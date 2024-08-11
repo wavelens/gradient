@@ -1,0 +1,70 @@
+{% extends 'dashboard/index.html' %}
+
+{% block title %}Dashboard{% endblock %}
+
+<head>{% load static %}</head>
+
+{% block content %}
+<div class="container">
+    <div class="header">
+        <div class="left">
+            <h1>Workflows</h1>
+        </div>
+        <div class="right">
+            <button class="button-clear">Clear All Filters</button>|
+            <button class="button-round">Branches</button>
+            <select class="field-select">
+                <option>Advanced Filter</option>
+            </select>
+        </div>
+    </div>
+    <div>
+        <div class="left">
+            <div class="filter-container">
+                <div class="search-container">
+                    <input type="text" placeholder="Search">
+                    <button class="button-round search-button">Search</button>
+                    |<button class="button-clear">Clear search</button>
+                </div>    
+            </div>
+        </div>
+        <div class="right">
+            <input class="field-date" type="date">
+        </div>
+    </div>
+    <table class="workflows-table">
+        <thead>
+            <tr>
+                <th>Project</th>
+                <th># of exec.</th>
+                <th>Avg. Duration</th>
+                <th>WF Performance</th>
+                <th>Latest 5 runs</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for i in "0,1,2"|slice:":" %}
+                <tr>
+                    <td><a class="full-width" href="https://hydra.wavelens.io/project/build"><span>build</span><br><span class="text-light">wvls:bulid</span></a></td>
+                    <td>34</td>
+                    <td>12m 11s</td>
+                    <td>
+                        <img class="red-filter" src="{% static 'dashboard/images/x-circle.svg' %}" alt="X Circle">
+                        <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                        <img class="gray-filter" src="{% static 'dashboard/images/circle.svg' %}" alt="X Circle">
+                    </td>
+                    <td>
+                        <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                        <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                        <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                        <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                        <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                    </td>
+                    <td><a href="/"><img src="{% static 'dashboard/images/more-vertical.svg' %}" alt="More"></a></td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
