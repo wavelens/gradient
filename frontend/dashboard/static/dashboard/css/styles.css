@@ -1,0 +1,168 @@
+:root{
+    --primary: #0d1118;
+    --secondary: #c9d1d9;
+    --tertiary: #21262d;
+}
+
+/* styles.css */
+body {
+    background-color: var(--primary);
+    color: var(--secondary);
+    font-family: Arial, sans-serif;
+}
+
+a{
+    color: var(--secondary);
+    text-decoration: none;
+}
+
+a:hover{
+    color: #818181;
+}
+
+.full-width{
+    display: inline-block;
+    width: 100%;
+}
+
+button{
+    cursor: pointer;
+}
+
+
+input[type="text"] {
+    padding: 5px;
+    background-color: var(--tertiary);
+    border: 1px solid rgb(118, 118, 118);
+    color: var(--secondary);
+    border-radius: 5px;
+    width: 18rem;
+}
+
+input[type="text"]:focus-visible {
+    outline: solid 1px var(--secondary);
+}
+
+.green-filter{
+    filter: invert(50%) sepia(65%) saturate(481%) hue-rotate(80deg) brightness(89%) contrast(93%)
+    /* filter: brightness(0) saturate(100%) invert(31%) sepia(97%) saturate(1384%) hue-rotate(98deg) brightness(70%) contrast(80%); */
+}
+
+.red-filter{
+    filter: brightness(0) saturate(100%) invert(24%) sepia(100%) saturate(7476%) hue-rotate(355deg) brightness(70%) contrast(80%);
+    /* filter: invert(39%) sepia(6%) saturate(2132%) hue-rotate(321deg) brightness(99%) contrast(90%); */
+}
+
+.gray-filter{
+    filter: invert(60%) sepia(1%) saturate(0%) hue-rotate(287deg) brightness(91%) contrast(88%);
+}
+
+.text-light{
+    font-size: 0.8rem;
+    color: #818181;
+}
+
+.button-clear{
+    background-color: transparent;
+    color: var(--secondary);
+    border: none;
+    border-radius: 5px;
+    margin: 0px 15px;
+    padding: 4px 8px;
+}
+
+.button-clear:hover{
+    border: 1px solid rgb(118, 118, 118);
+    padding: 4px 7px;
+    border-radius: 5px;
+    height: 31px;
+}
+
+.button-round{
+    background-color: transparent;
+    color: var(--secondary);
+    /* border: 1px solid var(--secondary); */
+    border: 1px solid rgb(118, 118, 118);
+    border-radius: 5px;
+    padding: 4px 8px;
+    margin: 0px 15px;
+    height: 31px;
+}
+
+.button-round:hover{
+    background-color: var(--secondary);
+    color: var(--primary);
+}
+
+.left{
+    float: left;
+}
+
+.right{
+    float: right;
+}
+
+.field-select{
+    background-color: var(--tertiary);
+    color: var(--secondary);
+    padding: 6px 8px;
+    border: 1px solid rgb(118, 118, 118);
+    border-radius: 5px;
+}
+
+.field-date{
+    background-color: var(--tertiary);
+    color: var(--secondary);
+    padding: 6px 8px;
+    border: 1px solid rgb(118, 118, 118);
+    border-radius: 5px;
+    width: 18rem;
+}
+
+
+.container {
+    width: 95%;
+    margin: 0 auto;
+    padding-top: 20px;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.search-container input[type="text"] {
+    padding: 5px;
+    background-color: var(--tertiary);
+    border: 1px solid rgb(118, 118, 118);
+    color: var(--secondary);
+    border-radius: 5px;
+    width: 18rem;
+    height: 19px;
+}
+
+.filter-container {
+    display: flex;
+    align-items: center;
+}
+
+.workflows-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 6rem;
+}
+
+.workflows-table th, .workflows-table td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #444;
+}
+
+.workflows-table th {
+    background-color: var(--tertiary);
+}
+
+.search-button{
+    border-radius: 5px;
+}
