@@ -9,3 +9,6 @@ from django.template import loader
 
 def index(request):
     return render(request, "dashboard/overview.html")
+
+def log(request):
+    return render(request, "dashboard/log.html")
