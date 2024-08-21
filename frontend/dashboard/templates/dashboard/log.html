@@ -1,0 +1,106 @@
+{% extends 'dashboard/index.html' %}
+
+{% block title %}Log{% endblock %}
+
+{% block content %}
+
+<head>{% load static %}</head>
+
+<div class="content-above">
+    018fe467-b180-7eb5-bd3b-6f07a669a19b
+</div>
+<div class="outerbody">
+    <div class="content-left">
+        <p class="border-bottom space-normal no-side-padding"><a class="space-normal">Overview</a></p>
+        <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+        <a>Build</a>
+    </div>
+    <div class="innerbody">
+        <div>
+            <span>build (x86_64-linux)</span><br>
+            <span class="text-light">succeeded 2 months ago in 1s</span>
+        </div>
+        <br>
+        <div>
+            <div class="border-bottom">
+                <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                <span>Build</span>
+            </div>
+            <!-- <button class="toggle-button">&#9660; Toggle Code</button> -->
+            <div class="code-container">
+                <!-- <pre id="code">
+                    Lorem ipsum dolor sit amet, consetetur sadipscing elitr \n\n
+                    , sed diam nonumy eirmod tempor invidunt ut labore et dolore magna \n
+                    aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores \n\n
+                    et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor \n
+                    sit amet. Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy \n\n
+                    eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero \n
+                    eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus
+                    \n\n est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed 
+                    \ndiam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. 
+                    \n\nt vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata 
+                    \nsanctus est Lorem ipsum dolor sit amet. 
+                </pre> -->
+                <details class="details-item">
+                    <summary>Lorem ipsum dolor sit amet, consetetur sadipscing elitr</summary>
+                    <div class="details-content">
+                        <div class="line">Lorem ipsum dolor sit amet, consetetur sadipscing elitr</div>
+                        <div class="line">, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna</div>
+                        <div class="line">aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores</div>
+                        <div class="line">et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.</div>
+                        <div class="line">Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua.</div>
+                        <div class="line">t vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.</div>
+                    </div>
+                </details>
+            
+                <details class="details-item">
+                    <summary>Second example summary</summary>
+                    <div class="details-content">
+                        <div class="line">Another set of text lines for the second details element.</div>
+                    </div>
+                </details>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<script>
+    // document.addEventListener('DOMContentLoaded', () => {
+    //         const preElement = document.getElementById('code');
+    //         const lines = preElement.textContent.split('\n');
+    //         const lineHtml = lines.map((line, index) => {
+    //             return index === 0
+    //                 ? `<span class="first-line">${line}</span>`
+    //                 : `<span>${line}</span>`;
+    //         }).join('<br>');
+            
+            
+    //         preElement.innerHTML = lineHtml;
+    //         preElement.classList.add('line-numbering');
+
+    //         // const toggleButton = document.querySelector('.toggle-button');
+    //         // const codeContainer = document.querySelector('.code-container');
+
+    //         // toggleButton.addEventListener('click', () => {
+    //         //     codeContainer.classList.toggle('show');
+    //         //     toggleButton.innerHTML = codeContainer.classList.contains('show') ? '&#9650; Collapse Code' : '&#9660; Expand Code';
+    //         // });
+    //     });
+
+    let lineCounter = 1; // Startzähler für die Nummerierung
+
+        document.querySelectorAll('.details-item').forEach(details => {
+            // Nummeriere die Zusammenfassung
+            const summary = details.querySelector('summary');
+            summary.setAttribute('data-line-number', lineCounter++);
+
+            // Nummeriere den Inhalt
+            const content = details.querySelector('.details-content');
+            content.querySelectorAll('.line').forEach(line => {
+                line.setAttribute('data-line-number', lineCounter++);
+            });
+        });
+</script>
+
+{% endblock %}
