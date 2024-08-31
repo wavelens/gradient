@@ -17,8 +17,8 @@
     </div>
     <div class="innerbody">
         <div>
-            <span>build (x86_64-linux)</span><br>
-            <span class="text-light">succeeded 2 months ago in 1s</span>
+            <span>{{ built_version }}</span><br>
+            <span class="text-light">{{ status}} {{time}}</span>
         </div>
         <br>
         <div>
@@ -41,24 +41,16 @@
                     \n\nt vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata 
                     \nsanctus est Lorem ipsum dolor sit amet. 
                 </pre> -->
-                <details class="details-item">
-                    <summary>Lorem ipsum dolor sit amet, consetetur sadipscing elitr</summary>
-                    <div class="details-content">
-                        <div class="line">Lorem ipsum dolor sit amet, consetetur sadipscing elitr</div>
-                        <div class="line">, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna</div>
-                        <div class="line">aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores</div>
-                        <div class="line">et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.</div>
-                        <div class="line">Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua.</div>
-                        <div class="line">t vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.</div>
-                    </div>
-                </details>
-            
-                <details class="details-item">
-                    <summary>Second example summary</summary>
-                    <div class="details-content">
-                        <div class="line">Another set of text lines for the second details element.</div>
-                    </div>
-                </details>
+                {% for block in details_blocks %}
+                    <details class="details-item">
+                        <summary>{{ block.summary }}</summary>
+                        <div class="details-content">
+                            {% for line in block.details %}
+                                <div class="line">{{ line }}</div>
+                            {% endfor %}
+                        </div>
+                    </details>
+                {% endfor %}
             </div>
         </div>
     </div>
