@@ -247,6 +247,7 @@ nav a {
     background-color: var(--quaternary);
     padding: 2rem;
     width: -webkit-fill-available;
+    border-radius: 5px;
 }
 
 .border-bottom{
