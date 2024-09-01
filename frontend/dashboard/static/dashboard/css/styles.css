@@ -1,8 +1,8 @@
 :root{
-    --primary: #0d1118;
+    --primary: #0d1118; /*  */
     --secondary: #abb0b4;
     --tertiary: #21262d;
-    --quaternary: #0a0d0f;
+    --quaternary: #050708; /* #0a0d0f */
 }
 
 /* styles.css */
@@ -31,6 +31,9 @@ button{
     cursor: pointer;
 }
 
+h2{
+    color: white;
+}
 
 input[type="text"] {
     padding: 5px;
@@ -55,7 +58,7 @@ input[type="text"]:focus-visible {
 }
 
 .green-filter{
-    filter: invert(50%) sepia(65%) saturate(481%) hue-rotate(80deg) brightness(89%) contrast(93%)
+    filter: invert(50%) sepia(65%) saturate(600%) hue-rotate(70deg) brightness(89%) contrast(93%);
     /* filter: brightness(0) saturate(100%) invert(31%) sepia(97%) saturate(1384%) hue-rotate(98deg) brightness(70%) contrast(80%); */
 }
 
@@ -70,6 +73,10 @@ input[type="text"]:focus-visible {
 
 .text-light{
     font-size: 0.8rem;
+    color: #818181;
+}
+
+.color-light{
     color: #818181;
 }
 
@@ -186,6 +193,7 @@ header {
     padding: 0rem 1rem;
     display: flex;
     flex-direction: column;
+    margin-bottom: 1rem;
 }
 
 .header {
@@ -319,10 +327,33 @@ pre span {
 }
 
 .content-above{
-    height: 6rem;
+    margin: 1.5rem;
+    margin-bottom: 2.3rem;
+
 }
 
 .content-left{
     min-width: 18rem;
     padding: 0 1rem;
+}
+
+.active{
+    border-bottom: 1px solid var(--secondary);
+    padding-bottom: 5px;
+}
+
+.icon{
+    height: 30px;
+}
+
+.webkit-middle{
+    vertical-align: -webkit-baseline-middle;
+}
+
+.h-20{
+    height: 20px;
+}
+
+.space-small{
+    margin-top: 5px;
 }

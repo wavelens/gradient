@@ -6,8 +6,16 @@
 
 <head>{% load static %}</head>
 
+<!-- <header>
+    <nav role="navigation">
+        <a href="/#home"><img class="center-image" src="../static/dashboard/icons/command.svg"><span>Workflows</span></a>
+        <a class="active" href="ai-development"><img class="center-image" src="../static/dashboard/icons/activity.svg"><span>Log</span></a>
+    </nav>
+</header> -->
+
 <div class="content-above">
-    018fe467-b180-7eb5-bd3b-6f07a669a19b
+    <div><a href="/#home"><img class="center-image" src="../static/dashboard/icons/arrow_back.svg"><span>Back</span></a></div>
+    <h2 class="webkit-middle space-small"><img class="green-filter center-image icon" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">{{ built_name }}<span class="color-light"> #{{ id }}</span></h2>
 </div>
 <div class="outerbody">
     <div class="content-left">
