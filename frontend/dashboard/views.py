@@ -38,6 +38,8 @@ def log(request):
         'details_blocks': details_blocks,
         'built_version' : 'Vbuild (x86_64-linux)',
         'status' : 'Vsucceeded',
-        'time' : 'V2 months ago in 1s'
+        'time' : 'V2 months ago in 1s',
+        'id' : 'v940',
+        'built_name' : 'Vdataset.corpus'
     }
     return render(request, "dashboard/log.html", context)
