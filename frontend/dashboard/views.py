@@ -33,8 +33,8 @@ def log(request):
         }
     ]
     context = {
-        'Projectname' : 'vWorkflow',
-        'Model' : 'vModel',
+        'projectname' : 'vWorkflow',
+        'model' : 'vModel',
         'details_blocks': details_blocks,
         'built_version' : 'Vbuild (x86_64-linux)',
         'status' : 'Vsucceeded',
