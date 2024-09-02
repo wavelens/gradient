@@ -1,7 +1,8 @@
-:root{
-    --primary: #0d1118;
-    --secondary: #c9d1d9;
+:root {
+    --primary: #0d1118; /*  */
+    --secondary: #abb0b4;
     --tertiary: #21262d;
+    --quaternary: #050708; /* #0a0d0f */
 }
 
 /* styles.css */
@@ -9,26 +10,30 @@ body {
     background-color: var(--primary);
     color: var(--secondary);
     font-family: Arial, sans-serif;
+    margin: 0px;
 }
 
-a{
+a {
     color: var(--secondary);
     text-decoration: none;
 }
 
-a:hover{
+a:hover {
     color: #818181;
 }
 
-.full-width{
+.full-width {
     display: inline-block;
     width: 100%;
 }
 
-button{
+button {
     cursor: pointer;
 }
 
+h2 {
+    color: white;
+}
 
 input[type="text"] {
     padding: 5px;
@@ -43,26 +48,39 @@ input[type="text"]:focus-visible {
     outline: solid 1px var(--secondary);
 }
 
-.green-filter{
-    filter: invert(50%) sepia(65%) saturate(481%) hue-rotate(80deg) brightness(89%) contrast(93%)
+.space-normal {
+    padding: 1rem;
+}
+
+.no-side-padding {
+    padding-right: 0;
+    padding-left: 0;
+}
+
+.green-filter {
+    filter: invert(50%) sepia(65%) saturate(600%) hue-rotate(70deg) brightness(89%) contrast(93%);
     /* filter: brightness(0) saturate(100%) invert(31%) sepia(97%) saturate(1384%) hue-rotate(98deg) brightness(70%) contrast(80%); */
 }
 
-.red-filter{
+.red-filter {
     filter: brightness(0) saturate(100%) invert(24%) sepia(100%) saturate(7476%) hue-rotate(355deg) brightness(70%) contrast(80%);
     /* filter: invert(39%) sepia(6%) saturate(2132%) hue-rotate(321deg) brightness(99%) contrast(90%); */
 }
 
-.gray-filter{
+.gray-filter {
     filter: invert(60%) sepia(1%) saturate(0%) hue-rotate(287deg) brightness(91%) contrast(88%);
 }
 
-.text-light{
+.text-light {
     font-size: 0.8rem;
     color: #818181;
 }
 
-.button-clear{
+.color-light {
+    color: #818181;
+}
+
+.button-clear {
     background-color: transparent;
     color: var(--secondary);
     border: none;
@@ -71,14 +89,14 @@ input[type="text"]:focus-visible {
     padding: 4px 8px;
 }
 
-.button-clear:hover{
+.button-clear:hover {
     border: 1px solid rgb(118, 118, 118);
     padding: 4px 7px;
     border-radius: 5px;
     height: 31px;
 }
 
-.button-round{
+.button-round {
     background-color: transparent;
     color: var(--secondary);
     /* border: 1px solid var(--secondary); */
@@ -89,20 +107,20 @@ input[type="text"]:focus-visible {
     height: 31px;
 }
 
-.button-round:hover{
+.button-round:hover {
     background-color: var(--secondary);
     color: var(--primary);
 }
 
-.left{
+.left {
     float: left;
 }
 
-.right{
+.right {
     float: right;
 }
 
-.field-select{
+.field-select {
     background-color: var(--tertiary);
     color: var(--secondary);
     padding: 6px 8px;
@@ -110,7 +128,7 @@ input[type="text"]:focus-visible {
     border-radius: 5px;
 }
 
-.field-date{
+.field-date {
     background-color: var(--tertiary);
     color: var(--secondary);
     padding: 6px 8px;
@@ -163,6 +181,158 @@ input[type="text"]:focus-visible {
     background-color: var(--tertiary);
 }
 
-.search-button{
+.search-button {
     border-radius: 5px;
+}
+
+/* --------------------------Header-------------------------- */
+
+header {
+    border-bottom: 1px solid rgba(118, 118, 118, 0.5);
+    background-color: var(--quaternary);
+    padding: 0rem 1rem;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 1rem;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 100%;
+    padding: 1rem;
+    padding-bottom: 0.5rem;
+}
+
+.header a {
+    margin: 0 1rem;
+}
+
+.header .logo-container {
+    display: flex;
+    align-items: center;
+}
+
+.header .logo-container span {
+    margin-left: 1rem;
+}
+
+nav {
+    display: flex;
+    justify-content: flex-start;
+    padding: 1rem;
+}
+
+nav a {
+    margin: 0 1rem;
+}
+
+.header .user {
+    margin-left: auto;
+}
+
+/* ---------------------------------------------------------- */
+
+.line-numbering {
+    counter-reset: line;
+}
+
+.line-numbering span::before {
+    counter-increment: line;
+    content: counter(line); 
+}
+
+.innerbody {
+    /* margin: 3rem 0 0 3rem; */
+    background-color: var(--quaternary);
+    padding: 2rem;
+    width: -webkit-fill-available;
+    border-radius: 5px;
+}
+
+.border-bottom {
+    border-bottom: 1px solid rgba(118, 118, 118, 0.5);
+    width: 100%;
+}
+
+pre ::before {
+    margin-right: 1rem;
+    color: #818181;
+}
+
+pre span {
+    font-size: 15px;
+    line-height: 1.5rem;
+    font-family: sans-serif;
+    white-space: normal;
+}
+
+.center-image {
+    height: 17px;
+    vertical-align: top;
+    margin-right: 3px;
+}
+
+.details-content {
+    position: relative;
+    left: 17px;
+}
+
+.details-content .line::before {
+    left: -17px;
+}
+
+.details-item summary::before {
+    left: 0px;
+}
+
+.details-content .line, .details-item summary {
+    position: relative;
+    padding-left: 50px; /* Platz für die Nummern */
+}
+
+.details-content .line::before, .details-item summary::before {
+    content: attr(data-line-number);
+    position: absolute;
+    /* left: 0; */
+    width: 40px;
+    text-align: right;
+    color: gray;
+}
+
+.outerbody {
+    display: flex;
+}
+
+.content-above {
+    margin: 1.5rem;
+    margin-bottom: 2.3rem;
+
+}
+
+.content-left {
+    min-width: 18rem;
+    padding: 0 1rem;
+}
+
+.active {
+    border-bottom: 1px solid var(--secondary);
+    padding-bottom: 5px;
+}
+
+.icon {
+    height: 30px;
+}
+
+.webkit-middle {
+    vertical-align: -webkit-baseline-middle;
+}
+
+.h-20 {
+    height: 20px;
+}
+
+.space-small {
+    margin-top: 5px;
 }
