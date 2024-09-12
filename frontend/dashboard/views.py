@@ -33,8 +33,6 @@ def log(request):
         }
     ]
     context = {
-        'projectname' : 'vWorkflow',
-        'model' : 'vModel',
         'details_blocks': details_blocks,
         'built_version' : 'Vbuild (x86_64-linux)',
         'status' : 'Vsucceeded',
@@ -44,3 +42,6 @@ def log(request):
         # 'icon' : 'green-filter'
     }
     return render(request, "dashboard/log.html", context)
+
+def download(request):
+    return render(request, "dashboard/download.html")
