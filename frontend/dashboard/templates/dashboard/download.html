@@ -1,0 +1,31 @@
+{% extends 'dashboard/index.html' %}
+
+{% block title %}Download{% endblock %}
+
+{% block content %}
+
+<head>{% load static %}</head>
+
+<div class="container">
+    <table class="workflows-table">
+        <thead>
+            <tr>
+                <th></th>
+                <th>Type</th>
+                <th>Link</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for i in "0,1,2"|slice:":" %}
+                <tr>
+                    <td>File</td>
+                    <td>dataset</td>
+                    <td><a>dataset.zip</a></td>
+                    <td>Details</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

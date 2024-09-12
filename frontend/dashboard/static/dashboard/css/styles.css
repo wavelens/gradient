@@ -237,6 +237,11 @@ nav a {
     margin-left: auto;
 }
 
+.nav-link {
+    padding-bottom: 5px;
+    width: max-content;
+}
+
 /* ---------------------------------------------------------- */
 
 .line-numbering {
@@ -334,7 +339,6 @@ pre span {
 
 .active {
     border-bottom: 1px solid var(--secondary);
-    padding-bottom: 5px;
     font-weight: bold;
 }
 
@@ -348,6 +352,10 @@ pre span {
 
 .h-23 {
     height: 23px;
+}
+
+.h-27 {
+    height: 27px;
 }
 
 .space-small {
