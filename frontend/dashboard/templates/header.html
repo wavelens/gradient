@@ -6,14 +6,29 @@
         <div class="header">
             <div class="logo-container">
                 <a href="/"><img src="../static/dashboard/images/wavelens-LOGO.svg" alt="Logo"></a>
-                <span>{{ projectname }} / {{ model }}</span>
+                <span><a>{{ projectname }}</a>/<a>{{ model }}</a></span>
             </div>
-            <div class="user"><img class="icon" src="../static/dashboard/icons/user.svg"></div>
+            <div>
+                <img class="icon" src="../static/dashboard/icons/user.svg">
+                <img class="icon" src="../static/dashboard/icons/settings.svg">
+            </div>
         </div> 
         <nav role="navigation">
-            <a href="/#home"><img class="center-image" src="../static/dashboard/icons/command.svg"><span>Workflows</span></a>
-            <a class="active" href="ai-development"><img class="center-image" src="../static/dashboard/icons/activity.svg"><span>Log</span></a>
-            <a href="/#home"><img class="center-image h-20" src="../static/dashboard/icons/download.svg"><span>Download</span></a>
+            <a class="nav-link flex-c" href="{% url 'workflow' %}">
+                <img class="center-image" src="../static/dashboard/icons/command.svg">
+                <span>Workflows</span>
+            </a>
+            
+            <a class="nav-link flex-c" href="{% url 'log' %}"><img class="center-image" src="../static/dashboard/icons/activity.svg"><span>Log</span></a>
+            <a class="nav-link flex-c" href="/#home"><img class="center-image h-23" src="../static/dashboard/icons/download.svg"><span>Download</span></a>
             <!-- <img class="center-image icon" src="../static/dashboard/icons/download.svg"> -->
         </nav>
+        <!-- <nav>
+            <ul>
+                <li><a href="" class="nav-link">Home</a></li>
+                <li><a href="" class="nav-link">About</a></li>
+                <li><a href="" class="nav-link">Services</a></li>
+                <li><a href="{% url 'log' %}" class="nav-link">Contact</a></li>
+            </ul>
+        </nav> -->
     </header>
