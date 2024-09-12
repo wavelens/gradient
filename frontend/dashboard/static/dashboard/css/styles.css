@@ -8,18 +8,19 @@
 /* styles.css */
 body {
     background-color: var(--primary);
-    color: var(--secondary);
+    color: white;
     font-family: Arial, sans-serif;
     margin: 0px;
 }
 
 a {
-    color: var(--secondary);
+    color: white;
     text-decoration: none;
 }
 
 a:hover {
-    color: #818181;
+    /* color: #818181; */
+    color: var(--secondary);
 }
 
 .full-width {
@@ -78,6 +79,10 @@ input[type="text"]:focus-visible {
 
 .color-light {
     color: #818181;
+}
+
+.color-secondary{
+    color: var(--secondary);
 }
 
 .button-clear {
@@ -249,6 +254,8 @@ nav a {
     padding: 2rem;
     width: -webkit-fill-available;
     border-radius: 5px;
+    border: 1px solid rgba(118, 118, 118, 0.5);
+    margin-right: 1rem;
 }
 
 .border-bottom {
@@ -269,7 +276,7 @@ pre span {
 }
 
 .center-image {
-    height: 17px;
+    height: 23px;
     vertical-align: top;
     margin-right: 3px;
 }
@@ -311,6 +318,15 @@ pre span {
 
 }
 
+.flex-c{
+    display: flex;
+    align-items: center;
+}
+
+.fw-normal{
+    font-weight: normal;
+}
+
 .content-left {
     min-width: 18rem;
     padding: 0 1rem;
@@ -319,6 +335,7 @@ pre span {
 .active {
     border-bottom: 1px solid var(--secondary);
     padding-bottom: 5px;
+    font-weight: bold;
 }
 
 .icon {
@@ -329,8 +346,8 @@ pre span {
     vertical-align: -webkit-baseline-middle;
 }
 
-.h-20 {
-    height: 20px;
+.h-23 {
+    height: 23px;
 }
 
 .space-small {

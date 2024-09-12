@@ -7,7 +7,7 @@ from django.http import HttpResponse
 from django.template import loader
 
 
-def index(request):
+def workflow(request):
     return render(request, "dashboard/overview.html")
 
 def log(request):
@@ -40,6 +40,7 @@ def log(request):
         'status' : 'Vsucceeded',
         'time' : 'V2 months ago in 1s',
         'id' : 'v940',
-        'built_name' : 'Vdataset.corpus'
+        'built_name' : 'Vdataset.corpus',
+        # 'icon' : 'green-filter'
     }
     return render(request, "dashboard/log.html", context)

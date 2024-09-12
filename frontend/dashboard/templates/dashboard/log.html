@@ -14,14 +14,16 @@
 </header> -->
 
 <div class="content-above">
-    <div><a href="/#home"><img class="center-image" src="../static/dashboard/icons/arrow_back.svg"><span>Back</span></a></div>
-    <h2 class="webkit-middle space-small"><img class="green-filter center-image icon" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">{{ built_name }}<span class="color-light"> #{{ id }}</span></h2>
+    <div><a href="/#home" class="flex-c"><img class="center-image" src="../static/dashboard/icons/arrow_back.svg"><span>Back</span></a></div>
+    <h2 class="webkit-middle space-small" class="flex-c"><img class="green-filter center-image icon" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">{{ built_name }}<span class="color-light fw-normal"> #{{ id }}</span></h2>
 </div>
 <div class="outerbody">
     <div class="content-left">
         <p class="border-bottom space-normal no-side-padding"><a class="space-normal">Overview</a></p>
-        <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-        <a>Build</a>
+        <div class="flex-c">
+            <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+            <a>Build</a>
+        </div>
     </div>
     <div class="innerbody">
         <div>
@@ -30,15 +32,15 @@
         </div>
         <br>
         <div>
-            <div class="border-bottom">
+            <div class="border-bottom flex-c">
                 <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                 <span>Build</span>
             </div>
             <div class="code-container">
                 {% for block in details_blocks %}
-                    <details class="details-item">
+                    <details class="details-item color-secondary">
                         <summary>{{ block.summary }}</summary>
-                        <div class="details-content">
+                        <div class="details-content color-secondary">
                             {% for line in block.details %}
                                 <div class="line">{{ line }}</div>
                             {% endfor %}
