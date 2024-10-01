@@ -147,6 +147,15 @@ input[type="text"]:focus-visible {
     width: 95%;
     margin: 0 auto;
     padding-top: 20px;
+    background-color: var(--quaternary);
+}
+
+.container-table {
+    width: 95%;
+    margin: 0 auto;
+    margin-top: 6rem;
+    border-radius: 5px;
+    background-color: var(--quaternary);
 }
 
 .header {
@@ -170,10 +179,43 @@ input[type="text"]:focus-visible {
     align-items: center;
 }
 
+table {
+    width: 100%;
+    border-collapse: collapse;
+    border-radius: 5px;
+    overflow: hidden;
+}
+
+th, td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #2a2a2a;
+    background-color: var(--quaternary);
+}
+
+tr:last-child td {
+    border: none;
+    padding-bottom: 2rem;
+}
+
+th {
+    padding-top: 2rem;
+}
+
+tr td:first-child {
+    padding-left: 2rem;
+}
+
+tr td:last-child {
+    padding-right: 2rem;
+}
+
 .workflows-table {
     width: 100%;
     border-collapse: collapse;
     margin-top: 6rem;
+    border-radius: 5px;
+    overflow: hidden;
 }
 
 .workflows-table th, .workflows-table td {
@@ -360,4 +402,47 @@ pre span {
 
 .space-small {
     margin-top: 5px;
+}
+
+.dropdown {
+    position: relative;
+    display: inline-block;
+}
+  
+.dropdown-content {
+    display: none;
+    position: absolute;
+    background-color: var(--quaternary);
+    color: white;
+    min-width: max-content;
+    overflow: auto;
+    box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+    z-index: 1;
+    right: 0;
+    border: 1px solid rgba(118, 118, 118, 0.5);
+    border-radius: 5px;
+}
+
+.dropdown-content a {
+    padding: 12px 16px;
+    text-decoration: none;
+    /* display: block; */
+    margin: 0;
+}
+
+.dropdown-content a:first-child {
+    border-bottom: 1px solid rgba(118, 118, 118, 0.5);
+    display: block;
+}
+
+.dropdown-content a:last-child {
+    border-top: 1px solid rgba(118, 118, 118, 0.5);
+}
+
+.show {
+    display: block;
+}
+
+.m-r-5 {
+    margin-right: 5px;
 }
