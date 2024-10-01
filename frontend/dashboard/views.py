@@ -8,7 +8,44 @@ from django.template import loader
 
 
 def workflow(request):
-    return render(request, "dashboard/overview.html")
+    details_blocks = [
+        {
+            'project': "build",
+            'id': "wvls:build",
+            'exec': 34,
+            'duration': '12m 11s',
+            'performance': 'filter',
+            'latest_runs': 'filter'
+        },
+        {
+            'project': "build2",
+            'id': "wvls:build",
+            'exec': 34,
+            'duration': '12m 11s',
+            'performance': 'filter',
+            'latest_runs': 'filter'
+        },
+        {
+            'project': "build3",
+            'id': "wvls:build",
+            'exec': 34,
+            'duration': '12m 11s',
+            'performance': 'filter',
+            'latest_runs': 'filter'
+        },
+        {
+            'project': "build4",
+            'id': "wvls:build",
+            'exec': 34,
+            'duration': '12m 11s',
+            'performance': 'filter',
+            'latest_runs': 'filter'
+        },
+    ]
+    context = {
+        'details_blocks': details_blocks
+    }
+    return render(request, "dashboard/overview.html", context)
 
 def log(request):
     details_blocks = [
@@ -44,4 +81,43 @@ def log(request):
     return render(request, "dashboard/log.html", context)
 
 def download(request):
-    return render(request, "dashboard/download.html")
+    files = [
+    {
+        'file': "File 1",
+        'type': "dataset",
+        'link' : "dataset.zip",
+        'actions' : "Details"
+    },
+    {
+        'file': "File 2",
+        'type': "dataset",
+        'link' : "dataset.zip",
+        'actions' : "Details"
+    },
+    {
+        'file': "File 3",
+        'type': "dataset",
+        'link' : "dataset.zip",
+        'actions' : "Details"
+    },
+    ]
+    context = {
+        'files': files,
+    }
+    return render(request, "dashboard/download.html", context)
+
+def model(request):
+    models = [
+    {
+        'name': "Model 1",
+        'description': "bliblablubs"
+    },
+    {
+        'name': "Model 2",
+        'description': "hihaho"
+    }
+    ]
+    context = {
+        'models': models,
+    }
+    return render(request, "dashboard/model.html", context)

@@ -6,8 +6,8 @@
 
 <head>{% load static %}</head>
 
-<div class="container">
-    <table class="workflows-table">
+<div class="container-table">
+    <table>
         <thead>
             <tr>
                 <th></th>
@@ -17,12 +17,12 @@
             </tr>
         </thead>
         <tbody>
-            {% for i in "0,1,2"|slice:":" %}
+            {% for file in files %}
                 <tr>
-                    <td>File</td>
-                    <td>dataset</td>
-                    <td><a>dataset.zip</a></td>
-                    <td>Details</td>
+                    <td>{{ file.file }}</td>
+                    <td>{{ file.type }}</td>
+                    <td><a>{{ file.link }}</a></td>
+                    <td>{{ file.actions }}</td>
                 </tr>
             {% endfor %}
         </tbody>
