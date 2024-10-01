@@ -147,7 +147,7 @@ input[type="text"]:focus-visible {
     width: 95%;
     margin: 0 auto;
     padding-top: 20px;
-    background-color: var(--quaternary);
+    /* background-color: var(--quaternary); */
 }
 
 .container-table {
