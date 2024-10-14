@@ -9,7 +9,10 @@
   outputs = { nixpkgs, ... }:
     let
       pkgs = import nixpkgs { system = "x86_64-linux"; config = { allowUnfree = true; }; };
-      rustEnv = with pkgs.rustPackages; [ clippy ];
+      rustEnv = with pkgs.rustPackages; [
+        clippy
+      ];
+
       py = pkgs.python3.override {
         packageOverrides = python-final: python-prev: {
           django = python-final.django_4;
@@ -27,12 +30,11 @@
         django-redis
         django-rosetta
         django-scheduler
-        django-shortuuidfield
         gunicorn
-        model-bakery
         mysqlclient
         redis
         requests
+        selenium
         uritemplate
         urllib3
         xstatic-bootstrap
@@ -48,14 +50,16 @@
         ];
 
         packages = [
-          rustup
           pkg-config
-          openssl
-          libsodium
+          rustc
           rustfmt
+          sea-orm-cli
           rustEnv
 
           gettext
+          libsodium
+          openssl
+          sqlite
           pythonEnv
         ];
 
