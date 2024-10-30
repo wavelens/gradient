@@ -184,3 +184,5 @@ result-*
 .direnv/
 .vscode/
 
+# nix run stuff
+gradient-persist.img
