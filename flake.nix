@@ -66,6 +66,7 @@
           self.nixosModules.default
           ./defaultNixConfig/example.nix
           ./defaultNixConfig/defaults.nix
+          ./defaultNixConfig/postgresql.nix
         ];
       };
       devShells."${system}".default = with pkgs; mkShell {

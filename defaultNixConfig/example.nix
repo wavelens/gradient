@@ -1,5 +1,4 @@
 { config, pkgs, lib, ... }:
-
 {
   microvm = {
     # hypervisor = "cloud-hypervisor";
@@ -22,17 +21,20 @@
     ];
     writableStoreOverlay = "/nix/.rw-store";
 
-    interfaces = [ {
-      id = "eth0";
-      type = "bridge";
-      mac = "02:00:00:00:00:01";
-      bridge = "virbr0";
-    } ];
+    interfaces = [
+      {
+        id = "eth0";
+        type = "bridge";
+        mac = "02:01:00:00:00:01";
+        bridge = "virbr0";
+      }
+    ];
   };
   networking.hostName = "gradient-dev";
   users.users.root.password = "";
 
   networking.useDHCP = false;
+  networking.nftables.enable = true;
   networking.useNetworkd = true;
   systemd.network = {
     netdevs = {
@@ -64,6 +66,20 @@
         } ];
       };
     };
+  };
+
+  services.openssh = {
+    enable = true;
+    # require public key authentication for better security
+    settings.PasswordAuthentication = false;
+    settings.KbdInteractiveAuthentication = false;
+    settings.PermitRootLogin = "yes";
+  };
+  users.users."root" = {
+    openssh.authorizedKeys.keys = [
+      # Makuru
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPRRdToCDUupkkwI+crB3fGDwdBIFkDsBHjOImn+qsjg openpgp:0xE8D3D833"
+    ];
   };
   environment.systemPackages = with pkgs; [
     tcpdump
