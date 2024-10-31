@@ -1,5 +1,6 @@
 { pkgs, lib, ... }:
 {
+  # EXTREMELY UNSECURE Postgres DB setup.
   services.postgresql = {
     enable = true;
     package = pkgs.postgresql_17;
