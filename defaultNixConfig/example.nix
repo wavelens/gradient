@@ -68,6 +68,8 @@
     };
   };
 
+  services.getty.greetingLine = "EXTREMELY UNSECURE SERVER, DO NOT STORE ANY IMPORTNANT DATA ON IT!!!";
+  
   services.openssh = {
     enable = true;
     # require public key authentication for better security
