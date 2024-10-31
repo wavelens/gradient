@@ -2,7 +2,7 @@
 {
   services.postgresql = {
     enable = true;
-    package = pkgs.postgresql_16;
+    package = pkgs.postgresql_17;
     enableJIT = true;
     enableTCPIP = true;
     settings = {
