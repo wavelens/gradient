@@ -16,11 +16,14 @@ body {
 a {
     color: white;
     text-decoration: none;
+    padding: 5px;
 }
 
 a:hover {
     /* color: #818181; */
-    color: var(--secondary);
+    /* color: var(--secondary); */
+    background-color: #252d33;
+    border-radius: 5px;
 }
 
 .full-width {
