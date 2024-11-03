@@ -353,7 +353,7 @@ pre span {
     content: attr(data-line-number);
     position: absolute;
     /* left: 0; */
-    width: 40px;
+    width: 28px;
     text-align: right;
     color: gray;
 }
@@ -448,4 +448,15 @@ pre span {
 
 .m-r-5 {
     margin-right: 5px;
+}
+
+.hovereffect-sidebar:hover {
+    background-color: #252d33;
+    border-radius: 5px;
+    border-left: 5px solid blue;
+    padding-left: 3px;
+}
+
+.monospace {
+    font-family: 'Space Mono';
 }
