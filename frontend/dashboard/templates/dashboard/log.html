@@ -20,7 +20,7 @@
 <div class="outerbody">
     <div class="content-left">
         <p class="border-bottom space-normal no-side-padding"><a class="space-normal">Overview</a></p>
-        <div class="flex-c">
+        <div class="flex-c hovereffect-sidebar">
             <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
             <a>Build</a>
         </div>
@@ -36,7 +36,7 @@
                 <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                 <span>Build</span>
             </div>
-            <div class="code-container">
+            <div class="code-container monospace">
                 {% for block in details_blocks %}
                     <details class="details-item color-secondary">
                         <summary>{{ block.summary }}</summary>
