@@ -4,11 +4,16 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     utils.url = "github:numtide/flake-utils";
+    microvm = {
+      url = "github:astro/microvm.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
-
-  outputs = { nixpkgs, ... }:
+  outputs = { self, nixpkgs, microvm, ... }:
     let
-      pkgs = import nixpkgs { system = "x86_64-linux"; config = { allowUnfree = true; }; };
+      system = "x86_64-linux";
+      defaultHostname = "gradient-dev";
+      pkgs = import nixpkgs { system = "${system}"; config = { allowUnfree = true; }; };
       rustEnv = with pkgs.rustPackages; [
         clippy
       ];
@@ -43,7 +48,28 @@
       ]);
     in
     {
-      devShells.x86_64-linux.default = with pkgs; mkShell {
+      packages."${system}" = {
+        ${defaultHostname} = self.nixosConfigurations.${defaultHostname}.config.microvm.declaredRunner;
+        default = self.nixosConfigurations.${defaultHostname}.config.microvm.declaredRunner;
+      };
+      #test, run by 'nix run'
+      nixosModules = {
+        default = {
+          imports = [
+          ];
+        };
+      };
+      nixosConfigurations."${defaultHostname}" = nixpkgs.lib.nixosSystem {
+        system = "${system}";
+        modules = [
+          microvm.nixosModules.microvm
+          self.nixosModules.default
+          ./defaultNixConfig/example.nix
+          ./defaultNixConfig/defaults.nix
+          ./defaultNixConfig/postgresql.nix
+        ];
+      };
+      devShells."${system}".default = with pkgs; mkShell {
         buildInputs = [
           stdenv.cc.cc.lib
           pam
@@ -62,9 +88,8 @@
           sqlite
           pythonEnv
         ];
-
-        EXTRA_CCFLAGS = "-I/usr/include";
-        RUST_BACKTRACE = 1;
-      };
+      EXTRA_CCFLAGS = "-I/usr/include";
+      RUST_BACKTRACE = 1;
     };
+  };
 }
