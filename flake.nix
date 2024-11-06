@@ -88,8 +88,11 @@
           sqlite
           pythonEnv
         ];
-      EXTRA_CCFLAGS = "-I/usr/include";
-      RUST_BACKTRACE = 1;
+
+        EXTRA_CCFLAGS = "-I/usr/include";
+        RUST_BACKTRACE = 1;
+
+        GRADIENT_DATABASE_URL = "psql://postgres:postgres@localhost:5432/gradient";
     };
   };
 }
