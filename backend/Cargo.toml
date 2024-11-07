@@ -3,15 +3,8 @@ name = "backend"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace]
+members = [".", "server", "entity", "migration"]
 
 [dependencies]
-async-ssh2-lite = { version = "0.5.0", features = ["tokio"] }
-axum = "0.7.7"
-futures = "0.3.31"
-nix-daemon = "0.1.1"
-sea-orm = "1.0.1"
-sea-orm-migration = "1.0.1"
-serde = { version = "1.0.210", features = ["derive"] }
-tokio = { version = "1.40.0", features = ["process", "rt-multi-thread"] }
-uuid = { version = "1.10.0", features = ["fast-rng", "macro-diagnostics", "v4"] }
+gradient-server = { path = "server" }

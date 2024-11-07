@@ -1,0 +1,22 @@
+[package]
+name = "gradient-server"
+version = "0.1.0"
+authors = ["Wavelens UG <info@wavelens.io>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-ssh2-lite = { version = "0.5.0", features = ["tokio"] }
+axum = "0.7.7"
+chrono = "0.4.38"
+clap = { version = "4.5.20", features = ["derive", "env"] }
+futures = "0.3.31"
+nix-daemon = "0.1.1"
+sea-orm = { version = "1.0.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
+sea-orm-migration = { version = "1.1.1", features = ["with-uuid", "with-chrono", "with-json", "sqlx-postgres", "sea-orm-cli", "runtime-tokio"] }
+serde = { version = "1.0.210", features = ["derive"] }
+tokio = { version = "1.40.0", features = ["process", "rt-multi-thread"] }
+uuid = { version = "1.10.0", features = ["fast-rng", "macro-diagnostics", "v4"] }
+migration = { path = "../migration" }
+entity = { path = "../entity" }

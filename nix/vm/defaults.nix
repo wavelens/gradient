@@ -2,12 +2,8 @@
   nix = {
     settings = {
       # fetch github-prebuilt microvm-kernels
-      substituters = [
-        "https://microvm.cachix.org"
-      ];
-      trusted-public-keys = [
-        "microvm.cachix.org-1:oXnBc6hRE3eX5rSYdRyMYXnfzcCxC7yKPTbZXALsqys="
-      ];
+      substituters = [ "https://microvm.cachix.org" ];
+      trusted-public-keys = [ "microvm.cachix.org-1:oXnBc6hRE3eX5rSYdRyMYXnfzcCxC7yKPTbZXALsqys=" ];
     };
 
     extraOptions = ''
@@ -15,6 +11,5 @@
       builders-use-substitutes = true
     '';
   };
-  
 }
 
