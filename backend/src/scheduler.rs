@@ -5,9 +5,10 @@ use tokio::task::JoinHandle;
 
 use super::input;
 use super::tables::*;
+use super::types::*;
 use super::executer::*;
 
-pub async fn schedule_project_loop() {
+pub async fn schedule_project_loop(db: DBConn) {
     let mut current_schedules = vec![];
     let mut interval = time::interval(Duration::from_secs(5));
 
@@ -46,7 +47,7 @@ pub async fn schedule_project(project: Project) {
     }
 }
 
-pub async fn schedule_build_loop() {
+pub async fn schedule_build_loop(db: DBConn) {
     let mut current_schedules = vec![];
     let mut interval = time::interval(Duration::from_secs(5));
 
@@ -99,6 +100,7 @@ pub async fn schedule_build(build: Build, server: Server) {
 }
 
 pub async fn get_next_project() -> Project {
+    // TODO: sort after most dependencies
     // dummy
     Project {
         id: Uuid::new_v4(),

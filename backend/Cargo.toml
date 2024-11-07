@@ -8,9 +8,11 @@ edition = "2021"
 [dependencies]
 async-ssh2-lite = { version = "0.5.0", features = ["tokio"] }
 axum = "0.7.7"
+chrono = "0.4.38"
+clap = { version = "4.5.20", features = ["derive", "env"] }
 futures = "0.3.31"
 nix-daemon = "0.1.1"
-sea-orm = "1.0.1"
+sea-orm = { version = "1.0.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
 sea-orm-migration = "1.0.1"
 serde = { version = "1.0.210", features = ["derive"] }
 tokio = { version = "1.40.0", features = ["process", "rt-multi-thread"] }
