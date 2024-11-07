@@ -33,8 +33,13 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(
+                        ColumnDef::new(Project::CurrentlyChecking)
+                            .boolean()
+                            .not_null(),
+                    )
+                    .col(
                         ColumnDef::new(Project::LastCheckAt)
-                            .timestamp_with_time_zone()
+                            .date_time()
                             .not_null(),
                     )
                     .col(
@@ -44,7 +49,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(Project::CreatedAt)
-                            .timestamp_with_time_zone()
+                            .date_time()
                             .not_null(),
                     )
                     .foreign_key(
@@ -80,6 +85,7 @@ enum Project {
     Organization,
     Name,
     Description,
+    CurrentlyChecking,
     LastCheckAt,
     CreatedBy,
     CreatedAt,

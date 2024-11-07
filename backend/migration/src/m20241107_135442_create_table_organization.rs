@@ -34,7 +34,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(Organization::CreatedAt)
-                            .timestamp_with_time_zone()
+                            .date_time()
                             .not_null(),
                     )
                     .foreign_key(

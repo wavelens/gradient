@@ -1,6 +1,7 @@
 use sea_orm::entity::prelude::*;
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
+use chrono::NaiveDateTime;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "project")]
@@ -11,9 +12,10 @@ pub struct Model {
     pub name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,
-    pub last_check_at: DateTimeUtc,
+    pub currently_checking: bool,
+    pub last_check_at: NaiveDateTime,
     pub created_by: Uuid,
-    pub created_at: DateTimeUtc,
+    pub created_at: NaiveDateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

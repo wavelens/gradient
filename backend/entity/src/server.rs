@@ -1,6 +1,7 @@
 use sea_orm::entity::prelude::*;
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
+use chrono::NaiveDateTime;
 
 #[derive(Debug, Clone, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
 #[sea_orm(rs_type = "i16", db_type = "Integer")]
@@ -20,14 +21,15 @@ pub enum Architecture {
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
+    pub name: String,
     pub organization: Uuid,
     pub host: String,
     pub port: i32,
     pub architectures: Vec<Architecture>,
     pub features: Vec<String>,
-    pub last_connection_at: DateTimeUtc,
+    pub last_connection_at: NaiveDateTime,
     pub created_by: Uuid,
-    pub created_at: DateTimeUtc,
+    pub created_at: NaiveDateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
