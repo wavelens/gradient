@@ -49,26 +49,21 @@
     in
     {
       packages."${system}" = {
-        ${defaultHostname} = self.nixosConfigurations.${defaultHostname}.config.microvm.declaredRunner;
-        default = self.nixosConfigurations.${defaultHostname}.config.microvm.declaredRunner;
+        "vm-${defaultHostname}" = self.nixosConfigurations.${defaultHostname}.config.microvm.declaredRunner;
+        db = pkgs.callPackage ./nix/scripts/postgres.nix { };
       };
-      #test, run by 'nix run'
-      nixosModules = {
-        default = {
-          imports = [
-          ];
-        };
-      };
+
       nixosConfigurations."${defaultHostname}" = nixpkgs.lib.nixosSystem {
         system = "${system}";
         modules = [
           microvm.nixosModules.microvm
           self.nixosModules.default
-          ./defaultNixConfig/example.nix
-          ./defaultNixConfig/defaults.nix
-          ./defaultNixConfig/postgresql.nix
+          ./nix/vm/base.nix
+          ./nix/vm/defaults.nix
+          ./nix/vm/postgresql.nix
         ];
       };
+
       devShells."${system}".default = with pkgs; mkShell {
         buildInputs = [
           stdenv.cc.cc.lib
@@ -87,12 +82,13 @@
           openssl
           sqlite
           pythonEnv
+          postgresql_17
         ];
 
         EXTRA_CCFLAGS = "-I/usr/include";
         RUST_BACKTRACE = 1;
 
-        GRADIENT_DATABASE_URL = "psql://postgres:postgres@localhost:5432/gradient";
+        GRADIENT_DATABASE_URL = "postgres://postgres:postgres@localhost:54321/gradient";
     };
   };
 }

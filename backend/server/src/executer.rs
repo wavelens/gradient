@@ -9,7 +9,7 @@ use tokio::{
 };
 use std::path::PathBuf;
 
-use super::tables::*;
+use super::types::*;
 use super::types::NixStore;
 
 
@@ -21,7 +21,7 @@ pub async fn connect(url: SocketAddr) -> Result<NixStore, Box<dyn std::error::Er
 
     let mut channel = session.channel_session().await?;
 
-    channel.exec("nix-daemon --stdio").await?;
+    channel.exec("nix-daemon --stdio --option store ./test").await?;
 
     Ok(DaemonStore::builder().init(channel).await?)
 }
@@ -37,7 +37,7 @@ pub async fn init_session(session: &mut AsyncSession<TokioTcpStream>, username: 
     Ok(())
 }
 
-pub async fn execute_build(builds: Vec<&Build>, remote_store: &mut NixStore) {
+pub async fn execute_build(builds: Vec<&MBuild>, remote_store: &mut NixStore) {
     println!("Executing builds");
 
     let result = remote_store.build_paths_with_results(get_builds_path(builds), BuildMode::Normal).result().await;
@@ -46,7 +46,7 @@ pub async fn execute_build(builds: Vec<&Build>, remote_store: &mut NixStore) {
 pub async fn copy_builds<
     A: AsyncReadExt + AsyncWriteExt + Unpin + Send,
     B: AsyncReadExt + AsyncWriteExt + Unpin + Send
->(builds: Vec<&Build>, from_store: &mut DaemonStore<A>, to_store: &mut DaemonStore<B>, remote_store_uri: SocketAddr, local_is_receiver: bool) {
+>(builds: Vec<&MBuild>, from_store: &mut DaemonStore<A>, to_store: &mut DaemonStore<B>, remote_store_uri: SocketAddr, local_is_receiver: bool) {
 
     for build in builds {
         let path = build.path.as_str();
@@ -71,7 +71,7 @@ pub async fn copy_builds<
     }
 }
 
-pub async fn get_missing_builds(build: &Build, store: &mut NixStore) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+pub async fn get_missing_builds(build: &MBuild, store: &mut NixStore) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     println!("Querying missing builds");
 
     let result = store.query_missing(get_builds_path(vec![build])).result().await?;
@@ -85,6 +85,6 @@ pub async fn get_local_store() -> DaemonStore<UnixStream> {
     DaemonStore::builder().init(UnixStream::connect("/nix/var/nix/daemon-socket/socket").await.unwrap()).await.unwrap()
 }
 
-pub fn get_builds_path(builds: Vec<&Build>) -> Vec<&str> {
+pub fn get_builds_path(builds: Vec<&MBuild>) -> Vec<&str> {
     builds.iter().map(|build| build.path.as_str()).collect()
 }
