@@ -2,6 +2,7 @@ use std::time::Duration;
 use uuid::Uuid;
 use tokio::time;
 use tokio::task::JoinHandle;
+use std::sync::Arc;
 
 use super::input;
 use super::tables::*;
@@ -18,8 +19,8 @@ pub async fn schedule_project_loop(db: DBConn) {
 
         // TODO: look at tokio semaphore
         while current_schedules.len() < 1 {
-            let project = get_next_project().await;
-            let schedule = tokio::spawn(schedule_project(project));
+            let project = get_next_project(Arc::clone(&db)).await;
+            let schedule = tokio::spawn(schedule_project(Arc::clone(&db), project));
             current_schedules.push(schedule);
             added_schedule = true;
         }
@@ -30,20 +31,20 @@ pub async fn schedule_project_loop(db: DBConn) {
     }
 }
 
-pub async fn schedule_project(project: Project) {
+pub async fn schedule_project(db: DBConn, project: Project) {
     println!("Reviewing Project: {}", project.name);
 
-    let has_update = check_project_updates(&project);
+    let has_update = check_project_updates(Arc::clone(&db), &project);
     if !has_update { return; }
 
-    let can_evaluate = evaluate_project(&project);
+    let can_evaluate = evaluate_project(Arc::clone(&db), &project);
     // TODO: Register the project can't be evaluated
     if !can_evaluate { return; }
 
-    let builds = get_project_rebuilds(&project);
+    let builds = get_project_rebuilds(Arc::clone(&db), &project);
 
     for build in builds {
-        register_build(&build);
+        register_build(Arc::clone(&db), &build);
     }
 }
 
@@ -56,15 +57,14 @@ pub async fn schedule_build_loop(db: DBConn) {
         current_schedules.retain(|schedule: &JoinHandle<()>| !schedule.is_finished());
 
         while current_schedules.len() < 1 {
-            let build = get_next_build().await;
+            let build = get_next_build(Arc::clone(&db)).await;
 
-            if let Some(server) = get_available_server(&build) {
-                let schedule = tokio::spawn(schedule_build(build, server));
+            if let Some(server) = get_available_server(Arc::clone(&db), &build) {
+                let schedule = tokio::spawn(schedule_build(Arc::clone(&db), build, server));
                 current_schedules.push(schedule);
                 added_schedule = true;
             } else {
-                // TODO: More elegant way to handle this
-                register_build(&build);
+                requeue_build(Arc::clone(&db), &build);
             }
         }
 
@@ -74,7 +74,7 @@ pub async fn schedule_build_loop(db: DBConn) {
     }
 }
 
-pub async fn schedule_build(build: Build, server: Server) {
+pub async fn schedule_build(db: DBConn, build: Build, server: Server) {
     println!("Executing Build: {}", build.id);
 
     let server_addr = input::url_to_addr(server.url.as_str()).unwrap();
@@ -86,7 +86,7 @@ pub async fn schedule_build(build: Build, server: Server) {
 
     // TODO: Change this to Uuid to build
     // https://docs.rs/nix-daemon/latest/nix_daemon/trait.Store.html#tymethod.query_missing
-    let deps = get_next_build().await; // dummy
+    let deps = get_next_build(db).await; // dummy
     let dependencies = vec![&deps];
 
     // TODO: somewhere else
@@ -99,7 +99,7 @@ pub async fn schedule_build(build: Build, server: Server) {
     copy_builds(vec![&build], &mut server_daemon, &mut local_daemon, server_addr, true).await;
 }
 
-pub async fn get_next_project() -> Project {
+pub async fn get_next_project(db: DBConn) -> Project {
     // TODO: sort after most dependencies
     // dummy
     Project {
@@ -113,19 +113,19 @@ pub async fn get_next_project() -> Project {
     }
 }
 
-pub fn check_project_updates(project: &Project) -> bool {
-    // dummy
+pub fn check_project_updates(db: DBConn, project: &Project) -> bool {
     println!("Checking for updates on project: {}", project.name);
+    // TODO: dummy
     true
 }
 
-pub fn evaluate_project(project: &Project) -> bool {
+pub fn evaluate_project(db: DBConn, project: &Project) -> bool {
     // dummy
     println!("Evaluating project: {}", project.name);
     true
 }
 
-pub fn get_project_rebuilds(project: &Project) -> Vec<Build> {
+pub fn get_project_rebuilds(db: DBConn, project: &Project) -> Vec<Build> {
     // dummy
     vec![
         Build {
@@ -138,12 +138,17 @@ pub fn get_project_rebuilds(project: &Project) -> Vec<Build> {
     ]
 }
 
-pub fn register_build(build: &Build) {
+pub fn register_build(db: DBConn, build: &Build) {
     // dummy
     println!("Registering build: {}", build.id);
 }
 
-pub async fn get_next_build() -> Build {
+pub fn requeue_build(db: DBConn, build: &Build) {
+    // dummy
+    println!("Requeueing build: {}", build.id);
+}
+
+pub async fn get_next_build(db: DBConn) -> Build {
     // dummy
     Build {
         id: Uuid::new_v4(),
@@ -154,7 +159,7 @@ pub async fn get_next_build() -> Build {
     }
 }
 
-pub fn get_available_server(build: &Build) -> Option<Server> {
+pub fn get_available_server(db: DBConn, build: &Build) -> Option<Server> {
     // dummy
     Some(Server {
         id: Uuid::new_v4(),

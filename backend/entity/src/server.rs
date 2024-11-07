@@ -16,7 +16,7 @@ pub enum Architecture {
 }
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
-#[sea_orm(table_name = "servers")]
+#[sea_orm(table_name = "server")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,

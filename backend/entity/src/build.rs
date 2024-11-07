@@ -21,7 +21,7 @@ pub enum BuildStatus {
 
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
-#[sea_orm(table_name = "builds")]
+#[sea_orm(table_name = "build")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
