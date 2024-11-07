@@ -6,13 +6,6 @@
     package = pkgs.postgresql_17;
     enableJIT = true;
     enableTCPIP = true;
-    settings = {
-      # ssl = true;
-      log_connections = true;
-      logging_collector = true;
-      log_disconnections = true;
-      log_destination = lib.mkForce "syslog";
-    };
     authentication = ''
       #...
       #type database DBuser origin-address auth-method
@@ -21,9 +14,17 @@
       # ipv6
       host all       all     ::1/128        trust
     '';
+
+    settings = {
+      # ssl = true;
+      log_connections = true;
+      logging_collector = true;
+      log_disconnections = true;
+      log_destination = lib.mkForce "syslog";
+    };
   };
 
-  #open firewall, needs to forwared port through the VM to.
+  # open firewall, needs to forwared port through the VM to.
   # allow communication from microvm port 5432 (postgres).
   networking.firewall.allowedTCPPorts = [ 5432 ];
 }
