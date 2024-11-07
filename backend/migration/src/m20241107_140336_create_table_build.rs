@@ -34,12 +34,12 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(Build::Dependencies)
-                            .json()
+                            .array(ColumnType::Uuid)
                             .not_null(),
                     )
                     .col(
                         ColumnDef::new(Build::CreatedAt)
-                            .timestamp_with_time_zone()
+                            .date_time()
                             .not_null(),
                     )
                     .foreign_key(

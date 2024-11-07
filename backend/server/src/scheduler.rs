@@ -1,11 +1,14 @@
 use std::time::Duration;
-use uuid::Uuid;
+use sea_orm::{IntoActiveModel, QueryOrder};
 use tokio::time;
 use tokio::task::JoinHandle;
 use std::sync::Arc;
+use chrono::Utc;
+use sea_orm::ActiveValue::Set;
+use sea_orm::{EntityTrait, ActiveModelTrait, ColumnTrait, QueryFilter};
+use entity::build::BuildStatus;
 
 use super::input;
-use super::tables::*;
 use super::types::*;
 use super::executer::*;
 
@@ -31,20 +34,20 @@ pub async fn schedule_project_loop(db: DBConn) {
     }
 }
 
-pub async fn schedule_project(db: DBConn, project: Project) {
+pub async fn schedule_project(db: DBConn, project: MProject) {
     println!("Reviewing Project: {}", project.name);
 
-    let has_update = check_project_updates(Arc::clone(&db), &project);
+    let has_update = check_project_updates(Arc::clone(&db), &project).await;
     if !has_update { return; }
 
-    let can_evaluate = evaluate_project(Arc::clone(&db), &project);
+    let can_evaluate = evaluate_project(Arc::clone(&db), &project).await;
     // TODO: Register the project can't be evaluated
     if !can_evaluate { return; }
 
-    let builds = get_project_rebuilds(Arc::clone(&db), &project);
+    let builds = get_project_rebuilds(Arc::clone(&db), &project).await;
 
     for build in builds {
-        register_build(Arc::clone(&db), &build);
+        register_build(Arc::clone(&db), build).await;
     }
 }
 
@@ -59,12 +62,12 @@ pub async fn schedule_build_loop(db: DBConn) {
         while current_schedules.len() < 1 {
             let build = get_next_build(Arc::clone(&db)).await;
 
-            if let Some(server) = get_available_server(Arc::clone(&db), &build) {
+            if let Some(server) = get_available_server(Arc::clone(&db), &build).await {
                 let schedule = tokio::spawn(schedule_build(Arc::clone(&db), build, server));
                 current_schedules.push(schedule);
                 added_schedule = true;
             } else {
-                requeue_build(Arc::clone(&db), &build);
+                requeue_build(Arc::clone(&db), build).await;
             }
         }
 
@@ -74,15 +77,15 @@ pub async fn schedule_build_loop(db: DBConn) {
     }
 }
 
-pub async fn schedule_build(db: DBConn, build: Build, server: Server) {
+pub async fn schedule_build(db: DBConn, build: MBuild, server: MServer) {
     println!("Executing Build: {}", build.id);
 
-    let server_addr = input::url_to_addr(server.url.as_str()).unwrap();
+    let server_addr = input::url_to_addr(server.host.as_str(), server.port).unwrap();
 
     let mut local_daemon = get_local_store().await;
     let mut server_daemon = connect(server_addr).await.unwrap();
 
-    println!("Connected to server: {}", server.url);
+    println!("Connected to server: {}", server.id);
 
     // TODO: Change this to Uuid to build
     // https://docs.rs/nix-daemon/latest/nix_daemon/trait.Store.html#tymethod.query_missing
@@ -99,74 +102,126 @@ pub async fn schedule_build(db: DBConn, build: Build, server: Server) {
     copy_builds(vec![&build], &mut server_daemon, &mut local_daemon, server_addr, true).await;
 }
 
-pub async fn get_next_project(db: DBConn) -> Project {
-    // TODO: sort after most dependencies
-    // dummy
-    Project {
-        id: Uuid::new_v4(),
-        organization_id: Uuid::nil(),
-        name: "Project Title".to_string(),
-        description: "Project Description".to_string(),
-        last_check_at: 0,
-        created_by: Uuid::nil(),
-        created_at: 0,
+pub async fn get_next_project(db: DBConn) -> MProject {
+    loop {
+        match EProject::find()
+            .filter(CProject::LastCheckAt.lte(Utc::now().naive_utc() - chrono::Duration::seconds(5)))
+            .filter(CProject::CurrentlyChecking.eq(false))
+            .order_by_asc(CProject::LastCheckAt)
+            .one(&*db)
+            .await
+        {
+            Ok(Some(project)) => {
+                let mut active_project: AProject = project.clone().into();
+
+                active_project.last_check_at = Set(Utc::now().naive_utc());
+                active_project.currently_checking = Set(true);
+
+                match active_project.update(&*db).await {
+                    Ok(updated_project) => {
+                        println!("Getting next project: {}", updated_project.name);
+                        return updated_project;
+                    }
+
+                    Err(e) => {
+                        eprintln!("Failed to update project status: {:?}", e);
+                        time::sleep(Duration::from_secs(5)).await;
+                    }
+                }
+            }
+
+            Ok(None) => {
+                time::sleep(Duration::from_secs(5)).await;
+            }
+
+            Err(e) => {
+                eprintln!("Database query error: {:?}", e);
+                time::sleep(Duration::from_secs(5)).await;
+            }
+        }
     }
 }
 
-pub fn check_project_updates(db: DBConn, project: &Project) -> bool {
+pub async fn check_project_updates(db: DBConn, project: &MProject) -> bool {
     println!("Checking for updates on project: {}", project.name);
     // TODO: dummy
     true
 }
 
-pub fn evaluate_project(db: DBConn, project: &Project) -> bool {
+pub async fn evaluate_project(db: DBConn, project: &MProject) -> bool {
     // dummy
     println!("Evaluating project: {}", project.name);
     true
 }
 
-pub fn get_project_rebuilds(db: DBConn, project: &Project) -> Vec<Build> {
+pub async fn get_project_rebuilds(db: DBConn, project: &MProject) -> Vec<MBuild> {
     // dummy
-    vec![
-        Build {
-            id: Uuid::new_v4(),
-            project_id: project.id,
-            path: "/nix/store/l2kvr9vx55cc469r3ncg04jf425alh3p-tig-2.5.10".to_string(),
-            dependencies: vec![],
-            created_at: 0,
-        }
-    ]
+    EBuild::find()
+        .filter(CBuild::Project.eq(project.id))
+        .filter(CBuild::Status.eq(BuildStatus::Queued))
+        .all(&*db).await.unwrap().into_iter().collect()
 }
 
-pub fn register_build(db: DBConn, build: &Build) {
+pub async fn register_build(db: DBConn, build: MBuild) -> MBuild {
     // dummy
+    let build = build.into_active_model();
+    let build = build.insert(&*db).await.unwrap();
+
     println!("Registering build: {}", build.id);
+
+    build
 }
 
-pub fn requeue_build(db: DBConn, build: &Build) {
+pub async fn requeue_build(db: DBConn, build: MBuild) -> MBuild {
     // dummy
+    let mut build: ABuild = EBuild::find_by_id(build.id).one(&*db).await.unwrap().unwrap().into();
+
+    build.status = Set(BuildStatus::Queued);
+    let build = build.update(&*db).await.unwrap();
+
     println!("Requeueing build: {}", build.id);
+    build
 }
 
-pub async fn get_next_build(db: DBConn) -> Build {
-    // dummy
-    Build {
-        id: Uuid::new_v4(),
-        project_id: Uuid::nil(),
-        path: "/nix/store/l2kvr9vx55cc469r3ncg04jf425alh3p-tig-2.5.10".to_string(),
-        dependencies: vec![],
-        created_at: 0,
+pub async fn get_next_build(db: DBConn) -> MBuild {
+    loop {
+        match EBuild::find()
+            .filter(CBuild::Status.eq(BuildStatus::Queued))
+            .order_by_asc(CBuild::CreatedAt)
+            .one(&*db)
+            .await
+        {
+            Ok(Some(build)) => {
+                let mut active_build: ABuild = build.clone().into();
+
+                active_build.status = Set(BuildStatus::Evaluating);
+
+                match active_build.update(&*db).await {
+                    Ok(updated_build) => {
+                        println!("Getting next build: {}", updated_build.id);
+                        return updated_build;
+                    }
+
+                    Err(e) => {
+                        eprintln!("Failed to update build status: {:?}", e);
+                        time::sleep(Duration::from_secs(5)).await;
+                    }
+                }
+            }
+
+            Ok(None) => {
+                time::sleep(Duration::from_secs(5)).await;
+            }
+
+            Err(e) => {
+                eprintln!("Database query error: {:?}", e);
+                time::sleep(Duration::from_secs(5)).await;
+            }
+        }
     }
 }
 
-pub fn get_available_server(db: DBConn, build: &Build) -> Option<Server> {
+pub async fn get_available_server(db: DBConn, build: &MBuild) -> Option<MServer> {
     // dummy
-    Some(Server {
-        id: Uuid::new_v4(),
-        organization_id: Uuid::nil(),
-        url: "127.0.0.1:22".to_string(),
-        connected: true,
-        last_connection_at: 0,
-        created_at: 0,
-    })
+    EServer::find().all(&*db).await.unwrap().into_iter().next()
 }

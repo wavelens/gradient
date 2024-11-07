@@ -9,6 +9,7 @@ name = "entity"
 path = "src/lib.rs"
 
 [dependencies]
+chrono = "0.4.38"
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1.10.0", features = ["fast-rng", "macro-diagnostics", "v4"] }
 

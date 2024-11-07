@@ -19,6 +19,11 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(
+                        ColumnDef::new(Server::Name)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
                         ColumnDef::new(Server::Organization)
                             .uuid()
                             .not_null(),
@@ -35,17 +40,17 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(Server::Architectures)
-                            .json()
+                            .array(ColumnType::SmallInteger)
                             .not_null(),
                     )
                     .col(
                         ColumnDef::new(Server::Features)
-                            .json()
+                            .array(ColumnType::Char(Some(255)))
                             .not_null(),
                     )
                     .col(
                         ColumnDef::new(Server::LastConnectionAt)
-                            .timestamp_with_time_zone()
+                            .date_time()
                             .not_null(),
                     )
                     .col(
@@ -55,7 +60,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(
                         ColumnDef::new(Server::CreatedAt)
-                            .timestamp_with_time_zone()
+                            .date_time()
                             .not_null(),
                     )
                     .foreign_key(
@@ -88,6 +93,7 @@ impl MigrationTrait for Migration {
 enum Server {
     Table,
     Id,
+    Name,
     Organization,
     Host,
     Port,

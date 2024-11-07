@@ -1,6 +1,7 @@
 use sea_orm::entity::prelude::*;
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
+use chrono::NaiveDateTime;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "user")]
@@ -11,7 +12,7 @@ pub struct Model {
     pub email: String,
     pub password_salt: String,
     pub password: String,
-    pub created_at: DateTimeUtc,
+    pub created_at: NaiveDateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -1,15 +1,20 @@
-use axum::extract::{Form, Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 use uuid::Uuid;
+use sea_orm::{EntityTrait, ActiveModelTrait};
+use sea_orm::ActiveValue::Set;
+use chrono::Utc;
 
 use super::types::*;
 use super::requests::*;
-use super::tables::*;
 
 
-pub async fn get_organizations() -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organizations: ListResponse = vec![];
+// TODO: USER AUTHENTICATION + User specific endpoints
+// TODO: sanitize inputs
+pub async fn get_organizations(state: State<AppState>) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let organizations = EOrganization::find().all(&*state.conn).await.unwrap();
+    let organizations: ListResponse = organizations.iter().map(|o| (o.id.clone(), o.name.clone())).collect();
 
     let res = BaseResponse {
         error: false,
@@ -19,23 +24,27 @@ pub async fn get_organizations() -> Result<Json<BaseResponse<ListResponse>>, (St
     Ok(Json(res))
 }
 
-pub async fn post_organizations() -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+pub async fn post_organizations(state: State<AppState>, Json(body): Json<MakeOrganizationRequest>) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let organization = AOrganization {
+        id: Set(Uuid::new_v4()),
+        name: Set(body.name.clone()),
+        description: Set(body.description.clone()),
+        created_by: Set(Uuid::nil()),
+        created_at: Set(Utc::now().naive_utc()),
+    };
+
+    let organization = organization.insert(&*state.conn).await.unwrap();
+
     let res = BaseResponse {
         error: false,
-        message: "Organization added successfully".to_string(),
+        message: organization.id.to_string(),
     };
 
     Ok(Json(res))
 }
 
-pub async fn get_organization(Path(organization_id) : Path<Uuid>) -> Result<Json<BaseResponse<Organization>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organization = Organization {
-        id: Uuid::nil(),
-        name: "Organization Title".to_string(),
-        description: "Organization Description".to_string(),
-        created_by: Uuid::nil(),
-        created_at: 0,
-    };
+pub async fn get_organization(state: State<AppState>, Path(organization_id): Path<Uuid>) -> Result<Json<BaseResponse<MOrganization>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let organization = EOrganization::find_by_id(organization_id).one(&*state.conn).await.unwrap().unwrap();
 
     let res = BaseResponse {
         error: false,
@@ -45,25 +54,30 @@ pub async fn get_organization(Path(organization_id) : Path<Uuid>) -> Result<Json
     Ok(Json(res))
 }
 
-pub async fn post_organization(Path(organization_id) : Path<Uuid>) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+pub async fn post_organization(state: State<AppState>, Path(organization_id): Path<Uuid>, Json(body): Json<MakeProjectRequest>) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let project = AProject {
+        id: Set(Uuid::new_v4()),
+        organization: Set(organization_id),
+        name: Set(body.name.clone()),
+        description: Set(body.description.clone()),
+        currently_checking: Set(false),
+        last_check_at: Set(*NULL_TIME),
+        created_by: Set(Uuid::nil()),
+        created_at: Set(Utc::now().naive_utc()),
+    };
+
+    let project = project.insert(&*state.conn).await.unwrap();
+
     let res = BaseResponse {
         error: false,
-        message: "Project added successfully".to_string(),
+        message: project.id.to_string(),
     };
 
     Ok(Json(res))
 }
 
-pub async fn get_project(Path(project_id) : Path<Uuid>) -> Result<Json<BaseResponse<Project>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let project = Project {
-        id: Uuid::nil(),
-        organization_id: Uuid::nil(),
-        name: "Project Title".to_string(),
-        description: "Project Description".to_string(),
-        last_check_at: 0,
-        created_by: Uuid::nil(),
-        created_at: 0,
-    };
+pub async fn get_project(state: State<AppState>, Path(project_id): Path<Uuid>) -> Result<Json<BaseResponse<MProject>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let project = EProject::find_by_id(project_id).one(&*state.conn).await.unwrap().unwrap();
 
     let res = BaseResponse {
         error: false,
@@ -73,7 +87,7 @@ pub async fn get_project(Path(project_id) : Path<Uuid>) -> Result<Json<BaseRespo
     Ok(Json(res))
 }
 
-pub async fn post_project(Path(project_id) : Path<Uuid>) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+pub async fn post_project(state: State<AppState>, Path(project_id): Path<Uuid>) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let res = BaseResponse {
         error: false,
         message: "Project configured successfully".to_string(),
@@ -82,14 +96,8 @@ pub async fn post_project(Path(project_id) : Path<Uuid>) -> Result<Json<BaseResp
     Ok(Json(res))
 }
 
-pub async fn get_build(Path(build_id) : Path<Uuid>) -> Result<Json<BaseResponse<Build>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let build = Build {
-        id: Uuid::nil(),
-        project_id: Uuid::nil(),
-        path: "".to_string(),
-        dependencies: vec![],
-        created_at: 0,
-    };
+pub async fn get_build(state: State<AppState>, Path(build_id): Path<Uuid>) -> Result<Json<BaseResponse<MBuild>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let build = EBuild::find_by_id(build_id).one(&*state.conn).await.unwrap().unwrap();
 
     let res = BaseResponse {
         error: false,
@@ -99,7 +107,7 @@ pub async fn get_build(Path(build_id) : Path<Uuid>) -> Result<Json<BaseResponse<
     Ok(Json(res))
 }
 
-pub async fn post_build(Path(build_id) : Path<Uuid>) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+pub async fn post_build(state: State<AppState>, Path(build_id): Path<Uuid>) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let res = BaseResponse {
         error: false,
         message: "Build executed successfully".to_string(),
@@ -108,8 +116,9 @@ pub async fn post_build(Path(build_id) : Path<Uuid>) -> Result<Json<BaseResponse
     Ok(Json(res))
 }
 
-pub async fn get_servers() -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let servers: ListResponse = vec![];
+pub async fn get_servers(state: State<AppState>) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let servers = EServer::find().all(&*state.conn).await.unwrap();
+    let servers: ListResponse = servers.iter().map(|s| (s.id.clone(), s.name.clone())).collect();
 
     let res = BaseResponse {
         error: false,
@@ -119,24 +128,32 @@ pub async fn get_servers() -> Result<Json<BaseResponse<ListResponse>>, (StatusCo
     Ok(Json(res))
 }
 
-pub async fn post_servers() -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+pub async fn post_servers(state: State<AppState>, Path(organization_id): Path<Uuid>, Json(body): Json<MakeServerRequest>) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let server = AServer {
+        id: Set(Uuid::new_v4()),
+        name: Set(body.name.clone()),
+        organization: Set(organization_id),
+        host: Set(body.host.clone()),
+        port: Set(body.port),
+        architectures: Set(body.architectures.clone()),
+        features: Set(body.features.clone()),
+        last_connection_at: Set(*NULL_TIME),
+        created_by: Set(Uuid::nil()),
+        created_at: Set(Utc::now().naive_utc()),
+    };
+
+    let server = server.insert(&*state.conn).await.unwrap();
+
     let res = BaseResponse {
         error: false,
-        message: "Server added successfully".to_string(),
+        message: server.id.to_string(),
     };
 
     Ok(Json(res))
 }
 
-pub async fn get_user(Path(user_id) : Path<Uuid>) -> Result<Json<BaseResponse<User>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let user = User {
-        id: Uuid::nil(),
-        username: "username".to_string(),
-        email: "email".to_string(),
-        password_salt: "salt".to_string(),
-        password: "password".to_string(),
-        created_at: 0,
-    };
+pub async fn get_user(state: State<AppState>, Path(user_id): Path<Uuid>) -> Result<Json<BaseResponse<MUser>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let user = EUser::find_by_id(user_id).one(&*state.conn).await.unwrap().unwrap();
 
     let res = BaseResponse {
         error: false,
@@ -146,12 +163,7 @@ pub async fn get_user(Path(user_id) : Path<Uuid>) -> Result<Json<BaseResponse<Us
     Ok(Json(res))
 }
 
-pub async fn post_user(Path(user_id) : Path<Uuid>) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let res = BaseResponse {
-        error: false,
-        message: "User added successfully".to_string(),
-    };
-
+pub async fn post_user(state: State<AppState>, Path(user_id): Path<Uuid>) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     Err((StatusCode::NOT_IMPLEMENTED, Json(BaseResponse {
         error: true,
         message: "not implemented yet".to_string(),

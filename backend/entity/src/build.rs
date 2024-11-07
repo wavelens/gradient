@@ -1,6 +1,7 @@
 use sea_orm::entity::prelude::*;
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
+use chrono::NaiveDateTime;
 
 #[derive(Debug, Clone, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
 #[sea_orm(rs_type = "i16", db_type = "Integer")]
@@ -28,9 +29,8 @@ pub struct Model {
     pub project: Uuid,
     pub status: BuildStatus,
     pub path: String,
-    #[sea_orm(column_type = "Json")]
     pub dependencies: Vec<Uuid>,
-    pub created_at: DateTimeUtc,
+    pub created_at: NaiveDateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
