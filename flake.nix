@@ -88,7 +88,7 @@
         EXTRA_CCFLAGS = "-I/usr/include";
         RUST_BACKTRACE = 1;
 
-        GRADIENT_DATABASE_URL = "psql://postgres:postgres@localhost:54321/gradient";
+        GRADIENT_DATABASE_URL = "postgres://postgres:postgres@localhost:54321/gradient";
     };
   };
 }
