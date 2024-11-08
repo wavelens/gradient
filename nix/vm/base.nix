@@ -1,7 +1,9 @@
 { config, pkgs, ... }:
 {
-  users.users.root.password = "root";
+  
+  systemd.services."serial-getty@".serviceConfig.ExecStartPre = "${pkgs.systemd}/bin/networkctl status br0";
   services.getty.greetingLine = "EXTREMELY UNSECURE SERVER, DO NOT STORE ANY IMPORTNANT DATA ON IT!!!";
+  users.users.root.password = "root";
   system.stateVersion = config.system.nixos.version;
   microvm = {
     vcpu = 4;
@@ -71,8 +73,6 @@
         };
 
         addresses = [ {
-          # TODO: addressConfig needs to be removed.
-          # trace: warning: Using 'addressConfig' is deprecated! Move all attributes inside one level up and remove it.
           Address = "fec0::1/64";
         }];
       };
