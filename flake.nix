@@ -57,7 +57,6 @@
         system = "${system}";
         modules = [
           microvm.nixosModules.microvm
-          self.nixosModules.default
           ./nix/vm/base.nix
           ./nix/vm/defaults.nix
           ./nix/vm/postgresql.nix
