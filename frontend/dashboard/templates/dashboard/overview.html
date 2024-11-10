@@ -44,11 +44,11 @@
             </tr>
         </thead>
         <tbody>
-            {% for i in "0,1,2"|slice:":" %}
+            {% for block in details_blocks %}
                 <tr>
-                    <td><a class="full-width" href="https://hydra.wavelens.io/project/build"><span>build</span><br><span class="text-light">wvls:bulid</span></a></td>
-                    <td>34</td>
-                    <td>12m 11s</td>
+                    <td><a class="full-width" href="https://hydra.wavelens.io/project/build"><span>{{ block.project }}</span><br><span class="text-light">{{ block.id }}</span></a></td>
+                    <td>{{ block.exec }}</td>
+                    <td>{{ block.duration }}</td>
                     <td>
                         <img class="red-filter" src="{% static 'dashboard/images/x-circle.svg' %}" alt="X Circle">
                         <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
