@@ -60,6 +60,7 @@
           ./nix/vm/base.nix
           ./nix/vm/defaults.nix
           ./nix/vm/postgresql.nix
+          ./nix/vm/mDNS.nix   
         ];
       };
 

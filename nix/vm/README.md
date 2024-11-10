@@ -42,3 +42,4 @@ Import the following config to allow the VM to connect to the Internet and you b
 ```
 # Connecting to the VM
 connect with `psql -U postgres -h ${IP_OF_VM}`
+or use the domain `gradient-dev.local`
