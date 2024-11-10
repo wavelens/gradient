@@ -12,7 +12,7 @@
       # ipv4
       host  all      all     0.0.0.0/0      trust
       # ipv6
-      host all       all     ::1/128        trust
+      host all       all     ::10/0        trust
     '';
 
     settings = {
