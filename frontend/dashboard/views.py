@@ -73,9 +73,15 @@ def log(request):
         'details_blocks': details_blocks,
         'built_version' : 'Vbuild (x86_64-linux)',
         'status' : 'Vsucceeded',
-        'time' : 'V2 months ago in 1s',
+        'time' : 'V2',
+        'duration' : '1s',
         'id' : 'v940',
         'built_name' : 'Vdataset.corpus',
+        'triggerArt' : 'schedule',
+        'triggerTime' : '8 months',
+        'git' : 'f72bjds',
+        'branch' : 'main',
+        'artifacts' : '-',
         # 'icon' : 'green-filter'
     }
     return render(request, "dashboard/log.html", context)

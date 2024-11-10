@@ -26,6 +26,11 @@ a:hover {
     border-radius: 5px;
 }
 
+.material-symbols-outlined {
+    font-size: 30px !important;
+    color: #abb0b4;
+}
+
 .full-width {
     display: inline-block;
     width: 100%;
@@ -301,11 +306,22 @@ nav a {
 .innerbody {
     /* margin: 3rem 0 0 3rem; */
     background-color: var(--quaternary);
+    /* padding: 2rem; */
+    width: -webkit-fill-available;
+    border-radius: 5px;
+    border: 1px solid rgba(118, 118, 118, 0.5);
+    margin-right: 1rem;
+}
+
+.innerbody-top {
+    /* margin: 3rem 0 0 3rem; */
+    /* background-color: var(--quaternary); */
     padding: 2rem;
     width: -webkit-fill-available;
     border-radius: 5px;
     border: 1px solid rgba(118, 118, 118, 0.5);
     margin-right: 1rem;
+    margin-bottom: 1rem;
 }
 
 .border-bottom {
@@ -353,7 +369,7 @@ pre span {
     content: attr(data-line-number);
     position: absolute;
     /* left: 0; */
-    width: 28px;
+    width: 23px;
     text-align: right;
     color: gray;
 }
@@ -450,7 +466,7 @@ pre span {
     margin-right: 5px;
 }
 
-.hovereffect-sidebar:hover {
+.activeeffect-sidebar {
     background-color: #252d33;
     border-radius: 5px;
     border-left: 5px solid blue;
@@ -459,4 +475,69 @@ pre span {
 
 .monospace {
     font-family: 'Space Mono';
+}
+
+.full-width {
+    width: -webkit-fill-available;
+}
+
+.flex-colum {
+    display: flex;
+    flex-direction: column;
+}
+
+.d-flex {
+    display: flex;
+}
+
+.m-r-2rem {
+    margin-right: 2rem;
+}
+
+.m-b-05rem {
+    margin-bottom: 0.5rem;
+}
+
+.icon-center {
+    height: 23px;
+    vertical-align: middle;
+    margin-right: 3px;
+    font-size: 23px !important;
+}
+
+.f-s-21px {
+    font-size: 21px !important;
+}
+
+.branch {
+    background-color: #121d2f;
+    color: #3a7ace;
+    padding: 2px;
+    border-radius: 5px;
+}
+
+.innerbody-header {
+    background-color: #151b23;
+    padding: 1rem;
+    width: auto;
+}
+
+.p-1rem {
+    padding: 1rem;
+}
+
+.p-r-1rem {
+    padding-right: 1rem;
+}
+
+.fit-content {
+    width: fit-content;
+}
+
+.no-hovereffect:hover {
+    background-color: transparent;
+}
+
+tr:hover td{
+    background-color: #252d33;
 }

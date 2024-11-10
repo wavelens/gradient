@@ -5,24 +5,28 @@
     <header>
         <div class="header">
             <div class="logo-container">
-                <a href="/"><img src="../static/dashboard/images/wavelens-LOGO.svg" alt="Logo"></a>
+                <a href="/" class="no-hovereffect"><img src="../static/dashboard/images/wavelens-LOGO.svg" alt="Logo"></a>
                 <span><a href="{% url 'workflow' %}">{{ projectname }}</a>/<a href="{% url 'model' %}">{{ model }}</a></span>
             </div>
             <div>
                 <div class="dropdown">
-                    <img onclick="dropdownFunction(); event.stopPropagation();" class="icon" src="../static/dashboard/icons/user.svg">
+                    <span onclick="dropdownFunction(); event.stopPropagation();" class="material-symbols-outlined icon">
+                        account_circle
+                    </span>
                     <div id="dropdownHeader" class="dropdown-content">
-                        <a href="#home">signed in as {{ user }}</a>
-                        <a href="#home" class="flex-c"><img class="icon m-r-5" src="../static/dashboard/icons/user.svg"><span>Profile</span></a>
-                        <a href="#about" class="flex-c"><img class="icon m-r-5" src="../static/dashboard/icons/star.svg"><span>Starred</span></a>
-                        <a href="#contact" class="flex-c"><img class="icon m-r-5" src="../static/dashboard/icons/notifications.svg"><span>Subscriptions</span></a>
-                        <a href="#contact" class="flex-c"><img class="icon m-r-5" src="../static/dashboard/icons/settings.svg"><span>Settings</span></a>
-                        <a href="#contact" class="flex-c"><img class="icon m-r-5" src="../static/dashboard/icons/help.svg"><span>Help</span></a>
-                        <a href="#contact" class="flex-c"><img class="icon m-r-5" src="../static/dashboard/icons/tune.svg"><span>Side Administration</span></a>
-                        <a href="#contact" class="flex-c"><img class="icon m-r-5" src="../static/dashboard/icons/logout.svg"><span>Sign Out</span></a>
+                        <a href="#home">signed in as {{ user.name }}</a>
+                        <a href="#home" class="flex-c"><span class="material-symbols-outlined m-r-5">account_circle</span><span>Profile</span></a>
+                        <a href="#about" class="flex-c"><span class="material-symbols-outlined m-r-5">star</span><span>Starred</span></a>
+                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">notifications</span><span>Subscriptions</span></a>
+                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">settings</span><span>Settings</span></a>
+                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">help</span><span>Help</span></a>
+                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">tune</span><span>Side Administration</span></a>
+                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">logout</span><span>Sign Out</span></a>
                     </div>
                 </div>
-                <img class="icon" src="../static/dashboard/icons/settings.svg">
+                <span class="material-symbols-outlined">
+                    settings
+                </span>
             </div>
         </div> 
         <nav role="navigation">
