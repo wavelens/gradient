@@ -1,7 +1,7 @@
 { config, pkgs, ... }:
 {
   
-  systemd.services."serial-getty@".serviceConfig.ExecStartPre = "${pkgs.systemd}/bin/networkctl status br0";
+  systemd.services."serial-getty@".serviceConfig.ExecStartPre = "${pkgs.systemd}/bin/networkctl status";
   services.getty.greetingLine = "EXTREMELY UNSECURE SERVER, DO NOT STORE ANY IMPORTNANT DATA ON IT!!!";
   users.users.root.password = "root";
   system.stateVersion = config.system.nixos.version;
@@ -34,7 +34,7 @@
     # }];
 
     interfaces = [{
-      id = "eth0";
+      id = "enp0s1";
       type = "bridge";
       mac = "02:01:00:00:00:01";
       bridge = "virbr0";
@@ -42,8 +42,8 @@
   };
 
   networking = {
+    domain = "local";
     hostName = "gradient-dev";
-    useDHCP = false;
     nftables.enable = true;
     useNetworkd = true;
   };
@@ -57,24 +57,22 @@
         };
       };
     };
-
     networks = {
       # uplink
-      "00-eth" = {
-        matchConfig.MACAddress = (builtins.head config.microvm.interfaces).mac;
+      "10-eth" = {
+        matchConfig.Name = [
+          "enp*"
+          "eth*"
+        ];
         networkConfig.Bridge = "br0";
       };
       # bridge is a dumb switch without addresses on the host
-      "01-br0" = {
+      "11-br0" = {
         matchConfig.Name = "br0";
         networkConfig = {
-          DHCP = "ipv4";
+          DHCP = "yes";
           IPv6AcceptRA = true;
         };
-
-        addresses = [ {
-          Address = "fec0::1/64";
-        }];
       };
     };
   };
