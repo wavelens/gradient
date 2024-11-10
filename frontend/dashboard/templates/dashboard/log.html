@@ -14,39 +14,62 @@
 </header> -->
 
 <div class="content-above">
-    <div><a href="/#home" class="flex-c"><img class="center-image" src="../static/dashboard/icons/arrow_back.svg"><span>Back</span></a></div>
+    <div><a href="/#home" class="flex-c p-r-1rem fit-content"><img class="center-image" src="../static/dashboard/icons/arrow_back.svg"><span>Back</span></a></div>
     <h2 class="webkit-middle space-small" class="flex-c"><img class="green-filter center-image icon" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">{{ built_name }}<span class="color-light fw-normal"> #{{ id }}</span></h2>
 </div>
 <div class="outerbody">
     <div class="content-left">
         <p class="border-bottom space-normal no-side-padding"><a class="space-normal">Overview</a></p>
-        <div class="flex-c hovereffect-sidebar">
+        <div class="flex-c activeeffect-sidebar">
             <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
             <a>Build</a>
         </div>
     </div>
-    <div class="innerbody">
-        <div>
-            <span>{{ built_version }}</span><br>
-            <span class="text-light">{{ status }} {{ time }}</span>
-        </div>
-        <br>
-        <div>
-            <div class="border-bottom flex-c">
-                <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-                <span>Build</span>
+    <div class="full-width">
+        <div class="innerbody-top d-flex">
+            <div class="m-r-2rem">
+                <div class="text-light m-b-05rem">Triggered via {{ triggerArt }} {{ triggerTime }} ago</div>
+                <div><span class="material-symbols-outlined icon-center">{{ user.image }}</span><span>{{ user.name }} </span> <span class="material-symbols-outlined icon-center f-s-21px">commit</span> {{ git }} <span class="branch">{{ branch }}</span></div>
             </div>
-            <div class="code-container monospace">
-                {% for block in details_blocks %}
-                    <details class="details-item color-secondary">
-                        <summary>{{ block.summary }}</summary>
-                        <div class="details-content color-secondary">
-                            {% for line in block.details %}
-                                <div class="line">{{ line }}</div>
-                            {% endfor %}
-                        </div>
-                    </details>
-                {% endfor %}
+            <div class="m-r-2rem">
+                <div class="text-light m-b-05rem">Status</div>
+                <div>{{ status }}</div>
+            </div>
+            <div class="m-r-2rem">
+                <div class="text-light m-b-05rem">Total duration</div>
+                <div>{{ duration }}</div>
+            </div>
+            <div class="m-r-2rem">
+                <div class="text-light m-b-05rem">Artifacts</div>
+                <div>{{ artifacts }}</div>
+            </div>
+
+        </div>
+        <div class="innerbody">
+            <div class="innerbody-header border-bottom">
+                <div>
+                    <span>{{ built_version }}</span><br>
+                    <span class="text-light">{{ status }} {{ time }} months ago in {{ duration }}</span>
+                </div>
+                <br>
+                <div class="flex-c">
+                    <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                    <span>Build</span>
+                </div>
+            </div>
+            <div class="p-1rem">
+                <div class="code-container monospace">
+                    {% for block in details_blocks %}
+                        <details class="details-item color-secondary">
+                            <summary>{{ block.summary }}</summary>
+                            <div class="details-content color-secondary">
+                                {% for line in block.details %}
+                                    <div class="line">{{ line }}</div>
+                                {% endfor %}
+                            </div>
+                        </details>
+                    {% endfor %}
+                </div>
             </div>
         </div>
     </div>
