@@ -11,15 +11,19 @@
       "auth.anonymous" = {
         enabled = true;
         # org_name = "Chaos";
-        org_role = "Viewer";
+        org_role = "Admin";
       };
-      users.allow_sign_up = false;
+      users = {
+        allow_sign_up = false;
+        login_hint = "admin";
+        password_hint = "admin";
+      };
       server = {
         http_addr = "127.0.0.1";
         http_port = 3000;
         enforce_domain = false;
         enable_gzip = true;
-        domain = "${config.networking.domain}";
+        domain = "${config.networking.fqdn}";
       };
     };
   };
