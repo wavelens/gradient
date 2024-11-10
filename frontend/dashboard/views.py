@@ -7,8 +7,45 @@ from django.http import HttpResponse
 from django.template import loader
 
 
-def index(request):
-    return render(request, "dashboard/overview.html")
+def workflow(request):
+    details_blocks = [
+        {
+            'project': "build",
+            'id': "wvls:build",
+            'exec': 34,
+            'duration': '12m 11s',
+            'performance': 'filter',
+            'latest_runs': 'filter'
+        },
+        {
+            'project': "build2",
+            'id': "wvls:build",
+            'exec': 34,
+            'duration': '12m 11s',
+            'performance': 'filter',
+            'latest_runs': 'filter'
+        },
+        {
+            'project': "build3",
+            'id': "wvls:build",
+            'exec': 34,
+            'duration': '12m 11s',
+            'performance': 'filter',
+            'latest_runs': 'filter'
+        },
+        {
+            'project': "build4",
+            'id': "wvls:build",
+            'exec': 34,
+            'duration': '12m 11s',
+            'performance': 'filter',
+            'latest_runs': 'filter'
+        },
+    ]
+    context = {
+        'details_blocks': details_blocks
+    }
+    return render(request, "dashboard/overview.html", context)
 
 def log(request):
     details_blocks = [
@@ -33,13 +70,60 @@ def log(request):
         }
     ]
     context = {
-        'projectname' : 'vWorkflow',
-        'model' : 'vModel',
         'details_blocks': details_blocks,
         'built_version' : 'Vbuild (x86_64-linux)',
         'status' : 'Vsucceeded',
-        'time' : 'V2 months ago in 1s',
+        'time' : 'V2',
+        'duration' : '1s',
         'id' : 'v940',
-        'built_name' : 'Vdataset.corpus'
+        'built_name' : 'Vdataset.corpus',
+        'triggerArt' : 'schedule',
+        'triggerTime' : '8 months',
+        'git' : 'f72bjds',
+        'branch' : 'main',
+        'artifacts' : '-',
+        # 'icon' : 'green-filter'
     }
     return render(request, "dashboard/log.html", context)
+
+def download(request):
+    files = [
+    {
+        'file': "File 1",
+        'type': "dataset",
+        'link' : "dataset.zip",
+        'actions' : "Details"
+    },
+    {
+        'file': "File 2",
+        'type': "dataset",
+        'link' : "dataset.zip",
+        'actions' : "Details"
+    },
+    {
+        'file': "File 3",
+        'type': "dataset",
+        'link' : "dataset.zip",
+        'actions' : "Details"
+    },
+    ]
+    context = {
+        'files': files,
+    }
+    return render(request, "dashboard/download.html", context)
+
+def model(request):
+    models = [
+    {
+        'name': "Model 1",
+        'description': "bliblablubs"
+    },
+    {
+        'name': "Model 2",
+        'description': "hihaho"
+    }
+    ]
+    context = {
+        'models': models,
+    }
+    return render(request, "dashboard/model.html", context)

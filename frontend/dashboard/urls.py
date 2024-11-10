@@ -3,6 +3,8 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    path("", views.index, name="index"),
+    path("workflow", views.workflow, name="workflow"),
     path("log", views.log, name="log"),
+    path("download", views.download, name="download"),
+    path("model", views.model, name="model"),
 ]
