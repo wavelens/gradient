@@ -8,6 +8,7 @@ Import the following config to allow the VM to connect to the Internet and you b
     netdevs = {
       # Create the bridge interface
       "20-virbr0" = {
+        bridgeConfig.STP = true;
         netdevConfig = {
           Kind = "bridge";
           Name = "virbr0";
