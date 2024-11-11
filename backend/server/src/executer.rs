@@ -10,10 +10,9 @@ use tokio::{
 use std::path::PathBuf;
 
 use super::types::*;
-use super::types::NixStore;
 
 
-pub async fn connect(url: SocketAddr) -> Result<NixStore, Box<dyn std::error::Error>> {
+pub async fn connect(url: SocketAddr, store_path: Option<String>) -> Result<NixStore, Box<dyn std::error::Error>> {
     let mut session = AsyncSession::<TokioTcpStream>::connect(url, None).await?;
     let private_key: PathBuf = PathBuf::from("/home/dennis/.ssh/keys/github");
 
@@ -21,7 +20,13 @@ pub async fn connect(url: SocketAddr) -> Result<NixStore, Box<dyn std::error::Er
 
     let mut channel = session.channel_session().await?;
 
-    channel.exec("nix-daemon --stdio --option store ./test").await?;
+    let command = if let Some(path) = store_path {
+        format!("nix-daemon --stdio --option store {}", path)
+    } else {
+        "nix-daemon --stdio".to_string()
+    };
+
+    channel.exec(command.as_str()).await?;
 
     Ok(DaemonStore::builder().init(channel).await?)
 }

@@ -17,6 +17,7 @@ pub struct MakeOrganizationRequest {
 pub struct MakeProjectRequest {
     pub name: String,
     pub description: String,
+    pub repository: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

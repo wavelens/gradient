@@ -80,18 +80,27 @@
           sea-orm-cli
           rustEnv
 
+          boost
           gettext
           libsodium
           openssl
           sqlite
           pythonEnv
           postgresql_17
+          nixVersions.latest
+        ];
+
+        nativeBuildInputs = [
+          pkg-config
         ];
 
         EXTRA_CCFLAGS = "-I/usr/include";
         RUST_BACKTRACE = 1;
 
         GRADIENT_DATABASE_URL = "postgres://postgres:postgres@localhost:54321/gradient";
+        GRADIENT_MAX_CONCURRENT_EVALUATIONS = 1;
+        GRADIENT_MAX_CONCURRENT_BUILDS = 1;
+        GRADIENT_STORE_PATH = "./testing/store";
     };
   };
 }

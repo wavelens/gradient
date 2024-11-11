@@ -1,3 +1,4 @@
+use uuid::Uuid;
 use std::time::Duration;
 use sea_orm::{IntoActiveModel, QueryOrder};
 use tokio::time;
@@ -5,14 +6,18 @@ use tokio::task::JoinHandle;
 use std::sync::Arc;
 use chrono::Utc;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{EntityTrait, ActiveModelTrait, ColumnTrait, QueryFilter};
+use sea_orm::{EntityTrait, ActiveModelTrait, ColumnTrait, QueryFilter, QuerySelect, JoinType, Condition};
 use entity::build::BuildStatus;
+use entity::evaluation::EvaluationStatus;
+use futures::stream::{self, StreamExt};
 
 use super::input;
 use super::types::*;
 use super::executer::*;
+use super::sources::*;
+use super::evaluator::*;
 
-pub async fn schedule_project_loop(db: DBConn) {
+pub async fn schedule_evaluation_loop(state: Arc<ServerState>) {
     let mut current_schedules = vec![];
     let mut interval = time::interval(Duration::from_secs(5));
 
@@ -21,9 +26,9 @@ pub async fn schedule_project_loop(db: DBConn) {
         current_schedules.retain(|schedule: &JoinHandle<()>| !schedule.is_finished());
 
         // TODO: look at tokio semaphore
-        while current_schedules.len() < 1 {
-            let project = get_next_project(Arc::clone(&db)).await;
-            let schedule = tokio::spawn(schedule_project(Arc::clone(&db), project));
+        while current_schedules.len() < state.cli.max_concurrent_evaluations {
+            let evaluation = get_next_evaluation(Arc::clone(&state)).await;
+            let schedule = tokio::spawn(schedule_evaluation(Arc::clone(&state), evaluation));
             current_schedules.push(schedule);
             added_schedule = true;
         }
@@ -34,24 +39,33 @@ pub async fn schedule_project_loop(db: DBConn) {
     }
 }
 
-pub async fn schedule_project(db: DBConn, project: MProject) {
-    println!("Reviewing Project: {}", project.name);
+pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) {
+    println!("Reviewing Evaluation: {}", evaluation.id);
 
-    let has_update = check_project_updates(Arc::clone(&db), &project).await;
-    if !has_update { return; }
+    let mut store = get_local_store().await;
+    let builds = evaluate(Arc::clone(&state), &mut store, &evaluation).await;
 
-    let can_evaluate = evaluate_project(Arc::clone(&db), &project).await;
-    // TODO: Register the project can't be evaluated
-    if !can_evaluate { return; }
+    match builds {
+        Ok(builds) => {
+            let active_builds = builds.iter().map(|b| b.clone().into_active_model()).collect::<Vec<ABuild>>();
 
-    let builds = get_project_rebuilds(Arc::clone(&db), &project).await;
+            EBuild::insert_many(active_builds)
+                .exec(&state.db)
+                .await
+                .unwrap();
 
-    for build in builds {
-        register_build(Arc::clone(&db), build).await;
+            update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Building).await;
+        }
+
+        Err(e) => {
+            update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Failed).await;
+            eprintln!("Failed to evaluate: {}", e);
+        }
     }
+
 }
 
-pub async fn schedule_build_loop(db: DBConn) {
+pub async fn schedule_build_loop(state: Arc<ServerState>) {
     let mut current_schedules = vec![];
     let mut interval = time::interval(Duration::from_secs(5));
 
@@ -59,15 +73,15 @@ pub async fn schedule_build_loop(db: DBConn) {
         let mut added_schedule = false;
         current_schedules.retain(|schedule: &JoinHandle<()>| !schedule.is_finished());
 
-        while current_schedules.len() < 1 {
-            let build = get_next_build(Arc::clone(&db)).await;
+        while current_schedules.len() < state.cli.max_concurrent_builds {
+            let build = get_next_build(Arc::clone(&state)).await;
 
-            if let Some(server) = get_available_server(Arc::clone(&db), &build).await {
-                let schedule = tokio::spawn(schedule_build(Arc::clone(&db), build, server));
+            if let Some(server) = get_available_server(Arc::clone(&state), &build).await {
+                let schedule = tokio::spawn(schedule_build(Arc::clone(&state), build, server));
                 current_schedules.push(schedule);
                 added_schedule = true;
             } else {
-                requeue_build(Arc::clone(&db), build).await;
+                requeue_build(Arc::clone(&state), build).await;
             }
         }
 
@@ -77,19 +91,19 @@ pub async fn schedule_build_loop(db: DBConn) {
     }
 }
 
-pub async fn schedule_build(db: DBConn, build: MBuild, server: MServer) {
+pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MServer) {
     println!("Executing Build: {}", build.id);
 
     let server_addr = input::url_to_addr(server.host.as_str(), server.port).unwrap();
 
     let mut local_daemon = get_local_store().await;
-    let mut server_daemon = connect(server_addr).await.unwrap();
+    let mut server_daemon = connect(server_addr, None).await.unwrap();
 
     println!("Connected to server: {}", server.id);
 
     // TODO: Change this to Uuid to build
     // https://docs.rs/nix-daemon/latest/nix_daemon/trait.Store.html#tymethod.query_missing
-    let deps = get_next_build(db).await; // dummy
+    let deps = get_next_build(state).await; // dummy
     let dependencies = vec![&deps];
 
     // TODO: somewhere else
@@ -102,101 +116,128 @@ pub async fn schedule_build(db: DBConn, build: MBuild, server: MServer) {
     copy_builds(vec![&build], &mut server_daemon, &mut local_daemon, server_addr, true).await;
 }
 
-pub async fn get_next_project(db: DBConn) -> MProject {
+async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
     loop {
-        match EProject::find()
-            .filter(CProject::LastCheckAt.lte(Utc::now().naive_utc() - chrono::Duration::seconds(5)))
-            .filter(CProject::CurrentlyChecking.eq(false))
+        let threshold_time = Utc::now().naive_utc() - chrono::Duration::seconds(state.cli.evaluation_timeout);
+
+        // TODO : https://www.sea-ql.org/SeaORM/docs/relation/chained-relations/
+        let projects = EProject::find()
+            .filter(CProject::LastCheckAt.lte(threshold_time))
             .order_by_asc(CProject::LastCheckAt)
-            .one(&*db)
+            .all(&state.db)
             .await
-        {
-            Ok(Some(project)) => {
-                let mut active_project: AProject = project.clone().into();
+            .unwrap();
 
-                active_project.last_check_at = Set(Utc::now().naive_utc());
-                active_project.currently_checking = Set(true);
-
-                match active_project.update(&*db).await {
-                    Ok(updated_project) => {
-                        println!("Getting next project: {}", updated_project.name);
-                        return updated_project;
+        let evaluations = stream::iter(projects.clone().into_iter())
+            .filter_map(|p| {
+                let intern_state = Arc::clone(&state);
+                async move {
+                    if !check_project_updates(Arc::clone(&intern_state), &p).await {
+                        return None;
                     }
 
-                    Err(e) => {
-                        eprintln!("Failed to update project status: {:?}", e);
-                        time::sleep(Duration::from_secs(5)).await;
+                    if let Some(evaluation) = p.last_evaluation {
+                        EEvaluation::find_by_id(evaluation)
+                            .filter(
+                                Condition::any()
+                                    .add(CEvaluation::Status.eq(EvaluationStatus::Completed))
+                                    .add(CEvaluation::Status.eq(EvaluationStatus::Failed))
+                                    .add(CEvaluation::Status.eq(EvaluationStatus::Aborted))
+                            )
+                            .one(&intern_state.db).await.unwrap_or(None)
+                    } else {
+                        Some(MEvaluation {
+                            id: Uuid::nil(),
+                            project: p.id,
+                            repository: p.repository,
+                            commit: "HEAD".to_string(),
+                            status: EvaluationStatus::Queued,
+                            previous: None,
+                            next: None,
+                            created_at: Utc::now().naive_utc(),
+                        })
                     }
                 }
-            }
+            })
+            .collect::<Vec<MEvaluation>>()
+            .await;
 
-            Ok(None) => {
-                time::sleep(Duration::from_secs(5)).await;
-            }
-
-            Err(e) => {
-                eprintln!("Database query error: {:?}", e);
-                time::sleep(Duration::from_secs(5)).await;
-            }
+        if evaluations.is_empty() {
+            time::sleep(Duration::from_secs(5)).await;
+            continue;
         }
+
+        let evaluation = evaluations.first().unwrap();
+
+
+        let project = projects.into_iter().find(|p| p.id == evaluation.project).unwrap_or_else(|| {
+            eprintln!("Failed to find project {} for evaluation {}", evaluation.project, evaluation.id);
+            std::process::exit(1);
+        });
+
+        let evaluation_id = if evaluation.id == Uuid::nil() {
+            None
+        } else {
+            Some(evaluation.id)
+        };
+
+        let new_evaluation = AEvaluation {
+            id: Set(Uuid::new_v4()),
+            project: Set(project.id),
+            repository: Set(project.repository.clone()),
+            commit: Set("HEAD".to_string()),
+            status: Set(EvaluationStatus::Queued),
+            previous: Set(evaluation_id),
+            next: Set(None),
+            created_at: Set(Utc::now().naive_utc()),
+        };
+
+        let new_evaluation = new_evaluation.insert(&state.db).await.unwrap();
+        println!("Created evaluation: {}", new_evaluation.id);
+
+        let mut active_project: AProject = project.clone().into();
+
+        active_project.last_check_at = Set(Utc::now().naive_utc());
+        active_project.last_evaluation = Set(Some(evaluation.id));
+
+        active_project.update(&state.db).await.unwrap();
+
+        if evaluation.id != Uuid::nil() {
+            let mut active_evaluation: AEvaluation = evaluation.clone().into();
+            active_evaluation.next = Set(Some(new_evaluation.id));
+
+            active_evaluation.update(&state.db).await.unwrap();
+        };
+
+        return new_evaluation;
     }
 }
 
-pub async fn check_project_updates(db: DBConn, project: &MProject) -> bool {
-    println!("Checking for updates on project: {}", project.name);
-    // TODO: dummy
-    true
-}
-
-pub async fn evaluate_project(db: DBConn, project: &MProject) -> bool {
+async fn requeue_build(state: Arc<ServerState>, build: MBuild) -> MBuild {
     // dummy
-    println!("Evaluating project: {}", project.name);
-    true
-}
-
-pub async fn get_project_rebuilds(db: DBConn, project: &MProject) -> Vec<MBuild> {
-    // dummy
-    EBuild::find()
-        .filter(CBuild::Project.eq(project.id))
-        .filter(CBuild::Status.eq(BuildStatus::Queued))
-        .all(&*db).await.unwrap().into_iter().collect()
-}
-
-pub async fn register_build(db: DBConn, build: MBuild) -> MBuild {
-    // dummy
-    let build = build.into_active_model();
-    let build = build.insert(&*db).await.unwrap();
-
-    println!("Registering build: {}", build.id);
-
-    build
-}
-
-pub async fn requeue_build(db: DBConn, build: MBuild) -> MBuild {
-    // dummy
-    let mut build: ABuild = EBuild::find_by_id(build.id).one(&*db).await.unwrap().unwrap().into();
+    let mut build: ABuild = EBuild::find_by_id(build.id).one(&state.db).await.unwrap().unwrap().into();
 
     build.status = Set(BuildStatus::Queued);
-    let build = build.update(&*db).await.unwrap();
+    let build = build.update(&state.db).await.unwrap();
 
     println!("Requeueing build: {}", build.id);
     build
 }
 
-pub async fn get_next_build(db: DBConn) -> MBuild {
+async fn get_next_build(state: Arc<ServerState>) -> MBuild {
     loop {
         match EBuild::find()
             .filter(CBuild::Status.eq(BuildStatus::Queued))
             .order_by_asc(CBuild::CreatedAt)
-            .one(&*db)
+            .one(&state.db)
             .await
         {
             Ok(Some(build)) => {
                 let mut active_build: ABuild = build.clone().into();
 
-                active_build.status = Set(BuildStatus::Evaluating);
+                active_build.status = Set(BuildStatus::Queued);
 
-                match active_build.update(&*db).await {
+                match active_build.update(&state.db).await {
                     Ok(updated_build) => {
                         println!("Getting next build: {}", updated_build.id);
                         return updated_build;
@@ -221,7 +262,27 @@ pub async fn get_next_build(db: DBConn) -> MBuild {
     }
 }
 
-pub async fn get_available_server(db: DBConn, build: &MBuild) -> Option<MServer> {
+async fn get_available_server(state: Arc<ServerState>, build: &MBuild) -> Option<MServer> {
     // dummy
-    EServer::find().all(&*db).await.unwrap().into_iter().next()
+    EServer::find().all(&state.db).await.unwrap().into_iter().next()
+}
+
+async fn update_build_status(state: Arc<ServerState>, build: MBuild, status: BuildStatus) -> MBuild {
+    let mut active_build: ABuild = build.into_active_model();
+    active_build.status = Set(status);
+
+    let build = active_build.update(&state.db).await.unwrap();
+
+    println!("Updated build status: {}", build.id);
+
+    build
+}
+
+async fn update_evaluation_status(state: Arc<ServerState>, evaluation: MEvaluation, status: EvaluationStatus) -> MEvaluation {
+    let mut active_evaluation: AEvaluation = evaluation.into_active_model();
+    active_evaluation.status = Set(status);
+
+    let evaluation = active_evaluation.update(&state.db).await.unwrap();
+
+    evaluation
 }

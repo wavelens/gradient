@@ -46,6 +46,7 @@ stop_postgres() {
   EXIT_CODE=$?
   step "Stopping PostgreSQL"
   pg_ctl stop -D testing/postgresql-data/ -w -s
+  rm -rf testing
   exit "${EXIT_CODE}"
 }
 

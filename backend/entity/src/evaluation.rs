@@ -5,62 +5,55 @@ use chrono::NaiveDateTime;
 
 #[derive(Debug, Clone, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
-pub enum BuildStatus {
+pub enum EvaluationStatus {
     #[sea_orm(num_value = 0)]
     Queued,
     #[sea_orm(num_value = 1)]
-    Building,
+    Evaluating,
     #[sea_orm(num_value = 2)]
-    Completed,
+    Building,
     #[sea_orm(num_value = 3)]
-    Failed,
+    Completed,
     #[sea_orm(num_value = 4)]
+    Failed,
+    #[sea_orm(num_value = 5)]
     Aborted,
 }
 
-
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
-#[sea_orm(table_name = "build")]
+#[sea_orm(table_name = "evaluation")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
-    pub evaluation: Uuid,
-    pub status: BuildStatus,
-    pub path: String,
-    pub dependency_of: Option<Uuid>,
+    pub project: Uuid,
+    pub repository: String,
+    pub commit: String,
+    pub status: EvaluationStatus,
+    pub previous: Option<Uuid>,
+    pub next: Option<Uuid>,
     pub created_at: NaiveDateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
+        belongs_to = "super::project::Entity",
+        from = "Column::Project",
+        to = "super::project::Column::Id"
+    )]
+    Project,
+    #[sea_orm(
         belongs_to = "super::evaluation::Entity",
-        from = "Column::Evaluation",
+        from = "Column::Previous",
         to = "super::evaluation::Column::Id"
     )]
-    Evaluation,
-        #[sea_orm(
-        belongs_to = "Entity",
-        from = "Column::DependencyOf",
-        to = "Column::Id"
+    PreviousEvaluation,
+    #[sea_orm(
+        belongs_to = "super::evaluation::Entity",
+        from = "Column::Next",
+        to = "super::evaluation::Column::Id"
     )]
-    DependencyOf,
-}
-
-impl Related<super::evaluation::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Evaluation.def()
-    }
-}
-
-impl Related<Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::DependencyOf.def()
-    }
-
-    fn via() -> Option<RelationDef> {
-        None
-    }
+    NextEvaluation,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
