@@ -3,71 +3,73 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
+
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .create_table(
                 Table::create()
-                    .table(Project::Table)
+                    .table(Evaluation::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(Project::Id)
+                        ColumnDef::new(Evaluation::Id)
                             .uuid()
                             .not_null()
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(Project::Organization)
+                        ColumnDef::new(Evaluation::Project)
                             .uuid()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(Project::Name)
+                        ColumnDef::new(Evaluation::Repository)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(Project::Description)
-                            .text()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Project::Repository)
+                        ColumnDef::new(Evaluation::Commit)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(Project::LastEvaluation)
+                        ColumnDef::new(Evaluation::Status)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Evaluation::Previous)
                             .uuid(),
                     )
                     .col(
-                        ColumnDef::new(Project::LastCheckAt)
-                            .date_time()
-                            .not_null(),
+                        ColumnDef::new(Evaluation::Next)
+                            .uuid(),
                     )
                     .col(
-                        ColumnDef::new(Project::CreatedBy)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Project::CreatedAt)
+                        ColumnDef::new(Evaluation::CreatedAt)
                             .date_time()
                             .not_null(),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk-projects-organizations")
-                            .from(Project::Table, Project::Organization)
-                            .to(Organization::Table, Organization::Id)
+                            .name("fk-evaluations-projects")
+                            .from(Evaluation::Table, Evaluation::Project)
+                            .to(Project::Table, Project::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk-projects-created_by")
-                            .from(Project::Table, Project::CreatedBy)
-                            .to(User::Table, User::Id)
+                            .name("fk-evaluations-previous-evaluations")
+                            .from(Evaluation::Table, Evaluation::Previous)
+                            .to(Evaluation::Table, Evaluation::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk-evaluations-next-evaluations")
+                            .from(Evaluation::Table, Evaluation::Next)
+                            .to(Evaluation::Table, Evaluation::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
@@ -77,33 +79,26 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(Project::Table).to_owned())
+            .drop_table(Table::drop().table(Evaluation::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
-enum Project {
+enum Evaluation {
     Table,
     Id,
-    Organization,
-    Name,
-    Description,
+    Project,
     Repository,
-    LastEvaluation,
-    LastCheckAt,
-    CreatedBy,
+    Commit,
+    Status,
+    Previous,
+    Next,
     CreatedAt,
 }
 
 #[derive(DeriveIden)]
-enum Organization {
-    Table,
-    Id,
-}
-
-#[derive(DeriveIden)]
-enum User {
+enum Project {
     Table,
     Id,
 }

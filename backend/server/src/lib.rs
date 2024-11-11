@@ -4,51 +4,58 @@ pub mod types;
 pub mod executer;
 pub mod scheduler;
 pub mod input;
+pub mod consts;
+pub mod sources;
+pub mod evaluator;
+
 
 use axum::routing::get;
 use axum::Router;
-use sea_orm::{ActiveModelTrait, Database};
+use clap::Parser;
+use sea_orm::{ActiveModelTrait, Database, DatabaseConnection};
 use migration::Migrator;
-use std::env;
 use sea_orm_migration::prelude::*;
+use consts::*;
 use types::*;
 use std::sync::Arc;
 use sea_orm::ActiveValue::Set;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use sea_orm::EntityTrait;
 
 #[tokio::main]
 pub async fn main() -> std::io::Result<()> {
-    let db = connect_db().await;
+    let cli = Cli::parse();
 
-    create_debug_data(Arc::clone(&db)).await;
+    println!("Starting Gradient Server on {}:{}", cli.ip, cli.port);
 
-    tokio::spawn(scheduler::schedule_project_loop(Arc::clone(&db)));
-    tokio::spawn(scheduler::schedule_build_loop(Arc::clone(&db)));
+    let db = connect_db(&cli).await;
 
-    serve_web(Arc::clone(&db)).await?;
+    let state = Arc::new(ServerState {
+        db,
+        cli,
+    });
+
+    create_debug_data(Arc::clone(&state)).await;
+
+    tokio::spawn(scheduler::schedule_evaluation_loop(Arc::clone(&state)));
+    tokio::spawn(scheduler::schedule_build_loop(Arc::clone(&state)));
+
+    serve_web(Arc::clone(&state)).await?;
 
     Ok(())
 }
 
-async fn connect_db() -> DBConn {
-    let db_url = env::var("GRADIENT_DATABASE_URL").expect("GRADIENT_DATABASE_URL must be set");
-    let db = Database::connect(db_url)
+async fn connect_db(cli: &Cli) -> DatabaseConnection {
+    let db = Database::connect(cli.database_uri.clone())
         .await
         .expect("Failed to connect to database");
     Migrator::up(&db, None).await.unwrap();
-    Arc::new(db)
+    db
 }
 
-async fn serve_web(db: DBConn) -> std::io::Result<()> {
-    // TODO: use clap
-    let server_ip = env::var("GRADIENT_IP").unwrap_or("127.0.0.1".to_string());
-    let server_port = env::var("GRADIENT_PORT").unwrap_or("3000".to_string());
-    let server_url = format!("{}:{}", server_ip, server_port);
-
-    let state = AppState {
-        conn: db,
-    };
+async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
+    let server_url = format!("{}:{}", state.cli.ip.clone(), state.cli.port.clone());
 
     let app = Router::new()
         .route("/organization", get(endpoints::get_organizations).post(endpoints::post_organizations))
@@ -63,7 +70,48 @@ async fn serve_web(db: DBConn) -> std::io::Result<()> {
     axum::serve(listener, app).await
 }
 
-async fn create_debug_data(db: DBConn) {
+async fn delete_all_data(state: Arc<ServerState>) {
+    let users = EUser::find().all(&state.db).await.unwrap();
+    for u in users {
+        let user: AUser = u.into();
+        EUser::delete(user).exec(&state.db).await.unwrap();
+    }
+
+    let organizations = EOrganization::find().all(&state.db).await.unwrap();
+    for o in organizations {
+        let organization: AOrganization = o.into();
+        EOrganization::delete(organization).exec(&state.db).await.unwrap();
+    }
+
+    let projects = EProject::find().all(&state.db).await.unwrap();
+    for p in projects {
+        let project: AProject = p.into();
+        EProject::delete(project).exec(&state.db).await.unwrap();
+    }
+
+    let servers = EServer::find().all(&state.db).await.unwrap();
+    for s in servers {
+        let server: AServer = s.into();
+        EServer::delete(server).exec(&state.db).await.unwrap();
+    }
+
+    let evaluations = EEvaluation::find().all(&state.db).await.unwrap();
+    for e in evaluations {
+        let evaluation: AEvaluation = e.into();
+        EEvaluation::delete(evaluation).exec(&state.db).await.unwrap();
+    }
+
+    let builds = EBuild::find().all(&state.db).await.unwrap();
+    for b in builds {
+        let build: ABuild = b.into();
+        EBuild::delete(build).exec(&state.db).await.unwrap();
+    }
+}
+
+async fn create_debug_data(state: Arc<ServerState>) {
+    delete_all_data(Arc::clone(&state)).await;
+    println!("Deleted all Database data");
+
     let user = AUser {
         id: Set(Uuid::new_v4()),
         name: Set("Test".to_string()),
@@ -73,7 +121,7 @@ async fn create_debug_data(db: DBConn) {
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    let user = user.insert(&*db).await.unwrap();
+    let user = user.insert(&state.db).await.unwrap();
     println!("Created user {}", user.id);
 
     let organization = AOrganization {
@@ -84,21 +132,22 @@ async fn create_debug_data(db: DBConn) {
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    let organization = organization.insert(&*db).await.unwrap();
+    let organization = organization.insert(&state.db).await.unwrap();
     println!("Created organization {}", organization.id);
 
     let project = AProject {
         id: Set(Uuid::new_v4()),
         organization: Set(organization.id),
-        name: Set("Test Project".to_string()),
-        description: Set("Test Project Description".to_string()),
-        currently_checking: Set(false),
+        name: Set("Good Project".to_string()),
+        description: Set("Test Good Project Description".to_string()),
+        repository: Set("git+ssh://gitea@git.wavelens.io:12/Wavelens/GPUTerraform.git?ref=main".to_string()),
+        last_evaluation: Set(None),
         last_check_at: Set(*NULL_TIME),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    let project = project.insert(&*db).await.unwrap();
+    let project = project.insert(&state.db).await.unwrap();
     println!("Created project {}", project.id);
 
     let server = AServer {
@@ -114,7 +163,7 @@ async fn create_debug_data(db: DBConn) {
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    let server = server.insert(&*db).await.unwrap();
+    let server = server.insert(&state.db).await.unwrap();
     println!("Created server {}", server.id);
 
 }

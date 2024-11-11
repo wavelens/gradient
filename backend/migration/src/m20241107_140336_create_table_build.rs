@@ -18,7 +18,7 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(Build::Project)
+                        ColumnDef::new(Build::Evaluation)
                             .uuid()
                             .not_null(),
                     )
@@ -33,9 +33,8 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(Build::Dependencies)
-                            .array(ColumnType::Uuid)
-                            .not_null(),
+                        ColumnDef::new(Build::DependencyOf)
+                            .uuid(),
                     )
                     .col(
                         ColumnDef::new(Build::CreatedAt)
@@ -44,9 +43,16 @@ impl MigrationTrait for Migration {
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk-builds-project")
-                            .from(Build::Table, Build::Project)
-                            .to(Project::Table, Project::Id)
+                            .name("fk-builds-evaluation")
+                            .from(Build::Table, Build::Evaluation)
+                            .to(Evaluation::Table, Evaluation::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk-builds-dependency_of")
+                            .from(Build::Table, Build::DependencyOf)
+                            .to(Build::Table, Build::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
@@ -65,15 +71,15 @@ impl MigrationTrait for Migration {
 enum Build {
     Table,
     Id,
-    Project,
+    Evaluation,
     Status,
     Path,
-    Dependencies,
+    DependencyOf,
     CreatedAt,
 }
 
 #[derive(DeriveIden)]
-enum Project {
+enum Evaluation {
     Table,
     Id,
 }

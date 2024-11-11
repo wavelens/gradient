@@ -12,7 +12,8 @@ pub struct Model {
     pub name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,
-    pub currently_checking: bool,
+    pub repository: String,
+    pub last_evaluation: Option<Uuid>,
     pub last_check_at: NaiveDateTime,
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
@@ -32,6 +33,12 @@ pub enum Relation {
         to = "super::user::Column::Id"
     )]
     CreatedBy,
+    #[sea_orm(
+        belongs_to = "super::evaluation::Entity",
+        from = "Column::LastEvaluation",
+        to = "super::evaluation::Column::Id"
+    )]
+    LastEvaluation,
 }
 
 impl ActiveModelBehavior for ActiveModel {}
