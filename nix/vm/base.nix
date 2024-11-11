@@ -51,6 +51,7 @@
   systemd.network = {
     netdevs = {
       "br0" = {
+        # bridgeConfig.STP = true; # Takes forever to activate interface
         netdevConfig = {
           Kind = "bridge";
           Name = "br0";
