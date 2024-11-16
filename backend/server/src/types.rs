@@ -35,6 +35,7 @@ pub type ListResponse = Vec<(Uuid, String)>;
 pub type NixStore = DaemonStore<AsyncChannel<TokioTcpStream>>;
 
 pub type EBuild = build::Entity;
+pub type EBuildDependency = build_dependency::Entity;
 pub type EEvaluation = evaluation::Entity;
 pub type EOrganization = organization::Entity;
 pub type EProject = project::Entity;
@@ -42,6 +43,7 @@ pub type EServer = server::Entity;
 pub type EUser = user::Entity;
 
 pub type MBuild = build::Model;
+pub type MBuildDependency = build_dependency::Model;
 pub type MEvaluation = evaluation::Model;
 pub type MOrganization = organization::Model;
 pub type MProject = project::Model;
@@ -49,6 +51,7 @@ pub type MServer = server::Model;
 pub type MUser = user::Model;
 
 pub type ABuild = build::ActiveModel;
+pub type ABuildDependency = build_dependency::ActiveModel;
 pub type AEvaluation = evaluation::ActiveModel;
 pub type AOrganization = organization::ActiveModel;
 pub type AProject = project::ActiveModel;
@@ -56,8 +59,17 @@ pub type AServer = server::ActiveModel;
 pub type AUser = user::ActiveModel;
 
 pub type CBuild = build::Column;
+pub type CBuildDependency = build_dependency::Column;
 pub type CEvaluation = evaluation::Column;
 pub type COrganization = organization::Column;
 pub type CProject = project::Column;
 pub type CServer = server::Column;
 pub type CUser = user::Column;
+
+pub type RBuild = build::Relation;
+pub type RBuildDependency = build_dependency::Relation;
+pub type REvaluation = evaluation::Relation;
+pub type ROrganization = organization::Relation;
+pub type RProject = project::Relation;
+pub type RServer = server::Relation;
+pub type RUser = user::Relation;

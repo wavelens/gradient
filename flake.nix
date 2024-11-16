@@ -60,7 +60,7 @@
           ./nix/vm/base.nix
           ./nix/vm/defaults.nix
           ./nix/vm/postgresql.nix
-          ./nix/vm/mDNS.nix   
+          ./nix/vm/mDNS.nix
           ./nix/vm/monitoring/grafana/nginx.nix
           ./nix/vm/monitoring/grafana/default.nix
           ./nix/vm/monitoring/prometheus/default.nix

@@ -33,10 +33,6 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(Build::DependencyOf)
-                            .uuid(),
-                    )
-                    .col(
                         ColumnDef::new(Build::CreatedAt)
                             .date_time()
                             .not_null(),
@@ -46,13 +42,6 @@ impl MigrationTrait for Migration {
                             .name("fk-builds-evaluation")
                             .from(Build::Table, Build::Evaluation)
                             .to(Evaluation::Table, Evaluation::Id)
-                            .on_delete(ForeignKeyAction::Cascade),
-                    )
-                    .foreign_key(
-                        ForeignKey::create()
-                            .name("fk-builds-dependency_of")
-                            .from(Build::Table, Build::DependencyOf)
-                            .to(Build::Table, Build::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
@@ -74,7 +63,6 @@ enum Build {
     Evaluation,
     Status,
     Path,
-    DependencyOf,
     CreatedAt,
 }
 

@@ -7,14 +7,16 @@ use chrono::NaiveDateTime;
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum BuildStatus {
     #[sea_orm(num_value = 0)]
-    Queued,
+    Created,
     #[sea_orm(num_value = 1)]
-    Building,
+    Queued,
     #[sea_orm(num_value = 2)]
-    Completed,
+    Building,
     #[sea_orm(num_value = 3)]
-    Failed,
+    Completed,
     #[sea_orm(num_value = 4)]
+    Failed,
+    #[sea_orm(num_value = 5)]
     Aborted,
 }
 
@@ -27,7 +29,6 @@ pub struct Model {
     pub evaluation: Uuid,
     pub status: BuildStatus,
     pub path: String,
-    pub dependency_of: Option<Uuid>,
     pub created_at: NaiveDateTime,
 }
 
@@ -39,27 +40,15 @@ pub enum Relation {
         to = "super::evaluation::Column::Id"
     )]
     Evaluation,
-        #[sea_orm(
-        belongs_to = "Entity",
-        from = "Column::DependencyOf",
-        to = "Column::Id"
-    )]
-    DependencyOf,
 }
 
-impl Related<super::evaluation::Entity> for Entity {
+impl Related<super::build::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Evaluation.def()
-    }
-}
-
-impl Related<Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::DependencyOf.def()
+        super::build_dependency::Relation::Dependency.def()
     }
 
     fn via() -> Option<RelationDef> {
-        None
+        Some(super::build_dependency::Relation::Build.def().rev())
     }
 }
 

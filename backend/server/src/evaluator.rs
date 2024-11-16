@@ -12,7 +12,7 @@ use chrono::Utc;
 use super::types::*;
 
 
-pub async fn evaluate(state: Arc<ServerState>, store: &mut DaemonStore<UnixStream>, evaluation: &MEvaluation) -> Result<Vec<MBuild>, String> {
+pub async fn evaluate(state: Arc<ServerState>, store: &mut DaemonStore<UnixStream>, evaluation: &MEvaluation) -> Result<(Vec<MBuild>, Vec<MBuildDependency>), String> {
     println!("Evaluating Evaluation: {}", evaluation.id);
 
     let organization_id = EProject::find_by_id(evaluation.project)
@@ -49,6 +49,7 @@ pub async fn evaluate(state: Arc<ServerState>, store: &mut DaemonStore<UnixStrea
 
     let packages_with_system = parsed_json["packages"].as_object().ok_or("Expected `packages` key in JSON object")?;
     let mut all_builds: Vec<MBuild> = vec![];
+    let mut all_dependencies: Vec<MBuildDependency> = vec![];
 
     for (system_name, packages) in packages_with_system {
         for (package_name, _package) in packages.as_object().ok_or("Expected `packages` key in JSON object")? {
@@ -67,54 +68,81 @@ pub async fn evaluate(state: Arc<ServerState>, store: &mut DaemonStore<UnixStrea
 
             println!("Creating build {} with path {}", derivation, path);
 
-            query_all_dependencies(Arc::clone(&state), &mut all_builds, evaluation, organization_id, build, store).await;
+            query_all_dependencies(Arc::clone(&state), &mut all_builds, &mut all_dependencies, evaluation, organization_id, build, store).await;
 
             println!("Found package: {}", derivation);
         }
     }
 
-    Ok(all_builds)
+    Ok((all_builds, all_dependencies))
 }
 
 async fn query_all_dependencies(
     state: Arc<ServerState>,
     all_builds: &mut Vec<MBuild>,
+    all_dependencies: &mut Vec<MBuildDependency>,
     evaluation: &MEvaluation,
     organization_id: Uuid,
     dependencies: Vec<String>,
     store: &mut DaemonStore<UnixStream>
 ) {
     let mut dependencies = dependencies.clone().into_iter()
-        .map(|d| (d, None))
-        .collect::<Vec<(String, Option<Uuid>)>>();
+        .map(|d| (d, None, Uuid::new_v4()))
+        .collect::<Vec<(String, Option<Uuid>, Uuid)>>();
 
-    while !dependencies.is_empty() {
-        let (dependency, dependency_id) = dependencies.pop().unwrap();
-
+    while let Some((dependency, dependency_id, build_id)) = dependencies.pop() {
         let path_info = get_derivation(store, dependency.as_str()).await.unwrap();
-        let mut references = path_info.references.clone();
-        let build_id = Uuid::new_v4();
 
-        let already_exsists = find_builds(Arc::clone(&state), organization_id, references.clone()).await.unwrap();
+        let already_exsists = find_builds(Arc::clone(&state), organization_id, path_info.references.clone()).await.unwrap();
+        let mut references = path_info.references.clone().into_iter()
+            .map(|d| (d, Some(build_id), Uuid::new_v4()))
+            .collect::<Vec<(String, Option<Uuid>, Uuid)>>();
+
         references.retain(|d| {
-            !all_builds.iter().any(|b| b.path == *d) &&
-            !already_exsists.iter().any(|b| b.path == *d) &&
-            !dependencies.iter().any(|(path, _)| *path == *d)
+            let d_path = d.0.clone();
+
+            let in_builds = all_builds.iter().any(|b| b.path == d_path);
+            let in_exsists = already_exsists.iter().any(|b| b.path == d_path);
+            let in_dependencies = dependencies.iter().any(|(path, _, _)| *path == d_path);
+
+            if  in_builds || in_dependencies {
+                let d_id = if in_builds {
+                    all_builds.iter().find(|b| b.path == d_path).unwrap().id
+                } else {
+                    dependencies.iter().find(|(path, _, _)| *path == d_path).unwrap().2
+                };
+
+                let dep = MBuildDependency {
+                    id: Uuid::new_v4(),
+                    build: d_id,
+                    dependency: build_id,
+                };
+
+                all_dependencies.push(dep);
+
+                false
+            } else {
+                !in_exsists
+            }
         });
-
-        let references = references.clone().into_iter()
-            .map(|d| (d, Some(build_id)))
-            .collect::<Vec<(String, Option<Uuid>)>>();
-
 
         let build = MBuild {
             id: build_id,
             evaluation: evaluation.id,
             path: dependency.clone(),
-            dependency_of: dependency_id,
-            status: BuildStatus::Queued,
+            status: BuildStatus::Created,
             created_at: Utc::now().naive_utc(),
         };
+
+        if let Some(d_id) = dependency_id {
+            let dep = MBuildDependency {
+                id: Uuid::new_v4(),
+                build: d_id,
+                dependency: build_id,
+            };
+
+            all_dependencies.push(dep);
+        }
 
         println!("Creating build {} with path {}", build.id, build.path);
 
