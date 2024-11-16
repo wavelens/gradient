@@ -6,7 +6,7 @@ use tokio::task::JoinHandle;
 use std::sync::Arc;
 use chrono::Utc;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{EntityTrait, ActiveModelTrait, ColumnTrait, QueryFilter, QuerySelect, JoinType, Condition};
+use sea_orm::{EntityTrait, ActiveModelTrait, ColumnTrait, QueryFilter, Condition};
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use futures::stream::{self, StreamExt};
@@ -47,12 +47,29 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
 
     match builds {
         Ok(builds) => {
-            let active_builds = builds.iter().map(|b| b.clone().into_active_model()).collect::<Vec<ABuild>>();
+            let (builds, dependencies) = builds;
+            let active_builds = builds
+                .iter()
+                .map(|b| b.clone().into_active_model())
+                .collect::<Vec<ABuild>>();
+            let active_dependencies = dependencies
+                .iter()
+                .map(|d| d.clone().into_active_model())
+                .collect::<Vec<ABuildDependency>>();
 
             EBuild::insert_many(active_builds)
                 .exec(&state.db)
                 .await
                 .unwrap();
+
+            EBuildDependency::insert_many(active_dependencies)
+                .exec(&state.db)
+                .await
+                .unwrap();
+
+            for build in builds {
+                update_build_status(Arc::clone(&state), build, BuildStatus::Queued).await;
+            }
 
             update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Building).await;
         }
@@ -120,7 +137,6 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
     loop {
         let threshold_time = Utc::now().naive_utc() - chrono::Duration::seconds(state.cli.evaluation_timeout);
 
-        // TODO : https://www.sea-ql.org/SeaORM/docs/relation/chained-relations/
         let projects = EProject::find()
             .filter(CProject::LastCheckAt.lte(threshold_time))
             .order_by_asc(CProject::LastCheckAt)
@@ -226,38 +242,62 @@ async fn requeue_build(state: Arc<ServerState>, build: MBuild) -> MBuild {
 
 async fn get_next_build(state: Arc<ServerState>) -> MBuild {
     loop {
-        match EBuild::find()
+        let builds = EBuild::find()
             .filter(CBuild::Status.eq(BuildStatus::Queued))
             .order_by_asc(CBuild::CreatedAt)
-            .one(&state.db)
+            .all(&state.db)
             .await
-        {
-            Ok(Some(build)) => {
-                let mut active_build: ABuild = build.clone().into();
+            .unwrap();
 
-                active_build.status = Set(BuildStatus::Queued);
+        let mut non_builds = true;
 
-                match active_build.update(&state.db).await {
-                    Ok(updated_build) => {
-                        println!("Getting next build: {}", updated_build.id);
-                        return updated_build;
-                    }
+        for build in builds {
+            let dependencies = EBuildDependency::find()
+                .filter(CBuildDependency::Build.eq(build.id))
+                .all(&state.db)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|d| d.dependency)
+                .collect::<Vec<Uuid>>();
 
-                    Err(e) => {
-                        eprintln!("Failed to update build status: {:?}", e);
-                        time::sleep(Duration::from_secs(5)).await;
-                    }
+            let mut condition = Condition::any();
+            for dependency in dependencies {
+                condition = condition.add(CBuild::Id.eq(dependency));
+            }
+
+            let dependent_builds = EBuild::find()
+                .filter(condition)
+                .filter(CBuild::Status.ne(BuildStatus::Completed))
+                .all(&state.db)
+                .await
+                .unwrap();
+
+            if !dependent_builds.is_empty() {
+                continue;
+            }
+
+            non_builds = false;
+
+            let mut active_build: ABuild = build.clone().into();
+
+            active_build.status = Set(BuildStatus::Building);
+
+            match active_build.update(&state.db).await {
+                Ok(updated_build) => {
+                    println!("Getting next build: {}", updated_build.id);
+                    return updated_build;
+                }
+
+                Err(e) => {
+                    eprintln!("Failed to update build status: {:?}", e);
                 }
             }
+        }
 
-            Ok(None) => {
-                time::sleep(Duration::from_secs(5)).await;
-            }
-
-            Err(e) => {
-                eprintln!("Database query error: {:?}", e);
-                time::sleep(Duration::from_secs(5)).await;
-            }
+        if non_builds {
+            time::sleep(Duration::from_secs(5)).await;
+            continue;
         }
     }
 }
@@ -282,7 +322,5 @@ async fn update_evaluation_status(state: Arc<ServerState>, evaluation: MEvaluati
     let mut active_evaluation: AEvaluation = evaluation.into_active_model();
     active_evaluation.status = Set(status);
 
-    let evaluation = active_evaluation.update(&state.db).await.unwrap();
-
-    evaluation
+    active_evaluation.update(&state.db).await.unwrap()
 }
