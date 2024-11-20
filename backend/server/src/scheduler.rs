@@ -1,12 +1,11 @@
 use uuid::Uuid;
 use std::time::Duration;
-use sea_orm::{IntoActiveModel, QueryOrder};
 use tokio::time;
 use tokio::task::JoinHandle;
 use std::sync::Arc;
 use chrono::Utc;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{EntityTrait, ActiveModelTrait, ColumnTrait, QueryFilter, Condition};
+use sea_orm::{EntityTrait, IntoActiveModel, ActiveModelTrait, QuerySelect, QueryFilter, ColumnTrait, RelationTrait, QueryOrder, JoinType, Condition};
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use futures::stream::{self, StreamExt};
@@ -114,21 +113,51 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
     let server_addr = input::url_to_addr(server.host.as_str(), server.port).unwrap();
 
     let mut local_daemon = get_local_store().await;
-    let mut server_daemon = connect(server_addr, None).await.unwrap();
+
+    let mut server_deamon = connect(server_addr, None).await;
+    for _ in 1..3 {
+        if server_deamon.is_ok() {
+            break;
+        };
+
+        time::sleep(Duration::from_secs(5)).await;
+        server_deamon = connect(server_addr, None).await;
+    };
+
+    let mut server_daemon = if let Ok(daemon) = server_deamon {
+        daemon
+    } else {
+        eprintln!("Failed to connect to server: {}", server.id);
+        requeue_build(state, build.clone()).await;
+        return;
+    };
 
     println!("Connected to server: {}", server.id);
-
-    // TODO: Change this to Uuid to build
-    // https://docs.rs/nix-daemon/latest/nix_daemon/trait.Store.html#tymethod.query_missing
-    let deps = get_next_build(state).await; // dummy
-    let dependencies = vec![&deps];
 
     // TODO: somewhere else
     // let missing_dependencies = get_missing_builds(&build, &mut server_daemon).await.unwrap();
 
-    copy_builds(dependencies, &mut local_daemon, &mut server_daemon, server_addr, false).await;
+    // copy_builds(dependencies, &mut local_daemon, &mut server_daemon, server_addr, false).await;
 
-    execute_build(vec![&build], &mut server_daemon).await;
+    let result = execute_build(vec![&build], &mut server_daemon).await;
+
+    match result {
+        Ok(results) => {
+            let status = if results.values().all(|r| r.error_msg.is_empty()) {
+                BuildStatus::Completed
+            } else {
+                BuildStatus::Failed
+            };
+
+            update_build_status(Arc::clone(&state), build.clone(), status).await;
+            check_evaluation_status(Arc::clone(&state), build.evaluation).await;
+        }
+
+        Err(e) => {
+            eprintln!("Failed to execute build: {}", e);
+            update_build_status_recursivly(state, build.clone(), BuildStatus::Failed).await;
+        }
+    };
 
     copy_builds(vec![&build], &mut server_daemon, &mut local_daemon, server_addr, true).await;
 }
@@ -137,12 +166,26 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
     loop {
         let threshold_time = Utc::now().naive_utc() - chrono::Duration::seconds(state.cli.evaluation_timeout);
 
-        let projects = EProject::find()
-            .filter(CProject::LastCheckAt.lte(threshold_time))
+        let mut projects = EProject::find()
+            .join(JoinType::InnerJoin, RProject::LastEvaluation.def())
+            .filter(Condition::all()
+                .add(CProject::LastCheckAt.lte(threshold_time))
+                .add(CEvaluation::Status.eq(EvaluationStatus::Completed))
+            )
             .order_by_asc(CProject::LastCheckAt)
             .all(&state.db)
             .await
             .unwrap();
+
+        projects.extend(EProject::find()
+            .filter(Condition::all()
+                .add(CProject::LastCheckAt.lte(threshold_time))
+                .add(CProject::LastEvaluation.is_null())
+            )
+            .order_by_asc(CProject::LastCheckAt)
+            .all(&state.db)
+            .await
+            .unwrap());
 
         let evaluations = stream::iter(projects.clone().into_iter())
             .filter_map(|p| {
@@ -242,43 +285,27 @@ async fn requeue_build(state: Arc<ServerState>, build: MBuild) -> MBuild {
 
 async fn get_next_build(state: Arc<ServerState>) -> MBuild {
     loop {
-        let builds = EBuild::find()
-            .filter(CBuild::Status.eq(BuildStatus::Queued))
-            .order_by_asc(CBuild::CreatedAt)
-            .all(&state.db)
+        let builds_sql = sea_orm::Statement::from_string(
+            sea_orm::DbBackend::Postgres,
+            r#"
+                SELECT * FROM public.build b
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM public.build_dependency d
+                    JOIN public.build dep ON d.dependency = dep.id
+                    WHERE d.build = b.id AND dep.status = 3
+                )
+                AND b.status = 1;
+            "#,
+        );
+
+        let build = EBuild::find()
+            .from_raw_sql(builds_sql)
+            .one(&state.db)
             .await
             .unwrap();
 
-        let mut non_builds = true;
-
-        for build in builds {
-            let dependencies = EBuildDependency::find()
-                .filter(CBuildDependency::Build.eq(build.id))
-                .all(&state.db)
-                .await
-                .unwrap()
-                .into_iter()
-                .map(|d| d.dependency)
-                .collect::<Vec<Uuid>>();
-
-            let mut condition = Condition::any();
-            for dependency in dependencies {
-                condition = condition.add(CBuild::Id.eq(dependency));
-            }
-
-            let dependent_builds = EBuild::find()
-                .filter(condition)
-                .filter(CBuild::Status.ne(BuildStatus::Completed))
-                .all(&state.db)
-                .await
-                .unwrap();
-
-            if !dependent_builds.is_empty() {
-                continue;
-            }
-
-            non_builds = false;
-
+        if let Some(build) = build {
             let mut active_build: ABuild = build.clone().into();
 
             active_build.status = Set(BuildStatus::Building);
@@ -293,17 +320,13 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                     eprintln!("Failed to update build status: {:?}", e);
                 }
             }
-        }
-
-        if non_builds {
+        } else {
             time::sleep(Duration::from_secs(5)).await;
-            continue;
         }
     }
 }
 
 async fn get_available_server(state: Arc<ServerState>, build: &MBuild) -> Option<MServer> {
-    // dummy
     EServer::find().all(&state.db).await.unwrap().into_iter().next()
 }
 
@@ -318,9 +341,68 @@ async fn update_build_status(state: Arc<ServerState>, build: MBuild, status: Bui
     build
 }
 
+async fn update_build_status_recursivly(state: Arc<ServerState>, build: MBuild, status: BuildStatus) -> MBuild {
+    // TODO: more efficient, recursive till all dependencies are updated
+    let dependencies = EBuildDependency::find()
+        .filter(CBuildDependency::Dependency.eq(build.id))
+        .all(&state.db)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|d| d.build)
+        .collect::<Vec<Uuid>>();
+
+    let mut condition = Condition::any();
+
+    for dependency in dependencies {
+        condition = condition.add(CBuild::Id.eq(dependency));
+    }
+
+    let dependent_builds = EBuild::find()
+        .filter(condition)
+        .filter(CBuild::Status.ne(status.clone()))
+        .all(&state.db)
+        .await
+        .unwrap();
+
+    for dependent_build in dependent_builds {
+        update_build_status(Arc::clone(&state), dependent_build, status.clone()).await;
+    }
+
+    update_build_status(Arc::clone(&state), build, status.clone()).await
+}
+
 async fn update_evaluation_status(state: Arc<ServerState>, evaluation: MEvaluation, status: EvaluationStatus) -> MEvaluation {
     let mut active_evaluation: AEvaluation = evaluation.into_active_model();
     active_evaluation.status = Set(status);
 
     active_evaluation.update(&state.db).await.unwrap()
+}
+
+async fn check_evaluation_status(state: Arc<ServerState>, evaluation_id: Uuid) {
+    let evaluation = EEvaluation::find_by_id(evaluation_id)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let builds = EBuild::find()
+        .filter(CBuild::Evaluation.eq(evaluation_id))
+        .all(&state.db)
+        .await
+        .unwrap();
+
+    let statuses = builds.into_iter().map(|b| b.status).collect::<Vec<BuildStatus>>();
+
+    let status = if statuses.iter().all(|s| *s == BuildStatus::Completed) {
+        EvaluationStatus::Completed
+    } else if statuses.iter().any(|s| *s == BuildStatus::Failed) {
+        EvaluationStatus::Failed
+    } else if statuses.iter().any(|s| *s == BuildStatus::Aborted) {
+        EvaluationStatus::Aborted
+    } else {
+        return;
+    };
+
+    update_evaluation_status(state, evaluation, status).await;
 }

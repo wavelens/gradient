@@ -1,4 +1,4 @@
-use nix_daemon::{self, BuildMode, Progress, Store};
+use nix_daemon::{self, BuildMode, BuildResult, Progress, Store};
 use nix_daemon::nix::DaemonStore;
 use async_ssh2_lite::{AsyncSession, TokioTcpStream};
 use std::net::SocketAddr;
@@ -8,11 +8,12 @@ use tokio::{
     process::Command,
 };
 use std::path::PathBuf;
+use std::collections::HashMap;
 
 use super::types::*;
 
 
-pub async fn connect(url: SocketAddr, store_path: Option<String>) -> Result<NixStore, Box<dyn std::error::Error>> {
+pub async fn connect(url: SocketAddr, store_path: Option<String>) -> Result<NixStore, Box<dyn std::error::Error + Send + Sync>> {
     let mut session = AsyncSession::<TokioTcpStream>::connect(url, None).await?;
     let private_key: PathBuf = PathBuf::from("/home/dennis/.ssh/keys/github");
 
@@ -31,7 +32,7 @@ pub async fn connect(url: SocketAddr, store_path: Option<String>) -> Result<NixS
     Ok(DaemonStore::builder().init(channel).await?)
 }
 
-pub async fn init_session(session: &mut AsyncSession<TokioTcpStream>, username: &str, private_key: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn init_session(session: &mut AsyncSession<TokioTcpStream>, username: &str, private_key: PathBuf) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     session.handshake().await.unwrap_or_else(|err| {
         println!("Handshake failed: {:?}", err);
     });
@@ -42,10 +43,10 @@ pub async fn init_session(session: &mut AsyncSession<TokioTcpStream>, username: 
     Ok(())
 }
 
-pub async fn execute_build(builds: Vec<&MBuild>, remote_store: &mut NixStore) {
+pub async fn execute_build(builds: Vec<&MBuild>, remote_store: &mut NixStore) -> Result<HashMap<String, BuildResult>, Box<dyn std::error::Error + Send + Sync>> {
     println!("Executing builds");
 
-    let result = remote_store.build_paths_with_results(get_builds_path(builds), BuildMode::Normal).result().await;
+    remote_store.build_paths_with_results(get_builds_path(builds), BuildMode::Normal).result().await.map_err(|e| e.into())
 }
 
 pub async fn copy_builds<
