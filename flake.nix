@@ -87,6 +87,7 @@
           sqlite
           pythonEnv
           postgresql_17
+          pgadmin4-desktopmode
           nixVersions.latest
         ];
 
@@ -99,7 +100,7 @@
 
         GRADIENT_DATABASE_URL = "postgres://postgres:postgres@localhost:54321/gradient";
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = 1;
-        GRADIENT_MAX_CONCURRENT_BUILDS = 1;
+        GRADIENT_MAX_CONCURRENT_BUILDS = 10;
         GRADIENT_STORE_PATH = "./testing/store";
     };
   };

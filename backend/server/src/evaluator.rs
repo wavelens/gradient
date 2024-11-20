@@ -158,8 +158,8 @@ async fn find_builds(state: Arc<ServerState>, organization_id: Uuid, build_paths
     }
 
     let builds = EBuild::find()
-        .join(JoinType::InnerJoin, entity::build::Relation::Evaluation.def())
-        .join(JoinType::InnerJoin, entity::evaluation::Relation::Project.def())
+        .join(JoinType::InnerJoin, RBuild::Evaluation.def())
+        .join(JoinType::InnerJoin, REvaluation::Project.def())
         .filter(CProject::Organization.eq(organization_id))
         .filter(condition)
         .all(&state.db)
