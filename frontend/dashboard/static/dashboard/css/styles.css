@@ -277,6 +277,7 @@ nav {
     display: flex;
     justify-content: flex-start;
     padding: 1rem;
+    padding-bottom: 0;
 }
 
 nav a {
@@ -399,8 +400,12 @@ pre span {
 }
 
 .active {
-    border-bottom: 1px solid var(--secondary);
+    border-bottom: 1px solid white;
     font-weight: bold;
+}
+
+.active span.material-symbols-outlined {
+    color: white;
 }
 
 .icon {
@@ -449,9 +454,11 @@ pre span {
     margin: 0;
 }
 
-.dropdown-content a:first-child {
+.dropdown-content p {
     border-bottom: 1px solid rgba(118, 118, 118, 0.5);
     display: block;
+    padding: 12px 16px;
+    margin: 0;
 }
 
 .dropdown-content a:last-child {
@@ -464,6 +471,10 @@ pre span {
 
 .m-r-5 {
     margin-right: 5px;
+}
+
+.m-r-3 {
+    margin-right: 3px;
 }
 
 .activeeffect-sidebar {
@@ -498,6 +509,14 @@ pre span {
     margin-bottom: 0.5rem;
 }
 
+.m-b-1rem {
+    margin-bottom: 1rem;
+}
+
+.p-l-1rem {
+    padding-left: 1rem;
+}
+
 .icon-center {
     height: 23px;
     vertical-align: middle;
@@ -507,6 +526,10 @@ pre span {
 
 .f-s-21px {
     font-size: 21px !important;
+}
+
+.f-s-24px {
+    font-size: 24px !important;
 }
 
 .branch {
@@ -540,4 +563,46 @@ pre span {
 
 tr:hover td{
     background-color: #252d33;
+}
+
+.d-webkit-box {
+    display: -webkit-box;
+}
+
+.icon-arrow {
+    font-size: 21px !important;
+    margin-left: -8px;
+    top: -3px;
+    position: relative;
+    margin-right: 2px;
+}
+
+.pointer {
+    cursor: pointer;
+}
+
+.header-icon-right {
+    float: right;
+    position: absolute;
+    right: 1rem;
+}
+  
+.tooltip .tooltiptext {
+    visibility: hidden;
+    width: 120px;
+    background-color: #151b23;
+    color: #fff;
+    text-align: center;
+    border-radius: 6px;
+    padding: 5px 0;
+    position: absolute;
+    z-index: 1;
+    top: 100%;
+    left: 50%;
+    margin-left: -60px;
+    border: 1px solid #444;
+}
+
+.tooltip:hover .tooltiptext {
+    visibility: visible;
 }
