@@ -6,6 +6,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{EntityTrait, IntoActiveModel, ActiveModelTrait, QuerySelect, QueryFilter, ColumnTrait, RelationTrait, QueryOrder, JoinType, Condition};
+use sea_orm::sea_query::Expr;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use futures::stream::{self, StreamExt};
@@ -56,15 +57,22 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 .map(|d| d.clone().into_active_model())
                 .collect::<Vec<ABuildDependency>>();
 
+            if active_builds.is_empty() {
+                update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Completed).await;
+                return;
+            }
+
             EBuild::insert_many(active_builds)
                 .exec(&state.db)
                 .await
                 .unwrap();
 
-            EBuildDependency::insert_many(active_dependencies)
-                .exec(&state.db)
-                .await
-                .unwrap();
+            if !active_dependencies.is_empty() {
+                EBuildDependency::insert_many(active_dependencies)
+                    .exec(&state.db)
+                    .await
+                    .unwrap();
+            }
 
             for build in builds {
                 update_build_status(Arc::clone(&state), build, BuildStatus::Queued).await;
@@ -327,7 +335,36 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
 }
 
 async fn get_available_server(state: Arc<ServerState>, build: &MBuild) -> Option<MServer> {
-    EServer::find().all(&state.db).await.unwrap().into_iter().next()
+    let mut features = Condition::all();
+
+    // TODO: check features
+    // for feature in build.features.iter() {
+    //     features = features.add(CServer::Features.like(format!("%\"{}\"%", feature)));
+    // }
+
+    // features = features.add(Expr::value(build.architecture as i32).is_in(CServer::Architectures));
+
+    let evaluation = EEvaluation::find_by_id(build.evaluation)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let project = EProject::find_by_id(evaluation.project)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    features = features.add(CServer::Organization.eq(project.organization));
+
+    EServer::find()
+        .filter(features)
+        .all(&state.db)
+        .await
+        .unwrap()
+        .into_iter()
+        .next()
 }
 
 async fn update_build_status(state: Arc<ServerState>, build: MBuild, status: BuildStatus) -> MBuild {

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 use tokio::process::Command;
 use serde_json::Value;
-use nix_daemon::{nix::DaemonStore, Progress, Store, PathInfo};
+use nix_daemon::nix::DaemonStore;
 use tokio::net::UnixStream;
 use entity::build::BuildStatus;
 use sea_orm::{EntityTrait, ColumnTrait, QuerySelect, JoinType, Condition};
@@ -10,6 +10,7 @@ use sea_orm::entity::prelude::*;
 use chrono::Utc;
 
 use super::types::*;
+use super::executer::*;
 
 
 pub async fn evaluate(state: Arc<ServerState>, store: &mut DaemonStore<UnixStream>, evaluation: &MEvaluation) -> Result<(Vec<MBuild>, Vec<MBuildDependency>), String> {
@@ -57,7 +58,14 @@ pub async fn evaluate(state: Arc<ServerState>, store: &mut DaemonStore<UnixStrea
             // TODO: use nix api
             let (derivation, _references) = get_derivation_cmd(&path).await?;
 
-            let already_exsists = all_builds.iter().any(|b| b.path == derivation);
+            let missing = get_missing_builds(vec![derivation.clone()], store).await?;
+
+            if missing.is_empty() {
+                println!("Skipping package: {}", derivation);
+                continue;
+            }
+
+            let already_exsists = all_builds.iter().any(|b| b.derivation_path == derivation);
 
             let build = vec![derivation.clone()];
 
@@ -91,23 +99,24 @@ async fn query_all_dependencies(
         .collect::<Vec<(String, Option<Uuid>, Uuid)>>();
 
     while let Some((dependency, dependency_id, build_id)) = dependencies.pop() {
-        let path_info = get_derivation(store, dependency.as_str()).await.unwrap();
+        let path_info = get_derivation(dependency.clone(), store).await.unwrap();
+        let references = get_missing_builds(path_info.references.clone(), store).await.unwrap();
 
-        let already_exsists = find_builds(Arc::clone(&state), organization_id, path_info.references.clone()).await.unwrap();
-        let mut references = path_info.references.clone().into_iter()
+        let already_exsists = find_builds(Arc::clone(&state), organization_id, references.clone()).await.unwrap();
+        let mut references = references.clone().into_iter()
             .map(|d| (d, Some(build_id), Uuid::new_v4()))
             .collect::<Vec<(String, Option<Uuid>, Uuid)>>();
 
         references.retain(|d| {
             let d_path = d.0.clone();
 
-            let in_builds = all_builds.iter().any(|b| b.path == d_path);
-            let in_exsists = already_exsists.iter().any(|b| b.path == d_path);
+            let in_builds = all_builds.iter().any(|b| b.derivation_path == d_path);
+            let in_exsists = already_exsists.iter().any(|b| b.derivation_path == d_path);
             let in_dependencies = dependencies.iter().any(|(path, _, _)| *path == d_path);
 
             if  in_builds || in_dependencies {
                 let d_id = if in_builds {
-                    all_builds.iter().find(|b| b.path == d_path).unwrap().id
+                    all_builds.iter().find(|b| b.derivation_path == d_path).unwrap().id
                 } else {
                     dependencies.iter().find(|(path, _, _)| *path == d_path).unwrap().2
                 };
@@ -126,11 +135,16 @@ async fn query_all_dependencies(
             }
         });
 
+        let (system, feature) = get_features_cmd(dependency.as_str()).await.unwrap();
+
         let build = MBuild {
             id: build_id,
             evaluation: evaluation.id,
-            path: dependency.clone(),
+            derivation_path: dependency.clone(),
+            architecture: system,
+            features: feature,
             status: BuildStatus::Created,
+            by_server: None,
             created_at: Utc::now().naive_utc(),
         };
 
@@ -144,7 +158,7 @@ async fn query_all_dependencies(
             all_dependencies.push(dep);
         }
 
-        println!("Creating build {} with path {}", build.id, build.path);
+        println!("Creating build {} with path {}", build.id, build.derivation_path);
 
         all_builds.push(build);
         dependencies.extend(references);
@@ -154,7 +168,7 @@ async fn query_all_dependencies(
 async fn find_builds(state: Arc<ServerState>, organization_id: Uuid, build_paths: Vec<String>) -> Result<Vec<MBuild>, String> {
     let mut condition = Condition::any();
     for path in build_paths {
-        condition = condition.add(CBuild::Path.eq(path.as_str()));
+        condition = condition.add(CBuild::DerivationPath.eq(path.as_str()));
     }
 
     let builds = EBuild::find()
@@ -196,11 +210,62 @@ pub async fn get_derivation_cmd(path: &str) -> Result<(String, Vec<String>), Str
     }
 
     let path = parsed_json.as_object().ok_or("Expected JSON object")?.keys().next().ok_or("Expected JSON object with Derivation Path")?.to_string();
-    let input_paths = parsed_json[path.clone()].as_object().ok_or("Expected JSON object with Derivation Path")?.keys().map(|k| k.to_string()).collect();
+    let input_paths = parsed_json[path.clone()].as_object()
+        .ok_or("Expected JSON object with Derivation Path")?.get("references")
+        .ok_or("Expected JSON object with Derivation Path")?.as_array()
+        .ok_or("Expected JSON object with Derivation Path")?.iter().map(|v| v.as_str().unwrap().to_string()).collect();
 
     Ok((path, input_paths))
 }
 
-pub async fn get_derivation(store: &mut DaemonStore<UnixStream>, path: &str) -> Result<PathInfo, String> {
-    Ok(store.query_pathinfo(path).result().await.map_err(|e| e.to_string())?.unwrap())
+pub async fn get_features_cmd(path: &str) -> Result<(entity::server::Architecture, Vec<String>), String> {
+    let output = Command::new("nix")
+        .arg("derivation")
+        .arg("show")
+        .arg(path)
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Command failed with status: {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let json_output = String::from_utf8_lossy(&output.stdout);
+    let parsed_json: Value = serde_json::from_str(&json_output)
+        .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+
+    if !parsed_json.is_object() {
+        return Err("Expected JSON object but found another type".to_string());
+    }
+
+    let features: Vec<String> = if let Some(pjson) = parsed_json.as_object().ok_or("Expected JSON object")?
+        .get(path).ok_or("Expected JSON object with path")?
+        .as_object().ok_or("Expected JSON object with path")?
+        .get("env").ok_or("Expected JSON object with env")?
+        .as_object().ok_or("Expected JSON object with env")?
+        .get("requiredSystemFeatures") {
+        pjson.as_array()
+            .ok_or("Expected JSON object with requiredSystemFeatures")?
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect()
+    } else {
+        vec![]
+    };
+
+    let system: entity::server::Architecture = parsed_json.as_object().ok_or("Expected JSON object")?
+        .get(path).ok_or("Expected JSON object with path")?
+        .as_object().ok_or("Expected JSON object with path")?
+        .get("env").ok_or("Expected JSON object with env")?
+        .as_object().ok_or("Expected JSON object with env")?
+        .get("system").ok_or("Expected JSON object with system")?
+        .as_str().unwrap()
+        .try_into().unwrap();
+
+    Ok((system, features))
 }
