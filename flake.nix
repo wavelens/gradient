@@ -73,10 +73,12 @@
           ./nix/vm/base.nix
           ./nix/vm/defaults.nix
           ./nix/vm/postgresql.nix
-          ./nix/vm/mDNS.nix
-          ./nix/vm/monitoring/grafana/nginx.nix
-          ./nix/vm/monitoring/grafana/default.nix
-          ./nix/vm/monitoring/prometheus/default.nix
+          ./nix/vm/mDNS.nix   
+          ./nix/vm/nginx/default.nix
+          ./nix/vm/nginx/grafana.nix
+          ./nix/vm/monitoring/source/prometheus/default.nix
+          ./nix/vm/monitoring/source/loki/default.nix
+          ./nix/vm/monitoring/destination/grafana/default.nix
         ];
       };
 
