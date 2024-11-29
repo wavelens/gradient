@@ -4,6 +4,10 @@
 
 {% block content %}
 
+{% include "../individualheader.html" %}
+
+{% include "../backHeader.html" %}  
+
 <head>{% load static %}</head>
 
 <!-- <header>
@@ -13,10 +17,11 @@
     </nav>
 </header> -->
 
-<div class="content-above">
+<!-- <div class="content-above">
     <div><a href="/#home" class="flex-c p-r-1rem fit-content"><img class="center-image" src="../static/dashboard/icons/arrow_back.svg"><span>Back</span></a></div>
     <h2 class="webkit-middle space-small" class="flex-c"><img class="green-filter center-image icon" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">{{ built_name }}<span class="color-light fw-normal"> #{{ id }}</span></h2>
-</div>
+</div> -->
+
 <div class="outerbody">
     <div class="content-left">
         <p class="border-bottom space-normal no-side-padding"><a class="p-l-1rem d-webkit-box">Overview</a></p>
@@ -29,7 +34,7 @@
         <div class="innerbody-top d-flex">
             <div class="m-r-2rem">
                 <div class="text-light m-b-05rem">Triggered via {{ triggerArt }} {{ triggerTime }} ago</div>
-                <div><span class="material-symbols-outlined icon-center">{{ user.image }}</span><span>{{ user.name }} </span> <span class="material-symbols-outlined icon-center f-s-21px">commit</span> {{ git }} <span class="branch">{{ branch }}</span></div>
+                <div><img src="../static/dashboard/images/{{ user.image }}" class="icon-center border-radius-5"><span>{{ user.name }} </span> <span class="material-symbols-outlined icon-center f-s-21px">commit</span> {{ git }} <span class="branch">{{ branch }}</span></div>
             </div>
             <div class="m-r-2rem">
                 <div class="text-light m-b-05rem">Status</div>
