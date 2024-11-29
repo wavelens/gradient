@@ -1,5 +1,6 @@
 pub mod tests;
 
+pub mod api;
 pub mod build;
 pub mod build_dependency;
 pub mod evaluation;

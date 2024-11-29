@@ -1,4 +1,4 @@
-use nix_daemon::{self, BuildMode, BuildResult, Progress, Store};
+use nix_daemon::{self, BuildMode, BuildResult, Progress, Store, PathInfo};
 use nix_daemon::nix::DaemonStore;
 use async_ssh2_lite::{AsyncSession, TokioTcpStream};
 use std::net::SocketAddr;
@@ -46,16 +46,24 @@ pub async fn init_session(session: &mut AsyncSession<TokioTcpStream>, username: 
 pub async fn execute_build(builds: Vec<&MBuild>, remote_store: &mut NixStore) -> Result<HashMap<String, BuildResult>, Box<dyn std::error::Error + Send + Sync>> {
     println!("Executing builds");
 
-    remote_store.build_paths_with_results(get_builds_path(builds), BuildMode::Normal).result().await.map_err(|e| e.into())
+    let paths = get_builds_path(builds.clone());
+
+    for path in paths.clone() {
+        remote_store.ensure_path(path).result().await?;
+    }
+
+    let paths = paths.iter().map(|p| format!("{}!*", p).to_string()).collect::<Vec<String>>();
+    remote_store.build_paths_with_results(paths, BuildMode::Normal).result().await.map_err(|e| e.into())
 }
+
 
 pub async fn copy_builds<
     A: AsyncReadExt + AsyncWriteExt + Unpin + Send,
     B: AsyncReadExt + AsyncWriteExt + Unpin + Send
 >(builds: Vec<&MBuild>, from_store: &mut DaemonStore<A>, to_store: &mut DaemonStore<B>, remote_store_uri: SocketAddr, local_is_receiver: bool) {
-
     for build in builds {
-        let path = build.path.as_str();
+        let path = build.derivation_path.as_str();
+
         println!("Copying build {} to {}", build.id, if local_is_receiver { "local" } else { "remote" });
 
         let path_info = match from_store.query_pathinfo(path).result().await.unwrap() {
@@ -77,12 +85,28 @@ pub async fn copy_builds<
     }
 }
 
-pub async fn get_missing_builds(build: &MBuild, store: &mut NixStore) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    println!("Querying missing builds");
+pub async fn get_missing_builds<
+    A: AsyncReadExt + AsyncWriteExt + Unpin + Send
+>(paths: Vec<String>, store: &mut DaemonStore<A>) -> Result<Vec<String>, String> {
+    let mut output_paths: HashMap<String, String> = HashMap::new();
 
-    let result = store.query_missing(get_builds_path(vec![build])).result().await?;
+    for path in paths {
+        if path.ends_with(".drv") {
+            let output_map = store.query_derivation_output_map(path.clone()).result().await.unwrap();
 
-    let missing = result.will_build.into_iter().chain(result.will_substitute.into_iter()).collect();
+            if let Some(out_path) = output_map.get("out") {
+                output_paths.insert(path, out_path.clone());
+            }
+        } else {
+            output_paths.insert(path.clone(), path);
+        }
+    }
+
+    let valid_paths = store.query_valid_paths(output_paths.values().clone(), true).result().await.unwrap();
+
+    let missing = output_paths.into_iter()
+        .filter(|(_, v)| !valid_paths.contains(v))
+        .map(|(k, _)| k).collect::<Vec<String>>();
 
     Ok(missing)
 }
@@ -92,5 +116,17 @@ pub async fn get_local_store() -> DaemonStore<UnixStream> {
 }
 
 pub fn get_builds_path(builds: Vec<&MBuild>) -> Vec<&str> {
-    builds.iter().map(|build| build.path.as_str()).collect()
+    builds.iter().map(|build| build.derivation_path.as_str()).collect()
+}
+
+pub async fn get_derivation<
+    A: AsyncReadExt + AsyncWriteExt + Unpin + Send
+>(path: String, store: &mut DaemonStore<A>) -> Result<PathInfo, String> {
+    Ok(store.query_pathinfo(path).result().await.map_err(|e| e.to_string())?.unwrap())
+}
+
+pub async fn get_output_path<
+    A: AsyncReadExt + AsyncWriteExt + Unpin + Send
+>(path: String, store: &mut DaemonStore<A>) -> Result<Vec<String>, String> {
+    Ok(store.query_derivation_output_map(path).result().await.map_err(|e| e.to_string()).unwrap().values().cloned().collect())
 }

@@ -28,9 +28,23 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(Build::Path)
+                        ColumnDef::new(Build::DerivationPath)
                             .string()
                             .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Build::Architecture)
+                            .small_integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Build::Features)
+                            .array(ColumnType::Char(Some(255)))
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Build::ByServer)
+                            .uuid(),
                     )
                     .col(
                         ColumnDef::new(Build::CreatedAt)
@@ -42,6 +56,13 @@ impl MigrationTrait for Migration {
                             .name("fk-builds-evaluation")
                             .from(Build::Table, Build::Evaluation)
                             .to(Evaluation::Table, Evaluation::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk-builds-servers")
+                            .from(Build::Table, Build::ByServer)
+                            .to(Server::Table, Server::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
@@ -62,12 +83,21 @@ enum Build {
     Id,
     Evaluation,
     Status,
-    Path,
+    DerivationPath,
+    Architecture,
+    Features,
+    ByServer,
     CreatedAt,
 }
 
 #[derive(DeriveIden)]
 enum Evaluation {
+    Table,
+    Id,
+}
+
+#[derive(DeriveIden)]
+enum Server {
     Table,
     Id,
 }

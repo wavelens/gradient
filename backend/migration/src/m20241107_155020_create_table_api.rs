@@ -10,43 +10,46 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(User::Table)
+                    .table(Api::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(User::Id)
+                        ColumnDef::new(Api::Id)
                             .uuid()
                             .not_null()
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(User::Username)
+                        ColumnDef::new(Api::OwnedBy)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Api::Name)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(User::Name)
+                        ColumnDef::new(Api::Key)
                             .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(User::Email)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(User::Password)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(User::LastLoginAt)
+                        ColumnDef::new(Api::LastUsedAt)
                             .date_time()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(User::CreatedAt)
+                        ColumnDef::new(Api::CreatedAt)
                             .date_time()
                             .not_null(),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("api_owned_by")
+                            .from(Api::Table, Api::OwnedBy)
+                            .to(User::Table, User::Id)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .on_update(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
             )
@@ -55,19 +58,25 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(User::Table).to_owned())
+            .drop_table(Table::drop().table(Api::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
+enum Api {
+    Table,
+    Id,
+    OwnedBy,
+    Name,
+    Key,
+    LastUsedAt,
+    CreatedAt,
+}
+
+
+#[derive(DeriveIden)]
 enum User {
     Table,
     Id,
-    Username,
-    Name,
-    Email,
-    Password,
-    LastLoginAt,
-    CreatedAt,
 }

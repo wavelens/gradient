@@ -1,27 +1,29 @@
 mod endpoints;
-pub mod requests;
-pub mod types;
-pub mod executer;
-pub mod scheduler;
-pub mod input;
+pub mod auth;
 pub mod consts;
-pub mod sources;
 pub mod evaluator;
+pub mod executer;
+pub mod input;
+pub mod requests;
+pub mod scheduler;
+pub mod sources;
+pub mod types;
 
-
-use axum::routing::get;
-use axum::Router;
+use axum::routing::{get, post};
+use axum::{Router, middleware};
 use clap::Parser;
 use sea_orm::{ActiveModelTrait, Database, DatabaseConnection};
 use migration::Migrator;
 use sea_orm_migration::prelude::*;
-use consts::*;
-use types::*;
 use std::sync::Arc;
 use sea_orm::ActiveValue::Set;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use sea_orm::EntityTrait;
+use password_auth::generate_hash;
+use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
+use consts::*;
+use types::*;
 
 #[tokio::main]
 pub async fn main() -> std::io::Result<()> {
@@ -33,7 +35,7 @@ pub async fn main() -> std::io::Result<()> {
 
     let state = Arc::new(ServerState {
         db,
-        cli,
+        cli
     });
 
     create_debug_data(Arc::clone(&state)).await;
@@ -57,13 +59,31 @@ async fn connect_db(cli: &Cli) -> DatabaseConnection {
 async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     let server_url = format!("{}:{}", state.cli.ip.clone(), state.cli.port.clone());
 
+    let oauth_client = if state.cli.oauth_enabled {
+        Some(BasicClient::new(
+            ClientId::new(state.cli.oauth_client_id.clone().unwrap()),
+            Some(ClientSecret::new(state.cli.oauth_client_secret.clone().unwrap())),
+            AuthUrl::new(state.cli.oauth_auth_url.clone().unwrap()).unwrap(),
+            Some(TokenUrl::new(state.cli.oauth_token_url.clone().unwrap()).unwrap()),
+        ))
+    } else {
+        None
+    };
+
     let app = Router::new()
         .route("/organization", get(endpoints::get_organizations).post(endpoints::post_organizations))
         .route("/organization/:organization", get(endpoints::get_organization).post(endpoints::post_organization))
         .route("/project/:project", get(endpoints::get_project).post(endpoints::post_project))
         .route("/build/:build", get(endpoints::get_build).post(endpoints::post_build))
-        .route("/user/:user", get(endpoints::get_user).post(endpoints::post_user))
+        .route("/user/settings/:user", get(endpoints::get_user).post(endpoints::post_user))
+        .route("/user/api", post(endpoints::post_api_key))
         .route("/server", get(endpoints::get_servers).post(endpoints::post_servers))
+        .route_layer(middleware::from_fn_with_state(Arc::clone(&state), auth::authorize))
+        .route("/user/login", post(endpoints::post_login))
+        .route("/user/logout", post(endpoints::post_logout))
+        .route("/user/register", post(endpoints::post_register))
+        .route("/health", get(endpoints::get_health))
+        .fallback(endpoints::handle_404)
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&server_url).await.unwrap();
@@ -106,18 +126,33 @@ async fn delete_all_data(state: Arc<ServerState>) {
         let build: ABuild = b.into();
         EBuild::delete(build).exec(&state.db).await.unwrap();
     }
+
+    let build_dependencies = EBuildDependency::find().all(&state.db).await.unwrap();
+    for bd in build_dependencies {
+        let build_dependency: ABuildDependency = bd.into();
+        EBuildDependency::delete(build_dependency).exec(&state.db).await.unwrap();
+    }
+
+    let apis = EApi::find().all(&state.db).await.unwrap();
+    for a in apis {
+        let api: AApi = a.into();
+        EApi::delete(api).exec(&state.db).await.unwrap();
+    }
 }
 
 async fn create_debug_data(state: Arc<ServerState>) {
+    if !state.cli.debug { return; }
+
     delete_all_data(Arc::clone(&state)).await;
     println!("Deleted all Database data");
 
     let user = AUser {
         id: Set(Uuid::new_v4()),
+        username: Set("test".to_string()),
         name: Set("Test".to_string()),
         email: Set("tes@were.local".to_string()),
-        password: Set("password".to_string()),
-        password_salt: Set("salt".to_string()),
+        password: Set(generate_hash("password")),
+        last_login_at: Set(*NULL_TIME),
         created_at: Set(Utc::now().naive_utc()),
     };
 
@@ -140,7 +175,7 @@ async fn create_debug_data(state: Arc<ServerState>) {
         organization: Set(organization.id),
         name: Set("Good Project".to_string()),
         description: Set("Test Good Project Description".to_string()),
-        repository: Set("git+ssh://gitea@git.wavelens.io:12/Wavelens/GPUTerraform.git?ref=main".to_string()),
+        repository: Set("git+ssh://gitea@git.wavelens.io:12/Wavelens/nix-ai-docs.git?ref=main".to_string()),
         last_evaluation: Set(None),
         last_check_at: Set(*NULL_TIME),
         created_by: Set(user.id),
@@ -167,4 +202,3 @@ async fn create_debug_data(state: Arc<ServerState>) {
     println!("Created server {}", server.id);
 
 }
-

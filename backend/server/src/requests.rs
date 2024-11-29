@@ -28,3 +28,22 @@ pub struct MakeServerRequest {
     pub architectures: Vec<Architecture>,
     pub features: Vec<String>,
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MakeApiKeyRequest {
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MakeUserRequest {
+    pub username: String,
+    pub name: String,
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MakeLoginRequest {
+    pub loginname: String,
+    pub password: String,
+}
