@@ -5,6 +5,6 @@ def global_variables(request):
         'user' : 'testuser',
         'user': {
             'name': 'testuser',
-            'image': 'account_circle',
+            'image': 'pb.png',
         }
     }
