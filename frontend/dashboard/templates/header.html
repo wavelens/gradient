@@ -6,14 +6,12 @@
         <div class="header">
             <div class="logo-container">
                 <a href="/" class="no-hovereffect"><img src="../static/dashboard/images/wavelens-LOGO.svg" alt="Logo"></a>
-                <span><a href="{% url 'workflow' %}">{{ projectname }}</a>/<a href="{% url 'model' %}">{{ model }}</a></span>
+                <!-- <span><a class="header-link" href="{% url 'workflow' %}">{{ projectname }}</a>/<a class="header-link" href="{% url 'model' %}">{{ model }}</a></span> -->
             </div>
             <div>
                 <div class="dropdown">
                     <div onclick="dropdownFunction(); event.stopPropagation();" class="tooltip">
-                        <span class="material-symbols-outlined icon pointer">
-                            account_circle
-                        </span>
+                        <img src="../static/dashboard/images/{{ user.image }}" class="h-30 border-radius-5">
                         <span class="material-symbols-outlined icon-arrow pointer">
                             keyboard_arrow_down
                         </span>
@@ -30,12 +28,9 @@
                         <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">logout</span><span>Sign Out</span></a>
                     </div>
                 </div>
-                <span class="material-symbols-outlined">
-                    settings
-                </span>
             </div>
         </div> 
-        <nav role="navigation">
+        <!-- <nav role="navigation">
             <a class="nav-link flex-c" href="{% url 'workflow' %}">
                 <span class="material-symbols-outlined f-s-24px m-r-3">keyboard_command_key</span>
                 <span>Workflows</span>
@@ -43,9 +38,9 @@
             
             <a class="nav-link flex-c" href="{% url 'log' %}"><span class="material-symbols-outlined f-s-24px m-r-3">vital_signs</span><span>Log</span></a>
             <a class="nav-link flex-c" href="{% url 'download' %}"><span class="material-symbols-outlined f-s-24px m-r-3">download</span><span>Download</span></a>
-            <a class="nav-link flex-c header-icon-right" href="/settings"><span class="material-symbols-outlined f-s-24px m-r-3">settings</span><span>Settings</span></a>
+            <a class="nav-link flex-c header-icon-right" href="/settings"><span class="material-symbols-outlined f-s-24px m-r-3">settings</span><span>Settings</span></a> -->
             <!-- <img class="center-image icon" src="../static/dashboard/icons/download.svg"> -->
-        </nav>
+        <!-- </nav> -->
         <!-- <nav>
             <ul>
                 <li><a href="" class="nav-link">Home</a></li>
