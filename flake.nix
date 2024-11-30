@@ -113,7 +113,7 @@
         EXTRA_CCFLAGS = "-I/usr/include";
         RUST_BACKTRACE = 1;
 
-        GRADIENT_DEBUG = true;
+        GRADIENT_DEBUG = "true";
         GRADIENT_DATABASE_URL = "postgres://postgres:postgres@localhost:54321/gradient";
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = 1;
         GRADIENT_MAX_CONCURRENT_BUILDS = 10;

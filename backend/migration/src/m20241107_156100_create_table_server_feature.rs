@@ -10,44 +10,37 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 Table::create()
-                    .table(Api::Table)
+                    .table(ServerFeature::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(Api::Id)
+                        ColumnDef::new(ServerFeature::Id)
                             .uuid()
                             .not_null()
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(Api::OwnedBy)
+                        ColumnDef::new(ServerFeature::Server)
                             .uuid()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(Api::Name)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Api::Key)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Api::LastUsedAt)
-                            .date_time()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Api::CreatedAt)
-                            .date_time()
+                        ColumnDef::new(ServerFeature::Feature)
+                            .uuid()
                             .not_null(),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk-api-owned_by")
-                            .from(Api::Table, Api::OwnedBy)
-                            .to(User::Table, User::Id)
+                            .name("fk-server_feature-server")
+                            .from(ServerFeature::Table, ServerFeature::Server)
+                            .to(Server::Table, Server::Id)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .on_update(ForeignKeyAction::Cascade),
+                    )
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk-server_feature-feature")
+                            .from(ServerFeature::Table, ServerFeature::Feature)
+                            .to(Feature::Table, Feature::Id)
                             .on_delete(ForeignKeyAction::Cascade)
                             .on_update(ForeignKeyAction::Cascade),
                     )
@@ -58,25 +51,28 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(Api::Table).to_owned())
+            .drop_table(Table::drop().table(ServerFeature::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
-enum Api {
+enum ServerFeature {
     Table,
     Id,
-    OwnedBy,
-    Name,
-    Key,
-    LastUsedAt,
-    CreatedAt,
+    Server,
+    Feature,
 }
-
 
 #[derive(DeriveIden)]
-enum User {
+enum Server {
     Table,
     Id,
 }
+
+#[derive(DeriveIden)]
+enum Feature {
+    Table,
+    Id,
+}
+

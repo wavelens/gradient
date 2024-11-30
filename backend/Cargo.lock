@@ -391,6 +391,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "axum-streams"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef49936ad8fd9750be8bb5c75f64b19bd407027c5c9e89c42e0939122d162d67"
+dependencies = [
+ "axum",
+ "bytes",
+ "futures",
+ "http 1.1.0",
+ "http-body 1.0.1",
+ "mime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+]
+
+[[package]]
 name = "backend"
 version = "0.1.0"
 dependencies = [
@@ -1117,8 +1136,10 @@ name = "gradient-server"
 version = "0.1.0"
 dependencies = [
  "async-ssh2-lite",
+ "async-stream",
  "async-trait",
  "axum",
+ "axum-streams",
  "chrono",
  "clap",
  "entity",

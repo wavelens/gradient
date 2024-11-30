@@ -1,23 +1,32 @@
 use nix_daemon::{self, BuildMode, BuildResult, Progress, Store, PathInfo};
 use nix_daemon::nix::DaemonStore;
 use async_ssh2_lite::{AsyncSession, TokioTcpStream};
-use std::net::SocketAddr;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
     process::Command,
 };
-use std::path::PathBuf;
 use std::collections::HashMap;
+use futures::Stream;
+use uuid::Uuid;
+use serde::Serialize;
+use std::pin::Pin;
 
 use super::types::*;
+use super::input;
 
 
-pub async fn connect(url: SocketAddr, store_path: Option<String>) -> Result<NixStore, Box<dyn std::error::Error + Send + Sync>> {
-    let mut session = AsyncSession::<TokioTcpStream>::connect(url, None).await?;
-    let private_key: PathBuf = PathBuf::from("/home/dennis/.ssh/keys/github");
+#[derive(Debug, Clone, Serialize)]
+pub struct BuildLogStreamResponse {
+    pub build_id: Uuid,
+    pub log: String,
+}
 
-    init_session(&mut session, "dennis", private_key).await?;
+pub async fn connect(server: MServer, store_path: Option<String>) -> Result<NixStore, Box<dyn std::error::Error + Send + Sync>> {
+    let server_addr = input::url_to_addr(server.host.as_str(), server.port).unwrap();
+    let mut session = AsyncSession::<TokioTcpStream>::connect(server_addr, None).await?;
+
+    init_session(&mut session, server.username.as_str(), server.public_key, server.private_key).await?;
 
     let mut channel = session.channel_session().await?;
 
@@ -32,12 +41,12 @@ pub async fn connect(url: SocketAddr, store_path: Option<String>) -> Result<NixS
     Ok(DaemonStore::builder().init(channel).await?)
 }
 
-pub async fn init_session(session: &mut AsyncSession<TokioTcpStream>, username: &str, private_key: PathBuf) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn init_session(session: &mut AsyncSession<TokioTcpStream>, username: &str, public_key: String, private_key: String) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     session.handshake().await.unwrap_or_else(|err| {
         println!("Handshake failed: {:?}", err);
     });
 
-    session.userauth_pubkey_file(username, None, &private_key, None).await?;
+    session.userauth_pubkey_memory(username, Some(public_key.as_str()), private_key.as_str(), None).await?;
     assert!(session.authenticated());
 
     Ok(())
@@ -60,7 +69,8 @@ pub async fn execute_build(builds: Vec<&MBuild>, remote_store: &mut NixStore) ->
 pub async fn copy_builds<
     A: AsyncReadExt + AsyncWriteExt + Unpin + Send,
     B: AsyncReadExt + AsyncWriteExt + Unpin + Send
->(builds: Vec<&MBuild>, from_store: &mut DaemonStore<A>, to_store: &mut DaemonStore<B>, remote_store_uri: SocketAddr, local_is_receiver: bool) {
+>(builds: Vec<&MBuild>, from_store: &mut DaemonStore<A>, to_store: &mut DaemonStore<B>, server: MServer, local_is_receiver: bool) {
+    let server_addr = input::url_to_addr(server.host.as_str(), server.port).unwrap();
     for build in builds {
         let path = build.derivation_path.as_str();
 
@@ -76,7 +86,7 @@ pub async fn copy_builds<
                 Command::new("nix")
                     .arg("copy")
                     .arg(if local_is_receiver { "--from" } else { "--to" })
-                    .arg(format!("ssh://{}:{}", remote_store_uri.ip(), remote_store_uri.port()))
+                    .arg(format!("ssh://{}:{}", server_addr.ip(), server_addr.port()))
                     .arg(ref_path)
                     .status()
                     .await.unwrap();
@@ -109,6 +119,41 @@ pub async fn get_missing_builds<
         .map(|(k, _)| k).collect::<Vec<String>>();
 
     Ok(missing)
+}
+
+pub fn get_buildlog_stream(server: MServer, build: MBuild) -> Result<Pin<Box<dyn Stream<Item = BuildLogStreamResponse> + Send>>, String> {
+    let stream = async_stream::stream! {
+        let server_addr = input::url_to_addr(server.host.as_str(), server.port).unwrap();
+        let mut session = AsyncSession::<TokioTcpStream>::connect(server_addr, None).await.unwrap();
+
+        init_session(&mut session, server.username.as_str(), server.public_key, server.private_key).await.unwrap();
+
+        let mut channel = session.channel_session().await.unwrap();
+
+        let command = format!("nix-store --log {}", build.derivation_path);
+
+        channel.exec(command.as_str()).await.unwrap();
+
+        let mut buffer = [0; 1024];
+        let mut log = String::new();
+
+        loop {
+            let len = channel.read(&mut buffer).await.unwrap();
+
+            if len == 0 {
+                break;
+            }
+
+            log.push_str(std::str::from_utf8(&buffer[..len]).unwrap());
+
+            yield BuildLogStreamResponse {
+                build_id: build.id,
+                log: log.clone(),
+            };
+        }
+    };
+
+    Ok(Box::pin(stream))
 }
 
 pub async fn get_local_store() -> DaemonStore<UnixStream> {

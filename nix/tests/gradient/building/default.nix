@@ -34,6 +34,13 @@
             log_destination = lib.mkForce "syslog";
           };
         };
+
+        gitDaemon = {
+          enable = true;
+          repositories = [
+            ""
+          ];
+        };
       };
     };
 

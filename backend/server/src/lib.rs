@@ -22,6 +22,7 @@ use chrono::{DateTime, Utc};
 use sea_orm::EntityTrait;
 use password_auth::generate_hash;
 use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
+use std::path::PathBuf;
 use consts::*;
 use types::*;
 
@@ -138,6 +139,30 @@ async fn delete_all_data(state: Arc<ServerState>) {
         let api: AApi = a.into();
         EApi::delete(api).exec(&state.db).await.unwrap();
     }
+
+    let features = EFeature::find().all(&state.db).await.unwrap();
+    for f in features {
+        let feature: AFeature = f.into();
+        EFeature::delete(feature).exec(&state.db).await.unwrap();
+    }
+
+    let server_architectures = EServerArchitecture::find().all(&state.db).await.unwrap();
+    for sa in server_architectures {
+        let server_architecture: AServerArchitecture = sa.into();
+        EServerArchitecture::delete(server_architecture).exec(&state.db).await.unwrap();
+    }
+
+    let server_features = EServerFeature::find().all(&state.db).await.unwrap();
+    for sf in server_features {
+        let server_feature: AServerFeature = sf.into();
+        EServerFeature::delete(server_feature).exec(&state.db).await.unwrap();
+    }
+
+    let build_features = EBuildFeature::find().all(&state.db).await.unwrap();
+    for bf in build_features {
+        let build_feature: ABuildFeature = bf.into();
+        EBuildFeature::delete(build_feature).exec(&state.db).await.unwrap();
+    }
 }
 
 async fn create_debug_data(state: Arc<ServerState>) {
@@ -191,8 +216,9 @@ async fn create_debug_data(state: Arc<ServerState>) {
         organization: Set(organization.id),
         host: Set("localhost".to_string()),
         port: Set(22),
-        architectures: Set(vec![entity::server::Architecture::X86_64Linux]),
-        features: Set(vec!["big_parallel".to_string()]),
+        username: Set("dennis".to_string()),
+        public_key: Set(PathBuf::from("/home/dennis/.ssh/keys/github.pub").to_string_lossy().to_string()),
+        private_key: Set(PathBuf::from("/home/dennis/.ssh/keys/github").to_string_lossy().to_string()),
         last_connection_at: Set(DateTime::from_timestamp(0, 0).unwrap().naive_utc()),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
@@ -201,4 +227,29 @@ async fn create_debug_data(state: Arc<ServerState>) {
     let server = server.insert(&state.db).await.unwrap();
     println!("Created server {}", server.id);
 
+    let server_architecture = AServerArchitecture {
+        id: Set(Uuid::new_v4()),
+        server: Set(server.id),
+        architecture: Set(entity::server::Architecture::X86_64Linux),
+    };
+
+    let server_architecture = server_architecture.insert(&state.db).await.unwrap();
+    println!("Created server architecture {}", server_architecture.id);
+
+    let feature = AFeature {
+        id: Set(Uuid::new_v4()),
+        name: Set("big_parallel".to_string()),
+    };
+
+    let feature = feature.insert(&state.db).await.unwrap();
+    println!("Created feature {}", feature.id);
+
+    let server_feature = AServerFeature {
+        id: Set(Uuid::new_v4()),
+        server: Set(server.id),
+        feature: Set(feature.id),
+    };
+
+    let server_feature = server_feature.insert(&state.db).await.unwrap();
+    println!("Created server feature {}", server_feature.id);
 }

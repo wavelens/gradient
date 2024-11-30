@@ -53,21 +53,21 @@ impl MigrationTrait for Migration {
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk-evaluations-projects")
+                            .name("fk-evaluation-project")
                             .from(Evaluation::Table, Evaluation::Project)
                             .to(Project::Table, Project::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk-evaluations-previous-evaluations")
+                            .name("fk-evaluation-previous")
                             .from(Evaluation::Table, Evaluation::Previous)
                             .to(Evaluation::Table, Evaluation::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk-evaluations-next-evaluations")
+                            .name("fk-evaluation-next")
                             .from(Evaluation::Table, Evaluation::Next)
                             .to(Evaluation::Table, Evaluation::Id)
                             .on_delete(ForeignKeyAction::Cascade),

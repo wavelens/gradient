@@ -3,46 +3,38 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
+
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .create_table(
                 Table::create()
-                    .table(Organization::Table)
+                    .table(ServerArchitecture::Table)
                     .if_not_exists()
                     .col(
-                        ColumnDef::new(Organization::Id)
+                        ColumnDef::new(ServerArchitecture::Id)
                             .uuid()
                             .not_null()
                             .primary_key(),
                     )
                     .col(
-                        ColumnDef::new(Organization::Name)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Organization::Description)
-                            .text()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Organization::CreatedBy)
+                        ColumnDef::new(ServerArchitecture::Server)
                             .uuid()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(Organization::CreatedAt)
-                            .date_time()
+                        ColumnDef::new(ServerArchitecture::Architecture)
+                            .small_integer()
                             .not_null(),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk-organization-created_by")
-                            .from(Organization::Table, Organization::CreatedBy)
-                            .to(User::Table, User::Id)
-                            .on_delete(ForeignKeyAction::Cascade),
+                            .name("fk-server_architecture-server")
+                            .from(ServerArchitecture::Table, ServerArchitecture::Server)
+                            .to(Server::Table, Server::Id)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .on_update(ForeignKeyAction::Cascade),
                     )
                     .to_owned(),
             )
@@ -51,23 +43,22 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(Organization::Table).to_owned())
+            .drop_table(Table::drop().table(ServerArchitecture::Table).to_owned())
             .await
     }
 }
 
 #[derive(DeriveIden)]
-enum Organization {
+enum ServerArchitecture {
     Table,
     Id,
-    Name,
-    Description,
-    CreatedBy,
-    CreatedAt,
+    Server,
+    Architecture,
 }
 
 #[derive(DeriveIden)]
-enum User {
+enum Server {
     Table,
     Id,
 }
+

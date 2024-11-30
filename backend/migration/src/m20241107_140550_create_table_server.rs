@@ -39,13 +39,18 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(Server::Architectures)
-                            .array(ColumnType::SmallInteger)
+                        ColumnDef::new(Server::Username)
+                            .string()
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(Server::Features)
-                            .array(ColumnType::Char(Some(255)))
+                        ColumnDef::new(Server::PublicKey)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(Server::PrivateKey)
+                            .string()
                             .not_null(),
                     )
                     .col(
@@ -65,14 +70,14 @@ impl MigrationTrait for Migration {
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk-servers-organizations")
+                            .name("fk-server-organization")
                             .from(Server::Table, Server::Organization)
                             .to(Organization::Table, Organization::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk-servers-created_by")
+                            .name("fk-server-created_by")
                             .from(Server::Table, Server::CreatedBy)
                             .to(User::Table, User::Id)
                             .on_delete(ForeignKeyAction::Cascade),
@@ -97,8 +102,9 @@ enum Server {
     Organization,
     Host,
     Port,
-    Architectures,
-    Features,
+    Username,
+    PublicKey,
+    PrivateKey,
     LastConnectionAt,
     CreatedBy,
     CreatedAt,
