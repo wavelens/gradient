@@ -25,8 +25,16 @@ pub struct MakeServerRequest {
     pub name: String,
     pub host: String,
     pub port: i32,
+    pub username: String,
+    pub public_key: String,
+    pub private_key: String,
     pub architectures: Vec<Architecture>,
     pub features: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MakeBuildRequest {
+    pub log_streaming: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

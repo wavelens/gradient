@@ -7,11 +7,13 @@ use sea_orm::ActiveValue::Set;
 use chrono::Utc;
 use std::sync::Arc;
 use password_auth::{verify_password, generate_hash};
+use axum_streams::*;
 
 use super::consts::*;
 use super::types::*;
 use super::requests::*;
 use super::auth::{encode_jwt, generate_api_key, update_last_login};
+use super::executer::get_buildlog_stream;
 
 
 // TODO: USER AUTHENTICATION + User specific endpoints
@@ -210,13 +212,44 @@ pub async fn get_build(state: State<Arc<ServerState>>, Extension(user): Extensio
     Ok(Json(res))
 }
 
-pub async fn post_build(state: State<Arc<ServerState>>, Extension(user): Extension<MUser>, Path(build_id): Path<Uuid>) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let res = BaseResponse {
-        error: false,
-        message: "Build executed successfully".to_string(),
+pub async fn post_build(state: State<Arc<ServerState>>, Extension(user): Extension<MUser>, Path(build_id): Path<Uuid>, Json(body): Json<MakeBuildRequest>) -> Result<StreamBodyAs<'static>, (StatusCode, Json<BaseResponse<String>>)> {
+    let build = match EBuild::find_by_id(build_id).one(&state.db).await.unwrap() {
+        Some(b) => b,
+        None => return Err((StatusCode::NOT_FOUND, Json(BaseResponse {
+            error: true,
+            message: "Build not found".to_string(),
+        }))),
     };
 
-    Ok(Json(res))
+    let evaluation = EEvaluation::find_by_id(build.evaluation).one(&state.db).await.unwrap().unwrap();
+    let project = EProject::find_by_id(evaluation.project).one(&state.db).await.unwrap().unwrap();
+    let organization = EOrganization::find_by_id(project.organization).one(&state.db).await.unwrap().unwrap();
+
+    if organization.created_by != user.id {
+        return Err((StatusCode::NOT_FOUND, Json(BaseResponse {
+            error: true,
+            message: "Build not found".to_string(),
+        })));
+    }
+
+    let server_id = match build.server {
+        Some(server) => server,
+        None => return Err((StatusCode::NO_CONTENT, Json(BaseResponse {
+            error: true,
+            message: "Build not queued yet".to_string(),
+        }))),
+    };
+
+    let server = EServer::find_by_id(server_id).one(&state.db).await.unwrap().unwrap();
+
+    let stream = get_buildlog_stream(server, build).map_err(|_| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse {
+            error: true,
+            message: "Failed to get build log stream".to_string(),
+        }))
+    }).unwrap();
+
+    Ok(StreamBodyAs::json_array(stream))
 }
 
 pub async fn get_servers(state: State<Arc<ServerState>>, Extension(user): Extension<MUser>) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
@@ -267,20 +300,29 @@ pub async fn post_servers(state: State<Arc<ServerState>>, Extension(user): Exten
         })));
     };
 
+    let server_id = Uuid::new_v4();
     let server = AServer {
-        id: Set(Uuid::new_v4()),
+        id: Set(server_id),
         name: Set(body.name.clone()),
         organization: Set(organization.id),
         host: Set(body.host.clone()),
         port: Set(body.port),
-        architectures: Set(body.architectures.clone()),
-        features: Set(body.features.clone()),
+        username: Set(body.username.clone()),
+        public_key: Set(body.public_key.clone()),
+        private_key: Set(body.private_key.clone()),
         last_connection_at: Set(*NULL_TIME),
         created_by: Set(Uuid::nil()),
         created_at: Set(Utc::now().naive_utc()),
     };
 
+    let server_architecture = AServerArchitecture {
+        id: Set(Uuid::new_v4()),
+        server: Set(server_id),
+        architecture: Set(entity::server::Architecture::X86_64Linux),
+    };
+
     let server = server.insert(&state.db).await.unwrap();
+    server_architecture.insert(&state.db).await.unwrap();
 
     let res = BaseResponse {
         error: false,

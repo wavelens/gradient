@@ -30,7 +30,7 @@ impl MigrationTrait for Migration {
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("build_dependency_build")
+                            .name("fk-build_dependency-build")
                             .from(BuildDependency::Table, BuildDependency::Build)
                             .to(Build::Table, Build::Id)
                             .on_delete(ForeignKeyAction::Cascade)
@@ -38,7 +38,7 @@ impl MigrationTrait for Migration {
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("build_dependency_dependency")
+                            .name("fk-build_dependency-dependency")
                             .from(BuildDependency::Table, BuildDependency::Dependency)
                             .to(Build::Table, Build::Id)
                             .on_delete(ForeignKeyAction::Cascade)

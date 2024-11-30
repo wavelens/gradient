@@ -58,14 +58,14 @@ impl MigrationTrait for Migration {
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk-projects-organizations")
+                            .name("fk-project-organization")
                             .from(Project::Table, Project::Organization)
                             .to(Organization::Table, Organization::Id)
                             .on_delete(ForeignKeyAction::Cascade),
                     )
                     .foreign_key(
                         ForeignKey::create()
-                            .name("fk-projects-created_by")
+                            .name("fk-project-created_by")
                             .from(Project::Table, Project::CreatedBy)
                             .to(User::Table, User::Id)
                             .on_delete(ForeignKeyAction::Cascade),

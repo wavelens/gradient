@@ -5,7 +5,7 @@ use serde_json::Value;
 use nix_daemon::nix::DaemonStore;
 use tokio::net::UnixStream;
 use entity::build::BuildStatus;
-use sea_orm::{EntityTrait, ColumnTrait, QuerySelect, JoinType, Condition};
+use sea_orm::{EntityTrait, ColumnTrait, QuerySelect, JoinType, Condition, ActiveValue::Set};
 use sea_orm::entity::prelude::*;
 use chrono::Utc;
 
@@ -135,18 +135,45 @@ async fn query_all_dependencies(
             }
         });
 
-        let (system, feature) = get_features_cmd(dependency.as_str()).await.unwrap();
+        let (system, features) = get_features_cmd(dependency.as_str()).await.unwrap();
 
         let build = MBuild {
             id: build_id,
             evaluation: evaluation.id,
             derivation_path: dependency.clone(),
             architecture: system,
-            features: feature,
             status: BuildStatus::Created,
-            by_server: None,
+            server: None,
             created_at: Utc::now().naive_utc(),
         };
+
+        for f in features {
+            let feature = EFeature::find()
+                .filter(CFeature::Name.eq(f.clone()))
+                .one(&state.db)
+                .await
+                .unwrap();
+
+            let feature = if let Some(f) = feature {
+                f
+            } else {
+                let afeature = AFeature {
+                    id: Set(Uuid::new_v4()),
+                    name: Set(f),
+                };
+
+                afeature.insert(&state.db).await.unwrap()
+            };
+
+            let abuild_feature = ABuildFeature {
+                id: Set(Uuid::new_v4()),
+                build: Set(build_id),
+                feature: Set(feature.id),
+            };
+
+            abuild_feature.insert(&state.db).await.unwrap();
+        };
+
 
         if let Some(d_id) = dependency_id {
             let dep = MBuildDependency {

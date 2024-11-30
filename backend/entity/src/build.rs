@@ -30,8 +30,7 @@ pub struct Model {
     pub status: BuildStatus,
     pub derivation_path: String,
     pub architecture: super::server::Architecture,
-    pub features: Vec<String>,
-    pub by_server: Option<Uuid>,
+    pub server: Option<Uuid>,
     pub created_at: NaiveDateTime,
 }
 
@@ -45,10 +44,10 @@ pub enum Relation {
     Evaluation,
     #[sea_orm(
         belongs_to = "super::server::Entity",
-        from = "Column::ByServer",
+        from = "Column::Server",
         to = "super::server::Column::Id"
     )]
-    ByServer,
+    Server,
 }
 
 impl Related<super::build::Entity> for Entity {
