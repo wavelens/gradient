@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+ */
+
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
