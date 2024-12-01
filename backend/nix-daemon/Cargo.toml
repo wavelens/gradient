@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2023 embr <git@liclac.eu>
+#
+# SPDX-License-Identifier: EUPL-1.2
+
+[package]
+name = "nix-daemon"
+version = "0.1.1"
+edition = "2021"
+license = "EUPL-1.2"
+authors = ["embr <git@liclac.eu>"]
+description = "A library for talking directly to the Nix Daemon"
+repository = "https://codeberg.org/gorgon/gorgon/src/branch/main/nix-daemon"
+documentation = "https://docs.rs/nix-daemon/"
+keywords = ["nix"]
+categories = ["api-bindings"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-stream = "0.3.5"
+bytes = "1.6.0"
+chrono = "0.4.31"
+futures = "0.3.29"
+num_enum = "0.7.1"
+tap = "1.0.1"
+thiserror = "1.0.50"
+tokio = { version = "1.40.0", features = ["rt", "macros", "parking_lot", "io-util", "net"] }
+tokio-stream = "0.1.14"
+tokio-test = "0.4.3"
+tracing = "0.1.40"
+
+[dev-dependencies]
+rand = "0.8.5"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }

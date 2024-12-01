@@ -12,7 +12,7 @@ axum = "0.7.7"
 chrono = "0.4.38"
 clap = { version = "4.5.20", features = ["derive", "env"] }
 futures = "0.3.31"
-nix-daemon = "0.1.1"
+nix-daemon = { path = "../nix-daemon" }
 sea-orm = { version = "1.0.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
 sea-orm-migration = { version = "1.1.1", features = ["with-uuid", "with-chrono", "with-json", "sqlx-postgres", "sea-orm-cli", "runtime-tokio"] }
 serde = { version = "1.0.210", features = ["derive"] }
