@@ -102,10 +102,8 @@ pub async fn copy_builds<
     paths: Vec<String>,
     from_store: &mut DaemonStore<A>,
     to_store: &mut DaemonStore<B>,
-    server: MServer,
     local_is_receiver: bool,
 ) {
-    let server_addr = input::url_to_addr(server.host.as_str(), server.port).unwrap();
     for path in paths {
         println!(
             "Copying build {} to {}",
@@ -113,26 +111,21 @@ pub async fn copy_builds<
             if local_is_receiver { "local" } else { "remote" }
         );
 
-        // TODO: ERROR HANDLING
+        // TODO: Error handling
         if !to_store.is_valid_path(path.clone()).result().await.unwrap() {
-            Command::new("nix")
-                .arg("copy")
-                .arg(if local_is_receiver { "--from" } else { "--to" })
-                .arg(format!("ssh://{}:{}", server_addr.ip(), server_addr.port()))
-                .arg(path)
-                .status()
+            let path_info = from_store
+                .query_pathinfo(path.clone())
+                .result()
                 .await
+                .unwrap()
                 .unwrap();
 
-            // let ref_path_name = ref_path.split('/').last().unwrap().split('-').collect::<Vec<&str>>()[1..].join("-");
-
-            // to_store.add_to_store(
-            //     ref_path_name,
-            //     "fixed:r:sha256",
-            //     Vec::<String>::new(),
-            //     false,
-            //     nar_stream,
-            // );
+            from_store
+                .nar_from_path(path.clone())
+                .result()
+                .await
+                .unwrap();
+            to_store.add_to_store_nar(path_info, &mut from_store.conn);
         }
     }
 }

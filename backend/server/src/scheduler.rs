@@ -159,14 +159,7 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
         dependencies.extend(output_paths);
     }
 
-    copy_builds(
-        dependencies,
-        &mut local_daemon,
-        &mut server_daemon,
-        server.clone(),
-        false,
-    )
-    .await;
+    copy_builds(dependencies, &mut local_daemon, &mut server_daemon, false).await;
 
     let result = execute_build(vec![&build], &mut server_daemon).await;
 
@@ -192,14 +185,7 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
         .await
         .unwrap();
 
-    copy_builds(
-        output_paths,
-        &mut server_daemon,
-        &mut local_daemon,
-        server,
-        true,
-    )
-    .await;
+    copy_builds(output_paths, &mut server_daemon, &mut local_daemon, true).await;
 }
 
 async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
