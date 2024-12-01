@@ -1,4 +1,8 @@
 #!/nix/store/l014xp1qxdl6gim3zc0jv3mpxhbp346s-python3-3.12.4/bin/python
+# SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+#
+# SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+
 """Django's command-line utility for administrative tasks."""
 import os
 import sys

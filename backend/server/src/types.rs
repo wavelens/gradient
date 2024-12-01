@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+ */
+
 use super::input::{greater_than_zero, port_in_range};
 use async_ssh2_lite::{AsyncChannel, TokioTcpStream};
 use clap::Parser;

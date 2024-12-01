@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+ */
+
 use async_ssh2_lite::{AsyncSession, TokioTcpStream};
 use futures::Stream;
 use nix_daemon::nix::DaemonStore;
@@ -8,7 +14,6 @@ use std::pin::Pin;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
-    process::Command,
 };
 use uuid::Uuid;
 

@@ -1,6 +1,11 @@
+/*
+ * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+ */
+
 { config, pkgs, ... }:
 {
-  
   systemd.services."serial-getty@".serviceConfig.ExecStartPre = "${pkgs.systemd}/bin/networkctl status";
   services.getty.greetingLine = "EXTREMELY UNSECURE SERVER, DO NOT STORE ANY IMPORTNANT DATA ON IT!!!";
   users.users.root.password = "root";

@@ -1,0 +1,91 @@
+Wavelens License 1.0 (WL-1.0)
+====================================================
+
+Last Updated: 01 December 2024
+
+PLEASE CAREFULLY READ THIS WAVELENS LICENSE AGREEMENT ("AGREEMENT").
+THIS AGREEMENT CONSTITUTES A LEGALLY BINDING AGREEMENT BETWEEN YOU AND WAVELENS UG
+AND GOVERNS YOUR USE OF THE SOFTWARE (DEFINED BELOW). BY DOWNLOADING, INSTALLING, MODIFYING,
+OR USING THE SOFTWARE, YOU AGREE TO BE BOUND BY THE TERMS OF THIS AGREEMENT. IF YOU DO NOT
+AGREE TO THESE TERMS, YOU MAY NOT USE THE SOFTWARE. IF YOU ARE USING THE SOFTWARE ON BEHALF
+OF A LEGAL ENTITY, YOU REPRESENT AND WARRANT THAT YOU HAVE THE AUTHORITY TO BIND THAT ENTITY
+TO THIS AGREEMENT.
+
+1. DEFINITIONS
+1.1. "Software" refers to Gradient, including all versions, updates, modifications,
+     documentation, and associated materials.
+1.2. "Licensor" refers to Wavelens UG.
+1.3. "Licensee" refers to the individual or entity using the Software under this Agreement.
+1.4. "Source Code" refers to the human-readable version of the Software’s code.
+1.5. "Enterprise Use" refers to deploying or modifying the Software for internal business
+     operations, including hosting modified versions without public distribution.
+1.6. "License Key" refers to a unique code provided by Licensor to activate and use the Software.
+
+2. GRANT OF LICENSE
+2.1. Licensor grants Licensee a perpetual, non-exclusive, non-transferable, non-sublicensable
+     license to:
+     a. Use the Software for internal operations, including hosting modified versions.
+     b. Modify the Software’s Source Code for internal use without the obligation to publish
+        modifications, provided that such modifications are not distributed outside the Licensee's
+        organization.
+2.2. Public distribution of the Software or any modified versions under this license is strictly
+     prohibited. This includes selling, leasing, sublicensing, or redistributing the Software
+     to third parties.
+2.3. Licensee is prohibited from bypassing, removing, or altering any licensing mechanisms,
+     such as License Key validation, implemented by the Licensor.
+2.4. If the Licensee is using the Software under a subscription model, continued use of the Software
+     is conditioned upon maintaining an active and valid subscription with Licensor. The subscription
+     covers all versions of the Software and updates provided during the subscription term.
+2.5. No rights are granted beyond those explicitly stated in this Agreement. Any use of the Software
+     outside the scope of this license is a violation of the Agreement.
+
+3. LICENSE KEY AND COMPLIANCE
+3.1. Licensee must acquire and maintain a valid License Key from Licensor for the Software.
+3.2. Any attempt to bypass or alter License Key functionality constitutes a material breach
+     of this Agreement.
+
+4. INTELLECTUAL PROPERTY
+4.1. All rights, title, and interest in the Software, including its Source Code, remain
+     exclusively with Licensor.
+4.2. Licensee retains ownership of any modifications they create, but grants Licensor a
+     perpetual, royalty-free license to use, distribute, or incorporate those modifications
+     into future versions of the Software.
+
+5. RESTRICTIONS
+5.1. Licensee may not reverse engineer, decompile, disassemble, or otherwise attempt to
+     derive the Software’s Source Code, except as explicitly permitted under this Agreement.
+5.2. Licensee may not remove, alter, or obscure any copyright, trademark, or other proprietary
+     notices from the Software.
+
+6. TERMINATION
+6.1. This Agreement is effective until terminated.
+6.2. Licensor may terminate this Agreement immediately if Licensee fails to comply with its
+     terms.
+6.3. Upon termination, Licensee must cease all use of the Software and destroy all copies
+     in their possession.
+
+7. LIMITATION OF LIABILITY
+7.1. To the fullest extent permitted by law, Licensor shall not be liable for any indirect,
+     incidental, special, consequential, or punitive damages, or any loss of profits, revenue,
+     data, or goodwill.
+
+8. GOVERNING LAW
+8.1. This Agreement shall be governed by and construed in accordance with the laws of Germany.
+8.2. Any disputes arising under or in connection with this Agreement shall be resolved in
+     the courts of Germany.
+
+9. MISCELLANEOUS
+9.1. This Agreement constitutes the entire agreement between the parties and supersedes all
+     prior agreements or understandings.
+9.2. If any provision of this Agreement is found to be invalid or unenforceable, the remaining
+     provisions shall remain in full force and effect.
+9.3. The failure of Licensor to enforce any right or provision of this Agreement shall not
+     constitute a waiver of such right or provision.
+
+10. CONTACT INFORMATION
+If you have any questions about this Agreement, please contact Wavelens UG at:
+Wavelens UG,
+Am Hey 1,
+02943 Boxberg,
+Germany
+info@wavelens.io

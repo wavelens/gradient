@@ -1,8 +1,8 @@
+# SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+#
+# SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+
 from django.shortcuts import render
-
-# Create your views here.
-from django.http import HttpResponse
-
 from django.http import HttpResponse
 from django.template import loader
 
