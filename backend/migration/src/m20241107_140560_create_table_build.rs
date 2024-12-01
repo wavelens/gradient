@@ -11,41 +11,17 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Build::Table)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(Build::Id)
-                            .uuid()
-                            .not_null()
-                            .primary_key(),
-                    )
-                    .col(
-                        ColumnDef::new(Build::Evaluation)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Build::Status)
-                            .integer()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Build::DerivationPath)
-                            .string()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Build::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Build::Evaluation).uuid().not_null())
+                    .col(ColumnDef::new(Build::Status).integer().not_null())
+                    .col(ColumnDef::new(Build::DerivationPath).string().not_null())
                     .col(
                         ColumnDef::new(Build::Architecture)
                             .small_integer()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(Build::Server)
-                            .uuid(),
-                    )
-                    .col(
-                        ColumnDef::new(Build::CreatedAt)
-                            .date_time()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Build::Server).uuid())
+                    .col(ColumnDef::new(Build::CreatedAt).date_time().not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-build-evaluation")

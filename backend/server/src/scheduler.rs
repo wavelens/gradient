@@ -2,7 +2,6 @@ use chrono::Utc;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use futures::stream::{self, StreamExt};
-use sea_orm::sea_query::Expr;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, JoinType, QueryFilter,
@@ -16,7 +15,6 @@ use uuid::Uuid;
 
 use super::evaluator::*;
 use super::executer::*;
-use super::input;
 use super::sources::*;
 use super::types::*;
 
@@ -109,7 +107,9 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
         while current_schedules.len() < state.cli.max_concurrent_builds {
             let build = get_next_build(Arc::clone(&state)).await;
 
-            if let Some((build, server)) = reserve_available_server(Arc::clone(&state), &build).await {
+            if let Some((build, server)) =
+                reserve_available_server(Arc::clone(&state), &build).await
+            {
                 let schedule = tokio::spawn(schedule_build(Arc::clone(&state), build, server));
                 current_schedules.push(schedule);
                 added_schedule = true;
@@ -147,10 +147,26 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
 
     println!("Connected to server: {}", server.id);
 
-    // TODO: somewhere else
-    // let missing_dependencies = get_missing_builds(&build, &mut server_daemon).await.unwrap();
+    let bdependencies = get_build_dependencies(Arc::clone(&state), &build)
+        .await
+        .unwrap();
+    let mut dependencies = vec![build.derivation_path.clone()];
 
-    // copy_builds(dependencies, &mut local_daemon, &mut server_daemon, server_addr, false).await;
+    for dependency in bdependencies {
+        let output_paths = get_output_path(dependency.derivation_path, &mut server_daemon)
+            .await
+            .unwrap();
+        dependencies.extend(output_paths);
+    }
+
+    copy_builds(
+        dependencies,
+        &mut local_daemon,
+        &mut server_daemon,
+        server.clone(),
+        false,
+    )
+    .await;
 
     let result = execute_build(vec![&build], &mut server_daemon).await;
 
@@ -172,8 +188,12 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
         }
     };
 
+    let output_paths = get_output_path(build.derivation_path, &mut server_daemon)
+        .await
+        .unwrap();
+
     copy_builds(
-        vec![&build],
+        output_paths,
         &mut server_daemon,
         &mut local_daemon,
         server,
@@ -305,7 +325,6 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
 }
 
 async fn requeue_build(state: Arc<ServerState>, build: MBuild) -> MBuild {
-    // dummy
     let mut build: ABuild = EBuild::find_by_id(build.id)
         .one(&state.db)
         .await
@@ -352,7 +371,10 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
     }
 }
 
-async fn reserve_available_server(state: Arc<ServerState>, build: &MBuild) -> Option<(MBuild, MServer)> {
+async fn reserve_available_server(
+    state: Arc<ServerState>,
+    build: &MBuild,
+) -> Option<(MBuild, MServer)> {
     let features = EBuildFeature::find()
         .filter(CBuildFeature::Build.eq(build.id))
         .all(&state.db)
@@ -385,15 +407,19 @@ async fn reserve_available_server(state: Arc<ServerState>, build: &MBuild) -> Op
     cond = cond.add(CServer::Organization.eq(project.organization));
 
     let servers = EServer::find()
-        .join_rev(JoinType::InnerJoin, EServerFeature::belongs_to(entity::server::Entity)
-            .from(CServerFeature::Server)
-            .to(CServer::Id)
-            .into()
+        .join_rev(
+            JoinType::InnerJoin,
+            EServerFeature::belongs_to(entity::server::Entity)
+                .from(CServerFeature::Server)
+                .to(CServer::Id)
+                .into(),
         )
-        .join_rev(JoinType::InnerJoin, EServerArchitecture::belongs_to(entity::server::Entity)
-            .from(CServerArchitecture::Server)
-            .to(CServer::Id)
-            .into()
+        .join_rev(
+            JoinType::InnerJoin,
+            EServerArchitecture::belongs_to(entity::server::Entity)
+                .from(CServerArchitecture::Server)
+                .to(CServer::Id)
+                .into(),
         )
         .filter(cond)
         .all(&state.db)
@@ -521,4 +547,32 @@ async fn check_evaluation_status(state: Arc<ServerState>, evaluation_id: Uuid) {
     };
 
     update_evaluation_status(state, evaluation, status).await;
+}
+
+async fn get_build_dependencies(
+    state: Arc<ServerState>,
+    build: &MBuild,
+) -> Result<Vec<MBuild>, String> {
+    let dependencies = EBuildDependency::find()
+        .filter(CBuildDependency::Build.eq(build.id))
+        .all(&state.db)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|d| d.dependency)
+        .collect::<Vec<Uuid>>();
+
+    let mut condition = Condition::any();
+
+    for dependency in dependencies {
+        condition = condition.add(CBuild::Id.eq(dependency));
+    }
+
+    let builds = EBuild::find()
+        .filter(condition)
+        .all(&state.db)
+        .await
+        .unwrap();
+
+    Ok(builds)
 }

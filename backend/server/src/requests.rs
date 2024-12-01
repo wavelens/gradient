@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use entity::server::Architecture;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BaseResponse<T> {
@@ -22,13 +21,14 @@ pub struct MakeProjectRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeServerRequest {
+    pub organization_id: String,
     pub name: String,
     pub host: String,
     pub port: i32,
     pub username: String,
     pub public_key: String,
     pub private_key: String,
-    pub architectures: Vec<Architecture>,
+    pub architectures: Vec<String>,
     pub features: Vec<String>,
 }
 

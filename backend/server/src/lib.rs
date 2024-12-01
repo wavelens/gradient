@@ -1,6 +1,6 @@
-mod endpoints;
 pub mod auth;
 pub mod consts;
+mod endpoints;
 pub mod evaluator;
 pub mod executer;
 pub mod input;
@@ -10,21 +10,21 @@ pub mod sources;
 pub mod types;
 
 use axum::routing::{get, post};
-use axum::{Router, middleware};
-use clap::Parser;
-use sea_orm::{ActiveModelTrait, Database, DatabaseConnection};
-use migration::Migrator;
-use sea_orm_migration::prelude::*;
-use std::sync::Arc;
-use sea_orm::ActiveValue::Set;
-use uuid::Uuid;
+use axum::{middleware, Router};
 use chrono::{DateTime, Utc};
-use sea_orm::EntityTrait;
-use password_auth::generate_hash;
-use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
-use std::path::PathBuf;
+use clap::Parser;
 use consts::*;
+use migration::Migrator;
+use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
+use password_auth::generate_hash;
+use sea_orm::ActiveValue::Set;
+use sea_orm::EntityTrait;
+use sea_orm::{ActiveModelTrait, Database, DatabaseConnection};
+use sea_orm_migration::prelude::*;
+use std::path::PathBuf;
+use std::sync::Arc;
 use types::*;
+use uuid::Uuid;
 
 #[tokio::main]
 pub async fn main() -> std::io::Result<()> {
@@ -34,10 +34,7 @@ pub async fn main() -> std::io::Result<()> {
 
     let db = connect_db(&cli).await;
 
-    let state = Arc::new(ServerState {
-        db,
-        cli
-    });
+    let state = Arc::new(ServerState { db, cli });
 
     create_debug_data(Arc::clone(&state)).await;
 
@@ -63,7 +60,9 @@ async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     let oauth_client = if state.cli.oauth_enabled {
         Some(BasicClient::new(
             ClientId::new(state.cli.oauth_client_id.clone().unwrap()),
-            Some(ClientSecret::new(state.cli.oauth_client_secret.clone().unwrap())),
+            Some(ClientSecret::new(
+                state.cli.oauth_client_secret.clone().unwrap(),
+            )),
             AuthUrl::new(state.cli.oauth_auth_url.clone().unwrap()).unwrap(),
             Some(TokenUrl::new(state.cli.oauth_token_url.clone().unwrap()).unwrap()),
         ))
@@ -72,14 +71,35 @@ async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     };
 
     let app = Router::new()
-        .route("/organization", get(endpoints::get_organizations).post(endpoints::post_organizations))
-        .route("/organization/:organization", get(endpoints::get_organization).post(endpoints::post_organization))
-        .route("/project/:project", get(endpoints::get_project).post(endpoints::post_project))
-        .route("/build/:build", get(endpoints::get_build).post(endpoints::post_build))
-        .route("/user/settings/:user", get(endpoints::get_user).post(endpoints::post_user))
+        .route(
+            "/organization",
+            get(endpoints::get_organizations).post(endpoints::post_organizations),
+        )
+        .route(
+            "/organization/:organization",
+            get(endpoints::get_organization).post(endpoints::post_organization),
+        )
+        .route(
+            "/project/:project",
+            get(endpoints::get_project).post(endpoints::post_project),
+        )
+        .route(
+            "/build/:build",
+            get(endpoints::get_build).post(endpoints::post_build),
+        )
+        .route(
+            "/user/settings/:user",
+            get(endpoints::get_user).post(endpoints::post_user),
+        )
         .route("/user/api", post(endpoints::post_api_key))
-        .route("/server", get(endpoints::get_servers).post(endpoints::post_servers))
-        .route_layer(middleware::from_fn_with_state(Arc::clone(&state), auth::authorize))
+        .route(
+            "/server",
+            get(endpoints::get_servers).post(endpoints::post_servers),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            auth::authorize,
+        ))
         .route("/user/login", post(endpoints::post_login))
         .route("/user/logout", post(endpoints::post_logout))
         .route("/user/register", post(endpoints::post_register))
@@ -101,7 +121,10 @@ async fn delete_all_data(state: Arc<ServerState>) {
     let organizations = EOrganization::find().all(&state.db).await.unwrap();
     for o in organizations {
         let organization: AOrganization = o.into();
-        EOrganization::delete(organization).exec(&state.db).await.unwrap();
+        EOrganization::delete(organization)
+            .exec(&state.db)
+            .await
+            .unwrap();
     }
 
     let projects = EProject::find().all(&state.db).await.unwrap();
@@ -119,7 +142,10 @@ async fn delete_all_data(state: Arc<ServerState>) {
     let evaluations = EEvaluation::find().all(&state.db).await.unwrap();
     for e in evaluations {
         let evaluation: AEvaluation = e.into();
-        EEvaluation::delete(evaluation).exec(&state.db).await.unwrap();
+        EEvaluation::delete(evaluation)
+            .exec(&state.db)
+            .await
+            .unwrap();
     }
 
     let builds = EBuild::find().all(&state.db).await.unwrap();
@@ -131,7 +157,10 @@ async fn delete_all_data(state: Arc<ServerState>) {
     let build_dependencies = EBuildDependency::find().all(&state.db).await.unwrap();
     for bd in build_dependencies {
         let build_dependency: ABuildDependency = bd.into();
-        EBuildDependency::delete(build_dependency).exec(&state.db).await.unwrap();
+        EBuildDependency::delete(build_dependency)
+            .exec(&state.db)
+            .await
+            .unwrap();
     }
 
     let apis = EApi::find().all(&state.db).await.unwrap();
@@ -149,24 +178,35 @@ async fn delete_all_data(state: Arc<ServerState>) {
     let server_architectures = EServerArchitecture::find().all(&state.db).await.unwrap();
     for sa in server_architectures {
         let server_architecture: AServerArchitecture = sa.into();
-        EServerArchitecture::delete(server_architecture).exec(&state.db).await.unwrap();
+        EServerArchitecture::delete(server_architecture)
+            .exec(&state.db)
+            .await
+            .unwrap();
     }
 
     let server_features = EServerFeature::find().all(&state.db).await.unwrap();
     for sf in server_features {
         let server_feature: AServerFeature = sf.into();
-        EServerFeature::delete(server_feature).exec(&state.db).await.unwrap();
+        EServerFeature::delete(server_feature)
+            .exec(&state.db)
+            .await
+            .unwrap();
     }
 
     let build_features = EBuildFeature::find().all(&state.db).await.unwrap();
     for bf in build_features {
         let build_feature: ABuildFeature = bf.into();
-        EBuildFeature::delete(build_feature).exec(&state.db).await.unwrap();
+        EBuildFeature::delete(build_feature)
+            .exec(&state.db)
+            .await
+            .unwrap();
     }
 }
 
 async fn create_debug_data(state: Arc<ServerState>) {
-    if !state.cli.debug { return; }
+    if !state.cli.debug {
+        return;
+    }
 
     delete_all_data(Arc::clone(&state)).await;
     println!("Deleted all Database data");
@@ -200,7 +240,9 @@ async fn create_debug_data(state: Arc<ServerState>) {
         organization: Set(organization.id),
         name: Set("Good Project".to_string()),
         description: Set("Test Good Project Description".to_string()),
-        repository: Set("git+ssh://gitea@git.wavelens.io:12/Wavelens/nix-ai-docs.git?ref=main".to_string()),
+        repository: Set(
+            "git+ssh://gitea@git.wavelens.io:12/Wavelens/nix-ai-docs.git?ref=main".to_string(),
+        ),
         last_evaluation: Set(None),
         last_check_at: Set(*NULL_TIME),
         created_by: Set(user.id),
@@ -217,8 +259,12 @@ async fn create_debug_data(state: Arc<ServerState>) {
         host: Set("localhost".to_string()),
         port: Set(22),
         username: Set("dennis".to_string()),
-        public_key: Set(PathBuf::from("/home/dennis/.ssh/keys/github.pub").to_string_lossy().to_string()),
-        private_key: Set(PathBuf::from("/home/dennis/.ssh/keys/github").to_string_lossy().to_string()),
+        public_key: Set(PathBuf::from("/home/dennis/.ssh/keys/github.pub")
+            .to_string_lossy()
+            .to_string()),
+        private_key: Set(PathBuf::from("/home/dennis/.ssh/keys/github")
+            .to_string_lossy()
+            .to_string()),
         last_connection_at: Set(DateTime::from_timestamp(0, 0).unwrap().naive_utc()),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
@@ -238,7 +284,7 @@ async fn create_debug_data(state: Arc<ServerState>) {
 
     let feature = AFeature {
         id: Set(Uuid::new_v4()),
-        name: Set("big_parallel".to_string()),
+        name: Set("big-parallel".to_string()),
     };
 
     let feature = feature.insert(&state.db).await.unwrap();

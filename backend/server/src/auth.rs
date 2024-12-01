@@ -1,19 +1,18 @@
-use sea_orm::{EntityTrait, QueryFilter, ColumnTrait, ActiveModelTrait, ActiveValue::Set};
+use axum::body::Body;
+use axum::extract::{Request, State};
+use axum::http::StatusCode;
+use axum::middleware::Next;
+use axum::response::{Json, Response};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
-use serde::{Serialize, Deserialize};
-use uuid::Uuid;
-use axum::http::StatusCode;
-use axum::response::{Response, Json};
-use axum::extract::{Request, State};
-use axum::middleware::Next;
-use axum::body::Body;
-use std::sync::Arc;
 use rand::distributions::{Alphanumeric, DistString};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use uuid::Uuid;
 
-use super::types::*;
 use super::requests::*;
-
+use super::types::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct Cliams {
@@ -22,18 +21,32 @@ pub struct Cliams {
     pub id: Uuid,
 }
 
-pub async fn authorize(state: State<Arc<ServerState>>, mut req: Request, next: Next) -> Result<Response<Body>, (StatusCode, Json<BaseResponse<String>>)> {
+pub async fn authorize(
+    state: State<Arc<ServerState>>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response<Body>, (StatusCode, Json<BaseResponse<String>>)> {
     let auth_header = req.headers_mut().get(axum::http::header::AUTHORIZATION);
 
     let auth_header = match auth_header {
-        Some(header) => header.to_str().map_err(|_| (StatusCode::FORBIDDEN, Json(BaseResponse {
-            error: true,
-            message: "Authorization header empty".to_string(),
-        })))?,
-        None => return Err((StatusCode::FORBIDDEN, Json(BaseResponse {
-            error: true,
-            message: "Authorization header not found".to_string(),
-        }))),
+        Some(header) => header.to_str().map_err(|_| {
+            (
+                StatusCode::FORBIDDEN,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Authorization header empty".to_string(),
+                }),
+            )
+        })?,
+        None => {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Authorization header not found".to_string(),
+                }),
+            ))
+        }
     };
 
     let mut header = auth_header.split_whitespace();
@@ -41,29 +54,43 @@ pub async fn authorize(state: State<Arc<ServerState>>, mut req: Request, next: N
     let (bearer, token) = (header.next(), header.next());
 
     if bearer != Some("Bearer") {
-        return Err((StatusCode::FORBIDDEN, Json(BaseResponse {
-            error: true,
-            message: "Invalid Authorization header".to_string(),
-        })));
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(BaseResponse {
+                error: true,
+                message: "Invalid Authorization header".to_string(),
+            }),
+        ));
     }
 
     let token_data = match decode_jwt(state.clone(), token.unwrap().to_string()).await {
         Ok(data) => data,
-        Err(_) => return Err((StatusCode::UNAUTHORIZED, Json(BaseResponse {
-            error: true,
-            message: "Unable to decode token".to_string(),
-        }))),
+        Err(_) => {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Unable to decode token".to_string(),
+                }),
+            ))
+        }
     };
 
     let current_user = match EUser::find_by_id(token_data.claims.id)
         .one(&state.db)
         .await
-        .unwrap() {
+        .unwrap()
+    {
         Some(user) => user,
-        None => return Err((StatusCode::UNAUTHORIZED, Json(BaseResponse {
-            error: true,
-            message: "User not found".to_string(),
-        }))),
+        None => {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(BaseResponse {
+                    error: true,
+                    message: "User not found".to_string(),
+                }),
+            ))
+        }
     };
 
     req.extensions_mut().insert(current_user);
@@ -87,7 +114,10 @@ pub fn encode_jwt(state: State<Arc<ServerState>>, id: Uuid) -> Result<String, St
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-pub async fn decode_jwt(state: State<Arc<ServerState>>, jwt: String) -> Result<TokenData<Cliams>, StatusCode> {
+pub async fn decode_jwt(
+    state: State<Arc<ServerState>>,
+    jwt: String,
+) -> Result<TokenData<Cliams>, StatusCode> {
     let result = if jwt.starts_with("GRAD") {
         let api_key = EApi::find()
             .filter(CApi::Key.eq(jwt.strip_prefix("GRAD").unwrap()))

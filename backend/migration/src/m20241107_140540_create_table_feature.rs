@@ -3,7 +3,6 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -12,17 +11,8 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Feature::Table)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(Feature::Id)
-                            .uuid()
-                            .not_null()
-                            .primary_key(),
-                    )
-                    .col(
-                        ColumnDef::new(Feature::Name)
-                            .string()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Feature::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Feature::Name).string().not_null())
                     .to_owned(),
             )
             .await
@@ -41,4 +31,3 @@ enum Feature {
     Id,
     Name,
 }
-

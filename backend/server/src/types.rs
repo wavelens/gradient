@@ -1,11 +1,11 @@
-use uuid::Uuid;
-use sea_orm::DatabaseConnection;
-use nix_daemon::nix::DaemonStore;
-use async_ssh2_lite::{ AsyncChannel, TokioTcpStream };
-use entity::*;
+use super::input::{greater_than_zero, port_in_range};
+use async_ssh2_lite::{AsyncChannel, TokioTcpStream};
 use clap::Parser;
-use super::input::{port_in_range, greater_than_zero};
-
+use entity::*;
+use nix_daemon::nix::DaemonStore;
+use sea_orm::DatabaseConnection;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Parser, Debug)]
 #[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient", author = "Wavelens", version, about, long_about = None)]
@@ -48,7 +48,13 @@ pub struct ServerState {
     pub cli: Cli,
 }
 
-pub type ListResponse = Vec<(Uuid, String)>;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListItem {
+    pub id: Uuid,
+    pub name: String,
+}
+
+pub type ListResponse = Vec<ListItem>;
 pub type NixStore = DaemonStore<AsyncChannel<TokioTcpStream>>;
 
 pub type EApi = api::Entity;

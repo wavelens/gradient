@@ -1,7 +1,7 @@
-use sea_orm::entity::prelude::*;
-use uuid::Uuid;
-use serde::{Deserialize, Serialize};
 use chrono::NaiveDateTime;
+use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
 #[sea_orm(rs_type = "i16", db_type = "Integer")]

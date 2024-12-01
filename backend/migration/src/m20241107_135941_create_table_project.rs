@@ -11,51 +11,15 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Project::Table)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(Project::Id)
-                            .uuid()
-                            .not_null()
-                            .primary_key(),
-                    )
-                    .col(
-                        ColumnDef::new(Project::Organization)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Project::Name)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Project::Description)
-                            .text()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Project::Repository)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Project::LastEvaluation)
-                            .uuid(),
-                    )
-                    .col(
-                        ColumnDef::new(Project::LastCheckAt)
-                            .date_time()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Project::CreatedBy)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Project::CreatedAt)
-                            .date_time()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Project::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Project::Organization).uuid().not_null())
+                    .col(ColumnDef::new(Project::Name).string().not_null())
+                    .col(ColumnDef::new(Project::Description).text().not_null())
+                    .col(ColumnDef::new(Project::Repository).string().not_null())
+                    .col(ColumnDef::new(Project::LastEvaluation).uuid())
+                    .col(ColumnDef::new(Project::LastCheckAt).date_time().not_null())
+                    .col(ColumnDef::new(Project::CreatedBy).uuid().not_null())
+                    .col(ColumnDef::new(Project::CreatedAt).date_time().not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-project-organization")
