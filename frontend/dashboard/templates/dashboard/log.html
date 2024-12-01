@@ -10,9 +10,9 @@
 
 {% block content %}
 
-{% include "../individualheader.html" %}
+{% include "../individualHeader.html" %}
 
-{% include "../backHeader.html" %}  
+{% include "../backHeader.html" %}
 
 <head>{% load static %}</head>
 
@@ -88,10 +88,9 @@
 
 
 <script>
-    let lineCounter = 1; 
+    let lineCounter = 1;
 
         document.querySelectorAll('.details-item').forEach(details => {
-            
             const summary = details.querySelector('summary');
             summary.setAttribute('data-line-number', lineCounter++);
 
