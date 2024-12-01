@@ -3,7 +3,6 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -18,11 +17,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(BuildDependency::Build)
-                            .uuid()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(BuildDependency::Build).uuid().not_null())
                     .col(
                         ColumnDef::new(BuildDependency::Dependency)
                             .uuid()
@@ -69,4 +64,3 @@ enum Build {
     Table,
     Id,
 }
-

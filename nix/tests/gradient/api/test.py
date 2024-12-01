@@ -63,3 +63,53 @@ with subtest("check api key authorization"):
 
     assert req.get("error") == False, req.get("message")
 
+with subtest("check api /organization"):
+    req = json.loads(machine.succeed("""
+        curl -XPOST http://localhost:3000/organization -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "MyOrganization", "description": "My Organization"}'
+    """.replace("api_key", api_key)))
+
+    assert req.get("error") == False, req.get("message")
+
+    org_id = req.get("message")
+    print(f"Organization ID: {org_id}")
+
+    req = json.loads(machine.succeed("""
+        curl -XGET http://localhost:3000/organization -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json'
+    """.replace("api_key", api_key)))
+
+    assert req.get("error") == False, req.get("message")
+    assert len(req.get("message")) == 1, "Should have only one organization"
+    assert req.get("message")[0].get("id") == org_id, "Organization ID should match"
+
+with subtest("check api /organization/:id"):
+    req = json.loads(machine.succeed("""
+        curl -XGET http://localhost:3000/organization/org_id -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json'
+    """.replace("api_key", api_key).replace("org_id", org_id)))
+
+    assert req.get("error") == False, req.get("message")
+    assert req.get("message").get("id") == org_id, "Organization ID should match"
+
+    req = json.loads(machine.succeed("""
+        curl -XPOST http://localhost:3000/organization/org_id -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "MyProject", "description": "My Project", "repository": "git+ssh://gitea@git.wavelens.io:12/Wavelens/nix-ai-docs.git?ref=main"}'
+    """.replace("api_key", api_key).replace("org_id", org_id)))
+
+    assert req.get("error") == False, req.get("message")
+
+    project_id = req.get("message")
+    print(f"Project ID: {project_id}")
+
+with subtest("check api /project/:id"):
+    req = json.loads(machine.succeed("""
+        curl -XGET http://localhost:3000/project/project_id -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json'
+    """.replace("api_key", api_key).replace("project_id", project_id)))
+
+    assert req.get("error") == False, req.get("message")
+    assert req.get("message").get("id") == project_id, "Project ID should match"
+
+with subtest("check api /server"):
+    req = json.loads(machine.succeed("""
+        curl -XPOST http://localhost:3000/server -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "MyServer", "host": "localhost", "port": 22, "username": "root", "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIB8Q", "private_key": "-----BEGIN OPENSSH PRIVATE", "organization_id": "org_id", "architectures": ["x86_64-linux"], "features": ["big-parallel"]}'
+    """.replace("api_key", api_key).replace("org_id", org_id)))
+
+    assert req.get("error") == False, req.get("message")
+

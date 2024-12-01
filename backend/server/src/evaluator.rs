@@ -1,19 +1,22 @@
-use std::sync::Arc;
-use uuid::Uuid;
-use tokio::process::Command;
-use serde_json::Value;
-use nix_daemon::nix::DaemonStore;
-use tokio::net::UnixStream;
-use entity::build::BuildStatus;
-use sea_orm::{EntityTrait, ColumnTrait, QuerySelect, JoinType, Condition, ActiveValue::Set};
-use sea_orm::entity::prelude::*;
 use chrono::Utc;
+use entity::build::BuildStatus;
+use nix_daemon::nix::DaemonStore;
+use sea_orm::entity::prelude::*;
+use sea_orm::{ActiveValue::Set, ColumnTrait, Condition, EntityTrait, JoinType, QuerySelect};
+use serde_json::Value;
+use std::sync::Arc;
+use tokio::net::UnixStream;
+use tokio::process::Command;
+use uuid::Uuid;
 
-use super::types::*;
 use super::executer::*;
+use super::types::*;
 
-
-pub async fn evaluate(state: Arc<ServerState>, store: &mut DaemonStore<UnixStream>, evaluation: &MEvaluation) -> Result<(Vec<MBuild>, Vec<MBuildDependency>), String> {
+pub async fn evaluate(
+    state: Arc<ServerState>,
+    store: &mut DaemonStore<UnixStream>,
+    evaluation: &MEvaluation,
+) -> Result<(Vec<MBuild>, Vec<MBuildDependency>), String> {
     println!("Evaluating Evaluation: {}", evaluation.id);
 
     let organization_id = EProject::find_by_id(evaluation.project)
@@ -41,20 +44,28 @@ pub async fn evaluate(state: Arc<ServerState>, store: &mut DaemonStore<UnixStrea
     }
 
     let json_output = String::from_utf8_lossy(&output.stdout);
-    let parsed_json: Value = serde_json::from_str(&json_output)
-        .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+    let parsed_json: Value =
+        serde_json::from_str(&json_output).map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
 
     if !parsed_json.is_object() {
         return Err("Expected JSON object but found another type".to_string());
     }
 
-    let packages_with_system = parsed_json["packages"].as_object().ok_or("Expected `packages` key in JSON object")?;
+    let packages_with_system = parsed_json["packages"]
+        .as_object()
+        .ok_or("Expected `packages` key in JSON object")?;
     let mut all_builds: Vec<MBuild> = vec![];
     let mut all_dependencies: Vec<MBuildDependency> = vec![];
 
     for (system_name, packages) in packages_with_system {
-        for (package_name, _package) in packages.as_object().ok_or("Expected `packages` key in JSON object")? {
-            let path = format!("{}#packages.{}.{}", evaluation.repository, system_name, package_name);
+        for (package_name, _package) in packages
+            .as_object()
+            .ok_or("Expected `packages` key in JSON object")?
+        {
+            let path = format!(
+                "{}#packages.{}.{}",
+                evaluation.repository, system_name, package_name
+            );
             // TODO: use nix api
             let (derivation, _references) = get_derivation_cmd(&path).await?;
 
@@ -69,14 +80,27 @@ pub async fn evaluate(state: Arc<ServerState>, store: &mut DaemonStore<UnixStrea
 
             let build = vec![derivation.clone()];
 
-            if already_exsists || !find_builds(Arc::clone(&state), organization_id, build.clone()).await?.is_empty() {
+            if already_exsists
+                || !find_builds(Arc::clone(&state), organization_id, build.clone())
+                    .await?
+                    .is_empty()
+            {
                 println!("Skipping package: {}", derivation);
                 continue;
             }
 
             println!("Creating build {} with path {}", derivation, path);
 
-            query_all_dependencies(Arc::clone(&state), &mut all_builds, &mut all_dependencies, evaluation, organization_id, build, store).await;
+            query_all_dependencies(
+                Arc::clone(&state),
+                &mut all_builds,
+                &mut all_dependencies,
+                evaluation,
+                organization_id,
+                build,
+                store,
+            )
+            .await;
 
             println!("Found package: {}", derivation);
         }
@@ -92,18 +116,26 @@ async fn query_all_dependencies(
     evaluation: &MEvaluation,
     organization_id: Uuid,
     dependencies: Vec<String>,
-    store: &mut DaemonStore<UnixStream>
+    store: &mut DaemonStore<UnixStream>,
 ) {
-    let mut dependencies = dependencies.clone().into_iter()
+    let mut dependencies = dependencies
+        .clone()
+        .into_iter()
         .map(|d| (d, None, Uuid::new_v4()))
         .collect::<Vec<(String, Option<Uuid>, Uuid)>>();
 
     while let Some((dependency, dependency_id, build_id)) = dependencies.pop() {
         let path_info = get_derivation(dependency.clone(), store).await.unwrap();
-        let references = get_missing_builds(path_info.references.clone(), store).await.unwrap();
+        let references = get_missing_builds(path_info.references.clone(), store)
+            .await
+            .unwrap();
 
-        let already_exsists = find_builds(Arc::clone(&state), organization_id, references.clone()).await.unwrap();
-        let mut references = references.clone().into_iter()
+        let already_exsists = find_builds(Arc::clone(&state), organization_id, references.clone())
+            .await
+            .unwrap();
+        let mut references = references
+            .clone()
+            .into_iter()
             .map(|d| (d, Some(build_id), Uuid::new_v4()))
             .collect::<Vec<(String, Option<Uuid>, Uuid)>>();
 
@@ -114,11 +146,19 @@ async fn query_all_dependencies(
             let in_exsists = already_exsists.iter().any(|b| b.derivation_path == d_path);
             let in_dependencies = dependencies.iter().any(|(path, _, _)| *path == d_path);
 
-            if  in_builds || in_dependencies {
+            if in_builds || in_dependencies {
                 let d_id = if in_builds {
-                    all_builds.iter().find(|b| b.derivation_path == d_path).unwrap().id
+                    all_builds
+                        .iter()
+                        .find(|b| b.derivation_path == d_path)
+                        .unwrap()
+                        .id
                 } else {
-                    dependencies.iter().find(|(path, _, _)| *path == d_path).unwrap().2
+                    dependencies
+                        .iter()
+                        .find(|(path, _, _)| *path == d_path)
+                        .unwrap()
+                        .2
                 };
 
                 let dep = MBuildDependency {
@@ -147,33 +187,7 @@ async fn query_all_dependencies(
             created_at: Utc::now().naive_utc(),
         };
 
-        for f in features {
-            let feature = EFeature::find()
-                .filter(CFeature::Name.eq(f.clone()))
-                .one(&state.db)
-                .await
-                .unwrap();
-
-            let feature = if let Some(f) = feature {
-                f
-            } else {
-                let afeature = AFeature {
-                    id: Set(Uuid::new_v4()),
-                    name: Set(f),
-                };
-
-                afeature.insert(&state.db).await.unwrap()
-            };
-
-            let abuild_feature = ABuildFeature {
-                id: Set(Uuid::new_v4()),
-                build: Set(build_id),
-                feature: Set(feature.id),
-            };
-
-            abuild_feature.insert(&state.db).await.unwrap();
-        };
-
+        add_features(Arc::clone(&state), features, Some(build_id), None).await;
 
         if let Some(d_id) = dependency_id {
             let dep = MBuildDependency {
@@ -185,14 +199,67 @@ async fn query_all_dependencies(
             all_dependencies.push(dep);
         }
 
-        println!("Creating build {} with path {}", build.id, build.derivation_path);
+        println!(
+            "Creating build {} with path {}",
+            build.id, build.derivation_path
+        );
 
         all_builds.push(build);
         dependencies.extend(references);
     }
 }
 
-async fn find_builds(state: Arc<ServerState>, organization_id: Uuid, build_paths: Vec<String>) -> Result<Vec<MBuild>, String> {
+pub async fn add_features(
+    state: Arc<ServerState>,
+    features: Vec<String>,
+    build_id: Option<Uuid>,
+    server_id: Option<Uuid>,
+) {
+    for f in features {
+        let feature = EFeature::find()
+            .filter(CFeature::Name.eq(f.clone()))
+            .one(&state.db)
+            .await
+            .unwrap();
+
+        let feature = if let Some(f) = feature {
+            f
+        } else {
+            let afeature = AFeature {
+                id: Set(Uuid::new_v4()),
+                name: Set(f),
+            };
+
+            afeature.insert(&state.db).await.unwrap()
+        };
+
+        if let Some(b_id) = build_id {
+            let abuild_feature = ABuildFeature {
+                id: Set(Uuid::new_v4()),
+                build: Set(b_id),
+                feature: Set(feature.id),
+            };
+
+            abuild_feature.insert(&state.db).await.unwrap();
+        }
+
+        if let Some(s_id) = server_id {
+            let aserver_feature = AServerFeature {
+                id: Set(Uuid::new_v4()),
+                server: Set(s_id),
+                feature: Set(feature.id),
+            };
+
+            aserver_feature.insert(&state.db).await.unwrap();
+        }
+    }
+}
+
+async fn find_builds(
+    state: Arc<ServerState>,
+    organization_id: Uuid,
+    build_paths: Vec<String>,
+) -> Result<Vec<MBuild>, String> {
     let mut condition = Condition::any();
     for path in build_paths {
         condition = condition.add(CBuild::DerivationPath.eq(path.as_str()));
@@ -229,23 +296,38 @@ pub async fn get_derivation_cmd(path: &str) -> Result<(String, Vec<String>), Str
     }
 
     let json_output = String::from_utf8_lossy(&output.stdout);
-    let parsed_json: Value = serde_json::from_str(&json_output)
-        .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+    let parsed_json: Value =
+        serde_json::from_str(&json_output).map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
 
     if !parsed_json.is_object() {
         return Err("Expected JSON object but found another type".to_string());
     }
 
-    let path = parsed_json.as_object().ok_or("Expected JSON object")?.keys().next().ok_or("Expected JSON object with Derivation Path")?.to_string();
-    let input_paths = parsed_json[path.clone()].as_object()
-        .ok_or("Expected JSON object with Derivation Path")?.get("references")
-        .ok_or("Expected JSON object with Derivation Path")?.as_array()
-        .ok_or("Expected JSON object with Derivation Path")?.iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    let path = parsed_json
+        .as_object()
+        .ok_or("Expected JSON object")?
+        .keys()
+        .next()
+        .ok_or("Expected JSON object with Derivation Path")?
+        .to_string();
+
+    let input_paths = parsed_json[path.clone()]
+        .as_object()
+        .ok_or("Expected JSON object with Derivation Path")?
+        .get("references")
+        .ok_or("Expected JSON object with Derivation Path")?
+        .as_array()
+        .ok_or("Expected JSON object with Derivation Path")?
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
 
     Ok((path, input_paths))
 }
 
-pub async fn get_features_cmd(path: &str) -> Result<(entity::server::Architecture, Vec<String>), String> {
+pub async fn get_features_cmd(
+    path: &str,
+) -> Result<(entity::server::Architecture, Vec<String>), String> {
     let output = Command::new("nix")
         .arg("derivation")
         .arg("show")
@@ -263,20 +345,28 @@ pub async fn get_features_cmd(path: &str) -> Result<(entity::server::Architectur
     }
 
     let json_output = String::from_utf8_lossy(&output.stdout);
-    let parsed_json: Value = serde_json::from_str(&json_output)
-        .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+    let parsed_json: Value =
+        serde_json::from_str(&json_output).map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
 
     if !parsed_json.is_object() {
         return Err("Expected JSON object but found another type".to_string());
     }
 
-    let features: Vec<String> = if let Some(pjson) = parsed_json.as_object().ok_or("Expected JSON object")?
-        .get(path).ok_or("Expected JSON object with path")?
-        .as_object().ok_or("Expected JSON object with path")?
-        .get("env").ok_or("Expected JSON object with env")?
-        .as_object().ok_or("Expected JSON object with env")?
-        .get("requiredSystemFeatures") {
-        pjson.as_array()
+    let features: Vec<String> = if let Some(pjson) = parsed_json
+        .as_object()
+        .ok_or("Expected JSON object")?
+        .get(path)
+        .ok_or("Expected JSON object with path")?
+        .as_object()
+        .ok_or("Expected JSON object with path")?
+        .get("env")
+        .ok_or("Expected JSON object with env")?
+        .as_object()
+        .ok_or("Expected JSON object with env")?
+        .get("requiredSystemFeatures")
+    {
+        pjson
+            .as_array()
             .ok_or("Expected JSON object with requiredSystemFeatures")?
             .iter()
             .map(|v| v.as_str().unwrap().to_string())
@@ -285,14 +375,23 @@ pub async fn get_features_cmd(path: &str) -> Result<(entity::server::Architectur
         vec![]
     };
 
-    let system: entity::server::Architecture = parsed_json.as_object().ok_or("Expected JSON object")?
-        .get(path).ok_or("Expected JSON object with path")?
-        .as_object().ok_or("Expected JSON object with path")?
-        .get("env").ok_or("Expected JSON object with env")?
-        .as_object().ok_or("Expected JSON object with env")?
-        .get("system").ok_or("Expected JSON object with system")?
-        .as_str().unwrap()
-        .try_into().unwrap();
+    let system: entity::server::Architecture = parsed_json
+        .as_object()
+        .ok_or("Expected JSON object")?
+        .get(path)
+        .ok_or("Expected JSON object with path")?
+        .as_object()
+        .ok_or("Expected JSON object with path")?
+        .get("env")
+        .ok_or("Expected JSON object with env")?
+        .as_object()
+        .ok_or("Expected JSON object with env")?
+        .get("system")
+        .ok_or("Expected JSON object with system")?
+        .as_str()
+        .unwrap()
+        .try_into()
+        .unwrap();
 
     Ok((system, features))
 }

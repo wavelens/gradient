@@ -1,7 +1,7 @@
-use sea_orm::entity::prelude::*;
-use uuid::Uuid;
-use serde::{Deserialize, Serialize};
 use chrono::NaiveDateTime;
+use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "user")]
@@ -17,7 +17,7 @@ pub struct Model {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation { }
+pub enum Relation {}
 
 impl std::fmt::Debug for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

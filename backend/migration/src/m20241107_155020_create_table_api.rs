@@ -3,7 +3,6 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -12,37 +11,12 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Api::Table)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(Api::Id)
-                            .uuid()
-                            .not_null()
-                            .primary_key(),
-                    )
-                    .col(
-                        ColumnDef::new(Api::OwnedBy)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Api::Name)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Api::Key)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Api::LastUsedAt)
-                            .date_time()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Api::CreatedAt)
-                            .date_time()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Api::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Api::OwnedBy).uuid().not_null())
+                    .col(ColumnDef::new(Api::Name).string().not_null())
+                    .col(ColumnDef::new(Api::Key).string().not_null())
+                    .col(ColumnDef::new(Api::LastUsedAt).date_time().not_null())
+                    .col(ColumnDef::new(Api::CreatedAt).date_time().not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-api-owned_by")
@@ -73,7 +47,6 @@ enum Api {
     LastUsedAt,
     CreatedAt,
 }
-
 
 #[derive(DeriveIden)]
 enum User {

@@ -3,7 +3,6 @@ use sea_orm_migration::prelude::*;
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
@@ -12,62 +11,21 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Server::Table)
                     .if_not_exists()
-                    .col(
-                        ColumnDef::new(Server::Id)
-                            .uuid()
-                            .not_null()
-                            .primary_key(),
-                    )
-                    .col(
-                        ColumnDef::new(Server::Name)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Server::Organization)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Server::Host)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Server::Port)
-                            .integer()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Server::Username)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Server::PublicKey)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Server::PrivateKey)
-                            .string()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Server::Id).uuid().not_null().primary_key())
+                    .col(ColumnDef::new(Server::Name).string().not_null())
+                    .col(ColumnDef::new(Server::Organization).uuid().not_null())
+                    .col(ColumnDef::new(Server::Host).string().not_null())
+                    .col(ColumnDef::new(Server::Port).integer().not_null())
+                    .col(ColumnDef::new(Server::Username).string().not_null())
+                    .col(ColumnDef::new(Server::PublicKey).string().not_null())
+                    .col(ColumnDef::new(Server::PrivateKey).string().not_null())
                     .col(
                         ColumnDef::new(Server::LastConnectionAt)
                             .date_time()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(Server::CreatedBy)
-                            .uuid()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Server::CreatedAt)
-                            .date_time()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Server::CreatedBy).uuid().not_null())
+                    .col(ColumnDef::new(Server::CreatedAt).date_time().not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-server-organization")

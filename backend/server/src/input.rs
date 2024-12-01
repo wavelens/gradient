@@ -1,15 +1,21 @@
-use std::net::{SocketAddr, ToSocketAddrs};
 use super::consts::*;
+use std::net::{SocketAddr, ToSocketAddrs};
 
 pub fn url_to_addr(host: &str, port: i32) -> Result<SocketAddr, Box<dyn std::error::Error>> {
     let port = port as usize;
 
     if !PORT_RANGE.contains(&port) {
-        return Err(format!("port out of range {}-{}", PORT_RANGE.start(), PORT_RANGE.end()).into());
+        return Err(format!(
+            "port out of range {}-{}",
+            PORT_RANGE.start(),
+            PORT_RANGE.end()
+        )
+        .into());
     }
 
     let uri = format!("{}:{}", host, port);
-    let url = uri.to_socket_addrs()?
+    let url = uri
+        .to_socket_addrs()?
         .next()
         .ok_or(format!("{} is not a valid address", uri))?;
     Ok(url)
@@ -32,8 +38,10 @@ pub fn port_in_range(s: &str) -> Result<u16, String> {
 }
 
 pub fn greater_than_zero<
-    T: std::str::FromStr + std::cmp::PartialOrd + std::fmt::Display + Default
->(s: &str) -> Result<T, String> {
+    T: std::str::FromStr + std::cmp::PartialOrd + std::fmt::Display + Default,
+>(
+    s: &str,
+) -> Result<T, String> {
     let num: T = s
         .parse()
         .map_err(|_| format!("`{}` is not a valid number", s))?;
@@ -44,7 +52,6 @@ pub fn greater_than_zero<
         Err(format!("`{}` is not larger than 0", s))
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -71,7 +78,10 @@ mod tests {
         assert_eq!(addr.to_string(), "[::1]:8080");
 
         let addr = url_to_addr(":::1", 8080).unwrap_err();
-        assert_eq!(addr.to_string(), "failed to lookup address information: Name or service not known");
+        assert_eq!(
+            addr.to_string(),
+            "failed to lookup address information: Name or service not known"
+        );
     }
 
     #[test]

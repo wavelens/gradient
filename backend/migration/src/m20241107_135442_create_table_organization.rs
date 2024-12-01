@@ -17,21 +17,9 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(
-                        ColumnDef::new(Organization::Name)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Organization::Description)
-                            .text()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Organization::CreatedBy)
-                            .uuid()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Organization::Name).string().not_null())
+                    .col(ColumnDef::new(Organization::Description).text().not_null())
+                    .col(ColumnDef::new(Organization::CreatedBy).uuid().not_null())
                     .col(
                         ColumnDef::new(Organization::CreatedAt)
                             .date_time()
