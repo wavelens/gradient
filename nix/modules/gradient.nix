@@ -10,12 +10,7 @@ in {
   options = {
     services.gradient = {
       enable = lib.mkEnableOption "Enable Gradient";
-      package = lib.mkOption {
-        description = "The package to use.";
-        type = lib.types.package;
-        default = pkgs.gradient;
-      };
-
+      package = lib.mkPackageOption pkgs "gradient" { };
       user = lib.mkOption {
         description = "The group under which Gradient runs.";
         type = lib.types.str;

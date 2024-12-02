@@ -15,6 +15,13 @@ use super::types::*;
 pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) -> bool {
     println!("Checking for updates on project: {}", project.id);
     // TODO: dummy
+
+    // let evaluation = EEvaluation::find_by_id(project.last_evaluation)
+    //     .one(&state.db)
+    //     .await
+    //     .unwrap();
+
+
     true
 }
 
@@ -30,11 +37,7 @@ pub fn generate_ssh_key(state: Arc<ServerState>) -> Result<(String, String), Str
     let verifying_key = signing_key.verifying_key();
     let public_key_pem = verifying_key
         .to_public_key_pem(pkcs8::LineEnding::LF)
-        .unwrap_or_else(|_| panic!("Failed to encode public key to PEM"))
-        .lines()
-        .nth(1)
-        .unwrap()
-        .to_string();
+        .unwrap_or_else(|_| panic!("Failed to encode public key to PEM"));
 
     let secret = general_purpose::STANDARD.decode(&state.cli.crypt_secret).unwrap();
     let encrypted_private_key = crypter::encrypt(secret, &private_key_pem).unwrap();
@@ -48,7 +51,7 @@ pub fn decrypt_ssh_private_key(state: Arc<ServerState>, organization: MOrganizat
     let encrypted_private_key = general_purpose::STANDARD.decode(organization.private_key).unwrap();
     let decrypted_private_key = crypter::decrypt(secret, encrypted_private_key).unwrap();
     let decrypted_private_key = String::from_utf8(decrypted_private_key).unwrap();
-    let formatted_public_key = format!("ed25519 {} {}", organization.public_key, organization.id);
+    let formatted_public_key = format!("ssh-ed25519 {} {}", organization.public_key, organization.id);
 
     Ok((decrypted_private_key, formatted_public_key))
 }

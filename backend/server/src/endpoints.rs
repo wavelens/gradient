@@ -251,7 +251,7 @@ pub async fn get_organization_ssh(
 
     let res = BaseResponse {
         error: false,
-        message: format!("ed25519 {} {}", organization.public_key, organization.id),
+        message: format!("ssh-ed25519 {} {}", organization.public_key, organization.id),
     };
 
     Ok(Json(res))
@@ -299,7 +299,7 @@ pub async fn post_organization_ssh(
 
     let res = BaseResponse {
         error: false,
-        message: format!("ed25519 {} {}", organization.public_key, organization.id),
+        message: format!("ssh-ed25519 {} {}", organization.public_key, organization.id),
     };
 
     Ok(Json(res))
