@@ -29,6 +29,8 @@ pub struct BuildLogStreamResponse {
 pub async fn connect(
     server: MServer,
     store_path: Option<String>,
+    public_key: String,
+    private_key: String,
 ) -> Result<NixStore, Box<dyn std::error::Error + Send + Sync>> {
     let server_addr = input::url_to_addr(server.host.as_str(), server.port).unwrap();
     let mut session = AsyncSession::<TokioTcpStream>::connect(server_addr, None).await?;
@@ -36,8 +38,8 @@ pub async fn connect(
     init_session(
         &mut session,
         server.username.as_str(),
-        server.public_key,
-        server.private_key,
+        public_key,
+        private_key,
     )
     .await?;
 
@@ -175,12 +177,14 @@ pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
 pub fn get_buildlog_stream(
     server: MServer,
     build: MBuild,
+    public_key: String,
+    private_key: String,
 ) -> Result<Pin<Box<dyn Stream<Item = BuildLogStreamResponse> + Send>>, String> {
     let stream = async_stream::stream! {
         let server_addr = input::url_to_addr(server.host.as_str(), server.port).unwrap();
         let mut session = AsyncSession::<TokioTcpStream>::connect(server_addr, None).await.unwrap();
 
-        init_session(&mut session, server.username.as_str(), server.public_key, server.private_key).await.unwrap();
+        init_session(&mut session, server.username.as_str(), public_key, private_key).await.unwrap();
 
         let mut channel = session.channel_session().await.unwrap();
 

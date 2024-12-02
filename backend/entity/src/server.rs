@@ -44,7 +44,7 @@ impl std::convert::TryFrom<&str> for Architecture {
     }
 }
 
-#[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "server")]
 pub struct Model {
     #[sea_orm(primary_key)]
@@ -54,27 +54,9 @@ pub struct Model {
     pub host: String,
     pub port: i32,
     pub username: String,
-    pub private_key: String,
-    pub public_key: String,
     pub last_connection_at: NaiveDateTime,
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
-}
-
-impl std::fmt::Debug for Model {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("User")
-            .field("id", &self.id)
-            .field("name", &self.name)
-            .field("organization", &self.organization)
-            .field("host", &self.host)
-            .field("port", &self.port)
-            .field("private_key", &"[redacted]")
-            .field("last_connection_at", &self.last_connection_at)
-            .field("created_by", &self.created_by)
-            .field("created_at", &self.created_at)
-            .finish()
-    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

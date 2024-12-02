@@ -46,6 +46,8 @@ pub struct Cli {
     pub oauth_redirect_url: Option<String>,
     #[arg(long, env = "GRADIENT_JWT_SECRET")]
     pub jwt_secret: String,
+    #[arg(long, env = "GRADIENT_CRYPT_SECRET")]
+    pub crypt_secret: String,
 }
 
 #[derive(Debug)]

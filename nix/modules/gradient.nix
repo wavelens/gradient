@@ -45,6 +45,11 @@ in {
         type = lib.types.str;
       };
 
+      cryptSecret = lib.mkOption {
+        description = "The base64-encoded secret key.";
+        type = lib.types.str;
+      };
+
       databaseUrl = lib.mkOption {
         description = "The URL of the database to use.";
         type = lib.types.str;
@@ -92,6 +97,7 @@ in {
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString 1;
         GRADIENT_MAX_CONCURRENT_BUILDS = toString 10;
         GRADIENT_OAUTH_ENABLE = lib.mkForce (if cfg.oauthEnable then "true" else "false");
+        GRADIENT_CRYPT_SECRET = cfg.cryptSecret;
       };
     };
   };

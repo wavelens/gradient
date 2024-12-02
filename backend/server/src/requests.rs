@@ -32,8 +32,6 @@ pub struct MakeServerRequest {
     pub host: String,
     pub port: i32,
     pub username: String,
-    pub public_key: String,
-    pub private_key: String,
     pub architectures: Vec<String>,
     pub features: Vec<String>,
 }

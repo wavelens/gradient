@@ -133,14 +133,22 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
 
     let mut local_daemon = get_local_store().await;
 
-    let mut server_deamon = connect(server.clone(), None).await;
+    let organization = EOrganization::find_by_id(server.organization)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let (private_key, public_key) = decrypt_ssh_private_key(Arc::clone(&state), organization).unwrap();
+
+    let mut server_deamon = connect(server.clone(), None, public_key.clone(), private_key.clone()).await;
     for _ in 1..3 {
         if server_deamon.is_ok() {
             break;
         };
 
         time::sleep(Duration::from_secs(5)).await;
-        server_deamon = connect(server.clone(), None).await;
+        server_deamon = connect(server.clone(), None, public_key.clone(), private_key.clone()).await;
     }
 
     let mut server_daemon = if let Ok(daemon) = server_deamon {

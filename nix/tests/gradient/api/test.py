@@ -102,6 +102,27 @@ with subtest("check api /organization/:id"):
     project_id = req.get("message")
     print(f"Project ID: {project_id}")
 
+with subtest("check api /organization/:id/ssh"):
+    req = json.loads(machine.succeed("""
+        curl -XGET http://localhost:3000/organization/org_id/ssh -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json'
+    """.replace("api_key", api_key).replace("org_id", org_id)))
+
+    assert req.get("error") == False, req.get("message")
+
+    ssh_key = req.get("message")
+
+    req = json.loads(machine.succeed("""
+        curl -XPOST http://localhost:3000/organization/org_id/ssh -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json'
+    """.replace("api_key", api_key).replace("org_id", org_id)))
+
+    assert req.get("error") == False, req.get("message")
+
+    new_ssh_key = req.get("message")
+
+    assert new_ssh_key != ssh_key, "Should have new ssh key"
+
+    print(f"New SSH Key: {new_ssh_key}")
+
 with subtest("check api /project/:id"):
     req = json.loads(machine.succeed("""
         curl -XGET http://localhost:3000/project/project_id -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json'
@@ -112,7 +133,7 @@ with subtest("check api /project/:id"):
 
 with subtest("check api /server"):
     req = json.loads(machine.succeed("""
-        curl -XPOST http://localhost:3000/server -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "MyServer", "host": "localhost", "port": 22, "username": "root", "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIB8Q", "private_key": "-----BEGIN OPENSSH PRIVATE", "organization_id": "org_id", "architectures": ["x86_64-linux"], "features": ["big-parallel"]}'
+        curl -XPOST http://localhost:3000/server -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "MyServer", "host": "localhost", "port": 22, "username": "root", "organization_id": "org_id", "architectures": ["x86_64-linux"], "features": ["big-parallel"]}'
     """.replace("api_key", api_key).replace("org_id", org_id)))
 
     assert req.get("error") == False, req.get("message")

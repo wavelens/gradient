@@ -24,6 +24,7 @@ use super::evaluator::add_features;
 use super::executer::get_buildlog_stream;
 use super::requests::*;
 use super::types::*;
+use super::sources::*;
 
 // TODO: USER AUTHENTICATION + User specific endpoints
 // TODO: sanitize inputs
@@ -80,10 +81,13 @@ pub async fn post_organizations(
     Extension(user): Extension<MUser>,
     Json(body): Json<MakeOrganizationRequest>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let (private_key, public_key) = generate_ssh_key(Arc::clone(&state)).unwrap();
     let organization = AOrganization {
         id: Set(Uuid::new_v4()),
         name: Set(body.name.clone()),
         description: Set(body.description.clone()),
+        public_key: Set(public_key),
+        private_key: Set(private_key),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
     };
@@ -208,6 +212,94 @@ pub async fn post_organization(
     let res = BaseResponse {
         error: false,
         message: project.id.to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn get_organization_ssh(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(organization_id): Path<Uuid>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let organization = match EOrganization::find_by_id(organization_id)
+        .one(&state.db)
+        .await
+        .unwrap()
+    {
+        Some(o) => o,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Organization not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    if organization.created_by != user.id {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(BaseResponse {
+                error: true,
+                message: "Organization not found".to_string(),
+            }),
+        ));
+    }
+
+    let res = BaseResponse {
+        error: false,
+        message: format!("ed25519 {} {}", organization.public_key, organization.id),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn post_organization_ssh(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(organization_id): Path<Uuid>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let organization = match EOrganization::find_by_id(organization_id)
+        .one(&state.db)
+        .await
+        .unwrap()
+    {
+        Some(o) => o,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Organization not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    if organization.created_by != user.id {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(BaseResponse {
+                error: true,
+                message: "Organization not found".to_string(),
+            }),
+        ));
+    }
+
+    let (private_key, public_key) = generate_ssh_key(Arc::clone(&state)).unwrap();
+
+    let mut aorganization: AOrganization = organization.into();
+
+    aorganization.private_key = Set(private_key.clone());
+    aorganization.public_key = Set(public_key.clone());
+    let organization = aorganization.update(&state.db).await.unwrap();
+
+    let res = BaseResponse {
+        error: false,
+        message: format!("ed25519 {} {}", organization.public_key, organization.id),
     };
 
     Ok(Json(res))
@@ -388,7 +480,9 @@ pub async fn post_build(
         .unwrap()
         .unwrap();
 
-    let stream = get_buildlog_stream(server, build)
+
+    let (private_key, public_key) = decrypt_ssh_private_key(Arc::clone(&state), organization).unwrap();
+    let stream = get_buildlog_stream(server, build, public_key.clone(), private_key.clone())
         .map_err(|_| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -502,8 +596,6 @@ pub async fn post_servers(
         host: Set(body.host.clone()),
         port: Set(body.port),
         username: Set(body.username.clone()),
-        public_key: Set(body.public_key.clone()),
-        private_key: Set(body.private_key.clone()),
         last_connection_at: Set(*NULL_TIME),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),

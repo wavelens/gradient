@@ -9,7 +9,7 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "organization")]
 pub struct Model {
     #[sea_orm(primary_key)]
@@ -17,8 +17,24 @@ pub struct Model {
     pub name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,
+    pub public_key: String,
+    pub private_key: String,
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
+}
+
+impl std::fmt::Debug for Model {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Organization")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("description", &self.description)
+            .field("public_key", &format!("ed25519 {} {}", self.public_key, self.id))
+            .field("private_key", &"[redacted]")
+            .field("created_by", &self.created_by)
+            .field("created_at", &self.created_at)
+            .finish()
+    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

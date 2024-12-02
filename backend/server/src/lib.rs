@@ -27,7 +27,6 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::EntityTrait;
 use sea_orm::{ActiveModelTrait, Database, DatabaseConnection};
 use sea_orm_migration::prelude::*;
-use std::path::PathBuf;
 use std::sync::Arc;
 use types::*;
 use uuid::Uuid;
@@ -84,6 +83,10 @@ async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route(
             "/organization/:organization",
             get(endpoints::get_organization).post(endpoints::post_organization),
+        )
+        .route(
+            "/organization/:organization/ssh",
+            get(endpoints::get_organization_ssh).post(endpoints::post_organization_ssh),
         )
         .route(
             "/project/:project",
@@ -230,10 +233,14 @@ async fn create_debug_data(state: Arc<ServerState>) {
     let user = user.insert(&state.db).await.unwrap();
     println!("Created user {}", user.id);
 
+    let (private_key, public_key) = sources::generate_ssh_key(Arc::clone(&state)).unwrap();
+
     let organization = AOrganization {
         id: Set(Uuid::new_v4()),
         name: Set("Test Organization".to_string()),
         description: Set("Test Organization Description".to_string()),
+        public_key: Set(public_key),
+        private_key: Set(private_key),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
     };
@@ -265,12 +272,6 @@ async fn create_debug_data(state: Arc<ServerState>) {
         host: Set("localhost".to_string()),
         port: Set(22),
         username: Set("dennis".to_string()),
-        public_key: Set(PathBuf::from("/home/dennis/.ssh/keys/github.pub")
-            .to_string_lossy()
-            .to_string()),
-        private_key: Set(PathBuf::from("/home/dennis/.ssh/keys/github")
-            .to_string_lossy()
-            .to_string()),
         last_connection_at: Set(DateTime::from_timestamp(0, 0).unwrap().naive_utc()),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),

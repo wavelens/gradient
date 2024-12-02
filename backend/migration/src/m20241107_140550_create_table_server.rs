@@ -23,8 +23,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Server::Host).string().not_null())
                     .col(ColumnDef::new(Server::Port).integer().not_null())
                     .col(ColumnDef::new(Server::Username).string().not_null())
-                    .col(ColumnDef::new(Server::PublicKey).string().not_null())
-                    .col(ColumnDef::new(Server::PrivateKey).string().not_null())
                     .col(
                         ColumnDef::new(Server::LastConnectionAt)
                             .date_time()
@@ -67,8 +65,6 @@ enum Server {
     Host,
     Port,
     Username,
-    PublicKey,
-    PrivateKey,
     LastConnectionAt,
     CreatedBy,
     CreatedAt,
