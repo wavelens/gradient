@@ -116,9 +116,6 @@
         ];
       };
 
-      default = gradient;
-    };
-
     nixosConfigurations."gradient-dev" = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";
       modules = [
