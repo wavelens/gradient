@@ -5,11 +5,12 @@
  */
 
 { lib
+, git
 , installShellFiles
 , nix
+, nixVersions
 , openssl
 , pkg-config
-, nixVersions
 , rustPlatform
 }: let
   ignoredPaths = [ ".github" "target" ];
@@ -23,15 +24,16 @@ in rustPlatform.buildRustPackage {
   };
 
   nativeBuildInputs = [
-    pkg-config
     installShellFiles
+    pkg-config
   ];
 
   buildInputs = [
+    git
     nix
+    nixVersions.latest
     openssl
     pkg-config
-    nixVersions.latest
   ];
 
   cargoLock = {

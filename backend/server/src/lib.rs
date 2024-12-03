@@ -21,7 +21,7 @@ use chrono::{DateTime, Utc};
 use clap::Parser;
 use consts::*;
 use migration::Migrator;
-use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
+// use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
 use password_auth::generate_hash;
 use sea_orm::ActiveValue::Set;
 use sea_orm::EntityTrait;
@@ -62,18 +62,19 @@ async fn connect_db(cli: &Cli) -> DatabaseConnection {
 async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     let server_url = format!("{}:{}", state.cli.ip.clone(), state.cli.port.clone());
 
-    let oauth_client = if state.cli.oauth_enabled {
-        Some(BasicClient::new(
-            ClientId::new(state.cli.oauth_client_id.clone().unwrap()),
-            Some(ClientSecret::new(
-                state.cli.oauth_client_secret.clone().unwrap(),
-            )),
-            AuthUrl::new(state.cli.oauth_auth_url.clone().unwrap()).unwrap(),
-            Some(TokenUrl::new(state.cli.oauth_token_url.clone().unwrap()).unwrap()),
-        ))
-    } else {
-        None
-    };
+    // TODO: add oauth
+    // let oauth_client = if state.cli.oauth_enabled {
+    //     Some(BasicClient::new(
+    //         ClientId::new(state.cli.oauth_client_id.clone().unwrap()),
+    //         Some(ClientSecret::new(
+    //             state.cli.oauth_client_secret.clone().unwrap(),
+    //         )),
+    //         AuthUrl::new(state.cli.oauth_auth_url.clone().unwrap()).unwrap(),
+    //         Some(TokenUrl::new(state.cli.oauth_token_url.clone().unwrap()).unwrap()),
+    //     ))
+    // } else {
+    //     None
+    // };
 
     let app = Router::new()
         .route(
@@ -105,6 +106,7 @@ async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/server",
             get(endpoints::get_servers).post(endpoints::post_servers),
         )
+        .route("/server/:server/check", post(endpoints::post_server_check))
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             auth::authorize,
@@ -233,7 +235,8 @@ async fn create_debug_data(state: Arc<ServerState>) {
     let user = user.insert(&state.db).await.unwrap();
     println!("Created user {}", user.id);
 
-    let (private_key, public_key) = sources::generate_ssh_key(Arc::clone(&state)).unwrap();
+    let (private_key, public_key) =
+        sources::generate_ssh_key(state.cli.crypt_secret.clone()).unwrap();
 
     let organization = AOrganization {
         id: Set(Uuid::new_v4()),

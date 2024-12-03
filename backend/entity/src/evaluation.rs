@@ -33,7 +33,7 @@ pub struct Model {
     pub id: Uuid,
     pub project: Uuid,
     pub repository: String,
-    pub commit: String,
+    pub commit: Uuid,
     pub status: EvaluationStatus,
     pub previous: Option<Uuid>,
     pub next: Option<Uuid>,
@@ -48,6 +48,12 @@ pub enum Relation {
         to = "super::project::Column::Id"
     )]
     Project,
+    #[sea_orm(
+        belongs_to = "super::commit::Entity",
+        from = "Column::Commit",
+        to = "super::commit::Column::Id"
+    )]
+    Commit,
     #[sea_orm(
         belongs_to = "super::evaluation::Entity",
         from = "Column::Previous",

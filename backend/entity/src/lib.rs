@@ -10,6 +10,7 @@ pub mod api;
 pub mod build;
 pub mod build_dependency;
 pub mod build_feature;
+pub mod commit;
 pub mod evaluation;
 pub mod feature;
 pub mod organization;

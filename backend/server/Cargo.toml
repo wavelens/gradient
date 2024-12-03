@@ -8,17 +8,17 @@ edition = "2021"
 
 [dependencies]
 async-ssh2-lite = { version = "0.5.0", features = ["tokio"] }
-axum = "0.7.7"
+axum = "0.7.9"
 chrono = "0.4.38"
-clap = { version = "4.5.20", features = ["derive", "env"] }
+clap = { version = "4.5.21", features = ["derive", "env"] }
 futures = "0.3.31"
 nix-daemon = { path = "../nix-daemon" }
-sea-orm = { version = "1.0.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
-sea-orm-migration = { version = "1.1.1", features = ["with-uuid", "with-chrono", "with-json", "sqlx-postgres", "sea-orm-cli", "runtime-tokio"] }
-serde = { version = "1.0.210", features = ["derive"] }
-tokio = { version = "1.40.0", features = ["process", "rt-multi-thread"] }
-uuid = { version = "1.10.0", features = ["fast-rng", "macro-diagnostics", "v4"] }
-serde_json = "1.0.132"
+sea-orm = { version = "1.1.2", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
+sea-orm-migration = { version = "1.1.2", features = ["with-uuid", "with-chrono", "with-json", "sqlx-postgres", "sea-orm-cli", "runtime-tokio"] }
+serde = { version = "1.0.215", features = ["derive"] }
+tokio = { version = "1.41.1", features = ["process", "rt-multi-thread"] }
+uuid = { version = "1.11.0", features = ["fast-rng", "macro-diagnostics", "v4"] }
+serde_json = "1.0.133"
 migration = { path = "../migration" }
 entity = { path = "../entity" }
 oauth2 = "4.4.2"
@@ -30,7 +30,7 @@ jsonwebtoken = "9.3.0"
 rand = "0.8.5"
 axum-streams = { version = "0.19.0", features = ["json"] }
 async-stream = "0.3.6"
-ed25519-dalek = { version = "2.1.1", features = ["pem", "pkcs8", "rand_core"] }
 pkcs8 = "0.10.2"
 crypter = "0.2.1"
 base64 = "0.22.1"
+ssh-key = { version = "0.6.7", features = ["ed25519"] }

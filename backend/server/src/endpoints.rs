@@ -21,14 +21,13 @@ use uuid::Uuid;
 use super::auth::{encode_jwt, generate_api_key, update_last_login};
 use super::consts::*;
 use super::evaluator::add_features;
-use super::executer::get_buildlog_stream;
+use super::executer::{connect, get_buildlog_stream};
 use super::requests::*;
-use super::types::*;
 use super::sources::*;
+use super::types::*;
 
 // TODO: USER AUTHENTICATION + User specific endpoints
 // TODO: sanitize inputs
-// TODO: use macros
 
 pub async fn handle_404() -> (StatusCode, Json<BaseResponse<String>>) {
     (
@@ -81,7 +80,17 @@ pub async fn post_organizations(
     Extension(user): Extension<MUser>,
     Json(body): Json<MakeOrganizationRequest>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let (private_key, public_key) = generate_ssh_key(Arc::clone(&state)).unwrap();
+    let (private_key, public_key) =
+        generate_ssh_key(state.cli.crypt_secret.clone()).map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Failed to generate SSH key".to_string(),
+                }),
+            )
+        })?;
+
     let organization = AOrganization {
         id: Set(Uuid::new_v4()),
         name: Set(body.name.clone()),
@@ -251,7 +260,7 @@ pub async fn get_organization_ssh(
 
     let res = BaseResponse {
         error: false,
-        message: format!("ssh-ed25519 {} {}", organization.public_key, organization.id),
+        message: format_public_key(organization),
     };
 
     Ok(Json(res))
@@ -289,7 +298,7 @@ pub async fn post_organization_ssh(
         ));
     }
 
-    let (private_key, public_key) = generate_ssh_key(Arc::clone(&state)).unwrap();
+    let (private_key, public_key) = generate_ssh_key(state.cli.crypt_secret.clone()).unwrap();
 
     let mut aorganization: AOrganization = organization.into();
 
@@ -299,7 +308,7 @@ pub async fn post_organization_ssh(
 
     let res = BaseResponse {
         error: false,
-        message: format!("ssh-ed25519 {} {}", organization.public_key, organization.id),
+        message: format_public_key(organization),
     };
 
     Ok(Json(res))
@@ -352,16 +361,23 @@ pub async fn get_project(
 }
 
 pub async fn post_project(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Path(project_id): Path<Uuid>,
+    _state: State<Arc<ServerState>>,
+    Extension(_user): Extension<MUser>,
+    Path(_project_id): Path<Uuid>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let res = BaseResponse {
-        error: false,
-        message: "Project configured successfully".to_string(),
-    };
+    Err((
+        StatusCode::NOT_IMPLEMENTED,
+        Json(BaseResponse {
+            error: true,
+            message: "not implemented yet".to_string(),
+        }),
+    ))
+    // let res = BaseResponse {
+    //     error: false,
+    //     message: "Project configured successfully".to_string(),
+    // };
 
-    Ok(Json(res))
+    // Ok(Json(res))
 }
 
 pub async fn get_build(
@@ -420,7 +436,7 @@ pub async fn post_build(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(build_id): Path<Uuid>,
-    Json(body): Json<MakeBuildRequest>,
+    Json(_body): Json<MakeBuildRequest>,
 ) -> Result<StreamBodyAs<'static>, (StatusCode, Json<BaseResponse<String>>)> {
     let build = match EBuild::find_by_id(build_id).one(&state.db).await.unwrap() {
         Some(b) => b,
@@ -480,8 +496,8 @@ pub async fn post_build(
         .unwrap()
         .unwrap();
 
-
-    let (private_key, public_key) = decrypt_ssh_private_key(Arc::clone(&state), organization).unwrap();
+    let (private_key, public_key) =
+        decrypt_ssh_private_key(state.cli.crypt_secret.clone(), organization).unwrap();
     let stream = get_buildlog_stream(server, build, public_key.clone(), private_key.clone())
         .map_err(|_| {
             (
@@ -651,6 +667,63 @@ pub async fn post_servers(
     Ok(Json(res))
 }
 
+pub async fn post_server_check(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(server_id): Path<Uuid>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let server = match EServer::find_by_id(server_id).one(&state.db).await.unwrap() {
+        Some(s) => s,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Server not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let organization = EOrganization::find_by_id(server.organization)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    if organization.created_by != user.id {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(BaseResponse {
+                error: true,
+                message: "Server not found".to_string(),
+            }),
+        ));
+    }
+
+    let (private_key, public_key) =
+        decrypt_ssh_private_key(state.cli.crypt_secret.clone(), organization.clone()).unwrap();
+
+    match connect(server, None, public_key, private_key).await {
+        Ok(_) => {
+            let res = BaseResponse {
+                error: false,
+                message: "server is online".to_string(),
+            };
+
+            Ok(Json(res))
+        }
+        Err(_) => {
+            let res = BaseResponse {
+                error: true,
+                message: "server connection failed".to_string(),
+            };
+
+            Ok(Json(res))
+        }
+    }
+}
+
 pub async fn get_user(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -681,9 +754,9 @@ pub async fn get_user(
 }
 
 pub async fn post_user(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Path(user_id): Path<Uuid>,
+    _state: State<Arc<ServerState>>,
+    Extension(_user): Extension<MUser>,
+    Path(_user_id): Path<Uuid>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     Err((
         StatusCode::NOT_IMPLEMENTED,
@@ -795,7 +868,7 @@ pub async fn post_login(
 }
 
 pub async fn post_logout(
-    state: State<Arc<ServerState>>,
+    _state: State<Arc<ServerState>>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let res = BaseResponse {
         error: false,

@@ -10,6 +10,7 @@ mod m20241107_135027_create_table_user;
 mod m20241107_135442_create_table_organization;
 mod m20241107_135941_create_table_project;
 mod m20241107_140540_create_table_feature;
+mod m20241107_140545_create_table_commit;
 mod m20241107_140550_create_table_server;
 mod m20241107_140560_create_table_build;
 mod m20241107_140600_create_table_evaluation;
@@ -29,6 +30,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20241107_135442_create_table_organization::Migration),
             Box::new(m20241107_135941_create_table_project::Migration),
             Box::new(m20241107_140540_create_table_feature::Migration),
+            Box::new(m20241107_140545_create_table_commit::Migration),
             Box::new(m20241107_140600_create_table_evaluation::Migration),
             Box::new(m20241107_140550_create_table_server::Migration),
             Box::new(m20241107_140560_create_table_build::Migration),

@@ -139,16 +139,29 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
         .unwrap()
         .unwrap();
 
-    let (private_key, public_key) = decrypt_ssh_private_key(Arc::clone(&state), organization).unwrap();
+    let (private_key, public_key) =
+        decrypt_ssh_private_key(state.cli.crypt_secret.clone(), organization).unwrap();
 
-    let mut server_deamon = connect(server.clone(), None, public_key.clone(), private_key.clone()).await;
+    let mut server_deamon = connect(
+        server.clone(),
+        None,
+        public_key.clone(),
+        private_key.clone(),
+    )
+    .await;
     for _ in 1..3 {
         if server_deamon.is_ok() {
             break;
         };
 
         time::sleep(Duration::from_secs(5)).await;
-        server_deamon = connect(server.clone(), None, public_key.clone(), private_key.clone()).await;
+        server_deamon = connect(
+            server.clone(),
+            None,
+            public_key.clone(),
+            private_key.clone(),
+        )
+        .await;
     }
 
     let mut server_daemon = if let Ok(daemon) = server_deamon {
@@ -236,12 +249,15 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             .filter_map(|p| {
                 let intern_state = Arc::clone(&state);
                 async move {
-                    if !check_project_updates(Arc::clone(&intern_state), &p).await {
+                    let (has_update, commit_hash) =
+                        check_project_updates(Arc::clone(&intern_state), &p).await;
+
+                    if !has_update {
                         return None;
                     }
 
                     if let Some(evaluation) = p.last_evaluation {
-                        EEvaluation::find_by_id(evaluation)
+                        match EEvaluation::find_by_id(evaluation)
                             .filter(
                                 Condition::any()
                                     .add(CEvaluation::Status.eq(EvaluationStatus::Completed))
@@ -250,22 +266,29 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                             )
                             .one(&intern_state.db)
                             .await
-                            .unwrap_or(None)
+                        {
+                            Ok(Some(eval)) => Some((eval, commit_hash)),
+                            Ok(None) => None,
+                            Err(_) => None,
+                        }
                     } else {
-                        Some(MEvaluation {
-                            id: Uuid::nil(),
-                            project: p.id,
-                            repository: p.repository,
-                            commit: "HEAD".to_string(),
-                            status: EvaluationStatus::Queued,
-                            previous: None,
-                            next: None,
-                            created_at: Utc::now().naive_utc(),
-                        })
+                        Some((
+                            MEvaluation {
+                                id: Uuid::nil(),
+                                project: p.id,
+                                repository: p.repository,
+                                commit: Uuid::nil(),
+                                status: EvaluationStatus::Queued,
+                                previous: None,
+                                next: None,
+                                created_at: Utc::now().naive_utc(),
+                            },
+                            commit_hash,
+                        ))
                     }
                 }
             })
-            .collect::<Vec<MEvaluation>>()
+            .collect::<Vec<(MEvaluation, Vec<u8>)>>()
             .await;
 
         if evaluations.is_empty() {
@@ -273,7 +296,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             continue;
         }
 
-        let evaluation = evaluations.first().unwrap();
+        let (evaluation, commit_hash) = evaluations.first().unwrap();
 
         let project = projects
             .into_iter()
@@ -292,11 +315,20 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             Some(evaluation.id)
         };
 
+        let acommit = ACommit {
+            id: Set(Uuid::new_v4()),
+            // TODO: fetch commit message
+            message: Set("".to_string()),
+            hash: Set(commit_hash.clone()),
+        };
+
+        let commit = acommit.insert(&state.db).await.unwrap();
+
         let new_evaluation = AEvaluation {
             id: Set(Uuid::new_v4()),
             project: Set(project.id),
             repository: Set(project.repository.clone()),
-            commit: Set("HEAD".to_string()),
+            commit: Set(commit.id),
             status: Set(EvaluationStatus::Queued),
             previous: Set(evaluation_id),
             next: Set(None),

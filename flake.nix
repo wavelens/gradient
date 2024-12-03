@@ -18,6 +18,7 @@
   outputs = { self, nixpkgs, microvm, flake-utils, ... }@inputs: flake-utils.lib.eachDefaultSystem (system: let
     pkgs = import nixpkgs {
       inherit system;
+      overlays = map (v: self.overlays.${v}) (builtins.attrNames self.overlays);
       config = { allowUnfree = true; };
     };
 
@@ -115,6 +116,9 @@
           self.overlays.default
         ];
       };
+
+      default = gradient;
+    };
 
     nixosConfigurations."gradient-dev" = nixpkgs.lib.nixosSystem {
       system = "x86_64-linux";

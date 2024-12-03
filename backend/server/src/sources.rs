@@ -4,55 +4,146 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  */
 
-use std::sync::Arc;
-use pkcs8::{EncodePrivateKey, EncodePublicKey};
 use base64::{engine::general_purpose, Engine as _};
-use ed25519_dalek::SigningKey;
+use entity::evaluation::EvaluationStatus;
 use rand::rngs::OsRng;
+use sea_orm::EntityTrait;
+use ssh_key::{Algorithm, LineEnding, PrivateKey};
+use std::sync::Arc;
+use tokio::process::Command;
 
+use super::input::hex_to_vec;
 use super::types::*;
 
-pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) -> bool {
+pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) -> (bool, Vec<u8>) {
     println!("Checking for updates on project: {}", project.id);
-    // TODO: dummy
 
-    // let evaluation = EEvaluation::find_by_id(project.last_evaluation)
-    //     .one(&state.db)
-    //     .await
-    //     .unwrap();
+    let output = match Command::new("git")
+        .arg("ls-remote")
+        .arg(&project.repository)
+        .output()
+        .await
+    {
+        Ok(output) => output.stdout,
+        Err(_) => return (false, vec![]),
+    };
 
+    let output = String::from_utf8(output).unwrap();
+    let output = output.lines().collect::<Vec<&str>>();
 
-    true
+    // TODO: Error handling
+    if output.len() != 1 {
+        return (false, vec![]);
+    }
+
+    let output = output[0].split_whitespace().collect::<Vec<&str>>();
+
+    if output.len() != 2 {
+        return (false, vec![]);
+    }
+
+    let remote_hash = hex_to_vec(output[0]).unwrap();
+
+    if let Some(last_evaluation) = project.last_evaluation {
+        let evaluation = EEvaluation::find_by_id(last_evaluation)
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        if evaluation.status == EvaluationStatus::Queued
+            || evaluation.status == EvaluationStatus::Evaluating
+            || evaluation.status == EvaluationStatus::Building
+        {
+            return (false, vec![]);
+        }
+
+        let commit = ECommit::find_by_id(evaluation.commit)
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        if commit.hash == remote_hash {
+            return (false, vec![]);
+        }
+    }
+
+    (true, remote_hash)
 }
 
-pub fn generate_ssh_key(state: Arc<ServerState>) -> Result<(String, String), String> {
+pub fn generate_ssh_key(secret: String) -> Result<(String, String), String> {
     let mut csprng = OsRng;
-    let signing_key = SigningKey::generate(&mut csprng);
+    let private_key = PrivateKey::random(&mut csprng, Algorithm::Ed25519)
+        .map_err(|e| "Failed to generate SSH key pair: ".to_string() + &e.to_string())?;
 
-    let private_key_pem = signing_key
-        .to_pkcs8_pem(pkcs8::LineEnding::LF)
-        .unwrap_or_else(|_| panic!("Failed to encode private key to PEM"))
+    let private_key_openssh = private_key.to_openssh(LineEnding::LF).unwrap().to_string();
+
+    let public_key_openssh = private_key
+        .public_key()
+        .to_openssh()
+        .unwrap()
+        .to_string()
+        .split_whitespace()
+        .collect::<Vec<&str>>()[1]
         .to_string();
 
-    let verifying_key = signing_key.verifying_key();
-    let public_key_pem = verifying_key
-        .to_public_key_pem(pkcs8::LineEnding::LF)
-        .unwrap_or_else(|_| panic!("Failed to encode public key to PEM"));
+    let public_key_openssh = format!("{} {}", Algorithm::Ed25519.as_str(), public_key_openssh);
 
-    let secret = general_purpose::STANDARD.decode(&state.cli.crypt_secret).unwrap();
-    let encrypted_private_key = crypter::encrypt(secret, &private_key_pem).unwrap();
+    let secret = general_purpose::STANDARD.decode(secret).unwrap();
+    let encrypted_private_key = crypter::encrypt(secret, &private_key_openssh).unwrap();
     let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_private_key);
 
-    Ok((encrypted_private_key, public_key_pem))
+    Ok((encrypted_private_key, public_key_openssh))
 }
 
-pub fn decrypt_ssh_private_key(state: Arc<ServerState>, organization: MOrganization) -> Result<(String, String), String> {
-    let secret = general_purpose::STANDARD.decode(&state.cli.crypt_secret).unwrap();
-    let encrypted_private_key = general_purpose::STANDARD.decode(organization.private_key).unwrap();
+pub fn decrypt_ssh_private_key(
+    secret: String,
+    organization: MOrganization,
+) -> Result<(String, String), String> {
+    let secret = general_purpose::STANDARD.decode(secret).unwrap();
+    let encrypted_private_key = general_purpose::STANDARD
+        .decode(organization.clone().private_key)
+        .unwrap();
     let decrypted_private_key = crypter::decrypt(secret, encrypted_private_key).unwrap();
     let decrypted_private_key = String::from_utf8(decrypted_private_key).unwrap();
-    let formatted_public_key = format!("ssh-ed25519 {} {}", organization.public_key, organization.id);
+    let formatted_public_key = format_public_key(organization);
 
     Ok((decrypted_private_key, formatted_public_key))
 }
 
+pub fn format_public_key(organization: MOrganization) -> String {
+    format!("{} {}", organization.public_key, organization.id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::NULL_TIME;
+
+    #[test]
+    fn test_check_generate_ssh_key() {
+        let secret = general_purpose::STANDARD.encode("invalid");
+        let (encrypted_private_key, public_key_openssh) = generate_ssh_key(secret.clone()).unwrap();
+
+        let organization = MOrganization {
+            id: uuid::Uuid::nil(),
+            name: "test".to_string(),
+            description: "test".to_string(),
+            public_key: public_key_openssh,
+            private_key: encrypted_private_key,
+            created_by: uuid::Uuid::nil(),
+            created_at: *NULL_TIME,
+        };
+
+        let (_decrypted_private_key, _formatted_public_key) =
+            decrypt_ssh_private_key(secret, organization.clone()).unwrap();
+
+        println!("{}", _decrypted_private_key);
+        println!("{}", format_public_key(organization.clone()));
+
+        assert!(
+            format_public_key(organization).starts_with("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI")
+        );
+    }
+}

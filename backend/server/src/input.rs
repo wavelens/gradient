@@ -59,6 +59,17 @@ pub fn greater_than_zero<
     }
 }
 
+pub fn hex_to_vec(s: &str) -> Result<Vec<u8>, String> {
+    if s.len() % 2 != 0 {
+        return Err("invalid hex string".to_string());
+    }
+
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +135,26 @@ mod tests {
 
         let num = greater_than_zero::<f32>("1.0").unwrap();
         assert_eq!(num, 1.0);
+    }
+
+    #[test]
+    fn test_hex_to_vec() {
+        let vec = hex_to_vec("68656c6c6f").unwrap();
+        assert_eq!(vec, vec![0x68, 0x65, 0x6c, 0x6c, 0x6f]);
+
+        let vec = hex_to_vec("11c2f8505c234697ccabbc96e5b8a76daf0f31d3").unwrap();
+        assert_eq!(
+            vec,
+            vec![
+                0x11, 0xc2, 0xf8, 0x50, 0x5c, 0x23, 0x46, 0x97, 0xcc, 0xab, 0xbc, 0x96, 0xe5, 0xb8,
+                0xa7, 0x6d, 0xaf, 0x0f, 0x31, 0xd3
+            ]
+        );
+
+        let vec = hex_to_vec("68656c6c6").unwrap_err();
+        assert_eq!(vec.to_string(), "invalid hex string");
+
+        let vec = hex_to_vec("68656c6c6g").unwrap_err();
+        assert_eq!(vec.to_string(), "invalid digit found in string");
     }
 }

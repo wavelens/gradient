@@ -29,7 +29,7 @@ impl std::fmt::Debug for Model {
             .field("id", &self.id)
             .field("name", &self.name)
             .field("description", &self.description)
-            .field("public_key", &format!("ssh-ed25519 {} {}", self.public_key, self.id))
+            .field("public_key", &format!("{} {}", self.public_key, self.id))
             .field("private_key", &"[redacted]")
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)

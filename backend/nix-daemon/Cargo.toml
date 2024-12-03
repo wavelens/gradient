@@ -17,18 +17,18 @@ categories = ["api-bindings"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-stream = "0.3.5"
-bytes = "1.6.0"
-chrono = "0.4.31"
-futures = "0.3.29"
-num_enum = "0.7.1"
+async-stream = "0.3.6"
+bytes = "1.9.0"
+chrono = "0.4.38"
+futures = "0.3.31"
+num_enum = "0.7.3"
 tap = "1.0.1"
-thiserror = "1.0.50"
-tokio = { version = "1.40.0", features = ["rt", "macros", "parking_lot", "io-util", "net"] }
-tokio-stream = "0.1.14"
-tokio-test = "0.4.3"
-tracing = "0.1.40"
+thiserror = "2.0.3"
+tokio = { version = "1.41.1", features = ["rt", "macros", "parking_lot", "io-util", "net"] }
+tokio-stream = "0.1.16"
+tokio-test = "0.4.4"
+tracing = "0.1.41"
 
 [dev-dependencies]
 rand = "0.8.5"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

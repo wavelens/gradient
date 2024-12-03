@@ -94,7 +94,7 @@ with subtest("check api /organization/:id"):
     assert req.get("message").get("id") == org_id, "Organization ID should match"
 
     req = json.loads(machine.succeed("""
-        curl -XPOST http://localhost:3000/organization/org_id -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "MyProject", "description": "My Project", "repository": "git+ssh://gitea@git.wavelens.io:12/Wavelens/nix-ai-docs.git?ref=main"}'
+        curl -XPOST http://localhost:3000/organization/org_id -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "MyProject", "description": "My Project", "repository": "git@github.com:Wavelens/Gradient.git"}'
     """.replace("api_key", api_key).replace("org_id", org_id)))
 
     assert req.get("error") == False, req.get("message")
@@ -111,7 +111,7 @@ with subtest("check api /organization/:id/ssh"):
 
     ssh_key = req.get("message")
 
-    assert ssh_key.startswith("ssh-ed25519 AAAAC3Nza"), f"invalid ssh-key: {ssh_key}"
+    assert ssh_key.startswith("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI"), f"invalid ssh-key: {ssh_key}"
 
     req = json.loads(machine.succeed("""
         curl -XPOST http://localhost:3000/organization/org_id/ssh -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json'
