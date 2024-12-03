@@ -18,9 +18,6 @@ use super::types::*;
 pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) -> (bool, Vec<u8>) {
     println!("Checking for updates on project: {}", project.id);
 
-
-    // TODO: check if git url is valid
-
     let cmd = match Command::new("git")
         .arg("ls-remote")
         .arg(&project.repository)
@@ -62,7 +59,7 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
             || evaluation.status == EvaluationStatus::Evaluating
             || evaluation.status == EvaluationStatus::Building
         {
-            return (false, vec![]);
+            return (false, remote_hash);
         }
 
         let commit = ECommit::find_by_id(evaluation.commit)
@@ -72,7 +69,7 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
             .unwrap();
 
         if commit.hash == remote_hash {
-            return (false, vec![]);
+            return (false, remote_hash);
         }
     }
 

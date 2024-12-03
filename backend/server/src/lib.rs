@@ -94,6 +94,10 @@ async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             get(endpoints::get_project).post(endpoints::post_project),
         )
         .route(
+            "/api/project/:project/check-repository",
+            post(endpoints::post_project_check_repository),
+        )
+        .route(
             "/api/build/:build",
             get(endpoints::get_build).post(endpoints::post_build),
         )

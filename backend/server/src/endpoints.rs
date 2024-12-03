@@ -26,6 +26,7 @@ use super::executer::{connect, get_buildlog_stream};
 use super::requests::*;
 use super::sources::*;
 use super::types::*;
+use super::input::vec_to_hex;
 
 // TODO: USER AUTHENTICATION + User specific endpoints
 // TODO: sanitize inputs
@@ -167,7 +168,6 @@ pub async fn post_organization(
             }),
         )
     })?;
-
 
     let organization = match EOrganization::find_by_id(organization_id)
         .one(&state.db)
@@ -390,6 +390,64 @@ pub async fn post_project(
     // };
 
     // Ok(Json(res))
+}
+
+pub async fn post_project_check_repository(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(project_id): Path<Uuid>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let project = match EProject::find_by_id(project_id)
+        .one(&state.db)
+        .await
+        .unwrap()
+    {
+        Some(p) => p,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Project not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let organization = EOrganization::find_by_id(project.organization)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    if organization.created_by != user.id {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(BaseResponse {
+                error: true,
+                message: "Project not found".to_string(),
+            }),
+        ));
+    }
+
+    let (_has_updates, remote_hash) = check_project_updates(Arc::clone(&state), &project).await;
+
+    if !remote_hash.is_empty() {
+        let res = BaseResponse {
+            error: false,
+            message: vec_to_hex(&remote_hash),
+        };
+
+        Ok(Json(res))
+    } else {
+        Err((
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(BaseResponse {
+                error: true,
+                message: "Failed to check repository".to_string(),
+            }),
+        ))
+    }
 }
 
 pub async fn get_build(
