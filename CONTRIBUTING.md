@@ -1,11 +1,11 @@
 # Contributing to the Project
 
 We welcome contributions to this project. Please respect the code of conduct.
-When contributing to this repository, please first discuss the change you wish to make via issue, email, or any other method with the owners of this repository before making a change.
+When contributing to this repository, please first discuss the change you wish to make via issue or any other method with the maintainers of this repository before making a change.
 
 ## Licensing
 
-This project is licensed under the Affero General Public License (AGPL) version 3.0. By contributing to this project, you agree that your contributions will be licensed under the AGPL-3.0 license.
+This project is licensed under the Affero General Public License (AGPL) version 3.0 and the Wavelens License (WL) version 1.0. By contributing to this project, you agree that your contributions will be licensed under the AGPL-3.0 and the WL-1.0 license.
 
 ## Code of Conduct
 

@@ -58,10 +58,11 @@
   {
     checks = import ./nix/tests { inherit inputs system pkgs; };
     packages = rec {
-      gradient = pkgs.callPackage ./nix/packages/gradient.nix { };
+      gradient-server = pkgs.callPackage ./nix/packages/gradient-server.nix { };
+      gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
       "vm-gradient-dev" = self.nixosConfigurations."gradient-dev".config.microvm.declaredRunner;
       db = pkgs.callPackage ./nix/scripts/postgres.nix { };
-      default = gradient;
+      default = gradient-server;
     };
 
     devShells.default = with pkgs; mkShell {
@@ -105,8 +106,9 @@
     };
   }) // {
     overlays = rec {
-      gradient = final: prev: { inherit (self.packages.${final.system}) gradient; };
-      default = gradient;
+      gradient-server = final: prev: { inherit (self.packages.${final.system}) gradient-server; };
+      gradient-frontend = final: prev: { inherit (self.packages.${final.system}) gradient-frontend; };
+      default = gradient-server;
     };
 
     nixosModules = rec {

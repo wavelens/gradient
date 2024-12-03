@@ -15,7 +15,7 @@
 }: let
   ignoredPaths = [ ".github" "target" ];
 in rustPlatform.buildRustPackage {
-  pname = "gradient";
+  pname = "gradient-server";
   version = "0.1.0";
 
   src = lib.cleanSourceWith {
@@ -43,12 +43,11 @@ in rustPlatform.buildRustPackage {
 
   NIX_INCLUDE_PATH = "${lib.getDev nix}/include";
 
-  doCheck = false;
-
   meta = {
-    description = "Nix Build Server";
+    description = "Nix Continuous Integration System Backend";
     homepage = "https://wavelens.io";
-    platforms = lib.platforms.linux;
+    license = lib.licenses.agpl3Only;
+    platforms = lib.platforms.unix;
     mainProgram = "backend";
   };
 }

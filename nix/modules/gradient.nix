@@ -7,10 +7,21 @@
 { lib, pkgs, config, ... }: let
   cfg = config.services.gradient;
 in {
+  imports = [
+    ./gradient-frontend.nix
+  ];
+
   options = {
     services.gradient = {
       enable = lib.mkEnableOption "Enable Gradient";
-      package = lib.mkPackageOption pkgs "gradient" { };
+      configureNginx = lib.mkEnableOption "Configure Nginx";
+      package = lib.mkPackageOption pkgs "gradient-server" { };
+      domain = lib.mkOption {
+        description = "The domain under which Gradient runs.";
+        type = lib.types.str;
+        example = "gradient.example.com";
+      };
+
       user = lib.mkOption {
         description = "The group under which Gradient runs.";
         type = lib.types.str;
@@ -55,8 +66,8 @@ in {
     };
   };
 
-  config = {
-    systemd.services.gradient = {
+  config = lib.mkIf cfg.enable {
+    systemd.services.gradient-server = {
       wantedBy = [ "multi-user.target" ];
       after = [
         "network.target"
@@ -93,6 +104,21 @@ in {
         GRADIENT_MAX_CONCURRENT_BUILDS = toString 1;
         GRADIENT_OAUTH_ENABLE = lib.mkForce (if cfg.oauthEnable then "true" else "false");
         GRADIENT_CRYPT_SECRET = cfg.cryptSecret;
+      };
+    };
+
+    services.nginx = lib.mkIf cfg.configureNginx {
+      enable = true;
+      virtualHosts."${cfg.domain}".locations = {
+        "/" = lib.mkIf cfg.frontend.enable {
+          proxyPass = "http://127.0.0.1:${toString config.services.gradient.frontend.port}";
+          proxyWebsockets = true;
+        };
+
+        "/api" = {
+          proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
+          proxyWebsockets = true;
+        };
       };
     };
   };

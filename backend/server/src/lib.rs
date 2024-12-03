@@ -78,43 +78,43 @@ async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
 
     let app = Router::new()
         .route(
-            "/organization",
+            "/api/organization",
             get(endpoints::get_organizations).post(endpoints::post_organizations),
         )
         .route(
-            "/organization/:organization",
+            "/api/organization/:organization",
             get(endpoints::get_organization).post(endpoints::post_organization),
         )
         .route(
-            "/organization/:organization/ssh",
+            "/api/organization/:organization/ssh",
             get(endpoints::get_organization_ssh).post(endpoints::post_organization_ssh),
         )
         .route(
-            "/project/:project",
+            "/api/project/:project",
             get(endpoints::get_project).post(endpoints::post_project),
         )
         .route(
-            "/build/:build",
+            "/api/build/:build",
             get(endpoints::get_build).post(endpoints::post_build),
         )
         .route(
-            "/user/settings/:user",
+            "/api/user/settings/:user",
             get(endpoints::get_user).post(endpoints::post_user),
         )
-        .route("/user/api", post(endpoints::post_api_key))
+        .route("/api/user/api", post(endpoints::post_api_key))
         .route(
-            "/server",
+            "/api/server",
             get(endpoints::get_servers).post(endpoints::post_servers),
         )
-        .route("/server/:server/check", post(endpoints::post_server_check))
+        .route("/api/server/:server/check", post(endpoints::post_server_check))
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             auth::authorize,
         ))
-        .route("/user/login", post(endpoints::post_login))
-        .route("/user/logout", post(endpoints::post_logout))
-        .route("/user/register", post(endpoints::post_register))
-        .route("/health", get(endpoints::get_health))
+        .route("/api/user/login", post(endpoints::post_login))
+        .route("/api/user/logout", post(endpoints::post_logout))
+        .route("/api/user/register", post(endpoints::post_register))
+        .route("/api/health", get(endpoints::get_health))
         .fallback(endpoints::handle_404)
         .with_state(state);
 
