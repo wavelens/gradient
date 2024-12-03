@@ -28,6 +28,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Build::Server).uuid())
                     .col(ColumnDef::new(Build::CreatedAt).date_time().not_null())
+                    .col(ColumnDef::new(Build::UpdatedAt).date_time().not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-build-evaluation")
@@ -64,6 +65,7 @@ enum Build {
     Architecture,
     Server,
     CreatedAt,
+    UpdatedAt,
 }
 
 #[derive(DeriveIden)]

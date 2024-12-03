@@ -116,6 +116,7 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
             if let Some((build, server)) =
                 reserve_available_server(Arc::clone(&state), &build).await
             {
+                println!("Reserving Server: {}", server.id);
                 let schedule = tokio::spawn(schedule_build(Arc::clone(&state), build, server));
                 current_schedules.push(schedule);
                 added_schedule = true;
@@ -366,6 +367,7 @@ async fn requeue_build(state: Arc<ServerState>, build: MBuild) -> MBuild {
 
     build.status = Set(BuildStatus::Queued);
     build.server = Set(None);
+    build.updated_at = Set(Utc::now().naive_utc());
     let build = build.update(&state.db).await.unwrap();
 
     println!("Requeueing build: {}", build.id);
@@ -384,7 +386,8 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                     JOIN public.build dep ON d.dependency = dep.id
                     WHERE d.build = b.id AND dep.status = 3
                 )
-                AND b.status = 1;
+                AND b.status = 1
+                ORDER BY b.updated_at ASC
             "#,
         );
 
@@ -395,7 +398,6 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
             .unwrap();
 
         if let Some(build) = build {
-            println!("Getting next build: {}", build.id);
             return build;
         } else {
             time::sleep(Duration::from_secs(5)).await;
@@ -459,10 +461,7 @@ async fn reserve_available_server(
         .unwrap();
 
     if servers.is_empty() {
-        let mut abuild: ABuild = build.clone().into();
-        abuild.status = Set(BuildStatus::Aborted);
-        abuild.update(&state.db).await.unwrap();
-
+        update_build_status(state, build.clone(), BuildStatus::Aborted).await;
         println!("Aborted build (No Servers Found): {}", build.id);
 
         return None;
@@ -476,13 +475,19 @@ async fn reserve_available_server(
             .await
             .unwrap();
 
+        let mut abuild: ABuild = build.clone().into();
         if running_builds.is_empty() {
-            let mut abuild: ABuild = build.clone().into();
             abuild.server = Set(Some(s.id));
             abuild.status = Set(BuildStatus::Building);
+            abuild.updated_at = Set(Utc::now().naive_utc());
             let build = abuild.update(&state.db).await.unwrap();
 
+            println!("Getting next build: {}", build.id);
+
             return Some((build, s));
+        } else {
+            abuild.updated_at = Set(Utc::now().naive_utc());
+            abuild.update(&state.db).await.unwrap();
         }
     }
 
@@ -496,6 +501,7 @@ async fn update_build_status(
 ) -> MBuild {
     let mut active_build: ABuild = build.into_active_model();
     active_build.status = Set(status);
+    active_build.updated_at = Set(Utc::now().naive_utc());
 
     let build = active_build.update(&state.db).await.unwrap();
 

@@ -34,3 +34,4 @@ pkcs8 = "0.10.2"
 crypter = "0.2.1"
 base64 = "0.22.1"
 ssh-key = { version = "0.6.7", features = ["ed25519"] }
+git-url-parse = "0.4.5"

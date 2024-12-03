@@ -212,6 +212,12 @@ async fn delete_all_data(state: Arc<ServerState>) {
             .await
             .unwrap();
     }
+
+    let commits = ECommit::find().all(&state.db).await.unwrap();
+    for c in commits {
+        let commit: ACommit = c.into();
+        ECommit::delete(commit).exec(&state.db).await.unwrap();
+    }
 }
 
 async fn create_debug_data(state: Arc<ServerState>) {
@@ -257,7 +263,7 @@ async fn create_debug_data(state: Arc<ServerState>) {
         name: Set("Good Project".to_string()),
         description: Set("Test Good Project Description".to_string()),
         repository: Set(
-            "git+ssh://gitea@git.wavelens.io:12/Wavelens/nix-ai-docs.git?ref=main".to_string(),
+            "ssh://git@github.com/Wavelens/Gradient.git".to_string(),
         ),
         last_evaluation: Set(None),
         last_check_at: Set(*NULL_TIME),

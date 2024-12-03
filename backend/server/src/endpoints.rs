@@ -17,6 +17,7 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use uuid::Uuid;
+use git_url_parse::normalize_url;
 
 use super::auth::{encode_jwt, generate_api_key, update_last_login};
 use super::consts::*;
@@ -157,6 +158,17 @@ pub async fn post_organization(
     Path(organization_id): Path<Uuid>,
     Json(body): Json<MakeProjectRequest>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let repository_url = normalize_url(body.repository.clone().as_str()).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: "Invalid Repository URL".to_string(),
+            }),
+        )
+    })?;
+
+
     let organization = match EOrganization::find_by_id(organization_id)
         .one(&state.db)
         .await
@@ -209,7 +221,7 @@ pub async fn post_organization(
         organization: Set(organization.id),
         name: Set(body.name.clone()),
         description: Set(body.description.clone()),
-        repository: Set(body.repository.clone()),
+        repository: Set(repository_url.to_string()),
         last_evaluation: Set(None),
         last_check_at: Set(*NULL_TIME),
         created_by: Set(user.id),

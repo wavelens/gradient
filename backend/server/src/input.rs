@@ -4,8 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  */
 
-use super::consts::*;
 use std::net::{SocketAddr, ToSocketAddrs};
+
+use super::consts::*;
 
 pub fn url_to_addr(host: &str, port: i32) -> Result<SocketAddr, Box<dyn std::error::Error>> {
     let port = port as usize;
@@ -70,9 +71,24 @@ pub fn hex_to_vec(s: &str) -> Result<Vec<u8>, String> {
         .collect()
 }
 
+pub fn vec_to_hex(v: &[u8]) -> String {
+    v.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+pub fn repository_url_to_nix(url: &str, commit_hash: &str) -> Result<String, String> {
+    let url = if url.starts_with("ssh://") {
+        format!("git+{}", url)
+    } else {
+        url.to_string()
+    };
+
+    Ok(format!("{}?rev={}", url, commit_hash))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use git_url_parse::normalize_url;
 
     #[test]
     fn test_url_to_addr() {
@@ -156,5 +172,14 @@ mod tests {
 
         let vec = hex_to_vec("68656c6c6g").unwrap_err();
         assert_eq!(vec.to_string(), "invalid digit found in string");
+    }
+
+    #[test]
+    fn test_repository_url_to_nix() {
+        let url = repository_url_to_nix(normalize_url("git@github.com:Wavelens/Gradient.git").unwrap().as_str(), "11c2f8505c234697ccabbc96e5b8a76daf0f31d3").unwrap();
+        assert_eq!(url, "git+ssh://git@github.com/Wavelens/Gradient.git?rev=11c2f8505c234697ccabbc96e5b8a76daf0f31d3");
+
+        let url = repository_url_to_nix(normalize_url("https://github.com/Wavelens/Gradient.git").unwrap().as_str(), "11c2f8505c234697ccabbc96e5b8a76daf0f31d3").unwrap();
+        assert_eq!(url, "https://github.com/Wavelens/Gradient.git?rev=11c2f8505c234697ccabbc96e5b8a76daf0f31d3");
     }
 }

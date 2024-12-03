@@ -90,7 +90,7 @@ in {
         GRADIENT_DATABASE_URL = cfg.databaseUrl;
         GRADIENT_JWT_SECRET = cfg.jwtSecret;
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString 1;
-        GRADIENT_MAX_CONCURRENT_BUILDS = toString 10;
+        GRADIENT_MAX_CONCURRENT_BUILDS = toString 1;
         GRADIENT_OAUTH_ENABLE = lib.mkForce (if cfg.oauthEnable then "true" else "false");
         GRADIENT_CRYPT_SECRET = cfg.cryptSecret;
       };

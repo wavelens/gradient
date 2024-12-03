@@ -37,6 +37,7 @@ pub struct Model {
     pub architecture: super::server::Architecture,
     pub server: Option<Uuid>,
     pub created_at: NaiveDateTime,
+    pub updated_at: NaiveDateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

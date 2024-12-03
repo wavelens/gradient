@@ -25,7 +25,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Evaluation::Project).uuid().not_null())
                     .col(ColumnDef::new(Evaluation::Repository).string().not_null())
-                    .col(ColumnDef::new(Evaluation::Commit).string().not_null())
+                    .col(ColumnDef::new(Evaluation::Commit).uuid().not_null())
                     .col(ColumnDef::new(Evaluation::Status).integer().not_null())
                     .col(ColumnDef::new(Evaluation::Previous).uuid())
                     .col(ColumnDef::new(Evaluation::Next).uuid())

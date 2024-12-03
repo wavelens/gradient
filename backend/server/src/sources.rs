@@ -18,27 +18,34 @@ use super::types::*;
 pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) -> (bool, Vec<u8>) {
     println!("Checking for updates on project: {}", project.id);
 
-    let output = match Command::new("git")
+
+    // TODO: check if git url is valid
+
+    let cmd = match Command::new("git")
         .arg("ls-remote")
         .arg(&project.repository)
+        .arg("HEAD")
         .output()
         .await
     {
-        Ok(output) => output.stdout,
+        Ok(output) => output,
         Err(_) => return (false, vec![]),
     };
 
-    let output = String::from_utf8(output).unwrap();
+    let output = String::from_utf8(cmd.stdout).unwrap();
     let output = output.lines().collect::<Vec<&str>>();
 
     // TODO: Error handling
     if output.len() != 1 {
+        println!("Error: too many lines in git ls-remote output");
+        println!("{}", output.join("\n"));
         return (false, vec![]);
     }
 
     let output = output[0].split_whitespace().collect::<Vec<&str>>();
 
     if output.len() != 2 {
+        println!("Error: no hash in git ls-remote output");
         return (false, vec![]);
     }
 

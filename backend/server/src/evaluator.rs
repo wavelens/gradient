@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use super::executer::*;
 use super::types::*;
+use super::input::{repository_url_to_nix, vec_to_hex};
 
 pub async fn evaluate(
     state: Arc<ServerState>,
@@ -32,11 +33,18 @@ pub async fn evaluate(
         .unwrap()
         .organization;
 
+    let commit = ECommit::find_by_id(evaluation.commit)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let repository = repository_url_to_nix(&evaluation.repository, vec_to_hex(&commit.hash).as_str()).unwrap();
     let output = Command::new("nix")
         .arg("flake")
         .arg("show")
         .arg("--json")
-        .arg(&evaluation.repository)
+        .arg(repository.clone())
         .output()
         .await
         .map_err(|e| e.to_string())?;
@@ -70,10 +78,17 @@ pub async fn evaluate(
         {
             let path = format!(
                 "{}#packages.{}.{}",
-                evaluation.repository, system_name, package_name
+                repository, system_name, package_name
             );
+
             // TODO: use nix api
-            let (derivation, _references) = get_derivation_cmd(&path).await?;
+            let (derivation, _references) = match get_derivation_cmd(&path).await {
+                Ok((d, r)) => (d, r),
+                Err(e) => {
+                    println!("Error: {}", e);
+                    continue;
+                }
+            };
 
             let missing = get_missing_builds(vec![derivation.clone()], store).await?;
 
@@ -191,6 +206,7 @@ async fn query_all_dependencies(
             status: BuildStatus::Created,
             server: None,
             created_at: Utc::now().naive_utc(),
+            updated_at: Utc::now().naive_utc(),
         };
 
         add_features(Arc::clone(&state), features, Some(build_id), None).await;
@@ -358,7 +374,7 @@ pub async fn get_features_cmd(
         return Err("Expected JSON object but found another type".to_string());
     }
 
-    let features: Vec<String> = if let Some(pjson) = parsed_json
+    let parsed_json = parsed_json
         .as_object()
         .ok_or("Expected JSON object")?
         .get(path)
@@ -368,12 +384,22 @@ pub async fn get_features_cmd(
         .get("env")
         .ok_or("Expected JSON object with env")?
         .as_object()
-        .ok_or("Expected JSON object with env")?
+        .ok_or("Expected JSON object with env")?;
+
+    let parsed_json = if let Some(new_json) = parsed_json.get("__json") {
+        let new_json = new_json.as_str().unwrap();
+        serde_json::from_str(new_json)
+            .map_err(|e| format!("Failed to parse JSON: {:?}", e))?
+    } else {
+        parsed_json.clone()
+    };
+
+    let features: Vec<String> = if let Some(pjson) = parsed_json
         .get("requiredSystemFeatures")
     {
         pjson
             .as_array()
-            .ok_or("Expected JSON object with requiredSystemFeatures")?
+            .unwrap_or(&vec![])
             .iter()
             .map(|v| v.as_str().unwrap().to_string())
             .collect()
@@ -382,16 +408,6 @@ pub async fn get_features_cmd(
     };
 
     let system: entity::server::Architecture = parsed_json
-        .as_object()
-        .ok_or("Expected JSON object")?
-        .get(path)
-        .ok_or("Expected JSON object with path")?
-        .as_object()
-        .ok_or("Expected JSON object with path")?
-        .get("env")
-        .ok_or("Expected JSON object with env")?
-        .as_object()
-        .ok_or("Expected JSON object with env")?
         .get("system")
         .ok_or("Expected JSON object with system")?
         .as_str()
