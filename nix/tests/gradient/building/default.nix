@@ -217,6 +217,16 @@
           | ${lib.getExe pkgs.jq} -rj '.message'
       """.replace("ACCESS_TOKEN", token).replace("ORG_ID", org_id))
 
+      # test git repository pullable
+      print(builder.succeed(f"""
+        ${lib.getExe pkgs.curl} -v \
+          -X POST \
+          -H "Authorization: Bearer {token}" \
+          http://server:3000/api/project/{project_id}/check-repository
+      """))
+
+      builder.sleep(10)
+
       project_data = builder.succeed(f"""
         ${lib.getExe pkgs.curl} -v \
           -X GET \
