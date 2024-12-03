@@ -18,8 +18,17 @@
       ...
     }@inputs:
     flake-utils.lib.eachDefaultSystem (system: {
-      packages =
-        {
+      packages = { pkgs, ... }: {
+        buildWait5Sec = pkgs.stdenv.mkDerivation {
+          name = "buildWait5Sec";
+          src = ./.;
+          buildInputs = [ pkgs.bash ];
+          installPhase = ''
+            mkdir -p $out/bin
+            sleep 5
+            echo "echo 'Hello, World!'" > $out/bin/hello.sh
+          '';
         };
+      };
     });
 }
