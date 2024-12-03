@@ -718,20 +718,18 @@ pub async fn post_server_check(
 
     match connect(server, None, public_key, private_key).await {
         Ok(_) => {
-            let res = BaseResponse {
-                error: false,
-                message: "server is online".to_string(),
-            };
-
-            Ok(Json(res))
-        }
-        Err(_) => {
-            let res = BaseResponse {
+            Ok(Json(BaseResponse {
                 error: true,
                 message: "server connection failed".to_string(),
-            };
-
-            Ok(Json(res))
+            }))
+        }
+        Err(_) => {
+            Err((StatusCode::GATEWAY_TIMEOUT,
+                Json(BaseResponse {
+                    error: true,
+                    message: "server connection failed".to_string(),
+                }),
+            ))
         }
     }
 }

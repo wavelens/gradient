@@ -140,3 +140,5 @@ with subtest("check api /server"):
 
     assert req.get("error") == False, req.get("message")
 
+    server_id = req.get("message")
+
