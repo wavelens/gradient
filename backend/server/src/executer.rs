@@ -122,23 +122,21 @@ pub async fn copy_builds<
             continue;
         }
 
-        if from_store.is_valid_path(path.clone()).result().await.unwrap() {
+        if from_store
+            .is_valid_path(path.clone())
+            .result()
+            .await
+            .unwrap()
+        {
             return Err("Path is not valid on store to copy from".into());
         }
 
-        let path_info = match from_store
-            .query_pathinfo(path.clone())
-            .result()
-            .await? {
+        let path_info = match from_store.query_pathinfo(path.clone()).result().await? {
             Some(path_info) => path_info,
             None => return Err(format!("Path not found: {}", path.clone()).into()),
         };
 
-
-        from_store
-            .nar_from_path(path.clone())
-            .result()
-            .await?;
+        from_store.nar_from_path(path.clone()).result().await?;
         to_store.add_to_store_nar(path_info, &mut from_store.conn);
     }
 

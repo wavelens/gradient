@@ -18,28 +18,30 @@ use super::types::*;
 pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) -> (bool, Vec<u8>) {
     println!("Checking for updates on project: {}", project.id);
 
-    let cmd = match Command::new("git")
+    let cmd = match Command::new(state.cli.binpath_git.clone())
         .arg("ls-remote")
         .arg(&project.repository)
-        .arg("HEAD")
         .output()
         .await
     {
         Ok(output) => output,
-        Err(_) => return (false, vec![]),
+        Err(e) => {
+            println!("Error on executing command: {}", e);
+            return (false, vec![]);
+        }
     };
 
-    let output = String::from_utf8(cmd.stdout).unwrap();
-    let output = output.lines().collect::<Vec<&str>>();
+    let errmsg = String::from_utf8(cmd.stderr).unwrap();
 
-    // TODO: Error handling
-    if output.len() != 1 {
-        println!("Error: too many lines in git ls-remote output");
-        println!("{}", output.join("\n"));
+    if !errmsg.is_empty() {
+        println!("Error: {}", errmsg);
         return (false, vec![]);
     }
 
-    let output = output[0].split_whitespace().collect::<Vec<&str>>();
+    let output = String::from_utf8(cmd.stdout).unwrap();
+    let output = output.lines().collect::<Vec<&str>>()[0]
+        .split_whitespace()
+        .collect::<Vec<&str>>();
 
     if output.len() != 2 {
         println!("Error: no hash in git ls-remote output");

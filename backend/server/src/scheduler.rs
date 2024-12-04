@@ -212,15 +212,19 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
 
         Err(e) => {
             eprintln!("Failed to execute build: {}", e);
-            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed).await;
+            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed)
+                .await;
         }
     };
 
-    let output_paths = match get_output_path(build.clone().derivation_path, &mut server_daemon).await {
+    let output_paths = match get_output_path(build.clone().derivation_path, &mut server_daemon)
+        .await
+    {
         Ok(paths) => paths,
         Err(e) => {
             eprintln!("Failed to get output paths: {}", e);
-            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed).await;
+            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed)
+                .await;
             return;
         }
     };
@@ -230,7 +234,8 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
         Err(e) => {
             eprintln!("Failed to copy builds: {}", e);
             // TODO: maybe retry
-            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed).await;
+            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed)
+                .await;
         }
     }
 }

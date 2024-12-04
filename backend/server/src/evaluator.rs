@@ -16,8 +16,8 @@ use tokio::process::Command;
 use uuid::Uuid;
 
 use super::executer::*;
-use super::types::*;
 use super::input::{repository_url_to_nix, vec_to_hex};
+use super::types::*;
 
 pub async fn evaluate(
     state: Arc<ServerState>,
@@ -39,8 +39,9 @@ pub async fn evaluate(
         .unwrap()
         .unwrap();
 
-    let repository = repository_url_to_nix(&evaluation.repository, vec_to_hex(&commit.hash).as_str()).unwrap();
-    let output = Command::new("nix")
+    let repository =
+        repository_url_to_nix(&evaluation.repository, vec_to_hex(&commit.hash).as_str()).unwrap();
+    let output = Command::new(state.cli.binpath_nix.clone())
         .arg("flake")
         .arg("show")
         .arg("--json")
@@ -76,19 +77,17 @@ pub async fn evaluate(
             .as_object()
             .ok_or("Expected `packages` key in JSON object")?
         {
-            let path = format!(
-                "{}#packages.{}.{}",
-                repository, system_name, package_name
-            );
+            let path = format!("{}#packages.{}.{}", repository, system_name, package_name);
 
             // TODO: use nix api
-            let (derivation, _references) = match get_derivation_cmd(&path).await {
-                Ok((d, r)) => (d, r),
-                Err(e) => {
-                    println!("Error: {}", e);
-                    continue;
-                }
-            };
+            let (derivation, _references) =
+                match get_derivation_cmd(state.cli.binpath_nix.as_str(), &path).await {
+                    Ok((d, r)) => (d, r),
+                    Err(e) => {
+                        println!("Error: {}", e);
+                        continue;
+                    }
+                };
 
             let missing = get_missing_builds(vec![derivation.clone()], store).await?;
 
@@ -196,7 +195,10 @@ async fn query_all_dependencies(
             }
         });
 
-        let (system, features) = get_features_cmd(dependency.as_str()).await.unwrap();
+        let (system, features) =
+            get_features_cmd(state.cli.binpath_nix.as_str(), dependency.as_str())
+                .await
+                .unwrap();
 
         let build = MBuild {
             id: build_id,
@@ -299,8 +301,11 @@ async fn find_builds(
     Ok(builds)
 }
 
-pub async fn get_derivation_cmd(path: &str) -> Result<(String, Vec<String>), String> {
-    let output = Command::new("nix")
+pub async fn get_derivation_cmd(
+    binpath_nix: &str,
+    path: &str,
+) -> Result<(String, Vec<String>), String> {
+    let output = Command::new(binpath_nix)
         .arg("path-info")
         .arg("--json")
         .arg("--derivation")
@@ -348,9 +353,10 @@ pub async fn get_derivation_cmd(path: &str) -> Result<(String, Vec<String>), Str
 }
 
 pub async fn get_features_cmd(
+    binpath_nix: &str,
     path: &str,
 ) -> Result<(entity::server::Architecture, Vec<String>), String> {
-    let output = Command::new("nix")
+    let output = Command::new(binpath_nix)
         .arg("derivation")
         .arg("show")
         .arg(path)
@@ -388,15 +394,12 @@ pub async fn get_features_cmd(
 
     let parsed_json = if let Some(new_json) = parsed_json.get("__json") {
         let new_json = new_json.as_str().unwrap();
-        serde_json::from_str(new_json)
-            .map_err(|e| format!("Failed to parse JSON: {:?}", e))?
+        serde_json::from_str(new_json).map_err(|e| format!("Failed to parse JSON: {:?}", e))?
     } else {
         parsed_json.clone()
     };
 
-    let features: Vec<String> = if let Some(pjson) = parsed_json
-        .get("requiredSystemFeatures")
-    {
+    let features: Vec<String> = if let Some(pjson) = parsed_json.get("requiredSystemFeatures") {
         pjson
             .as_array()
             .unwrap_or(&vec![])

@@ -48,6 +48,10 @@ pub struct Cli {
     pub jwt_secret: String,
     #[arg(long, env = "GRADIENT_CRYPT_SECRET")]
     pub crypt_secret: String,
+    #[arg(long, env = "GRADIENT_BINPATH_NIX", default_value = "nix")]
+    pub binpath_nix: String,
+    #[arg(long, env = "GRADIENT_BINPATH_GIT", default_value = "git")]
+    pub binpath_git: String,
 }
 
 #[derive(Debug)]

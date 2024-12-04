@@ -176,10 +176,25 @@ mod tests {
 
     #[test]
     fn test_repository_url_to_nix() {
-        let url = repository_url_to_nix(normalize_url("git@github.com:Wavelens/Gradient.git").unwrap().as_str(), "11c2f8505c234697ccabbc96e5b8a76daf0f31d3").unwrap();
+        let url = repository_url_to_nix(
+            normalize_url("git@github.com:Wavelens/Gradient.git")
+                .unwrap()
+                .as_str(),
+            "11c2f8505c234697ccabbc96e5b8a76daf0f31d3",
+        )
+        .unwrap();
         assert_eq!(url, "git+ssh://git@github.com/Wavelens/Gradient.git?rev=11c2f8505c234697ccabbc96e5b8a76daf0f31d3");
 
-        let url = repository_url_to_nix(normalize_url("https://github.com/Wavelens/Gradient.git").unwrap().as_str(), "11c2f8505c234697ccabbc96e5b8a76daf0f31d3").unwrap();
-        assert_eq!(url, "https://github.com/Wavelens/Gradient.git?rev=11c2f8505c234697ccabbc96e5b8a76daf0f31d3");
+        let url = repository_url_to_nix(
+            normalize_url("https://github.com/Wavelens/Gradient.git")
+                .unwrap()
+                .as_str(),
+            "11c2f8505c234697ccabbc96e5b8a76daf0f31d3",
+        )
+        .unwrap();
+        assert_eq!(
+            url,
+            "https://github.com/Wavelens/Gradient.git?rev=11c2f8505c234697ccabbc96e5b8a76daf0f31d3"
+        );
     }
 }

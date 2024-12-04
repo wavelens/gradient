@@ -9,6 +9,7 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_streams::*;
 use chrono::Utc;
+use git_url_parse::normalize_url;
 use password_auth::{generate_hash, verify_password};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -17,16 +18,15 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use uuid::Uuid;
-use git_url_parse::normalize_url;
 
 use super::auth::{encode_jwt, generate_api_key, update_last_login};
 use super::consts::*;
 use super::evaluator::add_features;
 use super::executer::{connect, get_buildlog_stream};
+use super::input::vec_to_hex;
 use super::requests::*;
 use super::sources::*;
 use super::types::*;
-use super::input::vec_to_hex;
 
 // TODO: USER AUTHENTICATION + User specific endpoints
 // TODO: sanitize inputs
@@ -775,20 +775,17 @@ pub async fn post_server_check(
         decrypt_ssh_private_key(state.cli.crypt_secret.clone(), organization.clone()).unwrap();
 
     match connect(server, None, public_key, private_key).await {
-        Ok(_) => {
-            Ok(Json(BaseResponse {
-                error: false,
-                message: "server connection established".to_string(),
-            }))
-        }
-        Err(e) => {
-            Err((StatusCode::GATEWAY_TIMEOUT,
-                Json(BaseResponse {
-                    error: true,
-                    message: format!("server connection failed with error: {}", e),
-                }),
-            ))
-        }
+        Ok(_) => Ok(Json(BaseResponse {
+            error: false,
+            message: "server connection established".to_string(),
+        })),
+        Err(e) => Err((
+            StatusCode::GATEWAY_TIMEOUT,
+            Json(BaseResponse {
+                error: true,
+                message: format!("server connection failed with error: {}", e),
+            }),
+        )),
     }
 }
 

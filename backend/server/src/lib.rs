@@ -23,9 +23,10 @@ use consts::*;
 use migration::Migrator;
 // use oauth2::{basic::BasicClient, AuthUrl, ClientId, ClientSecret, TokenUrl};
 use password_auth::generate_hash;
-use sea_orm::ActiveValue::Set;
-use sea_orm::EntityTrait;
-use sea_orm::{ActiveModelTrait, Database, DatabaseConnection};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, Database, DatabaseConnection,
+    EntityTrait, QueryFilter,
+};
 use sea_orm_migration::prelude::*;
 use std::sync::Arc;
 use types::*;
@@ -41,7 +42,7 @@ pub async fn main() -> std::io::Result<()> {
 
     let state = Arc::new(ServerState { db, cli });
 
-    create_debug_data(Arc::clone(&state)).await;
+    cleanup_database(Arc::clone(&state)).await;
 
     tokio::spawn(scheduler::schedule_evaluation_loop(Arc::clone(&state)));
     tokio::spawn(scheduler::schedule_build_loop(Arc::clone(&state)));
@@ -110,7 +111,10 @@ async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/api/server",
             get(endpoints::get_servers).post(endpoints::post_servers),
         )
-        .route("/api/server/:server/check", post(endpoints::post_server_check))
+        .route(
+            "/api/server/:server/check",
+            post(endpoints::post_server_check),
+        )
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             auth::authorize,
@@ -124,6 +128,46 @@ async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&server_url).await.unwrap();
     axum::serve(listener, app).await
+}
+
+async fn cleanup_database(state: Arc<ServerState>) {
+    create_debug_data(Arc::clone(&state)).await;
+    let evaluations = EEvaluation::find()
+        .filter(
+            Condition::any()
+                .add(CEvaluation::Status.eq(entity::evaluation::EvaluationStatus::Queued))
+                .add(CEvaluation::Status.eq(entity::evaluation::EvaluationStatus::Evaluating))
+                .add(CEvaluation::Status.eq(entity::evaluation::EvaluationStatus::Building)),
+        )
+        .all(&state.db)
+        .await
+        .unwrap();
+
+    for e in evaluations {
+        println!("Cleaning up evaluation {}", e.id);
+        let mut aevaluation: AEvaluation = e.into();
+        aevaluation.status = Set(entity::evaluation::EvaluationStatus::Failed);
+        aevaluation.update(&state.db).await.unwrap();
+    }
+
+    let builds = EBuild::find()
+        .filter(
+            Condition::any()
+                .add(CBuild::Status.eq(entity::build::BuildStatus::Created))
+                .add(CBuild::Status.eq(entity::build::BuildStatus::Queued))
+                .add(CBuild::Status.eq(entity::build::BuildStatus::Building)),
+        )
+        .all(&state.db)
+        .await
+        .unwrap();
+
+    for b in builds {
+        println!("Cleaning up build {}", b.id);
+        let mut abuild: ABuild = b.into();
+        abuild.status = Set(entity::build::BuildStatus::Failed);
+        abuild.updated_at = Set(Utc::now().naive_utc());
+        abuild.update(&state.db).await.unwrap();
+    }
 }
 
 async fn delete_all_data(state: Arc<ServerState>) {
@@ -266,9 +310,7 @@ async fn create_debug_data(state: Arc<ServerState>) {
         organization: Set(organization.id),
         name: Set("Good Project".to_string()),
         description: Set("Test Good Project Description".to_string()),
-        repository: Set(
-            "ssh://git@github.com/Wavelens/Gradient.git".to_string(),
-        ),
+        repository: Set("ssh://git@github.com/Wavelens/Gradient.git".to_string()),
         last_evaluation: Set(None),
         last_check_at: Set(*NULL_TIME),
         created_by: Set(user.id),
