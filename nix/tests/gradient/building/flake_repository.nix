@@ -16,7 +16,7 @@
       nixpkgs,
       flake-utils,
       ...
-    }@inputs:
+    }:
     flake-utils.lib.eachDefaultSystem (system: {
       packages = { pkgs, ... }: {
         buildWait5Sec = pkgs.stdenv.mkDerivation {

@@ -30,6 +30,8 @@
             domain = "gradient.local";
             jwtSecret = "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a";
             cryptSecret = "aW52YWxpZAo=";
+            binpath_nix = lib.getExe pkgs.nix;
+            binpath_git = lib.getExe pkgs.git;
           };
 
           postgresql = {
@@ -59,6 +61,7 @@
             enable = true;
             basePath = "/var/lib/git/";
             exportAll = true;
+            options = "--enable=receive-pack";
           };
         };
 
@@ -125,8 +128,8 @@
       for m in [builder, server]:
         m.wait_for_unit("network-online.target")
 
-      server.wait_for_unit("postgresql.service")
       server.wait_for_unit("gradient-server.service")
+      server.wait_for_unit("git-daemon.service")
 
       server.succeed("${lib.getExe pkgs.curl} http://localhost:3000/api/health -i --fail")
 
@@ -175,7 +178,9 @@
       server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test commit -m 'Initial commit'")
 
       # ensure git repository is available without authentication
-      server.succeed("${lib.getExe pkgs.git} clone git://localhost:9418/test test")
+      server.succeed("${lib.getExe pkgs.git} clone git://localhost/test test")
+      print(builder.succeed("${lib.getExe pkgs.git} ls-remote git://server/test"))
+      builder.succeed("${lib.getExe pkgs.git} clone git://server/test test")
 
       # add ssh key of gradient organization to builder machine
       builder.succeed(f"""
@@ -199,12 +204,12 @@
       """.replace("ACCESS_TOKEN", token).replace("ORG_ID", org_id))
 
       # test connection to build server (to verify ssh key does work as exptected)
-      builder.succeed(f"""
-        ${lib.getExe pkgs.curl} -v \
+      print(builder.succeed(f"""
+        ${lib.getExe pkgs.curl} -v -i \
           -X POST \
           -H "Authorization: Bearer {token}" \
           http://server:3000/api/server/{server_id}/check
-      """)
+      """))
 
       # create project from git repository
       project_id = builder.succeed("""
@@ -212,14 +217,14 @@
           -X POST \
           -H "Authorization: Bearer ACCESS_TOKEN" \
           -H "Content-Type: application/json" \
-          -d '{"name": "TestProject", "description": "Just a test", "repository": "git://server:9418/test"}' \
+          -d '{"name": "TestProject", "description": "Just a test", "repository": "git://server/test"}' \
           http://server:3000/api/organization/ORG_ID \
           | ${lib.getExe pkgs.jq} -rj '.message'
       """.replace("ACCESS_TOKEN", token).replace("ORG_ID", org_id))
 
       # test git repository pullable
       print(builder.succeed(f"""
-        ${lib.getExe pkgs.curl} -v \
+        ${lib.getExe pkgs.curl} -v -i \
           -X POST \
           -H "Authorization: Bearer {token}" \
           http://server:3000/api/project/{project_id}/check-repository
@@ -236,6 +241,8 @@
       """)
 
       print(f"Got Project Data: {project_data}")
+
+      print(server.succeed("journalctl -u gradient-server -n 100 --no-pager"))
 
       # TODO wait until project last_evaluation != null
     '';
