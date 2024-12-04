@@ -150,6 +150,7 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
         private_key.clone(),
     )
     .await;
+
     for _ in 1..3 {
         if server_deamon.is_ok() {
             break;
@@ -187,11 +188,17 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
         dependencies.extend(output_paths);
     }
 
-    copy_builds(dependencies, &mut local_daemon, &mut server_daemon, false).await;
+    match copy_builds(dependencies, &mut local_daemon, &mut server_daemon, false).await {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("Failed to copy builds: {}", e);
+            // TODO: maybe retry
+            update_build_status_recursivly(state, build.clone(), BuildStatus::Failed).await;
+            return;
+        }
+    }
 
-    let result = execute_build(vec![&build], &mut server_daemon).await;
-
-    match result {
+    match execute_build(vec![&build], &mut server_daemon).await {
         Ok(results) => {
             let status = if results.values().all(|r| r.error_msg.is_empty()) {
                 BuildStatus::Completed
@@ -205,15 +212,27 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
 
         Err(e) => {
             eprintln!("Failed to execute build: {}", e);
-            update_build_status_recursivly(state, build.clone(), BuildStatus::Failed).await;
+            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed).await;
         }
     };
 
-    let output_paths = get_output_path(build.derivation_path, &mut server_daemon)
-        .await
-        .unwrap();
+    let output_paths = match get_output_path(build.clone().derivation_path, &mut server_daemon).await {
+        Ok(paths) => paths,
+        Err(e) => {
+            eprintln!("Failed to get output paths: {}", e);
+            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed).await;
+            return;
+        }
+    };
 
-    copy_builds(output_paths, &mut server_daemon, &mut local_daemon, true).await;
+    match copy_builds(output_paths, &mut server_daemon, &mut local_daemon, true).await {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("Failed to copy builds: {}", e);
+            // TODO: maybe retry
+            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed).await;
+        }
+    }
 }
 
 async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
@@ -250,6 +269,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             .filter_map(|p| {
                 let intern_state = Arc::clone(&state);
                 async move {
+                    //TODO: query last evaluation early and pass it to check_project_updates
                     let (has_update, commit_hash) =
                         check_project_updates(Arc::clone(&intern_state), &p).await;
 
@@ -342,11 +362,11 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         let mut active_project: AProject = project.clone().into();
 
         active_project.last_check_at = Set(Utc::now().naive_utc());
-        active_project.last_evaluation = Set(Some(evaluation.id));
+        active_project.last_evaluation = Set(Some(new_evaluation.id));
 
         active_project.update(&state.db).await.unwrap();
 
-        if evaluation.id != Uuid::nil() {
+        if evaluation_id.is_some() {
             let mut active_evaluation: AEvaluation = evaluation.clone().into();
             active_evaluation.next = Set(Some(new_evaluation.id));
 

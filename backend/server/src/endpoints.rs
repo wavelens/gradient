@@ -777,15 +777,15 @@ pub async fn post_server_check(
     match connect(server, None, public_key, private_key).await {
         Ok(_) => {
             Ok(Json(BaseResponse {
-                error: true,
-                message: "server connection failed".to_string(),
+                error: false,
+                message: "server connection established".to_string(),
             }))
         }
-        Err(_) => {
+        Err(e) => {
             Err((StatusCode::GATEWAY_TIMEOUT,
                 Json(BaseResponse {
                     error: true,
-                    message: "server connection failed".to_string(),
+                    message: format!("server connection failed with error: {}", e),
                 }),
             ))
         }

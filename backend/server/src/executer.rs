@@ -110,7 +110,7 @@ pub async fn copy_builds<
     from_store: &mut DaemonStore<A>,
     to_store: &mut DaemonStore<B>,
     local_is_receiver: bool,
-) {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for path in paths {
         println!(
             "Copying build {} to {}",
@@ -118,23 +118,31 @@ pub async fn copy_builds<
             if local_is_receiver { "local" } else { "remote" }
         );
 
-        // TODO: Error handling
-        if !to_store.is_valid_path(path.clone()).result().await.unwrap() {
-            let path_info = from_store
-                .query_pathinfo(path.clone())
-                .result()
-                .await
-                .unwrap()
-                .unwrap();
-
-            from_store
-                .nar_from_path(path.clone())
-                .result()
-                .await
-                .unwrap();
-            to_store.add_to_store_nar(path_info, &mut from_store.conn);
+        if to_store.is_valid_path(path.clone()).result().await.unwrap() {
+            continue;
         }
+
+        if from_store.is_valid_path(path.clone()).result().await.unwrap() {
+            return Err("Path is not valid on store to copy from".into());
+        }
+
+        let path_info = match from_store
+            .query_pathinfo(path.clone())
+            .result()
+            .await? {
+            Some(path_info) => path_info,
+            None => return Err(format!("Path not found: {}", path.clone()).into()),
+        };
+
+
+        from_store
+            .nar_from_path(path.clone())
+            .result()
+            .await?;
+        to_store.add_to_store_nar(path_info, &mut from_store.conn);
     }
+
+    Ok(())
 }
 
 pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
