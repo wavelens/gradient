@@ -22,6 +22,12 @@ in {
         example = "gradient.example.com";
       };
 
+      baseDir = lib.mkOption {
+        description = "The base directory for Gradient.";
+        type = lib.types.str;
+        default = "/var/lib/gradient";
+      };
+
       user = lib.mkOption {
         description = "The group under which Gradient runs.";
         type = lib.types.str;
@@ -62,12 +68,27 @@ in {
         default = "postgres://postgres:postgres@localhost:5432/gradient";
       };
 
+      binpath_nix = lib.mkOption {
+        description = "The path to the Nix binary.";
+        type = lib.types.str;
+        default = lib.getExe pkgs.nix;
+        defaultText = "nix";
+      };
+
+      binpath_git = lib.mkOption {
+        description = "The path to the Git binary.";
+        type = lib.types.str;
+        default = lib.getExe pkgs.git;
+        defaultText = "git";
+      };
+
       oauthEnable = lib.mkEnableOption "Enable OAuth";
     };
   };
 
   config = lib.mkIf cfg.enable {
     systemd.services.gradient-server = {
+      path = [ pkgs.nix pkgs.git ];
       wantedBy = [ "multi-user.target" ];
       after = [
         "network.target"
@@ -93,9 +114,11 @@ in {
         RestrictNamespaces = true;
         RestrictRealtime = true;
         RestrictSUIDSGID = true;
+        WorkingDirectory = cfg.baseDir;
       };
 
       environment = {
+        XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
         GRADIENT_IP = cfg.ip;
         GRADIENT_PORT = toString cfg.port;
         GRADIENT_DATABASE_URL = cfg.databaseUrl;
@@ -104,8 +127,16 @@ in {
         GRADIENT_MAX_CONCURRENT_BUILDS = toString 1;
         GRADIENT_OAUTH_ENABLE = lib.mkForce (if cfg.oauthEnable then "true" else "false");
         GRADIENT_CRYPT_SECRET = cfg.cryptSecret;
+        GRADIENT_BINPATH_NIX = cfg.binpath_nix;
+        GRADIENT_BINPATH_GIT = cfg.binpath_git;
       };
     };
+
+    nix.settings.experimental-features = [
+      "nix-command"
+      "flakes"
+      "ca-derivations"
+    ];
 
     services.nginx = lib.mkIf cfg.configureNginx {
       enable = true;
