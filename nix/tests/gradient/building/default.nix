@@ -65,9 +65,18 @@
           };
         };
 
+        nix.settings = {
+          flake-registry = "";
+        };
+
         systemd.tmpfiles.rules = [
           "d /var/lib/git 0755 git git"
           "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
+        ];
+
+        environment.systemPackages = with pkgs; [
+          git
+          nix
         ];
       };
 
@@ -90,6 +99,7 @@
             "flakes"
             "ca-derivations"
           ];
+
           trusted-users = [
             "root"
             "@wheel"
@@ -120,8 +130,7 @@
     builder = import ../../modules/debug-host.nix;
   };
 
-  testScript =
-    { nodes, ... }:
+  testScript = { nodes, ... }:
     ''
       start_all()
 
@@ -180,7 +189,10 @@
       # ensure git repository is available without authentication
       server.succeed("${lib.getExe pkgs.git} clone git://localhost/test test")
       print(builder.succeed("${lib.getExe pkgs.git} ls-remote git://server/test"))
-      builder.succeed("${lib.getExe pkgs.git} clone git://server/test test")
+
+
+      # configure nix
+      print(server.succeed("${lib.getExe pkgs.nix} flake check git://localhost/test"))
 
       # add ssh key of gradient organization to builder machine
       builder.succeed(f"""
@@ -230,7 +242,7 @@
           http://server:3000/api/project/{project_id}/check-repository
       """))
 
-      builder.sleep(10)
+      builder.sleep(30)
 
       project_data = builder.succeed(f"""
         ${lib.getExe pkgs.curl} -v \
@@ -243,6 +255,7 @@
       print(f"Got Project Data: {project_data}")
 
       print(server.succeed("journalctl -u gradient-server -n 100 --no-pager"))
+      print(server.succeed("${lib.getExe pkgs.tree} /var/lib/gradient"))
 
       # TODO wait until project last_evaluation != null
     '';

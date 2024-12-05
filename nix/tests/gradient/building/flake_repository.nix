@@ -5,30 +5,12 @@
  */
 {
   description = "Test Repository for Gradient Build Server";
-
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+  outputs = { self, ... }: {
+    packages.x86_64-linux.buildWait5Sec = builtins.derivation {
+      name = "buildWait5Sec";
+      system = "x86_64-linux";
+      builder = "/bin/sh";
+      args = [ "-c" "sleep 5 && echo hello world > $out" ];
+    };
   };
-  outputs =
-    {
-      self,
-      nixpkgs,
-      flake-utils,
-      ...
-    }:
-    flake-utils.lib.eachDefaultSystem (system: {
-      packages = { pkgs, ... }: {
-        buildWait5Sec = pkgs.stdenv.mkDerivation {
-          name = "buildWait5Sec";
-          src = ./.;
-          buildInputs = [ pkgs.bash ];
-          installPhase = ''
-            mkdir -p $out/bin
-            sleep 5
-            echo "echo 'Hello, World!'" > $out/bin/hello.sh
-          '';
-        };
-      };
-    });
 }

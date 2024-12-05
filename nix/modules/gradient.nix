@@ -22,6 +22,12 @@ in {
         example = "gradient.example.com";
       };
 
+      baseDir = lib.mkOption {
+        description = "The base directory for Gradient.";
+        type = lib.types.str;
+        default = "/var/lib/gradient";
+      };
+
       user = lib.mkOption {
         description = "The group under which Gradient runs.";
         type = lib.types.str;
@@ -82,6 +88,7 @@ in {
 
   config = lib.mkIf cfg.enable {
     systemd.services.gradient-server = {
+      path = [ pkgs.nix pkgs.git ];
       wantedBy = [ "multi-user.target" ];
       after = [
         "network.target"
@@ -107,9 +114,11 @@ in {
         RestrictNamespaces = true;
         RestrictRealtime = true;
         RestrictSUIDSGID = true;
+        WorkingDirectory = cfg.baseDir;
       };
 
       environment = {
+        XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
         GRADIENT_IP = cfg.ip;
         GRADIENT_PORT = toString cfg.port;
         GRADIENT_DATABASE_URL = cfg.databaseUrl;
