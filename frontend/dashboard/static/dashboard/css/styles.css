@@ -228,7 +228,7 @@ th, td {
 
 tr:last-child td {
     border: none;
-    padding-bottom: 2rem;
+    /* padding-bottom: 2rem; */
 }
 
 th {

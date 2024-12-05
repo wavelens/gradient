@@ -14,68 +14,59 @@
 
 {% include "../backHeader.html" %}
 
-<head>{% load static %}</head>
-
-<!-- <header>
-    <nav role="navigation">
-        <a href="/#home"><img class="center-image" src="../static/dashboard/icons/command.svg"><span>Workflows</span></a>
-        <a class="active" href="ai-development"><img class="center-image" src="../static/dashboard/icons/activity.svg"><span>Log</span></a>
-    </nav>
-</header> -->
-
-<!-- <div class="content-above">
-    <div><a href="/#home" class="flex-c p-r-1rem fit-content"><img class="center-image" src="../static/dashboard/icons/arrow_back.svg"><span>Back</span></a></div>
-    <h2 class="webkit-middle space-small" class="flex-c"><img class="green-filter center-image icon" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">{{ built_name }}<span class="color-light fw-normal"> #{{ id }}</span></h2>
-</div> -->
+<head>
+    {% load static %}
+    {% load i18n %}
+</head>
 
 <div class="outerbody">
     <div class="content-left">
-        <p class="border-bottom space-normal no-side-padding"><a class="p-l-1rem d-webkit-box">Overview</a></p>
+        <p class="border-bottom space-normal no-side-padding"><a class="p-l-1rem d-webkit-box">{% trans 'Overview' %}</a></p>
         <div class="flex-c activeeffect-sidebar">
             <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-            <a>Build</a>
+            <a>{% trans 'Build' %}</a>
         </div>
     </div>
     <div class="full-width">
         <div class="innerbody-top d-flex">
             <div class="m-r-2rem">
-                <div class="text-light m-b-05rem">Triggered via {{ triggerArt }} {{ triggerTime }} ago</div>
-                <div><img src="../static/dashboard/images/{{ user.image }}" class="icon-center border-radius-5"><span>{{ user.name }} </span> <span class="material-symbols-outlined icon-center f-s-21px">commit</span> {{ git }} <span class="branch">{{ branch }}</span></div>
+                <div class="text-light m-b-05rem">{% trans 'Triggered via' %} {% trans triggerArt %} {% trans triggerTime %} {% trans 'ago' %}</div>
+                <div><img src="../static/dashboard/images/{{ user.image }}" class="icon-center border-radius-5"><span>{% trans user.name %} </span> <span class="material-symbols-outlined icon-center f-s-21px">{% trans 'commit' %}</span> {% trans git %} <span class="branch">{% trans branch %}</span></div>
             </div>
             <div class="m-r-2rem">
-                <div class="text-light m-b-05rem">Status</div>
-                <div>{{ status }}</div>
+                <div class="text-light m-b-05rem">{% trans 'Status' %}</div>
+                <div>{% trans status %}</div>
             </div>
             <div class="m-r-2rem">
-                <div class="text-light m-b-05rem">Total duration</div>
-                <div>{{ duration }}</div>
+                <div class="text-light m-b-05rem">{% trans 'Total duration' %}</div>
+                <div>{% trans duration %}</div>
             </div>
             <div class="m-r-2rem">
-                <div class="text-light m-b-05rem">Artifacts</div>
-                <div>{{ artifacts }}</div>
+                <div class="text-light m-b-05rem">{% trans 'Artifacts' %}</div>
+                <div>{% trans artifacts %}</div>
             </div>
 
         </div>
         <div class="innerbody">
             <div class="innerbody-header border-bottom">
                 <div>
-                    <span>{{ built_version }}</span><br>
-                    <span class="text-light">{{ status }} {{ time }} months ago in {{ duration }}</span>
+                    <span>{% trans built_version %}</span><br>
+                    <span class="text-light">{% trans status %} {% trans time %} {% trans 'months ago in' %} {% trans duration %}</span>
                 </div>
                 <br>
                 <div class="flex-c">
                     <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-                    <span>Build</span>
+                    <span>{% trans 'Build' %}</span>
                 </div>
             </div>
             <div class="p-1rem">
                 <div class="code-container monospace">
                     {% for block in details_blocks %}
                         <details class="details-item color-secondary">
-                            <summary>{{ block.summary }}</summary>
+                            <summary>{% trans block.summary %}</summary>
                             <div class="details-content color-secondary">
                                 {% for line in block.details %}
-                                    <div class="line">{{ line }}</div>
+                                    <div class="line">{% trans line %}</div>
                                 {% endfor %}
                             </div>
                         </details>

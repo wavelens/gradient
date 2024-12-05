@@ -4,22 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  -->
 
-<head></head>
+ <head>
+    {% load i18n %}
+</head>
 <body>
     <header class="m-t--1rem">
         <div class="logo-container header-workflow">
-            <img src="../static/dashboard/images/pb2.png"class="h-30 border-radius-5">
-            <span><a class="header-link" href="{% url 'workflow' %}">{{ projectname }}</a>/<a class="header-link" href="{% url 'model' %}"><b>{{ model }}</b></a></span>
+            <img src="../static/dashboard/images/pb2.png"class="h-30 border-radius-5 vertical-align-bottom">
+            <span><a class="header-link" href="{% url 'workflow' %}">{% trans projectname %}</a>/<a class="header-link" href="{% url 'model' %}"><b>{% trans model %}</b></a></span>
         </div>
         <nav role="navigation">
             <a class="nav-link flex-c" href="{% url 'workflow' %}">
                 <span class="material-symbols-outlined f-s-24px m-r-3">keyboard_command_key</span>
-                <span>Workflows</span>
+                <span>{% trans 'Workflows' %}</span>
             </a>
 
-            <a class="nav-link flex-c" href="{% url 'log' %}"><span class="material-symbols-outlined f-s-24px m-r-3">vital_signs</span><span>Log</span></a>
-            <a class="nav-link flex-c" href="{% url 'download' %}"><span class="material-symbols-outlined f-s-24px m-r-3">download</span><span>Download</span></a>
-            <a class="nav-link flex-c header-icon-right" href="/settings"><span class="material-symbols-outlined f-s-24px m-r-3">settings</span><span>Settings</span></a>
+            <a class="nav-link flex-c" href="{% url 'log' %}"><span class="material-symbols-outlined f-s-24px m-r-3">vital_signs</span><span>{% trans 'Log' %}</span></a>
+            <a class="nav-link flex-c" href="{% url 'download' %}"><span class="material-symbols-outlined f-s-24px m-r-3">download</span><span>{% trans 'Download' %}</span></a>
+            <a class="nav-link flex-c header-icon-right" href="/settings"><span class="material-symbols-outlined f-s-24px m-r-3">settings</span><span>{% trans 'Settings' %}</span></a>
             <!-- <img class="center-image icon" src="../static/dashboard/icons/download.svg"> -->
         </nav>
     </header>

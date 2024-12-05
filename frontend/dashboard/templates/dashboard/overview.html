@@ -8,7 +8,10 @@
 
 {% block title %}Dashboard{% endblock %}
 
-<head>{% load static %}</head>
+<head>
+    {% load static %}
+    {% load i18n %}
+</head>
 
 {% block content %}
 
@@ -17,13 +20,13 @@
 <div class="container">
     <div class="header">
         <div class="left">
-            <h1>Workflows</h1>
+            <h1>{% trans 'Workflows' %}</h1>
         </div>
         <div class="right">
-            <button class="button-clear">Clear All Filters</button>|
-            <button class="button-round">Branches</button>
+            <button class="button-clear">{% trans 'Clear All Filters' %}</button>|
+            <button class="button-round">{% trans 'Branches' %}</button>
             <select class="field-select">
-                <option>Advanced Filter</option>
+                <option>{% trans 'Advanced Filter' %}</option>
             </select>
         </div>
     </div>
@@ -32,8 +35,8 @@
             <div class="filter-container">
                 <div class="search-container">
                     <input type="text" placeholder="Search">
-                    <button class="button-round search-button">Search</button>
-                    |<button class="button-clear">Clear search</button>
+                    <button class="button-round search-button">{% trans 'Search' %}</button>
+                    |<button class="button-clear">{% trans 'Clear search' %}</button>
                 </div>    
             </div>
         </div>
@@ -44,20 +47,20 @@
     <table class="workflows-table">
         <thead>
             <tr>
-                <th>Project</th>
-                <th># of exec.</th>
-                <th>Avg. Duration</th>
-                <th>WF Performance</th>
-                <th>Latest 5 runs</th>
+                <th>{% trans 'Project' %}</th>
+                <th>{% trans '# of exec.' %}</th>
+                <th>{% trans 'Avg. Duration' %}</th>
+                <th>{% trans 'WF Performance' %}</th>
+                <th>{% trans 'Latest 5 runs' %}</th>
                 <th></th>
             </tr>
         </thead>
         <tbody>
             {% for block in details_blocks %}
                 <tr>
-                    <td><a class="full-width" href="https://hydra.wavelens.io/project/build"><span>{{ block.project }}</span><br><span class="text-light">{{ block.id }}</span></a></td>
+                    <td><a class="full-width" href="https://hydra.wavelens.io/project/build"><span>{% trans block.project %}</span><br><span class="text-light">{% trans block.id %}</span></a></td>
                     <td>{{ block.exec }}</td>
-                    <td>{{ block.duration }}</td>
+                    <td>{% trans block.duration %}</td>
                     <td>
                         <img class="red-filter" src="{% static 'dashboard/images/x-circle.svg' %}" alt="X Circle">
                         <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">

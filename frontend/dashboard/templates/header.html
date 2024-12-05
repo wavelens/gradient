@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  -->
 
-<head>
+ <head>
+    {% load i18n %}
 </head>
 <body>
     <header>
         <div class="header">
             <div class="logo-container">
                 <a href="/" class="no-hovereffect"><img src="../static/dashboard/images/wavelens-LOGO.svg" alt="Logo"></a>
-                <!-- <span><a class="header-link" href="{% url 'workflow' %}">{{ projectname }}</a>/<a class="header-link" href="{% url 'model' %}">{{ model }}</a></span> -->
             </div>
             <div>
                 <div class="dropdown">
@@ -20,38 +20,19 @@
                         <span class="material-symbols-outlined icon-arrow pointer">
                             keyboard_arrow_down
                         </span>
-                        <span class="tooltiptext">Profil und Einstellungen...</span>
+                        <span class="tooltiptext">{% trans 'Profil und Einstellungen...' %}</span>
                     </div>
                     <div id="dropdownHeader" class="dropdown-content">
                         <p>signed in as {{ user.name }}</p>
-                        <a href="#home" class="flex-c"><span class="material-symbols-outlined m-r-5">account_circle</span><span>Profile</span></a>
-                        <a href="#about" class="flex-c"><span class="material-symbols-outlined m-r-5">star</span><span>Starred</span></a>
-                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">notifications</span><span>Subscriptions</span></a>
-                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">settings</span><span>Settings</span></a>
-                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">help</span><span>Help</span></a>
-                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">tune</span><span>Side Administration</span></a>
-                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">logout</span><span>Sign Out</span></a>
+                        <a href="#home" class="flex-c"><span class="material-symbols-outlined m-r-5">account_circle</span><span>{% trans 'Profile' %}</span></a>
+                        <a href="#about" class="flex-c"><span class="material-symbols-outlined m-r-5">star</span><span>{% trans 'Starred' %}</span></a>
+                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">notifications</span><span>{% trans 'Subscriptions' %}</span></a>
+                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">settings</span><span>{% trans 'Settings' %}</span></a>
+                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">help</span><span>{% trans 'Help' %}</span></a>
+                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">tune</span><span>{% trans 'Side Administration' %}</span></a>
+                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">logout</span><span>{% trans 'Sign Out' %}</span></a>
                     </div>
                 </div>
             </div>
         </div> 
-        <!-- <nav role="navigation">
-            <a class="nav-link flex-c" href="{% url 'workflow' %}">
-                <span class="material-symbols-outlined f-s-24px m-r-3">keyboard_command_key</span>
-                <span>Workflows</span>
-            </a>
-            
-            <a class="nav-link flex-c" href="{% url 'log' %}"><span class="material-symbols-outlined f-s-24px m-r-3">vital_signs</span><span>Log</span></a>
-            <a class="nav-link flex-c" href="{% url 'download' %}"><span class="material-symbols-outlined f-s-24px m-r-3">download</span><span>Download</span></a>
-            <a class="nav-link flex-c header-icon-right" href="/settings"><span class="material-symbols-outlined f-s-24px m-r-3">settings</span><span>Settings</span></a> -->
-            <!-- <img class="center-image icon" src="../static/dashboard/icons/download.svg"> -->
-        <!-- </nav> -->
-        <!-- <nav>
-            <ul>
-                <li><a href="" class="nav-link">Home</a></li>
-                <li><a href="" class="nav-link">About</a></li>
-                <li><a href="" class="nav-link">Services</a></li>
-                <li><a href="{% url 'log' %}" class="nav-link">Contact</a></li>
-            </ul>
-        </nav> -->
     </header>
