@@ -18,9 +18,9 @@
                     <div onclick="dropdownFunction(); event.stopPropagation();" class="tooltip">
                         <img src="../static/dashboard/images/{{ user.image }}" class="h-30 border-radius-5">
                         <span class="material-symbols-outlined icon-arrow pointer">
-                            keyboard_arrow_down
+                            arrow_drop_down
                         </span>
-                        <span class="tooltiptext">{% trans 'Profil und Einstellungen...' %}</span>
+                        <span class="tooltiptext" id="tooltip">{% trans 'Profil und Einstellungen...' %}</span>
                     </div>
                     <div id="dropdownHeader" class="dropdown-content">
                         <p>signed in as {{ user.name }}</p>
