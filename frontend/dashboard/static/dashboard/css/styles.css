@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  */
 
-:root {
+ :root {
     --primary: #0d1118; /*  */
     --secondary: #abb0b4;
     --tertiary: #21262d;
@@ -228,7 +228,7 @@ th, td {
 
 tr:last-child td {
     border: none;
-    padding-bottom: 2rem;
+    /* padding-bottom: 2rem; */
 }
 
 th {
@@ -605,7 +605,7 @@ tr:hover td{
 
 .icon-arrow {
     font-size: 21px !important;
-    margin-left: -8px;
+    margin-left: -4px;
     top: -3px;
     position: relative;
     margin-right: 2px;
@@ -635,6 +635,11 @@ tr:hover td{
     left: 50%;
     margin-left: -60px;
     border: 1px solid #444;
+}
+
+.tooltiptext.hidden {
+    visibility: hidden;
+    opacity: 0;
 }
 
 .tooltip:hover .tooltiptext {
