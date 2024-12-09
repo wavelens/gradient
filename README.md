@@ -14,6 +14,9 @@ This project is currently in the early stages of development. We are working on 
 - **Streaming Logs**: real-time log streaming for builds.
 - **Rich Project Configuration**: check all branches, pull requests, and tags.
 
+## Deployment
+
+
 ## Contributing
 
 We welcome contributions to this project. Please read the [Contributing Guidelines](CONTRIBUTING.md) for more information.
