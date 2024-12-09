@@ -9,6 +9,12 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_streams::*;
 use chrono::Utc;
+use core::consts::*;
+use core::database::add_features;
+use core::executer::{connect, get_buildlog_stream};
+use core::input::vec_to_hex;
+use core::sources::*;
+use core::types::*;
 use git_url_parse::normalize_url;
 use password_auth::{generate_hash, verify_password};
 use sea_orm::ActiveValue::Set;
@@ -20,15 +26,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::auth::{encode_jwt, generate_api_key, update_last_login};
-use super::consts::*;
-use super::evaluator::add_features;
-use super::executer::{connect, get_buildlog_stream};
-use super::input::vec_to_hex;
 use super::requests::*;
-use super::sources::*;
-use super::types::*;
 
-// TODO: USER AUTHENTICATION + User specific endpoints
 // TODO: sanitize inputs
 
 pub async fn handle_404() -> (StatusCode, Json<BaseResponse<String>>) {

@@ -1,5 +1,7 @@
 # Gradient
 
+[Options Search](https://wavelens.github.io/gradient-search)
+
 Gradient is a web-based Nix-based Continuous Integration (CI) system.
 
 This project is currently in the early stages of development. We are working on the initial implementation and documentation. If you are interested in contributing, please read the [Contributing Guidelines](CONTRIBUTING.md) for more information.
@@ -13,6 +15,7 @@ This project is currently in the early stages of development. We are working on 
 - **API**: provides a RESTful API with API-Key management for authentication.
 - **Streaming Logs**: real-time log streaming for builds.
 - **Rich Project Configuration**: check all branches, pull requests, and tags.
+- **OIDC**: support for OpenID Connect (OIDC) for user authentication.
 
 ## Contributing
 

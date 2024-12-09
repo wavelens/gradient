@@ -1,0 +1,31 @@
+[package]
+name = "core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0 OR Commercial"
+authors = ["Wavelens UG <info@wavelens.io>"]
+
+[lib]
+name = "core"
+path = "src/lib.rs"
+
+[dependencies]
+async-ssh2-lite = { version = "0.5", features = ["tokio"] }
+async-stream = "0.3"
+base64 = "0.22"
+chrono = "0.4"
+clap = { version = "4.5", features = ["derive", "env"] }
+crypter = "0.2"
+entity = { path = "../entity" }
+futures = "0.3"
+git-url-parse = "=0.4.4"
+migration = { path = "../migration" }
+nix-daemon = { git = "https://github.com/wavelens/nix-daemon", tag = "v0.1.2" }
+rand = "0.8"
+sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
+sea-orm-migration = { version = "1.1", features = ["with-uuid", "with-chrono", "with-json", "sqlx-postgres", "sea-orm-cli", "runtime-tokio"] }
+serde = { version = "1", features = ["derive"] }
+ssh-key = { version = "0.6", features = ["ed25519"] }
+tokio = { version = "1.42", features = ["process", "rt-multi-thread"] }
+uuid = { version = "1.11", features = ["fast-rng", "macro-diagnostics", "v4"] }

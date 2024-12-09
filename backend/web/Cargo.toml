@@ -1,0 +1,26 @@
+[package]
+name = "web"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0 OR Commercial"
+authors = ["Wavelens UG <info@wavelens.io>"]
+
+[lib]
+name = "web"
+path = "src/lib.rs"
+
+[dependencies]
+axum = "0.7"
+axum-streams = { version = "0.19", features = ["json"] }
+chrono = "0.4"
+core = { path = "../core" }
+entity = { path = "../entity" }
+git-url-parse = "=0.4.4"
+jsonwebtoken = "9.3"
+password-auth = { version = "1.0.0", features = ["argon2"] }
+rand = "0.8"
+sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1.42", features = ["process", "rt-multi-thread"] }
+uuid = { version = "1.11", features = ["fast-rng", "macro-diagnostics", "v4"] }

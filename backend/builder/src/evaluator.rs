@@ -5,19 +5,19 @@
  */
 
 use chrono::Utc;
+use core::database::add_features;
+use core::executer::*;
+use core::input::{repository_url_to_nix, vec_to_hex};
+use core::types::*;
 use entity::build::BuildStatus;
 use nix_daemon::nix::DaemonStore;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue::Set, ColumnTrait, Condition, EntityTrait, JoinType, QuerySelect};
+use sea_orm::{ColumnTrait, Condition, EntityTrait, JoinType, QuerySelect};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::net::UnixStream;
 use tokio::process::Command;
 use uuid::Uuid;
-
-use super::executer::*;
-use super::input::{repository_url_to_nix, vec_to_hex};
-use super::types::*;
 
 pub async fn evaluate(
     state: Arc<ServerState>,
@@ -230,52 +230,6 @@ async fn query_all_dependencies(
 
         all_builds.push(build);
         dependencies.extend(references);
-    }
-}
-
-pub async fn add_features(
-    state: Arc<ServerState>,
-    features: Vec<String>,
-    build_id: Option<Uuid>,
-    server_id: Option<Uuid>,
-) {
-    for f in features {
-        let feature = EFeature::find()
-            .filter(CFeature::Name.eq(f.clone()))
-            .one(&state.db)
-            .await
-            .unwrap();
-
-        let feature = if let Some(f) = feature {
-            f
-        } else {
-            let afeature = AFeature {
-                id: Set(Uuid::new_v4()),
-                name: Set(f),
-            };
-
-            afeature.insert(&state.db).await.unwrap()
-        };
-
-        if let Some(b_id) = build_id {
-            let abuild_feature = ABuildFeature {
-                id: Set(Uuid::new_v4()),
-                build: Set(b_id),
-                feature: Set(feature.id),
-            };
-
-            abuild_feature.insert(&state.db).await.unwrap();
-        }
-
-        if let Some(s_id) = server_id {
-            let aserver_feature = AServerFeature {
-                id: Set(Uuid::new_v4()),
-                server: Set(s_id),
-                feature: Set(feature.id),
-            };
-
-            aserver_feature.insert(&state.db).await.unwrap();
-        }
     }
 }
 

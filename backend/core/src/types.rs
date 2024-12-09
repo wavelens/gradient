@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
-#[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient", author = "Wavelens", version, about, long_about = None)]
+#[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient-server", author = "Wavelens", version, about, long_about = None)]
 pub struct Cli {
     #[arg(long, env = "GRADIENT_DEBUG", default_value = "false")]
     pub debug: bool,

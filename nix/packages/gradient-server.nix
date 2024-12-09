@@ -49,6 +49,6 @@ in rustPlatform.buildRustPackage {
     homepage = "https://wavelens.io";
     license = lib.licenses.agpl3Only;
     platforms = lib.platforms.unix;
-    mainProgram = "backend";
+    mainProgram = "gradient-server";
   };
 }

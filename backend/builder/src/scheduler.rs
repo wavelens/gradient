@@ -5,6 +5,9 @@
  */
 
 use chrono::Utc;
+use core::executer::*;
+use core::sources::*;
+use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use futures::stream::{self, StreamExt};
@@ -20,9 +23,6 @@ use tokio::time;
 use uuid::Uuid;
 
 use super::evaluator::*;
-use super::executer::*;
-use super::sources::*;
-use super::types::*;
 
 pub async fn schedule_evaluation_loop(state: Arc<ServerState>) {
     let mut current_schedules = vec![];

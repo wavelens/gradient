@@ -244,6 +244,9 @@
 
       builder.sleep(30)
 
+      server.succeed("cat /nix/store/pf76zbb2bcldjv8dxxn3kssgl78qi3y3-buildWait5Sec.drv")
+      builder.succeed("cat /nix/store/pf76zbb2bcldjv8dxxn3kssgl78qi3y3-buildWait5Sec.drv")
+
       project_data = builder.succeed(f"""
         ${lib.getExe pkgs.curl} -v \
           -X GET \

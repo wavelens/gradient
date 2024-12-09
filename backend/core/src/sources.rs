@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  */
 
-use base64::{engine::general_purpose, Engine as _};
+use base64::{engine::general_purpose, Engine};
 use entity::evaluation::EvaluationStatus;
 use rand::rngs::OsRng;
 use sea_orm::EntityTrait;
@@ -125,7 +125,7 @@ pub fn format_public_key(organization: MOrganization) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::NULL_TIME;
+    use crate::consts::NULL_TIME;
 
     #[test]
     fn test_check_generate_ssh_key() {

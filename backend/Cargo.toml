@@ -1,10 +1,17 @@
 [package]
-name = "backend"
+name = "gradient-server"
 version = "0.1.0"
 edition = "2021"
+license = "AGPL-3.0 OR Commercial"
+authors = ["Wavelens UG <info@wavelens.io>"]
+description = "Nix-based Continuous Integration System"
+repository = "https://github.com/wavelens/gradient"
 
 [workspace]
-members = [".", "server", "entity", "migration"]
+members = [".", "core", "builder", "web", "entity", "migration"]
 
 [dependencies]
-gradient-server = { path = "server" }
+builder = { path = "builder" }
+core = { path = "core" }
+tokio = { version = "1.42", features = ["process", "rt-multi-thread"] }
+web = { path = "web" }
