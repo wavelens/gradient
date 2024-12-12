@@ -23,7 +23,15 @@
      <div class="content-left">
          <p class="border-bottom space-normal no-side-padding"><a class="p-l-1rem d-webkit-box">{% trans 'Overview' %}</a></p>
          <div class="flex-c activeeffect-sidebar">
-             <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+             <!-- <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+             <span class="material-symbols-rounded filled green">
+                check_circle
+            </span> -->
+            {% if success != 'waiting' %}
+                <span class="material-icons {% if success == 'true' %}green{% else %}red{% endif %}">{% if success == 'true' %}check_circle{% else %}cancel{% endif %}</span>
+            {% else %}
+                <div class="loader"></div>
+            {% endif %}
              <a>{% trans 'Build' %}</a>
          </div>
      </div>
@@ -45,7 +53,7 @@
                  <div class="text-light m-b-05rem">{% trans 'Artifacts' %}</div>
                  <div>{% trans artifacts %}</div>
              </div>
- 
+             
          </div>
          <div class="innerbody">
              <div class="innerbody-header border-bottom">
@@ -55,7 +63,12 @@
                  </div>
                  <br>
                  <div class="flex-c">
-                     <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                     <!-- <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle"> -->
+                    {% if success != 'waiting' %}
+                        <span class="material-icons {% if success == 'true' %}green{% else %}red{% endif %}">{% if success == 'true' %}check_circle{% else %}cancel{% endif %}</span>
+                    {% else %}
+                        <div class="loader"></div>
+                    {% endif %}
                      <span>{% trans 'Build' %}</span>
                  </div>
              </div>

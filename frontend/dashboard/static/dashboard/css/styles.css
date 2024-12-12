@@ -50,6 +50,11 @@ a:hover {
     color: #abb0b4;
 }
 
+.filled {
+    font-variation-settings:
+        'FILL' 1, 
+}
+
 .full-width {
     display: inline-block;
     width: 100%;
@@ -565,6 +570,10 @@ pre span {
     font-size: 24px !important;
 }
 
+.f-s-28px {
+    font-size: 28px !important;
+}
+
 .branch {
     background-color: #121d2f;
     color: #3a7ace;
@@ -652,4 +661,29 @@ tr:hover td{
 
 .vertical-align-bottom {
     vertical-align: bottom;
+}
+
+.green {
+    color: #238636;
+}
+
+.red {
+    color: #fa5e55;
+}
+
+.loader {
+    width: 10px;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: #c5b03b;
+    box-shadow: 0 0 0 0 #c7b54e;
+    animation: l1 1.5s infinite;
+    margin: 0 10px;
+}
+@keyframes l1 {
+    100% {box-shadow: 0 0 0 10px #0000}
+}
+
+.gray {
+    color: #767676;
 }

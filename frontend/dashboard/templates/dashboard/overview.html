@@ -62,16 +62,24 @@
                      <td>{{ block.exec }}</td>
                      <td>{% trans block.duration %}</td>
                      <td>
-                         <img class="red-filter" src="{% static 'dashboard/images/x-circle.svg' %}" alt="X Circle">
+                         <!-- <img class="red-filter" src="{% static 'dashboard/images/x-circle.svg' %}" alt="X Circle">
                          <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-                         <img class="gray-filter" src="{% static 'dashboard/images/circle.svg' %}" alt="X Circle">
+                         <img class="gray-filter" src="{% static 'dashboard/images/circle.svg' %}" alt="X Circle"> -->
+                         <span class="material-icons {% if block.wfp.1 == 'true' %}green{% elif block.wfp.1 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.wfp.1 == 'true' or block.wfp.1 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
+                         <span class="material-icons {% if block.wfp.2 == 'true' %}green{% elif block.wfp.2 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.wfp.2 == 'true' or block.wfp.2 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
+                         <span class="material-icons {% if block.wfp.3 == 'true' %}green{% elif block.wfp.3 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.wfp.3 == 'true' or block.wfp.3 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
                      </td>
                      <td>
+                         <!-- <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                          <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                          <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                          <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-                         <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-                         <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                         <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle"> -->
+                         <span class="material-icons {% if block.latestRuns.1 == 'true' %}green{% elif block.latestRuns.1 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.latestRuns.1 == 'true' or block.latestRuns.1 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
+                         <span class="material-icons {% if block.latestRuns.2 == 'true' %}green{% elif block.latestRuns.2 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.latestRuns.2 == 'true' or block.latestRuns.2 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
+                         <span class="material-icons {% if block.latestRuns.3 == 'true' %}green{% elif block.latestRuns.3 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.latestRuns.3 == 'true' or block.latestRuns.3 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
+                         <span class="material-icons {% if block.latestRuns.4 == 'true' %}green{% elif block.latestRuns.4 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.latestRuns.4 == 'true' or block.latestRuns.4 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
+                         <span class="material-icons {% if block.latestRuns.5 == 'true' %}green{% elif block.latestRuns.5 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.latestRuns.5 == 'true' or block.latestRuns.5 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
                      </td>
                      <td><a href="/"><img src="{% static 'dashboard/images/more-vertical.svg' %}" alt="More"></a></td>
                  </tr>
