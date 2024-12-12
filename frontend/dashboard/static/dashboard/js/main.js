@@ -15,18 +15,29 @@ document.addEventListener("DOMContentLoaded", function() {
 });
 
 function dropdownFunction() {
-    document.getElementById("dropdownHeader").classList.toggle("show");
+  const dropdown = document.getElementById("dropdownHeader");
+  const tooltip = document.getElementById("tooltip");
+
+  dropdown.classList.toggle("show");
+
+  if (dropdown.classList.contains("show")) {
+      tooltip.classList.add("hidden");
+  } else {
+      tooltip.classList.remove("hidden");
+  }
 }
 
-window.onclick = function(event) {
-    if (!event.target.matches('.dropbtn')) {
+window.onclick = function (event) {
+  if (!event.target.matches('.dropbtn')) {
       var dropdowns = document.getElementsByClassName("dropdown-content");
-      var i;
-      for (i = 0; i < dropdowns.length; i++) {
-        var openDropdown = dropdowns[i];
-        if (openDropdown.classList.contains('show')) {
-          openDropdown.classList.remove('show');
-        }
+      var tooltip = document.getElementById("tooltip");
+
+      for (let i = 0; i < dropdowns.length; i++) {
+          var openDropdown = dropdowns[i];
+          if (openDropdown.classList.contains('show')) {
+              openDropdown.classList.remove('show');
+              tooltip.classList.remove("hidden");
+          }
       }
-    }
   }
+};

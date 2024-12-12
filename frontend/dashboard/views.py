@@ -15,7 +15,19 @@ def workflow(request):
             'exec': 34,
             'duration': '12m 11s',
             'performance': 'filter',
-            'latest_runs': 'filter'
+            'latest_runs': 'filter',
+            'latestRuns': {
+                '1': 'true',
+                '2': 'true',
+                '3': 'false',
+                '4': 'true',
+                '5': 'true',
+            },
+            'wfp': {
+                '1': 'true',
+                '2': 'false',
+                '3': 'nothing',
+            }
         },
         {
             'project': "build2",
@@ -23,7 +35,19 @@ def workflow(request):
             'exec': 34,
             'duration': '12m 11s',
             'performance': 'filter',
-            'latest_runs': 'filter'
+            'latest_runs': 'filter',
+            'latestRuns': {
+                '1': 'false',
+                '2': 'true',
+                '3': 'false',
+                '4': 'true',
+                '5': 'true',
+            },
+            'wfp': {
+                '1': 'true',
+                '2': 'false',
+                '3': 'nothing',
+            }
         },
         {
             'project': "build3",
@@ -31,7 +55,19 @@ def workflow(request):
             'exec': 34,
             'duration': '12m 11s',
             'performance': 'filter',
-            'latest_runs': 'filter'
+            'latest_runs': 'filter',
+            'latestRuns': {
+                '1': 'false',
+                '2': 'false',
+                '3': 'false',
+                '4': 'true',
+                '5': 'true',
+            },
+            'wfp': {
+                '1': 'true',
+                '2': 'false',
+                '3': 'nothing',
+            }
         },
         {
             'project': "build4",
@@ -39,7 +75,19 @@ def workflow(request):
             'exec': 34,
             'duration': '12m 11s',
             'performance': 'filter',
-            'latest_runs': 'filter'
+            'latest_runs': 'filter',
+            'latestRuns': {
+                '1': 'nothing',
+                '2': 'nothing',
+                '3': 'false',
+                '4': 'true',
+                '5': 'true',
+            },
+            'wfp': {
+                '1': 'true',
+                '2': 'false',
+                '3': 'nothing',
+            }
         },
     ]
     context = {

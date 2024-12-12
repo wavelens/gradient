@@ -4,30 +4,33 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  -->
 
-{% extends 'dashboard/index.html' %}
+ {% extends 'dashboard/index.html' %}
 
-{% block title %}Models{% endblock %}
-
-{% block content %}
-
-<head>{% load static %}</head>
-
-<div class="container">
-    <table class="workflows-table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Description</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for model in models %}
-                <tr>
-                    <td>{{ model.name }}</td>
-                    <td>{{ model.description }}</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endblock %}
+ {% block title %}Models{% endblock %}
+ 
+ {% block content %}
+ 
+ <head>
+     {% load static %}
+     {% load i18n %}
+ </head>
+ 
+ <div class="container">
+     <table class="workflows-table">
+         <thead>
+             <tr>
+                 <th>{% trans 'Name' %}</th>
+                 <th>{% trans 'Description' %}</th>
+             </tr>
+         </thead>
+         <tbody>
+             {% for model in models %}
+                 <tr>
+                     <td>{% trans model.name %}</td>
+                     <td>{% trans model.description %}</td>
+                 </tr>
+             {% endfor %}
+         </tbody>
+     </table>
+ </div>
+ {% endblock %}
