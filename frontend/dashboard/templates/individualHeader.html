@@ -11,7 +11,7 @@
     <header class="m-t--1rem">
         <div class="logo-container header-workflow">
             <img src="../static/dashboard/images/pb2.png"class="h-30 border-radius-5 vertical-align-bottom">
-            <span><a class="header-link" href="{% url 'workflow' %}">{% trans projectname %}</a>/<a class="header-link" href="{% url 'model' %}"><b>{% trans model %}</b></a></span>
+            <span><a class="header-link" href="{% url 'workflow' %}">{{ projectname }}</a>/<a class="header-link" href="{% url 'model' %}"><b>{{ model }}</b></a></span>
         </div>
         <nav role="navigation">
             <a class="nav-link flex-c" href="{% url 'workflow' %}">

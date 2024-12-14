@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  -->
 
- <head>
+<head>
     {% load static %}
     {% load i18n %}
 </head>
@@ -14,12 +14,14 @@
         <h2 class="webkit-middle space-small" class="flex-c">
             {% if success != 'waiting' %}
                 <div>
-                    <span class="material-icons center-image f-s-28px {% if success == 'true' %}green{% else %}red{% endif %}">{% if success == 'true' %}check_circle{% else %}cancel{% endif %}</span>
+                    <span class="material-icons center-image f-s-28px {% if success == 'true' %}green{% else %}red{% endif %}">
+                        {% if success == 'true' %}check_circle{% else %}cancel{% endif %}
+                    </span>
             {% else %}
                 <div class="filter-container">
                     <div class="loader"></div>
             {% endif %}
-                {% trans built_name %}
+                {{ built_name }}
                 <span class="color-light fw-normal"> #{{ id }}</span>
                 </div>
         </h2>

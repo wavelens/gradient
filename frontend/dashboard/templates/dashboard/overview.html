@@ -4,87 +4,109 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  -->
 
- {% extends 'dashboard/index.html' %}
+{% extends 'dashboard/index.html' %}
 
- {% block title %}Dashboard{% endblock %}
- 
- <head>
-     {% load static %}
-     {% load i18n %}
- </head>
- 
- {% block content %}
- 
- {% include "../individualHeader.html" %} 
- 
- <div class="container">
-     <div class="header">
-         <div class="left">
-             <h1>{% trans 'Workflows' %}</h1>
-         </div>
-         <div class="right">
-             <button class="button-clear">{% trans 'Clear All Filters' %}</button>|
-             <button class="button-round">{% trans 'Branches' %}</button>
-             <select class="field-select">
-                 <option>{% trans 'Advanced Filter' %}</option>
-             </select>
-         </div>
-     </div>
-     <div>
-         <div class="left">
-             <div class="filter-container">
-                 <div class="search-container">
-                     <input type="text" placeholder="Search">
-                     <button class="button-round search-button">{% trans 'Search' %}</button>
-                     |<button class="button-clear">{% trans 'Clear search' %}</button>
-                 </div>    
-             </div>
-         </div>
-         <div class="right">
-             <input class="field-date" type="date">
-         </div>
-     </div>
-     <table class="workflows-table">
-         <thead>
-             <tr>
-                 <th>{% trans 'Project' %}</th>
-                 <th>{% trans '# of exec.' %}</th>
-                 <th>{% trans 'Avg. Duration' %}</th>
-                 <th>{% trans 'WF Performance' %}</th>
-                 <th>{% trans 'Latest 5 runs' %}</th>
-                 <th></th>
-             </tr>
-         </thead>
-         <tbody>
-             {% for block in details_blocks %}
-                 <tr>
-                     <td><a class="full-width" href="https://hydra.wavelens.io/project/build"><span>{% trans block.project %}</span><br><span class="text-light">{% trans block.id %}</span></a></td>
-                     <td>{{ block.exec }}</td>
-                     <td>{% trans block.duration %}</td>
-                     <td>
-                         <!-- <img class="red-filter" src="{% static 'dashboard/images/x-circle.svg' %}" alt="X Circle">
-                         <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-                         <img class="gray-filter" src="{% static 'dashboard/images/circle.svg' %}" alt="X Circle"> -->
-                         <span class="material-icons {% if block.wfp.1 == 'true' %}green{% elif block.wfp.1 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.wfp.1 == 'true' or block.wfp.1 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
-                         <span class="material-icons {% if block.wfp.2 == 'true' %}green{% elif block.wfp.2 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.wfp.2 == 'true' or block.wfp.2 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
-                         <span class="material-icons {% if block.wfp.3 == 'true' %}green{% elif block.wfp.3 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.wfp.3 == 'true' or block.wfp.3 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
-                     </td>
-                     <td>
-                         <!-- <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-                         <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-                         <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-                         <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-                         <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle"> -->
-                         <span class="material-icons {% if block.latestRuns.1 == 'true' %}green{% elif block.latestRuns.1 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.latestRuns.1 == 'true' or block.latestRuns.1 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
-                         <span class="material-icons {% if block.latestRuns.2 == 'true' %}green{% elif block.latestRuns.2 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.latestRuns.2 == 'true' or block.latestRuns.2 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
-                         <span class="material-icons {% if block.latestRuns.3 == 'true' %}green{% elif block.latestRuns.3 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.latestRuns.3 == 'true' or block.latestRuns.3 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
-                         <span class="material-icons {% if block.latestRuns.4 == 'true' %}green{% elif block.latestRuns.4 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.latestRuns.4 == 'true' or block.latestRuns.4 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
-                         <span class="material-icons {% if block.latestRuns.5 == 'true' %}green{% elif block.latestRuns.5 == 'nothing' %}gray{% else %}red{% endif %}">{% if block.latestRuns.5 == 'true' or block.latestRuns.5 == 'nothing' %}check_circle{% else %}cancel{% endif %}</span>
-                     </td>
-                     <td><a href="/"><img src="{% static 'dashboard/images/more-vertical.svg' %}" alt="More"></a></td>
-                 </tr>
-             {% endfor %}
-         </tbody>
-     </table>
- </div>
- {% endblock %}
+{% block title %}{% trans 'Dashboard' %}{% endblock %}
+
+<head>
+    {% load static %}
+    {% load i18n %}
+</head>
+
+{% block content %}
+
+{% include "../individualHeader.html" %}
+
+<div class="container">
+    <div class="header">
+        <div class="left">
+            <h1>{% trans 'Workflows' %}</h1>
+        </div>
+        <div class="right">
+            <button class="button-clear">{% trans 'Clear All Filters' %}</button>|
+            <button class="button-round">{% trans 'Branches' %}</button>
+            <select class="field-select">
+                <option>{% trans 'Advanced Filter' %}</option>
+            </select>
+        </div>
+    </div>
+    <div>
+        <div class="left">
+            <div class="filter-container">
+                <div class="search-container">
+                    <input type="text" placeholder="Search">
+                    <button class="button-round search-button">{% trans 'Search' %}</button>
+                    |<button class="button-clear">{% trans 'Clear search' %}</button>
+                </div>
+            </div>
+        </div>
+        <div class="right">
+            <input class="field-date" type="date">
+        </div>
+    </div>
+    <table class="workflows-table">
+        <thead>
+            <tr>
+                <th>{% trans 'Project' %}</th>
+                <th>{% trans '# of exec.' %}</th>
+                <th>{% trans 'Avg. Duration' %}</th>
+                <th>{% trans 'WF Performance' %}</th>
+                <th>{% trans 'Latest 5 runs' %}</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for block in details_blocks %}
+                <tr>
+                    <td>
+                        <a class="full-width" href="https://hydra.wavelens.io/project/build">
+                            <span>{% trans block.project %}</span><br><span class="text-light">{{ block.id %}</span>
+                        </a>
+                    </td>
+                    <td>{{ block.exec }}</td>
+                    <td>{{ block.duration }}</td>
+                    <td>
+                        <!-- <img class="red-filter" src="{% static 'dashboard/images/x-circle.svg' %}" alt="X Circle">
+                        <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                        <img class="gray-filter" src="{% static 'dashboard/images/circle.svg' %}" alt="X Circle"> -->
+                        <span class="material-icons {% if block.wfp.1 == 'true' %}green{% elif block.wfp.1 == 'nothing' %}gray{% else %}red{% endif %}">
+                            {% if block.wfp.1 == 'true' or block.wfp.1 == 'nothing' %}check_circle{% else %}cancel{% endif %}
+                        </span>
+                        <span class="material-icons {% if block.wfp.2 == 'true' %}green{% elif block.wfp.2 == 'nothing' %}gray{% else %}red{% endif %}">
+                            {% if block.wfp.2 == 'true' or block.wfp.2 == 'nothing' %}check_circle{% else %}cancel{% endif %}
+                        </span>
+                        <span class="material-icons {% if block.wfp.3 == 'true' %}green{% elif block.wfp.3 == 'nothing' %}gray{% else %}red{% endif %}">
+                            {% if block.wfp.3 == 'true' or block.wfp.3 == 'nothing' %}check_circle{% else %}cancel{% endif %}
+                        </span>
+                    </td>
+                    <td>
+                        <!-- <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                        <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                        <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                        <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+                        <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle"> -->
+                        <span class="material-icons {% if block.latestRuns.1 == 'true' %}green{% elif block.latestRuns.1 == 'nothing' %}gray{% else %}red{% endif %}">
+                            {% if block.latestRuns.1 == 'true' or block.latestRuns.1 == 'nothing' %}check_circle{% else %}cancel{% endif %}
+                        </span>
+                        <span class="material-icons {% if block.latestRuns.2 == 'true' %}green{% elif block.latestRuns.2 == 'nothing' %}gray{% else %}red{% endif %}">
+                            {% if block.latestRuns.2 == 'true' or block.latestRuns.2 == 'nothing' %}check_circle{% else %}cancel{% endif %}
+                        </span>
+                        <span class="material-icons {% if block.latestRuns.3 == 'true' %}green{% elif block.latestRuns.3 == 'nothing' %}gray{% else %}red{% endif %}">
+                            {% if block.latestRuns.3 == 'true' or block.latestRuns.3 == 'nothing' %}check_circle{% else %}cancel{% endif %}
+                        </span>
+                        <span class="material-icons {% if block.latestRuns.4 == 'true' %}green{% elif block.latestRuns.4 == 'nothing' %}gray{% else %}red{% endif %}">
+                            {% if block.latestRuns.4 == 'true' or block.latestRuns.4 == 'nothing' %}check_circle{% else %}cancel{% endif %}
+                        </span>
+                        <span class="material-icons {% if block.latestRuns.5 == 'true' %}green{% elif block.latestRuns.5 == 'nothing' %}gray{% else %}red{% endif %}">
+                            {% if block.latestRuns.5 == 'true' or block.latestRuns.5 == 'nothing' %}check_circle{% else %}cancel{% endif %}
+                        </span>
+                    </td>
+                    <td>
+                        <a href="/"><img src="{% static 'dashboard/images/more-vertical.svg' %}" alt="More"></a>
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

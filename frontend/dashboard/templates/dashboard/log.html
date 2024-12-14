@@ -4,105 +4,106 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  -->
 
- {% extends 'dashboard/index.html' %}
+{% extends 'dashboard/index.html' %}
 
- {% block title %}Log{% endblock %}
- 
- {% block content %}
- 
- {% include "../individualHeader.html" %}
- 
- {% include "../backHeader.html" %}
- 
- <head>
-     {% load static %}
-     {% load i18n %}
- </head>
- 
- <div class="outerbody">
-     <div class="content-left">
-         <p class="border-bottom space-normal no-side-padding"><a class="p-l-1rem d-webkit-box">{% trans 'Overview' %}</a></p>
-         <div class="flex-c activeeffect-sidebar">
-             <!-- <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-             <span class="material-symbols-rounded filled green">
-                check_circle
-            </span> -->
-            {% if success != 'waiting' %}
+{% block title %}{% trans 'Log' %}{% endblock %}
+
+{% block content %}
+
+{% include "../individualHeader.html" %}
+
+{% include "../backHeader.html" %}
+
+<head>
+    {% load static %}
+    {% load i18n %}
+</head>
+
+<div class="outerbody">
+    <div class="content-left">
+        <p class="border-bottom space-normal no-side-padding"><a class="p-l-1rem d-webkit-box">{% trans 'Overview' %}</a></p>
+        <div class="flex-c activeeffect-sidebar">
+            <!-- <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
+            <span class="material-symbols-rounded filled green">
+               check_circle
+           </span> -->
+           {% if success != 'waiting' %}
                 <span class="material-icons {% if success == 'true' %}green{% else %}red{% endif %}">{% if success == 'true' %}check_circle{% else %}cancel{% endif %}</span>
-            {% else %}
-                <div class="loader"></div>
-            {% endif %}
-             <a>{% trans 'Build' %}</a>
-         </div>
-     </div>
-     <div class="full-width">
-         <div class="innerbody-top d-flex">
-             <div class="m-r-2rem">
-                 <div class="text-light m-b-05rem">{% trans 'Triggered via' %} {% trans triggerArt %} {% trans triggerTime %} {% trans 'ago' %}</div>
-                 <div><img src="../static/dashboard/images/{{ user.image }}" class="icon-center border-radius-5"><span>{% trans user.name %} </span> <span class="material-symbols-outlined icon-center f-s-21px">{% trans 'commit' %}</span> {% trans git %} <span class="branch">{% trans branch %}</span></div>
-             </div>
-             <div class="m-r-2rem">
-                 <div class="text-light m-b-05rem">{% trans 'Status' %}</div>
-                 <div>{% trans status %}</div>
-             </div>
-             <div class="m-r-2rem">
-                 <div class="text-light m-b-05rem">{% trans 'Total duration' %}</div>
-                 <div>{% trans duration %}</div>
-             </div>
-             <div class="m-r-2rem">
-                 <div class="text-light m-b-05rem">{% trans 'Artifacts' %}</div>
-                 <div>{% trans artifacts %}</div>
-             </div>
-             
-         </div>
-         <div class="innerbody">
-             <div class="innerbody-header border-bottom">
-                 <div>
-                     <span>{% trans built_version %}</span><br>
-                     <span class="text-light">{% trans status %} {% trans time %} {% trans 'months ago in' %} {% trans duration %}</span>
-                 </div>
-                 <br>
-                 <div class="flex-c">
-                     <!-- <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle"> -->
+           {% else %}
+               <div class="loader"></div>
+           {% endif %}
+            <a>{% trans 'Build' %}</a>
+        </div>
+    </div>
+    <div class="full-width">
+        <div class="innerbody-top d-flex">
+            <div class="m-r-2rem">
+               <div class="text-light m-b-05rem">{% trans 'Triggered via' %} {{ triggerArt }} {{ triggerTime }} {% trans 'ago' %}</div>
+               <div><img src="../static/dashboard/images/{{ user.image }}" class="icon-center border-radius-5"><span>{{ user.name }} </span> <span class="material-symbols-outlined icon-center f-s-21px">{% trans 'commit' %}</span> {{ git }} <span class="branch">{{ branch }}</span></div>
+            </div>
+            <div class="m-r-2rem">
+                <div class="text-light m-b-05rem">{% trans 'Status' %}</div>
+                <div>{{ status }}</div>
+            </div>
+            <div class="m-r-2rem">
+                <div class="text-light m-b-05rem">{% trans 'Total duration' %}</div>
+                <div>{{ duration }}</div>
+            </div>
+            <div class="m-r-2rem">
+                <div class="text-light m-b-05rem">{% trans 'Artifacts' %}</div>
+                <div>{{ artifacts }}</div>
+            </div>
+        </div>
+        <div class="innerbody">
+            <div class="innerbody-header border-bottom">
+                <div>
+                    <span>{% trans built_version %}</span><br>
+                    <span class="text-light">{{ status }} {{ time }} {% trans 'months ago in' %} {{ duration }}</span>
+                </div>
+                <br>
+                <div class="flex-c">
+                    <!-- <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle"> -->
                     {% if success != 'waiting' %}
-                        <span class="material-icons {% if success == 'true' %}green{% else %}red{% endif %}">{% if success == 'true' %}check_circle{% else %}cancel{% endif %}</span>
+                        <span class="material-icons {% if success == 'true' %}green{% else %}red{% endif %}">
+                            {% if success == 'true' %}check_circle{% else %}cancel{% endif %}
+                        </span>
                     {% else %}
                         <div class="loader"></div>
                     {% endif %}
-                     <span>{% trans 'Build' %}</span>
-                 </div>
-             </div>
-             <div class="p-1rem">
-                 <div class="code-container monospace">
-                     {% for block in details_blocks %}
-                         <details class="details-item color-secondary">
-                             <summary>{% trans block.summary %}</summary>
-                             <div class="details-content color-secondary">
-                                 {% for line in block.details %}
-                                     <div class="line">{% trans line %}</div>
-                                 {% endfor %}
-                             </div>
-                         </details>
-                     {% endfor %}
-                 </div>
-             </div>
-         </div>
-     </div>
- </div>
- 
- 
- <script>
-     let lineCounter = 1;
- 
-         document.querySelectorAll('.details-item').forEach(details => {
-             const summary = details.querySelector('summary');
-             summary.setAttribute('data-line-number', lineCounter++);
- 
-             const content = details.querySelector('.details-content');
-             content.querySelectorAll('.line').forEach(line => {
-                 line.setAttribute('data-line-number', lineCounter++);
-             });
-         });
- </script>
- 
- {% endblock %}
+                    <span>{% trans 'Build' %}</span>
+                </div>
+            </div>
+            <div class="p-1rem">
+                <div class="code-container monospace">
+                    {% for block in details_blocks %}
+                        <details class="details-item color-secondary">
+                            <summary>{{ block.summary }}</summary>
+                            <div class="details-content color-secondary">
+                                {% for line in block.details %}
+                                    <div class="line">{{ line }}</div>
+                                {% endfor %}
+                            </div>
+                        </details>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<script>
+    let lineCounter = 1;
+
+    document.querySelectorAll('.details-item').forEach(details => {
+        const summary = details.querySelector('summary');
+        summary.setAttribute('data-line-number', lineCounter++);
+
+        const content = details.querySelector('.details-content');
+        content.querySelectorAll('.line').forEach(line => {
+            line.setAttribute('data-line-number', lineCounter++);
+        });
+    });
+</script>
+
+{% endblock %}

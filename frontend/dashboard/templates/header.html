@@ -23,7 +23,7 @@
                         <span class="tooltiptext" id="tooltip">{% trans 'Profil und Einstellungen...' %}</span>
                     </div>
                     <div id="dropdownHeader" class="dropdown-content">
-                        <p>signed in as {{ user.name }}</p>
+                        <p>{% trans 'signed in as' %} {{ user.name }}</p>
                         <a href="#home" class="flex-c"><span class="material-symbols-outlined m-r-5">account_circle</span><span>{% trans 'Profile' %}</span></a>
                         <a href="#about" class="flex-c"><span class="material-symbols-outlined m-r-5">star</span><span>{% trans 'Starred' %}</span></a>
                         <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">notifications</span><span>{% trans 'Subscriptions' %}</span></a>
