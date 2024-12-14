@@ -1361,6 +1361,7 @@ name = "gradient-server"
 version = "0.1.0"
 dependencies = [
  "builder",
+ "clap",
  "core",
  "tokio",
  "web",
