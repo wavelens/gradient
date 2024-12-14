@@ -6,31 +6,34 @@
 
 {% extends 'dashboard/index.html' %}
 
-{% block title %}Download{% endblock %}
+{% block title %}{% trans 'Download' %}{% endblock %}
 
 {% block content %}
 
 {% include "../individualHeader.html" %} 
 
-<head>{% load static %}</head>
+<head>
+    {% load static %}
+    {% load i18n %}
+</head>
 
 <div class="container-table">
-    <table>
+    <table class="workflows-table">
         <thead>
             <tr>
                 <th></th>
-                <th>Type</th>
-                <th>Link</th>
-                <th>Actions</th>
+                <th>{% trans 'Type' %}</th>
+                <th>{% trans 'Link' %}</th>
+                <th>{% trans 'Actions' %}</th>
             </tr>
         </thead>
         <tbody>
             {% for file in files %}
                 <tr>
                     <td>{{ file.file }}</td>
-                    <td>{{ file.type }}</td>
+                    <td>{{ trans file.type }}</td>
                     <td><a>{{ file.link }}</a></td>
-                    <td>{{ file.actions }}</td>
+                    <td>{{ trans file.actions }}</td>
                 </tr>
             {% endfor %}
         </tbody>

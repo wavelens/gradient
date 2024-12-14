@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  */
 
-:root {
+ :root {
     --primary: #0d1118; /*  */
     --secondary: #abb0b4;
     --tertiary: #21262d;
@@ -48,6 +48,11 @@ a:hover {
 .material-symbols-outlined {
     font-size: 30px !important;
     color: #abb0b4;
+}
+
+.filled {
+    font-variation-settings:
+        'FILL' 1, 
 }
 
 .full-width {
@@ -228,7 +233,7 @@ th, td {
 
 tr:last-child td {
     border: none;
-    padding-bottom: 2rem;
+    /* padding-bottom: 2rem; */
 }
 
 th {
@@ -565,6 +570,10 @@ pre span {
     font-size: 24px !important;
 }
 
+.f-s-28px {
+    font-size: 28px !important;
+}
+
 .branch {
     background-color: #121d2f;
     color: #3a7ace;
@@ -605,7 +614,7 @@ tr:hover td{
 
 .icon-arrow {
     font-size: 21px !important;
-    margin-left: -8px;
+    margin-left: -4px;
     top: -3px;
     position: relative;
     margin-right: 2px;
@@ -637,6 +646,11 @@ tr:hover td{
     border: 1px solid #444;
 }
 
+.tooltiptext.hidden {
+    visibility: hidden;
+    opacity: 0;
+}
+
 .tooltip:hover .tooltiptext {
     visibility: visible;
 }
@@ -647,4 +661,29 @@ tr:hover td{
 
 .vertical-align-bottom {
     vertical-align: bottom;
+}
+
+.green {
+    color: #238636;
+}
+
+.red {
+    color: #fa5e55;
+}
+
+.loader {
+    width: 10px;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: #c5b03b;
+    box-shadow: 0 0 0 0 #c7b54e;
+    animation: l1 1.5s infinite;
+    margin: 0 10px;
+}
+@keyframes l1 {
+    100% {box-shadow: 0 0 0 10px #0000}
+}
+
+.gray {
+    color: #767676;
 }
