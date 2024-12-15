@@ -11,4 +11,5 @@ urlpatterns = [
     path("log", views.log, name="log"),
     path("download", views.download, name="download"),
     path("model", views.model, name="model"),
+    path("login", views.login, name="login"),
 ]

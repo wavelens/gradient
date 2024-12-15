@@ -68,7 +68,7 @@ h2 {
     color: white;
 }
 
-input[type="text"] {
+input[type="text"], input[type="password"] {
     padding: 5px;
     background-color: var(--tertiary);
     border: 1px solid rgb(118, 118, 118);
@@ -77,8 +77,21 @@ input[type="text"] {
     width: 18rem;
 }
 
-input[type="text"]:focus-visible {
-    outline: solid 1px var(--secondary);
+input[type="text"]:focus-visible, input[type="password"]:focus-visible {
+    outline: none;
+    border: 1px solid #007BFF;
+}
+
+.form-field input:-webkit-autofill {
+    background-color: var(--tertiary) !important;
+    -webkit-box-shadow: 0 0 0px 1000px var(--tertiary) inset !important;
+    -webkit-text-fill-color: var(--secondary) !important;
+    caret-color: var(--secondary) !important;
+}
+
+.form-field input:focus,
+.form-field input:valid {
+    background-color: var(--tertiary);
 }
 
 .space-normal {
@@ -547,6 +560,10 @@ pre span {
     margin-top: -1rem;
 }
 
+.m-t-0 {
+    margin-top: 0;
+}
+
 .m-b-1rem {
     margin-bottom: 1rem;
 }
@@ -686,4 +703,90 @@ tr:hover td{
 
 .gray {
     color: #767676;
+}
+
+.text-center {
+    text-align: center;
+}
+
+.form-header-label {
+    margin: -20px -20px 20px -20px;
+    border-bottom: 1px solid rgba(118, 118, 118, 1);
+    text-align: center;
+    padding-bottom: 20px;
+    padding-top: 20px;
+    background-color: var(--tertiary);
+    border-radius: 5px 5px 0 0;
+}
+
+.form-container {
+    padding: 20px;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    width: 100%;
+    max-width: 400px;
+    margin: auto;
+    border: 1px solid rgb(118, 118, 118);
+}
+.form-field {
+    margin-bottom: 15px;
+}
+
+.form-field label {
+    display: block;
+    margin-bottom: 5px;
+}
+
+.required-label::after {
+    content: " *";
+    color: red;
+}
+
+.form-field input {
+    width: 94.5%;
+    padding: 10px;
+    font-size: 16px;
+    border-radius: 5px;
+}
+
+.form-field .error {
+    color: red;
+    font-size: 0.9em;
+    margin-top: 5px;
+}
+
+.submit-btn {
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+    color: #fff;
+    background-color: #007BFF;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.submit-btn:hover {
+    background-color: #0056b3;
+}
+
+.form-check-input {
+    width: 20px;
+    height: 20px;
+    appearance: none;
+    border: 1px solid var(--secondary);
+    border-radius: 2px;
+    background-color: var(--tertiary);
+    cursor: pointer;
+}
+
+.form-check {
+    display: flex;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.form-check-input:checked {
+    border-radius: 5px;
+    appearance: checkbox;
 }

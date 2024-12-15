@@ -1,0 +1,43 @@
+<!--
+ * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+ -->
+
+ {% extends 'dashboard/index.html' %}
+
+ <head>
+    {% load static %}
+    {% load i18n %}
+</head>
+
+{% block title %}{% trans 'Login' %}{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <h2 class="form-header-label">Anmelden</h2>
+    <form method="post">
+        {% csrf_token %}
+        {% for field in form %}
+            {% if field.field.widget|default:"" == form.fields.remember_me.widget %}
+                <div class="form-check">
+                    {{ field }}
+                    <label for="{{ field.id_for_label }}" class="form-check-label">{{ field.label }}</label>
+                </div>
+            {% else %}
+                <div class="form-field">
+                    <label for="{{ field.id_for_label }}" class="required-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="error">{{ field.errors }}</div>
+                    {% endif %}
+                </div>
+            {% endif %}
+        {% endfor %}
+        <button type="submit" class="submit-btn">Anmelden</button>
+    </form>
+</div>
+<style>
+    
+</style>
+{% endblock %}
