@@ -5,6 +5,8 @@
 from django.shortcuts import render
 from django.http import HttpResponse
 from django.template import loader
+from django.shortcuts import render
+from .forms import LoginForm
 
 
 def workflow(request):
@@ -175,3 +177,7 @@ def model(request):
         'models': models,
     }
     return render(request, "dashboard/model.html", context)
+
+def login(request):
+    form = LoginForm()
+    return render(request, "dashboard/login.html", {'form': form})

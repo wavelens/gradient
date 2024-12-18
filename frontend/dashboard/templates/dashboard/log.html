@@ -6,6 +6,11 @@
 
 {% extends 'dashboard/index.html' %}
 
+<head>
+    {% load static %}
+    {% load i18n %}
+</head>
+
 {% block title %}{% trans 'Log' %}{% endblock %}
 
 {% block content %}
@@ -14,10 +19,6 @@
 
 {% include "../backHeader.html" %}
 
-<head>
-    {% load static %}
-    {% load i18n %}
-</head>
 
 <div class="outerbody">
     <div class="content-left">

@@ -6,12 +6,13 @@
 
 {% extends 'dashboard/index.html' %}
 
-{% block title %}{% trans 'Dashboard' %}{% endblock %}
 
 <head>
     {% load static %}
     {% load i18n %}
 </head>
+
+{% block title %}{% trans 'Dashboard' %}{% endblock %}
 
 {% block content %}
 
@@ -60,7 +61,7 @@
                 <tr>
                     <td>
                         <a class="full-width" href="https://hydra.wavelens.io/project/build">
-                            <span>{% trans block.project %}</span><br><span class="text-light">{{ block.id %}</span>
+                            <span>{% trans block.project %}</span><br><span class="text-light">{{ block.id }}</span>
                         </a>
                     </td>
                     <td>{{ block.exec }}</td>
