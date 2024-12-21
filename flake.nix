@@ -60,8 +60,10 @@
     packages = rec {
       gradient-server = pkgs.callPackage ./nix/packages/gradient-server.nix { };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
+      gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix { };
       "vm-gradient-dev" = self.nixosConfigurations."gradient-dev".config.microvm.declaredRunner;
       db = pkgs.callPackage ./nix/scripts/postgres.nix { };
+      gradient = gradient-cli;
       default = gradient-server;
     };
 
@@ -108,6 +110,7 @@
     overlays = rec {
       gradient-server = final: prev: { inherit (self.packages.${final.system}) gradient-server; };
       gradient-frontend = final: prev: { inherit (self.packages.${final.system}) gradient-frontend; };
+      gradient-cli = final: prev: { inherit (self.packages.${final.system}) gradient-cli; };
       default = gradient-server;
     };
 

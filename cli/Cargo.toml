@@ -1,0 +1,23 @@
+[package]
+name = "gradient-cli"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0 OR Commercial"
+authors = ["Wavelens UG <info@wavelens.io>"]
+description = "CLI-Tool for Gradient"
+repository = "https://github.com/wavelens/gradient"
+
+[[bin]]
+name = "gradient"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+rpassword = "7.3"
+clap_complete = "4"
+strum = "0.26"
+strum_macros = "0.26"
+serde = { version = "1.0", features = ["derive"] }
+dirs = "5.0"
+toml = "0.8"
+reqwest = { version = "0.12.9", features = ["json"] }
