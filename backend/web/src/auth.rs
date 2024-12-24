@@ -129,8 +129,12 @@ pub async fn decode_jwt(
             .filter(CApi::Key.eq(jwt.strip_prefix("GRAD").unwrap()))
             .one(&state.db)
             .await
-            .unwrap()
             .unwrap();
+
+        let api_key = match api_key {
+            Some(api_key) => api_key,
+            None => return Err(StatusCode::UNAUTHORIZED),
+        };
 
         let mut aapi_key: AApi = api_key.clone().into();
 

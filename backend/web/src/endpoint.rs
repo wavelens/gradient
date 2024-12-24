@@ -934,6 +934,7 @@ pub async fn post_login(
 pub async fn post_logout(
     _state: State<Arc<ServerState>>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    // TODO: invalidate token if needed
     let res = BaseResponse {
         error: false,
         message: "Logout Successfully".to_string(),

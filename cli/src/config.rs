@@ -61,62 +61,20 @@ pub fn save_config(config: &HashMap<ConfigKey, Option<String>>) {
     let config_file = get_config_file();
     let config_dir = config_file.parent().expect("Failed to get configuration directory");
 
-    // Create the directory if it doesn't exist
     fs::create_dir_all(config_dir).expect("Failed to create configuration directory");
 
-    // Write the configuration to the file
     let contents = toml::to_string_pretty(config).expect("Failed to serialize configuration");
     let mut file = fs::File::create(config_file).expect("Failed to create configuration file");
     file.write_all(contents.as_bytes())
         .expect("Failed to write configuration file");
 }
 
-pub fn set_get_value(key: String, value: Option<String>, quiet: bool) -> Result<Option<String>, String> {
+pub fn set_get_value_from_string(key: String, value: Option<String>, quiet: bool) -> Result<Option<String>, String> {
     let config_keys = ConfigKey::iter().collect::<Vec<_>>();
 
     for config_key in config_keys.clone() {
         if key.to_lowercase() == format!("{}", config_key).to_lowercase() {
-            if let Some(value) = value.clone() {
-                let mut config = load_config();
-                config.remove(&config_key);
-                config.insert(config_key.clone(), Some(value.clone()));
-                save_config(&config);
-
-                if !quiet {
-                    println!("{} set to \"{}\"", config_key, value);
-                }
-            } else {
-                let config = load_config();
-                let found_values = config.iter().map(|(key, value): (&ConfigKey, &Option<String>)| -> Option<String> {
-                    if key == &config_key {
-                        if let Some(value) = value {
-                            if !quiet {
-                                println!("{}", value);
-                            };
-
-                            return Some(value.clone());
-                        } else {
-                            if !quiet {
-                                println!("[unset]");
-                            };
-
-                            return None;
-                        }
-
-                    }
-
-                    None
-                })
-                .filter(|value| value.is_some())
-                .collect::<Vec<_>>();
-
-                if let Some(value) = found_values.first() {
-                    return Ok(value.clone());
-                } else {
-                    return Ok(None);
-                }
-            }
-
+            return Ok(set_get_value(config_key, value.clone(), quiet));
         }
     }
 
@@ -129,4 +87,50 @@ pub fn set_get_value(key: String, value: Option<String>, quiet: bool) -> Result<
     }
 
     Err("Invalid key".to_string())
+}
+
+pub fn set_get_value(key: ConfigKey, value: Option<String>, quiet: bool) -> Option<String> {
+    if let Some(value) = value.clone() {
+        let mut config = load_config();
+        config.remove(&key);
+        config.insert(key.clone(), Some(value.clone()));
+        save_config(&config);
+
+        if !quiet {
+            println!("{} set to \"{}\"", key, value);
+        }
+
+        Some(value)
+    } else {
+        let config = load_config();
+        let found_values = config.iter().map(|(config_key, value): (&ConfigKey, &Option<String>)| -> Option<String> {
+            if &key == config_key {
+                if value.is_some() && !value.clone().unwrap().is_empty() {
+                    let value = value.clone().unwrap();
+                    if !quiet {
+                        println!("{}", value);
+                    };
+
+                    return Some(value.clone());
+                } else {
+                    if !quiet {
+                        println!("[unset]");
+                    };
+
+                    return None;
+                }
+
+            }
+
+            None
+        })
+        .filter(|value| value.is_some())
+        .collect::<Vec<_>>();
+
+        if let Some(value) = found_values.first() {
+            value.clone()
+        } else {
+            None
+        }
+    }
 }

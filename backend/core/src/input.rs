@@ -76,7 +76,7 @@ pub fn vec_to_hex(v: &[u8]) -> String {
 }
 
 pub fn repository_url_to_nix(url: &str, commit_hash: &str) -> Result<String, String> {
-    let url = if url.starts_with("ssh://") {
+    let url = if url.starts_with("ssh://") || url.starts_with("http") {
         format!("git+{}", url)
     } else {
         url.to_string()
