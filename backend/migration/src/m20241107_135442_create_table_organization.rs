@@ -26,6 +26,11 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Organization::Name).string().not_null())
                     .col(ColumnDef::new(Organization::Description).text().not_null())
                     .col(ColumnDef::new(Organization::PublicKey).string().not_null())
+                    .col(
+                        ColumnDef::new(Organization::UseNixStore)
+                            .boolean()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Organization::PrivateKey).string().not_null())
                     .col(ColumnDef::new(Organization::CreatedBy).uuid().not_null())
                     .col(
@@ -60,6 +65,7 @@ enum Organization {
     Description,
     PublicKey,
     PrivateKey,
+    UseNixStore,
     CreatedBy,
     CreatedAt,
 }

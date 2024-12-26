@@ -22,6 +22,11 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Project::Name).string().not_null())
                     .col(ColumnDef::new(Project::Description).text().not_null())
                     .col(ColumnDef::new(Project::Repository).string().not_null())
+                    .col(
+                        ColumnDef::new(Project::EvaluationWildcard)
+                            .string()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Project::LastEvaluation).uuid())
                     .col(ColumnDef::new(Project::LastCheckAt).date_time().not_null())
                     .col(ColumnDef::new(Project::CreatedBy).uuid().not_null())
@@ -60,6 +65,7 @@ enum Project {
     Name,
     Description,
     Repository,
+    EvaluationWildcard,
     LastEvaluation,
     LastCheckAt,
     CreatedBy,

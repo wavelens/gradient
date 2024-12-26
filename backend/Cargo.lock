@@ -790,6 +790,7 @@ dependencies = [
  "ssh-key",
  "tokio",
  "uuid",
+ "wildcard",
 ]
 
 [[package]]
@@ -1051,6 +1052,15 @@ dependencies = [
  "sec1",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "email_address"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e079f19b08ca6239f47f8ba8509c11cf3ea30095831f7fed61441475edd8c449"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -3984,6 +3994,7 @@ dependencies = [
  "axum-streams",
  "chrono",
  "core",
+ "email_address",
  "entity",
  "git-url-parse",
  "jsonwebtoken",
@@ -4013,6 +4024,15 @@ checksum = "372d5b87f58ec45c384ba03563b03544dc5fadc3983e434b286913f5b4a9bb6d"
 dependencies = [
  "redox_syscall 0.5.7",
  "wasite",
+]
+
+[[package]]
+name = "wildcard"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9b0540e91e49de3817c314da0dd3bc518093ceacc6ea5327cb0e1eb073e5189"
+dependencies = [
+ "thiserror 2.0.6",
 ]
 
 [[package]]

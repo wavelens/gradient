@@ -7,7 +7,7 @@
 use chrono::Utc;
 use core::database::add_features;
 use core::executer::*;
-use core::input::{repository_url_to_nix, vec_to_hex};
+use core::input::{parse_evaluation_wildcard, repository_url_to_nix, vec_to_hex};
 use core::types::*;
 use entity::build::BuildStatus;
 use nix_daemon::nix::DaemonStore;
@@ -62,68 +62,105 @@ pub async fn evaluate(
     let parsed_json: Value =
         serde_json::from_str(&json_output).map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
 
-    if !parsed_json.is_object() {
-        return Err("Expected JSON object but found another type".to_string());
+    let parsed_json = parsed_json.as_object().ok_or("Expected JSON object")?;
+
+    let mut json_tree_unfinished = parsed_json.keys().cloned().collect::<Vec<String>>();
+    let mut json_tree = Vec::new();
+
+    while let Some(current_key) = json_tree_unfinished.pop() {
+        let current_keys = current_key.split(".").collect::<Vec<&str>>();
+        let mut pjson = parsed_json;
+
+        for key in current_keys {
+            pjson = pjson
+                .get(key)
+                .ok_or("Expected JSON object")
+                .unwrap()
+                .as_object()
+                .ok_or("Expected JSON object")
+                .unwrap();
+        }
+
+        let new_keys = pjson.keys().collect::<Vec<&String>>();
+
+        for key in new_keys.iter() {
+            let formated_key = format!("{}.{}", current_key, key);
+            if pjson.get(*key).unwrap().is_object() {
+                json_tree_unfinished.push(formated_key);
+            } else if pjson.get(*key).unwrap().is_string() && *key == "type" {
+                let type_value = pjson.get(*key).unwrap().as_str().unwrap();
+                if type_value == "derivation" {
+                    json_tree.push(formated_key);
+                }
+            }
+        }
     }
 
-    let packages_with_system = parsed_json["packages"]
-        .as_object()
-        .ok_or("Expected `packages` key in JSON object")?;
+    let wildcards = parse_evaluation_wildcard(evaluation.evaluation_wildcard.as_str())?;
+    let mut all_derivations = Vec::new();
+
+    for t in json_tree {
+        for w in wildcards.iter() {
+            if w.is_match(t.as_bytes()) {
+                all_derivations.push(t.clone());
+            }
+        }
+    }
+
+    // let packages_with_system = parsed_json["packages"]
+    //     .as_object()
+    //     .ok_or("Expected `packages` key in JSON object")?;
+
     let mut all_builds: Vec<MBuild> = vec![];
     let mut all_dependencies: Vec<MBuildDependency> = vec![];
 
-    for (system_name, packages) in packages_with_system {
-        for (package_name, _package) in packages
-            .as_object()
-            .ok_or("Expected `packages` key in JSON object")?
-        {
-            let path = format!("{}#packages.{}.{}", repository, system_name, package_name);
+    for derivation_string in all_derivations {
+        let path = format!("{}#{}", repository, derivation_string);
 
-            // TODO: use nix api
-            let (derivation, _references) =
-                match get_derivation_cmd(state.cli.binpath_nix.as_str(), &path).await {
-                    Ok((d, r)) => (d, r),
-                    Err(e) => {
-                        println!("Error: {}", e);
-                        continue;
-                    }
-                };
+        // TODO: use nix api
+        let (derivation, _references) =
+            match get_derivation_cmd(state.cli.binpath_nix.as_str(), &path).await {
+                Ok((d, r)) => (d, r),
+                Err(e) => {
+                    println!("Error: {}", e);
+                    continue;
+                }
+            };
 
-            let missing = get_missing_builds(vec![derivation.clone()], store).await?;
+        let missing = get_missing_builds(vec![derivation.clone()], store).await?;
 
-            if missing.is_empty() {
-                println!("Skipping package: {}", derivation);
-                continue;
-            }
-
-            let already_exsists = all_builds.iter().any(|b| b.derivation_path == derivation);
-
-            let build = vec![derivation.clone()];
-
-            if already_exsists
-                || !find_builds(Arc::clone(&state), organization_id, build.clone())
-                    .await?
-                    .is_empty()
-            {
-                println!("Skipping package: {}", derivation);
-                continue;
-            }
-
-            println!("Creating build {} with path {}", derivation, path);
-
-            query_all_dependencies(
-                Arc::clone(&state),
-                &mut all_builds,
-                &mut all_dependencies,
-                evaluation,
-                organization_id,
-                build,
-                store,
-            )
-            .await;
-
-            println!("Found package: {}", derivation);
+        if missing.is_empty() {
+            println!("Skipping package: {}", derivation);
+            continue;
         }
+
+        let already_exsists = all_builds.iter().any(|b| b.derivation_path == derivation);
+
+        let build = vec![derivation.clone()];
+
+        if already_exsists
+            || !find_builds(Arc::clone(&state), organization_id, build.clone())
+                .await?
+                .is_empty()
+        {
+            println!("Skipping package: {}", derivation);
+            continue;
+        }
+
+        println!("Creating build {} with path {}", derivation, path);
+
+        query_all_dependencies(
+            Arc::clone(&state),
+            &mut all_builds,
+            &mut all_dependencies,
+            evaluation,
+            organization_id,
+            build,
+            store,
+        )
+        .await;
+
+        println!("Found package: {}", derivation);
     }
 
     Ok((all_builds, all_dependencies))

@@ -12,9 +12,10 @@ use chrono::Utc;
 use core::consts::*;
 use core::database::add_features;
 use core::executer::{connect, get_buildlog_stream};
-use core::input::vec_to_hex;
+use core::input::{valid_evaluation_wildcard, vec_to_hex};
 use core::sources::*;
 use core::types::*;
+use email_address::EmailAddress;
 use git_url_parse::normalize_url;
 use password_auth::{generate_hash, verify_password};
 use sea_orm::ActiveValue::Set;
@@ -98,6 +99,7 @@ pub async fn post_organizations(
         description: Set(body.description.clone()),
         public_key: Set(public_key),
         private_key: Set(private_key),
+        use_nix_store: Set(body.use_nix_store),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
     };
@@ -215,12 +217,23 @@ pub async fn post_organization(
         ));
     };
 
+    if !valid_evaluation_wildcard(body.evaluation_wildcard.clone().as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: "Invalid Evaluation Wildcard".to_string(),
+            }),
+        ));
+    }
+
     let project = AProject {
         id: Set(Uuid::new_v4()),
         organization: Set(organization.id),
         name: Set(body.name.clone()),
         description: Set(body.description.clone()),
         repository: Set(repository_url.to_string()),
+        evaluation_wildcard: Set(body.evaluation_wildcard.clone()),
         last_evaluation: Set(None),
         last_check_at: Set(*NULL_TIME),
         created_by: Set(user.id),
@@ -947,6 +960,16 @@ pub async fn post_register(
     state: State<Arc<ServerState>>,
     Json(body): Json<MakeUserRequest>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    if !EmailAddress::is_valid(body.email.clone().as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: "Invalid Email".to_string(),
+            }),
+        ));
+    }
+
     let user = EUser::find()
         .filter(
             Condition::any()

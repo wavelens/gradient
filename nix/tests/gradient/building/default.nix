@@ -166,7 +166,7 @@
           -X POST \
           -H "Authorization: Bearer ACCESS_TOKEN" \
           -H "Content-Type: application/json" \
-          -d '{"name": "MyOrganization", "description": "My Organization"}' \
+          -d '{"name": "MyOrganization", "description": "My Organization", "use_nix_store": false}' \
           http://server:3000/api/organization \
           | ${lib.getExe pkgs.jq} -rj '.message'
       """.replace("ACCESS_TOKEN", token))
@@ -229,7 +229,7 @@
           -X POST \
           -H "Authorization: Bearer ACCESS_TOKEN" \
           -H "Content-Type: application/json" \
-          -d '{"name": "TestProject", "description": "Just a test", "repository": "git://server/test"}' \
+          -d '{"name": "TestProject", "description": "Just a test", "repository": "git://server/test", "evaluation_wildcard": "packages.*"}' \
           http://server:3000/api/organization/ORG_ID \
           | ${lib.getExe pkgs.jq} -rj '.message'
       """.replace("ACCESS_TOKEN", token).replace("ORG_ID", org_id))

@@ -16,6 +16,7 @@ pub struct BaseResponse<T> {
 pub struct MakeOrganizationRequest {
     pub name: String,
     pub description: String,
+    pub use_nix_store: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -23,6 +24,7 @@ pub struct MakeProjectRequest {
     pub name: String,
     pub description: String,
     pub repository: String,
+    pub evaluation_wildcard: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

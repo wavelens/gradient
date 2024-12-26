@@ -24,3 +24,4 @@ sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array",
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1.42", features = ["process", "rt-multi-thread"] }
 uuid = { version = "1.11", features = ["fast-rng", "macro-diagnostics", "v4"] }
+email_address = "0.2"

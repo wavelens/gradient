@@ -69,7 +69,7 @@ with subtest("check api key authorization"):
 
 with subtest("check api /organization"):
     req = json.loads(machine.succeed("""
-        curl -XPOST http://localhost:3000/api/organization -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "MyOrganization", "description": "My Organization"}'
+        curl -XPOST http://localhost:3000/api/organization -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "MyOrganization", "description": "My Organization", "use_nix_store": true}'
     """.replace("api_key", api_key)))
 
     assert req.get("error") == False, req.get("message")
@@ -94,7 +94,7 @@ with subtest("check api /organization/:id"):
     assert req.get("message").get("id") == org_id, "Organization ID should match"
 
     req = json.loads(machine.succeed("""
-        curl -XPOST http://localhost:3000/api/organization/org_id -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "MyProject", "description": "My Project", "repository": "git@github.com:Wavelens/Gradient.git"}'
+        curl -XPOST http://localhost:3000/api/organization/org_id -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "MyProject", "description": "My Project", "repository": "git@github.com:Wavelens/Gradient.git", "evaluation_wildcard": "packages.*"}'
     """.replace("api_key", api_key).replace("org_id", org_id)))
 
     assert req.get("error") == False, req.get("message")

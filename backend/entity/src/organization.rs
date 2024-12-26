@@ -19,6 +19,7 @@ pub struct Model {
     pub description: String,
     pub public_key: String,
     pub private_key: String,
+    pub use_nix_store: bool,
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
 }
@@ -31,6 +32,7 @@ impl std::fmt::Debug for Model {
             .field("description", &self.description)
             .field("public_key", &format!("{} {}", self.public_key, self.id))
             .field("private_key", &"[redacted]")
+            .field("use_nix_store", &self.use_nix_store)
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)
             .finish()

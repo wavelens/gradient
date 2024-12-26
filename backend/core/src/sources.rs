@@ -138,6 +138,7 @@ mod tests {
             description: "test".to_string(),
             public_key: public_key_openssh,
             private_key: encrypted_private_key,
+            use_nix_store: true,
             created_by: uuid::Uuid::nil(),
             created_at: *NULL_TIME,
         };

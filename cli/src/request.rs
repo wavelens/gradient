@@ -19,6 +19,7 @@ pub struct BaseResponse<T> {
 pub struct MakeOrganizationRequest {
     pub name: String,
     pub description: String,
+    pub use_nix_store: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -26,6 +27,7 @@ pub struct MakeProjectRequest {
     pub name: String,
     pub description: String,
     pub repository: String,
+    pub evaluation_wildcard: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -198,10 +200,11 @@ pub async fn list_organization(config: HashMap<ConfigKey, Option<String>>) -> Re
     Ok(parse_response(res).await.unwrap())
 }
 
-pub async fn create_organization(config: HashMap<ConfigKey, Option<String>>, name: String, description: String) -> Result<BaseResponse<String>, String> {
+pub async fn create_organization(config: HashMap<ConfigKey, Option<String>>, name: String, description: String, use_nix_store: bool) -> Result<BaseResponse<String>, String> {
     let req = MakeOrganizationRequest {
         name,
         description,
+        use_nix_store,
     };
 
     let res = get_client(config, "organization".to_string(), true, true)
@@ -288,11 +291,12 @@ pub async fn show_project(config: HashMap<ConfigKey, Option<String>>, projekt_id
 //     Ok(parse_response(res).await.unwrap())
 // }
 
-pub async fn create_project(config: HashMap<ConfigKey, Option<String>>, organization_id: String, name: String, description: String, repository: String) -> Result<BaseResponse<String>, String> {
+pub async fn create_project(config: HashMap<ConfigKey, Option<String>>, organization_id: String, name: String, description: String, repository: String, evaluation_wildcard: String) -> Result<BaseResponse<String>, String> {
     let req = MakeProjectRequest {
         name,
         description,
         repository,
+        evaluation_wildcard,
     };
 
     let res = get_client(config, format!("organization/{}", organization_id), true, true)

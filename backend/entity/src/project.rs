@@ -19,6 +19,7 @@ pub struct Model {
     #[sea_orm(column_type = "Text")]
     pub description: String,
     pub repository: String,
+    pub evaluation_wildcard: String,
     pub last_evaluation: Option<Uuid>,
     pub last_check_at: NaiveDateTime,
     pub created_by: Uuid,
