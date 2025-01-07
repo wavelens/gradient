@@ -681,7 +681,8 @@ tr:hover td{
 }
 
 .green {
-    color: #238636;
+    /* color: #238636; */
+    color: #30c54c;
 }
 
 .red {
