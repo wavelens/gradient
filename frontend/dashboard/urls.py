@@ -12,4 +12,7 @@ urlpatterns = [
     path("download", views.download, name="download"),
     path("model", views.model, name="model"),
     path("login", views.login, name="login"),
+    path("newOrganization", views.newOrganization, name="newOrganization"),
+    path("newProject", views.newProject, name="newProject"),
+    path("newServer", views.newServer, name="newServer"),
 ]

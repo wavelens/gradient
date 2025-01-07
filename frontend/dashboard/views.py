@@ -7,6 +7,9 @@ from django.http import HttpResponse
 from django.template import loader
 from django.shortcuts import render
 from .forms import LoginForm
+from .forms import newOrganizationForm
+from .forms import newProjectForm
+from .forms import newServerForm
 
 
 def workflow(request):
@@ -181,3 +184,15 @@ def model(request):
 def login(request):
     form = LoginForm()
     return render(request, "dashboard/login.html", {'form': form})
+
+def newOrganization(request):
+    form = newOrganizationForm()
+    return render(request, "dashboard/newOrganization.html", {'form': form})
+
+def newProject(request):
+    form = newProjectForm()
+    return render(request, "dashboard/newProject.html", {'form': form})
+
+def newServer(request):
+    form = newServerForm()
+    return render(request, "dashboard/newServer.html", {'form': form})

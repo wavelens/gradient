@@ -1,7 +1,7 @@
 <!--
  * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
  *
- * SPDX-License-Identifier: AGPL-3.0-only
+ * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  -->
 
  {% extends 'dashboard/index.html' %}
@@ -11,12 +11,12 @@
     {% load i18n %}
 </head>
 
-{% block title %}{% trans 'Login' %}{% endblock %}
+{% block title %}{% trans 'new Project' %}{% endblock %}
 
 {% block content %}
 <div class="outer-form">
     <div class="form-container">
-        <h2 class="form-header-label">{% trans 'Anmelden' %}</h2>
+        <h2 class="form-header-label">{% trans 'Neues Projekt' %}</h2>
         <form method="post">
             {% csrf_token %}
             {% for field in form %}
@@ -27,7 +27,7 @@
                     </div>
                 {% else %}
                     <div class="form-field">
-                        <label for="{{ field.id_for_label }}" class="required-label">{% trans field.label %}</label>
+                        <label for="{{ field.id_for_label }}" {% if field.field.required %}class="required-label"{% endif %}>{% trans field.label %}</label>
                         {{ field }}
                         {% if field.errors %}
                             <div class="error">{% trans field.errors %}</div>
@@ -35,7 +35,7 @@
                     </div>
                 {% endif %}
             {% endfor %}
-            <button type="submit" class="submit-btn">{% trans 'Anmelden' %}</button>
+            <button type="submit" class="submit-btn">{% trans 'Erstellen' %}</button>
         </form>
     </div>
 </div>
