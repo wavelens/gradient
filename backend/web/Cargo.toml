@@ -11,12 +11,12 @@ name = "web"
 path = "src/lib.rs"
 
 [dependencies]
-axum = "0.7"
-axum-streams = { version = "0.19", features = ["json"] }
+axum = "0.8"
+axum-streams = { version = "0.20", features = ["json"] }
 chrono = "0.4"
 core = { path = "../core" }
 entity = { path = "../entity" }
-git-url-parse = "=0.4.4"
+git-url-parse = "0.4"
 jsonwebtoken = "9.3"
 password-auth = { version = "1.0.0", features = ["argon2"] }
 rand = "0.8"
