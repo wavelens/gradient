@@ -813,3 +813,8 @@ tr:hover td{
     background-color: transparent;
     border-radius: 0px;
 }
+
+.flex-end {
+    display: flex;
+    align-items: end;
+}
