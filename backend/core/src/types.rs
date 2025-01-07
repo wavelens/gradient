@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
  *
- * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+ * SPDX-License-Identifier: AGPL-3.0-only
  */
 
 use super::input::{greater_than_zero, port_in_range};
@@ -11,6 +11,11 @@ use entity::*;
 use nix_daemon::nix::DaemonStore;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tokio::io;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::net::UnixStream;
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
@@ -64,6 +69,44 @@ pub struct ServerState {
 pub struct ListItem {
     pub id: Uuid,
     pub name: String,
+}
+
+pub struct CommandDuplex {
+    pub stdin: tokio::process::ChildStdin,
+    pub stdout: tokio::process::ChildStdout,
+}
+
+impl AsyncRead for CommandDuplex {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.stdout).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for CommandDuplex {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.stdin).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.stdin).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.stdin).poll_shutdown(cx)
+    }
+}
+
+pub enum LocalNixStore {
+    UnixStream(DaemonStore<UnixStream>),
+    CommandDuplex(DaemonStore<CommandDuplex>),
 }
 
 pub type ListResponse = Vec<ListItem>;

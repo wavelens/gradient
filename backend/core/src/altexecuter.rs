@@ -53,6 +53,7 @@ pub async fn connect(
     };
 
     channel.exec(command.as_str()).await?;
+    // tvix_build::buildservice::BuildService
 
     Ok(DaemonStore::builder().init(channel).await?)
 }

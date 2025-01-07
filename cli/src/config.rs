@@ -1,16 +1,16 @@
 /*
  * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
  *
- * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+ * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::path::PathBuf;
-use std::{fs, fmt};
-use std::io::Write;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Write;
+use std::path::PathBuf;
+use std::{fmt, fs};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
-use serde::{Serialize, Deserialize};
 
 #[derive(Clone, Debug, EnumIter, Hash, Eq, PartialEq, Serialize, Deserialize)]
 pub enum ConfigKey {
@@ -59,7 +59,9 @@ pub fn load_config() -> HashMap<ConfigKey, Option<String>> {
 
 pub fn save_config(config: &HashMap<ConfigKey, Option<String>>) {
     let config_file = get_config_file();
-    let config_dir = config_file.parent().expect("Failed to get configuration directory");
+    let config_dir = config_file
+        .parent()
+        .expect("Failed to get configuration directory");
 
     fs::create_dir_all(config_dir).expect("Failed to create configuration directory");
 
@@ -69,7 +71,11 @@ pub fn save_config(config: &HashMap<ConfigKey, Option<String>>) {
         .expect("Failed to write configuration file");
 }
 
-pub fn set_get_value_from_string(key: String, value: Option<String>, quiet: bool) -> Result<Option<String>, String> {
+pub fn set_get_value_from_string(
+    key: String,
+    value: Option<String>,
+    quiet: bool,
+) -> Result<Option<String>, String> {
     let config_keys = ConfigKey::iter().collect::<Vec<_>>();
 
     for config_key in config_keys.clone() {
@@ -103,29 +109,32 @@ pub fn set_get_value(key: ConfigKey, value: Option<String>, quiet: bool) -> Opti
         Some(value)
     } else {
         let config = load_config();
-        let found_values = config.iter().map(|(config_key, value): (&ConfigKey, &Option<String>)| -> Option<String> {
-            if &key == config_key {
-                if value.is_some() && !value.clone().unwrap().is_empty() {
-                    let value = value.clone().unwrap();
-                    if !quiet {
-                        println!("{}", value);
-                    };
+        let found_values = config
+            .iter()
+            .map(
+                |(config_key, value): (&ConfigKey, &Option<String>)| -> Option<String> {
+                    if &key == config_key {
+                        if value.is_some() && !value.clone().unwrap().is_empty() {
+                            let value = value.clone().unwrap();
+                            if !quiet {
+                                println!("{}", value);
+                            };
 
-                    return Some(value.clone());
-                } else {
-                    if !quiet {
-                        println!("[unset]");
-                    };
+                            return Some(value.clone());
+                        } else {
+                            if !quiet {
+                                println!("[unset]");
+                            };
 
-                    return None;
-                }
+                            return None;
+                        }
+                    }
 
-            }
-
-            None
-        })
-        .filter(|value| value.is_some())
-        .collect::<Vec<_>>();
+                    None
+                },
+            )
+            .filter(|value| value.is_some())
+            .collect::<Vec<_>>();
 
         if let Some(value) = found_values.first() {
             value.clone()

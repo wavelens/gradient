@@ -5,15 +5,11 @@ When contributing to this repository, please first discuss the change you wish t
 
 ## Licensing
 
-This project is licensed under the Affero General Public License (AGPL) version 3.0 and the Wavelens License (WL) version 1.0. By contributing to this project, you agree that your contributions will be licensed under the AGPL-3.0 and the WL-1.0 license.
+This project is licensed under the Affero General Public License (AGPL) version 3.0. By contributing to this project, you agree that your contributions will be licensed under the AGPL-3.0.
 
 ## Code of Conduct
 
-We as members, contributors, and leaders pledge to make participation in our community a harassment-free 
-experience for everyone, regardless of age, body size, visible or invisible disability, ethnicity, sex 
-characteristics, gender identity and expression, level of experience, education, socio-economic status, 
-nationality, personal appearance, race, religion, or sexual identity and orientation.
-We pledge to act and interact in ways that contribute to an open, welcoming, diverse, inclusive, 
-and healthy community.
+We as members, contributors, and leaders pledge to make participation in our community a harassment-free experience for everyone, regardless of age, body size, visible or invisible disability, ethnicity, sex characteristics, gender identity and expression, level of experience, education, socio-economic status, nationality, personal appearance, race, religion, or sexual identity and orientation.
+We pledge to act and interact in ways that contribute to an open, welcoming, diverse, inclusive, and healthy community.
 
 You can read the full [Code of Conduct](./CODE_OF_CONDUCT.md) for more information.

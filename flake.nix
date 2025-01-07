@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
  *
- * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+ * SPDX-License-Identifier: AGPL-3.0-only
  */
 
 {
@@ -89,6 +89,7 @@
         postgresql_17
         pgadmin4-desktopmode
         nixVersions.latest
+        protobuf
       ];
 
       nativeBuildInputs = [
@@ -96,6 +97,9 @@
       ];
 
       EXTRA_CCFLAGS = "-I/usr/include";
+      PROTOC = "${protobuf}/bin/protoc";
+      PROTO_ROOT = "/home/dennis/repos/tvix-depot/";
+      TVIX_BUILD_SANDBOX_SHELL = "/bin/sh";
       RUST_BACKTRACE = 1;
 
       GRADIENT_DEBUG = "true";

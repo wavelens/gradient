@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
  *
- * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+ * SPDX-License-Identifier: AGPL-3.0-only
  */
 
 use chrono::Utc;
@@ -15,13 +15,13 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, JoinType, QuerySelect};
 use serde_json::Value;
 use std::sync::Arc;
-use tokio::net::UnixStream;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use uuid::Uuid;
 
-pub async fn evaluate(
+pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     state: Arc<ServerState>,
-    store: &mut DaemonStore<UnixStream>,
+    store: &mut DaemonStore<C>,
     evaluation: &MEvaluation,
 ) -> Result<(Vec<MBuild>, Vec<MBuildDependency>), String> {
     println!("Evaluating Evaluation: {}", evaluation.id);
@@ -84,13 +84,12 @@ pub async fn evaluate(
         let new_keys = pjson.keys().collect::<Vec<&String>>();
 
         for key in new_keys.iter() {
-            let formated_key = format!("{}.{}", current_key, key);
             if pjson.get(*key).unwrap().is_object() {
-                json_tree_unfinished.push(formated_key);
+                json_tree_unfinished.push(format!("{}.{}", current_key, key));
             } else if pjson.get(*key).unwrap().is_string() && *key == "type" {
                 let type_value = pjson.get(*key).unwrap().as_str().unwrap();
                 if type_value == "derivation" {
-                    json_tree.push(formated_key);
+                    json_tree.push(current_key.clone());
                 }
             }
         }
@@ -107,9 +106,10 @@ pub async fn evaluate(
         }
     }
 
-    // let packages_with_system = parsed_json["packages"]
-    //     .as_object()
-    //     .ok_or("Expected `packages` key in JSON object")?;
+    if all_derivations.is_empty() {
+        println!("No derivations found for evaluation: {}", evaluation.id);
+        return Ok((vec![], vec![]));
+    }
 
     let mut all_builds: Vec<MBuild> = vec![];
     let mut all_dependencies: Vec<MBuildDependency> = vec![];
@@ -166,14 +166,14 @@ pub async fn evaluate(
     Ok((all_builds, all_dependencies))
 }
 
-async fn query_all_dependencies(
+async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     state: Arc<ServerState>,
     all_builds: &mut Vec<MBuild>,
     all_dependencies: &mut Vec<MBuildDependency>,
     evaluation: &MEvaluation,
     organization_id: Uuid,
     dependencies: Vec<String>,
-    store: &mut DaemonStore<UnixStream>,
+    store: &mut DaemonStore<C>,
 ) {
     let mut dependencies = dependencies
         .clone()

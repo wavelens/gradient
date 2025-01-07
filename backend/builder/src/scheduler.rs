@@ -1,11 +1,12 @@
 /*
  * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
  *
- * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+ * SPDX-License-Identifier: AGPL-3.0-only
  */
 
 use chrono::Utc;
 use core::executer::*;
+// use core::altexecuter::*;
 use core::sources::*;
 use core::types::*;
 use entity::build::BuildStatus;
@@ -49,8 +50,27 @@ pub async fn schedule_evaluation_loop(state: Arc<ServerState>) {
 pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) {
     println!("Reviewing Evaluation: {}", evaluation.id);
 
-    let mut store = get_local_store().await;
-    let builds = evaluate(Arc::clone(&state), &mut store, &evaluation).await;
+    let project = EProject::find_by_id(evaluation.project)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let organization = EOrganization::find_by_id(project.organization)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let local_daemon = get_local_store(organization).await;
+    let builds = match local_daemon {
+        LocalNixStore::UnixStream(mut store) => {
+            evaluate(Arc::clone(&state), &mut store, &evaluation).await
+        }
+        LocalNixStore::CommandDuplex(mut store) => {
+            evaluate(Arc::clone(&state), &mut store, &evaluation).await
+        }
+    };
 
     match builds {
         Ok(builds) => {
@@ -132,13 +152,13 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
 pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MServer) {
     println!("Executing Build: {}", build.id);
 
-    let mut local_daemon = get_local_store().await;
-
     let organization = EOrganization::find_by_id(server.organization)
         .one(&state.db)
         .await
         .unwrap()
         .unwrap();
+
+    let mut local_daemon = get_local_store(organization.clone()).await;
 
     let (private_key, public_key) =
         decrypt_ssh_private_key(state.cli.crypt_secret.clone(), organization).unwrap();
@@ -188,7 +208,16 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
         dependencies.extend(output_paths);
     }
 
-    match copy_builds(dependencies, &mut local_daemon, &mut server_daemon, false).await {
+    let copy_build = match local_daemon {
+        LocalNixStore::UnixStream(ref mut store) => {
+            copy_builds(dependencies.clone(), store, &mut server_daemon, false).await
+        }
+        LocalNixStore::CommandDuplex(ref mut store) => {
+            copy_builds(dependencies.clone(), store, &mut server_daemon, false).await
+        }
+    };
+
+    match copy_build {
         Ok(_) => {}
         Err(e) => {
             eprintln!("Failed to copy builds: {}", e);
@@ -229,7 +258,16 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
         }
     };
 
-    match copy_builds(output_paths, &mut server_daemon, &mut local_daemon, true).await {
+    let copy_build = match local_daemon {
+        LocalNixStore::UnixStream(ref mut store) => {
+            copy_builds(dependencies, store, &mut server_daemon, false).await
+        }
+        LocalNixStore::CommandDuplex(ref mut store) => {
+            copy_builds(dependencies, store, &mut server_daemon, false).await
+        }
+    };
+
+    match copy_build {
         Ok(_) => {}
         Err(e) => {
             eprintln!("Failed to copy builds: {}", e);

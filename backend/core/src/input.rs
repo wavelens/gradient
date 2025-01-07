@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
  *
- * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+ * SPDX-License-Identifier: AGPL-3.0-only
  */
 
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -77,6 +77,14 @@ pub fn vec_to_hex(v: &[u8]) -> String {
 }
 
 pub fn repository_url_to_nix(url: &str, commit_hash: &str) -> Result<String, String> {
+    if commit_hash.len() != 40 {
+        return Err("commit hash must be 40 characters long".to_string());
+    }
+
+    if url.contains("file://") {
+        return Err("\"file://\" is not allowed in url".to_string());
+    }
+
     let url = if url.starts_with("ssh://") || url.starts_with("http") {
         format!("git+{}", url)
     } else {
@@ -329,7 +337,7 @@ mod tests {
                     .map(|wildcard| wildcard.is_match(wildcard_test.as_bytes()))
                     .filter(|res| !res)
                     .collect::<Vec<bool>>();
-                
+
                 assert!(
                     !results.is_empty(),
                     "Expected {} not to match {}",

@@ -1,12 +1,11 @@
 # SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
 #
-# SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+# SPDX-License-Identifier: AGPL-3.0-only
 
 import json
 
 start_all()
 
-machine.wait_for_unit("network-online.target")
 machine.wait_for_unit("gradient-server.service")
 
 with subtest("check api health"):

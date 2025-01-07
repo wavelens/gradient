@@ -1,18 +1,18 @@
 /*
  * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
  *
- * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+ * SPDX-License-Identifier: AGPL-3.0-only
  */
 
 mod config;
 mod request;
 
-use clap::{Parser, Subcommand, arg, CommandFactory};
+use clap::{arg, CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
-use rpassword::read_password;
-use std::io::Write;
-use std::io;
 use config::*;
+use rpassword::read_password;
+use std::io;
+use std::io::Write;
 use std::process::exit;
 
 #[derive(Parser, Debug)]
@@ -23,7 +23,6 @@ struct Cli {
     #[arg(long, value_enum)]
     generate_completions: Option<Shell>,
 }
-
 
 #[derive(Subcommand, Debug)]
 enum MainCommands {
@@ -130,7 +129,9 @@ fn ask_for_input(prompt: &str) -> String {
     print!("{}: ", prompt);
     std::io::stdout().flush().unwrap();
     let mut inp = String::new();
-    io::stdin().read_line(&mut inp).expect(format!("Failed to read {}.", prompt).as_str());
+    io::stdin()
+        .read_line(&mut inp)
+        .expect(format!("Failed to read {}.", prompt).as_str());
     let inp = inp.trim().to_string();
 
     if inp.is_empty() {
@@ -158,9 +159,10 @@ fn ask_for_list(prompt: &str) -> Vec<String> {
     print!("{} (list of items separated by commas): ", prompt);
     std::io::stdout().flush().unwrap();
     let mut inp = String::new();
-    io::stdin().read_line(&mut inp).expect("Failed to read list.");
-    inp
-        .trim()
+    io::stdin()
+        .read_line(&mut inp)
+        .expect("Failed to read list.");
+    inp.trim()
         .split(",")
         .map(|s| s.trim().to_string())
         .collect()
@@ -190,9 +192,11 @@ pub async fn main() -> std::io::Result<()> {
     if let Some(cmd) = cli.cmd {
         match cmd {
             MainCommands::Config { key, value } => {
-                set_get_value_from_string(key, value, false).map_err(|_| {
-                    exit(1);
-                }).unwrap();
+                set_get_value_from_string(key, value, false)
+                    .map_err(|_| {
+                        exit(1);
+                    })
+                    .unwrap();
             }
 
             MainCommands::Status => {
@@ -201,7 +205,9 @@ pub async fn main() -> std::io::Result<()> {
                 let auth_token = set_get_value(ConfigKey::AuthToken, None, true);
 
                 if server_url.is_none() {
-                    eprintln!("Server URL is not set. Use `gradient config server <url>` to set it.");
+                    eprintln!(
+                        "Server URL is not set. Use `gradient config server <url>` to set it."
+                    );
                     std::process::exit(1);
                 }
 
@@ -210,41 +216,50 @@ pub async fn main() -> std::io::Result<()> {
                     std::process::exit(1);
                 }
 
-                request::health(config).await.map_err(|e| {
-                    eprintln!("{}", e);
-                    exit(1);
-                }).unwrap();
+                request::health(config)
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{}", e);
+                        exit(1);
+                    })
+                    .unwrap();
 
                 println!("Server Online.");
             }
 
-            MainCommands::Register { username, name, email } => {
+            MainCommands::Register {
+                username,
+                name,
+                email,
+            } => {
                 let server_url = set_get_value(ConfigKey::Server, None, true);
 
-                if server_url.is_none() {
-                };
+                if server_url.is_none() {};
 
                 let username = match username {
                     Some(username) => username,
-                    None => ask_for_input("Username")
+                    None => ask_for_input("Username"),
                 };
 
                 let name = match name {
                     Some(name) => name,
-                    None => ask_for_input("Name")
+                    None => ask_for_input("Name"),
                 };
 
                 let email = match email {
                     Some(email) => email,
-                    None => ask_for_input("Email")
+                    None => ask_for_input("Email"),
                 };
 
                 let password = ask_for_password();
 
-                let res = request::register(load_config(), username, name, email, password).await.map_err(|e| {
-                    eprintln!("{}", e);
-                    exit(1);
-                }).unwrap();
+                let res = request::register(load_config(), username, name, email, password)
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{}", e);
+                        exit(1);
+                    })
+                    .unwrap();
 
                 if res.error {
                     eprintln!("Registration failed: {}", res.message);
@@ -258,7 +273,8 @@ pub async fn main() -> std::io::Result<()> {
                 let server_url = set_get_value(ConfigKey::Server, None, true);
 
                 if server_url.is_none() {
-                    set_get_value(ConfigKey::Server, Some(ask_for_input("Server URL: ")), true).unwrap();
+                    set_get_value(ConfigKey::Server, Some(ask_for_input("Server URL: ")), true)
+                        .unwrap();
                 };
 
                 let username = if let Some(username) = username {
@@ -269,10 +285,13 @@ pub async fn main() -> std::io::Result<()> {
 
                 let password = ask_for_password();
 
-                let res = request::login(load_config(), username, password).await.map_err(|e| {
-                    eprintln!("{}", e);
-                    exit(1);
-                }).unwrap();
+                let res = request::login(load_config(), username, password)
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{}", e);
+                        exit(1);
+                    })
+                    .unwrap();
 
                 if res.error {
                     eprintln!("Login failed: {}", res.message);
@@ -287,145 +306,187 @@ pub async fn main() -> std::io::Result<()> {
                 println!("Logged out.");
             }
 
-            MainCommands::Organization { cmd, organization_id } => {
-                match cmd {
-                    OrganizationCommands::Create { name, description, use_nix_store } => {
-                        let name = match name {
-                            Some(name) => name,
-                            None => ask_for_input("Name")
-                        };
+            MainCommands::Organization {
+                cmd,
+                organization_id,
+            } => match cmd {
+                OrganizationCommands::Create {
+                    name,
+                    description,
+                    use_nix_store,
+                } => {
+                    let name = match name {
+                        Some(name) => name,
+                        None => ask_for_input("Name"),
+                    };
 
-                        let description = match description {
-                            Some(description) => description,
-                            None => ask_for_input("Description")
-                        };
+                    let description = match description {
+                        Some(description) => description,
+                        None => ask_for_input("Description"),
+                    };
 
-                        let res = request::create_organization(load_config(), name, description, use_nix_store).await.map_err(|e| {
+                    let res = request::create_organization(
+                        load_config(),
+                        name,
+                        description,
+                        use_nix_store,
+                    )
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{}", e);
+                        exit(1);
+                    })
+                    .unwrap();
+
+                    if res.error {
+                        eprintln!("Organization creation failed: {}", res.message);
+                        exit(1);
+                    } else {
+                        println!("Organization created.");
+                    }
+                }
+
+                OrganizationCommands::List => {
+                    let res = request::list_organization(load_config())
+                        .await
+                        .map_err(|e| {
                             eprintln!("{}", e);
                             exit(1);
-                        }).unwrap();
+                        })
+                        .unwrap();
 
-                        if res.error {
-                            eprintln!("Organization creation failed: {}", res.message);
-                            exit(1);
-                        } else {
-                            println!("Organization created.");
+                    if res.error {
+                        eprintln!("Failed to list organizations");
+                        exit(1);
+                    } else if res.message.is_empty() {
+                        println!("You have no organizations.");
+                    } else {
+                        for org in res.message {
+                            println!("{}: {}", org.name, org.id);
                         }
                     }
+                }
 
-                    OrganizationCommands::List => {
-                        let res = request::list_organization(load_config()).await.map_err(|e| {
+                OrganizationCommands::Delete => {
+                    let organization_id = match organization_id {
+                        Some(id) => id,
+                        None => {
+                            eprintln!("Organization ID is required for command.");
+                            exit(1);
+                        }
+                    };
+
+                    let res = request::delete_organization(load_config(), organization_id)
+                        .await
+                        .map_err(|e| {
                             eprintln!("{}", e);
                             exit(1);
-                        }).unwrap();
+                        })
+                        .unwrap();
 
-                        if res.error {
-                            eprintln!("Failed to list organizations");
-                            exit(1);
-                        } else if res.message.is_empty() {
-                            println!("You have no organizations.");
-                        } else {
-                            for org in res.message {
-                                println!("{}: {}", org.name, org.id);
-                            }
-                        }
+                    if res.error {
+                        eprintln!("Failed to delete organization: {}", res.message);
+                        exit(1);
+                    } else {
+                        println!("Organization deleted.");
                     }
+                }
 
-                    OrganizationCommands::Delete => {
-                        let organization_id = match organization_id {
-                            Some(id) => id,
-                            None =>{
-                                eprintln!("Organization ID is required for command.");
-                                exit(1);
-                            }
-                        };
-
-                        let res = request::delete_organization(load_config(), organization_id).await.map_err(|e| {
-                            eprintln!("{}", e);
+                OrganizationCommands::Ssh { cmd } => {
+                    let organization_id = match organization_id {
+                        Some(id) => id,
+                        None => {
+                            eprintln!("Organization ID is required for command.");
                             exit(1);
-                        }).unwrap();
-
-                        if res.error {
-                            eprintln!("Failed to delete organization: {}", res.message);
-                            exit(1);
-                        } else {
-                            println!("Organization deleted.");
                         }
-                    }
+                    };
 
-                    OrganizationCommands::Ssh { cmd } => {
-                        let organization_id = match organization_id {
-                            Some(id) => id,
-                            None =>{
-                                eprintln!("Organization ID is required for command.");
-                                exit(1);
-                            }
-                        };
-
-                        match cmd {
-                            SshCommands::Show => {
-                                let res = request::get_organization_ssh(load_config(), organization_id).await.map_err(|e| {
+                    match cmd {
+                        SshCommands::Show => {
+                            let res = request::get_organization_ssh(load_config(), organization_id)
+                                .await
+                                .map_err(|e| {
                                     eprintln!("{}", e);
                                     exit(1);
-                                }).unwrap();
+                                })
+                                .unwrap();
 
-                                if res.error {
-                                    eprintln!("Failed to show SSH key: {}", res.message);
-                                    exit(1);
-                                } else {
-                                    println!("Public Key: {}", res.message);
-                                }
+                            if res.error {
+                                eprintln!("Failed to show SSH key: {}", res.message);
+                                exit(1);
+                            } else {
+                                println!("Public Key: {}", res.message);
                             }
+                        }
 
-                            SshCommands::Recreate => {
-                                let res = request::renew_organization_ssh(load_config(), organization_id).await.map_err(|e| {
-                                    eprintln!("{}", e);
-                                    exit(1);
-                                }).unwrap();
+                        SshCommands::Recreate => {
+                            let res =
+                                request::renew_organization_ssh(load_config(), organization_id)
+                                    .await
+                                    .map_err(|e| {
+                                        eprintln!("{}", e);
+                                        exit(1);
+                                    })
+                                    .unwrap();
 
-                                if res.error {
-                                    eprintln!("Failed to recreate SSH key: {}", res.message);
-                                } else {
-                                    println!("New Public Key: {}", res.message);
-                                }
+                            if res.error {
+                                eprintln!("Failed to recreate SSH key: {}", res.message);
+                            } else {
+                                println!("New Public Key: {}", res.message);
                             }
                         }
                     }
                 }
-            }
+            },
 
             MainCommands::Project { cmd } => {
                 match cmd {
-                    ProjectCommands::Create { organization_id, name, description, repository, evaluation_wildcard } => {
+                    ProjectCommands::Create {
+                        organization_id,
+                        name,
+                        description,
+                        repository,
+                        evaluation_wildcard,
+                    } => {
                         let organization_id = match organization_id {
                             Some(id) => id,
-                            None => ask_for_input("Organization ID")
+                            None => ask_for_input("Organization ID"),
                         };
 
                         let name = match name {
                             Some(name) => name,
-                            None => ask_for_input("Name")
+                            None => ask_for_input("Name"),
                         };
 
                         let description = match description {
                             Some(description) => description,
-                            None => ask_for_input("Description")
+                            None => ask_for_input("Description"),
                         };
 
                         let repository = match repository {
                             Some(repository) => repository,
-                            None => ask_for_input("Repository")
+                            None => ask_for_input("Repository"),
                         };
 
                         let evaluation_wildcard = match evaluation_wildcard {
                             Some(evaluation_wildcard) => evaluation_wildcard,
-                            None => ask_for_input("Evaluation Wildcard")
+                            None => ask_for_input("Evaluation Wildcard"),
                         };
 
-                        let res = request::create_project(load_config(), organization_id, name, description, repository, evaluation_wildcard).await.map_err(|e| {
+                        let res = request::create_project(
+                            load_config(),
+                            organization_id,
+                            name,
+                            description,
+                            repository,
+                            evaluation_wildcard,
+                        )
+                        .await
+                        .map_err(|e| {
                             eprintln!("{}", e);
                             exit(1);
-                        }).unwrap();
+                        })
+                        .unwrap();
 
                         if res.error {
                             eprintln!("Project creation failed: {}", res.message);
@@ -464,49 +525,77 @@ pub async fn main() -> std::io::Result<()> {
 
             MainCommands::Server { cmd } => {
                 match cmd {
-                    ServerCommands::Create { organization_id, name, host, port, ssh_user, architectures, features } => {
+                    ServerCommands::Create {
+                        organization_id,
+                        name,
+                        host,
+                        port,
+                        ssh_user,
+                        architectures,
+                        features,
+                    } => {
                         let organization_id = match organization_id {
                             Some(id) => id,
-                            None => ask_for_input("Organization ID")
+                            None => ask_for_input("Organization ID"),
                         };
 
                         let name = match name {
                             Some(name) => name,
-                            None => ask_for_input("Name")
+                            None => ask_for_input("Name"),
                         };
 
                         let host = match host {
                             Some(host) => host,
-                            None => ask_for_input("Host")
+                            None => ask_for_input("Host"),
                         };
 
                         let port = match port {
                             Some(port) => port,
-                            None => ask_for_input("Port").parse::<i32>().map_err(|_| {
-                                eprintln!("Not a valid port.");
-                                exit(1);
-                            }).unwrap()
+                            None => ask_for_input("Port")
+                                .parse::<i32>()
+                                .map_err(|_| {
+                                    eprintln!("Not a valid port.");
+                                    exit(1);
+                                })
+                                .unwrap(),
                         };
 
                         let ssh_user = match ssh_user {
                             Some(ssh_user) => ssh_user,
-                            None => ask_for_input("SSH User")
+                            None => ask_for_input("SSH User"),
                         };
 
                         let architectures = match architectures {
-                            Some(architectures) => architectures.split(",").map(|s| s.trim().to_string()).collect(),
-                            None => ask_for_list("Architectures")
+                            Some(architectures) => architectures
+                                .split(",")
+                                .map(|s| s.trim().to_string())
+                                .collect(),
+                            None => ask_for_list("Architectures"),
                         };
 
                         let features = match features {
-                            Some(features) => features.split(",").map(|s| s.trim().to_string()).collect(),
-                            None => ask_for_list("Features")
+                            Some(features) => {
+                                features.split(",").map(|s| s.trim().to_string()).collect()
+                            }
+                            None => ask_for_list("Features"),
                         };
 
-                        let res = request::create_server(load_config(), organization_id, name, host, port, ssh_user, architectures, features).await.map_err(|e| {
+                        let res = request::create_server(
+                            load_config(),
+                            organization_id,
+                            name,
+                            host,
+                            port,
+                            ssh_user,
+                            architectures,
+                            features,
+                        )
+                        .await
+                        .map_err(|e| {
                             eprintln!("{}", e);
                             exit(1);
-                        }).unwrap();
+                        })
+                        .unwrap();
 
                         if res.error {
                             eprintln!("Server creation failed: {}", res.message);
@@ -517,10 +606,13 @@ pub async fn main() -> std::io::Result<()> {
                     }
 
                     ServerCommands::List => {
-                        let res = request::list_server(load_config()).await.map_err(|e| {
-                            eprintln!("{}", e);
-                            exit(1);
-                        }).unwrap();
+                        let res = request::list_server(load_config())
+                            .await
+                            .map_err(|e| {
+                                eprintln!("{}", e);
+                                exit(1);
+                            })
+                            .unwrap();
 
                         if res.error {
                             eprintln!("Failed to list servers");

@@ -30,3 +30,8 @@ ssh-key = { version = "0.6", features = ["ed25519"] }
 tokio = { version = "1.42", features = ["process", "rt-multi-thread"] }
 uuid = { version = "1.11", features = ["fast-rng", "macro-diagnostics", "v4"] }
 wildcard = "0.3"
+# tvix-build = { git = "https://github.com/tvlfyi/tvix.git", rev = "d31eb5e60e1db2f5b99c4ff1695178bd500bc953", default-features = false, features = []}
+# tvix-eval = { git = "https://github.com/tvlfyi/tvix.git", rev = "d31eb5e60e1db2f5b99c4ff1695178bd500bc953" }
+# tvix-castore = { git = "https://github.com/tvlfyi/tvix.git", rev = "d31eb5e60e1db2f5b99c4ff1695178bd500bc953" }
+# tvix-store = { git = "https://github.com/tvlfyi/tvix.git", rev = "d31eb5e60e1db2f5b99c4ff1695178bd500bc953", default-features = false, features = []}
+# tvix-tracing = { git = "https://github.com/tvlfyi/tvix.git", rev = "d31eb5e60e1db2f5b99c4ff1695178bd500bc953" }

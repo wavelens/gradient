@@ -1,7 +1,7 @@
 /*
  * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
  *
- * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
+ * SPDX-License-Identifier: AGPL-3.0-only
  */
 
 { pkgs, lib, ... }:
@@ -74,10 +74,13 @@
           "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
         ];
 
-        environment.systemPackages = with pkgs; [
-          git
-          nix
-        ];
+        environment = {
+          variables.NIX_STORE_DIR = "/var/lib/store";
+          systemPackages = with pkgs; [
+            git
+            nix
+          ];
+        };
       };
 
     builder =
@@ -88,6 +91,7 @@
         ...
       }:
       {
+        environment.variables.NIX_STORE_DIR = "/var/lib/store";
         users.users.builder = {
           isNormalUser = true;
           group = "users";
@@ -134,9 +138,6 @@
     ''
       start_all()
 
-      for m in [builder, server]:
-        m.wait_for_unit("network-online.target")
-
       server.wait_for_unit("gradient-server.service")
       server.wait_for_unit("git-daemon.service")
 
@@ -166,7 +167,7 @@
           -X POST \
           -H "Authorization: Bearer ACCESS_TOKEN" \
           -H "Content-Type: application/json" \
-          -d '{"name": "MyOrganization", "description": "My Organization", "use_nix_store": false}' \
+          -d '{"name": "MyOrganization", "description": "My Organization", "use_nix_store": true}' \
           http://server:3000/api/organization \
           | ${lib.getExe pkgs.jq} -rj '.message'
       """.replace("ACCESS_TOKEN", token))
@@ -244,6 +245,8 @@
 
       builder.sleep(30)
 
+      server.succeed("ls -l /var/lib/gradient")
+      server.succeed("ls -l /var/lib/gradient/store")
       server.succeed("cat /nix/store/pf76zbb2bcldjv8dxxn3kssgl78qi3y3-buildWait5Sec.drv")
       builder.succeed("cat /nix/store/pf76zbb2bcldjv8dxxn3kssgl78qi3y3-buildWait5Sec.drv")
 
