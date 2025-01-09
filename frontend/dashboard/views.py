@@ -6,13 +6,13 @@ from django.shortcuts import render
 from django.http import HttpResponse
 from django.template import loader
 from django.shortcuts import render
-from .forms import LoginForm
-from .forms import newOrganizationForm
-from .forms import newProjectForm
-from .forms import newServerForm
+from django.contrib.auth.decorators import login_required
+from .auth import LoginForm, login
+from .forms import *
+import api
 
-
-def workflow(request):
+@login_required(login_url='/account/login/')
+def workflow(request, org_id):
     details_blocks = [
         {
             'project': "build",
@@ -181,12 +181,15 @@ def model(request):
     }
     return render(request, "dashboard/model.html", context)
 
-def login(request):
-    form = LoginForm()
-    return render(request, "dashboard/login.html", {'form': form})
-
 def newOrganization(request):
-    form = newOrganizationForm()
+    if request.method == 'POST':
+        form = newOrganizationForm(request.POST)
+        if form.is_valid():
+            api.new_organization(request, form.cleaned_data['name'], form.cleaned_data['description'])
+            return redirect('dashboard')
+    else:
+        form = newOrganizationForm()
+
     return render(request, "dashboard/newOrganization.html", {'form': form})
 
 def newProject(request):
@@ -196,3 +199,28 @@ def newProject(request):
 def newServer(request):
     form = newServerForm()
     return render(request, "dashboard/newServer.html", {'form': form})
+
+class UserLoginView(LoginView):
+    template_name = "login.html"
+    form_class = LoginForm
+
+    def form_valid(self, form):
+        login(self.request, form.get_user())
+        # if not form.get_user().is_active:
+        #     return render(
+        #         self.request,
+        #         "checkin_displaytext.html",
+        #         {
+        #             "displaytext": _(
+        #                 "Your account is not active yet! Please verify your E-Mail first!"
+        #             )
+        #         },
+        #     )
+        #     return redirect(self.get_success_url())
+        # self.request.session["allauth_2fa_user_id"] = form.get_user().pk
+        return redirect("home")
+
+def logout_view(request):
+    logout(request)
+    return redirect("/account/login/")
+

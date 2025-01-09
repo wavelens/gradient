@@ -3,39 +3,15 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 from django import forms
-
-class LoginForm(forms.Form):
-    username = forms.CharField(
-        label='E-Mail-Adresse oder Benutzername',
-        max_length=150,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control',
-        }),
-        required=True
-    )
-    password = forms.CharField(
-        label='Passwort',
-        widget=forms.PasswordInput(attrs={
-            'class': 'form-control',
-        }),
-        required=True
-    )
-    remember_me = forms.BooleanField(
-        label='Dieses Gerät Speichern',
-        required=False,
-        widget=forms.CheckboxInput(attrs={
-            'class': 'form-check-input'
-        })
-    )
-
+from django.utils.translation import gettext_lazy as _
 
 GEEKS_CHOICES =(
-    ("1", "One"), 
-    ("2", "Two"), 
-    ("3", "Three"), 
-    ("4", "Four"), 
-    ("5", "Five"), 
-) 
+    ("1", "One"),
+    ("2", "Two"),
+    ("3", "Three"),
+    ("4", "Four"),
+    ("5", "Five"),
+)
 
 class newOrganizationForm(forms.Form):
     # owner = forms.ChoiceField(
