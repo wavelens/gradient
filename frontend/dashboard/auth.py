@@ -7,9 +7,12 @@ from django.utils.translation import gettext_lazy as _
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.auth.signals import user_logged_in, user_logged_out, user_login_failed
 from django.contrib.auth import SESSION_KEY, BACKEND_SESSION_KEY, _clean_credentials
-from django.utils.translation import LANGUAGE_SESSION_KEY
+from django.utils.deprecation import MiddlewareMixin
+from django.utils.functional import SimpleLazyObject
+from django.db.models.manager import EmptyManager
+from django.contrib.auth.models import Group, Permission
 from functools import partial
-import api
+from . import api
 
 
 def login(request, user):
@@ -21,12 +24,7 @@ def logout(request):
     user = getattr(request, 'user', None)
     user_logged_out.send(sender=user.__class__, request=request, user=user)
 
-    language = request.session.get(LANGUAGE_SESSION_KEY)
-
     request.session.flush()
-
-    if language is not None:
-        request.session[LANGUAGE_SESSION_KEY] = language
 
     if hasattr(request, 'user'):
         request.user = AnonymousUser()

@@ -7,9 +7,10 @@ from django.http import HttpResponse
 from django.template import loader
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.views import LoginView
+from . import api
 from .auth import LoginForm, login
 from .forms import *
-import api
 
 @login_required(login_url='/account/login/')
 def workflow(request, org_id):

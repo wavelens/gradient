@@ -10,7 +10,7 @@ def get_client(user, endpoint, body=None, post=True, login=True):
     headers = {'Content-Type': 'application/json'}
 
     if login:
-        headers['Authorization'] = 'Bearer ' + user.session}
+        headers['Authorization'] = 'Bearer ' + user.session
     else:
         return None
 
