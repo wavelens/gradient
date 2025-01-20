@@ -34,7 +34,11 @@ def get_user(request):
     user = None
 
     if SESSION_KEY in request.session:
-        user = User(api.get_user(request, request.session[SESSION_KEY]))
+        # TODO: fix api
+        # user = User(api.get_user(request, request.session[SESSION_KEY]))
+        json_user_cache = {'id': '1', 'username': 'user', 'email': 'test@test.de', 'name': 'tolllername'}
+        json_user_cache['session'] = request.session[SESSION_KEY]
+        user = User(json_user_cache)
 
     return user or AnonymousUser()
 
@@ -51,7 +55,7 @@ class AuthenticationMiddleware(MiddlewareMixin):
             )
 
         request.user = SimpleLazyObject(lambda: get_user(request))
-        request.auser = partial(auser, request)
+        # request.auser = partial(auser, request)
 
 
 class LoginForm(forms.Form):
@@ -88,18 +92,22 @@ class LoginForm(forms.Form):
         password = self.cleaned_data.get('password')
 
         if username is not None and password:
-            user_session = api.login(config, username, password)
-            if user_session is None:
-                user_login_failed.send(sender=__name__, credentials=_clean_credentials(username, password))
+            user_session = api.login(username, password)
+            if user_session is None or user_session['error']:
+                # TODO: fix reporting
+                # user_login_failed.send(sender=__name__, credentials=_clean_credentials(username, password))
                 raise forms.ValidationError(
                     self.error_messages['invalid_login'],
                     code='invalid_login',
-                    params={'username': self.username_field.verbose_name},
+                    params={'username': username},
                 )
             else:
-                self.confirm_login_allowed(self.user_cache)
+                # self.confirm_login_allowed(self.user_cache)
+                user_session = user_session['message']
 
-            json_user_cache = api.get_user(request, user_session)
+            # TODO: fix api
+            # json_user_cache = api.get_user(request, user_session)
+            json_user_cache = {'id': '1', 'username': 'user', 'email': 'test@test.de', 'name': 'tolllername'}
             json_user_cache['session'] = user_session
             self.user_cache = User(json_user_cache)
 

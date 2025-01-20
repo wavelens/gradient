@@ -6,31 +6,36 @@
 
  <head>
     {% load i18n %}
+    {% load static %}
 </head>
 <body>
     <header>
         <div class="header">
             <div class="logo-container">
-                <a href="/" class="no-hovereffect"><img src="../static/dashboard/images/wavelens-LOGO.svg" alt="Logo"></a>
+                <a href="/" class="no-hovereffect"><img src="{% static '/dashboard/images/wavelens-LOGO.svg' %}" alt="Logo"></a>
             </div>
             <div>
                 <div class="dropdown">
                     <div onclick="dropdownFunction(); event.stopPropagation();" class="tooltip">
-                        <img src="../static/dashboard/images/{{ user.image }}" class="h-30 border-radius-5">
+                        {% if request.user.image %}
+                            <img src="{{ request.user.image }}" class="h-30 border-radius-5">
+                        {% else %}
+                            <img src="{% static '/dashboard/images/pb.png' %}" class="h-30 border-radius-5">
+                        {% endif %}
                         <span class="material-symbols-outlined icon-arrow pointer">
                             arrow_drop_down
                         </span>
                         <span class="tooltiptext" id="tooltip">{% trans 'Profil und Einstellungen...' %}</span>
                     </div>
                     <div id="dropdownHeader" class="dropdown-content">
-                        <p>{% trans 'signed in as' %} {{ user.name }}</p>
+                        <p>{% trans 'signed in as' %} {{ request.user.name }}</p>
                         <a href="#home" class="flex-c"><span class="material-symbols-outlined m-r-5">account_circle</span><span>{% trans 'Profile' %}</span></a>
                         <a href="#about" class="flex-c"><span class="material-symbols-outlined m-r-5">star</span><span>{% trans 'Starred' %}</span></a>
                         <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">notifications</span><span>{% trans 'Subscriptions' %}</span></a>
                         <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">settings</span><span>{% trans 'Settings' %}</span></a>
                         <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">help</span><span>{% trans 'Help' %}</span></a>
                         <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">tune</span><span>{% trans 'Side Administration' %}</span></a>
-                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">logout</span><span>{% trans 'Sign Out' %}</span></a>
+                        <a href="{% url 'logout' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">logout</span><span>{% trans 'Sign Out' %}</span></a>
                     </div>
                 </div>
             </div>

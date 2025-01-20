@@ -8,8 +8,4 @@ def global_variables(request):
         'model' : 'vModel',
         'user' : 'testuser',
         'success' : 'waiting',
-        'user': {
-            'name': 'testuser',
-            'image': 'pb.png',
-        }
     }

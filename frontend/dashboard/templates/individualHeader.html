@@ -11,16 +11,16 @@
     <header class="m-t--1rem">
         <div class="logo-container header-workflow">
             <img src="../static/dashboard/images/pb2.png"class="h-30 border-radius-5 vertical-align-bottom">
-            <span><a class="header-link" href="{% url 'workflow' %}">{{ projectname }}</a>/<a class="header-link" href="{% url 'model' %}"><b>{{ model }}</b></a></span>
+            <span><a class="header-link" href="{% url 'workflow' org_id %}">{{ projectname }}</a>/<a class="header-link" href="{% url 'model' org_id %}"><b>{{ model }}</b></a></span>
         </div>
         <nav role="navigation">
-            <a class="nav-link flex-end" href="{% url 'workflow' %}">
+            <a class="nav-link flex-end" href="{% url 'workflow' org_id %}">
                 <span class="material-symbols-outlined f-s-21px m-r-3">keyboard_command_key</span>
                 <span>{% trans 'Workflows' %}</span>
             </a>
 
-            <a class="nav-link flex-end" href="{% url 'log' %}"><span class="material-symbols-outlined f-s-21px m-r-3">vital_signs</span><span>{% trans 'Log' %}</span></a>
-            <a class="nav-link flex-end" href="{% url 'download' %}"><span class="material-symbols-outlined f-s-21px m-r-3">download</span><span>{% trans 'Download' %}</span></a>
+            <a class="nav-link flex-end" href="{% url 'log' org_id %}"><span class="material-symbols-outlined f-s-21px m-r-3">vital_signs</span><span>{% trans 'Log' %}</span></a>
+            <a class="nav-link flex-end" href="{% url 'download' org_id %}"><span class="material-symbols-outlined f-s-21px m-r-3">download</span><span>{% trans 'Download' %}</span></a>
             <a class="nav-link flex-end header-icon-right" href="/settings"><span class="material-symbols-outlined f-s-21px m-r-3">settings</span><span>{% trans 'Settings' %}</span></a>
             <!-- <img class="center-image icon" src="../static/dashboard/icons/download.svg"> -->
         </nav>

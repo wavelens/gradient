@@ -22,27 +22,27 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             get(endpoint::get_organizations).post(endpoint::post_organizations),
         )
         .route(
-            "/api/organization/:organization",
+            "/api/organization/{organization}",
             get(endpoint::get_organization).post(endpoint::post_organization),
         )
         .route(
-            "/api/organization/:organization/ssh",
+            "/api/organization/{organization}/ssh",
             get(endpoint::get_organization_ssh).post(endpoint::post_organization_ssh),
         )
         .route(
-            "/api/project/:project",
+            "/api/project/{project}",
             get(endpoint::get_project).post(endpoint::post_project),
         )
         .route(
-            "/api/project/:project/check-repository",
+            "/api/project/{project}/check-repository",
             post(endpoint::post_project_check_repository),
         )
         .route(
-            "/api/build/:build",
+            "/api/build/{build}",
             get(endpoint::get_build).post(endpoint::post_build),
         )
         .route(
-            "/api/user/settings/:user",
+            "/api/user/settings/{user}",
             get(endpoint::get_user).post(endpoint::post_user),
         )
         .route("/api/user/api", post(endpoint::post_api_key))
@@ -51,7 +51,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             get(endpoint::get_servers).post(endpoint::post_servers),
         )
         .route(
-            "/api/server/:server/check",
+            "/api/server/{server}/check",
             post(endpoint::post_server_check),
         )
         .route_layer(middleware::from_fn_with_state(

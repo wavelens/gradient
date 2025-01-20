@@ -126,3 +126,7 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Gradient Api
+
+GRADIENT_BASE_URL = 'http://127.0.0.1:3000/api'
