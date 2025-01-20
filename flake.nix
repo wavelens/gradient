@@ -74,6 +74,7 @@
       ];
 
       packages = [
+	cargo
         pkg-config
         rustc
         rustfmt

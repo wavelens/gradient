@@ -10,11 +10,12 @@ urlpatterns = [
     path("account/login/", UserLoginView.as_view(), name="login"),
     path("account/logout/", logout_view, name="logout"),
 
-    path("workflow/<str:org_id>", workflow, name="workflow"),
-    path("log", log, name="log"),
-    path("download", download, name="download"),
-    path("model", model, name="model"),
-    path("newOrganization", newOrganization, name="newOrganization"),
-    path("newProject", newProject, name="newProject"),
-    path("newServer", newServer, name="newServer"),
+    path("<str:org_id>/", workflow, name="workflow"),
+    path("<str:org_id>/log/", log, name="log"),
+    path("<str:org_id>/download/", download, name="download"),
+    path("<str:org_id>/model/", model, name="model"),
+    
+    path("new/organization/", new_organization, name="new_organization"),
+    path("<str:org_id>/new/project/", new_project, name="new_project"),
+    path("<str:org_id>/new/server/", new_server, name="new_server"),
 ]

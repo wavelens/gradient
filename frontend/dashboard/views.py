@@ -2,12 +2,12 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-only
 
-from django.shortcuts import render
-from django.http import HttpResponse
+from django.shortcuts import render, redirect
+from django.http import HttpResponse, HttpResponseRedirect
 from django.template import loader
-from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
+from django.contrib.auth import logout
 from . import api
 from .auth import LoginForm, login
 from .forms import *
@@ -97,11 +97,12 @@ def workflow(request, org_id):
         },
     ]
     context = {
+        'org_id': org_id,
         'details_blocks': details_blocks
     }
     return render(request, "dashboard/overview.html", context)
 
-def log(request):
+def log(request, org_id):
     details_blocks = [
         {
             'summary': "Lorem ipsum dolor sit amet, consetetur sadipscing elitr",
@@ -124,6 +125,7 @@ def log(request):
         }
     ]
     context = {
+        'org_id': org_id,
         'details_blocks': details_blocks,
         'built_version' : 'Vbuild (x86_64-linux)',
         'status' : 'Vsucceeded',
@@ -140,7 +142,7 @@ def log(request):
     }
     return render(request, "dashboard/log.html", context)
 
-def download(request):
+def download(request, org_id):
     files = [
     {
         'file': "File 1",
@@ -166,7 +168,7 @@ def download(request):
     }
     return render(request, "dashboard/download.html", context)
 
-def model(request):
+def model(request, org_id):
     models = [
     {
         'name': "Model 1",
@@ -182,22 +184,22 @@ def model(request):
     }
     return render(request, "dashboard/model.html", context)
 
-def newOrganization(request):
+def new_organization(request):
     if request.method == 'POST':
         form = newOrganizationForm(request.POST)
         if form.is_valid():
-            api.new_organization(request, form.cleaned_data['name'], form.cleaned_data['description'])
+            api.post_organization(request, form.cleaned_data['name'], form.cleaned_data['description'], True)
             return redirect('dashboard')
     else:
         form = newOrganizationForm()
 
     return render(request, "dashboard/newOrganization.html", {'form': form})
 
-def newProject(request):
+def new_project(request, org_id):
     form = newProjectForm()
     return render(request, "dashboard/newProject.html", {'form': form})
 
-def newServer(request):
+def new_server(request, org_id):
     form = newServerForm()
     return render(request, "dashboard/newServer.html", {'form': form})
 
@@ -219,9 +221,10 @@ class UserLoginView(LoginView):
         #     )
         #     return redirect(self.get_success_url())
         # self.request.session["allauth_2fa_user_id"] = form.get_user().pk
-        return redirect("home")
+        return HttpResponseRedirect(self.get_success_url())
 
 def logout_view(request):
+    # TODO: api logout request
     logout(request)
     return redirect("/account/login/")
 
