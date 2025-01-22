@@ -888,6 +888,24 @@ pub async fn post_api_key(
     Ok(Json(res))
 }
 
+pub async fn get_user_info(
+    Extension(user): Extension<MUser>,
+) -> Result<Json<BaseResponse<UserInfoResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let user_info = UserInfoResponse {
+        id: user.id.to_string(),
+        username: user.username.clone(),
+        name: user.name.clone(),
+        email: user.email.clone(),
+    };
+
+    let res = BaseResponse {
+        error: false,
+        message: user_info,
+    };
+
+    Ok(Json(res))
+}
+
 pub async fn post_login(
     state: State<Arc<ServerState>>,
     Json(body): Json<MakeLoginRequest>,

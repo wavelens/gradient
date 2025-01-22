@@ -13,6 +13,14 @@ pub struct BaseResponse<T> {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct UserInfoResponse {
+    pub id: String,
+    pub username: String,
+    pub name: String,
+    pub email: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct MakeOrganizationRequest {
     pub name: String,
     pub description: String,

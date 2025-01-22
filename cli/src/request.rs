@@ -16,6 +16,14 @@ pub struct BaseResponse<T> {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct UserInfoResponse {
+    pub id: String,
+    pub username: String,
+    pub name: String,
+    pub email: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct MakeOrganizationRequest {
     pub name: String,
     pub description: String,
@@ -182,6 +190,22 @@ pub async fn login(
     let res = get_client(config, "user/login".to_string(), true, false)
         .unwrap()
         .json(&req)
+        .send()
+        .await;
+
+    let res = match res {
+        Ok(res) => res,
+        Err(e) => return Err(e.to_string()),
+    };
+
+    Ok(parse_response(res).await.unwrap())
+}
+
+pub async fn user_info(
+    config: HashMap<ConfigKey, Option<String>>,
+) -> Result<BaseResponse<UserInfoResponse>, String> {
+    let res = get_client(config, "user/info".to_string(), false, true)
+        .unwrap()
         .send()
         .await;
 

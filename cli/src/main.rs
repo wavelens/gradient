@@ -44,6 +44,7 @@ enum MainCommands {
         username: Option<String>,
     },
     Logout,
+    Info,
     Organization {
         organization_id: Option<String>,
         #[command(subcommand)]
@@ -298,6 +299,26 @@ pub async fn main() -> std::io::Result<()> {
                     exit(1);
                 } else {
                     set_get_value(ConfigKey::AuthToken, Some(res.message), true).unwrap();
+                }
+            }
+
+            MainCommands::Info => {
+                let res = request::user_info(load_config())
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{}", e);
+                        exit(1);
+                    })
+                    .unwrap();
+
+                if res.error {
+                    eprintln!("Failed to get user info.");
+                    exit(1);
+                } else {
+                    println!("User ID: {}", res.message.id);
+                    println!("Username: {}", res.message.username);
+                    println!("Name: {}", res.message.name);
+                    println!("Email: {}", res.message.email);
                 }
             }
 

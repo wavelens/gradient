@@ -57,6 +57,9 @@ def get_organization(request, organization_id):
 def get_user(request, uid):
     return get_client(request.user, f"user/settings/{uid}", post=False)
 
+def get_user_info(request):
+    return get_client(request.user, f"user/info", post=False)
+
 def post_project(request, name, description, repository, evaluation_wildcard):
     return get_client(request.user, "project", body={'name': name, 'description': description, 'repository': repository, 'evaluation_wildcard': evaluation_wildcard})
 
@@ -86,3 +89,4 @@ def post_organization_ssh(request, organization_id):
 
 def post_server_check(request, server_id):
     return get_client(request.user, f"server/{server_id}/check", post=True)
+

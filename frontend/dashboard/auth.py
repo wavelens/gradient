@@ -34,9 +34,14 @@ def get_user(request):
     user = None
 
     if SESSION_KEY in request.session:
-        # TODO: fix api
-        # user = User(api.get_user(request, request.session[SESSION_KEY]))
-        json_user_cache = {'id': '1', 'username': 'user', 'email': 'test@test.de', 'name': 'tolllername'}
+        json_user_cache = api.get_user_info(request)
+
+        if json_user_cache is None or json_user_cache['error']:
+            logout(request)
+            return AnonymousUser()
+        else:
+            json_user_cache = json_user_cache['message']
+
         json_user_cache['session'] = request.session[SESSION_KEY]
         user = User(json_user_cache)
 
@@ -105,9 +110,17 @@ class LoginForm(forms.Form):
                 # self.confirm_login_allowed(self.user_cache)
                 user_session = user_session['message']
 
-            # TODO: fix api
-            # json_user_cache = api.get_user(request, user_session)
-            json_user_cache = {'id': '1', 'username': 'user', 'email': 'test@test.de', 'name': 'tolllername'}
+            json_user_cache = api.get_user(request, user_session)
+
+            if json_user_cache is None or json_user_cache['error']:
+                raise forms.ValidationError(
+                    self.error_messages['invalid_login'],
+                    code='invalid_login',
+                    params={'username': username},
+                )
+            else:
+                json_user_cache = json_user_cache['message']
+
             json_user_cache['session'] = user_session
             self.user_cache = User(json_user_cache)
 

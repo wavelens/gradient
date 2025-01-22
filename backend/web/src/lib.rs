@@ -46,6 +46,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             get(endpoint::get_user).post(endpoint::post_user),
         )
         .route("/api/user/api", post(endpoint::post_api_key))
+        .route("/api/user/info", get(endpoint::get_user_info))
         .route(
             "/api/server",
             get(endpoint::get_servers).post(endpoint::post_servers),
