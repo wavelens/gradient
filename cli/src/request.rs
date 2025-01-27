@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use reqwest_streams::JsonStreamResponse;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use futures::stream::StreamExt;
 
 use crate::ConfigKey;
 
@@ -503,11 +505,31 @@ pub async fn get_builds(
     Ok(parse_response(res).await.unwrap())
 }
 
-// pub async fn stream_build(
-//     config: HashMap<ConfigKey, Option<String>>,
-//     build_id: String,
-// ) -> Result<, String> {
-// }
+pub async fn stream_build(
+    config: HashMap<ConfigKey, Option<String>>,
+    build_id: String,
+) -> Result<(), String> {
+    let mut stream = get_client(config, format!("build/{}", build_id), true, true)
+        .unwrap()
+        .send()
+        .await
+        .unwrap()
+        .json_nl_stream::<String>(1024000);
+
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(chunk) => {
+                print!("{}", chunk);
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    Ok(())
+}
 
 pub async fn show_server(
     config: HashMap<ConfigKey, Option<String>>,

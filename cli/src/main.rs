@@ -93,6 +93,7 @@ enum ProjectCommands {
         project_id: String,
     },
     Show,
+    Log,
     Create {
         #[arg(short, long)]
         name: Option<String>,
@@ -577,9 +578,23 @@ pub async fn main() -> std::io::Result<()> {
                         }
 
                         println!("===== Building =====");
-                        for build in builds.message {
+                        for build in builds.message.clone() {
                             println!("{}", build);
                         }
+                        println!();
+
+                        println!("===== Log =====");
+                        for build in builds.message {
+                            // if build.status != "building" {
+                            //     continue;
+                            // }
+
+                            request::stream_build(load_config(), build).await.unwrap();
+                        }
+                    }
+
+                    ProjectCommands::Log => {
+                        todo!();
                     }
 
                     ProjectCommands::Create {

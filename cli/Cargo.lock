@@ -426,6 +426,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "dirs",
+ "futures",
  "reqwest",
  "reqwest-streams",
  "rpassword",

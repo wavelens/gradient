@@ -736,6 +736,7 @@ pub async fn connect_build(
     let stream = stream! {
         let mut last_log = build.log.unwrap_or("".to_string());
         if !last_log.is_empty() {
+            // TODO: Chunkify past log
             yield last_log.clone();
         }
 

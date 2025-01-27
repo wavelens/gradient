@@ -110,15 +110,11 @@ pub async fn execute_build(
             //     continue;
             // }
 
-            println!("Log line: {}", res.fields.len());
-
             let log = res.fields.iter()
                 .map(|l| l.as_string().unwrap_or(&"".to_string()).clone())
-                .filter(|l| !l.is_empty())
+                .filter(|l| !l.replace("/n", "").is_empty())
                 .collect::<Vec<String>>()
-                .join("\n");
-
-            println!("{}", log);
+                .join("");
 
             let full_log = format!("{}\n{}", build.log.as_ref().unwrap_or(&"".to_string()), log);
 
