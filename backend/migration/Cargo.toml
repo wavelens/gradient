@@ -3,7 +3,7 @@ name = "migration"
 version = "0.1.0"
 edition = "2021"
 publish = false
-license = "AGPL-3.0 OR Commercial"
+license = "AGPL-3.0"
 authors = ["Wavelens UG <info@wavelens.io>"]
 
 [lib]

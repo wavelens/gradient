@@ -18,6 +18,8 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use uuid::Uuid;
+use entity::evaluation::EvaluationStatus;
+use super::scheduler::update_evaluation_status;
 
 pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     state: Arc<ServerState>,
@@ -25,6 +27,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     evaluation: &MEvaluation,
 ) -> Result<(Vec<MBuild>, Vec<MBuildDependency>), String> {
     println!("Evaluating Evaluation: {}", evaluation.id);
+    update_evaluation_status(Arc::clone(&state), evaluation.clone(), EvaluationStatus::Building).await;
 
     let organization_id = EProject::find_by_id(evaluation.project)
         .one(&state.db)
@@ -244,6 +247,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             architecture: system,
             status: BuildStatus::Created,
             server: None,
+            log: None,
             created_at: Utc::now().naive_utc(),
             updated_at: Utc::now().naive_utc(),
         };

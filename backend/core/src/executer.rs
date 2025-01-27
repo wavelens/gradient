@@ -17,6 +17,9 @@ use tokio::{
     process::Command,
 };
 use uuid::Uuid;
+use sea_orm::ActiveValue::Set;
+use std::sync::Arc;
+use sea_orm::ActiveModelTrait;
 
 use super::input;
 use super::types::*;
@@ -81,12 +84,14 @@ pub async fn init_session(
 }
 
 pub async fn execute_build(
-    builds: Vec<&MBuild>,
+    build: &MBuild,
     remote_store: &mut NixStore,
-) -> Result<HashMap<String, BuildResult>, Box<dyn std::error::Error + Send + Sync>> {
+    state: Arc<ServerState>,
+) -> Result<(MBuild, HashMap<String, BuildResult>), Box<dyn std::error::Error + Send + Sync>> {
     println!("Executing builds");
 
-    let paths = get_builds_path(builds.clone());
+    let paths = get_builds_path(vec![&build]);
+    let mut build = build.clone();
 
     for path in paths.clone() {
         remote_store.ensure_path(path).result().await?;
@@ -96,11 +101,37 @@ pub async fn execute_build(
         .iter()
         .map(|p| format!("{}!*", p).to_string())
         .collect::<Vec<String>>();
-    remote_store
-        .build_paths_with_results(paths, BuildMode::Normal)
-        .result()
-        .await
-        .map_err(|e| e.into())
+
+    let mut prog = remote_store.build_paths_with_results(paths, BuildMode::Normal);
+
+    while let Some(stderr) = prog.next().await? {
+        if let nix_daemon::Stderr::Result(res) = stderr {
+            // if res.kind != nix_daemon::StderrResultType::BuildLogLine {
+            //     continue;
+            // }
+
+            println!("Log line: {}", res.fields.len());
+
+            let log = res.fields.iter()
+                .map(|l| l.as_string().unwrap_or(&"".to_string()).clone())
+                .filter(|l| !l.is_empty())
+                .collect::<Vec<String>>()
+                .join("\n");
+
+            println!("{}", log);
+
+            let full_log = format!("{}\n{}", build.log.as_ref().unwrap_or(&"".to_string()), log);
+
+            let mut abuild: ABuild = build.clone().into();
+            abuild.log = Set(Some(full_log));
+            build = abuild.update(&state.db).await.unwrap();
+        }
+    }
+
+    match prog.result().await.map_err(|e| e.into()) {
+        Ok(results) => Ok((build, results)),
+        Err(e) => Err(e),
+    }
 }
 
 pub async fn copy_builds<
@@ -195,7 +226,7 @@ pub fn get_buildlog_stream(
 
         let mut channel = session.channel_session().await.unwrap();
 
-        let command = format!("nix-store --log {}", build.derivation_path);
+        let command = format!("watch -n 0.5 nix-store --read-log {}", build.derivation_path);
 
         channel.exec(command.as_str()).await.unwrap();
 

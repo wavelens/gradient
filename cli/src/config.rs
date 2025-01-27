@@ -16,6 +16,8 @@ use strum_macros::EnumIter;
 pub enum ConfigKey {
     AuthToken,
     Server,
+    SelectedOrganization,
+    SelectedProject,
 }
 
 impl fmt::Display for ConfigKey {

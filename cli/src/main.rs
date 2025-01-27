@@ -46,7 +46,6 @@ enum MainCommands {
     Logout,
     Info,
     Organization {
-        organization_id: Option<String>,
         #[command(subcommand)]
         cmd: OrganizationCommands,
     },
@@ -62,6 +61,9 @@ enum MainCommands {
 
 #[derive(Subcommand, Debug)]
 enum OrganizationCommands {
+    Select {
+        organization_id: String,
+    },
     Create {
         #[arg(short, long)]
         name: Option<String>,
@@ -70,6 +72,7 @@ enum OrganizationCommands {
         #[arg(short = 's', long, default_value = "true")]
         use_nix_store: bool,
     },
+    Show,
     List,
     Delete,
     Ssh {
@@ -86,9 +89,11 @@ enum SshCommands {
 
 #[derive(Subcommand, Debug)]
 enum ProjectCommands {
+    Select {
+        project_id: String,
+    },
+    Show,
     Create {
-        #[arg(short, long)]
-        organization_id: Option<String>,
         #[arg(short, long)]
         name: Option<String>,
         #[arg(short, long)]
@@ -105,8 +110,6 @@ enum ProjectCommands {
 #[derive(Subcommand, Debug)]
 enum ServerCommands {
     Create {
-        #[arg(short, long)]
-        organization_id: Option<String>,
         #[arg(short, long)]
         name: Option<String>,
         #[arg(short = 's', long)]
@@ -265,9 +268,9 @@ pub async fn main() -> std::io::Result<()> {
                 if res.error {
                     eprintln!("Registration failed: {}", res.message);
                     exit(1);
-                } else {
-                    println!("Registration successful. Please log in.");
                 }
+
+                println!("Registration successful. Please log in.");
             }
 
             MainCommands::Login { username } => {
@@ -297,9 +300,9 @@ pub async fn main() -> std::io::Result<()> {
                 if res.error {
                     eprintln!("Login failed: {}", res.message);
                     exit(1);
-                } else {
-                    set_get_value(ConfigKey::AuthToken, Some(res.message), true).unwrap();
                 }
+
+                set_get_value(ConfigKey::AuthToken, Some(res.message), true).unwrap();
             }
 
             MainCommands::Info => {
@@ -314,12 +317,12 @@ pub async fn main() -> std::io::Result<()> {
                 if res.error {
                     eprintln!("Failed to get user info.");
                     exit(1);
-                } else {
-                    println!("User ID: {}", res.message.id);
-                    println!("Username: {}", res.message.username);
-                    println!("Name: {}", res.message.name);
-                    println!("Email: {}", res.message.email);
                 }
+
+                println!("User ID: {}", res.message.id);
+                println!("Username: {}", res.message.username);
+                println!("Name: {}", res.message.name);
+                println!("Email: {}", res.message.email);
             }
 
             MainCommands::Logout => {
@@ -327,10 +330,12 @@ pub async fn main() -> std::io::Result<()> {
                 println!("Logged out.");
             }
 
-            MainCommands::Organization {
-                cmd,
-                organization_id,
-            } => match cmd {
+            MainCommands::Organization { cmd } => match cmd {
+                OrganizationCommands::Select { organization_id } => {
+                    set_get_value(ConfigKey::SelectedOrganization, Some(organization_id), true).unwrap();
+                    println!("Organization selected.");
+                }
+
                 OrganizationCommands::Create {
                     name,
                     description,
@@ -362,9 +367,37 @@ pub async fn main() -> std::io::Result<()> {
                     if res.error {
                         eprintln!("Organization creation failed: {}", res.message);
                         exit(1);
-                    } else {
-                        println!("Organization created.");
                     }
+
+                    set_get_value(ConfigKey::SelectedOrganization, Some(res.message), true);
+                    println!("Organization created.");
+                }
+
+                OrganizationCommands::Show => {
+                    let organization_id = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+                        Some(id) => id,
+                        None => {
+                            eprintln!("Organization ID is required for command.");
+                            exit(1);
+                        }
+                    };
+
+                    let res = request::show_organization(load_config(), organization_id)
+                        .await
+                        .map_err(|e| {
+                            eprintln!("{}", e);
+                            exit(1);
+                        })
+                        .unwrap();
+
+                    if res.error {
+                        eprintln!("Failed to show organization.");
+                        exit(1);
+                    }
+
+                    println!("Name: {}", res.message.name);
+                    println!("Description: {}", res.message.description);
+                    println!("Use Nix Store: {}", res.message.use_nix_store);
                 }
 
                 OrganizationCommands::List => {
@@ -379,7 +412,9 @@ pub async fn main() -> std::io::Result<()> {
                     if res.error {
                         eprintln!("Failed to list organizations");
                         exit(1);
-                    } else if res.message.is_empty() {
+                    }
+
+                    if res.message.is_empty() {
                         println!("You have no organizations.");
                     } else {
                         for org in res.message {
@@ -389,7 +424,7 @@ pub async fn main() -> std::io::Result<()> {
                 }
 
                 OrganizationCommands::Delete => {
-                    let organization_id = match organization_id {
+                    let organization_id = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                         Some(id) => id,
                         None => {
                             eprintln!("Organization ID is required for command.");
@@ -408,13 +443,13 @@ pub async fn main() -> std::io::Result<()> {
                     if res.error {
                         eprintln!("Failed to delete organization: {}", res.message);
                         exit(1);
-                    } else {
-                        println!("Organization deleted.");
                     }
+
+                    println!("Organization deleted.");
                 }
 
                 OrganizationCommands::Ssh { cmd } => {
-                    let organization_id = match organization_id {
+                    let organization_id = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                         Some(id) => id,
                         None => {
                             eprintln!("Organization ID is required for command.");
@@ -435,9 +470,9 @@ pub async fn main() -> std::io::Result<()> {
                             if res.error {
                                 eprintln!("Failed to show SSH key: {}", res.message);
                                 exit(1);
-                            } else {
-                                println!("Public Key: {}", res.message);
                             }
+
+                            println!("Public Key: {}", res.message);
                         }
 
                         SshCommands::Recreate => {
@@ -452,9 +487,10 @@ pub async fn main() -> std::io::Result<()> {
 
                             if res.error {
                                 eprintln!("Failed to recreate SSH key: {}", res.message);
-                            } else {
-                                println!("New Public Key: {}", res.message);
+                                exit(1);
                             }
+
+                            println!("New Public Key: {}", res.message);
                         }
                     }
                 }
@@ -462,16 +498,102 @@ pub async fn main() -> std::io::Result<()> {
 
             MainCommands::Project { cmd } => {
                 match cmd {
+                    ProjectCommands::Select { project_id } => {
+                        set_get_value(ConfigKey::SelectedProject, Some(project_id), true).unwrap();
+                        println!("Project selected.");
+                    }
+
+                    ProjectCommands::Show => {
+                        let project_id = match set_get_value(ConfigKey::SelectedProject, None, true) {
+                            Some(id) => id,
+                            None => {
+                                eprintln!("Project ID is required for command.");
+                                exit(1);
+                            }
+                        };
+
+                        let project = request::show_project(load_config(), project_id)
+                            .await
+                            .map_err(|e| {
+                                eprintln!("{}", e);
+                                exit(1);
+                            })
+                            .unwrap();
+
+                        if project.error {
+                            eprintln!("Failed to show project.");
+                            exit(1);
+                        }
+
+                        println!("===== Project =====");
+                        println!("Name: {}", project.message.name);
+                        println!("Description: {}", project.message.description);
+                        println!("Repository: {}", project.message.repository);
+                        println!("Evaluation Wildcard: {}", project.message.evaluation_wildcard);
+                        println!("Organization ID: {}", project.message.organization);
+                        println!("Last Check At: {}", project.message.last_check_at);
+                        println!();
+
+                        if project.message.last_evaluation.is_none() {
+                            println!("No last evaluation.");
+                            exit(0);
+                        }
+
+                        let evaluation = request::show_evaluation(load_config(), project.message.last_evaluation.unwrap())
+                            .await
+                            .map_err(|e| {
+                                eprintln!("{}", e);
+                                exit(1);
+                            })
+                            .unwrap();
+
+                        if evaluation.error {
+                            eprintln!("Failed to show evaluation.");
+                            exit(1);
+                        }
+
+                        println!("===== Evaluation =====");
+                        println!("ID: {}", evaluation.message.id);
+                        println!("Status: {}", evaluation.message.status);
+                        println!("Commit: {}", evaluation.message.commit);
+                        println!();
+
+                        let builds = request::get_builds(load_config(), evaluation.message.id)
+                            .await
+                            .map_err(|e| {
+                                eprintln!("{}", e);
+                                exit(1);
+                            })
+                            .unwrap();
+
+                        if builds.error {
+                            eprintln!("Failed to get builds.");
+                            exit(1);
+                        }
+
+                        if builds.message.is_empty() {
+                            println!("No builds.");
+                            exit(0);
+                        }
+
+                        println!("===== Building =====");
+                        for build in builds.message {
+                            println!("{}", build);
+                        }
+                    }
+
                     ProjectCommands::Create {
-                        organization_id,
                         name,
                         description,
                         repository,
                         evaluation_wildcard,
                     } => {
-                        let organization_id = match organization_id {
+                        let organization_id = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                             Some(id) => id,
-                            None => ask_for_input("Organization ID"),
+                            None => {
+                                eprintln!("Organization ID is required for command.");
+                                exit(1);
+                            }
                         };
 
                         let name = match name {
@@ -512,9 +634,10 @@ pub async fn main() -> std::io::Result<()> {
                         if res.error {
                             eprintln!("Project creation failed: {}", res.message);
                             exit(1);
-                        } else {
-                            println!("Project created.");
                         }
+
+                        set_get_value(ConfigKey::SelectedProject, Some(res.message), true).unwrap();
+                        println!("Project created.");
                     }
 
                     ProjectCommands::List => {
@@ -547,7 +670,6 @@ pub async fn main() -> std::io::Result<()> {
             MainCommands::Server { cmd } => {
                 match cmd {
                     ServerCommands::Create {
-                        organization_id,
                         name,
                         host,
                         port,
@@ -555,9 +677,12 @@ pub async fn main() -> std::io::Result<()> {
                         architectures,
                         features,
                     } => {
-                        let organization_id = match organization_id {
+                        let organization_id = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                             Some(id) => id,
-                            None => ask_for_input("Organization ID"),
+                            None => {
+                                eprintln!("Organization ID is required for command.");
+                                exit(1);
+                            }
                         };
 
                         let name = match name {
@@ -621,13 +746,21 @@ pub async fn main() -> std::io::Result<()> {
                         if res.error {
                             eprintln!("Server creation failed: {}", res.message);
                             exit(1);
-                        } else {
-                            println!("Server created.");
                         }
+
+                        println!("Server created.");
                     }
 
                     ServerCommands::List => {
-                        let res = request::list_server(load_config())
+                        let organization_id = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+                            Some(id) => id,
+                            None => {
+                                eprintln!("Organization ID is required for command.");
+                                exit(1);
+                            }
+                        };
+
+                        let res = request::list_server(load_config(), organization_id)
                             .await
                             .map_err(|e| {
                                 eprintln!("{}", e);
@@ -638,7 +771,9 @@ pub async fn main() -> std::io::Result<()> {
                         if res.error {
                             eprintln!("Failed to list servers");
                             exit(1);
-                        } else if res.message.is_empty() {
+                        }
+
+                        if res.message.is_empty() {
                             println!("You have no servers.");
                         } else {
                             for server in res.message {

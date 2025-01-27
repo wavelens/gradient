@@ -8,13 +8,15 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_streams::*;
+use async_stream::stream;
 use chrono::Utc;
 use core::consts::*;
 use core::database::add_features;
-use core::executer::{connect, get_buildlog_stream};
 use core::input::{valid_evaluation_wildcard, vec_to_hex};
+use core::executer::connect;
 use core::sources::*;
 use core::types::*;
+use builder::scheduler::abort_evaluation;
 use email_address::EmailAddress;
 use git_url_parse::normalize_url;
 use password_auth::{generate_hash, verify_password};
@@ -462,6 +464,175 @@ pub async fn post_project_check_repository(
     }
 }
 
+pub async fn get_evaluation(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(evaluation_id): Path<Uuid>,
+) -> Result<Json<BaseResponse<MEvaluation>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let evaluation = match EEvaluation::find_by_id(evaluation_id)
+        .one(&state.db)
+        .await
+        .unwrap()
+    {
+        Some(e) => e,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Evaluation not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let project = EProject::find_by_id(evaluation.project)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let organization = EOrganization::find_by_id(project.organization)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    if organization.created_by != user.id {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(BaseResponse {
+                error: true,
+                message: "Evaluation not found".to_string(),
+            }),
+        ));
+    }
+
+    let res = BaseResponse {
+        error: false,
+        message: evaluation,
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn post_evaluation(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(evaluation_id): Path<Uuid>,
+    Json(body): Json<MakeEvaluationRequest>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let evaluation = match EEvaluation::find_by_id(evaluation_id)
+        .one(&state.db)
+        .await
+        .unwrap()
+    {
+        Some(e) => e,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Evaluation not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let project = EProject::find_by_id(evaluation.project)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let organization = EOrganization::find_by_id(project.organization)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    if organization.created_by != user.id {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(BaseResponse {
+                error: true,
+                message: "Evaluation not found".to_string(),
+            }),
+        ));
+    }
+
+    if body.method == "abort" {
+        abort_evaluation(Arc::clone(&state), evaluation).await;
+    }
+
+    let res = BaseResponse {
+        error: false,
+        message: "Success".to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn get_builds(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(evaluation_id): Path<Uuid>,
+) -> Result<Json<BaseResponse<Vec<String>>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let evaluation = match EEvaluation::find_by_id(evaluation_id)
+        .one(&state.db)
+        .await
+        .unwrap()
+    {
+        Some(e) => e,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Evaluation not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let project = EProject::find_by_id(evaluation.project)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let organization = EOrganization::find_by_id(project.organization)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    if organization.created_by != user.id {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(BaseResponse {
+                error: true,
+                message: "Evaluation not found".to_string(),
+            }),
+        ));
+    }
+
+    let builds = EBuild::find()
+        .filter(CBuild::Evaluation.eq(evaluation.id))
+        .all(&state.db)
+        .await
+        .unwrap();
+
+    let builds: Vec<String> = builds
+        .iter()
+        .map(|b| b.id.to_string())
+        .collect();
+
+    let res = BaseResponse {
+        error: false,
+        message: builds,
+    };
+
+    Ok(Json(res))
+}
+
 pub async fn get_build(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -514,11 +685,10 @@ pub async fn get_build(
     Ok(Json(res))
 }
 
-pub async fn post_build(
+pub async fn connect_build(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(build_id): Path<Uuid>,
-    Json(_body): Json<MakeBuildRequest>,
 ) -> Result<StreamBodyAs<'static>, (StatusCode, Json<BaseResponse<String>>)> {
     let build = match EBuild::find_by_id(build_id).one(&state.db).await.unwrap() {
         Some(b) => b,
@@ -559,49 +729,44 @@ pub async fn post_build(
         ));
     }
 
-    let server_id = match build.server {
-        Some(server) => server,
-        None => {
-            return Err((
-                StatusCode::NO_CONTENT,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Build not queued yet".to_string(),
-                }),
-            ))
+    // TODO: check if build is building
+
+    // watch build.log and stream it
+
+    let stream = stream! {
+        let mut last_log = build.log.unwrap_or("".to_string());
+        if !last_log.is_empty() {
+            yield last_log.clone();
+        }
+
+        loop {
+            let build = EBuild::find_by_id(build_id).one(&state.db).await.unwrap().unwrap();
+            if build.status != entity::build::BuildStatus::Building {
+                break;
+            }
+
+            let log = build.log.unwrap_or("".to_string());
+            let log_new = log.replace(last_log.as_str(), "");
+            if !log_new.is_empty() {
+                last_log = log.clone();
+                yield log_new.clone();
+            }
         }
     };
 
-    let server = EServer::find_by_id(server_id)
-        .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
-
-    let (private_key, public_key) =
-        decrypt_ssh_private_key(state.cli.crypt_secret.clone(), organization).unwrap();
-    let stream = get_buildlog_stream(server, build, public_key.clone(), private_key.clone())
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Failed to get build log stream".to_string(),
-                }),
-            )
-        })
-        .unwrap();
-
-    Ok(StreamBodyAs::json_array(stream))
+    Ok(StreamBodyAs::json_nl(stream))
 }
 
 pub async fn get_servers(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Json(body): Json<MakeServerGetRequest>,
 ) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+    // TODO: check if user is authorized to access the organization
     let servers = EServer::find()
         .join(JoinType::InnerJoin, RServer::Organization.def())
         .filter(COrganization::CreatedBy.eq(user.id))
+        .filter(CServer::Organization.eq(body.organization_id))
         .all(&state.db)
         .await
         .unwrap();
@@ -699,26 +864,24 @@ pub async fn post_servers(
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    let server = server.insert(&state.db).await.unwrap();
-
     let architectures = body
         .architectures
         .iter()
-        .map(|a| {
-            entity::server::Architecture::try_from(a.as_str())
-                .map_err(|_| {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        Json(BaseResponse {
-                            error: true,
-                            message: format!("Unknown architecture: {}", a),
-                        }),
-                    )
-                })
-                .unwrap()
-        })
+        .map(|a| entity::server::Architecture::try_from(a.as_str()))
+        .filter_map(|a| a.ok())
         .collect::<Vec<entity::server::Architecture>>();
 
+    if architectures.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: "Invalid Architectures".to_string(),
+            }),
+        ));
+    }
+
+    let server = server.insert(&state.db).await.unwrap();
     let server_architecture = architectures
         .iter()
         .map(|a| AServerArchitecture {

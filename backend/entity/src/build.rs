@@ -36,6 +36,8 @@ pub struct Model {
     pub derivation_path: String,
     pub architecture: super::server::Architecture,
     pub server: Option<Uuid>,
+    #[sea_orm(column_type = "Text")]
+    pub log: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }

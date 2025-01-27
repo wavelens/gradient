@@ -27,6 +27,7 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(ColumnDef::new(Build::Server).uuid())
+                    .col(ColumnDef::new(Build::Log).text())
                     .col(ColumnDef::new(Build::CreatedAt).date_time().not_null())
                     .col(ColumnDef::new(Build::UpdatedAt).date_time().not_null())
                     .foreign_key(
@@ -64,6 +65,7 @@ enum Build {
     DerivationPath,
     Architecture,
     Server,
+    Log,
     CreatedAt,
     UpdatedAt,
 }

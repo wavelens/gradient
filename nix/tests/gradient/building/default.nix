@@ -14,124 +14,121 @@
   };
 
   nodes = {
-    server =
-      {
-        config,
-        pkgs,
-        lib,
-        ...
-      }:
-      {
-        imports = [ ../../../modules/gradient.nix ];
-        services = {
-          gradient = {
-            enable = true;
-            ip = "0.0.0.0";
-            domain = "gradient.local";
-            jwtSecret = "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a";
-            cryptSecret = "aW52YWxpZAo=";
-            binpath_nix = lib.getExe pkgs.nix;
-            binpath_git = lib.getExe pkgs.git;
-          };
+    machine = { config, pkgs, lib, ... }@inputs: {
+      imports = [
+        inputs.microvm.host
+        ../../../modules/gradient.nix
+      ];
 
-          postgresql = {
-            enable = true;
-            package = pkgs.postgresql_17;
-            enableJIT = true;
-            enableTCPIP = true;
-            ensureDatabases = [ "gradient" ];
-            authentication = ''
-              #...
-              #type database DBuser origin-address auth-method
-              # ipv4
-              host  all      all     0.0.0.0/0      trust
-              # ipv6
-              host all       all     ::0/0        trust
-            '';
+      microvm.vms = {
+        server = {
+          config = {
+            services = {
+              gradient = {
+                enable = true;
+                ip = "0.0.0.0";
+                domain = "gradient.local";
+                jwtSecret = "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a";
+                cryptSecret = "aW52YWxpZAo=";
+                binpath_nix = lib.getExe pkgs.nix;
+                binpath_git = lib.getExe pkgs.git;
+              };
 
-            settings = {
-              log_connections = true;
-              logging_collector = true;
-              log_disconnections = true;
-              log_destination = lib.mkForce "syslog";
+              postgresql = {
+                enable = true;
+                package = pkgs.postgresql_17;
+                enableJIT = true;
+                enableTCPIP = true;
+                ensureDatabases = [ "gradient" ];
+                authentication = ''
+                  #...
+                  #type database DBuser origin-address auth-method
+                  # ipv4
+                  host  all      all     0.0.0.0/0      trust
+                  # ipv6
+                  host all       all     ::0/0        trust
+                '';
+
+                settings = {
+                  log_connections = true;
+                  logging_collector = true;
+                  log_disconnections = true;
+                  log_destination = lib.mkForce "syslog";
+                };
+              };
+
+              gitDaemon = {
+                enable = true;
+                basePath = "/var/lib/git/";
+                exportAll = true;
+                options = "--enable=receive-pack";
+              };
+            };
+
+            nix.settings = {
+              flake-registry = "";
+            };
+
+            systemd.tmpfiles.rules = [
+              "d /var/lib/git 0755 git git"
+              "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
+            ];
+
+            environment = {
+              variables.NIX_STORE_DIR = "/var/lib/store";
+              systemPackages = with pkgs; [
+                git
+                nix
+              ];
             };
           };
-
-          gitDaemon = {
-            enable = true;
-            basePath = "/var/lib/git/";
-            exportAll = true;
-            options = "--enable=receive-pack";
-          };
         };
 
-        nix.settings = {
-          flake-registry = "";
-        };
+        builder = {
+          config = {
+            environment.variables.NIX_STORE_DIR = "/var/lib/store";
+            users.users.builder = {
+              isNormalUser = true;
+              group = "users";
+            };
 
-        systemd.tmpfiles.rules = [
-          "d /var/lib/git 0755 git git"
-          "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
-        ];
+            nix.settings = {
+              experimental-features = [
+                "nix-command"
+                "flakes"
+                "ca-derivations"
+              ];
 
-        environment = {
-          variables.NIX_STORE_DIR = "/var/lib/store";
-          systemPackages = with pkgs; [
-            git
-            nix
-          ];
-        };
-      };
+              trusted-users = [
+                "root"
+                "@wheel"
+                "builder"
+              ];
+            };
 
-    builder =
-      {
-        config,
-        pkgs,
-        lib,
-        ...
-      }:
-      {
-        environment.variables.NIX_STORE_DIR = "/var/lib/store";
-        users.users.builder = {
-          isNormalUser = true;
-          group = "users";
-        };
-
-        nix.settings = {
-          experimental-features = [
-            "nix-command"
-            "flakes"
-            "ca-derivations"
-          ];
-
-          trusted-users = [
-            "root"
-            "@wheel"
-            "builder"
-          ];
-        };
-
-        systemd.tmpfiles.rules = [
-          "d /home/builder/.ssh 0700 builder users"
-        ];
-
-        services.openssh = {
-          enable = true;
-          settings = {
-            PasswordAuthentication = false;
-            # rust lib ssh2 requires one of the following Message Authentication Codes:
-            # hmac-sha2-256,hmac-sha2-512,hmac-sha1,hmac-sha1-96,hmac-md5,hmac-md5-96,hmac-ripemd160,hmac-ripemd160@openssh.com
-            Macs = [
-              "hmac-sha2-512"
+            systemd.tmpfiles.rules = [
+              "d /home/builder/.ssh 0700 builder users"
             ];
+
+            services.openssh = {
+              enable = true;
+              settings = {
+                PasswordAuthentication = false;
+                # rust lib ssh2 requires one of the following Message Authentication Codes:
+                # hmac-sha2-256,hmac-sha2-512,hmac-sha1,hmac-sha1-96,hmac-md5,hmac-md5-96,hmac-ripemd160,hmac-ripemd160@openssh.com
+                Macs = [
+                  "hmac-sha2-512"
+                ];
+              };
+            };
           };
         };
       };
+    };
   };
 
   interactive.nodes = {
-    server = import ../../modules/debug-host.nix;
-    builder = import ../../modules/debug-host.nix;
+    machine = import ../../modules/debug-host.nix;
   };
 
   testScript = { nodes, ... }:

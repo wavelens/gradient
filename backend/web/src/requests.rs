@@ -47,6 +47,16 @@ pub struct MakeServerRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct MakeServerGetRequest {
+    pub organization_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MakeEvaluationRequest {
+    pub method: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct MakeBuildRequest {
     pub log_streaming: bool,
 }

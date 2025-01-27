@@ -40,7 +40,13 @@ impl std::convert::TryFrom<&str> for Architecture {
     type Error = String;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        s.parse()
+        match s {
+            "x86_64-linux" => Ok(Architecture::X86_64Linux),
+            "aarch64-linux" => Ok(Architecture::Aarch64Linux),
+            "x86_64-darwin" => Ok(Architecture::X86_64Darwin),
+            "aarch64-darwin" => Ok(Architecture::Aarch64Darwin),
+            _ => Err(format!("Unknown architecture: {}", s)),
+        }
     }
 }
 

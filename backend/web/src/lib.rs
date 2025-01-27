@@ -38,8 +38,16 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             post(endpoint::post_project_check_repository),
         )
         .route(
+            "/api/evaluation/{evaluation}",
+            get(endpoint::get_evaluation).post(endpoint::post_evaluation),
+        )
+        .route(
+            "/api/evaluation/{evaluation}/builds",
+            get(endpoint::get_builds),
+        )
+        .route(
             "/api/build/{build}",
-            get(endpoint::get_build).post(endpoint::post_build),
+            get(endpoint::get_build).post(endpoint::connect_build),
         )
         .route(
             "/api/user/settings/{user}",

@@ -3,7 +3,7 @@ name = "web"
 version = "0.1.0"
 edition = "2021"
 publish = false
-license = "AGPL-3.0 OR Commercial"
+license = "AGPL-3.0"
 authors = ["Wavelens UG <info@wavelens.io>"]
 
 [lib]
@@ -13,8 +13,10 @@ path = "src/lib.rs"
 [dependencies]
 axum = "0.8"
 axum-streams = { version = "0.20", features = ["json"] }
+async-stream = "0.3"
 chrono = "0.4"
 core = { path = "../core" }
+builder = { path = "../builder" }
 entity = { path = "../entity" }
 git-url-parse = "0.4"
 jsonwebtoken = "9.3"
