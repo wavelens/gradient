@@ -8,6 +8,7 @@ from .views import *
 
 urlpatterns = [
     path("account/login/", UserLoginView.as_view(), name="login"),
+    path("account/register/", register, name="register"),
     path("account/logout/", logout_view, name="logout"),
 
     path("<str:org_id>/", workflow, name="workflow"),

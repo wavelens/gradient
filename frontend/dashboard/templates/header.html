@@ -17,11 +17,7 @@
             <div>
                 <div class="dropdown">
                     <div onclick="dropdownFunction(); event.stopPropagation();" class="tooltip">
-                        {% if request.user.image %}
-                            <img src="{{ request.user.image }}" class="h-30 border-radius-5">
-                        {% else %}
-                            <img src="{% static '/dashboard/images/pb.png' %}" class="h-30 border-radius-5">
-                        {% endif %}
+                        <img src="{{ request.user.image }}" class="h-30 border-radius-5">
                         <span class="material-symbols-outlined icon-arrow pointer">
                             arrow_drop_down
                         </span>

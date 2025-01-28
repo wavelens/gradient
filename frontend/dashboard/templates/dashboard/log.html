@@ -40,7 +40,7 @@
         <div class="innerbody-top d-flex">
             <div class="m-r-2rem">
                <div class="text-light m-b-05rem">{% trans 'Triggered via' %} {{ triggerArt }} {{ triggerTime }} {% trans 'ago' %}</div>
-               <div><a class="normal-hover" href=""><img src="../static/dashboard/images/{{ user.image }}" class="icon-center border-radius-5"><span>{{ user.name }} </span></a> <span class="material-symbols-outlined icon-center f-s-21px">{% trans 'commit' %}</span> {{ git }} <span class="branch">{{ branch }}</span></div>
+               <div><a class="normal-hover" href=""><img src="{{ request.user.image }}" class="icon-center border-radius-5"><span>{{ user.name }} </span></a> <span class="material-symbols-outlined icon-center f-s-21px">{% trans 'commit' %}</span> {{ git }} <span class="branch">{{ branch }}</span></div>
             </div>
             <div class="m-r-2rem">
                 <div class="text-light m-b-05rem">{% trans 'Status' %}</div>

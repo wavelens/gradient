@@ -13,6 +13,7 @@ from django.db.models.manager import EmptyManager
 from django.contrib.auth.models import Group, Permission
 from functools import partial
 from . import api
+from django.templatetags.static import static
 
 
 def login(request, user):
@@ -34,10 +35,10 @@ def get_user(request):
     user = None
 
     if SESSION_KEY in request.session:
-        json_user_cache = api.get_user_info(request)
+        json_user_cache = api.get_user_info(request.session[SESSION_KEY])
 
         if json_user_cache is None or json_user_cache['error']:
-            logout(request)
+            request.session.pop(SESSION_KEY, None)
             return AnonymousUser()
         else:
             json_user_cache = json_user_cache['message']
@@ -47,6 +48,10 @@ def get_user(request):
 
     return user or AnonymousUser()
 
+def get_cached_user(request):
+    if not hasattr(request, "_cached_user"):
+        request._cached_user = get_user(request)
+    return request._cached_user
 
 class AuthenticationMiddleware(MiddlewareMixin):
     def process_request(self, request):
@@ -59,7 +64,7 @@ class AuthenticationMiddleware(MiddlewareMixin):
                 "'django.contrib.auth.middleware.AuthenticationMiddleware'."
             )
 
-        request.user = SimpleLazyObject(lambda: get_user(request))
+        request.user = SimpleLazyObject(lambda: get_cached_user(request))
         # request.auser = partial(auser, request)
 
 
@@ -110,7 +115,7 @@ class LoginForm(forms.Form):
                 # self.confirm_login_allowed(self.user_cache)
                 user_session = user_session['message']
 
-            json_user_cache = api.get_user(request, user_session)
+            json_user_cache = api.get_user_info(user_session)
 
             if json_user_cache is None or json_user_cache['error']:
                 raise forms.ValidationError(
@@ -129,6 +134,24 @@ class LoginForm(forms.Form):
     def get_user(self):
         return self.user_cache
 
+class RegisterForm(forms.Form):
+    email = forms.CharField(
+        label = _("E-Mail"),
+        max_length = 150,
+        widget = forms.TextInput(attrs={'class': 'form-control'}),
+        required = True
+    )
+    password = forms.CharField(
+        label = _("Password"),
+        widget = forms.PasswordInput(attrs={'class': 'form-control'}),
+        required = True
+    )
+    username = forms.CharField(
+        label = _("Username"),
+        max_length = 150,
+        widget = forms.TextInput(attrs={'class': 'form-control'}),
+        required = True
+    )
 
 class User(object):
     id = None
@@ -140,15 +163,18 @@ class User(object):
     _groups = EmptyManager(Group)
     _user_permissions = EmptyManager(Permission)
 
-    def __init__(self, json=None):
-        if json is None:
-            return
+    def __init__(self, json=None, session=None):
+        if json:
+            self.id = json['id']
+            self.username = json['username']
+            self.email = json['email']
+            self.name = json['name']
+            self.session = json['session']
 
-        self.id = json['id']
-        self.username = json['username']
-        self.email = json['email']
-        self.name = json['name']
-        self.session = json['session']
+        if session:
+            self.session = session
+
+        self.image = static('/dashboard/images/pb.png')
 
     def __str__(self):
         return self.name

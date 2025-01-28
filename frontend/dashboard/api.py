@@ -5,6 +5,7 @@
 from django.conf import settings
 import requests
 import json
+from .auth import User
 
 def get_client(user, endpoint, body=None, post=True):
     headers = {'Content-Type': 'application/json'}
@@ -39,8 +40,8 @@ def get_client(user, endpoint, body=None, post=True):
 def health(request):
     return get_client(request.user, "health", post=False)
 
-def register(request, username, name, email, password):
-    return get_client(request.user, "user/register", body={'username': username, 'name': name, 'email': email, 'password': password})
+def register(username, name, email, password):
+    return get_client(None, "user/register", body={'username': username, 'name': name, 'email': email, 'password': password})
 
 def login(loginname, password):
     return get_client(None, "user/login", body={'loginname': loginname, 'password': password})
@@ -57,8 +58,9 @@ def get_organization(request, organization_id):
 def get_user(request, uid):
     return get_client(request.user, f"user/settings/{uid}", post=False)
 
-def get_user_info(request):
-    return get_client(request.user, f"user/info", post=False)
+def get_user_info(session):
+    user = User(session=session)
+    return get_client(user, f"user/info", post=False)
 
 def post_project(request, name, description, repository, evaluation_wildcard):
     return get_client(request.user, "project", body={'name': name, 'description': description, 'repository': repository, 'evaluation_wildcard': evaluation_wildcard})

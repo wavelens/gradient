@@ -9,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
 from django.contrib.auth import logout
 from . import api
-from .auth import LoginForm, login
+from .auth import LoginForm, login, RegisterForm
 from .forms import *
 
 @login_required(login_url='/account/login/')
@@ -186,21 +186,21 @@ def model(request, org_id):
 
 def new_organization(request):
     if request.method == 'POST':
-        form = newOrganizationForm(request.POST)
+        form = NewOrganizationForm(request.POST)
         if form.is_valid():
             api.post_organization(request, form.cleaned_data['name'], form.cleaned_data['description'], True)
             return redirect('dashboard')
     else:
-        form = newOrganizationForm()
+        form = NewOrganizationForm()
 
     return render(request, "dashboard/newOrganization.html", {'form': form})
 
 def new_project(request, org_id):
-    form = newProjectForm()
+    form = NewProjectForm()
     return render(request, "dashboard/newProject.html", {'form': form})
 
 def new_server(request, org_id):
-    form = newServerForm()
+    form = NewServerForm()
     return render(request, "dashboard/newServer.html", {'form': form})
 
 class UserLoginView(LoginView):
@@ -228,3 +228,6 @@ def logout_view(request):
     logout(request)
     return redirect("/account/login/")
 
+def register(request):
+    form = RegisterForm()
+    return render(request, "register.html", {'form': form})

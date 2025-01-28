@@ -1,0 +1,38 @@
+<!--
+ * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ -->
+
+ {% extends 'dashboard/index.html' %}
+
+ <head>
+    {% load static %}
+    {% load i18n %}
+</head>
+
+{% block title %}{% trans 'Register' %}{% endblock %}
+
+{% block content %}
+<div class="outer-form">
+    <div class="form-container">
+        <h2 class="form-header-label">{% trans 'Registrieren' %}</h2>
+        <form method="post">
+            {% csrf_token %}
+            {% for field in form %}
+                    <div class="form-field">
+                        <label for="{{ field.id_for_label }}" class="required-label">{% trans field.label %}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                            <div class="error">{% trans field.errors %}</div>
+                        {% endif %}
+                    </div>
+            {% endfor %}
+            <button type="submit" class="submit-btn">{% trans 'Registrieren' %}</button>
+        </form>
+    </div>
+</div>
+<style>
+    
+</style>
+{% endblock %}

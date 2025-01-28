@@ -13,7 +13,7 @@ GEEKS_CHOICES =(
     ("5", "Five"),
 )
 
-class newOrganizationForm(forms.Form):
+class NewOrganizationForm(forms.Form):
     # owner = forms.ChoiceField(
     #     choices=GEEKS_CHOICES,
     #     required=True,
@@ -124,7 +124,7 @@ class newOrganizationForm(forms.Form):
     #     })
     # )
 
-class newProjectForm(forms.Form):
+class NewProjectForm(forms.Form):
     project_name = forms.CharField(
         label='Projekt-Name',
         required=True,
@@ -146,7 +146,7 @@ class newProjectForm(forms.Form):
         label='Repository'
     )
 
-class newServerForm(forms.Form):
+class NewServerForm(forms.Form):
     organization_id = forms.CharField(
         label='Organization',
         required=True,

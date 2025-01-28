@@ -130,3 +130,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Gradient Api
 
 GRADIENT_BASE_URL = 'http://127.0.0.1:3000/api'
+
+# Authentication 
+
+LOGIN_REDIRECT_URL = '/'
