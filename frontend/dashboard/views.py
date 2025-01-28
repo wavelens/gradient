@@ -12,7 +12,7 @@ from . import api
 from .auth import LoginForm, login, RegisterForm
 from .forms import *
 
-@login_required(login_url='/account/login/')
+@login_required
 def workflow(request, org_id):
     details_blocks = [
         {
@@ -102,6 +102,7 @@ def workflow(request, org_id):
     }
     return render(request, "dashboard/overview.html", context)
 
+@login_required
 def log(request, org_id):
     details_blocks = [
         {
@@ -142,6 +143,7 @@ def log(request, org_id):
     }
     return render(request, "dashboard/log.html", context)
 
+@login_required
 def download(request, org_id):
     files = [
     {
@@ -168,6 +170,7 @@ def download(request, org_id):
     }
     return render(request, "dashboard/download.html", context)
 
+@login_required
 def model(request, org_id):
     models = [
     {
@@ -184,6 +187,7 @@ def model(request, org_id):
     }
     return render(request, "dashboard/model.html", context)
 
+@login_required
 def new_organization(request):
     if request.method == 'POST':
         form = NewOrganizationForm(request.POST)
@@ -195,10 +199,12 @@ def new_organization(request):
 
     return render(request, "dashboard/newOrganization.html", {'form': form})
 
+@login_required
 def new_project(request, org_id):
     form = NewProjectForm()
     return render(request, "dashboard/newProject.html", {'form': form})
 
+@login_required
 def new_server(request, org_id):
     form = NewServerForm()
     return render(request, "dashboard/newServer.html", {'form': form})
@@ -223,11 +229,25 @@ class UserLoginView(LoginView):
         # self.request.session["allauth_2fa_user_id"] = form.get_user().pk
         return HttpResponseRedirect(self.get_success_url())
 
+@login_required
 def logout_view(request):
     # TODO: api logout request
     logout(request)
     return redirect("/account/login/")
 
+@login_required
 def register(request):
-    form = RegisterForm()
+    if request.method == 'POST':
+        form = RegisterForm(request.POST)
+        if form.is_valid():
+            res = api.register(**form.cleaned_data)
+            if isinstance(res, type(None)) or res['error']:
+                # form = RegisterForm()
+                # TODO: add form error
+                pass
+            else:
+                return redirect('login')
+    else:
+        form = RegisterForm()
+
     return render(request, "register.html", {'form': form})

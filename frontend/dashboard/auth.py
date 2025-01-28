@@ -135,21 +135,30 @@ class LoginForm(forms.Form):
         return self.user_cache
 
 class RegisterForm(forms.Form):
+    username = forms.CharField(
+        label = _("Username"),
+        max_length = 150,
+        widget = forms.TextInput(attrs={'class': 'form-control'}),
+        required = True
+    )
+
+    name = forms.CharField(
+        label = _("Name"),
+        max_length = 150,
+        widget = forms.TextInput(attrs={'class': 'form-control'}),
+        required = True
+    )
+
     email = forms.CharField(
         label = _("E-Mail"),
         max_length = 150,
         widget = forms.TextInput(attrs={'class': 'form-control'}),
         required = True
     )
+
     password = forms.CharField(
         label = _("Password"),
         widget = forms.PasswordInput(attrs={'class': 'form-control'}),
-        required = True
-    )
-    username = forms.CharField(
-        label = _("Username"),
-        max_length = 150,
-        widget = forms.TextInput(attrs={'class': 'form-control'}),
         required = True
     )
 
@@ -160,6 +169,7 @@ class User(object):
     is_staff = False
     is_active = False
     is_superuser = False
+    is_authenticated = True
     _groups = EmptyManager(Group)
     _user_permissions = EmptyManager(Permission)
 
