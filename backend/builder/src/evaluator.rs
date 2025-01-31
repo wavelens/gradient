@@ -372,13 +372,30 @@ async fn get_flake_derivations(
     wildcards: Vec<&str>,
 ) -> Result<Vec<String>, String> {
     let mut all_derivations: HashSet<String> = HashSet::new();
-    let mut partial_derivations: HashMap<String, Vec<String>> = HashMap::new();
+    // let mut all_keys: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut partial_derivations: HashMap<String, HashSet<String>> = HashMap::new();
 
     for w in wildcards.iter().map(|w| w.split(".").map(|s| s.to_string()).collect::<Vec<String>>()) {
         for (it, t) in w.iter().enumerate() {
-            if t == "*" {
+            if t.contains("*") {
+                let (key_start, key_end) = t.split_at(t.find("*").unwrap());
                 if it == 0 {
-                    partial_derivations.entry("#".to_string()).or_insert(FLAKE_START.map(|s| s.to_string()).to_vec());
+                    let selected_keys = FLAKE_START.map(|s| s.to_string())
+                        .to_vec()
+                        .iter()
+                        .filter(|s| s.starts_with(key_start)
+                            && s.ends_with(key_end)
+                            && s.len() >= key_start.len() + key_end.len())
+                        .cloned()
+                        .collect::<Vec<String>>();
+                    partial_derivations.
+                        entry("#".to_string())
+                        .and_modify(|s| {
+                            selected_keys.iter().for_each(|v| {
+                                s.insert(v.clone());
+                            });
+                        })
+                        .or_insert(HashSet::from_iter(selected_keys.iter().cloned()));
                     continue;
                 }
 
@@ -389,9 +406,9 @@ async fn get_flake_derivations(
 
                     for (ik, k) in key.clone().into_iter().enumerate() {
                         let val = if ik == 0 {
-                            partial_derivations.get("#").unwrap()
+                            partial_derivations.get("#").unwrap().iter().collect::<Vec<&String>>()
                         } else {
-                            partial_derivations.get(&current_key.join(".")).unwrap()
+                            partial_derivations.get(&current_key.join(".")).unwrap().iter().collect::<Vec<&String>>()
                         };
 
                         if k >= val.len() {
@@ -416,7 +433,8 @@ async fn get_flake_derivations(
 
                     let current_key = current_key.join(".");
 
-                    if partial_derivations.contains_key(&current_key) || all_derivations.contains(&current_key) { continue; }
+                    // TODO: optimize partial_derivations by saving all keys
+                    if /* partial_derivations.contains_key(&current_key) || */ all_derivations.contains(&current_key) { continue; }
 
                     let keys = Command::new(state.cli.binpath_nix.clone())
                         .arg("eval")
@@ -447,12 +465,28 @@ async fn get_flake_derivations(
                         }
                     }
 
-                    partial_derivations.insert(current_key.clone(), keys);
+                    let selected_keys = keys.iter()
+                        .filter(|s| s.starts_with(key_end)
+                            && s.ends_with(key_end)
+                            && s.len() >= key_start.len() + key_end.len())
+                        .cloned()
+                        .collect::<Vec<String>>();
+
+                    partial_derivations
+                        .entry(current_key.clone())
+                        .and_modify(|s| {
+                            selected_keys.iter().for_each(|v| {
+                                s.insert(v.clone());
+                            });
+                        })
+                        .or_insert(HashSet::from_iter(selected_keys.iter().cloned()));
                 }
             } else if !FLAKE_START.iter().any(|s| s == t) && it == 0 {
                 break;
             } else {
-                partial_derivations.insert("#".to_string(), vec![t.to_string()]);
+                let mut new_hashset = HashSet::new();
+                new_hashset.insert(t.to_string());
+                partial_derivations.insert("#".to_string(), new_hashset);
             }
         }
     }
