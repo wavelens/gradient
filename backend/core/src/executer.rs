@@ -8,18 +8,18 @@ use async_ssh2_lite::{AsyncSession, TokioTcpStream};
 use futures::Stream;
 use nix_daemon::nix::DaemonStore;
 use nix_daemon::{self, BuildMode, BuildResult, PathInfo, Progress, Store};
+use sea_orm::ActiveModelTrait;
+use sea_orm::ActiveValue::Set;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Arc;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
     process::Command,
 };
 use uuid::Uuid;
-use sea_orm::ActiveValue::Set;
-use std::sync::Arc;
-use sea_orm::ActiveModelTrait;
 
 use super::input;
 use super::types::*;
@@ -110,7 +110,9 @@ pub async fn execute_build(
             //     continue;
             // }
 
-            let log = res.fields.iter()
+            let log = res
+                .fields
+                .iter()
                 .map(|l| l.as_string().unwrap_or(&"".to_string()).clone())
                 .filter(|l| !l.replace("/n", "").is_empty())
                 .collect::<Vec<String>>()

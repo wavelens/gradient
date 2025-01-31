@@ -4,19 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use async_stream::stream;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_streams::*;
-use async_stream::stream;
+use builder::scheduler::abort_evaluation;
 use chrono::Utc;
 use core::consts::*;
 use core::database::add_features;
-use core::input::{valid_evaluation_wildcard, vec_to_hex};
 use core::executer::connect;
+use core::input::{valid_evaluation_wildcard, vec_to_hex};
 use core::sources::*;
 use core::types::*;
-use builder::scheduler::abort_evaluation;
 use email_address::EmailAddress;
 use git_url_parse::normalize_url;
 use password_auth::{generate_hash, verify_password};
@@ -25,8 +25,8 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QuerySelect,
     RelationTrait,
 };
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 use uuid::Uuid;
 
 use super::auth::{encode_jwt, generate_api_key, update_last_login};
@@ -761,10 +761,7 @@ pub async fn get_builds(
         .await
         .unwrap();
 
-    let builds: Vec<String> = builds
-        .iter()
-        .map(|b| b.id.to_string())
-        .collect();
+    let builds: Vec<String> = builds.iter().map(|b| b.id.to_string()).collect();
 
     let res = BaseResponse {
         error: false,
