@@ -30,6 +30,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             get(endpoint::get_organization_ssh).post(endpoint::post_organization_ssh),
         )
         .route(
+            "/api/organization/{organization}/projects",
+            get(endpoint::get_organization_projects),
+        )
+        .route(
             "/api/project/{project}",
             get(endpoint::get_project).post(endpoint::post_project),
         )
@@ -43,7 +47,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         )
         .route(
             "/api/evaluation/{evaluation}/builds",
-            get(endpoint::get_builds),
+            get(endpoint::get_builds).post(endpoint::connect_evaluation),
         )
         .route(
             "/api/build/{build}",

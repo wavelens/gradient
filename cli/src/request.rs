@@ -505,6 +505,32 @@ pub async fn get_builds(
     Ok(parse_response(res).await.unwrap())
 }
 
+pub async fn stream_evaluation(
+    config: HashMap<ConfigKey, Option<String>>,
+    evaluation_id: String,
+) -> Result<(), String> {
+    let mut stream = get_client(config, format!("evaluation/{}/builds", evaluation_id), true, true)
+        .unwrap()
+        .send()
+        .await
+        .unwrap()
+        .json_nl_stream::<String>(1024000);
+
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(chunk) => {
+                print!("{}", chunk);
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn stream_build(
     config: HashMap<ConfigKey, Option<String>>,
     build_id: String,

@@ -5,7 +5,6 @@
  */
 
 use std::net::{SocketAddr, ToSocketAddrs};
-use wildcard::Wildcard;
 
 use super::consts::*;
 
@@ -94,7 +93,7 @@ pub fn repository_url_to_nix(url: &str, commit_hash: &str) -> Result<String, Str
     Ok(format!("{}?rev={}", url, commit_hash))
 }
 
-pub fn parse_evaluation_wildcard(s: &str) -> Result<Vec<Wildcard>, String> {
+pub fn parse_evaluation_wildcard(s: &str) -> Result<Vec<&str>, String> {
     if s.trim() != s {
         return Err("Evaluation wildcard cannot have leading or trailing whitespace".to_string());
     } else if s.contains(",,") {
@@ -116,11 +115,7 @@ pub fn parse_evaluation_wildcard(s: &str) -> Result<Vec<Wildcard>, String> {
             return Err("Evaluation wildcard cannot start with a period".to_string());
         }
 
-        evaluations.push(
-            Wildcard::new(evaluation.as_bytes())
-                .map_err(|e| e.to_string())
-                .unwrap(),
-        );
+        evaluations.push(evaluation);
     }
 
     if evaluations.is_empty() {
@@ -245,106 +240,5 @@ mod tests {
             url,
             "git+https://github.com/Wavelens/Gradient.git?rev=11c2f8505c234697ccabbc96e5b8a76daf0f31d3"
         );
-    }
-
-    #[test]
-    fn test_parse_evaluation_wildcard() {
-        let wildcards_good = vec![
-            "hello.world",
-            "hello.world,world.hello",
-            "world*",
-            "*",
-            "hello.world.*,world.*.hello",
-        ];
-
-        for wildcard in wildcards_good {
-            let result = parse_evaluation_wildcard(wildcard);
-            assert!(result.is_ok(), "{}", result.unwrap_err());
-        }
-
-        let wildcards_bad = vec![
-            "hello.world, world.hello",
-            "",
-            ".hello",
-            "world *",
-            "hello.world,",
-        ];
-
-        for wildcard in wildcards_bad {
-            let result = parse_evaluation_wildcard(wildcard).unwrap_err();
-            assert!(!result.is_empty(), "{}", wildcard);
-        }
-
-        let wildcards_match = [
-            "hello.*",
-            "hello.*.world",
-            "hello.wor*",
-            "hello.*world",
-            "hello.world.*,world.*",
-        ];
-
-        let wildcards_match_good = [
-            vec![
-                "hello.world",
-                "hello.world.world",
-                "hello.world.world.world",
-            ],
-            vec![
-                "hello.world.world",
-                "hello.world.world.world",
-                "hello.world.world.world.world",
-            ],
-            vec!["hello.world", "hello.wor", "hello.world.world"],
-            vec![
-                "hello.world",
-                "hello.world.world",
-                "hello.world.world.world",
-            ],
-            vec!["hello.world.world", "world.hello", "world.world.hello"],
-        ];
-
-        let wildcards_match_bad = [
-            vec!["hello", "hell.world"],
-            vec!["hello.world"],
-            vec!["hello.wo"],
-            vec!["hello.wor", "llo.world.world"],
-            vec!["hello.hello.world", "hello.wor"],
-        ];
-
-        for (i, wildcards) in wildcards_match.iter().enumerate() {
-            let result = parse_evaluation_wildcard(wildcards);
-            assert!(result.is_ok(), "{}", result.unwrap_err());
-            let result = result.unwrap();
-
-            for wildcard_test in wildcards_match_good[i].iter() {
-                let results = result
-                    .iter()
-                    .map(|wildcard| wildcard.is_match(wildcard_test.as_bytes()))
-                    .filter(|res| *res)
-                    .collect::<Vec<bool>>();
-
-                assert!(
-                    !results.is_empty(),
-                    "Expected {} to match {}",
-                    wildcards,
-                    wildcard_test
-                );
-            }
-
-            for wildcard_test in wildcards_match_bad[i].iter() {
-                let results = result
-                    .iter()
-                    .map(|wildcard| wildcard.is_match(wildcard_test.as_bytes()))
-                    .filter(|res| !res)
-                    .collect::<Vec<bool>>();
-
-                assert!(
-                    !results.is_empty(),
-                    "Expected {} not to match {}",
-                    wildcards,
-                    wildcard_test
-                );
-            }
-        }
     }
 }

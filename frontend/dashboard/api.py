@@ -49,6 +49,9 @@ def login(loginname, password):
 def logout(request):
     return get_client(request.user, "user/logout", post=True)
 
+def get_organizations(request):
+    return get_client(request.user, f"organization", post=False)
+
 def post_organization(request, name, description, use_nix_store):
     return get_client(request.user, "organization", body={'name': name, 'description': description, 'use_nix_store': use_nix_store})
 
@@ -62,6 +65,9 @@ def get_user_info(session):
     user = User(session=session)
     return get_client(user, f"user/info", post=False)
 
+def get_projects(request, organization_id):
+    return get_client(request.user, f"organization/{organization_id}/projects", post=False)
+
 def post_project(request, name, description, repository, evaluation_wildcard):
     return get_client(request.user, "project", body={'name': name, 'description': description, 'repository': repository, 'evaluation_wildcard': evaluation_wildcard})
 
@@ -74,8 +80,11 @@ def post_server(request, organization_id, name, host, port, username, architectu
 def get_servers(request):
     return get_client(request.user, "server", post=False)
 
-def post_build(request, log_streaming):
-    return get_client(request.user, "build", body={'log_streaming': log_streaming})
+def post_build(request):
+    return get_client(request.user, "build")
+
+def get_builds(request, evaluation_id):
+    return get_client(request.user, f"evaluation/{evaluation_id}/builds", post=False)
 
 def get_build(request, build_id):
     return get_client(request.user, f"build/{build_id}", post=False)
