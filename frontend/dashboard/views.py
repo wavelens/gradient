@@ -229,13 +229,11 @@ class UserLoginView(LoginView):
         # self.request.session["allauth_2fa_user_id"] = form.get_user().pk
         return HttpResponseRedirect(self.get_success_url())
 
-@login_required
 def logout_view(request):
     # TODO: api logout request
     logout(request)
     return redirect("/account/login/")
 
-@login_required
 def register(request):
     if request.method == 'POST':
         form = RegisterForm(request.POST)
