@@ -248,17 +248,6 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         }
     };
 
-    let output_paths = match get_output_path(build.clone().derivation_path, &mut server_daemon).await
-    {
-        Ok(paths) => paths,
-        Err(e) => {
-            eprintln!("Failed to get output paths: {}", e);
-            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed)
-                .await;
-            return;
-        }
-    };
-
     let copy_build = match local_daemon {
         LocalNixStore::UnixStream(ref mut store) => {
             copy_builds(dependencies, store, &mut server_daemon, false).await

@@ -16,35 +16,33 @@
 
 {% block content %}
 
-{% include "../individualHeader.html" %}
-
 <div class="container">
     <div class="header">
         <div class="left">
-            <h1>{% trans 'Workflows' %}</h1>
+            <h1>{% trans 'Home' %}</h1>
         </div>
-        <div class="right">
-            <button class="button-clear">{% trans 'Clear All Filters' %}</button>|
-            <button class="button-round">{% trans 'Branches' %}</button>
-            <select class="field-select">
-                <option>{% trans 'Advanced Filter' %}</option>
-            </select>
-        </div>
+        <!-- <div class="right"> -->
+        <!--     <button class="button-clear">{% trans 'Clear All Filters' %}</button>| -->
+        <!--     <button class="button-round">{% trans 'Branches' %}</button> -->
+        <!--     <select class="field-select"> -->
+        <!--         <option>{% trans 'Advanced Filter' %}</option> -->
+        <!--     </select> -->
+        <!-- </div> -->
     </div>
-    <div>
-        <div class="left">
-            <div class="filter-container">
-                <div class="search-container">
-                    <input type="text" placeholder="Search">
-                    <button class="button-round search-button">{% trans 'Search' %}</button>
-                    |<button class="button-clear">{% trans 'Clear search' %}</button>
-                </div>
-            </div>
-        </div>
-        <div class="right">
-            <input class="field-date" type="date">
-        </div>
-    </div>
+    <!-- <div> -->
+    <!--     <div class="left"> -->
+    <!--         <div class="filter-container"> -->
+    <!--             <div class="search-container"> -->
+    <!--                 <input type="text" placeholder="Search"> -->
+    <!--                 <button class="button-round search-button">{% trans 'Search' %}</button> -->
+    <!--                 |<button class="button-clear">{% trans 'Clear search' %}</button> -->
+    <!--             </div> -->
+    <!--         </div> -->
+    <!--     </div> -->
+    <!--     <div class="right"> -->
+    <!--         <input class="field-date" type="date"> -->
+    <!--     </div> -->
+    <!-- </div> -->
     <table class="workflows-table">
         <thead>
             <tr>
@@ -60,7 +58,7 @@
             {% for block in details_blocks %}
                 <tr>
                     <td>
-                        <a class="full-width" href="{% url 'log' block.id %}">
+                        <a class="full-width" href="{% url 'workflow' block.id %}">
                             <span>{% trans block.project %}</span><br><span class="text-light">{{ block.id }}</span>
                         </a>
                     </td>

@@ -20,3 +20,4 @@ sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array",
 serde_json = "1.0"
 tokio = { version = "1.42", features = ["process", "rt-multi-thread"] }
 uuid = { version = "1.11", features = ["fast-rng", "macro-diagnostics", "v4"] }
+async-trait = "0.1"

@@ -26,6 +26,7 @@ use sea_orm::{
     RelationTrait,
 };
 use std::sync::Arc;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use super::auth::{encode_jwt, generate_api_key, update_last_login};
@@ -340,6 +341,60 @@ pub async fn post_organization_ssh(
     Ok(Json(res))
 }
 
+pub async fn get_organization_projects(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(organization_id): Path<Uuid>,
+) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let organization = match EOrganization::find_by_id(organization_id)
+        .one(&state.db)
+        .await
+        .unwrap()
+    {
+        Some(o) => o,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Organization not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    if organization.created_by != user.id {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(BaseResponse {
+                error: true,
+                message: "Organization not found".to_string(),
+            }),
+        ));
+    }
+
+    let projects = EProject::find()
+        .filter(CProject::Organization.eq(organization.id))
+        .all(&state.db)
+        .await
+        .unwrap();
+
+    let projects: ListResponse = projects
+        .iter()
+        .map(|p| ListItem {
+            id: p.id,
+            name: p.name.clone(),
+        })
+        .collect();
+
+    let res = BaseResponse {
+        error: false,
+        message: projects,
+    };
+
+    Ok(Json(res))
+}
+
 pub async fn get_project(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -569,6 +624,92 @@ pub async fn post_evaluation(
     };
 
     Ok(Json(res))
+}
+
+pub async fn connect_evaluation(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(evaluation_id): Path<Uuid>,
+) -> Result<StreamBodyAs<'static>, (StatusCode, Json<BaseResponse<String>>)> {
+    let evaluation = match EEvaluation::find_by_id(evaluation_id)
+        .one(&state.db)
+        .await
+        .unwrap()
+    {
+        Some(e) => e,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Evaluation not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let project = EProject::find_by_id(evaluation.project)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+    let organization = EOrganization::find_by_id(project.organization)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
+    if organization.created_by != user.id {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(BaseResponse {
+                error: true,
+                message: "Evaluation not found".to_string(),
+            }),
+        ));
+    }
+
+    let condition = Condition::all()
+        .add(CBuild::Evaluation.eq(evaluation.id))
+        .add(CBuild::Status.eq(entity::build::BuildStatus::Building));
+
+    let stream = stream! {
+        let mut last_logs: HashMap<Uuid, String> = HashMap::new();
+        loop {
+            let builds = EBuild::find()
+                .filter(condition.clone())
+                .all(&state.db)
+                .await
+                .unwrap();
+
+            if builds.is_empty() {
+                break;
+            }
+
+            for build in builds {
+                let name = build.derivation_path.split("-").next().unwrap();
+                let name = build.derivation_path.replace(format!("{}-", name).as_str(), "").replace(".drv", "");
+                let log = build.log.unwrap_or("".to_string())
+                    .split("\n")
+                    .map(|l| format!("{}> {}", name, l))
+                    .collect::<Vec<String>>()
+                    .join("\n");
+
+                if last_logs.contains_key(&build.id) {
+                    let last_log = last_logs.get(&build.id).unwrap();
+                    let log_new = log.replace(last_log.as_str(), "");
+                    if !log_new.is_empty() {
+                        last_logs.insert(build.id, log.clone());
+                        yield log_new.clone();
+                    }
+                } else {
+                    last_logs.insert(build.id, log.clone());
+                }
+            }
+        }
+    };
+
+    Ok(StreamBodyAs::json_nl(stream))
 }
 
 pub async fn get_builds(

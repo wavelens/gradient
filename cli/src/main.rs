@@ -559,7 +559,7 @@ pub async fn main() -> std::io::Result<()> {
                         println!("Commit: {}", evaluation.message.commit);
                         println!();
 
-                        let builds = request::get_builds(load_config(), evaluation.message.id)
+                        let builds = request::get_builds(load_config(), evaluation.message.id.clone())
                             .await
                             .map_err(|e| {
                                 eprintln!("{}", e);
@@ -584,13 +584,7 @@ pub async fn main() -> std::io::Result<()> {
                         println!();
 
                         println!("===== Log =====");
-                        for build in builds.message {
-                            // if build.status != "building" {
-                            //     continue;
-                            // }
-
-                            request::stream_build(load_config(), build).await.unwrap();
-                        }
+                            request::stream_evaluation(load_config(), evaluation.message.id).await.unwrap();
                     }
 
                     ProjectCommands::Log => {

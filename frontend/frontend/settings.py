@@ -134,4 +134,4 @@ GRADIENT_BASE_URL = 'http://127.0.0.1:3000/api'
 # Authentication
 
 LOGIN_REDIRECT_URL = '/'
-LOGIN_URL = '/account/login/'
+LOGIN_URL = '/account/login'
