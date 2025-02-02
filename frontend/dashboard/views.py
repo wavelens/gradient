@@ -15,7 +15,6 @@ from .forms import *
 @login_required
 def home(request):
     details_blocks = []
-
     all_orgs = api.get_organizations(request)
 
     if isinstance(all_orgs, type(None)) or all_orgs['error']:
@@ -177,7 +176,7 @@ def new_organization(request):
         form = NewOrganizationForm(request.POST)
         if form.is_valid():
             api.post_organization(request, form.cleaned_data['name'], form.cleaned_data['description'], True)
-            return redirect('dashboard')
+            return redirect('/')
     else:
         form = NewOrganizationForm()
 
@@ -185,7 +184,31 @@ def new_organization(request):
 
 @login_required
 def new_project(request, org_id):
-    form = NewProjectForm()
+    all_orgs = api.get_organizations(request)
+
+    if isinstance(all_orgs, type(None)) or all_orgs['error']:
+        return HttpResponse(status=500)
+
+    all_orgs = all_orgs['message']
+
+    org_choices = []
+    for org in all_orgs:
+        org_details = api.get_organization(request, org['id'])
+        org_choices.append((org['id'], org['name']))
+
+    if request.method == 'POST':
+        form = NewProjectForm(request.POST)
+        if form.is_valid():
+            res = api.post_project(request, **form.cleaned_data)
+            if isinstance(res, type(None)) or res['error']:
+                # form = RegisterForm()
+                # TODO: add form error
+                pass
+            else:
+                return redirect('/')
+    else:
+        form = NewProjectForm()
+        form.fields['repository'].widget.choices = org_choices
     return render(request, "dashboard/newProject.html", {'form': form})
 
 @login_required

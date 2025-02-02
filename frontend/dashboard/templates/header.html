@@ -16,7 +16,22 @@
             </div>
             <div>
                 <div class="dropdown">
-                    <div onclick="dropdownFunction(); event.stopPropagation();" class="tooltip">
+                    <div onclick="toggleDropdown('dropdownHeaderAdd', 'tooltipAdd', 'dropdownHeader', 'tooltip'); event.stopPropagation();" class="tooltip">
+                        <span class="material-symbols-outlined icon-arrow pointer">
+                            add
+                        </span>
+                        <span class="material-symbols-outlined icon-arrow pointer m-l--11 m-r-1rem">
+                            arrow_drop_down
+                        </span>
+                        <span class="tooltiptext" id="tooltipAdd">{% trans 'Erstellen' %}</span>
+                    </div>
+                    <div id="dropdownHeaderAdd" class="dropdown-content">
+                        <a href="{% url 'logout' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">add</span><span>{% trans 'Neues Projekt' %}</span></a>
+                        <a href="{% url 'logout' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">apartment</span><span>{% trans 'Neue Organisation' %}</span></a>
+                    </div>
+                </div>
+                <div class="dropdown">
+                    <div onclick="toggleDropdown('dropdownHeader', 'tooltip', 'dropdownHeaderAdd', 'tooltipAdd'); event.stopPropagation();" class="tooltip">
                         <img src="{{ request.user.image }}" class="h-30 border-radius-5">
                         <span class="material-symbols-outlined icon-arrow pointer">
                             arrow_drop_down

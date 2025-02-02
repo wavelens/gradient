@@ -12,6 +12,10 @@
 }
 
 /* styles.css */
+html {
+    overflow-x: hidden;
+}
+
 body {
     background-color: var(--primary);
     color: white;
@@ -528,6 +532,10 @@ pre span {
     margin-right: 3px;
 }
 
+.m-r-1rem {
+    margin-right: 1rem !important;
+}
+
 .activeeffect-sidebar {
     background-color: #252d33;
     border-radius: 5px;
@@ -563,6 +571,10 @@ pre span {
 
 .m-t--1rem {
     margin-top: -1rem;
+}
+
+.m-l--11 {
+    margin-left: -11px !important;
 }
 
 .m-t-0 {
@@ -824,3 +836,4 @@ tr:hover td{
     display: flex;
     align-items: end;
 }
+

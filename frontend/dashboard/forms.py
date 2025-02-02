@@ -20,7 +20,7 @@ class NewOrganizationForm(forms.Form):
     #     widget=forms.Select,
     #     label='Besitzer'
     # )
-    organization_name = forms.CharField(
+    name = forms.CharField(
         label='Organisations-Name',
         required=True,
         widget=forms.TextInput(attrs={
@@ -125,7 +125,7 @@ class NewOrganizationForm(forms.Form):
     # )
 
 class NewProjectForm(forms.Form):
-    project_name = forms.CharField(
+    name = forms.CharField(
         label='Projekt-Name',
         required=True,
         widget=forms.TextInput(attrs={
@@ -139,8 +139,7 @@ class NewProjectForm(forms.Form):
             'class': 'form-control'
         })
     )
-    repo = forms.ChoiceField(
-        choices=GEEKS_CHOICES,
+    repository = forms.ChoiceField(
         required=True,
         widget=forms.Select,
         label='Repository'
