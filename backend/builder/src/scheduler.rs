@@ -554,7 +554,9 @@ async fn update_build_status(
     build: MBuild,
     status: BuildStatus,
 ) -> MBuild {
-    if status == BuildStatus::Aborted && (build.status == BuildStatus::Completed || build.status == BuildStatus::Failed) {
+    if status == BuildStatus::Aborted
+        && (build.status == BuildStatus::Completed || build.status == BuildStatus::Failed)
+    {
         return build;
     }
 
@@ -596,8 +598,7 @@ async fn update_build_status_recursivly(
             .add(CBuild::Status.eq(BuildStatus::Queued))
             .add(CBuild::Status.eq(BuildStatus::Building))
     } else {
-        Condition::all()
-            .add(CBuild::Status.ne(status.clone()))
+        Condition::all().add(CBuild::Status.ne(status.clone()))
     };
 
     let dependent_builds = EBuild::find()

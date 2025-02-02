@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use futures::stream::StreamExt;
 use reqwest_streams::JsonStreamResponse;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use futures::stream::StreamExt;
 
 use crate::ConfigKey;
 
@@ -492,10 +492,15 @@ pub async fn get_builds(
     config: HashMap<ConfigKey, Option<String>>,
     evaluation_id: String,
 ) -> Result<BaseResponse<Vec<String>>, String> {
-    let res = get_client(config, format!("evaluation/{}/builds", evaluation_id), false, true)
-        .unwrap()
-        .send()
-        .await;
+    let res = get_client(
+        config,
+        format!("evaluation/{}/builds", evaluation_id),
+        false,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await;
 
     let res = match res {
         Ok(res) => res,
@@ -509,12 +514,17 @@ pub async fn stream_evaluation(
     config: HashMap<ConfigKey, Option<String>>,
     evaluation_id: String,
 ) -> Result<(), String> {
-    let mut stream = get_client(config, format!("evaluation/{}/builds", evaluation_id), true, true)
-        .unwrap()
-        .send()
-        .await
-        .unwrap()
-        .json_nl_stream::<String>(1024000);
+    let mut stream = get_client(
+        config,
+        format!("evaluation/{}/builds", evaluation_id),
+        true,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap()
+    .json_nl_stream::<String>(1024000);
 
     while let Some(chunk) = stream.next().await {
         match chunk {
@@ -578,9 +588,7 @@ pub async fn list_server(
     config: HashMap<ConfigKey, Option<String>>,
     organization_id: String,
 ) -> Result<BaseResponse<ListResponse>, String> {
-    let req = MakeServerGetRequest {
-        organization_id,
-    };
+    let req = MakeServerGetRequest { organization_id };
 
     let res = get_client(config, "server".to_string(), false, true)
         .unwrap()
