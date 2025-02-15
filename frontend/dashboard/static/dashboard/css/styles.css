@@ -50,8 +50,10 @@ a:hover {
 }
 
 .material-symbols-outlined {
-    font-size: 30px !important;
+    font-size: 19px !important;
     color: #abb0b4;
+    position: relative;
+    bottom: 1px;
 }
 
 .filled {
@@ -457,6 +459,8 @@ pre span {
 
 .active span.material-symbols-outlined {
     color: white;
+    position: relative;
+    bottom: 1px;
 }
 
 .icon {
@@ -594,6 +598,10 @@ pre span {
     vertical-align: middle;
     margin-right: 3px;
     font-size: 23px !important;
+}
+
+.f-s-19px {
+    font-size: 19px !important;
 }
 
 .f-s-21px {
@@ -837,3 +845,16 @@ tr:hover td{
     align-items: end;
 }
 
+.home-container {
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgb(118, 118, 118);
+}
+
+.home-container div:not(:last-child) {
+    border-bottom: 1px solid rgb(118, 118, 118);
+}
+
+.home-container div {
+    padding: 20px;
+}

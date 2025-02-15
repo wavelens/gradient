@@ -18,9 +18,8 @@
 
 <div class="container">
     <div class="header">
-        <div class="left">
             <h1>{% trans 'Home' %}</h1>
-        </div>
+        <!-- </div> -->
         <!-- <div class="right"> -->
         <!--     <button class="button-clear">{% trans 'Clear All Filters' %}</button>| -->
         <!--     <button class="button-round">{% trans 'Branches' %}</button> -->
@@ -29,6 +28,19 @@
         <!--     </select> -->
         <!-- </div> -->
     </div>
+
+
+    <div class="home-container">
+        {% for block in details_blocks %}
+            <div>
+                <a class="full-width normal-hover" href="{% url 'workflow' block.id %}">
+                    <span>{% trans block.project %}</span><br><span class="text-light">{{ block.description }}</span>
+                </a>
+            </div>
+        {% endfor %}
+    </div>
+
+
     <!-- <div> -->
     <!--     <div class="left"> -->
     <!--         <div class="filter-container"> -->
@@ -43,7 +55,7 @@
     <!--         <input class="field-date" type="date"> -->
     <!--     </div> -->
     <!-- </div> -->
-    <table class="workflows-table">
+    <!-- <table class="workflows-table">
         <thead>
             <tr>
                 <th>{% trans 'Project' %}</th>
@@ -64,11 +76,11 @@
                     </td>
                     <td>{{ block.exec }}</td>
                     <td>{{ block.duration }}</td>
-                    <td>
+                    <td> -->
                         <!-- <img class="red-filter" src="{% static 'dashboard/images/x-circle.svg' %}" alt="X Circle">
                         <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                         <img class="gray-filter" src="{% static 'dashboard/images/circle.svg' %}" alt="X Circle"> -->
-                        <span class="material-icons {% if block.wfp.1 == 'true' %}green{% elif block.wfp.1 == 'nothing' %}gray{% else %}red{% endif %}">
+                        <!-- <span class="material-icons {% if block.wfp.1 == 'true' %}green{% elif block.wfp.1 == 'nothing' %}gray{% else %}red{% endif %}">
                             {% if block.wfp.1 == 'true' or block.wfp.1 == 'nothing' %}check_circle{% else %}cancel{% endif %}
                         </span>
                         <span class="material-icons {% if block.wfp.2 == 'true' %}green{% elif block.wfp.2 == 'nothing' %}gray{% else %}red{% endif %}">
@@ -78,13 +90,13 @@
                             {% if block.wfp.3 == 'true' or block.wfp.3 == 'nothing' %}check_circle{% else %}cancel{% endif %}
                         </span>
                     </td>
-                    <td>
+                    <td> -->
                         <!-- <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                         <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                         <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                         <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                         <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle"> -->
-                        <span class="material-icons {% if block.latestRuns.1 == 'true' %}green{% elif block.latestRuns.1 == 'nothing' %}gray{% else %}red{% endif %}">
+                        <!-- <span class="material-icons {% if block.latestRuns.1 == 'true' %}green{% elif block.latestRuns.1 == 'nothing' %}gray{% else %}red{% endif %}">
                             {% if block.latestRuns.1 == 'true' or block.latestRuns.1 == 'nothing' %}check_circle{% else %}cancel{% endif %}
                         </span>
                         <span class="material-icons {% if block.latestRuns.2 == 'true' %}green{% elif block.latestRuns.2 == 'nothing' %}gray{% else %}red{% endif %}">
@@ -106,6 +118,6 @@
                 </tr>
             {% endfor %}
         </tbody>
-    </table>
-</div>
+    </table>-->
+</div> 
 {% endblock %}

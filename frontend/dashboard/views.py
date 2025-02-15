@@ -31,6 +31,7 @@ def home(request):
         details_blocks.append({
             'project': org['name'],
             'id': org['id'],
+            'description': 'muss noch variabel werden',
             'exec': 34,
             'duration': '12m 11s',
             'performance': 'filter',
