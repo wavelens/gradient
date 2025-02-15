@@ -125,8 +125,14 @@ class NewOrganizationForm(forms.Form):
     # )
 
 class NewProjectForm(forms.Form):
+    organization_id = forms.ChoiceField(
+        label='Organization',
+        required=True,
+        widget=forms.Select
+    )
+
     name = forms.CharField(
-        label='Projekt-Name',
+        label='Projekt Name',
         required=True,
         widget=forms.TextInput(attrs={
             'class': 'form-control'
@@ -139,10 +145,19 @@ class NewProjectForm(forms.Form):
             'class': 'form-control'
         })
     )
-    repository = forms.ChoiceField(
+    repository = forms.CharField(
+        label='Repository',
         required=True,
-        widget=forms.Select,
-        label='Repository'
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    evaluation_wildcard = forms.CharField(
+        label='Wildcard',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
     )
 
 class NewServerForm(forms.Form):

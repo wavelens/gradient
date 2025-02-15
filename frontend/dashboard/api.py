@@ -20,8 +20,10 @@ def get_client(user, endpoint, body=None, post=True):
             response = requests.post(url, data=json.dumps(body), headers=headers)
         except:
             return None
-        print(response)
-        print(url)
+
+        if settings.DEBUG:
+            print(f'request to {url} resulted in {response}')
+
         if response.status_code == 200:
             return response.json()
         else:
@@ -52,11 +54,14 @@ def logout(request):
 def get_organizations(request):
     return get_client(request.user, f"organization", post=False)
 
-def post_organization(request, name, description, use_nix_store):
+def post_organizations(request, name, description, use_nix_store):
     return get_client(request.user, "organization", body={'name': name, 'description': description, 'use_nix_store': use_nix_store})
 
 def get_organization(request, organization_id):
     return get_client(request.user, f"organization/{organization_id}", post=False)
+
+def post_organization(request, organization_id, name, description, repository, evaluation_wildcard):
+    return get_client(request.user, f"organization/{organization_id}", body={'name': name, 'description': description, 'repository': repository, 'evaluation_wildcard': evaluation_wildcard})
 
 def get_user(request, uid):
     return get_client(request.user, f"user/settings/{uid}", post=False)
@@ -67,9 +72,6 @@ def get_user_info(session):
 
 def get_projects(request, organization_id):
     return get_client(request.user, f"organization/{organization_id}/projects", post=False)
-
-def post_project(request, name, description, repository, evaluation_wildcard):
-    return get_client(request.user, "project", body={'name': name, 'description': description, 'repository': repository, 'evaluation_wildcard': evaluation_wildcard})
 
 def get_project(request, project_id):
     return get_client(request.user, f"project/{project_id}", post=False)

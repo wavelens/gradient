@@ -102,7 +102,7 @@ def workflow(request, org_id):
     return render(request, "dashboard/overview.html", context)
 
 @login_required
-def log(request, evaluation_id):
+def log(request, org_id, evaluation_id=None):
     details_blocks = [{
         'summary': "Loading Log...",
         'details': [ "Loading Log..." ]
@@ -127,7 +127,7 @@ def log(request, evaluation_id):
     return render(request, "dashboard/log.html", context)
 
 @login_required
-def download(request, org_id):
+def download(request, org_id, evaluation_id=None):
     files = [
     {
         'file': "File 1",
@@ -154,7 +154,7 @@ def download(request, org_id):
     return render(request, "dashboard/download.html", context)
 
 @login_required
-def model(request, org_id):
+def model(request, org_id, evaluation_id=None):
     models = [
     {
         'name': "Model 1",
@@ -175,7 +175,7 @@ def new_organization(request):
     if request.method == 'POST':
         form = NewOrganizationForm(request.POST)
         if form.is_valid():
-            api.post_organization(request, form.cleaned_data['name'], form.cleaned_data['description'], True)
+            api.post_organizations(request, form.cleaned_data['name'], form.cleaned_data['description'], True)
             return redirect('/')
     else:
         form = NewOrganizationForm()
@@ -183,7 +183,8 @@ def new_organization(request):
     return render(request, "dashboard/newOrganization.html", {'form': form})
 
 @login_required
-def new_project(request, org_id):
+def new_project(request):
+    org_id = request.GET.get("org")
     all_orgs = api.get_organizations(request)
 
     if isinstance(all_orgs, type(None)) or all_orgs['error']:
@@ -198,8 +199,9 @@ def new_project(request, org_id):
 
     if request.method == 'POST':
         form = NewProjectForm(request.POST)
+        form.fields['organization_id'].choices = org_choices
         if form.is_valid():
-            res = api.post_project(request, **form.cleaned_data)
+            res = api.post_organization(request, **form.cleaned_data)
             if isinstance(res, type(None)) or res['error']:
                 # form = RegisterForm()
                 # TODO: add form error
@@ -208,11 +210,12 @@ def new_project(request, org_id):
                 return redirect('/')
     else:
         form = NewProjectForm()
-        form.fields['repository'].widget.choices = org_choices
+        form.fields['organization_id'].choices = org_choices
     return render(request, "dashboard/newProject.html", {'form': form})
 
 @login_required
-def new_server(request, org_id):
+def new_server(request):
+    org_id = request.GET.get("org")
     form = NewServerForm()
     return render(request, "dashboard/newServer.html", {'form': form})
 

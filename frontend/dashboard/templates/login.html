@@ -16,7 +16,7 @@
 {% block content %}
 <div class="outer-form">
     <div class="form-container">
-        <h2 class="form-header-label">{% trans 'Anmelden' %}</h2>
+        <h2 class="form-header-label">{% trans 'Login' %}</h2>
         <form method="post">
             {% csrf_token %}
             {% for field in form %}
@@ -35,7 +35,7 @@
                     </div>
                 {% endif %}
             {% endfor %}
-            <button type="submit" class="submit-btn">{% trans 'Anmelden' %}</button>
+            <button type="submit" class="submit-btn">{% trans 'Login' %}</button>
         </form>
     </div>
 </div>

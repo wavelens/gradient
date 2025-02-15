@@ -23,11 +23,11 @@
                         <span class="material-symbols-outlined icon-arrow pointer m-l--11 m-r-1rem">
                             arrow_drop_down
                         </span>
-                        <span class="tooltiptext" id="tooltipAdd">{% trans 'Erstellen' %}</span>
+                        <span class="tooltiptext" id="tooltipAdd">{% trans 'Create' %}</span>
                     </div>
                     <div id="dropdownHeaderAdd" class="dropdown-content">
-                        <a href="{% url 'logout' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">add</span><span>{% trans 'Neues Projekt' %}</span></a>
-                        <a href="{% url 'logout' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">apartment</span><span>{% trans 'Neue Organisation' %}</span></a>
+                        <a href="{% url 'login' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">add</span><span>{% trans 'New Project' %}</span></a>
+                        <a href="{% url 'new_organization' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">apartment</span><span>{% trans 'New Organization' %}</span></a>
                     </div>
                 </div>
                 <div class="dropdown">
@@ -36,7 +36,7 @@
                         <span class="material-symbols-outlined icon-arrow pointer">
                             arrow_drop_down
                         </span>
-                        <span class="tooltiptext" id="tooltip">{% trans 'Profil und Einstellungen...' %}</span>
+                        <span class="tooltiptext" id="tooltip">{% trans 'Profile and settings...' %}</span>
                     </div>
                     <div id="dropdownHeader" class="dropdown-content">
                         <p>{% trans 'signed in as' %} {{ request.user.name }}</p>

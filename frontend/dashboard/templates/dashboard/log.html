@@ -91,7 +91,13 @@
         </div>
     </div>
 </div>
-{{request.user.session}}
+{{request}}
+
+<script>
+    const token = "{{ request.user.session }}";
+</script>
+
+<script src="../../static/dashboard/js/log.js"></script>
 
 
 <script>
