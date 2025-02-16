@@ -18,7 +18,7 @@
 
 {% include "../individualHeader.html" %}
 
-<div class="container">
+<!-- <div class="container">
     <div class="header">
         <div class="left">
             <h1>{% trans 'Workflows' %}</h1>
@@ -66,11 +66,11 @@
                     </td>
                     <td>{{ block.exec }}</td>
                     <td>{{ block.duration }}</td>
-                    <td>
+                    <td> -->
                         <!-- <img class="red-filter" src="{% static 'dashboard/images/x-circle.svg' %}" alt="X Circle">
                         <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                         <img class="gray-filter" src="{% static 'dashboard/images/circle.svg' %}" alt="X Circle"> -->
-                        <span class="material-icons {% if block.wfp.1 == 'true' %}green{% elif block.wfp.1 == 'nothing' %}gray{% else %}red{% endif %}">
+                        <!-- <span class="material-icons {% if block.wfp.1 == 'true' %}green{% elif block.wfp.1 == 'nothing' %}gray{% else %}red{% endif %}">
                             {% if block.wfp.1 == 'true' or block.wfp.1 == 'nothing' %}check_circle{% else %}cancel{% endif %}
                         </span>
                         <span class="material-icons {% if block.wfp.2 == 'true' %}green{% elif block.wfp.2 == 'nothing' %}gray{% else %}red{% endif %}">
@@ -80,13 +80,13 @@
                             {% if block.wfp.3 == 'true' or block.wfp.3 == 'nothing' %}check_circle{% else %}cancel{% endif %}
                         </span>
                     </td>
-                    <td>
+                    <td> -->
                         <!-- <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                         <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                         <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                         <img class="gray-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
                         <img class="green-filter" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle"> -->
-                        <span class="material-icons {% if block.latestRuns.1 == 'true' %}green{% elif block.latestRuns.1 == 'nothing' %}gray{% else %}red{% endif %}">
+                        <!-- <span class="material-icons {% if block.latestRuns.1 == 'true' %}green{% elif block.latestRuns.1 == 'nothing' %}gray{% else %}red{% endif %}">
                             {% if block.latestRuns.1 == 'true' or block.latestRuns.1 == 'nothing' %}check_circle{% else %}cancel{% endif %}
                         </span>
                         <span class="material-icons {% if block.latestRuns.2 == 'true' %}green{% elif block.latestRuns.2 == 'nothing' %}gray{% else %}red{% endif %}">
@@ -109,5 +109,46 @@
             {% endfor %}
         </tbody>
     </table>
-</div>
+</div> -->
+
+<div class="container">
+    <div class="header m-b-1rem">
+        <div>
+            <h1>{% trans 'Workflows' %}</h1>
+        </div>
+    </div>
+    <div class="m-b-1rem">
+        <div class="filter-container">
+            <div class="search-container">
+                <input type="text" placeholder="Search">
+                <button class="button-round search-button">{% trans 'Search' %}</button>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="home-container">
+        {% for block in details_blocks %}
+            <div>
+                <a class="full-width normal-hover" href="{% url 'workflow' block.id %}">
+                    <span>{% trans block.project %}</span><br><span class="text-light">{{ block.description }}</span>
+                </a>
+                <div class="d-flex p-0">
+                    <span class="flex-c m-r-1rem">
+                        <span class="material-symbols-outlined m-r-3">
+                            mode_standby
+                        </span>
+                        <span class="text-light-n-s">{{ block.exec }}</span>
+                    </span>
+                    <span class="flex-c">
+                        <span class="material-symbols-outlined m-r-3">
+                            graph_1
+                        </span>
+                        <span class="text-light-n-s">hier kommt die evalId hin</span>
+                    </span>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+</div> 
 {% endblock %}

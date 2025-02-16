@@ -128,6 +128,10 @@ input[type="text"]:focus-visible, input[type="password"]:focus-visible, .form-fi
     color: #818181;
 }
 
+.text-light-n-s {
+    color: #818181;
+}
+
 .color-light {
     color: #818181;
 }

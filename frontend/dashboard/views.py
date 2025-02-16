@@ -80,6 +80,7 @@ def workflow(request, org_id):
         details_blocks.append({
             'project': project['name'],
             'id': project_details['last_evaluation'],
+            'description': project_details['description'],
             'exec': 34,
             'duration': '12m 11s',
             'performance': 'filter',
