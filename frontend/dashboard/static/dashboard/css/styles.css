@@ -53,7 +53,7 @@ a:hover {
     font-size: 19px !important;
     color: #abb0b4;
     position: relative;
-    bottom: 1px;
+    bottom: 2px;
 }
 
 .filled {
@@ -591,6 +591,10 @@ pre span {
 
 .p-l-1rem {
     padding-left: 1rem;
+}
+
+.p-0 {
+    padding: 0 !important;
 }
 
 .icon-center {
