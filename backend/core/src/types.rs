@@ -27,6 +27,8 @@ pub struct Cli {
     pub ip: String,
     #[arg(long, env = "GRADIENT_PORT", value_parser = port_in_range, default_value_t = 3000)]
     pub port: u16,
+    #[arg(long, env = "GRADIENT_SERVE_URL", default_value = "http://127.0.0.1:8000")]
+    pub serve_url: String,
     #[arg(long, env = "GRADIENT_DATABASE_URL")]
     pub database_uri: String,
     #[arg(long, env = "GRADIENT_MAX_CONCURRENT_EVALUATIONS", value_parser = greater_than_zero::<usize>, default_value = "10")]

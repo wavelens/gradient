@@ -12,7 +12,7 @@ use axum::response::{Json, Response};
 use chrono::{Duration, Utc};
 use core::types::*;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
-use rand::distributions::{Alphanumeric, DistString};
+use rand::distr::{Alphanumeric, SampleString};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -176,5 +176,5 @@ pub async fn update_last_login(state: State<Arc<ServerState>>, user_id: Uuid) {
 }
 
 pub fn generate_api_key() -> String {
-    Alphanumeric.sample_string(&mut rand::thread_rng(), 64)
+    Alphanumeric.sample_string(&mut rand::rng(), 64)
 }

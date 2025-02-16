@@ -38,7 +38,6 @@
       channels
       channels-redis
       django
-      django-cors-headers
       django-debug-toolbar
       django-parler
       django-redis

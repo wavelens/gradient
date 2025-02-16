@@ -675,7 +675,8 @@ pub async fn connect_evaluation(
 
     let stream = stream! {
         let mut last_logs: HashMap<Uuid, String> = HashMap::new();
-        loop {
+        let mut no_response: i16 = 0;
+        while no_response < 5 {
             let builds = EBuild::find()
                 .filter(condition.clone())
                 .all(&state.db)
@@ -683,7 +684,9 @@ pub async fn connect_evaluation(
                 .unwrap();
 
             if builds.is_empty() {
-                break;
+                no_response += 1;
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                continue;
             }
 
             for build in builds {

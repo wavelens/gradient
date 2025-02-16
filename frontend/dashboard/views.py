@@ -28,10 +28,12 @@ def home(request):
         if isinstance(org_details, type(None)) or org_details['error']:
             return HttpResponse(status=500)
 
+        org_details = org_details['message']
+
         details_blocks.append({
             'project': org['name'],
             'id': org['id'],
-            'description': 'muss noch variabel werden',
+            'description': org_details['description'],
             'exec': 34,
             'duration': '12m 11s',
             'performance': 'filter',

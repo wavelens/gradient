@@ -8,14 +8,46 @@ pub mod auth;
 mod endpoint;
 pub mod requests;
 
+use axum::body::Body;
 use axum::routing::{get, post};
 use axum::{middleware, Router};
+use tower_http::trace::TraceLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
+use http::header::{AUTHORIZATION, ACCEPT, CONTENT_TYPE};
+use http::{Request, Response, HeaderMap};
+use bytes::Bytes;
+use tower_http::classify::ServerErrorsFailureClass;
+use std::time::Duration;
+use tracing::Span;
 
 use core::types::ServerState;
 use std::sync::Arc;
 
 pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     let server_url = format!("{}:{}", state.cli.ip.clone(), state.cli.port.clone());
+
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::exact(state.cli.serve_url.clone().try_into().unwrap()))
+        .allow_headers(vec![AUTHORIZATION, ACCEPT, CONTENT_TYPE])
+        .allow_credentials(true);
+
+    let trace = TraceLayer::new_for_http()
+        .on_request(|request: &Request<Body>, _span: &Span| {
+            tracing::debug!("started {} {}", request.method(), request.uri().path())
+        })
+        .on_response(|_response: &Response<Body>, latency: Duration, _span: &Span| {
+            tracing::debug!("response generated in {:?}", latency)
+        })
+        .on_body_chunk(|chunk: &Bytes, _latency: Duration, _span: &Span| {
+            tracing::debug!("sending {} bytes", chunk.len())
+        })
+        .on_eos(|_trailers: Option<&HeaderMap>, stream_duration: Duration, _span: &Span| {
+            tracing::debug!("stream closed after {:?}", stream_duration)
+        })
+        .on_failure(|error: ServerErrorsFailureClass, _latency: Duration, _span: &Span| {
+            tracing::debug!("request failed with {:?}", error)
+        });
+
     let app = Router::new()
         .route(
             "/api/organization",
@@ -76,6 +108,8 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route("/api/user/register", post(endpoint::post_register))
         .route("/api/health", get(endpoint::get_health))
         .fallback(endpoint::handle_404)
+        .layer(cors)
+        .layer(trace)
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&server_url).await.unwrap();

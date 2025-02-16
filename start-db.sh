@@ -46,7 +46,7 @@ stop_postgres() {
   EXIT_CODE=$?
   step "Stopping PostgreSQL"
   pg_ctl stop -D testing/postgresql-data/ -w -s
-  rm -rf testing
+  # rm -rf testing
   exit "${EXIT_CODE}"
 }
 
@@ -54,7 +54,7 @@ step "Starting PostgreSQL"
 rm -f -- testing/postgresql.log
 trap stop_postgres EXIT INT TERM
 pg_ctl start -D testing/postgresql-data/ -l testing/postgresql.log -w -s
-createdb -U postgres -h localhost -p 54321 gradient
+createdb -U postgres -h localhost -p 54321 gradient >> /dev/null 2>&1 || true
 
 step "Running command: $*"
 set +e
