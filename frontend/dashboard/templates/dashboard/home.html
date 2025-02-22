@@ -25,8 +25,7 @@
     <div class="m-b-1rem">
         <div class="filter-container">
             <div class="search-container">
-                <input type="text" placeholder="Search">
-                <button class="button-round search-button">{% trans 'Search' %}</button>
+                <input type="text" id="searchInput" placeholder="Search">
             </div>
         </div>
     </div>
@@ -34,9 +33,9 @@
 
     <div class="home-container">
         {% for block in details_blocks %}
-            <div>
+            <div class="workflow-item">
                 <a class="full-width normal-hover" href="{% url 'workflow' block.id %}">
-                    <span>{% trans block.project %}</span><br><span class="text-light">{{ block.description }}</span>
+                    <span class="workflow-title">{% trans block.project %}</span><br><span class="text-light">{{ block.description }}</span>
                 </a>
                 <div class="d-flex p-0">
                     <span class="flex-c m-r-1rem">
@@ -49,11 +48,31 @@
                         <span class="material-symbols-outlined m-r-3">
                             graph_1
                         </span>
-                        <span class="text-light-n-s">hier kommt die evalId hin</span>
+                        <span class="text-light-n-s">{{ block.id }}</span>
                     </span>
                 </div>
             </div>
         {% endfor %}
     </div>
-</div> 
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        let searchInput = document.getElementById("searchInput");
+        let items = document.querySelectorAll(".workflow-item");
+
+        searchInput.addEventListener("input", function() {
+            let filter = searchInput.value.toLowerCase();
+
+            items.forEach(item => {
+                let titleElement = item.querySelector(".workflow-title");
+                
+                if (titleElement) {
+                    let title = titleElement.textContent.toLowerCase();
+                    item.style.display = title.includes(filter) ? "" : "none";
+                }
+            });
+        });
+    });
+</script>
 {% endblock %}

@@ -206,9 +206,11 @@ def new_project(request):
         form.fields['organization_id'].choices = org_choices
         if form.is_valid():
             res = api.post_organization(request, **form.cleaned_data)
-            if isinstance(res, type(None)) or res['error']:
-                # form = RegisterForm()
-                # TODO: add form error
+            if res is None:
+                form.add_error(None, "Die API hat keine Antwort zurückgegeben.")
+            elif 'error' in res and res['error'] != False:
+                error_msg = res['error']
+                form.add_error(None, f"Projekt konnte nicht erstellt werden: {error_msg}")
                 pass
             else:
                 return redirect('/')
