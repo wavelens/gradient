@@ -24,8 +24,8 @@ password-auth = { version = "1.0.0", features = ["argon2"] }
 rand = "0.9"
 sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1.42", features = ["process", "rt-multi-thread"] }
-uuid = { version = "1.11", features = ["fast-rng", "macro-diagnostics", "v4"] }
+tokio = { version = "1.43", features = ["process", "rt-multi-thread"] }
+uuid = { version = "1.14", features = ["fast-rng", "macro-diagnostics", "v4"] }
 email_address = "0.2"
 tower-http = { version = "0.6.2", features = ["cors", "trace"] }
 http = "1.2"
