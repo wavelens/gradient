@@ -1,30 +1,34 @@
-async function makeRequest(){
-    try {
-        const response = await fetch(url, {
-            method: "POST",
-            credentials: 'include',
-            withCredentials: true,
-            mode: 'cors',
-            headers: {
-                "Authorization": `Bearer ${token}`,
-                "Content-Type": "application/jsonstream",
-            },
-        });
-
-        if (!response.ok){
-            throw new Error('HTTP error! Status: ' + response.status);
+async function makeRequest() {
+  try {
+    fetch(url, {
+      method: "POST",
+      credentials: "include",
+      withCredentials: true,
+      mode: "cors",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/jsonstream",
+      },
+    }).then(async (response) => {
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        const text = new TextDecoder("utf-8").decode(value);
+        if (done) break;
+        if (text) {
+          const data = JSON.parse(text);
+          if (data.hasOwnProperty("error")) {
+            console.error(data["message"]);
+          } else {
+            // Replace this with element to output
+            console.log(data);
+          }
         }
-
-        const data = await response.text();
-        if (data) {
-            console.log("Response data:", data);
-        } else {
-            console.log("Die API hat keine Daten zurückgegeben.");
-        }
-    } catch (error) {
-        console.error("Error during fetch:", error);
-    }
+      }
+    });
+  } catch (error) {
+    console.error("Error during fetch:", error);
+  }
 }
 
 makeRequest();
-

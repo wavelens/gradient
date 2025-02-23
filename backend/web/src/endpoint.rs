@@ -676,6 +676,7 @@ pub async fn connect_evaluation(
     let stream = stream! {
         let mut last_logs: HashMap<Uuid, String> = HashMap::new();
         let mut no_response: i16 = 0;
+        let mut first_response: bool = true;
         while no_response < 5 {
             let builds = EBuild::find()
                 .filter(condition.clone())
@@ -684,10 +685,17 @@ pub async fn connect_evaluation(
                 .unwrap();
 
             if builds.is_empty() {
+                if first_response {
+                    yield "".to_string();
+                    break;
+                }
+
                 no_response += 1;
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 continue;
             }
+
+            first_response = false;
 
             for build in builds {
                 let name = build.derivation_path.split("-").next().unwrap();
@@ -876,16 +884,24 @@ pub async fn connect_build(
 
     let stream = stream! {
         let mut last_log = build.log.unwrap_or("".to_string());
+        let mut first_response: bool = true;
         if !last_log.is_empty() {
             // TODO: Chunkify past log
+            first_response = false;
             yield last_log.clone();
         }
 
         loop {
             let build = EBuild::find_by_id(build_id).one(&state.db).await.unwrap().unwrap();
             if build.status != entity::build::BuildStatus::Building {
+                if first_response {
+                    yield "".to_string();
+                }
+
                 break;
             }
+
+            first_response = false;
 
             let log = build.log.unwrap_or("".to_string());
             let log_new = log.replace(last_log.as_str(), "");
