@@ -23,5 +23,5 @@ dirs = "6.0"
 toml = "0.8"
 reqwest = { version = "0.12", features = ["json"] }
 reqwest-streams = { version = "0.9", features=["json"] }
-tokio = { version = "1.42", features = ["macros", "process", "rt-multi-thread"] }
+tokio = { version = "1.43", features = ["macros", "process", "rt-multi-thread"] }
 serde_json = "1.0"

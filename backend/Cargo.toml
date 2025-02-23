@@ -12,7 +12,7 @@ members = [".", "core", "builder", "web", "entity", "migration"]
 
 [dependencies]
 builder = { path = "builder" }
-clap = { version = "4.5.23", features = ["derive"] }
+clap = { version = "4.5.30", features = ["derive"] }
 core = { path = "core" }
-tokio = { version = "1.42", features = ["process", "rt-multi-thread"] }
+tokio = { version = "1.43", features = ["process", "rt-multi-thread"] }
 web = { path = "web" }
