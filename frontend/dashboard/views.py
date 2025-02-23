@@ -11,6 +11,7 @@ from django.contrib.auth import logout
 from . import api
 from .auth import LoginForm, login, RegisterForm
 from .forms import *
+from django.contrib.auth.models import User
 
 @login_required
 def home(request):
@@ -207,7 +208,7 @@ def new_project(request):
         if form.is_valid():
             res = api.post_organization(request, **form.cleaned_data)
             if res is None:
-                form.add_error(None, "Die API hat keine Antwort zurückgegeben.")
+                form.add_error(None, "Das Projekt konnte nicht erstellt werden.")
             elif 'error' in res and res['error'] != False:
                 error_msg = res['error']
                 form.add_error(None, f"Projekt konnte nicht erstellt werden: {error_msg}")
@@ -244,6 +245,8 @@ class UserLoginView(LoginView):
         #     return redirect(self.get_success_url())
         # self.request.session["allauth_2fa_user_id"] = form.get_user().pk
         return HttpResponseRedirect(self.get_success_url())
+        
+        return self.render_to_response(self.get_context_data(form=form))
 
 def logout_view(request):
     # TODO: api logout request

@@ -11,18 +11,27 @@ async function makeRequest() {
       },
     }).then(async (response) => {
       const reader = response.body.getReader();
+      const logContainer = document.querySelector(".details-content");
       while (true) {
         const { done, value } = await reader.read();
         const text = new TextDecoder("utf-8").decode(value);
-        if (done) break;
+        if (done) {
+            logContainer.innerHTML += `<div class="line">Log beendet</div>`;
+            break;
+        }
         if (text) {
-          const data = JSON.parse(text);
-          if (data.hasOwnProperty("error")) {
-            console.error(data["message"]);
-          } else {
-            // Replace this with element to output
-            console.log(data);
-          }
+            try {
+                const data = JSON.parse(text);
+                
+                if (data.hasOwnProperty("error")) {
+                  console.error(data["message"]);
+                } else {
+                  logContainer.innerHTML += `<div class="line">${data.message}</div>`;
+                  logContainer.scrollTop = logContainer.scrollHeight;
+                }
+              } catch (err) {
+                console.error("Fehler beim Parsen von JSON:", err);
+              }
         }
       }
     });

@@ -866,3 +866,18 @@ tr:hover td{
 .home-container div {
     padding: 20px;
 }
+
+.code-container {
+    min-height: 17px;
+}
+
+.alert-danger {
+    border: 1px solid red;
+    border-radius: 5px;
+    background-color: #ff00001f;
+    margin-bottom: 1rem;
+}
+
+.alert-danger li {
+    display: block;
+}

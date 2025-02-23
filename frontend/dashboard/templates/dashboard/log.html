@@ -77,14 +77,14 @@
             <div class="p-1rem">
                 <div class="code-container monospace">
                     {% for block in details_blocks %}
-                        <details class="details-item color-secondary">
-                            <summary>{{ block.summary }}</summary>
+                        <!-- <details class="details-item color-secondary"> -->
+                            <!-- <summary></summary> -->
                             <div class="details-content color-secondary">
                                 {% for line in block.details %}
-                                    <div class="line">{{ line }}</div>
+                                    <div class="line"></div>
                                 {% endfor %}
                             </div>
-                        </details>
+                        <!-- </details> -->
                     {% endfor %}
                 </div>
             </div>
@@ -94,7 +94,7 @@
 
 <script>
     const token = "{{ request.user.session }}";
-    const url = "http://127.0.0.1:3000/api/evaluation/{{ org_id }}/builds";
+    const url = "http://127.0.0.1:3000/api/evaluation/9404fcdb-11a9-4349-b28b-782296c63f6b/builds";
 </script>
 
 <script src="../../static/dashboard/js/log.js"></script>
@@ -103,12 +103,18 @@
 <script>
     let lineCounter = 1;
 
-    document.querySelectorAll('.details-item').forEach(details => {
-        const summary = details.querySelector('summary');
-        summary.setAttribute('data-line-number', lineCounter++);
+    // document.querySelectorAll('.details-item').forEach(details => {
+    //     // const summary = details.querySelector('summary');
+    //     // summary.setAttribute('data-line-number', lineCounter++);
 
-        const content = details.querySelector('.details-content');
-        content.querySelectorAll('.line').forEach(line => {
+    //     const content = details.querySelector('.details-content');
+    //     content.querySelectorAll('.line').forEach(line => {
+    //         line.setAttribute('data-line-number', lineCounter++);
+    //     });
+    // });
+
+    document.querySelectorAll('.details-content').forEach(details => {
+        details.querySelectorAll('.line').forEach(line => {
             line.setAttribute('data-line-number', lineCounter++);
         });
     });

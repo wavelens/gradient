@@ -17,6 +17,11 @@
 <div class="outer-form">
     <div class="form-container">
         <h2 class="form-header-label">{% trans 'Login' %}</h2>
+        {% if form.non_field_errors %}
+            <div class="alert alert-danger">
+                {{ form.non_field_errors }}
+            </div>
+        {% endif %}
         <form method="post">
             {% csrf_token %}
             {% for field in form %}
