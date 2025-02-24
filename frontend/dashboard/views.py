@@ -115,6 +115,7 @@ def log(request, org_id, evaluation_id=None):
 
     context = {
         'org_id': org_id,
+        'evaluation_id': evaluation_id,
         'details_blocks': details_blocks,
         'built_version' : 'Vbuild (x86_64-linux)',
         'status' : 'Vsucceeded',
