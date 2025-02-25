@@ -70,7 +70,7 @@ Gradient can be used via the web interface, API, and CLI.
 ### API
 
 The API is a RESTful API that can be used to interact with Gradient programmatically.
-OpenAPI documentation is available at `/docs/gradient-api.yaml`. [API Specification](./docs/gradient-api.yaml)
+OpenAPI documentation is available at `/docs/gradient-api.yaml` or via [Swagger Editor](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml)
 
 ### Web Interface
 
@@ -92,14 +92,25 @@ Install the CLI:
   # inputs.gradient.inputs.nixpkgs.follows = "nixpkgs";
   # inputs.gradient.inputs.flake-utils.follows = "flake-utils";
 
-  outputs = { self, nixpkgs, gradient, ... }: {
+  outputs = { self, nixpkgs, gradient, ... }: let
+    pkgs = import nixpkgs {
+      inherit system;
+      overlays = [ gradient.overlays.default ];
+    };
+  in {
     # change `yourhostname` to your actual hostname
-    nixosConfigurations.yourhostname = nixpkgs.lib.nixosSystem {
+    nixosConfigurations.yourhostname = pkgs.lib.nixosSystem {
       # customize to your system
       system = "x86_64-linux";
       modules = [
         ./configuration.nix
-        gradient.packages.${system}.gradient-cli
+
+        # or define in the configuration.nix
+        {
+          config = {
+            environment.systemPackages = [ pkgs.gradient-cli ];
+          };
+        }
       ];
     };
   };

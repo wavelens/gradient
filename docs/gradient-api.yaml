@@ -28,7 +28,7 @@ tags:
     description: create and modify projects
   - name: servers
     description: create and modify servers
-  - name: evaluations
+  - name: evals
     description: retrieve evaluations
   - name: builds
     description: retrieve builds
@@ -592,7 +592,7 @@ paths:
   /evals/{evaluation}:
     get:
       tags:
-        - evaluations
+        - evals
       summary: Get evaluation info
       description: Get details about the evaluation by id
       responses:
@@ -610,7 +610,7 @@ paths:
                 $ref: '#/components/schemas/BasicResponse'
     post:
       tags:
-        - evaluations
+        - evals
       summary: Abort evaluation
       description: Abort the evaluation by id
       responses:
@@ -629,7 +629,7 @@ paths:
   /evals/{evaluation}/builds:
     get:
       tags:
-        - builds
+        - evals
       summary: Get list of builds
       description: Get list of builds of the evaluation by id
       responses:
@@ -647,7 +647,7 @@ paths:
                 $ref: '#/components/schemas/BasicResponse'
     post:
       tags:
-        - builds
+        - evals
       summary: Get log stream of evaluation
       description: Get the log stream of the evaluation by id
       responses:
