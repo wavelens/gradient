@@ -1,9 +1,11 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use futures::stream::StreamExt;
+use reqwest_streams::JsonStreamResponse;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -13,6 +15,49 @@ use crate::ConfigKey;
 pub struct BaseResponse<T> {
     pub error: bool,
     pub message: T,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct UserInfoResponse {
+    pub id: String,
+    pub username: String,
+    pub name: String,
+    pub email: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct OrganizationResponse {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub use_nix_store: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ProjectResponse {
+    pub id: String,
+    pub organization: String,
+    pub name: String,
+    pub description: String,
+    pub repository: String,
+    pub evaluation_wildcard: String,
+    pub last_evaluation: Option<String>,
+    pub last_check_at: String,
+    pub created_by: String,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct EvaluationResponse {
+    pub id: String,
+    pub project: String,
+    pub repository: String,
+    pub commit: String,
+    pub evaluation_wildcard: String,
+    pub status: String,
+    pub previous: Option<String>,
+    pub next: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -39,6 +84,11 @@ pub struct MakeServerRequest {
     pub username: String,
     pub architectures: Vec<String>,
     pub features: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct MakeServerGetRequest {
+    pub organization_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -193,10 +243,26 @@ pub async fn login(
     Ok(parse_response(res).await.unwrap())
 }
 
+pub async fn user_info(
+    config: HashMap<ConfigKey, Option<String>>,
+) -> Result<BaseResponse<UserInfoResponse>, String> {
+    let res = get_client(config, "user/info".to_string(), false, true)
+        .unwrap()
+        .send()
+        .await;
+
+    let res = match res {
+        Ok(res) => res,
+        Err(e) => return Err(e.to_string()),
+    };
+
+    Ok(parse_response(res).await.unwrap())
+}
+
 pub async fn show_organization(
     config: HashMap<ConfigKey, Option<String>>,
     organization_id: String,
-) -> Result<BaseResponse<String>, String> {
+) -> Result<BaseResponse<OrganizationResponse>, String> {
     let res = get_client(
         config,
         format!("organization/{}", organization_id),
@@ -326,7 +392,7 @@ pub async fn get_organization_ssh(
 pub async fn show_project(
     config: HashMap<ConfigKey, Option<String>>,
     projekt_id: String,
-) -> Result<BaseResponse<Vec<String>>, String> {
+) -> Result<BaseResponse<ProjectResponse>, String> {
     let res = get_client(config, format!("project/{}", projekt_id), false, true)
         .unwrap()
         .send()
@@ -405,6 +471,102 @@ pub async fn delete_project(
     Ok(parse_response(res).await.unwrap())
 }
 
+pub async fn show_evaluation(
+    config: HashMap<ConfigKey, Option<String>>,
+    evaluation_id: String,
+) -> Result<BaseResponse<EvaluationResponse>, String> {
+    let res = get_client(config, format!("evaluation/{}", evaluation_id), false, true)
+        .unwrap()
+        .send()
+        .await;
+
+    let res = match res {
+        Ok(res) => res,
+        Err(e) => return Err(e.to_string()),
+    };
+
+    Ok(parse_response(res).await.unwrap())
+}
+
+pub async fn get_builds(
+    config: HashMap<ConfigKey, Option<String>>,
+    evaluation_id: String,
+) -> Result<BaseResponse<Vec<String>>, String> {
+    let res = get_client(
+        config,
+        format!("evaluation/{}/builds", evaluation_id),
+        false,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await;
+
+    let res = match res {
+        Ok(res) => res,
+        Err(e) => return Err(e.to_string()),
+    };
+
+    Ok(parse_response(res).await.unwrap())
+}
+
+pub async fn stream_evaluation(
+    config: HashMap<ConfigKey, Option<String>>,
+    evaluation_id: String,
+) -> Result<(), String> {
+    let mut stream = get_client(
+        config,
+        format!("evaluation/{}/builds", evaluation_id),
+        true,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap()
+    .json_nl_stream::<String>(1024000);
+
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(chunk) => {
+                print!("{}", chunk);
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn stream_build(
+    config: HashMap<ConfigKey, Option<String>>,
+    build_id: String,
+) -> Result<(), String> {
+    let mut stream = get_client(config, format!("build/{}", build_id), true, true)
+        .unwrap()
+        .send()
+        .await
+        .unwrap()
+        .json_nl_stream::<String>(1024000);
+
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(chunk) => {
+                print!("{}", chunk);
+            }
+            Err(e) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn show_server(
     config: HashMap<ConfigKey, Option<String>>,
     server_id: String,
@@ -424,9 +586,13 @@ pub async fn show_server(
 
 pub async fn list_server(
     config: HashMap<ConfigKey, Option<String>>,
+    organization_id: String,
 ) -> Result<BaseResponse<ListResponse>, String> {
+    let req = MakeServerGetRequest { organization_id };
+
     let res = get_client(config, "server".to_string(), false, true)
         .unwrap()
+        .json(&req)
         .send()
         .await;
 

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -19,6 +19,7 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(ColumnDef::new(Server::Id).uuid().not_null().primary_key())
                     .col(ColumnDef::new(Server::Name).string().not_null())
+                    .col(ColumnDef::new(Server::DisplayName).string().not_null())
                     .col(ColumnDef::new(Server::Organization).uuid().not_null())
                     .col(ColumnDef::new(Server::Host).string().not_null())
                     .col(ColumnDef::new(Server::Port).integer().not_null())
@@ -61,6 +62,7 @@ enum Server {
     Table,
     Id,
     Name,
+    DisplayName,
     Organization,
     Host,
     Port,

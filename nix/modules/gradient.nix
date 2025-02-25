@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -15,7 +15,10 @@ in {
     services.gradient = {
       enable = lib.mkEnableOption "Enable Gradient";
       configureNginx = lib.mkEnableOption "Configure Nginx";
+      configurePostgres = lib.mkEnableOption "Configure Postgres";
       package = lib.mkPackageOption pkgs "gradient-server" { };
+      package_nix = lib.mkPackageOption pkgs "nix" { };
+      package_git = lib.mkPackageOption pkgs "git" { };
       domain = lib.mkOption {
         description = "The domain under which Gradient runs.";
         type = lib.types.str;
@@ -48,17 +51,17 @@ in {
 
       port = lib.mkOption {
         description = "The port on which Gradient listens.";
-        type = lib.types.int;
+        type = lib.types.port;
         default = 3000;
       };
 
-      jwtSecret = lib.mkOption {
-        description = "The secret key used to sign JWTs.";
+      jwtSecretFile = lib.mkOption {
+        description = "The secret key file used to sign JWTs.";
         type = lib.types.str;
       };
 
-      cryptSecret = lib.mkOption {
-        description = "The base64-encoded secret key.";
+      cryptSecretFile = lib.mkOption {
+        description = "The base64-encoded secret key file.";
         type = lib.types.str;
       };
 
@@ -68,31 +71,73 @@ in {
         default = "postgres://postgres:postgres@localhost:5432/gradient";
       };
 
-      binpath_nix = lib.mkOption {
-        description = "The path to the Nix binary.";
-        type = lib.types.str;
-        default = lib.getExe pkgs.nix;
-        defaultText = "nix";
+      oauth = {
+        enable = lib.mkEnableOption "Enable OAuth";
+        clientId = lib.mkOption {
+          description = "The client ID for OAuth.";
+          type = lib.types.str;
+          required = cfg.oauth.enable;
+        };
+
+        clientSecretFile = lib.mkOption {
+          description = "The client secret file for OAuth.";
+          type = lib.types.str;
+          required = cfg.oauth.enable;
+        };
+
+        scopes = lib.mkOption {
+          description = "The scopes for OAuth.";
+          type = lib.types.listOf lib.types.str;
+          default = [];
+        };
+
+        tokenUrl = lib.mkOption {
+          description = "The token URL for OAuth.";
+          type = lib.types.str;
+          required = cfg.oauth.enable;
+        };
+
+        authUrl = lib.mkOption {
+          description = "The auth URL for OAuth.";
+          type = lib.types.str;
+          required = cfg.oauth.enable;
+        };
+
+        apiUrl = lib.mkOption {
+          description = "The API URL for OAuth.";
+          type = lib.types.str;
+          required = cfg.oauth.enable;
+        };
+      };
+    };
+
+    settings = {
+      disableRegistration = lib.mkEnableOption "Disable registration. Users must be registered via OAuth2.";
+      maxConcurrentEvaluations = lib.mkOption {
+        description = "The maximum number of concurrent evaluations.";
+        type = lib.types.ints.unsigned;
+        default = 1;
       };
 
-      binpath_git = lib.mkOption {
-        description = "The path to the Git binary.";
-        type = lib.types.str;
-        default = lib.getExe pkgs.git;
-        defaultText = "git";
+      maxConcurrentBuilds = lib.mkOption {
+        description = "The maximum number of concurrent builds.";
+        type = lib.types.ints.unsigned;
+        default = 1;
       };
-
-      oauthEnable = lib.mkEnableOption "Enable OAuth";
     };
   };
 
   config = lib.mkIf cfg.enable {
     systemd.services.gradient-server = {
-      path = [ pkgs.nix pkgs.git ];
       wantedBy = [ "multi-user.target" ];
       after = [
         "network.target"
         "postgresql.service"
+      ];
+
+      path = [
+        cfg.package_nix
+        cfg.package_git
       ];
 
       serviceConfig = {
@@ -115,20 +160,33 @@ in {
         RestrictRealtime = true;
         RestrictSUIDSGID = true;
         WorkingDirectory = cfg.baseDir;
+        LoadCredential = [
+          "GRADIENT_JWT_SECRET:${cfg.jwtSecretFile}"
+          "GRADIENT_CRYPT_SECRET:${cfg.cryptSecretFile}"
+        ] ++ lib.optional cfg.oauth.enable [
+          "GRADIENT_OAUTH_CLIENT_SECRET:${cfg.oauth.clientSecretFile}"
+        ];
       };
 
       environment = {
         XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
         GRADIENT_IP = cfg.ip;
         GRADIENT_PORT = toString cfg.port;
+        GRADIENT_SERVE_URL = "https://${cfg.domain}";
         GRADIENT_DATABASE_URL = cfg.databaseUrl;
-        GRADIENT_JWT_SECRET = cfg.jwtSecret;
-        GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString 1;
-        GRADIENT_MAX_CONCURRENT_BUILDS = toString 1;
+        GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString cfg.settings.maxConcurrentEvaluations;
+        GRADIENT_MAX_CONCURRENT_BUILDS = toString cfg.settings.maxConcurrentBuilds;
+        GRADIENT_BINPATH_NIX = lib.getExe cfg.package_nix;
+        GRADIENT_BINPATH_GIT = lib.getExe cfg.package_git;
         GRADIENT_OAUTH_ENABLE = lib.mkForce (if cfg.oauthEnable then "true" else "false");
-        GRADIENT_CRYPT_SECRET = cfg.cryptSecret;
-        GRADIENT_BINPATH_NIX = cfg.binpath_nix;
-        GRADIENT_BINPATH_GIT = cfg.binpath_git;
+        GRADIENT_DISABLE_REGISTER = toString cfg.settings.disableRegistration;
+      } // lib.optionalAttrs cfg.oauth.enable {
+        GRADIENT_OAUTH_CLIENT_ID = cfg.oauth.clientId;
+        GRADIENT_OAUTH_SCOPES = builtins.concatStringsSep " " cfg.oauth.scopes;
+        GRADIENT_OAUTH_TOKEN_URL = cfg.oauth.tokenUrl;
+        GRADIENT_OAUTH_AUTH_URL = cfg.oauth.authUrl;
+        GRADIENT_OAUTH_API_URL = cfg.oauth.apiUrl;
+        GRADIENT_OAUTH_REQUIRED = toString cfg.settings.disableRegistration;
       };
     };
 
@@ -138,18 +196,29 @@ in {
       "ca-derivations"
     ];
 
-    services.nginx = lib.mkIf cfg.configureNginx {
-      enable = true;
-      virtualHosts."${cfg.domain}".locations = {
-        "/" = lib.mkIf cfg.frontend.enable {
-          proxyPass = "http://127.0.0.1:${toString config.services.gradient.frontend.port}";
-          proxyWebsockets = true;
-        };
+    services = {
+      nginx = lib.mkIf cfg.configureNginx {
+        enable = true;
+        virtualHosts."${cfg.domain}".locations = {
+          "/" = lib.mkIf cfg.frontend.enable {
+            proxyPass = "http://127.0.0.1:${toString config.services.gradient.frontend.port}";
+            proxyWebsockets = true;
+          };
 
-        "/api" = {
-          proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
-          proxyWebsockets = true;
+          "/api" = {
+            proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
+            proxyWebsockets = true;
+          };
         };
+      };
+
+      postgresql = lib.mkIf cfg.configurePostgres {
+        enable = true;
+        ensureDatabases = [ "gradient" ];
+        ensureUsers = [{
+          name = "gradient";
+          ensureDBOwnership = true;
+        }];
       };
     };
   };

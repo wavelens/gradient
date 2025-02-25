@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -14,30 +14,30 @@ document.addEventListener("DOMContentLoaded", function() {
     });
 });
 
-function dropdownFunction() {
-  const dropdown = document.getElementById("dropdownHeader");
-  const tooltip = document.getElementById("tooltip");
+function toggleDropdown(openDropdownId, openTooltipId, closeDropdownId, closeTooltipId) {
+    const openDropdown = document.getElementById(openDropdownId);
+    const openTooltip = document.getElementById(openTooltipId);
+    const closeDropdown = document.getElementById(closeDropdownId);
+    const closeTooltip = document.getElementById(closeTooltipId);
 
-  dropdown.classList.toggle("show");
+    if (closeDropdown.classList.contains("show")) {
+        closeDropdown.classList.remove("show");
+        closeTooltip.classList.remove("hidden");
+    }
 
-  if (dropdown.classList.contains("show")) {
-      tooltip.classList.add("hidden");
-  } else {
-      tooltip.classList.remove("hidden");
-  }
+    openDropdown.classList.toggle("show");
+
+    if (openDropdown.classList.contains("show")) {
+        openTooltip.classList.add("hidden");
+    } else {
+        openTooltip.classList.remove("hidden");
+    }
 }
 
 window.onclick = function (event) {
-  if (!event.target.matches('.dropbtn')) {
-      var dropdowns = document.getElementsByClassName("dropdown-content");
-      var tooltip = document.getElementById("tooltip");
-
-      for (let i = 0; i < dropdowns.length; i++) {
-          var openDropdown = dropdowns[i];
-          if (openDropdown.classList.contains('show')) {
-              openDropdown.classList.remove('show');
-              tooltip.classList.remove("hidden");
-          }
-      }
-  }
+    if (!event.target.closest(".dropdown")) {
+        document.querySelectorAll(".dropdown-content").forEach(dropdown => dropdown.classList.remove("show"));
+        document.querySelectorAll(".tooltiptext").forEach(tooltip => tooltip.classList.remove("hidden"));
+    }
 };
+

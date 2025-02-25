@@ -2,7 +2,7 @@
 name = "gradient-server"
 version = "0.1.0"
 edition = "2021"
-license = "AGPL-3.0 OR Commercial"
+license = "AGPL-3.0"
 authors = ["Wavelens UG <info@wavelens.io>"]
 description = "Nix-based Continuous Integration System"
 repository = "https://github.com/wavelens/gradient"
@@ -12,7 +12,7 @@ members = [".", "core", "builder", "web", "entity", "migration"]
 
 [dependencies]
 builder = { path = "builder" }
-clap = { version = "4.5.23", features = ["derive"] }
+clap = { version = "4.5.31", features = ["derive"] }
 core = { path = "core" }
-tokio = { version = "1.42", features = ["process", "rt-multi-thread"] }
+tokio = { version = "1.43", features = ["process", "rt-multi-thread"] }
 web = { path = "web" }

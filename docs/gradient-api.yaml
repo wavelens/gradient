@@ -1,0 +1,902 @@
+openapi: 3.1.1
+info:
+  title: Gradient API
+  description: |-
+    Gradient is a web-based Nix-based Continuous Integration (CI) system.
+
+    Some useful links:
+    - [The Gradient repository](https://github.com/wavelens/gradient)
+  contact:
+    email: info@wavelens.io
+  license:
+    name: AGPL-3.0
+    url: https://www.gnu.org/licenses/agpl-3.0.en.html
+  version: 0.1.0
+externalDocs:
+  description: The Gradient Options-Search
+  url: https://wavelens.github.io/gradient-search
+servers:
+  - url: http://127.0.0.1:8000/api/v1
+tags:
+  - name: auth
+    description: authorization and registration
+  - name: user
+    description: operations about logged-in user
+  - name: orgs
+    description: create and modify organziations
+  - name: projects
+    description: create and modify projects
+  - name: servers
+    description: create and modify servers
+  - name: evaluations
+    description: retrieve evaluations
+  - name: builds
+    description: retrieve builds
+paths:
+  /auth/basic/login:
+    post:
+      tags:
+        - auth
+      summary: Login with Credentials
+      description: Login with Username / E-Mail and Password. Returns JWT-Token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeLoginRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '401':
+          description: Please login via OAuth / Invalid Credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /auth/basic/register:
+    post:
+      tags:
+        - auth
+      summary: Register a new User
+      description: Register a new User
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeUserRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '400':
+          description: Registration is disabled / Invalid email
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '409':
+          description: User already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /auth/oauth/authorize:
+    get:
+      tags:
+        - auth
+      summary: Redirect URL for OAuth2
+      description: This endpoint is the redirect Url for the OAuth provider
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+    post:
+      tags:
+        - auth
+      summary: Login with OAuth2
+      description: Login with OAuth2. Returns JWT-Token
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '400':
+          description: OAuth login is disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '401':
+          description: OAuth login failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /auth/logout:
+    post:
+      tags:
+        - auth
+      summary: Logout
+      description: Invalidates the used token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeUserRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /user:
+    get:
+      tags:
+        - user
+      summary: Get user info
+      description: Get basic information about logged-in user
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfoResponse'
+    delete:
+      tags:
+        - user
+      summary: Delete user
+      description: Delete logged-in user
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /user/keys:
+    post:
+      tags:
+        - user
+      summary: Create API Key
+      description: Create an API Key
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApiKeyRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '409':
+          description: API-Key Name already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    delete:
+      tags:
+        - user
+      summary: Delete API Key
+      description: Delete an API Key
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApiKeyRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '400':
+          description: API-Key not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /user/settings:
+    get:
+      tags:
+        - user
+      summary: Get user settings
+      description: Get user settings
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    post:
+      tags:
+        - user
+      summary: Update user settings
+      description: Update user settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BasicResponse'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/scomponents/schemas/BasicResponse'
+  /orgs:
+    get:
+      tags:
+        - orgs
+      summary: Get list of organizations
+      description: Get list of organizations logged-in user owns
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+    post:
+      tags:
+        - orgs
+      summary: Create organization
+      description: Create new organization
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeOrganizationRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '409':
+          description: Organization Name already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /orgs/{organization}:
+    get:
+      tags:
+        - orgs
+      summary: Get organization info
+      description: Get details about the organization by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    delete:
+      tags:
+        - orgs
+      summary: Delete organization
+      description: Delete organization by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /orgs/{organization}/ssh:
+    get:
+      tags:
+        - orgs
+      summary: Get organization SSH Public Key
+      description: Get the SSH Public Key of the organization by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    post:
+      tags:
+        - orgs
+      summary: Reset organization SSH Public Key
+      description: Reset the SSH Public Key of the organization by name. Returns new SSH Public Key
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /projects/{organization}:
+    get:
+      tags:
+        - projects
+      summary: Get list of projects
+      description: Get list of projects of the organization by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    post:
+      tags:
+        - projects
+      summary: Create project
+      description: Create new project in the organization by name
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeProjectRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /projects/{organization}/{project}:
+    get:
+      tags:
+        - projects
+      summary: Get project info
+      description: Get details about the project by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    delete:
+      tags:
+        - projects
+      summary: Delete project
+      description: Delete project by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /projects/{organization}/{project}/check-repository:
+    post:
+      tags:
+        - projects
+      summary: Check Repository
+      description: Check if the Repository of the project is available by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /projects/{organization}/{project}/evaluate:
+    post:
+      tags:
+        - projects
+      summary: Evaluate Project
+      description: Evaluate the project by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '400':
+          description: Evaluation already in progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /servers/{organization}:
+    get:
+      tags:
+        - servers
+      summary: Get list of servers
+      description: Get list of servers of the organization by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    post:
+      tags:
+        - servers
+      summary: Create server
+      description: Create new server in the organization by name
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeServerRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /servers/{organization}/{server}:
+    get:
+      tags:
+        - servers
+      summary: Get server info
+      description: Get details about the server by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerResponse'
+        '404':
+          description: Server not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    delete:
+      tags:
+        - servers
+      summary: Delete server
+      description: Delete server by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Server not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /servers/{organization}/{server}/check-connection:
+    post:
+      tags:
+        - servers
+      summary: Check Connection
+      description: Check if the Connection to the Server is available by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Server not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '504':
+          description: Server not reachable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /evals/{evaluation}:
+    get:
+      tags:
+        - evaluations
+      summary: Get evaluation info
+      description: Get details about the evaluation by id
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluationResponse'
+        '404':
+          description: Evaluation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    post:
+      tags:
+        - evaluations
+      summary: Abort evaluation
+      description: Abort the evaluation by id
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Evaluation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /evals/{evaluation}/builds:
+    get:
+      tags:
+        - builds
+      summary: Get list of builds
+      description: Get list of builds of the evaluation by id
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '404':
+          description: Evaluation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    post:
+      tags:
+        - builds
+      summary: Get log stream of evaluation
+      description: Get the log stream of the evaluation by id
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/jsonstream:
+              $ref: '#/components/schemas/StreamResponse'
+        '404':
+          description: Evaluation not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /builds/{build}:
+    get:
+      tags:
+        - builds
+      summary: Get build info
+      description: Get details about the build by id
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildResponse'
+        '404':
+          description: Build not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    post:
+      tags:
+        - builds
+      summary: Get log stream of build
+      description: Get the log stream of the build by id
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/jsonstream:
+              $ref: '#/components/schemas/StreamResponse'
+        '404':
+          description: Build not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+components:
+  schemas:
+    BasicResponse:
+      type: object
+      properties:
+        error:
+          type: bool
+          description: Wheather this is an error or not
+          examples: [false]
+        message:
+          type: string
+          description: Response Message - usually uuid or token
+          examples: [important]
+    ListResponse:
+      type: object
+      properties:
+        error:
+          type: boolean
+          description: Wheather this is an error or not
+          examples: [false]
+        message:
+          type: list
+          description: Response Message containing a list of objects
+          examples: [[{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "name": MyObj}]]
+    OrganizationResponse:
+      type: object
+      properties:
+        error:
+          type: boolean
+          description: Wheather this is an error or not
+          examples: [false]
+        message:
+          type: list
+          description: Response Message containing all organization details
+          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "name": myorg, "display_name": MyOrg, "description": "My Test Org", "public_key": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDQ2 ...", "private_key": "[redacted]", "use_nix_store": true, "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
+    ProjectResponse:
+      type: object
+      properties:
+        error:
+          type: boolean
+          description: Wheather this is an error or not
+          examples: [false]
+        message:
+          type: list
+          description: Response Message containing all project details
+          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "organization": 9f7767ea-1757-48ba-93d1-5cda578b476c, "name": myproj, "display_name": MyProj, "description": "My Test Proj", "repository": "https://github.com/wavelens/gradient", "evaluation_wildcard": "packages.*.gradient-cli", "last_evaluation": af7767ea-1757-48ba-93d1-5cda578b476d, "last_check_at": "2021-10-10T10:00:00Z", "force_evaluation": false, "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
+    ServerResponse:
+      type: object
+      properties:
+        error:
+          type: boolean
+          description: Wheather this is an error or not
+          examples: [false]
+        message:
+          type: list
+          description: Response Message containing all server details
+          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "organization": 9f7767ea-1757-48ba-93d1-5cda578b476c, "name": myserver, "display_name": MyServer, "host": "127.0.0.1", "port": 22, "username": "builduser", "last_connection_at": "2021-10-10T10:00:00Z", "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
+    EvaluationResponse:
+      type: object
+      properties:
+        error:
+          type: boolean
+          description: Wheather this is an error or not
+          examples: [false]
+        message:
+          type: list
+          description: Response Message containing all evaluation details
+          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "project": 9f7767ea-1757-48ba-93d1-5cda578b476c, "repository": "https://github.com/wavelens/gradient", "commit": "af7767ea-1757-48ba-93d1-5cda578b476d", "evaluation_wildcard": "packages.*.gradient-cli", "status": "queued", "previous": Null, "next": Null, "created_at": "2021-10-10T10:00:00Z"}]
+    BuildResponse:
+      type: object
+      properties:
+        error:
+          type: boolean
+          description: Wheather this is an error or not
+          examples: [false]
+        message:
+          type: list
+          description: Response Message containing all build details
+          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "evaluation": 9f7767ea-1757-48ba-93d1-5cda578b476c, "status": "building", "derivation_path": "/nix/store/...", "architecture": "x86_64-linux", "server": af7767ea-1757-48ba-93d1-5cda578b476d, "log": "Running /bin/sh ...", "created_at": "2021-10-10T10:00:00Z", "updated_at": "2021-10-10T10:00:00Z"}]
+    StreamResponse:
+      type: string
+      description: Stream of log messages
+      examples: ["Running /bin/sh ..."]
+    UserInfoResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: UUIDv4
+          examples: [8f7767ea-1757-48ba-93d1-5cda578b476b]
+        username:
+          type: string
+          examples: [testuser]
+        name:
+          type: string
+          examples: [Alex]
+        email:
+          type: string
+          format: email
+          examples: [alex@example.com]
+    MakeLoginRequest:
+      type: object
+      properties:
+        loginname:
+          type: string
+          description: Username or E-Mail
+          examples: [testuser]
+        password:
+          type: string
+          format: password
+          examples: [v3ry_s3cur3=p4ssw0rd]
+    MakeUserRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          examples: [testuser]
+        name:
+          type: string
+          examples: [Alex]
+        email:
+          type: string
+          format: email
+          examples: [alex@example.com]
+        password:
+          type: string
+          format: password
+          examples: [v3ry_s3cur3=p4ssw0rd]
+    MakeOrganizationRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          examples: [testorg]
+        display_name:
+          type: string
+          examples: [TestOrg]
+        description:
+          type: string
+          examples: ["My Test Org"]
+    MakeProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          examples: [testproj]
+        display_name:
+          type: string
+          examples: [TestProj]
+        description:
+          type: string
+          examples: ["My Test Proj"]
+        repository:
+          type: string
+          examples: ["https://github.com/wavelens/gradient"]
+        evaluation_wildcard:
+          type: string
+          examples: ["packages.*.gradient-cli"]
+    MakeServerRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          examples: [testserver]
+        display_name:
+          type: string
+          examples: [TestServer]
+        host:
+          type: string
+          examples: ["127.0.0.1"]
+        port:
+          type: integer
+          examples: [22]
+        username:
+          type: string
+          examples: [builduser]
+        architecture:
+          type: list
+          examples: [[x86_64-linux]]
+        features:
+          type: list
+          examples: [[big-parallel]]
+    ApiKeyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          examples: [CLI-Key]
+  securitySchemes:
+    token:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    oauth:
+      type: oauth2
+      flows:
+        implicit:
+          authorizationUrl: https://127.0.0.1:8000/auth/oauth/authorize
+    api_key:
+      type: apiKey
+      name: API Key
+      in: header

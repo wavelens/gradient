@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -18,10 +18,15 @@ impl MigrationTrait for Migration {
                     .table(User::Table)
                     .if_not_exists()
                     .col(ColumnDef::new(User::Id).uuid().not_null().primary_key())
-                    .col(ColumnDef::new(User::Username).string().not_null())
+                    .col(
+                        ColumnDef::new(User::Username)
+                            .string()
+                            .not_null()
+                            .unique_key(),
+                    )
                     .col(ColumnDef::new(User::Name).string().not_null())
                     .col(ColumnDef::new(User::Email).string().not_null())
-                    .col(ColumnDef::new(User::Password).string().not_null())
+                    .col(ColumnDef::new(User::Password).string())
                     .col(ColumnDef::new(User::LastLoginAt).date_time().not_null())
                     .col(ColumnDef::new(User::CreatedAt).date_time().not_null())
                     .to_owned(),

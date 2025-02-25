@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -36,6 +36,8 @@ pub struct Model {
     pub derivation_path: String,
     pub architecture: super::server::Architecture,
     pub server: Option<Uuid>,
+    #[sea_orm(column_type = "Text")]
+    pub log: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }

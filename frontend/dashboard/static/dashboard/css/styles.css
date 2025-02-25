@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -12,6 +12,10 @@
 }
 
 /* styles.css */
+html {
+    overflow-x: hidden;
+}
+
 body {
     background-color: var(--primary);
     color: white;
@@ -46,8 +50,10 @@ a:hover {
 }
 
 .material-symbols-outlined {
-    font-size: 30px !important;
+    font-size: 19px !important;
     color: #abb0b4;
+    position: relative;
+    bottom: 2px;
 }
 
 .filled {
@@ -119,6 +125,10 @@ input[type="text"]:focus-visible, input[type="password"]:focus-visible, .form-fi
 
 .text-light {
     font-size: 0.8rem;
+    color: #818181;
+}
+
+.text-light-n-s {
     color: #818181;
 }
 
@@ -298,7 +308,7 @@ header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    height: 100%;
+    height: 1.5rem;
     padding: 1rem;
     padding-bottom: 0.5rem;
 }
@@ -310,6 +320,10 @@ header {
 .header .logo-container {
     display: flex;
     align-items: center;
+}
+
+.header .logo-container img {
+    height: 1.5rem;
 }
 
 .header .logo-container span {
@@ -449,6 +463,8 @@ pre span {
 
 .active span.material-symbols-outlined {
     color: white;
+    position: relative;
+    bottom: 1px;
 }
 
 .icon {
@@ -524,6 +540,10 @@ pre span {
     margin-right: 3px;
 }
 
+.m-r-1rem {
+    margin-right: 1rem !important;
+}
+
 .activeeffect-sidebar {
     background-color: #252d33;
     border-radius: 5px;
@@ -533,6 +553,7 @@ pre span {
 
 .monospace {
     font-family: 'Space Mono';
+    font-size: 0.7rem;
 }
 
 .full-width {
@@ -560,6 +581,10 @@ pre span {
     margin-top: -1rem;
 }
 
+.m-l--11 {
+    margin-left: -11px !important;
+}
+
 .m-t-0 {
     margin-top: 0;
 }
@@ -572,11 +597,19 @@ pre span {
     padding-left: 1rem;
 }
 
+.p-0 {
+    padding: 0 !important;
+}
+
 .icon-center {
     height: 23px;
     vertical-align: middle;
     margin-right: 3px;
     font-size: 23px !important;
+}
+
+.f-s-19px {
+    font-size: 19px !important;
 }
 
 .f-s-21px {
@@ -818,4 +851,33 @@ tr:hover td{
 .flex-end {
     display: flex;
     align-items: end;
+}
+
+.home-container {
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border: 1px solid rgb(118, 118, 118);
+}
+
+.home-container div:not(:last-child) {
+    border-bottom: 1px solid rgb(118, 118, 118);
+}
+
+.home-container div {
+    padding: 20px;
+}
+
+.code-container {
+    min-height: 17px;
+}
+
+.alert-danger {
+    border: 1px solid red;
+    border-radius: 5px;
+    background-color: #ff00001f;
+    margin-bottom: 1rem;
+}
+
+.alert-danger li {
+    display: block;
 }

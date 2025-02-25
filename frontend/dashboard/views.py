@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+# SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
 #
 # SPDX-License-Identifier: AGPL-3.0-only
 
@@ -9,15 +9,79 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
 from django.contrib.auth import logout
 from . import api
-from .auth import LoginForm, login
+from .auth import LoginForm, login, RegisterForm
 from .forms import *
+from django.contrib.auth.models import User
 
-@login_required(login_url='/account/login/')
+@login_required
+def home(request):
+    details_blocks = []
+    all_orgs = api.get_organizations(request)
+
+    if isinstance(all_orgs, type(None)) or all_orgs['error']:
+        return HttpResponse(status=500)
+
+    all_orgs = all_orgs['message']
+
+    for org in all_orgs:
+        org_details = api.get_organization(request, org['id'])
+
+        if isinstance(org_details, type(None)) or org_details['error']:
+            return HttpResponse(status=500)
+
+        org_details = org_details['message']
+
+        details_blocks.append({
+            'project': org['name'],
+            'id': org['id'],
+            'description': org_details['description'],
+            'exec': 34,
+            'duration': '12m 11s',
+            'performance': 'filter',
+            'latest_runs': 'filter',
+            'latestRuns': {
+                '1': 'true',
+                '2': 'true',
+                '3': 'false',
+                '4': 'true',
+                '5': 'true',
+            },
+            'wfp': {
+                '1': 'true',
+                '2': 'false',
+                '3': 'nothing',
+            }
+        })
+
+    context = {
+        'org_id': "TEMP",
+        'details_blocks': details_blocks
+    }
+    return render(request, "dashboard/home.html", context)
+
+@login_required
 def workflow(request, org_id):
-    details_blocks = [
-        {
-            'project': "build",
-            'id': "wvls:build",
+    details_blocks = []
+
+    all_projects = api.get_projects(request, org_id)
+
+    if isinstance(all_projects, type(None)) or all_projects['error']:
+        return HttpResponse(status=500)
+
+    all_projects = all_projects['message']
+
+    for project in all_projects:
+        project_details = api.get_project(request, project['id'])
+
+        if isinstance(project_details, type(None)) or project_details['error']:
+            return HttpResponse(status=500)
+
+        project_details = project_details['message']
+
+        details_blocks.append({
+            'project': project['name'],
+            'id': project_details['last_evaluation'],
+            'description': project_details['description'],
             'exec': 34,
             'duration': '12m 11s',
             'performance': 'filter',
@@ -34,98 +98,24 @@ def workflow(request, org_id):
                 '2': 'false',
                 '3': 'nothing',
             }
-        },
-        {
-            'project': "build2",
-            'id': "wvls:build",
-            'exec': 34,
-            'duration': '12m 11s',
-            'performance': 'filter',
-            'latest_runs': 'filter',
-            'latestRuns': {
-                '1': 'false',
-                '2': 'true',
-                '3': 'false',
-                '4': 'true',
-                '5': 'true',
-            },
-            'wfp': {
-                '1': 'true',
-                '2': 'false',
-                '3': 'nothing',
-            }
-        },
-        {
-            'project': "build3",
-            'id': "wvls:build",
-            'exec': 34,
-            'duration': '12m 11s',
-            'performance': 'filter',
-            'latest_runs': 'filter',
-            'latestRuns': {
-                '1': 'false',
-                '2': 'false',
-                '3': 'false',
-                '4': 'true',
-                '5': 'true',
-            },
-            'wfp': {
-                '1': 'true',
-                '2': 'false',
-                '3': 'nothing',
-            }
-        },
-        {
-            'project': "build4",
-            'id': "wvls:build",
-            'exec': 34,
-            'duration': '12m 11s',
-            'performance': 'filter',
-            'latest_runs': 'filter',
-            'latestRuns': {
-                '1': 'nothing',
-                '2': 'nothing',
-                '3': 'false',
-                '4': 'true',
-                '5': 'true',
-            },
-            'wfp': {
-                '1': 'true',
-                '2': 'false',
-                '3': 'nothing',
-            }
-        },
-    ]
+        })
+
     context = {
         'org_id': org_id,
         'details_blocks': details_blocks
     }
     return render(request, "dashboard/overview.html", context)
 
-def log(request, org_id):
-    details_blocks = [
-        {
-            'summary': "Lorem ipsum dolor sit amet, consetetur sadipscing elitr",
-            'details': [
-                "Lorem ipsum dolor sit amet, consetetur sadipscing elitr",
-                "Sed diam nonumy eirmod tempor invidunt ut labore et dolore magna",
-                "Aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores",
-                "Et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.",
-                "Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua.",
-                "At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet."
-            ]
-        },
-        {
-            'summary': "Summary 2",
-            'details': [
-                "Detail 2-1",
-                "Detail 2-2",
-                "Detail 2-3"
-            ]
-        }
-    ]
+@login_required
+def log(request, org_id, evaluation_id=None):
+    details_blocks = [{
+        'summary': "Loading Log...",
+        'details': [ "Loading Log..." ]
+    }]
+
     context = {
         'org_id': org_id,
+        'evaluation_id': evaluation_id,
         'details_blocks': details_blocks,
         'built_version' : 'Vbuild (x86_64-linux)',
         'status' : 'Vsucceeded',
@@ -142,7 +132,8 @@ def log(request, org_id):
     }
     return render(request, "dashboard/log.html", context)
 
-def download(request, org_id):
+@login_required
+def download(request, org_id, evaluation_id=None):
     files = [
     {
         'file': "File 1",
@@ -168,7 +159,8 @@ def download(request, org_id):
     }
     return render(request, "dashboard/download.html", context)
 
-def model(request, org_id):
+@login_required
+def model(request, org_id, evaluation_id=None):
     models = [
     {
         'name': "Model 1",
@@ -184,23 +176,55 @@ def model(request, org_id):
     }
     return render(request, "dashboard/model.html", context)
 
+@login_required
 def new_organization(request):
     if request.method == 'POST':
-        form = newOrganizationForm(request.POST)
+        form = NewOrganizationForm(request.POST)
         if form.is_valid():
-            api.post_organization(request, form.cleaned_data['name'], form.cleaned_data['description'], True)
-            return redirect('dashboard')
+            api.post_organizations(request, form.cleaned_data['name'], form.cleaned_data['description'], True)
+            return redirect('/')
     else:
-        form = newOrganizationForm()
+        form = NewOrganizationForm()
 
     return render(request, "dashboard/newOrganization.html", {'form': form})
 
-def new_project(request, org_id):
-    form = newProjectForm()
+@login_required
+def new_project(request):
+    org_id = request.GET.get("org")
+    all_orgs = api.get_organizations(request)
+
+    if isinstance(all_orgs, type(None)) or all_orgs['error']:
+        return HttpResponse(status=500)
+
+    all_orgs = all_orgs['message']
+
+    org_choices = []
+    for org in all_orgs:
+        org_details = api.get_organization(request, org['id'])
+        org_choices.append((org['id'], org['name']))
+
+    if request.method == 'POST':
+        form = NewProjectForm(request.POST)
+        form.fields['organization_id'].choices = org_choices
+        if form.is_valid():
+            res = api.post_organization(request, **form.cleaned_data)
+            if res is None:
+                form.add_error(None, "Das Projekt konnte nicht erstellt werden.")
+            elif 'error' in res and res['error'] != False:
+                error_msg = res['error']
+                form.add_error(None, f"Projekt konnte nicht erstellt werden: {error_msg}")
+                pass
+            else:
+                return redirect('/')
+    else:
+        form = NewProjectForm()
+        form.fields['organization_id'].choices = org_choices
     return render(request, "dashboard/newProject.html", {'form': form})
 
-def new_server(request, org_id):
-    form = newServerForm()
+@login_required
+def new_server(request):
+    org_id = request.GET.get("org")
+    form = NewServerForm()
     return render(request, "dashboard/newServer.html", {'form': form})
 
 class UserLoginView(LoginView):
@@ -222,9 +246,26 @@ class UserLoginView(LoginView):
         #     return redirect(self.get_success_url())
         # self.request.session["allauth_2fa_user_id"] = form.get_user().pk
         return HttpResponseRedirect(self.get_success_url())
+        
+        return self.render_to_response(self.get_context_data(form=form))
 
 def logout_view(request):
     # TODO: api logout request
     logout(request)
     return redirect("/account/login/")
 
+def register(request):
+    if request.method == 'POST':
+        form = RegisterForm(request.POST)
+        if form.is_valid():
+            res = api.register(**form.cleaned_data)
+            if isinstance(res, type(None)) or res['error']:
+                # form = RegisterForm()
+                # TODO: add form error
+                pass
+            else:
+                return redirect('login')
+    else:
+        form = RegisterForm()
+
+    return render(request, "register.html", {'form': form})

@@ -1,5 +1,5 @@
 <!--
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  -->
@@ -16,16 +16,27 @@
             </div>
             <div>
                 <div class="dropdown">
-                    <div onclick="dropdownFunction(); event.stopPropagation();" class="tooltip">
-                        {% if request.user.image %}
-                            <img src="{{ request.user.image }}" class="h-30 border-radius-5">
-                        {% else %}
-                            <img src="{% static '/dashboard/images/pb.png' %}" class="h-30 border-radius-5">
-                        {% endif %}
+                    <div onclick="toggleDropdown('dropdownHeaderAdd', 'tooltipAdd', 'dropdownHeader', 'tooltip'); event.stopPropagation();" class="tooltip">
+                        <span class="material-symbols-outlined icon-arrow pointer">
+                            add
+                        </span>
+                        <span class="material-symbols-outlined icon-arrow pointer m-l--11 m-r-1rem">
+                            arrow_drop_down
+                        </span>
+                        <span class="tooltiptext" id="tooltipAdd">{% trans 'Create' %}</span>
+                    </div>
+                    <div id="dropdownHeaderAdd" class="dropdown-content">
+                        <a href="{% url 'new_project' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">add</span><span>{% trans 'New Project' %}</span></a>
+                        <a href="{% url 'new_organization' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">apartment</span><span>{% trans 'New Organization' %}</span></a>
+                    </div>
+                </div>
+                <div class="dropdown">
+                    <div onclick="toggleDropdown('dropdownHeader', 'tooltip', 'dropdownHeaderAdd', 'tooltipAdd'); event.stopPropagation();" class="tooltip">
+                        <img src="{{ request.user.image }}" class="h-30 border-radius-5">
                         <span class="material-symbols-outlined icon-arrow pointer">
                             arrow_drop_down
                         </span>
-                        <span class="tooltiptext" id="tooltip">{% trans 'Profil und Einstellungen...' %}</span>
+                        <span class="tooltiptext" id="tooltip">{% trans 'Profile and settings...' %}</span>
                     </div>
                     <div id="dropdownHeader" class="dropdown-content">
                         <p>{% trans 'signed in as' %} {{ request.user.name }}</p>

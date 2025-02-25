@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -40,7 +40,13 @@ impl std::convert::TryFrom<&str> for Architecture {
     type Error = String;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        s.parse()
+        match s {
+            "x86_64-linux" => Ok(Architecture::X86_64Linux),
+            "aarch64-linux" => Ok(Architecture::Aarch64Linux),
+            "x86_64-darwin" => Ok(Architecture::X86_64Darwin),
+            "aarch64-darwin" => Ok(Architecture::Aarch64Darwin),
+            _ => Err(format!("Unknown architecture: {}", s)),
+        }
     }
 }
 
@@ -49,7 +55,9 @@ impl std::convert::TryFrom<&str> for Architecture {
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
+    #[sea_orm(indexed)]
     pub name: String,
+    pub display_name: String,
     pub organization: Uuid,
     pub host: String,
     pub port: i32,

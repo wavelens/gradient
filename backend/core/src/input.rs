@@ -1,11 +1,10 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
 use std::net::{SocketAddr, ToSocketAddrs};
-use wildcard::Wildcard;
 
 use super::consts::*;
 
@@ -94,7 +93,7 @@ pub fn repository_url_to_nix(url: &str, commit_hash: &str) -> Result<String, Str
     Ok(format!("{}?rev={}", url, commit_hash))
 }
 
-pub fn parse_evaluation_wildcard(s: &str) -> Result<Vec<Wildcard>, String> {
+pub fn parse_evaluation_wildcard(s: &str) -> Result<Vec<&str>, String> {
     if s.trim() != s {
         return Err("Evaluation wildcard cannot have leading or trailing whitespace".to_string());
     } else if s.contains(",,") {
@@ -116,11 +115,7 @@ pub fn parse_evaluation_wildcard(s: &str) -> Result<Vec<Wildcard>, String> {
             return Err("Evaluation wildcard cannot start with a period".to_string());
         }
 
-        evaluations.push(
-            Wildcard::new(evaluation.as_bytes())
-                .map_err(|e| e.to_string())
-                .unwrap(),
-        );
+        evaluations.push(evaluation);
     }
 
     if evaluations.is_empty() {
@@ -132,6 +127,26 @@ pub fn parse_evaluation_wildcard(s: &str) -> Result<Vec<Wildcard>, String> {
 
 pub fn valid_evaluation_wildcard(s: &str) -> bool {
     parse_evaluation_wildcard(s).is_ok()
+}
+
+pub fn check_index_name(s: &str) -> Result<(), String> {
+    if s.is_empty() {
+        return Err("Name cannot be empty".to_string());
+    }
+
+    if s != s.to_lowercase() {
+        return Err("Name must be lowercase".to_string());
+    }
+
+    if s.contains(|c: char| !c.is_ascii_alphanumeric() && c != '-') {
+        return Err("Name can only contain letters, numbers, and dashes".to_string());
+    }
+
+    if s.starts_with('-') || s.ends_with('-') {
+        return Err("Name can only start and end with letters or numbers".to_string());
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -248,103 +263,31 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_evaluation_wildcard() {
-        let wildcards_good = vec![
-            "hello.world",
-            "hello.world,world.hello",
-            "world*",
-            "*",
-            "hello.world.*,world.*.hello",
-        ];
+    fn test_check_index_name() {
+        check_index_name("test").unwrap();
+        check_index_name("te-st").unwrap();
+        check_index_name("test1").unwrap();
+        check_index_name("te-9st").unwrap();
 
-        for wildcard in wildcards_good {
-            let result = parse_evaluation_wildcard(wildcard);
-            assert!(result.is_ok(), "{}", result.unwrap_err());
-        }
+        let name = check_index_name("Test").unwrap_err();
+        assert_eq!(name, "Name must be lowercase");
 
-        let wildcards_bad = vec![
-            "hello.world, world.hello",
-            "",
-            ".hello",
-            "world *",
-            "hello.world,",
-        ];
+        let name = check_index_name("test-").unwrap_err();
+        assert_eq!(name, "Name can only start and end with letters or numbers");
 
-        for wildcard in wildcards_bad {
-            let result = parse_evaluation_wildcard(wildcard).unwrap_err();
-            assert!(!result.is_empty(), "{}", wildcard);
-        }
+        let name = check_index_name("test_").unwrap_err();
+        assert_eq!(name, "Name can only contain letters, numbers, and dashes");
 
-        let wildcards_match = [
-            "hello.*",
-            "hello.*.world",
-            "hello.wor*",
-            "hello.*world",
-            "hello.world.*,world.*",
-        ];
+        let name = check_index_name("test ").unwrap_err();
+        assert_eq!(name, "Name can only contain letters, numbers, and dashes");
 
-        let wildcards_match_good = [
-            vec![
-                "hello.world",
-                "hello.world.world",
-                "hello.world.world.world",
-            ],
-            vec![
-                "hello.world.world",
-                "hello.world.world.world",
-                "hello.world.world.world.world",
-            ],
-            vec!["hello.world", "hello.wor", "hello.world.world"],
-            vec![
-                "hello.world",
-                "hello.world.world",
-                "hello.world.world.world",
-            ],
-            vec!["hello.world.world", "world.hello", "world.world.hello"],
-        ];
+        let name = check_index_name("test name").unwrap_err();
+        assert_eq!(name, "Name can only contain letters, numbers, and dashes");
 
-        let wildcards_match_bad = [
-            vec!["hello", "hell.world"],
-            vec!["hello.world"],
-            vec!["hello.wo"],
-            vec!["hello.wor", "llo.world.world"],
-            vec!["hello.hello.world", "hello.wor"],
-        ];
+        let name = check_index_name("test?name").unwrap_err();
+        assert_eq!(name, "Name can only contain letters, numbers, and dashes");
 
-        for (i, wildcards) in wildcards_match.iter().enumerate() {
-            let result = parse_evaluation_wildcard(wildcards);
-            assert!(result.is_ok(), "{}", result.unwrap_err());
-            let result = result.unwrap();
-
-            for wildcard_test in wildcards_match_good[i].iter() {
-                let results = result
-                    .iter()
-                    .map(|wildcard| wildcard.is_match(wildcard_test.as_bytes()))
-                    .filter(|res| *res)
-                    .collect::<Vec<bool>>();
-
-                assert!(
-                    !results.is_empty(),
-                    "Expected {} to match {}",
-                    wildcards,
-                    wildcard_test
-                );
-            }
-
-            for wildcard_test in wildcards_match_bad[i].iter() {
-                let results = result
-                    .iter()
-                    .map(|wildcard| wildcard.is_match(wildcard_test.as_bytes()))
-                    .filter(|res| !res)
-                    .collect::<Vec<bool>>();
-
-                assert!(
-                    !results.is_empty(),
-                    "Expected {} not to match {}",
-                    wildcards,
-                    wildcard_test
-                );
-            }
-        }
+        let name = check_index_name("").unwrap_err();
+        assert_eq!(name, "Name cannot be empty");
     }
 }

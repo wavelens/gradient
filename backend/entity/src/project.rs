@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -15,13 +15,16 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
     pub organization: Uuid,
+    #[sea_orm(indexed)]
     pub name: String,
+    pub display_name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,
     pub repository: String,
     pub evaluation_wildcard: String,
     pub last_evaluation: Option<Uuid>,
     pub last_check_at: NaiveDateTime,
+    pub force_evaluation: bool,
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
 }

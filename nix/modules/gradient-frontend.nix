@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -10,7 +10,7 @@
 in {
   options = {
     services.gradient.frontend = {
-      enable = lib.mkEnableOption "Enable Gradient";
+      enable = lib.mkEnableOption "Enable Gradient Frontend";
       package = lib.mkPackageOption pkgs "gradient-frontend" { };
       ip = lib.mkOption {
         description = "The IP address on which Gradient listens.";
@@ -20,7 +20,7 @@ in {
 
       port = lib.mkOption {
         description = "The port on which Gradient listens.";
-        type = lib.types.int;
+        type = lib.types.port;
         default = 3001;
       };
     };

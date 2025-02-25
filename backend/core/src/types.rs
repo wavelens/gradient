@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -27,6 +27,12 @@ pub struct Cli {
     pub ip: String,
     #[arg(long, env = "GRADIENT_PORT", value_parser = port_in_range, default_value_t = 3000)]
     pub port: u16,
+    #[arg(
+        long,
+        env = "GRADIENT_SERVE_URL",
+        default_value = "http://127.0.0.1:8000"
+    )]
+    pub serve_url: String,
     #[arg(long, env = "GRADIENT_DATABASE_URL")]
     pub database_uri: String,
     #[arg(long, env = "GRADIENT_MAX_CONCURRENT_EVALUATIONS", value_parser = greater_than_zero::<usize>, default_value = "10")]
@@ -37,8 +43,12 @@ pub struct Cli {
     pub evaluation_timeout: i64,
     #[arg(long, env = "GRADIENT_STORE_PATH")]
     pub store_path: Option<String>,
+    #[arg(long, env = "GRADIENT_DISABLE_REGISTRATION", default_value = "false")]
+    pub disable_registration: bool,
     #[arg(long, env = "GRADIENT_OAUTH_ENABLED", default_value = "false")]
     pub oauth_enabled: bool,
+    #[arg(long, env = "GRADIENT_OAUTH_REQUIRED", default_value = "false")]
+    pub oauth_required: bool,
     #[arg(long, env = "GRADIENT_OAUTH_CLIENT_ID")]
     pub oauth_client_id: Option<String>,
     #[arg(long, env = "GRADIENT_OAUTH_CLIENT_SECRET")]
@@ -47,8 +57,10 @@ pub struct Cli {
     pub oauth_auth_url: Option<String>,
     #[arg(long, env = "GRADIENT_OAUTH_TOKEN_URL")]
     pub oauth_token_url: Option<String>,
-    #[arg(long, env = "GRADIENT_OAUTH_REDIRECT_URL")]
-    pub oauth_redirect_url: Option<String>,
+    #[arg(long, env = "GRADIENT_OAUTH_API_URL")]
+    pub oauth_api_url: Option<String>,
+    #[arg(long, env = "GRADIENT_OAUTH_SCOPES")]
+    pub oauth_scopes: Option<String>,
     #[arg(long, env = "GRADIENT_JWT_SECRET")]
     pub jwt_secret: String,
     #[arg(long, env = "GRADIENT_CRYPT_SECRET")]
@@ -63,6 +75,12 @@ pub struct Cli {
 pub struct ServerState {
     pub db: DatabaseConnection,
     pub cli: Cli,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BaseResponse<T> {
+    pub error: bool,
+    pub message: T,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

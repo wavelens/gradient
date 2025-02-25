@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+# SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
 #
 # SPDX-License-Identifier: AGPL-3.0-only
 
@@ -29,8 +29,12 @@ SECRET_KEY = 'django-insecure-8aa0=fofed&)*3(3v)b39@vm@zxsqss=#5asynz9ru4=zm6$e6
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
+CSRF_TRUSTED_ORIGINS = [
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:8000'
+]
 
 # Application definition
 
@@ -40,7 +44,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'dashboard'
+    'dashboard',
 ]
 
 MIDDLEWARE = [
@@ -130,3 +134,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Gradient Api
 
 GRADIENT_BASE_URL = 'http://127.0.0.1:3000/api'
+
+# Authentication
+
+LOGIN_REDIRECT_URL = '/'
+LOGIN_URL = '/account/login'

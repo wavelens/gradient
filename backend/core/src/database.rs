@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -66,5 +66,57 @@ pub async fn add_features(
 
             aserver_feature.insert(&state.db).await.unwrap();
         }
+    }
+}
+
+pub async fn get_organization_by_name(
+    state: Arc<ServerState>,
+    user_id: Uuid,
+    name: String,
+) -> Option<MOrganization> {
+    EOrganization::find()
+        .filter(
+            Condition::all()
+                .add(COrganization::CreatedBy.eq(user_id))
+                .add(COrganization::Name.eq(name)),
+        )
+        .one(&state.db)
+        .await
+        .unwrap()
+}
+
+pub async fn get_project_by_name(
+    state: Arc<ServerState>,
+    user_id: Uuid,
+    organization_name: String,
+    project_name: String,
+) -> Option<(MOrganization, MProject)> {
+    match get_organization_by_name(state.clone(), user_id, organization_name).await {
+        Some(o) => EProject::find()
+            .filter(CProject::Organization.eq(o.id))
+            .filter(CProject::Name.eq(project_name))
+            .one(&state.db)
+            .await
+            .unwrap()
+            .map(|p| (o, p)),
+        None => None,
+    }
+}
+
+pub async fn get_server_by_name(
+    state: Arc<ServerState>,
+    user_id: Uuid,
+    organization_name: String,
+    server_name: String,
+) -> Option<(MOrganization, MServer)> {
+    match get_organization_by_name(state.clone(), user_id, organization_name).await {
+        Some(o) => EServer::find()
+            .filter(CServer::Organization.eq(o.id))
+            .filter(CServer::Name.eq(server_name))
+            .one(&state.db)
+            .await
+            .unwrap()
+            .map(|s| (o, s)),
+        None => None,
     }
 }

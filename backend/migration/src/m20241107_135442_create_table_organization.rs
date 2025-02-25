@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -23,7 +23,17 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(Organization::Name).string().not_null())
+                    .col(
+                        ColumnDef::new(Organization::Name)
+                            .string()
+                            .not_null()
+                            .unique_key(),
+                    )
+                    .col(
+                        ColumnDef::new(Organization::DisplayName)
+                            .string()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Organization::Description).text().not_null())
                     .col(ColumnDef::new(Organization::PublicKey).string().not_null())
                     .col(
@@ -62,6 +72,7 @@ enum Organization {
     Table,
     Id,
     Name,
+    DisplayName,
     Description,
     PublicKey,
     PrivateKey,

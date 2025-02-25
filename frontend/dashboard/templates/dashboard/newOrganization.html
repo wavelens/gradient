@@ -1,5 +1,5 @@
 <!--
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  -->
@@ -11,12 +11,12 @@
     {% load i18n %}
 </head>
 
-{% block title %}{% trans 'new Organisation' %}{% endblock %}
+{% block title %}{% trans 'New Organization' %}{% endblock %}
 
 {% block content %}
 <div class="outer-form">
     <div class="form-container">
-        <h2 class="form-header-label">{% trans 'Neue Organisation' %}</h2>
+        <h2 class="form-header-label">{% trans 'New Organization' %}</h2>
         <form method="post">
             {% csrf_token %}
             {% for field in form %}
@@ -30,12 +30,12 @@
                         <label for="{{ field.id_for_label }}" {% if field.field.required %}class="required-label"{% endif %}>{% trans field.label %}</label>
                         {{ field }}
                         {% if field.errors %}
-                            <div class="error">{% trans field.errors %}</div>
+                            <div class="error">{{ field.errors }}</div>
                         {% endif %}
                     </div>
                 {% endif %}
             {% endfor %}
-            <button type="submit" class="submit-btn">{% trans 'Erstellen' %}</button>
+            <button type="submit" class="submit-btn">{% trans 'Create' %}</button>
         </form>
     </div>
 </div>

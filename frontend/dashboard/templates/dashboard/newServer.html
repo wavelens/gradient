@@ -1,5 +1,5 @@
 <!--
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  -->
@@ -11,12 +11,12 @@
     {% load i18n %}
 </head>
 
-{% block title %}{% trans 'new Server' %}{% endblock %}
+{% block title %}{% trans 'New Server' %}{% endblock %}
 
 {% block content %}
 <div class="outer-form">
     <div class="form-container">
-        <h2 class="form-header-label">{% trans 'Neuer Server' %}</h2>
+        <h2 class="form-header-label">{% trans 'New Server' %}</h2>
         <form method="post">
             {% csrf_token %}
             {% for field in form %}
@@ -35,7 +35,7 @@
                     </div>
                 {% endif %}
             {% endfor %}
-            <button type="submit" class="submit-btn">{% trans 'Erstellen' %}</button>
+            <button type="submit" class="submit-btn">{% trans 'Create' %}</button>
         </form>
     </div>
 </div>

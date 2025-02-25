@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -16,6 +16,8 @@ use strum_macros::EnumIter;
 pub enum ConfigKey {
     AuthToken,
     Server,
+    SelectedOrganization,
+    SelectedProject,
 }
 
 impl fmt::Display for ConfigKey {

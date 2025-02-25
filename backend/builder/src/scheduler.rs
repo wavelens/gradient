@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -149,7 +149,7 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
     }
 }
 
-pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MServer) {
+pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: MServer) {
     println!("Executing Build: {}", build.id);
 
     let organization = EOrganization::find_by_id(server.organization)
@@ -227,13 +227,15 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
         }
     }
 
-    match execute_build(vec![&build], &mut server_daemon).await {
+    match execute_build(&build, &mut server_daemon, Arc::clone(&state)).await {
         Ok(results) => {
-            let status = if results.values().all(|r| r.error_msg.is_empty()) {
+            let status = if results.1.values().all(|r| r.error_msg.is_empty()) {
                 BuildStatus::Completed
             } else {
                 BuildStatus::Failed
             };
+
+            build = results.0;
 
             update_build_status(Arc::clone(&state), build.clone(), status).await;
             check_evaluation_status(Arc::clone(&state), build.evaluation).await;
@@ -243,18 +245,6 @@ pub async fn schedule_build(state: Arc<ServerState>, build: MBuild, server: MSer
             eprintln!("Failed to execute build: {}", e);
             update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed)
                 .await;
-        }
-    };
-
-    let output_paths = match get_output_path(build.clone().derivation_path, &mut server_daemon)
-        .await
-    {
-        Ok(paths) => paths,
-        Err(e) => {
-            eprintln!("Failed to get output paths: {}", e);
-            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed)
-                .await;
-            return;
         }
     };
 
@@ -283,30 +273,23 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         let threshold_time =
             Utc::now().naive_utc() - chrono::Duration::seconds(state.cli.evaluation_timeout);
 
-        let mut projects = EProject::find()
+        let projects = EProject::find()
             .join(JoinType::InnerJoin, RProject::LastEvaluation.def())
             .filter(
                 Condition::all()
                     .add(CProject::LastCheckAt.lte(threshold_time))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Completed)),
+                    .add(
+                        Condition::any()
+                            .add(CEvaluation::Status.eq(EvaluationStatus::Completed))
+                            .add(CEvaluation::Status.eq(EvaluationStatus::Failed))
+                            .add(CProject::ForceEvaluation.eq(true))
+                            .add(CProject::LastEvaluation.is_null()),
+                    ),
             )
             .order_by_asc(CProject::LastCheckAt)
             .all(&state.db)
             .await
             .unwrap();
-
-        projects.extend(
-            EProject::find()
-                .filter(
-                    Condition::all()
-                        .add(CProject::LastCheckAt.lte(threshold_time))
-                        .add(CProject::LastEvaluation.is_null()),
-                )
-                .order_by_asc(CProject::LastCheckAt)
-                .all(&state.db)
-                .await
-                .unwrap(),
-        );
 
         let evaluations = stream::iter(projects.clone().into_iter())
             .filter_map(|p| {
@@ -408,6 +391,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
 
         active_project.last_check_at = Set(Utc::now().naive_utc());
         active_project.last_evaluation = Set(Some(new_evaluation.id));
+        active_project.force_evaluation = Set(false);
 
         active_project.update(&state.db).await.unwrap();
 
@@ -564,6 +548,12 @@ async fn update_build_status(
     build: MBuild,
     status: BuildStatus,
 ) -> MBuild {
+    if status == BuildStatus::Aborted
+        && (build.status == BuildStatus::Completed || build.status == BuildStatus::Failed)
+    {
+        return build;
+    }
+
     let mut active_build: ABuild = build.into_active_model();
     active_build.status = Set(status);
     active_build.updated_at = Set(Utc::now().naive_utc());
@@ -596,9 +586,18 @@ async fn update_build_status_recursivly(
         condition = condition.add(CBuild::Id.eq(dependency));
     }
 
+    let status_condition = if status == BuildStatus::Aborted {
+        Condition::any()
+            .add(CBuild::Status.eq(BuildStatus::Created))
+            .add(CBuild::Status.eq(BuildStatus::Queued))
+            .add(CBuild::Status.eq(BuildStatus::Building))
+    } else {
+        Condition::all().add(CBuild::Status.ne(status.clone()))
+    };
+
     let dependent_builds = EBuild::find()
         .filter(condition)
-        .filter(CBuild::Status.ne(status.clone()))
+        .filter(status_condition)
         .all(&state.db)
         .await
         .unwrap();
@@ -610,7 +609,7 @@ async fn update_build_status_recursivly(
     update_build_status(Arc::clone(&state), build, status.clone()).await
 }
 
-async fn update_evaluation_status(
+pub async fn update_evaluation_status(
     state: Arc<ServerState>,
     evaluation: MEvaluation,
     status: EvaluationStatus,
@@ -619,6 +618,30 @@ async fn update_evaluation_status(
     active_evaluation.status = Set(status);
 
     active_evaluation.update(&state.db).await.unwrap()
+}
+
+pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) {
+    if evaluation.status == EvaluationStatus::Completed {
+        return;
+    }
+
+    let builds = EBuild::find()
+        .filter(CBuild::Evaluation.eq(evaluation.id))
+        .filter(
+            Condition::any()
+                .add(CBuild::Status.eq(BuildStatus::Created))
+                .add(CBuild::Status.eq(BuildStatus::Queued))
+                .add(CBuild::Status.eq(BuildStatus::Building)),
+        )
+        .all(&state.db)
+        .await
+        .unwrap();
+
+    for build in builds {
+        update_build_status(Arc::clone(&state), build, BuildStatus::Aborted).await;
+    }
+
+    update_evaluation_status(state, evaluation, EvaluationStatus::Aborted).await;
 }
 
 async fn check_evaluation_status(state: Arc<ServerState>, evaluation_id: Uuid) {

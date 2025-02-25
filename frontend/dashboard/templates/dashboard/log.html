@@ -1,5 +1,5 @@
 <!--
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  -->
@@ -40,7 +40,7 @@
         <div class="innerbody-top d-flex">
             <div class="m-r-2rem">
                <div class="text-light m-b-05rem">{% trans 'Triggered via' %} {{ triggerArt }} {{ triggerTime }} {% trans 'ago' %}</div>
-               <div><a class="normal-hover" href=""><img src="../static/dashboard/images/{{ user.image }}" class="icon-center border-radius-5"><span>{{ user.name }} </span></a> <span class="material-symbols-outlined icon-center f-s-21px">{% trans 'commit' %}</span> {{ git }} <span class="branch">{{ branch }}</span></div>
+               <div><a class="normal-hover" href=""><img src="{{ request.user.image }}" class="icon-center border-radius-5"><span>{{ request.user.name }} </span></a> <span class="material-symbols-outlined icon-center f-s-21px">{% trans 'commit' %}</span> {{ git }} <span class="branch">{{ branch }}</span></div>
             </div>
             <div class="m-r-2rem">
                 <div class="text-light m-b-05rem">{% trans 'Status' %}</div>
@@ -77,14 +77,14 @@
             <div class="p-1rem">
                 <div class="code-container monospace">
                     {% for block in details_blocks %}
-                        <details class="details-item color-secondary">
-                            <summary>{{ block.summary }}</summary>
+                        <!-- <details class="details-item color-secondary"> -->
+                            <!-- <summary></summary> -->
                             <div class="details-content color-secondary">
                                 {% for line in block.details %}
-                                    <div class="line">{{ line }}</div>
+                                    <div class="line"></div>
                                 {% endfor %}
                             </div>
-                        </details>
+                        <!-- </details> -->
                     {% endfor %}
                 </div>
             </div>
@@ -92,16 +92,29 @@
     </div>
 </div>
 
+<script>
+    const token = "{{ request.user.session }}";
+    const url = "http://127.0.0.1:3000/api/evaluation/{{ evaluation_id }}/builds";
+</script>
+
+<script src="../../static/dashboard/js/log.js"></script>
+
 
 <script>
     let lineCounter = 1;
 
-    document.querySelectorAll('.details-item').forEach(details => {
-        const summary = details.querySelector('summary');
-        summary.setAttribute('data-line-number', lineCounter++);
+    // document.querySelectorAll('.details-item').forEach(details => {
+    //     // const summary = details.querySelector('summary');
+    //     // summary.setAttribute('data-line-number', lineCounter++);
 
-        const content = details.querySelector('.details-content');
-        content.querySelectorAll('.line').forEach(line => {
+    //     const content = details.querySelector('.details-content');
+    //     content.querySelectorAll('.line').forEach(line => {
+    //         line.setAttribute('data-line-number', lineCounter++);
+    //     });
+    // });
+
+    document.querySelectorAll('.details-content').forEach(details => {
+        details.querySelectorAll('.line').forEach(line => {
             line.setAttribute('data-line-number', lineCounter++);
         });
     });
