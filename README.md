@@ -4,18 +4,65 @@
 
 Gradient is a web-based Nix-based Continuous Integration (CI) system.
 
-This project is currently in the early stages of development. We are working on the initial implementation and documentation. If you are interested in contributing, please read the [Contributing Guidelines](CONTRIBUTING.md) for more information.
+> [!IMPORTANT]
+> This project is currently in the early stages of development. We are working on the initial implementation and documentation. If you are interested in contributing, please read the [Contributing Guidelines](CONTRIBUTING.md) for more information.
 
-## Features (planned)
+## Features
 
 ![Gradient](./docs/gradient.png)
 
-- **Modern UI**: has a clean and intuitive user interface.
+- **Modern UI**: has a clean and intuitive user interface. (planned)
 - **Organizations**: multiple organizations, which work independently from each other (e.g. different servers, user access).
 - **API**: provides a RESTful API with API-Key management for authentication.
 - **Streaming Logs**: real-time log streaming for builds.
-- **Rich Project Configuration**: check all branches, pull requests, and tags.
-- **OIDC**: support for OpenID Connect (OIDC) for user authentication.
+- **Rich Project Configuration**: check all branches, pull requests, and tags. (planned)
+- **OAuth2**: support for OAuth2 for user authentication.
+
+## Installation
+
+Extend your `flake.nix` with gradient module:
+
+```nix
+{
+  inputs.gradient.url = "github:wavelens/gradient";
+  # optional, not necessary for the module
+  # inputs.gradient.inputs.nixpkgs.follows = "nixpkgs";
+  # inputs.gradient.inputs.flake-utils.follows = "flake-utils";
+
+  outputs = { self, nixpkgs, gradient, ... }: {
+    # change `yourhostname` to your actual hostname
+    nixosConfigurations.yourhostname = nixpkgs.lib.nixosSystem {
+      # customize to your system
+      system = "x86_64-linux";
+      modules = [
+        ./configuration.nix
+        gradient.nixosModules.default
+      ];
+    };
+  };
+}
+```
+
+Configure Gradient in your `configuration.nix`:
+
+> [!NOTE]
+> All configuration options here: [Options Search](https://wavelens.github.io/gradient-search)
+
+```nix
+{
+  services.gradient = {
+    enable = true;
+    frontend.enable = true;
+    configurePostgres = true;
+    configureNginx = true;
+    domain = "gradient.wavelens.io";
+
+    # we recommend the use of sops-nix
+    jwtSecretFile = "/var/lib/gradient/jwt-secret";
+    cryptSecretFile = "/var/lib/gradient/crypt-secret";
+  };
+}
+```
 
 ## Contributing
 

@@ -76,6 +76,7 @@ pub struct MakeUserRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeLoginRequest {
-    pub loginname: String,
-    pub password: String,
+    pub loginname: Option<String>,
+    pub password: Option<String>,
+    pub oauth: Option<bool>,
 }

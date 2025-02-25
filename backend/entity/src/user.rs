@@ -17,7 +17,7 @@ pub struct Model {
     pub username: String,
     pub name: String,
     pub email: String,
-    pub password: String,
+    pub password: Option<String>,
     pub last_login_at: NaiveDateTime,
     pub created_at: NaiveDateTime,
 }

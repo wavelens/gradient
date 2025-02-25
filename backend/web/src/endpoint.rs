@@ -5,7 +5,7 @@
  */
 
 use async_stream::stream;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_streams::*;
@@ -29,7 +29,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use super::auth::{encode_jwt, generate_api_key, update_last_login};
+use super::auth::{
+    encode_jwt, generate_api_key, oauth_login_create, oauth_login_verify, update_last_login,
+};
 use super::requests::*;
 
 // TODO: sanitize inputs
@@ -1231,39 +1233,159 @@ pub async fn post_login(
     state: State<Arc<ServerState>>,
     Json(body): Json<MakeLoginRequest>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let user = match EUser::find()
-        .filter(
-            Condition::any()
-                .add(CUser::Username.eq(body.loginname.clone()))
-                .add(CUser::Email.eq(body.loginname.clone())),
-        )
-        .one(&state.db)
-        .await
-        .unwrap()
-    {
-        Some(u) => u,
-        None => {
+    if body.oauth.unwrap_or(false) {
+        if !state.cli.oauth_enabled {
             return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(BaseResponse {
+                    error: true,
+                    message: "OAuth login is disabled".to_string(),
+                }),
+            ));
+        }
+
+        let authorize_url = oauth_login_create(state).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: e.to_string(),
+                }),
+            )
+        })?;
+
+        let res = BaseResponse {
+            error: false,
+            message: authorize_url.to_string(),
+        };
+
+        Ok(Json(res))
+    } else if let (Some(loginname), Some(password)) =
+        (body.loginname.clone(), body.password.clone())
+    {
+        if state.cli.oauth_required {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Please login via OAuth".to_string(),
+                }),
+            ));
+        }
+
+        let user = match EUser::find()
+            .filter(
+                Condition::any()
+                    .add(CUser::Username.eq(loginname.clone()))
+                    .add(CUser::Email.eq(loginname.clone())),
+            )
+            .one(&state.db)
+            .await
+            .unwrap()
+        {
+            Some(u) => u,
+            None => {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Invalid credentials".to_string(),
+                    }),
+                ))
+            }
+        };
+
+        let user_password = match user.password.clone() {
+            Some(p) => p,
+            None => {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Please login via OAuth".to_string(),
+                    }),
+                ))
+            }
+        };
+
+        verify_password(password, &user_password).map_err(|_| {
+            (
                 StatusCode::UNAUTHORIZED,
                 Json(BaseResponse {
                     error: true,
                     message: "Invalid credentials".to_string(),
                 }),
+            )
+        })?;
+
+        let token = encode_jwt(state.clone(), user.id).map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Failed to generate token".to_string(),
+                }),
+            )
+        })?;
+
+        update_last_login(state, user).await.map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Failed to update user".to_string(),
+                }),
+            )
+        })?;
+
+        let res = BaseResponse {
+            error: false,
+            message: token,
+        };
+
+        Ok(Json(res))
+    } else {
+        Err((
+            StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: "Loginname and password are required".to_string(),
+            }),
+        ))
+    }
+}
+
+pub async fn get_oauth_login(
+    state: State<Arc<ServerState>>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let code = match query.get("code") {
+        Some(c) => c,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Invalid OAuth Code".to_string(),
+                }),
             ))
         }
     };
 
-    verify_password(&body.password, &user.password).map_err(|_| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(BaseResponse {
-                error: true,
-                message: "Invalid credentials".to_string(),
-            }),
-        )
-    })?;
+    let user: MUser = match oauth_login_verify(state.clone(), code.to_string()).await {
+        Ok(u) => u,
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: e.to_string(),
+                }),
+            ))
+        }
+    };
 
-    let token = encode_jwt(state.clone(), user.id).map_err(|_| {
+    let token = encode_jwt(state, user.id).map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(BaseResponse {
@@ -1272,8 +1394,6 @@ pub async fn post_login(
             }),
         )
     })?;
-
-    update_last_login(state, user.id).await;
 
     let res = BaseResponse {
         error: false,
@@ -1299,6 +1419,16 @@ pub async fn post_register(
     state: State<Arc<ServerState>>,
     Json(body): Json<MakeUserRequest>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    if state.cli.oauth_required || state.cli.disable_registration {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: "Registration is disabled".to_string(),
+            }),
+        ));
+    }
+
     if !EmailAddress::is_valid(body.email.clone().as_str()) {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -1334,7 +1464,7 @@ pub async fn post_register(
         username: Set(body.username.clone()),
         name: Set(body.name.clone()),
         email: Set(body.email.clone()),
-        password: Set(generate_hash(body.password.clone())),
+        password: Set(Some(generate_hash(body.password.clone()))),
         last_login_at: Set(*NULL_TIME),
         created_at: Set(Utc::now().naive_utc()),
     };
