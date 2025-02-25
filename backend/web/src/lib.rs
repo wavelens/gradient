@@ -1,12 +1,11 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub mod auth;
-mod endpoint;
-pub mod requests;
+pub mod authorization;
+mod endpoints;
 
 use axum::body::Body;
 use axum::routing::{get, post};
@@ -21,6 +20,7 @@ use tower_http::trace::TraceLayer;
 use tracing::Span;
 
 use core::types::ServerState;
+use endpoints::*;
 use std::sync::Arc;
 
 pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
@@ -57,66 +57,77 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         );
 
     let api = Router::new()
+        .route("/orgs", get(orgs::get).post(orgs::post))
         .route(
-            "/organization",
-            get(endpoint::get_organizations).post(endpoint::post_organizations),
+            "/orgs/{organization}",
+            get(orgs::get_organization).delete(orgs::delete_organization),
         )
         .route(
-            "/organization/{organization}",
-            get(endpoint::get_organization).post(endpoint::post_organization),
+            "/orgs/{organization}/ssh",
+            get(orgs::get_organization_ssh).post(orgs::post_organization_ssh),
         )
         .route(
-            "/organization/{organization}/ssh",
-            get(endpoint::get_organization_ssh).post(endpoint::post_organization_ssh),
+            "/projects/{organization}",
+            get(projects::get).post(projects::post),
         )
         .route(
-            "/organization/{organization}/projects",
-            get(endpoint::get_organization_projects),
+            "/projects/{organization}/{project}",
+            get(projects::get_project).delete(projects::delete_project),
         )
         .route(
-            "/project/{project}",
-            get(endpoint::get_project).post(endpoint::post_project),
+            "/projects/{organization}/{project}/check-repository",
+            post(projects::post_project_check_repository),
         )
         .route(
-            "/project/{project}/check-repository",
-            post(endpoint::post_project_check_repository),
+            "/projects/{organization}/{project}/evaluate",
+            post(projects::post_project_evaluate),
         )
         .route(
-            "/evaluation/{evaluation}",
-            get(endpoint::get_evaluation).post(endpoint::post_evaluation),
+            "/evals/{evaluation}",
+            get(evals::get_evaluation).post(evals::post_evaluation),
         )
         .route(
-            "/evaluation/{evaluation}/builds",
-            get(endpoint::get_builds).post(endpoint::connect_evaluation),
+            "/evals/{evaluation}/builds",
+            get(evals::get_evaluation_builds).post(evals::connect_evaluation_builds),
         )
         .route(
-            "/build/{build}",
-            get(endpoint::get_build).post(endpoint::connect_build),
+            "/builds/{build}",
+            get(builds::get_build).post(builds::connect_build),
+        )
+        .route("/user", get(user::get).delete(user::delete))
+        .route(
+            "/user/keys",
+            post(user::post_keys).delete(user::delete_keys),
         )
         .route(
-            "/user/settings/{user}",
-            get(endpoint::get_user).post(endpoint::post_user),
+            "/user/settings",
+            get(user::get_settings).post(user::post_settings),
         )
-        .route("/user/api", post(endpoint::post_api_key))
-        .route("/user/info", get(endpoint::get_user_info))
+        .route("/servers", get(servers::get).post(servers::post))
         .route(
-            "/server",
-            get(endpoint::get_servers).post(endpoint::post_servers),
+            "/servers/{organization}/{server}",
+            get(servers::get_server).delete(servers::delete_server),
         )
-        .route("/server/{server}/check", post(endpoint::post_server_check))
+        .route(
+            "/servers/{organization}/{server}/check-connection",
+            post(servers::post_server_check_connection),
+        )
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
-            auth::authorize,
+            authorization::authorize,
         ))
-        .route("/auth/login", post(endpoint::post_login))
-        .route("/auth/logout", post(endpoint::post_logout))
-        .route("/auth/register", post(endpoint::post_register))
-        .route("/auth/oauth2/authorized", get(endpoint::get_oauth_login))
-        .route("/health", get(endpoint::get_health));
+        .route("/auth/basic/login", post(auth::post_basic_login))
+        .route("/auth/basic/register", post(auth::post_basic_register))
+        .route(
+            "/auth/oauth/authorize",
+            get(auth::get_oauth_authorize).post(auth::post_oauth_authorize),
+        )
+        .route("/auth/logout", post(auth::post_logout))
+        .route("/health", get(get_health));
 
     let app = Router::new()
         .nest("/api/v1", api)
-        .fallback(endpoint::handle_404)
+        .fallback(handle_404)
         .layer(cors)
         .layer(trace)
         .with_state(state);

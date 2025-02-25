@@ -1,7 +1,7 @@
-# SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+# SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
 #
 # SPDX-License-Identifier: AGPL-3.0-only
-#
+
 auth_enabled: false
 
 server:
@@ -23,7 +23,7 @@ ingester:
 
 schema_config:
   configs:
-    - from: 2024-01-01
+    - from: 2025-01-01
       store: tsdb
       object_store: filesystem
       schema: v13

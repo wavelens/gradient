@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -55,7 +55,9 @@ impl std::convert::TryFrom<&str> for Architecture {
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
+    #[sea_orm(indexed)]
     pub name: String,
+    pub display_name: String,
     pub organization: Uuid,
     pub host: String,
     pub port: i32,

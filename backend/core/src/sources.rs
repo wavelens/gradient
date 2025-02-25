@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -49,6 +49,10 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
     }
 
     let remote_hash = hex_to_vec(output[0]).unwrap();
+
+    if project.force_evaluation {
+        return (true, remote_hash);
+    }
 
     if let Some(last_evaluation) = project.last_evaluation {
         let evaluation = EEvaluation::find_by_id(last_evaluation)
@@ -135,6 +139,7 @@ mod tests {
         let organization = MOrganization {
             id: uuid::Uuid::nil(),
             name: "test".to_string(),
+            display_name: "test".to_string(),
             description: "test".to_string(),
             public_key: public_key_openssh,
             private_key: encrypted_private_key,

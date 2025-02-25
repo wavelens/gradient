@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -20,6 +20,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Project::Id).uuid().not_null().primary_key())
                     .col(ColumnDef::new(Project::Organization).uuid().not_null())
                     .col(ColumnDef::new(Project::Name).string().not_null())
+                    .col(ColumnDef::new(Project::DisplayName).string().not_null())
                     .col(ColumnDef::new(Project::Description).text().not_null())
                     .col(ColumnDef::new(Project::Repository).string().not_null())
                     .col(
@@ -29,6 +30,11 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Project::LastEvaluation).uuid())
                     .col(ColumnDef::new(Project::LastCheckAt).date_time().not_null())
+                    .col(
+                        ColumnDef::new(Project::ForceEvaluation)
+                            .boolean()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Project::CreatedBy).uuid().not_null())
                     .col(ColumnDef::new(Project::CreatedAt).date_time().not_null())
                     .foreign_key(
@@ -63,11 +69,13 @@ enum Project {
     Id,
     Organization,
     Name,
+    DisplayName,
     Description,
     Repository,
     EvaluationWildcard,
     LastEvaluation,
     LastCheckAt,
+    ForceEvaluation,
     CreatedBy,
     CreatedAt,
 }

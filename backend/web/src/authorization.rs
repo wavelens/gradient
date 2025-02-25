@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -26,8 +26,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use url::Url;
 use uuid::Uuid;
-
-use super::requests::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct OAuthUser {
@@ -202,6 +200,7 @@ pub fn oauth_login_create(state: State<Arc<ServerState>>) -> Result<Url, String>
         return Err("OAuth is not enabled".to_string());
     }
 
+    // TODO: Cleaner way to get OAuth client
     let client = if let (
         Some(oauth_client_id),
         Some(oauth_client_secret),
@@ -219,7 +218,7 @@ pub fn oauth_login_create(state: State<Arc<ServerState>>) -> Result<Url, String>
             .set_token_uri(TokenUrl::new(oauth_token_url).unwrap())
             .set_redirect_uri(
                 RedirectUrl::new(format!(
-                    "{}/api/v1/auth/oauth2/authorized",
+                    "{}/api/v1/auth/oauth/authorize",
                     state.cli.serve_url.clone()
                 ))
                 .unwrap(),
@@ -279,7 +278,7 @@ pub async fn oauth_login_verify(
             .set_token_uri(TokenUrl::new(oauth_token_url).unwrap())
             .set_redirect_uri(
                 RedirectUrl::new(format!(
-                    "{}/api/v1/auth/oauth2/authorized",
+                    "{}/api/v1/auth/oauth/authorize",
                     state.cli.serve_url.clone()
                 ))
                 .unwrap(),

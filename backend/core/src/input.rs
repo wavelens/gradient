@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -129,6 +129,26 @@ pub fn valid_evaluation_wildcard(s: &str) -> bool {
     parse_evaluation_wildcard(s).is_ok()
 }
 
+pub fn check_index_name(s: &str) -> Result<(), String> {
+    if s.is_empty() {
+        return Err("Name cannot be empty".to_string());
+    }
+
+    if s != s.to_lowercase() {
+        return Err("Name must be lowercase".to_string());
+    }
+
+    if s.contains(|c: char| !c.is_ascii_alphanumeric() && c != '-') {
+        return Err("Name can only contain letters, numbers, and dashes".to_string());
+    }
+
+    if s.starts_with('-') || s.ends_with('-') {
+        return Err("Name can only start and end with letters or numbers".to_string());
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,5 +260,34 @@ mod tests {
             url,
             "git+https://github.com/Wavelens/Gradient.git?rev=11c2f8505c234697ccabbc96e5b8a76daf0f31d3"
         );
+    }
+
+    #[test]
+    fn test_check_index_name() {
+        check_index_name("test").unwrap();
+        check_index_name("te-st").unwrap();
+        check_index_name("test1").unwrap();
+        check_index_name("te-9st").unwrap();
+
+        let name = check_index_name("Test").unwrap_err();
+        assert_eq!(name, "Name must be lowercase");
+
+        let name = check_index_name("test-").unwrap_err();
+        assert_eq!(name, "Name can only start and end with letters or numbers");
+
+        let name = check_index_name("test_").unwrap_err();
+        assert_eq!(name, "Name can only contain letters, numbers, and dashes");
+
+        let name = check_index_name("test ").unwrap_err();
+        assert_eq!(name, "Name can only contain letters, numbers, and dashes");
+
+        let name = check_index_name("test name").unwrap_err();
+        assert_eq!(name, "Name can only contain letters, numbers, and dashes");
+
+        let name = check_index_name("test?name").unwrap_err();
+        assert_eq!(name, "Name can only contain letters, numbers, and dashes");
+
+        let name = check_index_name("").unwrap_err();
+        assert_eq!(name, "Name cannot be empty");
     }
 }

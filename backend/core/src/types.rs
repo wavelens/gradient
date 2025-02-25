@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -75,6 +75,12 @@ pub struct Cli {
 pub struct ServerState {
     pub db: DatabaseConnection,
     pub cli: Cli,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BaseResponse<T> {
+    pub error: bool,
+    pub message: T,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

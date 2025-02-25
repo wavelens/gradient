@@ -20,7 +20,7 @@ Gradient is a web-based Nix-based Continuous Integration (CI) system.
 
 ## Installation
 
-Extend your `flake.nix` with gradient module:
+Extend your `flake.nix` with Gradient module:
 
 ```nix
 {
@@ -63,6 +63,55 @@ Configure Gradient in your `configuration.nix`:
   };
 }
 ```
+
+## Usage
+Gradient can be used via the web interface, API, and CLI.
+
+### API
+
+The API is a RESTful API that can be used to interact with Gradient programmatically.
+OpenAPI documentation is available at `/docs/gradient-api.yaml`. [API Specification](./docs/gradient-api.yaml)
+
+### Web Interface
+
+> [!NOTE]
+> The web interface is currently in development.
+
+The web interface is the primary way to interact with Gradient. It also just uses the API.
+
+### CLI
+
+The CLI is also based on the API and can be used to interact with Gradient from the command line.
+
+Install the CLI:
+
+```nix
+{
+  inputs.gradient.url = "github:wavelens/gradient";
+  # optional, not necessary for the module
+  # inputs.gradient.inputs.nixpkgs.follows = "nixpkgs";
+  # inputs.gradient.inputs.flake-utils.follows = "flake-utils";
+
+  outputs = { self, nixpkgs, gradient, ... }: {
+    # change `yourhostname` to your actual hostname
+    nixosConfigurations.yourhostname = nixpkgs.lib.nixosSystem {
+      # customize to your system
+      system = "x86_64-linux";
+      modules = [
+        ./configuration.nix
+        gradient.packages.${system}.gradient-cli
+      ];
+    };
+  };
+}
+```
+
+or
+
+```sh
+nix run github:wavelens/gradient#gradient-cli
+```
+
 
 ## Contributing
 

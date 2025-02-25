@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -273,30 +273,23 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         let threshold_time =
             Utc::now().naive_utc() - chrono::Duration::seconds(state.cli.evaluation_timeout);
 
-        let mut projects = EProject::find()
+        let projects = EProject::find()
             .join(JoinType::InnerJoin, RProject::LastEvaluation.def())
             .filter(
                 Condition::all()
                     .add(CProject::LastCheckAt.lte(threshold_time))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Completed)),
+                    .add(
+                        Condition::any()
+                            .add(CEvaluation::Status.eq(EvaluationStatus::Completed))
+                            .add(CEvaluation::Status.eq(EvaluationStatus::Failed))
+                            .add(CProject::ForceEvaluation.eq(true))
+                            .add(CProject::LastEvaluation.is_null()),
+                    ),
             )
             .order_by_asc(CProject::LastCheckAt)
             .all(&state.db)
             .await
             .unwrap();
-
-        projects.extend(
-            EProject::find()
-                .filter(
-                    Condition::all()
-                        .add(CProject::LastCheckAt.lte(threshold_time))
-                        .add(CProject::LastEvaluation.is_null()),
-                )
-                .order_by_asc(CProject::LastCheckAt)
-                .all(&state.db)
-                .await
-                .unwrap(),
-        );
 
         let evaluations = stream::iter(projects.clone().into_iter())
             .filter_map(|p| {
@@ -398,6 +391,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
 
         active_project.last_check_at = Set(Utc::now().naive_utc());
         active_project.last_evaluation = Set(Some(new_evaluation.id));
+        active_project.force_evaluation = Set(false);
 
         active_project.update(&state.db).await.unwrap();
 

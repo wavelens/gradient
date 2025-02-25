@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Wavelens UG <info@wavelens.io>
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
  * SPDX-License-Identifier: AGPL-3.0-only
  */
@@ -15,6 +15,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
+
   outputs = { self, nixpkgs, microvm, flake-utils, ... }@inputs: flake-utils.lib.eachDefaultSystem (system: let
     pkgs = import nixpkgs {
       inherit system;
@@ -90,7 +91,6 @@
         postgresql_17
         pgadmin4-desktopmode
         nixVersions.latest
-        protobuf
       ];
 
       nativeBuildInputs = [
@@ -98,9 +98,6 @@
       ];
 
       EXTRA_CCFLAGS = "-I/usr/include";
-      PROTOC = "${protobuf}/bin/protoc";
-      PROTO_ROOT = "/home/dennis/repos/tvix-depot/";
-      TVIX_BUILD_SANDBOX_SHELL = "/bin/sh";
       RUST_BACKTRACE = 1;
 
       GRADIENT_DEBUG = "true";
