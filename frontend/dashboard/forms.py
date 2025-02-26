@@ -125,7 +125,7 @@ class NewOrganizationForm(forms.Form):
     # )
 
 class NewProjectForm(forms.Form):
-    organization_id = forms.ChoiceField(
+    organization = forms.ChoiceField(
         label='Organization',
         required=True,
         widget=forms.Select
@@ -161,7 +161,7 @@ class NewProjectForm(forms.Form):
     )
 
 class NewServerForm(forms.Form):
-    organization_id = forms.CharField(
+    organization = forms.CharField(
         label='Organization',
         required=True,
         widget=forms.TextInput(attrs={

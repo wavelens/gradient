@@ -901,7 +901,7 @@ components:
         username:
           type: string
           examples: [builduser]
-        architecture:
+        architectures:
           type: list
           examples: [[x86_64-linux]]
         features:

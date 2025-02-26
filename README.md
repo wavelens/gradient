@@ -29,7 +29,12 @@ Extend your `flake.nix` with Gradient module:
   # inputs.gradient.inputs.nixpkgs.follows = "nixpkgs";
   # inputs.gradient.inputs.flake-utils.follows = "flake-utils";
 
-  outputs = { self, nixpkgs, gradient, ... }: {
+  outputs = { self, nixpkgs, gradient, ... }: let
+    pkgs = import nixpkgs {
+      inherit system;
+      overlays = [ gradient.overlays.default ];
+    };
+  in {
     # change `yourhostname` to your actual hostname
     nixosConfigurations.yourhostname = nixpkgs.lib.nixosSystem {
       # customize to your system
@@ -95,7 +100,8 @@ Install the CLI:
   outputs = { self, nixpkgs, gradient, ... }: let
     pkgs = import nixpkgs {
       inherit system;
-      overlays = [ gradient.overlays.default ];
+      overlays = [ gradient.overlays.gradient-cli ];
+      # or use the default overlay
     };
   in {
     # change `yourhostname` to your actual hostname

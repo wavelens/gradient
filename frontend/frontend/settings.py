@@ -14,6 +14,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -23,17 +24,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-8aa0=fofed&)*3(3v)b39@vm@zxsqss=#5asynz9ru4=zm6$e6'
+SECRET_KEY = os.environ.get('GRADIENT_CRYP_SECRET', 'django-insecure-8aa0=fofed&)*3(3v)b39@vm@zxsqss=#5asynz9ru4=zm6$e6')
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('GRADIENT_DEBUG', 'true') == 'true'
 
+# TODO: Is this necessary?
 ALLOWED_HOSTS = ['*']
 
 CSRF_TRUSTED_ORIGINS = [
-    'http://127.0.0.1:3000',
-    'http://127.0.0.1:8000'
+    os.environ.get('GRADIENT_SERVE_URL', 'http://127.0.0.1:8000')
 ]
 
 # Application definition
@@ -82,12 +81,7 @@ WSGI_APPLICATION = 'frontend.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}
+DATABASES = {}
 
 
 # Password validation
@@ -133,7 +127,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Gradient Api
 
-GRADIENT_BASE_URL = 'http://127.0.0.1:3000/api'
+GRADIENT_BASE_URL = f"{os.environ.get('GRADIENT_API_URL', 'http://127.0.0.1:3000')}/api/v1"
+GRADIENT_DISABLE_REGISTRATION = os.environ.get('GRADIENT_DISABLE_REGISTRATION', 'false') == 'true'
+GRADIENT_OAUTH_REQUIRED = os.environ.get('GRADIENT_OAUTH_REQUIRED', 'false') == 'true'
 
 # Authentication
 

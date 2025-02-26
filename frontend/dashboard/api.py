@@ -7,7 +7,7 @@ import requests
 import json
 from .auth import User
 
-def get_client(user, endpoint, body=None, post=True):
+def get_client(user, endpoint, request_type, body=None):
     headers = {'Content-Type': 'application/json'}
 
     if not (isinstance(user, type(None)) or isinstance(user.session, type(None))):
@@ -15,91 +15,130 @@ def get_client(user, endpoint, body=None, post=True):
 
     url = f"{settings.GRADIENT_BASE_URL}/{endpoint}"
 
-    if post:
-        try:
-            response = requests.post(url, data=json.dumps(body), headers=headers)
-        except:
-            return None
+    try:
+        data = None if isinstance(body, type(None)) else json.dumps(body)
+        if request_type == "GET":
+            response = requests.get(url, data=data, headers=headers)
+        elif request_type == "POST":
+            response = requests.post(url, data=data, headers=headers)
+        elif request_type == "DELETE":
+            response = requests.delete(url, data=data, headers=headers)
+    except:
+        return None
 
-        if settings.DEBUG:
-            print(f'request to {url} resulted in {response}')
+    if settings.DEBUG:
+        print(f'request to {url} resulted in {response}')
 
-        if response.status_code == 200:
-            return response.json()
-        else:
-            return None
+    if response.status_code == 200:
+        return response.json()
     else:
-        try:
-            response = requests.get(url, headers=headers)
-        except:
-            return None
+        return None
 
-        if response.status_code == 200:
-            return response.json()
-        else:
-            return None
 
 def health(request):
-    return get_client(request.user, "health", post=False)
+    return get_client(request.user, "health", "GET")
 
-def register(username, name, email, password):
-    return get_client(None, "user/register", body={'username': username, 'name': name, 'email': email, 'password': password})
 
-def login(loginname, password):
-    return get_client(None, "user/login", body={'loginname': loginname, 'password': password})
+def post_auth_basic_register(username, name, email, password):
+    return get_client(None, "auth/basic/register", "POST", body={'username': username, 'name': name, 'email': email, 'password': password})
 
-def logout(request):
-    return get_client(request.user, "user/logout", post=True)
+def post_auth_basic_login(loginname, password):
+    return get_client(None, "auth/basic/login", "POST", body={'loginname': loginname, 'password': password})
 
-def get_organizations(request):
-    return get_client(request.user, f"organization", post=False)
+def post_auth_oauth_authorize(code):
+    return get_client(None, f"auth/oauth/authorize?code={code}", "POST")
 
-def post_organizations(request, name, description, use_nix_store):
-    return get_client(request.user, "organization", body={'name': name, 'description': description, 'use_nix_store': use_nix_store})
+def get_auth_oauth_authorize():
+    return get_client(None, "auth/oauth/authorize", "GET")
 
-def get_organization(request, organization_id):
-    return get_client(request.user, f"organization/{organization_id}", post=False)
+def post_auth_logout(request):
+    return get_client(request.user, "auth/logout", "POST")
 
-def post_organization(request, organization_id, name, description, repository, evaluation_wildcard):
-    return get_client(request.user, f"organization/{organization_id}", body={'name': name, 'description': description, 'repository': repository, 'evaluation_wildcard': evaluation_wildcard})
 
-def get_user(request, uid):
-    return get_client(request.user, f"user/settings/{uid}", post=False)
+def get_orgs(request):
+    return get_client(request.user, "orgs", "GET")
 
-def get_user_info(session):
+def post_orgs(request):
+    return get_client(request.user, "orgs", "POST", body={'name': name, 'display_name': display_name, 'description': description})
+
+def get_orgs_organization(request, organization):
+    return get_client(request.user, f"organization/{organization}", "GET")
+
+def delete_orgs_organization(request, organization):
+    return get_client(request.user, f"organization/{organization}", "DELETE")
+
+def get_orgs_organization_ssh(request, organization):
+    return get_client(request.user, f"organization/{organization}/ssh", "GET")
+
+def post_orgs_organization_ssh(request, organization, public_key):
+    return get_client(request.user, f"organization/{organization}/ssh", "POST")
+
+
+def get_projects(request, organization):
+    return get_client(request.user, f"projects/{organization}", "GET")
+
+def post_projects(request, organization, name, display_name, description, repository, evaluation_wildcard):
+    return get_client(request.user, f"projects/{organization}", "POST", body={'name': name, 'display_name': display_name, 'description': description, 'repository': repository, 'evaluation_wildcard': evaluation_wildcard})
+
+def get_projects_project(request, organization, project):
+    return get_client(request.user, f"projects/{organization}/{project}", "GET")
+
+def delete_projects_project(request, organization, project):
+    return get_client(request.user, f"projects/{organization}/{project}", "DELETE")
+
+def post_projects_project_check_repository(request, organization, project):
+    return get_client(request.user, f"projects/{organization}/{project}/check-repository", "POST")
+
+def post_projects_project_evaluations(request, organization, project):
+    return get_client(request.user, f"projects/{organization}/{project}/evaluations", "POST")
+
+
+def get_evals_evaluation(request, evaluation):
+    return get_client(request.user, f"evaluations/{evaluation}", "GET")
+
+def post_evals_evaluation(request, evaluation):
+    return get_client(request.user, f"evaluations/{evaluation}", "POST")
+
+def get_evals_evaluation_builds(request, evaluation):
+    return get_client(request.user, f"evaluations/{evaluation}/builds", "GET")
+
+def connect_evals_evaluation_builds(request, evaluation):
+    return get_client(request.user, f"evaluations/{evaluation}/builds", "POST")
+
+
+def get_builds_build(request, build):
+    return get_client(request.user, f"builds/{build}", "GET")
+
+def connect_builds_build(request, build):
+    return get_client(request.user, f"builds/{build}", "POST")
+
+
+def get_user(session):
     user = User(session=session)
-    return get_client(user, f"user/info", post=False)
+    return get_client(user, "user", "GET")
 
-def get_projects(request, organization_id):
-    return get_client(request.user, f"organization/{organization_id}/projects", post=False)
+def delete_user(request):
+    return get_client(request.user, "user", "DELETE")
 
-def get_project(request, project_id):
-    return get_client(request.user, f"project/{project_id}", post=False)
+def post_user_keys(request, name):
+    return get_client(request.user, "user/keys", "POST", body={'name': name})
 
-def post_server(request, organization_id, name, host, port, username, architectures, features):
-    return get_client(request.user, "server", body={ 'organization_id': organization_id, 'name': name, 'host': host, 'port': port, 'username': username, 'architectures': architectures, 'features': features})
+def delete_user_keys(request, name):
+    return get_client(request.user, f"user/keys/{name}", "DELETE")
 
-def get_servers(request):
-    return get_client(request.user, "server", post=False)
 
-def post_build(request):
-    return get_client(request.user, "build")
+def get_servers(request, organization):
+    return get_client(request.user, f"servers/{organization}", "GET")
 
-def get_builds(request, evaluation_id):
-    return get_client(request.user, f"evaluation/{evaluation_id}/builds", post=False)
+def post_servers(request, organization, name, display_name, host, port, username, architectures, features):
+    return get_client(request.user, f"servers/{organization}", "POST", body={'name': name, 'display_name': display_name, 'host': host, 'port': port, 'username': username, 'architectures': architectures, 'features': features})
 
-def get_build(request, build_id):
-    return get_client(request.user, f"build/{build_id}", post=False)
+def get_servers_server(request, organization, server):
+    return get_client(request.user, f"servers/{organization}/{server}", "GET")
 
-def post_api_key(request, name):
-    return get_client(request.user, "user/api", body={'name': name})
+def delete_servers_server(request, organization, server):
+    return get_client(request.user, f"servers/{organization}/{server}", "DELETE")
 
-def post_project_check_repository(request, project_id):
-    return get_client(request.user, f"project/{project_id}/check-repository", post=True)
-
-def post_organization_ssh(request, organization_id):
-    return get_client(request.user, f"organization/{organization_id}/ssh", post=True)
-
-def post_server_check(request, server_id):
-    return get_client(request.user, f"server/{server_id}/check", post=True)
+def post_servers_server_check_connection(request, organization, server):
+    return get_client(request.user, f"servers/{organization}/{server}/check-connection", "POST")
 

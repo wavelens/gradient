@@ -43,7 +43,7 @@ in {
         default = "gradient";
       };
 
-      ip = lib.mkOption {
+      listenAddr = lib.mkOption {
         description = "The IP address on which Gradient listens.";
         type = lib.types.str;
         default = "127.0.0.1";
@@ -170,7 +170,8 @@ in {
 
       environment = {
         XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
-        GRADIENT_IP = cfg.ip;
+        GRADIENT_DEBUG = "false";
+        GRADIENT_IP = cfg.listenAddr;
         GRADIENT_PORT = toString cfg.port;
         GRADIENT_SERVE_URL = "https://${cfg.domain}";
         GRADIENT_DATABASE_URL = cfg.databaseUrl;

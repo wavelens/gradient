@@ -12,16 +12,22 @@ in {
     services.gradient.frontend = {
       enable = lib.mkEnableOption "Enable Gradient Frontend";
       package = lib.mkPackageOption pkgs "gradient-frontend" { };
-      ip = lib.mkOption {
+      listenAddr = lib.mkOption {
         description = "The IP address on which Gradient listens.";
         type = lib.types.str;
-        default = "127.0.0.1";
+        default = gradientCfg.listenAddr;
       };
 
       port = lib.mkOption {
         description = "The port on which Gradient listens.";
         type = lib.types.port;
         default = 3001;
+      };
+
+      apiUrl = lib.mkOption {
+        description = "The URL of the Gradient API.";
+        type = lib.types.str;
+        default = "http://127.0.0.1:${gradientCfg.port}";
       };
     };
   };
@@ -53,6 +59,19 @@ in {
         RestrictNamespaces = true;
         RestrictRealtime = true;
         RestrictSUIDSGID = true;
+        LoadCredential = [
+          "GRADIENT_CRYPT_SECRET:${gradientCfg.cryptSecretFile}"
+        ];
+      };
+
+      environment = {
+        GRADIENT_DEBUG = "false";
+        GRADIENT_FRONTEND_IP = cfg.listenAddr;
+        GRADIENT_FRONTEND_PORT = toString cfg.port;
+        GRADIENT_API_URL = cfg.apiUrl;
+        GRADIENT_SERVE_URL = "https://${gradientCfg.domain}";
+      } // lib.optionalAttrs gradientCfg.oauth.enable {
+        GRADIENT_OAUTH_REQUIRED = toString gradientCfg.settings.disableRegistration;
       };
     };
   };

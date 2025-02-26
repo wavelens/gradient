@@ -102,7 +102,7 @@ class LoginForm(forms.Form):
         password = self.cleaned_data.get('password')
 
         if username is not None and password:
-            user_session = api.login(username, password)
+            user_session = api.post_auth_basic_login(username, password)
             if user_session is None or user_session['error']:
                 # TODO: fix reporting
                 # user_login_failed.send(sender=__name__, credentials=_clean_credentials(username, password))

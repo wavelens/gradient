@@ -16,7 +16,7 @@ from django.contrib.auth.models import User
 @login_required
 def home(request):
     details_blocks = []
-    all_orgs = api.get_organizations(request)
+    all_orgs = api.get_orgs(request)
 
     if isinstance(all_orgs, type(None)) or all_orgs['error']:
         return HttpResponse(status=500)
@@ -24,7 +24,7 @@ def home(request):
     all_orgs = all_orgs['message']
 
     for org in all_orgs:
-        org_details = api.get_organization(request, org['id'])
+        org_details = api.get_orgs_organization(request, org['name'])
 
         if isinstance(org_details, type(None)) or org_details['error']:
             return HttpResponse(status=500)
@@ -54,16 +54,16 @@ def home(request):
         })
 
     context = {
-        'org_id': "TEMP",
+        'org': "TEMP",
         'details_blocks': details_blocks
     }
     return render(request, "dashboard/home.html", context)
 
 @login_required
-def workflow(request, org_id):
+def workflow(request, org):
     details_blocks = []
 
-    all_projects = api.get_projects(request, org_id)
+    all_projects = api.get_projects(request, org)
 
     if isinstance(all_projects, type(None)) or all_projects['error']:
         return HttpResponse(status=500)
@@ -71,7 +71,7 @@ def workflow(request, org_id):
     all_projects = all_projects['message']
 
     for project in all_projects:
-        project_details = api.get_project(request, project['id'])
+        project_details = api.get_projects_project(request, org, project['name'])
 
         if isinstance(project_details, type(None)) or project_details['error']:
             return HttpResponse(status=500)
@@ -101,20 +101,20 @@ def workflow(request, org_id):
         })
 
     context = {
-        'org_id': org_id,
+        'org_id': org,
         'details_blocks': details_blocks
     }
     return render(request, "dashboard/overview.html", context)
 
 @login_required
-def log(request, org_id, evaluation_id=None):
+def log(request, org, evaluation_id=None):
     details_blocks = [{
         'summary': "Loading Log...",
         'details': [ "Loading Log..." ]
     }]
 
     context = {
-        'org_id': org_id,
+        'org_id': org,
         'evaluation_id': evaluation_id,
         'details_blocks': details_blocks,
         'built_version' : 'Vbuild (x86_64-linux)',
@@ -133,7 +133,7 @@ def log(request, org_id, evaluation_id=None):
     return render(request, "dashboard/log.html", context)
 
 @login_required
-def download(request, org_id, evaluation_id=None):
+def download(request, org, evaluation_id=None):
     files = [
     {
         'file': "File 1",
@@ -160,7 +160,7 @@ def download(request, org_id, evaluation_id=None):
     return render(request, "dashboard/download.html", context)
 
 @login_required
-def model(request, org_id, evaluation_id=None):
+def model(request, org, evaluation_id=None):
     models = [
     {
         'name': "Model 1",
@@ -181,7 +181,8 @@ def new_organization(request):
     if request.method == 'POST':
         form = NewOrganizationForm(request.POST)
         if form.is_valid():
-            api.post_organizations(request, form.cleaned_data['name'], form.cleaned_data['description'], True)
+            # TODO: ADD display_name
+            api.post_orgs(request, form.cleaned_data['name'], form.cleaned_data['display_name'], form.cleaned_data['description'])
             return redirect('/')
     else:
         form = NewOrganizationForm()
@@ -190,24 +191,22 @@ def new_organization(request):
 
 @login_required
 def new_project(request):
-    org_id = request.GET.get("org")
-    all_orgs = api.get_organizations(request)
+    org = request.GET.get("org")
+    all_orgs = api.get_orgs(request)
 
     if isinstance(all_orgs, type(None)) or all_orgs['error']:
         return HttpResponse(status=500)
 
     all_orgs = all_orgs['message']
 
-    org_choices = []
-    for org in all_orgs:
-        org_details = api.get_organization(request, org['id'])
-        org_choices.append((org['id'], org['name']))
+    org_choices = [ (o['name'], o['name']) for o in all_orgs ]
 
     if request.method == 'POST':
         form = NewProjectForm(request.POST)
-        form.fields['organization_id'].choices = org_choices
+        form.fields['organization'].choices = org_choices
         if form.is_valid():
-            res = api.post_organization(request, **form.cleaned_data)
+            # TODO: ADD display_name
+            res = api.post_orgs(request, **form.cleaned_data)
             if res is None:
                 form.add_error(None, "Das Projekt konnte nicht erstellt werden.")
             elif 'error' in res and res['error'] != False:
@@ -218,12 +217,12 @@ def new_project(request):
                 return redirect('/')
     else:
         form = NewProjectForm()
-        form.fields['organization_id'].choices = org_choices
+        form.fields['organization'].choices = org_choices
     return render(request, "dashboard/newProject.html", {'form': form})
 
 @login_required
 def new_server(request):
-    org_id = request.GET.get("org")
+    org = request.GET.get("org")
     form = NewServerForm()
     return render(request, "dashboard/newServer.html", {'form': form})
 
@@ -246,7 +245,6 @@ class UserLoginView(LoginView):
         #     return redirect(self.get_success_url())
         # self.request.session["allauth_2fa_user_id"] = form.get_user().pk
         return HttpResponseRedirect(self.get_success_url())
-        
         return self.render_to_response(self.get_context_data(form=form))
 
 def logout_view(request):
@@ -258,7 +256,7 @@ def register(request):
     if request.method == 'POST':
         form = RegisterForm(request.POST)
         if form.is_valid():
-            res = api.register(**form.cleaned_data)
+            res = api.post_auth_basic_register(**form.cleaned_data)
             if isinstance(res, type(None)) or res['error']:
                 # form = RegisterForm()
                 # TODO: add form error

@@ -505,7 +505,7 @@ pub async fn main() -> std::io::Result<()> {
 
                     match cmd {
                         SshCommands::Show => {
-                            let res = orgs::get_organization_keys(
+                            let res = orgs::get_organization_ssh(
                                 get_request_config(load_config()).unwrap(),
                                 organization,
                             )
@@ -525,7 +525,7 @@ pub async fn main() -> std::io::Result<()> {
                         }
 
                         SshCommands::Recreate => {
-                            let res = orgs::post_organization_keys(
+                            let res = orgs::post_organization_ssh(
                                 get_request_config(load_config()).unwrap(),
                                 organization,
                             )

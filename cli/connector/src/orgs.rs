@@ -95,13 +95,13 @@ pub async fn delete_organization(
     Ok(parse_response(res).await.unwrap())
 }
 
-pub async fn get_organization_keys(
+pub async fn get_organization_ssh(
     config: RequestConfig,
     organization: String,
 ) -> Result<BaseResponse<String>, String> {
     let res = get_client(
         config,
-        format!("orgs/{}/keys", organization),
+        format!("orgs/{}/ssh", organization),
         RequestType::Get,
         true,
     )
@@ -113,13 +113,13 @@ pub async fn get_organization_keys(
     Ok(parse_response(res).await.unwrap())
 }
 
-pub async fn post_organization_keys(
+pub async fn post_organization_ssh(
     config: RequestConfig,
     organization: String,
 ) -> Result<BaseResponse<String>, String> {
     let res = get_client(
         config,
-        format!("orgs/{}/keys", organization),
+        format!("orgs/{}/ssh", organization),
         RequestType::Post,
         true,
     )

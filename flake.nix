@@ -110,11 +110,11 @@
       GRADIENT_CRYPT_SECRET = "aW52YWxpZAo=";
     };
   }) // {
-    overlays = rec {
+    overlays = {
       gradient-server = final: prev: { inherit (self.packages.${final.system}) gradient-server; };
       gradient-frontend = final: prev: { inherit (self.packages.${final.system}) gradient-frontend; };
       gradient-cli = final: prev: { inherit (self.packages.${final.system}) gradient-cli; };
-      default = gradient-cli;
+      default = final: prev: { inherit (self.packages.${final.system}) gradient-server gradient-frontend gradient-cli; };
     };
 
     nixosModules = rec {
