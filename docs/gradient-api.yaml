@@ -18,6 +18,8 @@ externalDocs:
 servers:
   - url: http://127.0.0.1:8000/api/v1
 tags:
+  - name: general
+    description: general operations
   - name: auth
     description: authorization and registration
   - name: user
@@ -33,6 +35,19 @@ tags:
   - name: builds
     description: retrieve builds
 paths:
+  /health:
+    get:
+      tags:
+        - general
+      summary: Health Check
+      description: Check if the API is running
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
   /auth/basic/login:
     post:
       tags:
@@ -170,6 +185,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
   /user/keys:
+    get:
+      tags:
+        - user
+      summary: Get list of API Keys
+      description: Get list of API Keys of logged-in user
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
     post:
       tags:
         - user
@@ -248,7 +275,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/scomponents/schemas/BasicResponse'
+                $ref: '#/components/schemas/BasicResponse'
   /orgs:
     get:
       tags:

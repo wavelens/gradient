@@ -97,7 +97,9 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route("/user", get(user::get).delete(user::delete))
         .route(
             "/user/keys",
-            post(user::post_keys).delete(user::delete_keys),
+            get(user::get_keys)
+                .post(user::post_keys)
+                .delete(user::delete_keys),
         )
         .route(
             "/user/settings",

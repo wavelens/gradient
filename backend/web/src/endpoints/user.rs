@@ -18,16 +18,16 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct ApiKeyRequest {
-    pub name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 pub struct UserInfoResponse {
     pub id: String,
     pub username: String,
     pub name: String,
     pub email: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ApiKeyRequest {
+    pub name: String,
 }
 
 pub async fn get(
@@ -59,6 +59,32 @@ pub async fn delete(
     let res = BaseResponse {
         error: false,
         message: "User deleted".to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn get_keys(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let api_keys = EApi::find()
+        .filter(CApi::OwnedBy.eq(user.id))
+        .all(&state.db)
+        .await
+        .unwrap();
+
+    let api_keys: ListResponse = api_keys
+        .iter()
+        .map(|k| ListItem {
+            id: k.id,
+            name: k.name.clone(),
+        })
+        .collect();
+
+    let res = BaseResponse {
+        error: false,
+        message: api_keys,
     };
 
     Ok(Json(res))
