@@ -37,7 +37,7 @@ pub async fn get_build(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn connect_build(config: RequestConfig, build_id: String) -> Result<(), String> {

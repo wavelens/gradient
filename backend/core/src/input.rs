@@ -149,6 +149,11 @@ pub fn check_index_name(s: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn load_secret(f: &str) -> String {
+    let s = std::fs::read_to_string(f).unwrap_or_default();
+    s.trim().replace(char::from(25), "")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

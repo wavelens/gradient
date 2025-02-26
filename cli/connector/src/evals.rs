@@ -37,7 +37,7 @@ pub async fn get_evaluation(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn post_evaluation(
@@ -55,7 +55,7 @@ pub async fn post_evaluation(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn get_evaluation_builds(
@@ -73,7 +73,7 @@ pub async fn get_evaluation_builds(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn connect_evaluation(

@@ -161,7 +161,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
     let mut local_daemon = get_local_store(organization.clone()).await;
 
     let (private_key, public_key) =
-        decrypt_ssh_private_key(state.cli.crypt_secret.clone(), organization).unwrap();
+        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization).unwrap();
 
     let mut server_deamon = connect(
         server.clone(),
@@ -273,7 +273,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         let threshold_time =
             Utc::now().naive_utc() - chrono::Duration::seconds(state.cli.evaluation_timeout);
 
-        let projects = EProject::find()
+        let mut projects = EProject::find()
             .join(JoinType::InnerJoin, RProject::LastEvaluation.def())
             .filter(
                 Condition::all()
@@ -283,13 +283,27 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                             .add(CEvaluation::Status.eq(EvaluationStatus::Completed))
                             .add(CEvaluation::Status.eq(EvaluationStatus::Failed))
                             .add(CProject::ForceEvaluation.eq(true))
-                            .add(CProject::LastEvaluation.is_null()),
                     ),
             )
             .order_by_asc(CProject::LastCheckAt)
             .all(&state.db)
             .await
             .unwrap();
+
+        projects.extend(
+            EProject::find()
+                .filter(
+                    Condition::all()
+                        .add(CProject::LastCheckAt.lte(threshold_time))
+                        .add(CProject::LastEvaluation.is_null()),
+                )
+                .order_by_asc(CProject::LastCheckAt)
+                .all(&state.db)
+                .await
+                .unwrap(),
+        );
+
+        // TODO: check if organization has at least one server
 
         let evaluations = stream::iter(projects.clone().into_iter())
             .filter_map(|p| {
@@ -467,14 +481,6 @@ async fn reserve_available_server(
         .map(|f| f.feature)
         .collect::<Vec<Uuid>>();
 
-    let mut cond = Condition::all();
-
-    for feature in features {
-        cond = cond.add(CServerFeature::Feature.eq(feature));
-    }
-
-    cond = cond.add(CServerArchitecture::Architecture.eq(build.architecture.clone()));
-
     let evaluation = EEvaluation::find_by_id(build.evaluation)
         .one(&state.db)
         .await
@@ -487,7 +493,14 @@ async fn reserve_available_server(
         .unwrap()
         .unwrap();
 
-    cond = cond.add(CServer::Organization.eq(project.organization));
+    let mut cond = Condition::all()
+        .add(CServer::Organization.eq(project.organization))
+        .add(CServer::Enabled.eq(true))
+        .add(CServerArchitecture::Architecture.eq(build.architecture.clone()));
+
+    for feature in features {
+        cond = cond.add(CServerFeature::Feature.eq(feature));
+    }
 
     let servers = EServer::find()
         .join_rev(

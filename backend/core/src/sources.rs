@@ -12,11 +12,13 @@ use ssh_key::{Algorithm, LineEnding, PrivateKey};
 use std::sync::Arc;
 use tokio::process::Command;
 
-use super::input::hex_to_vec;
+use super::input::{load_secret, hex_to_vec};
 use super::types::*;
 
 pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) -> (bool, Vec<u8>) {
-    println!("Checking for updates on project: {}", project.id);
+    if state.cli.debug {
+        println!("Checking for updates on project: {} [{}]", project.id, project.name);
+    };
 
     let cmd = match Command::new(state.cli.binpath_git.clone())
         .arg("ls-remote")
@@ -82,7 +84,7 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
     (true, remote_hash)
 }
 
-pub fn generate_ssh_key(secret: String) -> Result<(String, String), String> {
+pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), String> {
     let mut csprng = OsRng;
     let private_key = PrivateKey::random(&mut csprng, Algorithm::Ed25519)
         .map_err(|e| "Failed to generate SSH key pair: ".to_string() + &e.to_string())?;
@@ -100,22 +102,39 @@ pub fn generate_ssh_key(secret: String) -> Result<(String, String), String> {
 
     let public_key_openssh = format!("{} {}", Algorithm::Ed25519.as_str(), public_key_openssh);
 
-    let secret = general_purpose::STANDARD.decode(secret).unwrap();
-    let encrypted_private_key = crypter::encrypt(secret, &private_key_openssh).unwrap();
+    let secret = general_purpose::STANDARD.decode(load_secret(&secret_file)).map_err(|_| {
+        "Failed to decode GRADIENT_CRYPT_SECRET".to_string()
+    })?;
+
+    let encrypted_private_key = if let Some(p) = crypter::encrypt(secret, &private_key_openssh) {
+        p
+    } else {
+        return Err("Failed to encrypt private key".to_string());
+    };
+
     let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_private_key);
 
     Ok((encrypted_private_key, public_key_openssh))
 }
 
 pub fn decrypt_ssh_private_key(
-    secret: String,
+    secret_file: String,
     organization: MOrganization,
 ) -> Result<(String, String), String> {
-    let secret = general_purpose::STANDARD.decode(secret).unwrap();
+    let secret = general_purpose::STANDARD.decode(load_secret(&secret_file)).map_err(|_| {
+        "Failed to decode GRADIENT_CRYPT_SECRET".to_string()
+    })?;
+
     let encrypted_private_key = general_purpose::STANDARD
         .decode(organization.clone().private_key)
         .unwrap();
-    let decrypted_private_key = crypter::decrypt(secret, encrypted_private_key).unwrap();
+
+    let decrypted_private_key = if let Some(p) = crypter::decrypt(secret, encrypted_private_key) {
+        p
+    } else {
+        return Err("Failed to decrypt private key".to_string());
+    };
+
     let decrypted_private_key = String::from_utf8(decrypted_private_key).unwrap();
     let formatted_public_key = format_public_key(organization);
 

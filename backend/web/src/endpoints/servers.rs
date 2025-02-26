@@ -128,6 +128,7 @@ pub async fn post(
         name: Set(body.name.clone()),
         display_name: Set(body.display_name.clone()),
         organization: Set(organization.id),
+        enabled: Set(true),
         host: Set(body.host.clone()),
         port: Set(body.port),
         username: Set(body.username.clone()),
@@ -187,8 +188,7 @@ pub async fn post(
 pub async fn get_server(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path(organization): Path<String>,
-    Path(server): Path<String>,
+    Path((organization, server)): Path<(String, String)>,
 ) -> Result<Json<BaseResponse<MServer>>, (StatusCode, Json<BaseResponse<String>>)> {
     let (_organization, server): (MOrganization, MServer) = match get_server_by_name(
         state.0.clone(),
@@ -221,8 +221,7 @@ pub async fn get_server(
 pub async fn delete_server(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path(organization): Path<String>,
-    Path(server): Path<String>,
+    Path((organization, server)): Path<(String, String)>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let (_organization, server): (MOrganization, MServer) = match get_server_by_name(
         state.0.clone(),
@@ -255,11 +254,84 @@ pub async fn delete_server(
     Ok(Json(res))
 }
 
+pub async fn post_server_enable(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, server)): Path<(String, String)>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let (_organization, server): (MOrganization, MServer) = match get_server_by_name(
+        state.0.clone(),
+        user.id,
+        organization.clone(),
+        server.clone(),
+    )
+    .await
+    {
+        Some(s) => s,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Server not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let mut server: AServer = server.into();
+    server.enabled = Set(true);
+    server.update(&state.db).await.unwrap();
+
+    let res = BaseResponse {
+        error: false,
+        message: "Server enabled".to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn post_server_disable(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, server)): Path<(String, String)>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let (_organization, server): (MOrganization, MServer) = match get_server_by_name(
+        state.0.clone(),
+        user.id,
+        organization.clone(),
+        server.clone(),
+    )
+    .await
+    {
+        Some(s) => s,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Server not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let mut server: AServer = server.into();
+    server.enabled = Set(false);
+    server.update(&state.db).await.unwrap();
+
+    let res = BaseResponse {
+        error: false,
+        message: "Server disabled".to_string(),
+    };
+
+    Ok(Json(res))
+}
+
 pub async fn post_server_check_connection(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path(organization): Path<String>,
-    Path(server): Path<String>,
+    Path((organization, server)): Path<(String, String)>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let (organization, server): (MOrganization, MServer) = match get_server_by_name(
         state.0.clone(),
@@ -282,7 +354,7 @@ pub async fn post_server_check_connection(
     };
 
     let (private_key, public_key) =
-        decrypt_ssh_private_key(state.cli.crypt_secret.clone(), organization.clone()).unwrap();
+        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization.clone()).unwrap();
 
     match connect(server, None, public_key, private_key).await {
         Ok(_) => Ok(Json(BaseResponse {

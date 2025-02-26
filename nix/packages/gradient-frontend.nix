@@ -6,10 +6,10 @@
 
 { lib
 , gettext
-, python
+, python3
 }: let
   ignoredPaths = [ ".github" "target" ];
-in python.pkgs.buildPythonApplication {
+in python3.pkgs.buildPythonApplication {
   pname = "gradient-frontend";
   version = "0.1.0";
   pyproject = false;
@@ -23,7 +23,7 @@ in python.pkgs.buildPythonApplication {
     gettext
   ];
 
-  dependencies = with python.pkgs; [
+  dependencies = with python3.pkgs; [
     bleach
     celery
     channels
@@ -47,9 +47,9 @@ in python.pkgs.buildPythonApplication {
   ];
 
   postBuild = ''
-    ${python.pythonOnBuildForHost.interpreter} -OO -m compileall src
-    ${python.pythonOnBuildForHost.interpreter} src/manage.py collectstatic --clear --no-input
-    ${python.pythonOnBuildForHost.interpreter} src/manage.py compilemessages
+    ${python3.pythonOnBuildForHost.interpreter} -OO -m compileall src
+    ${python3.pythonOnBuildForHost.interpreter} manage.py collectstatic --clear --no-input
+    ${python3.pythonOnBuildForHost.interpreter} manage.py compilemessages
   '';
 
   meta = {

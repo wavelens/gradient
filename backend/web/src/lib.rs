@@ -105,7 +105,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/user/settings",
             get(user::get_settings).post(user::post_settings),
         )
-        .route("/servers", get(servers::get).post(servers::post))
+        .route("/servers/{organization}", get(servers::get).post(servers::post))
         .route(
             "/servers/{organization}/{server}",
             get(servers::get_server).delete(servers::delete_server),
@@ -113,6 +113,14 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route(
             "/servers/{organization}/{server}/check-connection",
             post(servers::post_server_check_connection),
+        )
+        .route(
+            "/servers/{organization}/{server}/enable",
+            post(servers::post_server_enable),
+        )
+        .route(
+            "/servers/{organization}/{server}/disable",
+            post(servers::post_server_disable),
         )
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
@@ -134,6 +142,9 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .layer(trace)
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(&server_url).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(&server_url).await.map_err(|e| {
+        tracing::error!("Failed to bind to {}: {}", server_url, e);
+        e
+    })?;
     axum::serve(listener, app).await
 }

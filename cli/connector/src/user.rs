@@ -27,7 +27,7 @@ pub async fn get(config: RequestConfig) -> Result<BaseResponse<UserInfoResponse>
         .await
         .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn delete(config: RequestConfig) -> Result<BaseResponse<String>, String> {
@@ -37,7 +37,7 @@ pub async fn delete(config: RequestConfig) -> Result<BaseResponse<String>, Strin
         .await
         .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn get_keys(config: RequestConfig) -> Result<BaseResponse<ListResponse>, String> {
@@ -47,7 +47,7 @@ pub async fn get_keys(config: RequestConfig) -> Result<BaseResponse<ListResponse
         .await
         .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn post_key(config: RequestConfig, name: String) -> Result<BaseResponse<String>, String> {
@@ -60,7 +60,7 @@ pub async fn post_key(config: RequestConfig, name: String) -> Result<BaseRespons
         .await
         .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn delete_key(
@@ -76,5 +76,5 @@ pub async fn delete_key(
         .await
         .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }

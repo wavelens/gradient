@@ -21,6 +21,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Server::Name).string().not_null())
                     .col(ColumnDef::new(Server::DisplayName).string().not_null())
                     .col(ColumnDef::new(Server::Organization).uuid().not_null())
+                    .col(ColumnDef::new(Server::Enabled).boolean().not_null())
                     .col(ColumnDef::new(Server::Host).string().not_null())
                     .col(ColumnDef::new(Server::Port).integer().not_null())
                     .col(ColumnDef::new(Server::Username).string().not_null())
@@ -64,6 +65,7 @@ enum Server {
     Name,
     DisplayName,
     Organization,
+    Enabled,
     Host,
     Port,
     Username,

@@ -59,6 +59,7 @@ pub struct Model {
     pub name: String,
     pub display_name: String,
     pub organization: Uuid,
+    pub enabled: bool,
     pub host: String,
     pub port: i32,
     pub username: String,

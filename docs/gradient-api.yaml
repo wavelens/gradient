@@ -616,6 +616,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
+  /servers/{organization}/{server}/enable:
+    post:
+      tags:
+        - servers
+      summary: Enable Server
+      description: Enable the Server by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Server not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /servers/{organization}/{server}/disable:
+    post:
+      tags:
+        - servers
+      summary: Disable Server
+      description: Disable the Server by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Server not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
   /evals/{evaluation}:
     get:
       tags:

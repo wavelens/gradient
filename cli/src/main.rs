@@ -25,6 +25,8 @@ struct Cli {
     generate_completions: Option<Shell>,
 }
 
+// TODO: display help when no subcommand is given
+// TODO: check selected organization and project before running commands
 #[derive(Subcommand, Debug)]
 enum MainCommands {
     Config {
@@ -70,7 +72,7 @@ enum OrganizationCommands {
         name: Option<String>,
         #[arg(short, long)]
         display_name: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 'c', long)]
         description: Option<String>,
     },
     Show,
@@ -100,7 +102,7 @@ enum ProjectCommands {
         name: Option<String>,
         #[arg(short, long)]
         display_name: Option<String>,
-        #[arg(short, long)]
+        #[arg(short = 'c', long)]
         description: Option<String>,
         #[arg(short, long)]
         repository: Option<String>,
@@ -390,7 +392,7 @@ pub async fn main() -> std::io::Result<()> {
 
                     let res = orgs::post(
                         get_request_config(load_config()).unwrap(),
-                        name,
+                        name.clone(),
                         display_name,
                         description,
                     )
@@ -406,7 +408,7 @@ pub async fn main() -> std::io::Result<()> {
                         exit(1);
                     }
 
-                    set_get_value(ConfigKey::SelectedOrganization, Some(res.message), true);
+                    set_get_value(ConfigKey::SelectedOrganization, Some(name), true);
                     println!("Organization created.");
                 }
 
@@ -700,7 +702,7 @@ pub async fn main() -> std::io::Result<()> {
 
                         let display_name = match display_name {
                             Some(display_name) => display_name,
-                            None => ask_for_input("Name"),
+                            None => ask_for_input("Display Name"),
                         };
 
                         let description = match description {
@@ -721,7 +723,7 @@ pub async fn main() -> std::io::Result<()> {
                         let res = projects::post(
                             get_request_config(load_config()).unwrap(),
                             organization.clone(),
-                            name,
+                            name.clone(),
                             display_name,
                             description,
                             repository,
@@ -741,7 +743,7 @@ pub async fn main() -> std::io::Result<()> {
 
                         set_get_value(
                             ConfigKey::SelectedProject,
-                            Some(format!("{}/{}", organization, res.message)),
+                            Some(format!("{}/{}", organization, name)),
                             true,
                         )
                         .unwrap();

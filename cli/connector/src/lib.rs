@@ -13,6 +13,7 @@ pub mod servers;
 pub mod user;
 
 use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
 
 #[derive(Debug, Clone)]
 pub struct RequestConfig {
@@ -41,18 +42,30 @@ pub struct ListItem {
 
 pub type ListResponse = Vec<ListItem>;
 
-async fn parse_response<T: for<'de> Deserialize<'de>>(
-    res: reqwest::Response,
-) -> Result<BaseResponse<T>, String> {
-    let parsed_res = match res.json().await {
-        Ok(res) => res,
+async fn parse_response<T: DeserializeOwned>(res: reqwest::Response) -> BaseResponse<T> {
+    let bytes = match res.bytes().await {
+        Ok(b) => b,
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("Failed to read response body: {}", e);
             std::process::exit(1);
         }
     };
 
-    Ok(parsed_res)
+    match serde_json::from_slice::<BaseResponse<T>>(&bytes) {
+        Ok(parsed_res) => parsed_res,
+        Err(_) => {
+            match serde_json::from_slice::<BaseResponse<String>>(&bytes) {
+                Ok(error_res) => {
+                    eprintln!("{}", error_res.message);
+                    std::process::exit(1);
+                }
+                Err(_) => {
+                    eprintln!("{}", String::from_utf8_lossy(&bytes));
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
 }
 
 fn get_client(
@@ -98,5 +111,5 @@ pub async fn health(config: RequestConfig) -> Result<BaseResponse<String>, Strin
         Err(e) => return Err(e.to_string()),
     };
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }

@@ -51,8 +51,8 @@ pub struct Cli {
     pub oauth_required: bool,
     #[arg(long, env = "GRADIENT_OAUTH_CLIENT_ID")]
     pub oauth_client_id: Option<String>,
-    #[arg(long, env = "GRADIENT_OAUTH_CLIENT_SECRET")]
-    pub oauth_client_secret: Option<String>,
+    #[arg(long, env = "GRADIENT_OAUTH_CLIENT_SECRET_FILE")]
+    pub oauth_client_secret_file: Option<String>,
     #[arg(long, env = "GRADIENT_OAUTH_AUTH_URL")]
     pub oauth_auth_url: Option<String>,
     #[arg(long, env = "GRADIENT_OAUTH_TOKEN_URL")]
@@ -61,10 +61,10 @@ pub struct Cli {
     pub oauth_api_url: Option<String>,
     #[arg(long, env = "GRADIENT_OAUTH_SCOPES")]
     pub oauth_scopes: Option<String>,
-    #[arg(long, env = "GRADIENT_JWT_SECRET")]
-    pub jwt_secret: String,
-    #[arg(long, env = "GRADIENT_CRYPT_SECRET")]
-    pub crypt_secret: String,
+    #[arg(long, env = "GRADIENT_CRYPT_SECRET_FILE")]
+    pub crypt_secret_file: String,
+    #[arg(long, env = "GRADIENT_JWT_SECRET_FILE")]
+    pub jwt_secret_file: String,
     #[arg(long, env = "GRADIENT_BINPATH_NIX", default_value = "nix")]
     pub binpath_nix: String,
     #[arg(long, env = "GRADIENT_BINPATH_GIT", default_value = "git")]

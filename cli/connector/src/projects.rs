@@ -46,7 +46,7 @@ pub async fn get(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn post(
@@ -78,7 +78,7 @@ pub async fn post(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn get_project(
@@ -97,7 +97,7 @@ pub async fn get_project(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn delete_project(
@@ -116,7 +116,7 @@ pub async fn delete_project(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn post_project_check_repository(
@@ -135,7 +135,7 @@ pub async fn post_project_check_repository(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn post_project_evaluate(
@@ -154,5 +154,5 @@ pub async fn post_project_evaluate(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }

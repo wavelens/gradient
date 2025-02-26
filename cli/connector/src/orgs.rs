@@ -34,7 +34,7 @@ pub async fn get(config: RequestConfig) -> Result<BaseResponse<ListResponse>, St
         Err(e) => return Err(e.to_string()),
     };
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn post(
@@ -56,7 +56,7 @@ pub async fn post(
         .await
         .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn get_organization(
@@ -74,7 +74,7 @@ pub async fn get_organization(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn delete_organization(
@@ -92,7 +92,7 @@ pub async fn delete_organization(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn get_organization_ssh(
@@ -110,7 +110,7 @@ pub async fn get_organization_ssh(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn post_organization_ssh(
@@ -128,5 +128,5 @@ pub async fn post_organization_ssh(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }

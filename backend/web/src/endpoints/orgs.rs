@@ -80,7 +80,9 @@ pub async fn post(
     }
 
     let (private_key, public_key) =
-        generate_ssh_key(state.cli.crypt_secret.clone()).map_err(|_| {
+        generate_ssh_key(state.cli.crypt_secret_file.clone()).map_err(|e| {
+            println!("{}", e);
+
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(BaseResponse {
@@ -212,7 +214,7 @@ pub async fn post_organization_ssh(
             }
         };
 
-    let (private_key, public_key) = generate_ssh_key(state.cli.crypt_secret.clone()).unwrap();
+    let (private_key, public_key) = generate_ssh_key(state.cli.crypt_secret_file.clone()).unwrap();
 
     let mut aorganization: AOrganization = organization.into();
 

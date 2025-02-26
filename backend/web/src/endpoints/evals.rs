@@ -244,9 +244,7 @@ pub async fn connect_evaluation_builds(
 
     let stream = stream! {
         let mut last_logs: HashMap<Uuid, String> = HashMap::new();
-        let mut no_response: i16 = 0;
-        let mut first_response: bool = true;
-        while no_response < 5 {
+        loop {
             let builds = EBuild::find()
                 .filter(condition.clone())
                 .all(&state.db)
@@ -254,33 +252,45 @@ pub async fn connect_evaluation_builds(
                 .unwrap();
 
             if builds.is_empty() {
-                if first_response {
+                let all_builds = EBuild::find()
+                    .filter(
+                        Condition::all()
+                            .add(CBuild::Evaluation.eq(evaluation.id))
+                            .add(
+                                Condition::any()
+                                    .add(CBuild::Status.eq(entity::build::BuildStatus::Building))
+                                    .add(CBuild::Status.eq(entity::build::BuildStatus::Queued)),
+                            ),
+                    )
+                    .one(&state.db)
+                    .await
+                    .unwrap();
+
+                if all_builds.is_none() {
                     yield "".to_string();
                     break;
                 }
 
-                no_response += 1;
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 continue;
             }
 
-            first_response = false;
-
             for build in builds {
                 let name = build.derivation_path.split("-").next().unwrap();
                 let name = build.derivation_path.replace(format!("{}-", name).as_str(), "").replace(".drv", "");
-                let log = build.log.unwrap_or("".to_string())
-                    .split("\n")
-                    .map(|l| format!("{}> {}", name, l))
-                    .collect::<Vec<String>>()
-                    .join("\n");
+                let log = build.log.unwrap_or("".to_string());
 
                 if last_logs.contains_key(&build.id) {
                     let last_log = last_logs.get(&build.id).unwrap();
                     let log_new = log.replace(last_log.as_str(), "");
+
                     if !log_new.is_empty() {
                         last_logs.insert(build.id, log.clone());
-                        yield log_new.clone();
+                        yield log_new
+                            .split("\n")
+                            .map(|l| format!("{}> {}", name, l))
+                            .collect::<Vec<String>>()
+                            .join("\n");
                     }
                 } else {
                     last_logs.insert(build.id, log.clone());

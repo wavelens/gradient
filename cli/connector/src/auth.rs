@@ -47,7 +47,7 @@ pub async fn post_basic_register(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn post_basic_login(
@@ -72,7 +72,7 @@ pub async fn post_basic_login(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn get_oauth_authorize(config: RequestConfig) -> Result<BaseResponse<String>, String> {
@@ -87,7 +87,7 @@ pub async fn get_oauth_authorize(config: RequestConfig) -> Result<BaseResponse<S
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn post_oauth_authorize(
@@ -106,7 +106,7 @@ pub async fn post_oauth_authorize(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn post_logout(config: RequestConfig) -> Result<BaseResponse<String>, String> {
@@ -116,5 +116,5 @@ pub async fn post_logout(config: RequestConfig) -> Result<BaseResponse<String>, 
         .await
         .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }

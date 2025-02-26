@@ -167,7 +167,7 @@ pub async fn delete_keys(
 
     let res = BaseResponse {
         error: false,
-        message: format!("API-Key deleted"),
+        message: "API-Key deleted".to_string(),
     };
 
     Ok(Json(res))
@@ -175,7 +175,8 @@ pub async fn delete_keys(
 
 // TODO: Implement User Settings; but more important user permissions
 pub async fn get_settings(
-    Extension(user): Extension<MUser>,
+    _state: State<Arc<ServerState>>,
+    Extension(_user): Extension<MUser>,
 ) -> Result<Json<BaseResponse<MUser>>, (StatusCode, Json<BaseResponse<String>>)> {
     Err((
         StatusCode::NOT_IMPLEMENTED,

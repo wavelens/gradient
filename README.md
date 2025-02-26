@@ -1,6 +1,7 @@
 # Gradient
 
 [Options Search](https://wavelens.github.io/gradient-search)
+[Demo Instance (non frontend version)](https://gradient.wavelens.io/api/v1)
 
 Gradient is a web-based Nix-based Continuous Integration (CI) system.
 
@@ -63,8 +64,8 @@ Configure Gradient in your `configuration.nix`:
     domain = "gradient.wavelens.io";
 
     # we recommend the use of sops-nix
-    jwtSecretFile = "/var/lib/gradient/jwt-secret";
-    cryptSecretFile = "/var/lib/gradient/crypt-secret";
+    cryptSecretFile = "/var/lib/gradient/crypt-secret"; # a password base64 encoded
+    jwtSecretFile = "/var/lib/gradient/jwt-secret"; # random alphanumeric string
   };
 }
 ```

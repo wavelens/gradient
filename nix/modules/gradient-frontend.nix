@@ -27,7 +27,7 @@ in {
       apiUrl = lib.mkOption {
         description = "The URL of the Gradient API.";
         type = lib.types.str;
-        default = "http://127.0.0.1:${gradientCfg.port}";
+        default = "http://127.0.0.1:${toString gradientCfg.port}";
       };
     };
   };
@@ -43,9 +43,8 @@ in {
       serviceConfig = {
         ExecStart = lib.getExe cfg.package;
         StateDirectory = "gradient";
-        DynamicUser = true;
-        User = gradientCfg.user;
-        Group = gradientCfg.group;
+        User = "gradient";
+        Group = "gradient";
         ProtectHome = true;
         ProtectHostname = true;
         ProtectKernelLogs = true;
@@ -60,7 +59,7 @@ in {
         RestrictRealtime = true;
         RestrictSUIDSGID = true;
         LoadCredential = [
-          "GRADIENT_CRYPT_SECRET:${gradientCfg.cryptSecretFile}"
+          "gradient_crypt_secret:${gradientCfg.cryptSecretFile}"
         ];
       };
 
@@ -70,8 +69,13 @@ in {
         GRADIENT_FRONTEND_PORT = toString cfg.port;
         GRADIENT_API_URL = cfg.apiUrl;
         GRADIENT_SERVE_URL = "https://${gradientCfg.domain}";
+        GRADIENT_OAUTH_ENABLE = toString gradientCfg.oauth.enable;
+        GRADIENT_DISABLE_REGISTER = toString gradientCfg.settings.disableRegistration;
+        GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString gradientCfg.settings.maxConcurrentEvaluations;
+        GRADIENT_MAX_CONCURRENT_BUILDS = toString gradientCfg.settings.maxConcurrentBuilds;
+        GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
       } // lib.optionalAttrs gradientCfg.oauth.enable {
-        GRADIENT_OAUTH_REQUIRED = toString gradientCfg.settings.disableRegistration;
+        GRADIENT_OAUTH_REQUIRED = toString cfg.oauth.required;
       };
     };
   };

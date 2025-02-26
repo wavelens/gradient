@@ -11,6 +11,7 @@ use axum::middleware::Next;
 use axum::response::{Json, Response};
 use chrono::{Duration, Utc};
 use core::types::*;
+use core::input::load_secret;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
 use oauth2::basic::BasicClient;
 use oauth2::reqwest;
@@ -128,7 +129,7 @@ pub fn encode_jwt(state: State<Arc<ServerState>>, id: Uuid) -> Result<String, St
     let iat: usize = now.timestamp() as usize;
 
     let claim = Cliams { iat, exp, id };
-    let secret = state.cli.jwt_secret.clone();
+    let secret = load_secret(&state.cli.jwt_secret_file);
 
     encode(
         &Header::default(),
@@ -168,7 +169,7 @@ pub async fn decode_jwt(
             header: Default::default(),
         }
     } else {
-        let secret = state.cli.jwt_secret.clone();
+        let secret = load_secret(&state.cli.jwt_secret_file);
 
         decode(
             &jwt,
@@ -203,17 +204,17 @@ pub fn oauth_login_create(state: State<Arc<ServerState>>) -> Result<Url, String>
     // TODO: Cleaner way to get OAuth client
     let client = if let (
         Some(oauth_client_id),
-        Some(oauth_client_secret),
+        Some(oauth_client_secret_file),
         Some(oauth_auth_url),
         Some(oauth_token_url),
     ) = (
         state.cli.oauth_client_id.clone(),
-        state.cli.oauth_client_secret.clone(),
+        state.cli.oauth_client_secret_file.clone(),
         state.cli.oauth_auth_url.clone(),
         state.cli.oauth_token_url.clone(),
     ) {
         let client = BasicClient::new(ClientId::new(oauth_client_id))
-            .set_client_secret(ClientSecret::new(oauth_client_secret))
+            .set_client_secret(ClientSecret::new(load_secret(&oauth_client_secret_file)))
             .set_auth_uri(AuthUrl::new(oauth_auth_url).unwrap())
             .set_token_uri(TokenUrl::new(oauth_token_url).unwrap())
             .set_redirect_uri(
@@ -263,17 +264,17 @@ pub async fn oauth_login_verify(
 
     let client = if let (
         Some(oauth_client_id),
-        Some(oauth_client_secret),
+        Some(oauth_client_secret_file),
         Some(oauth_auth_url),
         Some(oauth_token_url),
     ) = (
         state.cli.oauth_client_id.clone(),
-        state.cli.oauth_client_secret.clone(),
+        state.cli.oauth_client_secret_file.clone(),
         state.cli.oauth_auth_url.clone(),
         state.cli.oauth_token_url.clone(),
     ) {
         let client = BasicClient::new(ClientId::new(oauth_client_id))
-            .set_client_secret(ClientSecret::new(oauth_client_secret))
+            .set_client_secret(ClientSecret::new(load_secret(&oauth_client_secret_file)))
             .set_auth_uri(AuthUrl::new(oauth_auth_url).unwrap())
             .set_token_uri(TokenUrl::new(oauth_token_url).unwrap())
             .set_redirect_uri(

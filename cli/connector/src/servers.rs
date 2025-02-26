@@ -13,6 +13,7 @@ pub struct ServerResponse {
     pub name: String,
     pub display_name: String,
     pub organization: String,
+    pub enabled: bool,
     pub host: String,
     pub port: i32,
     pub username: String,
@@ -52,7 +53,7 @@ pub async fn get(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn post(
@@ -88,7 +89,7 @@ pub async fn post(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn get_server(
@@ -107,7 +108,7 @@ pub async fn get_server(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }
 
 pub async fn delete_server(
@@ -126,7 +127,45 @@ pub async fn delete_server(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
+}
+
+pub async fn post_server_enable(
+    config: RequestConfig,
+    organization: String,
+    server: String,
+) -> Result<BaseResponse<String>, String> {
+    let res = get_client(
+        config,
+        format!("servers/{}/{}/enable", organization, server),
+        RequestType::Post,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn post_server_disable(
+    config: RequestConfig,
+    organization: String,
+    server: String,
+) -> Result<BaseResponse<String>, String> {
+    let res = get_client(
+        config,
+        format!("servers/{}/{}/disable", organization, server),
+        RequestType::Post,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
 }
 
 pub async fn post_server_check_connection(
@@ -145,5 +184,5 @@ pub async fn post_server_check_connection(
     .await
     .unwrap();
 
-    Ok(parse_response(res).await.unwrap())
+    Ok(parse_response(res).await)
 }

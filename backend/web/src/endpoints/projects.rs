@@ -170,8 +170,7 @@ pub async fn post(
 pub async fn get_project(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path(organization): Path<String>,
-    Path(project): Path<String>,
+    Path((organization, project)): Path<(String, String)>,
 ) -> Result<Json<BaseResponse<MProject>>, (StatusCode, Json<BaseResponse<String>>)> {
     let (_organization, project): (MOrganization, MProject) = match get_project_by_name(
         state.0.clone(),
@@ -204,8 +203,7 @@ pub async fn get_project(
 pub async fn delete_project(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path(organization): Path<String>,
-    Path(project): Path<String>,
+    Path((organization, project)): Path<(String, String)>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let (_organization, project): (MOrganization, MProject) = match get_project_by_name(
         state.0.clone(),
@@ -241,8 +239,7 @@ pub async fn delete_project(
 pub async fn post_project_check_repository(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path(organization): Path<String>,
-    Path(project): Path<String>,
+    Path((organization, project)): Path<(String, String)>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let (_organization, project): (MOrganization, MProject) = match get_project_by_name(
         state.0.clone(),
@@ -287,8 +284,7 @@ pub async fn post_project_check_repository(
 pub async fn post_project_evaluate(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    Path(organization): Path<String>,
-    Path(project): Path<String>,
+    Path((organization, project)): Path<(String, String)>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let (_organization, project): (MOrganization, MProject) = match get_project_by_name(
         state.0.clone(),
