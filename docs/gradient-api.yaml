@@ -34,6 +34,8 @@ tags:
     description: retrieve evaluations
   - name: builds
     description: retrieve builds
+  - name: commits
+    description: retrieve commits
 paths:
   /health:
     get:
@@ -759,6 +761,25 @@ paths:
               $ref: '#/components/schemas/StreamResponse'
         '404':
           description: Build not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /commits/{commit}:
+    get:
+      tags:
+        - commits
+      summary: Get commit info
+      description: Get details about the commit by id
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Commit not found
           content:
             application/json:
               schema:

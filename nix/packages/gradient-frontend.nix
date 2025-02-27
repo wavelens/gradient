@@ -47,7 +47,7 @@ in python3.pkgs.buildPythonApplication {
   ];
 
   postBuild = ''
-    ${python3.pythonOnBuildForHost.interpreter} -OO -m compileall src
+    ${python3.pythonOnBuildForHost.interpreter} -OO -m compileall .
     ${python3.pythonOnBuildForHost.interpreter} manage.py collectstatic --clear --no-input
     ${python3.pythonOnBuildForHost.interpreter} manage.py compilemessages
   '';

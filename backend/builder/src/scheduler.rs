@@ -6,7 +6,6 @@
 
 use chrono::Utc;
 use core::executer::*;
-// use core::altexecuter::*;
 use core::sources::*;
 use core::types::*;
 use entity::build::BuildStatus;
@@ -232,6 +231,12 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
             let status = if results.1.values().all(|r| r.error_msg.is_empty()) {
                 BuildStatus::Completed
             } else {
+                for (path, result) in results.1 {
+                    if !result.error_msg.is_empty() {
+                        eprintln!("Failed to build {}: {}", path, result.error_msg);
+                    }
+                }
+
                 BuildStatus::Failed
             };
 
@@ -561,6 +566,10 @@ async fn update_build_status(
     build: MBuild,
     status: BuildStatus,
 ) -> MBuild {
+    if status == build.status {
+        return build;
+    }
+
     if status == BuildStatus::Aborted
         && (build.status == BuildStatus::Completed || build.status == BuildStatus::Failed)
     {
@@ -627,10 +636,18 @@ pub async fn update_evaluation_status(
     evaluation: MEvaluation,
     status: EvaluationStatus,
 ) -> MEvaluation {
+    if status == evaluation.status {
+        return evaluation;
+    }
+
     let mut active_evaluation: AEvaluation = evaluation.into_active_model();
     active_evaluation.status = Set(status);
 
-    active_evaluation.update(&state.db).await.unwrap()
+    let evaluation = active_evaluation.update(&state.db).await.unwrap();
+
+    println!("Updated evaluation status: {}", evaluation.id);
+
+    evaluation
 }
 
 pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) {

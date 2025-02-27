@@ -148,3 +148,7 @@ def post_servers_server_disable(request, organization, server):
 def post_servers_server_check_connection(request, organization, server):
     return get_client(request.user, f"servers/{organization}/{server}/check-connection", "POST")
 
+
+def get_commits_commit(request, commit):
+    return get_client(request.user, f"commits/{commit}", "GET")
+

@@ -6,6 +6,7 @@
 
 pub mod auth;
 pub mod builds;
+pub mod commits;
 pub mod evals;
 pub mod orgs;
 pub mod projects;

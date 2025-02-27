@@ -122,6 +122,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/servers/{organization}/{server}/disable",
             post(servers::post_server_disable),
         )
+        .route(
+            "/commits/{commit}",
+            get(commits::get_commit),
+        )
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize,
