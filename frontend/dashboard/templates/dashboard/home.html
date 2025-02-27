@@ -34,7 +34,7 @@
     <div class="home-container">
         {% for block in details_blocks %}
             <div class="workflow-item">
-                <a class="full-width normal-hover" href="{% url 'workflow' block.id %}">
+                <a class="full-width normal-hover" href="{% url 'workflow' block.name %}">
                     <span class="workflow-title">{% trans block.project %}</span><br><span class="text-light">{{ block.description }}</span>
                 </a>
                 <div class="d-flex p-0">
