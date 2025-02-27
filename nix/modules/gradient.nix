@@ -157,6 +157,7 @@ in {
         GRADIENT_IP = cfg.listenAddr;
         GRADIENT_PORT = toString cfg.port;
         GRADIENT_SERVE_URL = "https://${cfg.domain}";
+        GRADIENT_BASE_PATH = cfg.baseDir;
         GRADIENT_DATABASE_URL = cfg.databaseUrl;
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString cfg.settings.maxConcurrentEvaluations;
         GRADIENT_MAX_CONCURRENT_BUILDS = toString cfg.settings.maxConcurrentBuilds;

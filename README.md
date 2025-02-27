@@ -81,9 +81,10 @@ OpenAPI documentation is available at `/docs/gradient-api.yaml` or via [Swagger 
 ### Web Interface
 
 > [!NOTE]
-> The web interface is currently in development.
+> The web interface is currently under heavy development.
 
 The web interface is the primary way to interact with Gradient. It also just uses the API.
+Registration is at `/account/register`.
 
 ### CLI
 

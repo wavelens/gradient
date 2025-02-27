@@ -39,6 +39,7 @@
       channels
       channels-redis
       django
+      django-compression-middleware
       django-debug-toolbar
       django-parler
       django-redis
@@ -51,6 +52,7 @@
       selenium
       uritemplate
       urllib3
+      whitenoise
       xstatic-bootstrap
       xstatic-jquery
       xstatic-jquery-ui

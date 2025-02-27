@@ -8,8 +8,9 @@
 , gettext
 , python3
 }: let
+  python = python3;
   ignoredPaths = [ ".github" "target" ];
-in python3.pkgs.buildPythonApplication {
+in python.pkgs.buildPythonApplication rec {
   pname = "gradient-frontend";
   version = "0.1.0";
   pyproject = false;
@@ -23,12 +24,13 @@ in python3.pkgs.buildPythonApplication {
     gettext
   ];
 
-  dependencies = with python3.pkgs; [
+  dependencies = with python.pkgs; [
     bleach
     celery
     channels
     channels-redis
     django
+    django-compression-middleware
     django-debug-toolbar
     django-parler
     django-redis
@@ -41,22 +43,42 @@ in python3.pkgs.buildPythonApplication {
     selenium
     uritemplate
     urllib3
+    whitenoise
     xstatic-bootstrap
     xstatic-jquery
     xstatic-jquery-ui
   ];
 
   postBuild = ''
-    ${python3.pythonOnBuildForHost.interpreter} -OO -m compileall .
-    ${python3.pythonOnBuildForHost.interpreter} manage.py collectstatic --clear --no-input
-    ${python3.pythonOnBuildForHost.interpreter} manage.py compilemessages
+    ${python.pythonOnBuildForHost.interpreter} -OO -m compileall .
+    ${python.pythonOnBuildForHost.interpreter} manage.py collectstatic --clear --no-input
+    ${python.pythonOnBuildForHost.interpreter} manage.py compilemessages
   '';
+
+  installPhase = let
+    pythonPath = python.pkgs.makePythonPath dependencies;
+  in ''
+    runHook preInstall
+
+    mkdir -p $out/lib/gradient-frontend/static/dashboard
+    cp -r {dashboard,static,frontend,locale,manage.py} $out/lib/gradient-frontend
+    chmod +x $out/lib/gradient-frontend/manage.py
+
+    makeWrapper $out/lib/gradient-frontend/manage.py $out/bin/gradient-frontend \
+      --prefix PYTHONPATH : "${pythonPath}"
+
+    runHook postInstall
+  '';
+
+  passthru = {
+    inherit python;
+  };
 
   meta = {
     description = "Nix Continuous Integration System Frontend";
-    homepage = "https://wavelens.io";
+    homepage = "https://github.com/wavelens/gradient";
     license = lib.licenses.agpl3Only;
     platforms = lib.platforms.unix;
-    mainProgram = "backend";
+    mainProgram = "gradient-frontend";
   };
 }

@@ -5,7 +5,10 @@
 from django.conf import settings
 import requests
 import json
-from .auth import User
+
+class FakeUser:
+    def __init__(self, session=None):
+        self.session = session
 
 def get_client(user, endpoint, request_type, body=None):
     headers = {'Content-Type': 'application/json'}
@@ -113,7 +116,7 @@ def connect_builds_build(request, build):
 
 
 def get_user(session):
-    user = User(session=session)
+    user = FakeUser(session)
     return get_client(user, "user", "GET")
 
 def delete_user(request):

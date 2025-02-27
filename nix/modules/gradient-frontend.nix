@@ -40,8 +40,12 @@ in {
         "gradient-server.service"
       ];
 
+      preStart = ''
+        ${lib.getExe cfg.package} migrate
+      '';
+
       serviceConfig = {
-        ExecStart = lib.getExe cfg.package;
+        ExecStart = "${lib.getExe cfg.package.python.pkgs.gunicorn} --bind ${cfg.listenAddr}:${toString cfg.port} --worker-tmp-dir /dev/shm frontend.wsgi:application";
         StateDirectory = "gradient";
         User = "gradient";
         Group = "gradient";
@@ -64,11 +68,13 @@ in {
       };
 
       environment = {
+        PYTHONPATH = "${cfg.package.python.pkgs.makePythonPath cfg.package.propagatedBuildInputs}:${cfg.package}/lib/gradient-frontend";
         GRADIENT_DEBUG = "false";
         GRADIENT_FRONTEND_IP = cfg.listenAddr;
         GRADIENT_FRONTEND_PORT = toString cfg.port;
         GRADIENT_API_URL = cfg.apiUrl;
         GRADIENT_SERVE_URL = "https://${gradientCfg.domain}";
+        GRADIENT_BASE_PATH = gradientCfg.baseDir;
         GRADIENT_OAUTH_ENABLE = toString gradientCfg.oauth.enable;
         GRADIENT_DISABLE_REGISTER = toString gradientCfg.settings.disableRegistration;
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString gradientCfg.settings.maxConcurrentEvaluations;

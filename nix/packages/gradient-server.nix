@@ -46,7 +46,7 @@ in rustPlatform.buildRustPackage {
 
   meta = {
     description = "Nix Continuous Integration System Backend";
-    homepage = "https://wavelens.io";
+    homepage = "https://github.com/wavelens/gradient";
     license = lib.licenses.agpl3Only;
     platforms = lib.platforms.unix;
     mainProgram = "gradient-server";

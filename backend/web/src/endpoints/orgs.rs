@@ -145,7 +145,7 @@ pub async fn delete_organization(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> Result<Json<BaseResponse<MOrganization>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let organization: MOrganization =
         match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
             Some(o) => o,
@@ -162,7 +162,7 @@ pub async fn delete_organization(
 
     let res = BaseResponse {
         error: false,
-        message: organization,
+        message: "Organization deleted".to_string(),
     };
 
     Ok(Json(res))

@@ -246,10 +246,15 @@ class UserLoginView(LoginView):
         return HttpResponseRedirect(self.get_success_url())
         return self.render_to_response(self.get_context_data(form=form))
 
+    def get(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            return redirect("/")
+        return super().get(request, *args, **kwargs)
+
 def logout_view(request):
     # TODO: api logout request
     logout(request)
-    return redirect("/account/login/")
+    return redirect("/account/login")
 
 def register(request):
     if request.method == 'POST':
