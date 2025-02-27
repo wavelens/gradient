@@ -27,6 +27,13 @@ class NewOrganizationForm(forms.Form):
             'class': 'form-control'
         })
     )
+    display_name = forms.CharField(
+        label='Organisations-Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
     description = forms.CharField(
         label='Beschreibung',
         required=True,
@@ -133,6 +140,13 @@ class NewProjectForm(forms.Form):
 
     name = forms.CharField(
         label='Projekt Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    display_name = forms.CharField(
+        label='Organisations-Name',
         required=True,
         widget=forms.TextInput(attrs={
             'class': 'form-control'

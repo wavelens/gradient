@@ -32,7 +32,7 @@ def home(request):
         org_details = org_details['message']
 
         details_blocks.append({
-            'project': org['name'],
+            'name': org['name'],
             'id': org['id'],
             'description': org_details['description'],
             'exec': 34,
@@ -181,7 +181,6 @@ def new_organization(request):
     if request.method == 'POST':
         form = NewOrganizationForm(request.POST)
         if form.is_valid():
-            # TODO: ADD display_name
             api.post_orgs(request, form.cleaned_data['name'], form.cleaned_data['display_name'], form.cleaned_data['description'])
             return redirect('/')
     else:
@@ -206,7 +205,7 @@ def new_project(request):
         form.fields['organization'].choices = org_choices
         if form.is_valid():
             # TODO: ADD display_name
-            res = api.post_orgs(request, **form.cleaned_data)
+            res = api.post_projects(request, **form.cleaned_data)
             if res is None:
                 form.add_error(None, "Das Projekt konnte nicht erstellt werden.")
             elif 'error' in res and res['error'] != False:

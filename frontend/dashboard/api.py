@@ -34,7 +34,6 @@ def get_client(user, endpoint, request_type, body=None):
     else:
         return None
 
-
 def health(request):
     return get_client(request.user, "health", "GET")
 
@@ -58,20 +57,20 @@ def post_auth_logout(request):
 def get_orgs(request):
     return get_client(request.user, "orgs", "GET")
 
-def post_orgs(request):
+def post_orgs(request, name, display_name, description):
     return get_client(request.user, "orgs", "POST", body={'name': name, 'display_name': display_name, 'description': description})
 
 def get_orgs_organization(request, organization):
-    return get_client(request.user, f"organization/{organization}", "GET")
+    return get_client(request.user, f"orgs/{organization}", "GET")
 
 def delete_orgs_organization(request, organization):
-    return get_client(request.user, f"organization/{organization}", "DELETE")
+    return get_client(request.user, f"orgs/{organization}", "DELETE")
 
 def get_orgs_organization_ssh(request, organization):
-    return get_client(request.user, f"organization/{organization}/ssh", "GET")
+    return get_client(request.user, f"orgs/{organization}/ssh", "GET")
 
 def post_orgs_organization_ssh(request, organization, public_key):
-    return get_client(request.user, f"organization/{organization}/ssh", "POST")
+    return get_client(request.user, f"orgs/{organization}/ssh", "POST")
 
 
 def get_projects(request, organization):

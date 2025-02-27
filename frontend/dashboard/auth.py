@@ -35,7 +35,7 @@ def get_user(request):
     user = None
 
     if SESSION_KEY in request.session:
-        json_user_cache = api.get_user_info(request.session[SESSION_KEY])
+        json_user_cache = api.get_user(request.session[SESSION_KEY])
 
         if json_user_cache is None or json_user_cache['error']:
             request.session.pop(SESSION_KEY, None)
@@ -115,7 +115,7 @@ class LoginForm(forms.Form):
                 # self.confirm_login_allowed(self.user_cache)
                 user_session = user_session['message']
 
-            json_user_cache = api.get_user_info(user_session)
+            json_user_cache = api.get_user(user_session)
 
             if json_user_cache is None or json_user_cache['error']:
                 raise forms.ValidationError(
