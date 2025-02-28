@@ -75,14 +75,14 @@ in {
         GRADIENT_API_URL = cfg.apiUrl;
         GRADIENT_SERVE_URL = "https://${gradientCfg.domain}";
         GRADIENT_BASE_PATH = gradientCfg.baseDir;
-        GRADIENT_OAUTH_ENABLE = toString gradientCfg.oauth.enable;
-        GRADIENT_DISABLE_REGISTER = toString gradientCfg.settings.disableRegistration;
+        GRADIENT_OAUTH_ENABLE = lib.boolToString gradientCfg.oauth.enable;
+        GRADIENT_DISABLE_REGISTER = lib.boolToString gradientCfg.settings.disableRegistration;
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString gradientCfg.settings.maxConcurrentEvaluations;
         GRADIENT_MAX_CONCURRENT_BUILDS = toString gradientCfg.settings.maxConcurrentBuilds;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
-        GRADIENT_SERVE_CACHE = toString gradientCfg.serveCache;
+        GRADIENT_SERVE_CACHE = lib.boolToString gradientCfg.serveCache;
       } // lib.optionalAttrs gradientCfg.oauth.enable {
-        GRADIENT_OAUTH_REQUIRED = toString cfg.oauth.required;
+        GRADIENT_OAUTH_REQUIRED = lib.boolToString cfg.oauth.required;
       };
     };
   };

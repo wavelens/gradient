@@ -18,8 +18,30 @@ impl MigrationTrait for Migration {
                     .table(Cache::Table)
                     .if_not_exists()
                     .col(ColumnDef::new(Cache::Id).uuid().not_null().primary_key())
+                    .col(
+                        ColumnDef::new(Cache::Name)
+                            .string()
+                            .not_null()
+                            .unique_key(),
+                    )
+                    .col(
+                        ColumnDef::new(Cache::DisplayName)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(Cache::Description).text().not_null())
+                    .col(ColumnDef::new(Cache::Active).boolean().not_null())
                     .col(ColumnDef::new(Cache::Priority).integer().not_null())
                     .col(ColumnDef::new(Cache::SigningKey).string().not_null())
+                    .col(ColumnDef::new(Cache::CreatedBy).uuid().not_null())
+                    .col(ColumnDef::new(Cache::CreatedAt).date_time().not_null())
+                    .foreign_key(
+                        ForeignKey::create()
+                            .name("fk-cache-created_by")
+                            .from(Cache::Table, Cache::CreatedBy)
+                            .to(User::Table, User::Id)
+                            .on_delete(ForeignKeyAction::Cascade),
+                    )
                     .to_owned(),
             )
             .await
@@ -36,6 +58,18 @@ impl MigrationTrait for Migration {
 enum Cache {
     Table,
     Id,
+    Name,
+    DisplayName,
+    Description,
+    Active,
     Priority,
     SigningKey,
+    CreatedBy,
+    CreatedAt,
+}
+
+#[derive(DeriveIden)]
+enum User {
+    Table,
+    Id,
 }

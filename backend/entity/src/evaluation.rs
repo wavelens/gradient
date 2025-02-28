@@ -34,7 +34,7 @@ pub struct Model {
     pub project: Uuid,
     pub repository: String,
     pub commit: Uuid,
-    pub evaluation_wildcard: String,
+    pub wildcard: String,
     pub status: EvaluationStatus,
     pub previous: Option<Uuid>,
     pub next: Option<Uuid>,

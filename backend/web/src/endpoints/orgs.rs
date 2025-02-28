@@ -8,12 +8,12 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use chrono::Utc;
-use core::database::get_organization_by_name;
+use core::database::{get_organization_by_name, get_cache_by_name};
 use core::input::check_index_name;
 use core::sources::{format_public_key, generate_ssh_key};
 use core::types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -228,6 +228,139 @@ pub async fn post_organization_ssh(
     let res = BaseResponse {
         error: false,
         message: format_public_key(organization),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn post_organization_subscribe_cache(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, cache)): Path<(String, String)>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let organization: MOrganization =
+        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
+            Some(o) => o,
+            None => {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Organization not found".to_string(),
+                    }),
+                ))
+            }
+        };
+
+    let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
+        Some(c) => c,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Cache not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let organization_cache = EOrganizationCache::find()
+        .filter(
+            Condition::all()
+                .add(COrganizationCache::Organization.eq(organization.id))
+                .add(COrganizationCache::Cache.eq(cache.id)),
+        )
+        .one(&state.db)
+        .await
+        .unwrap();
+
+    if organization_cache.is_some() {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(BaseResponse {
+                error: true,
+                message: "Organization already subscribed to Cache".to_string(),
+            }),
+        ));
+    }
+
+    let aorganization_cache = AOrganizationCache {
+        id: Set(Uuid::new_v4()),
+        organization: Set(organization.id),
+        cache: Set(cache.id),
+    };
+
+    aorganization_cache.insert(&state.db).await.unwrap();
+
+    let res = BaseResponse {
+        error: false,
+        message: "Cache subscribed".to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn delete_organization_subscribe_cache(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, cache)): Path<(String, String)>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let organization: MOrganization =
+        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
+            Some(o) => o,
+            None => {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Organization not found".to_string(),
+                    }),
+                ))
+            }
+        };
+
+    let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
+        Some(c) => c,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Cache not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let organization_cache = EOrganizationCache::find()
+        .filter(
+            Condition::all()
+                .add(COrganizationCache::Organization.eq(organization.id))
+                .add(COrganizationCache::Cache.eq(cache.id)),
+        )
+        .one(&state.db)
+        .await
+        .unwrap();
+
+
+
+    if let Some(organization_cache) = organization_cache {
+        let aorganization_cache: AOrganizationCache = organization_cache.into();
+        aorganization_cache.delete(&state.db).await.unwrap();
+    } else {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(BaseResponse {
+                error: true,
+                message: "Organization not subscribed to Cache".to_string(),
+            }),
+        ));
+    }
+
+    let res = BaseResponse {
+        error: false,
+        message: "Cache unsubscribed".to_string(),
     };
 
     Ok(Json(res))

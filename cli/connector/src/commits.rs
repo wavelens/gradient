@@ -21,7 +21,7 @@ pub async fn get_commit(
     let res = get_client(
         config,
         format!("commits/{}", commit_id),
-        RequestType::Get,
+        RequestType::GET,
         true,
     )
     .unwrap()

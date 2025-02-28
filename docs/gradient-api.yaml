@@ -30,6 +30,8 @@ tags:
     description: create and modify projects
   - name: servers
     description: create and modify servers
+  - name: caches
+    description: create and modify caches
   - name: evals
     description: retrieve evaluations
   - name: builds
@@ -389,6 +391,55 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
+  /orgs/{organization}/subscribe/{cache}:
+    post:
+      tags:
+        - orgs
+      summary: Subscribe to Cache
+      description: Subscribe the organization to the cache by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Organization or Cache not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '409':
+          description: Organization already subscribed to Cache
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    delete:
+      tags:
+        - orgs
+      summary: Unsubscribe from Cache
+      description: Unsubscribe the organization from the cache by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Organization or Cache not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '409':
+          description: Organization not subscribed to Cache
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
   /projects/{organization}:
     get:
       tags:
@@ -432,6 +483,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
+        '409':
+          description: Project Name already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
   /projects/{organization}/{project}:
     get:
       tags:
@@ -456,6 +513,43 @@ paths:
         - projects
       summary: Delete project
       description: Delete project by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /projects/{organization}/{project}/active:
+    post:
+      tags:
+        - projects
+      summary: Enable Project
+      description: Enable the Project by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    delete:
+      tags:
+        - projects
+      summary: Disable Project
+      description: Disable the Project by name
       responses:
         '200':
           description: Successful
@@ -556,6 +650,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
+        '409':
+          description: Server Name already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
   /servers/{organization}/{server}:
     get:
       tags:
@@ -580,6 +680,43 @@ paths:
         - servers
       summary: Delete server
       description: Delete server by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Server not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /servers/{organization}/{server}/active:
+    post:
+      tags:
+        - servers
+      summary: Enable Server
+      description: Enable the Server by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Server not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    delete:
+      tags:
+        - servers
+      summary: Disable Server
+      description: Disable the Server by name
       responses:
         '200':
           description: Successful
@@ -618,12 +755,67 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
-  /servers/{organization}/{server}/enable:
-    post:
+  /caches:
+    get:
       tags:
-        - servers
-      summary: Enable Server
-      description: Enable the Server by name
+        - caches
+      summary: List caches
+      description: List all cache entries
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+    put:
+      tags:
+        - caches
+      summary: Create cache entry
+      description: Create a new cache entry
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeCacheRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '409':
+          description: Cache Name already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /caches/{cache}:
+    get:
+      tags:
+        - caches
+      summary: Get cache info
+      description: Get details about the cache entry by id
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CacheResponse'
+        '404':
+          description: Cache entry not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    delete:
+      tags:
+        - caches
+      summary: Delete cache entry
+      description: Delete cache entry by id
       responses:
         '200':
           description: Successful
@@ -632,17 +824,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
         '404':
-          description: Server not found
+          description: Cache entry not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
-  /servers/{organization}/{server}/disable:
+  /cache/{cache}/active:
     post:
       tags:
-        - servers
-      summary: Disable Server
-      description: Disable the Server by name
+        - caches
+      summary: Enable Cache
+      description: Enable the Cache by name
       responses:
         '200':
           description: Successful
@@ -651,7 +843,25 @@ paths:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
         '404':
-          description: Server not found
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    delete:
+      tags:
+        - caches
+      summary: Disable Cache
+      description: Disable the Cache by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Project not found
           content:
             application/json:
               schema:
@@ -818,7 +1028,7 @@ components:
         message:
           type: list
           description: Response Message containing all organization details
-          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "name": myorg, "display_name": MyOrg, "description": "My Test Org", "public_key": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDQ2 ...", "private_key": "[redacted]", "use_nix_store": true, "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
+          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "name": myorg, "display_name": MyOrg, "description": "My Test Org", "public_key": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDQ2 ...", "use_nix_store": true, "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
     ProjectResponse:
       type: object
       properties:
@@ -829,7 +1039,7 @@ components:
         message:
           type: list
           description: Response Message containing all project details
-          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "organization": 9f7767ea-1757-48ba-93d1-5cda578b476c, "name": myproj, "enabled": true, "display_name": MyProj, "description": "My Test Proj", "repository": "https://github.com/wavelens/gradient", "evaluation_wildcard": "packages.*.gradient-cli", "last_evaluation": af7767ea-1757-48ba-93d1-5cda578b476d, "last_check_at": "2021-10-10T10:00:00Z", "force_evaluation": false, "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
+          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "organization": 9f7767ea-1757-48ba-93d1-5cda578b476c, "name": myproj, "active": true, "display_name": MyProj, "description": "My Test Proj", "repository": "https://github.com/wavelens/gradient", "evaluation_wildcard": "packages.*.gradient-cli", "last_evaluation": af7767ea-1757-48ba-93d1-5cda578b476d, "last_check_at": "2021-10-10T10:00:00Z", "force_evaluation": false, "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
     ServerResponse:
       type: object
       properties:
@@ -840,7 +1050,7 @@ components:
         message:
           type: list
           description: Response Message containing all server details
-          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "organization": 9f7767ea-1757-48ba-93d1-5cda578b476c, "name": myserver, "display_name": MyServer, "host": "127.0.0.1", "port": 22, "username": "builduser", "last_connection_at": "2021-10-10T10:00:00Z", "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
+          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "organization": 9f7767ea-1757-48ba-93d1-5cda578b476c, "name": myserver, "active": true, "display_name": MyServer, "host": "127.0.0.1", "port": 22, "username": "builduser", "last_connection_at": "2021-10-10T10:00:00Z", "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
     EvaluationResponse:
       type: object
       properties:
@@ -851,7 +1061,7 @@ components:
         message:
           type: list
           description: Response Message containing all evaluation details
-          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "project": 9f7767ea-1757-48ba-93d1-5cda578b476c, "repository": "https://github.com/wavelens/gradient", "commit": "af7767ea-1757-48ba-93d1-5cda578b476d", "evaluation_wildcard": "packages.*.gradient-cli", "status": "queued", "previous": Null, "next": Null, "created_at": "2021-10-10T10:00:00Z"}]
+          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "project": 9f7767ea-1757-48ba-93d1-5cda578b476c, "repository": "https://github.com/wavelens/gradient", "commit": "af7767ea-1757-48ba-93d1-5cda578b476d", "wildcard": "packages.*.gradient-cli", "status": "queued", "previous": Null, "next": Null, "created_at": "2021-10-10T10:00:00Z"}]
     BuildResponse:
       type: object
       properties:
@@ -874,6 +1084,17 @@ components:
           type: list
           description: Response Message containing all commit details
           examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "commit": "4f84fd348f7d4c7d8f7d4c7d8f7d4c7d", "message": "My Commit Message"}]
+    CacheResponse:
+      type: object
+      properties:
+        error:
+          type: boolean
+          description: Wheather this is an error or not
+          examples: [false]
+        message:
+          type: list
+          description: Response Message containing all cache details
+          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "name": mycache, "active": true, "display_name": MyCache, "description": "My Test Cache", "priority": 40, "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
     StreamResponse:
       type: string
       description: Stream of log messages
@@ -977,6 +1198,21 @@ components:
         features:
           type: list
           examples: [[big-parallel]]
+    MakeCacheRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          examples: [testcache]
+        display_name:
+          type: string
+          examples: [TestCache]
+        description:
+          type: string
+          examples: ["My Test Cache"]
+        priority:
+          type: integer
+          examples: [10]
     ApiKeyRequest:
       type: object
       properties:

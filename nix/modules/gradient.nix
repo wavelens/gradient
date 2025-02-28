@@ -164,11 +164,11 @@ in {
         GRADIENT_MAX_CONCURRENT_BUILDS = toString cfg.settings.maxConcurrentBuilds;
         GRADIENT_BINPATH_NIX = lib.getExe cfg.package_nix;
         GRADIENT_BINPATH_GIT = lib.getExe cfg.package_git;
-        GRADIENT_OAUTH_ENABLE = toString cfg.oauth.enable;
-        GRADIENT_DISABLE_REGISTER = toString cfg.settings.disableRegistration;
+        GRADIENT_OAUTH_ENABLE = lib.boolToString cfg.oauth.enable;
+        GRADIENT_DISABLE_REGISTER = lib.boolToString cfg.settings.disableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
         GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";
-        GRADIENT_SERVE_CACHE = toString cfg.serveCache;
+        GRADIENT_SERVE_CACHE = lib.boolToString cfg.serveCache;
       } // lib.optionalAttrs cfg.oauth.enable {
         GRADIENT_OAUTH_CLIENT_ID = cfg.oauth.clientId;
         GRADIENT_OAUTH_CLIENT_SECRET_FILE = "%d/gradient_oauth_client_secret";
@@ -176,7 +176,7 @@ in {
         GRADIENT_OAUTH_TOKEN_URL = cfg.oauth.tokenUrl;
         GRADIENT_OAUTH_AUTH_URL = cfg.oauth.authUrl;
         GRADIENT_OAUTH_API_URL = cfg.oauth.apiUrl;
-        GRADIENT_OAUTH_REQUIRED = toString cfg.oauth.required;
+        GRADIENT_OAUTH_REQUIRED = lib.boolToString cfg.oauth.required;
       };
     };
 

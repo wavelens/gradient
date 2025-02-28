@@ -128,7 +128,7 @@ pub async fn put(
         name: Set(body.name.clone()),
         display_name: Set(body.display_name.clone()),
         organization: Set(organization.id),
-        enabled: Set(true),
+        active: Set(true),
         host: Set(body.host.clone()),
         port: Set(body.port),
         username: Set(body.username.clone()),
@@ -254,7 +254,7 @@ pub async fn delete_server(
     Ok(Json(res))
 }
 
-pub async fn post_server_enable(
+pub async fn post_server_active(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, server)): Path<(String, String)>,
@@ -279,9 +279,9 @@ pub async fn post_server_enable(
         }
     };
 
-    let mut server: AServer = server.into();
-    server.enabled = Set(true);
-    server.update(&state.db).await.unwrap();
+    let mut aserver: AServer = server.into();
+    aserver.active = Set(true);
+    aserver.update(&state.db).await.unwrap();
 
     let res = BaseResponse {
         error: false,
@@ -291,7 +291,7 @@ pub async fn post_server_enable(
     Ok(Json(res))
 }
 
-pub async fn post_server_disable(
+pub async fn delete_server_active(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, server)): Path<(String, String)>,
@@ -316,9 +316,9 @@ pub async fn post_server_disable(
         }
     };
 
-    let mut server: AServer = server.into();
-    server.enabled = Set(false);
-    server.update(&state.db).await.unwrap();
+    let mut aserver: AServer = server.into();
+    aserver.active = Set(false);
+    aserver.update(&state.db).await.unwrap();
 
     let res = BaseResponse {
         error: false,

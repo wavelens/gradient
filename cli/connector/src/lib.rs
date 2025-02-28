@@ -6,6 +6,7 @@
 
 pub mod auth;
 pub mod builds;
+pub mod caches;
 pub mod commits;
 pub mod evals;
 pub mod orgs;
@@ -22,13 +23,6 @@ pub struct RequestConfig {
     pub token: Option<String>,
 }
 
-#[derive(Debug, PartialEq)]
-enum RequestType {
-    Get,
-    Post,
-    Delete,
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct BaseResponse<T> {
     pub error: bool,
@@ -42,6 +36,7 @@ pub struct ListItem {
 }
 
 pub type ListResponse = Vec<ListItem>;
+pub type RequestType = reqwest::Method;
 
 async fn parse_response<T: DeserializeOwned>(res: reqwest::Response) -> BaseResponse<T> {
     let bytes = match res.bytes().await {
@@ -76,13 +71,7 @@ fn get_client(
     login: bool,
 ) -> Result<reqwest::RequestBuilder, String> {
     let client = reqwest::Client::new();
-    let mut client = if request_type == RequestType::Post {
-        client.post(format!("{}/api/v1/{}", config.server_url, endpoint))
-    } else if request_type == RequestType::Delete {
-        client.delete(format!("{}/api/v1/{}", config.server_url, endpoint))
-    } else {
-        client.get(format!("{}/api/v1/{}", config.server_url, endpoint))
-    };
+    let mut client = client.request(request_type, format!("{}/api/v1/{}", config.server_url, endpoint));
 
     client = client.header("Content-Type", "application/json");
 
@@ -93,7 +82,7 @@ fn get_client(
     let token = if let Some(token) = config.token {
         token
     } else {
-        return Err("Token not set. Use `gradient login` to set it.".to_string());
+        return Err("Token not set. Use `gradient login` to set it.\nIf you have an API Key use `gradient config authtoken [YourApiKeyHere]`.".to_string());
     };
 
     client = client.header("Authorization", format!("Bearer {}", token));
@@ -102,7 +91,7 @@ fn get_client(
 }
 
 pub async fn health(config: RequestConfig) -> Result<BaseResponse<String>, String> {
-    let res = get_client(config, "health".to_string(), RequestType::Get, false)
+    let res = get_client(config, "health".to_string(), RequestType::GET, false)
         .unwrap()
         .send()
         .await;

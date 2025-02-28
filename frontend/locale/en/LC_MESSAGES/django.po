@@ -1,0 +1,260 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2025-02-28 18:15+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+#: dashboard/auth.py:73
+msgid "E-Mail or Username"
+msgstr ""
+
+#: dashboard/auth.py:79 dashboard/auth.py:160
+msgid "Password"
+msgstr ""
+
+#: dashboard/auth.py:84
+msgid "Stay logged in"
+msgstr ""
+
+#: dashboard/auth.py:90
+#, python-format
+msgid ""
+"Please enter a correct %(username)s and password. Note that both fields may "
+"be case-sensitive."
+msgstr ""
+
+#: dashboard/auth.py:92
+msgid "This account is inactive."
+msgstr ""
+
+#: dashboard/auth.py:139
+msgid "Username"
+msgstr ""
+
+#: dashboard/auth.py:146 dashboard/templates/dashboard/model.html:23
+msgid "Name"
+msgstr ""
+
+#: dashboard/auth.py:153
+msgid "E-Mail"
+msgstr ""
+
+#: dashboard/templates/backHeader.html:13
+msgid "Back"
+msgstr ""
+
+#: dashboard/templates/dashboard/download.html:14
+#: dashboard/templates/individualHeader.html:24
+msgid "Download"
+msgstr ""
+
+#: dashboard/templates/dashboard/download.html:27
+msgid "Type"
+msgstr ""
+
+#: dashboard/templates/dashboard/download.html:28
+msgid "Link"
+msgstr ""
+
+#: dashboard/templates/dashboard/download.html:29
+msgid "Actions"
+msgstr ""
+
+#: dashboard/templates/dashboard/home.html:15
+msgid "Home"
+msgstr ""
+
+#: dashboard/templates/dashboard/home.html:22
+msgid "Repositories"
+msgstr ""
+
+#: dashboard/templates/dashboard/log.html:14
+#: dashboard/templates/individualHeader.html:23
+msgid "Log"
+msgstr ""
+
+#: dashboard/templates/dashboard/log.html:25
+msgid "Overview"
+msgstr ""
+
+#: dashboard/templates/dashboard/log.html:36
+#: dashboard/templates/dashboard/log.html:74
+msgid "Build"
+msgstr ""
+
+#: dashboard/templates/dashboard/log.html:42
+msgid "Triggered via"
+msgstr ""
+
+#: dashboard/templates/dashboard/log.html:42
+msgid "ago"
+msgstr ""
+
+#: dashboard/templates/dashboard/log.html:43
+msgid "commit"
+msgstr ""
+
+#: dashboard/templates/dashboard/log.html:46
+msgid "Status"
+msgstr ""
+
+#: dashboard/templates/dashboard/log.html:50
+msgid "Total duration"
+msgstr ""
+
+#: dashboard/templates/dashboard/log.html:54
+msgid "Artifacts"
+msgstr ""
+
+#: dashboard/templates/dashboard/log.html:62
+msgid "months ago in"
+msgstr ""
+
+#: dashboard/templates/dashboard/model.html:15
+msgid "Models"
+msgstr ""
+
+#: dashboard/templates/dashboard/model.html:24
+msgid "Description"
+msgstr ""
+
+#: dashboard/templates/dashboard/newOrganization.html:14
+#: dashboard/templates/dashboard/newOrganization.html:19
+#: dashboard/templates/header.html:30
+msgid "New Organization"
+msgstr ""
+
+#: dashboard/templates/dashboard/newOrganization.html:38
+#: dashboard/templates/dashboard/newProject.html:43
+#: dashboard/templates/dashboard/newServer.html:38
+#: dashboard/templates/header.html:26
+msgid "Create"
+msgstr ""
+
+#: dashboard/templates/dashboard/newProject.html:14
+#: dashboard/templates/header.html:29
+msgid "New Project"
+msgstr ""
+
+#: dashboard/templates/dashboard/newProject.html:19
+msgid "New Projekt"
+msgstr ""
+
+#: dashboard/templates/dashboard/newServer.html:14
+#: dashboard/templates/dashboard/newServer.html:19
+msgid "New Server"
+msgstr ""
+
+#: dashboard/templates/dashboard/overview.html:15
+msgid "Dashboard"
+msgstr ""
+
+#: dashboard/templates/dashboard/overview.html:24
+#: dashboard/templates/dashboard/overview.html:117
+#: dashboard/templates/individualHeader.html:20
+msgid "Workflows"
+msgstr ""
+
+#: dashboard/templates/dashboard/overview.html:27
+msgid "Clear All Filters"
+msgstr ""
+
+#: dashboard/templates/dashboard/overview.html:28
+msgid "Branches"
+msgstr ""
+
+#: dashboard/templates/dashboard/overview.html:30
+msgid "Advanced Filter"
+msgstr ""
+
+#: dashboard/templates/dashboard/overview.html:39
+msgid "Search"
+msgstr ""
+
+#: dashboard/templates/dashboard/overview.html:40
+msgid "Clear search"
+msgstr ""
+
+#: dashboard/templates/dashboard/overview.html:51
+msgid "Project"
+msgstr ""
+
+#: dashboard/templates/dashboard/overview.html:52
+msgid "# of exec."
+msgstr ""
+
+#: dashboard/templates/dashboard/overview.html:53
+msgid "Avg. Duration"
+msgstr ""
+
+#: dashboard/templates/dashboard/overview.html:54
+msgid "WF Performance"
+msgstr ""
+
+#: dashboard/templates/dashboard/overview.html:55
+msgid "Latest 5 runs"
+msgstr ""
+
+#: dashboard/templates/header.html:39
+msgid "Profile and settings..."
+msgstr ""
+
+#: dashboard/templates/header.html:42
+msgid "signed in as"
+msgstr ""
+
+#: dashboard/templates/header.html:43
+msgid "Profile"
+msgstr ""
+
+#: dashboard/templates/header.html:44
+msgid "Starred"
+msgstr ""
+
+#: dashboard/templates/header.html:45
+msgid "Subscriptions"
+msgstr ""
+
+#: dashboard/templates/header.html:46
+#: dashboard/templates/individualHeader.html:25
+msgid "Settings"
+msgstr ""
+
+#: dashboard/templates/header.html:47
+msgid "Help"
+msgstr ""
+
+#: dashboard/templates/header.html:48
+msgid "Side Administration"
+msgstr ""
+
+#: dashboard/templates/header.html:49
+msgid "Sign Out"
+msgstr ""
+
+#: dashboard/templates/login.html:14 dashboard/templates/login.html:19
+#: dashboard/templates/login.html:43
+msgid "Login"
+msgstr ""
+
+#: dashboard/templates/register.html:14 dashboard/templates/register.html:19
+#: dashboard/templates/register.html:31
+msgid "Register"
+msgstr ""
+
+#: frontend/settings.py:129
+msgid "English"
+msgstr ""

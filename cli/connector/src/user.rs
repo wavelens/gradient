@@ -21,7 +21,7 @@ struct MakeApiKeyRequest {
 }
 
 pub async fn get(config: RequestConfig) -> Result<BaseResponse<UserInfoResponse>, String> {
-    let res = get_client(config, "user".to_string(), RequestType::Get, true)
+    let res = get_client(config, "user".to_string(), RequestType::GET, true)
         .unwrap()
         .send()
         .await
@@ -31,7 +31,7 @@ pub async fn get(config: RequestConfig) -> Result<BaseResponse<UserInfoResponse>
 }
 
 pub async fn delete(config: RequestConfig) -> Result<BaseResponse<String>, String> {
-    let res = get_client(config, "user".to_string(), RequestType::Delete, true)
+    let res = get_client(config, "user".to_string(), RequestType::DELETE, true)
         .unwrap()
         .send()
         .await
@@ -41,7 +41,7 @@ pub async fn delete(config: RequestConfig) -> Result<BaseResponse<String>, Strin
 }
 
 pub async fn get_keys(config: RequestConfig) -> Result<BaseResponse<ListResponse>, String> {
-    let res = get_client(config, "user/keys".to_string(), RequestType::Get, true)
+    let res = get_client(config, "user/keys".to_string(), RequestType::GET, true)
         .unwrap()
         .send()
         .await
@@ -53,7 +53,7 @@ pub async fn get_keys(config: RequestConfig) -> Result<BaseResponse<ListResponse
 pub async fn post_key(config: RequestConfig, name: String) -> Result<BaseResponse<String>, String> {
     let req = MakeApiKeyRequest { name };
 
-    let res = get_client(config, "user/keys".to_string(), RequestType::Post, true)
+    let res = get_client(config, "user/keys".to_string(), RequestType::POST, true)
         .unwrap()
         .json(&req)
         .send()
@@ -69,7 +69,7 @@ pub async fn delete_key(
 ) -> Result<BaseResponse<String>, String> {
     let req = MakeApiKeyRequest { name };
 
-    let res = get_client(config, "user/keys".to_string(), RequestType::Delete, true)
+    let res = get_client(config, "user/keys".to_string(), RequestType::DELETE, true)
         .unwrap()
         .json(&req)
         .send()

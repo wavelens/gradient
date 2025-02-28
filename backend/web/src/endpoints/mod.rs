@@ -6,7 +6,7 @@
 
 pub mod auth;
 pub mod builds;
-pub mod cache;
+pub mod caches;
 pub mod commits;
 pub mod evals;
 pub mod orgs;

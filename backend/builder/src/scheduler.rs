@@ -282,6 +282,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             .join(JoinType::InnerJoin, RProject::LastEvaluation.def())
             .filter(
                 Condition::all()
+                    .add(CProject::Active.eq(true))
                     .add(CProject::LastCheckAt.lte(threshold_time))
                     .add(
                         Condition::any()
@@ -299,6 +300,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             EProject::find()
                 .filter(
                     Condition::all()
+                        .add(CProject::Active.eq(true))
                         .add(CProject::LastCheckAt.lte(threshold_time))
                         .add(CProject::LastEvaluation.is_null()),
                 )
@@ -344,7 +346,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                                 project: p.id,
                                 repository: p.repository,
                                 commit: Uuid::nil(),
-                                evaluation_wildcard: p.evaluation_wildcard,
+                                wildcard: p.evaluation_wildcard,
                                 status: EvaluationStatus::Queued,
                                 previous: None,
                                 next: None,
@@ -399,7 +401,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             project: Set(project.id),
             repository: Set(project.repository.clone()),
             commit: Set(commit.id),
-            evaluation_wildcard: Set(project.evaluation_wildcard.clone()),
+            wildcard: Set(project.evaluation_wildcard.clone()),
             status: Set(EvaluationStatus::Queued),
             previous: Set(evaluation_id),
             next: Set(None),
@@ -503,7 +505,7 @@ async fn reserve_available_server(
 
     let mut cond = Condition::all()
         .add(CServer::Organization.eq(project.organization))
-        .add(CServer::Enabled.eq(true))
+        .add(CServer::Active.eq(true))
         .add(CServerArchitecture::Architecture.eq(build.architecture.clone()));
 
     for feature in features {

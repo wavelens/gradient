@@ -55,7 +55,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     let repository =
         repository_url_to_nix(&evaluation.repository, vec_to_hex(&commit.hash).as_str()).unwrap();
 
-    let wildcards = parse_evaluation_wildcard(evaluation.evaluation_wildcard.as_str())?;
+    let wildcards = parse_evaluation_wildcard(evaluation.wildcard.as_str())?;
     let all_derivations =
         get_flake_derivations(Arc::clone(&state), repository.clone(), wildcards).await?;
 

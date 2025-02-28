@@ -7,7 +7,7 @@ import requests
 import json
 
 class FakeUser:
-    def __init__(self, session=None):
+    def __init__(self, session):
         self.session = session
 
 def get_client(user, endpoint, request_type, body=None):
@@ -24,6 +24,8 @@ def get_client(user, endpoint, request_type, body=None):
             response = requests.get(url, data=data, headers=headers)
         elif request_type == "POST":
             response = requests.post(url, data=data, headers=headers)
+        elif request_type == "PUT":
+            response = requests.put(url, data=data, headers=headers)
         elif request_type == "DELETE":
             response = requests.delete(url, data=data, headers=headers)
     except:
@@ -75,6 +77,12 @@ def get_orgs_organization_ssh(request, organization):
 def post_orgs_organization_ssh(request, organization, public_key):
     return get_client(request.user, f"orgs/{organization}/ssh", "POST")
 
+def post_orgs_organization_subscribe_cache(request, organization, cache):
+    return get_client(request.user, f"orgs/{organization}/subscribe-cache/{cache}", "POST")
+
+def delete_orgs_organization_subscribe_cache(request, organization, cache):
+    return get_client(request.user, f"orgs/{organization}/subscribe-cache/{cache}", "DELETE")
+
 
 def get_projects(request, organization):
     return get_client(request.user, f"projects/{organization}", "GET")
@@ -87,6 +95,12 @@ def get_projects_project(request, organization, project):
 
 def delete_projects_project(request, organization, project):
     return get_client(request.user, f"projects/{organization}/{project}", "DELETE")
+
+def post_projects_project_active(request, organization, project):
+    return get_client(request.user, f"projects/{organization}/{project}/active", "POST")
+
+def delete_projects_project_active(request, organization, project):
+    return get_client(request.user, f"projects/{organization}/{project}/active", "DELETE")
 
 def post_projects_project_check_repository(request, organization, project):
     return get_client(request.user, f"projects/{organization}/{project}/check-repository", "POST")
@@ -141,14 +155,33 @@ def get_servers_server(request, organization, server):
 def delete_servers_server(request, organization, server):
     return get_client(request.user, f"servers/{organization}/{server}", "DELETE")
 
-def post_servers_server_enable(request, organization, server):
-    return get_client(request.user, f"servers/{organization}/{server}/enable", "POST")
+def post_servers_server_active(request, organization, server):
+    return get_client(request.user, f"servers/{organization}/{server}/active", "POST")
 
-def post_servers_server_disable(request, organization, server):
-    return get_client(request.user, f"servers/{organization}/{server}/disable", "POST")
+def delete_servers_server_active(request, organization, server):
+    return get_client(request.user, f"servers/{organization}/{server}/active", "DELETE")
 
 def post_servers_server_check_connection(request, organization, server):
     return get_client(request.user, f"servers/{organization}/{server}/check-connection", "POST")
+
+
+def get_caches(request):
+    return get_client(request.user, "caches", "GET")
+
+def put_caches(request, name, display_name, description, priority):
+    return get_client(request.user, "caches", "PUT", body={'name': name, 'display_name': display_name, 'description': description, 'priority': priority})
+
+def get_caches_cache(request, cache):
+    return get_client(request.user, f"caches/{cache}", "GET")
+
+def delete_caches_cache(request, cache):
+    return get_client(request.user, f"caches/{cache}", "DELETE")
+
+def post_caches_cache_active(request, cache):
+    return get_client(request.user, f"caches/{cache}/active", "POST")
+
+def delete_caches_cache_active(request, cache):
+    return get_client(request.user, f"caches/{cache}/active", "DELETE")
 
 
 def get_commits_commit(request, commit):

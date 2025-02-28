@@ -10,9 +10,11 @@ use rand::rngs::OsRng;
 use sea_orm::EntityTrait;
 use ssh_key::{Algorithm, LineEnding, PrivateKey};
 use std::sync::Arc;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use tokio::process::Command;
 
-use super::input::{load_secret, hex_to_vec};
+use super::input::{load_secret, hex_to_vec, check_repository_url_is_ssh};
 use super::types::*;
 
 pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) -> (bool, Vec<u8>) {
@@ -20,12 +22,38 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
         println!("Checking for updates on project: {} [{}]", project.id, project.name);
     };
 
-    let cmd = match Command::new(state.cli.binpath_git.clone())
-        .arg("ls-remote")
-        .arg(&project.repository)
+    let cmd = match if check_repository_url_is_ssh(&project.repository) {
+        let organization = EOrganization::find_by_id(project.organization).one(&state.db).await.unwrap().unwrap();
+
+
+        let (private_key, _public_key) = decrypt_ssh_private_key(
+            load_secret(&state.cli.crypt_secret_file),
+            organization,
+        ).unwrap();
+
+        let ssh_key_path = write_ssh_key(
+            private_key,
+            state.cli.base_path.clone(),
+        ).unwrap();
+
+        let cmd = Command::new(state.cli.binpath_git.clone())
+            .arg("ls-remote")
+            .arg("-c")
+            .arg(format!("core.sshCommand=ssh -i {}", ssh_key_path))
+            .arg(&project.repository)
+        .output()
+        .await;
+
+        clear_ssh_key(ssh_key_path).unwrap();
+
+        cmd
+    } else {
+        Command::new(state.cli.binpath_git.clone())
+            .arg("ls-remote")
+            .arg(&project.repository)
         .output()
         .await
-    {
+    } {
         Ok(output) => output,
         Err(e) => {
             println!("Error on executing command: {}", e);
@@ -82,6 +110,20 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
     }
 
     (true, remote_hash)
+}
+
+pub fn write_ssh_key(private_key: String, to_path: String) -> Result<String, String> {
+    let path = format!("{}/loaded_credentials_{}.key", to_path, uuid::Uuid::new_v4());
+
+    fs::write(&path, private_key).map_err(|e| e.to_string())?;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+
+    Ok(path)
+}
+
+pub fn clear_ssh_key(path: String) -> Result<(), String> {
+    fs::remove_file(&path).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), String> {

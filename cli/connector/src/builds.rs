@@ -29,7 +29,7 @@ pub async fn get_build(
     let res = get_client(
         config,
         format!("builds/{}", build_id),
-        RequestType::Get,
+        RequestType::GET,
         true,
     )
     .unwrap()
@@ -44,7 +44,7 @@ pub async fn connect_build(config: RequestConfig, build_id: String) -> Result<()
     let mut stream = get_client(
         config,
         format!("builds/{}", build_id),
-        RequestType::Post,
+        RequestType::CONNECT,
         true,
     )
     .unwrap()

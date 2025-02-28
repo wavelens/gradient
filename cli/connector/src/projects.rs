@@ -12,7 +12,7 @@ pub struct ProjectResponse {
     pub id: String,
     pub organization: String,
     pub name: String,
-    pub enabled: bool,
+    pub active: bool,
     pub display_name: String,
     pub description: String,
     pub repository: String,
@@ -39,7 +39,7 @@ pub async fn get(
     let res = get_client(
         config,
         format!("projects/{}", organization),
-        RequestType::Get,
+        RequestType::GET,
         true,
     )
     .unwrap()
@@ -50,7 +50,7 @@ pub async fn get(
     Ok(parse_response(res).await)
 }
 
-pub async fn post(
+pub async fn put(
     config: RequestConfig,
     organization: String,
     name: String,
@@ -70,7 +70,7 @@ pub async fn post(
     let res = get_client(
         config,
         format!("projects/{}", organization),
-        RequestType::Post,
+        RequestType::PUT,
         true,
     )
     .unwrap()
@@ -90,7 +90,7 @@ pub async fn get_project(
     let res = get_client(
         config,
         format!("projects/{}/{}", organization, projekt),
-        RequestType::Get,
+        RequestType::GET,
         true,
     )
     .unwrap()
@@ -109,7 +109,45 @@ pub async fn delete_project(
     let res = get_client(
         config,
         format!("projects/{}/{}", organization, project),
-        RequestType::Delete,
+        RequestType::DELETE,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn post_project_active(
+    config: RequestConfig,
+    organization: String,
+    project: String,
+) -> Result<BaseResponse<String>, String> {
+    let res = get_client(
+        config,
+        format!("projects/{}/{}/active", organization, project),
+        RequestType::POST,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn delete_project_active(
+    config: RequestConfig,
+    organization: String,
+    project: String,
+) -> Result<BaseResponse<String>, String> {
+    let res = get_client(
+        config,
+        format!("projects/{}/{}/active", organization, project),
+        RequestType::DELETE,
         true,
     )
     .unwrap()
@@ -128,7 +166,7 @@ pub async fn post_project_check_repository(
     let res = get_client(
         config,
         format!("projects/{}/{}/check-repository", organization, project),
-        RequestType::Post,
+        RequestType::POST,
         true,
     )
     .unwrap()
@@ -147,7 +185,7 @@ pub async fn post_project_evaluate(
     let res = get_client(
         config,
         format!("projects/{}/{}/evaluate", organization, project),
-        RequestType::Post,
+        RequestType::POST,
         true,
     )
     .unwrap()
