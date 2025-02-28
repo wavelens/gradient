@@ -291,7 +291,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ListResponse'
-    post:
+    put:
       tags:
         - orgs
       summary: Create organization
@@ -408,7 +408,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
-    post:
+    put:
       tags:
         - projects
       summary: Create project
@@ -532,7 +532,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
-    post:
+    put:
       tags:
         - servers
       summary: Create server
@@ -712,7 +712,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
-    post:
+    connect:
       tags:
         - evals
       summary: Get log stream of evaluation
@@ -748,7 +748,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
-    post:
+    connect:
       tags:
         - builds
       summary: Get log stream of build
@@ -829,7 +829,7 @@ components:
         message:
           type: list
           description: Response Message containing all project details
-          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "organization": 9f7767ea-1757-48ba-93d1-5cda578b476c, "name": myproj, "display_name": MyProj, "description": "My Test Proj", "repository": "https://github.com/wavelens/gradient", "evaluation_wildcard": "packages.*.gradient-cli", "last_evaluation": af7767ea-1757-48ba-93d1-5cda578b476d, "last_check_at": "2021-10-10T10:00:00Z", "force_evaluation": false, "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
+          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "organization": 9f7767ea-1757-48ba-93d1-5cda578b476c, "name": myproj, "enabled": true, "display_name": MyProj, "description": "My Test Proj", "repository": "https://github.com/wavelens/gradient", "evaluation_wildcard": "packages.*.gradient-cli", "last_evaluation": af7767ea-1757-48ba-93d1-5cda578b476d, "last_check_at": "2021-10-10T10:00:00Z", "force_evaluation": false, "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
     ServerResponse:
       type: object
       properties:

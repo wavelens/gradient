@@ -19,6 +19,7 @@ in {
       package = lib.mkPackageOption pkgs "gradient-server" { };
       package_nix = lib.mkPackageOption pkgs "nix" { };
       package_git = lib.mkPackageOption pkgs "git" { };
+      serveCache = lib.mkEnableOption "Serve cache";
       domain = lib.mkOption {
         description = "The domain under which Gradient runs.";
         type = lib.types.str;
@@ -167,6 +168,7 @@ in {
         GRADIENT_DISABLE_REGISTER = toString cfg.settings.disableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
         GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";
+        GRADIENT_SERVE_CACHE = toString cfg.serveCache;
       } // lib.optionalAttrs cfg.oauth.enable {
         GRADIENT_OAUTH_CLIENT_ID = cfg.oauth.clientId;
         GRADIENT_OAUTH_CLIENT_SECRET_FILE = "%d/gradient_oauth_client_secret";
@@ -194,6 +196,11 @@ in {
           };
 
           "/api" = {
+            proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
+            proxyWebsockets = true;
+          };
+
+          "/cache" = lib.mkIf cfg.serveCache {
             proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
             proxyWebsockets = true;
           };

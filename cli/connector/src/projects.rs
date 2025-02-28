@@ -12,6 +12,7 @@ pub struct ProjectResponse {
     pub id: String,
     pub organization: String,
     pub name: String,
+    pub enabled: bool,
     pub display_name: String,
     pub description: String,
     pub repository: String,

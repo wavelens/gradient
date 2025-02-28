@@ -17,6 +17,7 @@ pub struct Model {
     pub organization: Uuid,
     #[sea_orm(indexed)]
     pub name: String,
+    pub enabled: bool,
     pub display_name: String,
     #[sea_orm(column_type = "Text")]
     pub description: String,

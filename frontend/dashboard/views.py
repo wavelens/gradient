@@ -181,7 +181,7 @@ def new_organization(request):
     if request.method == 'POST':
         form = NewOrganizationForm(request.POST)
         if form.is_valid():
-            api.post_orgs(request, form.cleaned_data['name'], form.cleaned_data['display_name'], form.cleaned_data['description'])
+            api.put_orgs(request, form.cleaned_data['name'], form.cleaned_data['display_name'], form.cleaned_data['description'])
             return redirect('/')
     else:
         form = NewOrganizationForm()
@@ -205,7 +205,7 @@ def new_project(request):
         form.fields['organization'].choices = org_choices
         if form.is_valid():
             # TODO: ADD display_name
-            res = api.post_projects(request, **form.cleaned_data)
+            res = api.put_projects(request, **form.cleaned_data)
             if res is None:
                 form.add_error(None, "Das Projekt konnte nicht erstellt werden.")
             elif 'error' in res and res['error'] != False:

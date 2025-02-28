@@ -80,6 +80,7 @@ in {
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString gradientCfg.settings.maxConcurrentEvaluations;
         GRADIENT_MAX_CONCURRENT_BUILDS = toString gradientCfg.settings.maxConcurrentBuilds;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
+        GRADIENT_SERVE_CACHE = toString gradientCfg.serveCache;
       } // lib.optionalAttrs gradientCfg.oauth.enable {
         GRADIENT_OAUTH_REQUIRED = toString cfg.oauth.required;
       };

@@ -65,6 +65,8 @@ pub struct Cli {
     pub crypt_secret_file: String,
     #[arg(long, env = "GRADIENT_JWT_SECRET_FILE")]
     pub jwt_secret_file: String,
+    #[arg(long, env = "GRADIENT_SERVE_CACHE", default_value = "false")]
+    pub serve_cache: bool,
     #[arg(long, env = "GRADIENT_BINPATH_NIX", default_value = "nix")]
     pub binpath_nix: String,
     #[arg(long, env = "GRADIENT_BINPATH_GIT", default_value = "git")]

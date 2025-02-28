@@ -387,6 +387,9 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             // TODO: fetch commit message
             message: Set("".to_string()),
             hash: Set(commit_hash.clone()),
+            // TODO: fetch author
+            author: Set(None),
+            author_name: Set("".to_string()),
         };
 
         let commit = acommit.insert(&state.db).await.unwrap();

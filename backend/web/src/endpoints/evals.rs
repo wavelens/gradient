@@ -244,6 +244,25 @@ pub async fn connect_evaluation_builds(
 
     let stream = stream! {
         let mut last_logs: HashMap<Uuid, String> = HashMap::new();
+
+        let past_builds = EBuild::find()
+            .filter(CBuild::Evaluation.eq(evaluation.id))
+            .all(&state.db)
+            .await
+            .unwrap();
+
+        for build in past_builds {
+            let log = build.log.unwrap_or("".to_string());
+            last_logs.insert(build.id, log.clone());
+
+            // TODO: Chunkify past log
+            yield log
+                .split("\n")
+                .map(|l| format!("{}> {}", build.derivation_path, l))
+                .collect::<Vec<String>>()
+                .join("\n");
+        }
+
         loop {
             let builds = EBuild::find()
                 .filter(condition.clone())

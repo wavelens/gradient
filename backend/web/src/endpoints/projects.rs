@@ -72,7 +72,7 @@ pub async fn get(
     Ok(Json(res))
 }
 
-pub async fn post(
+pub async fn put(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
@@ -146,6 +146,7 @@ pub async fn post(
         id: Set(Uuid::new_v4()),
         organization: Set(organization.id),
         name: Set(body.name.clone()),
+        enabled: Set(true),
         display_name: Set(body.display_name.clone()),
         description: Set(body.description.clone()),
         repository: Set(repository_url.to_string()),

@@ -9,14 +9,12 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
-#[sea_orm(table_name = "commit")]
+#[sea_orm(table_name = "cache")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
-    pub message: String,
-    pub hash: Vec<u8>,
-    pub author: Option<Uuid>,
-    pub author_name: String,
+    pub priority: i32,
+    pub signing_key: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

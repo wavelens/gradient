@@ -19,6 +19,9 @@ mod m20241107_155020_create_table_api;
 mod m20241107_156000_create_table_build_feature;
 mod m20241107_156100_create_table_server_feature;
 mod m20241107_156110_create_table_server_architecture;
+mod m20241107_156120_create_table_cache;
+mod m20241107_156130_create_table_organization_cache;
+
 
 pub struct Migrator;
 
@@ -39,6 +42,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20241107_156000_create_table_build_feature::Migration),
             Box::new(m20241107_156100_create_table_server_feature::Migration),
             Box::new(m20241107_156110_create_table_server_architecture::Migration),
+            Box::new(m20241107_156120_create_table_cache::Migration),
+            Box::new(m20241107_156130_create_table_organization_cache::Migration),
         ]
     }
 }

@@ -10,7 +10,6 @@ pub mod executer;
 pub mod input;
 pub mod sources;
 pub mod types;
-// pub mod altexecuter;
 
 use clap::Parser;
 use database::connect_db;

@@ -20,6 +20,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Project::Id).uuid().not_null().primary_key())
                     .col(ColumnDef::new(Project::Organization).uuid().not_null())
                     .col(ColumnDef::new(Project::Name).string().not_null())
+                    .col(ColumnDef::new(Project::Enabled).boolean().not_null())
                     .col(ColumnDef::new(Project::DisplayName).string().not_null())
                     .col(ColumnDef::new(Project::Description).text().not_null())
                     .col(ColumnDef::new(Project::Repository).string().not_null())
@@ -69,6 +70,7 @@ enum Project {
     Id,
     Organization,
     Name,
+    Enabled,
     DisplayName,
     Description,
     Repository,

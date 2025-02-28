@@ -60,8 +60,8 @@ def post_auth_logout(request):
 def get_orgs(request):
     return get_client(request.user, "orgs", "GET")
 
-def post_orgs(request, name, display_name, description):
-    return get_client(request.user, "orgs", "POST", body={'name': name, 'display_name': display_name, 'description': description})
+def put_orgs(request, name, display_name, description):
+    return get_client(request.user, "orgs", "PUT", body={'name': name, 'display_name': display_name, 'description': description})
 
 def get_orgs_organization(request, organization):
     return get_client(request.user, f"orgs/{organization}", "GET")
@@ -79,8 +79,8 @@ def post_orgs_organization_ssh(request, organization, public_key):
 def get_projects(request, organization):
     return get_client(request.user, f"projects/{organization}", "GET")
 
-def post_projects(request, organization, name, display_name, description, repository, evaluation_wildcard):
-    return get_client(request.user, f"projects/{organization}", "POST", body={'name': name, 'display_name': display_name, 'description': description, 'repository': repository, 'evaluation_wildcard': evaluation_wildcard})
+def put_projects(request, organization, name, display_name, description, repository, evaluation_wildcard):
+    return get_client(request.user, f"projects/{organization}", "PUT", body={'name': name, 'display_name': display_name, 'description': description, 'repository': repository, 'evaluation_wildcard': evaluation_wildcard})
 
 def get_projects_project(request, organization, project):
     return get_client(request.user, f"projects/{organization}/{project}", "GET")
@@ -132,8 +132,8 @@ def delete_user_keys(request, name):
 def get_servers(request, organization):
     return get_client(request.user, f"servers/{organization}", "GET")
 
-def post_servers(request, organization, name, display_name, host, port, username, architectures, features):
-    return get_client(request.user, f"servers/{organization}", "POST", body={'name': name, 'display_name': display_name, 'host': host, 'port': port, 'username': username, 'architectures': architectures, 'features': features})
+def put_servers(request, organization, name, display_name, host, port, username, architectures, features):
+    return get_client(request.user, f"servers/{organization}", "PUT", body={'name': name, 'display_name': display_name, 'host': host, 'port': port, 'username': username, 'architectures': architectures, 'features': features})
 
 def get_servers_server(request, organization, server):
     return get_client(request.user, f"servers/{organization}/{server}", "GET")

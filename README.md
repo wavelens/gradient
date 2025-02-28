@@ -18,6 +18,7 @@ Gradient is a web-based Nix-based Continuous Integration (CI) system.
 - **Streaming Logs**: real-time log streaming for builds.
 - **Rich Project Configuration**: check all branches, pull requests, and tags. (planned)
 - **OAuth2**: support for OAuth2 for user authentication.
+- **Cache**: integrated nix store cache. (planned)
 
 ## Installation
 
@@ -59,13 +60,14 @@ Configure Gradient in your `configuration.nix`:
   services.gradient = {
     enable = true;
     frontend.enable = true;
+    serveCache = true;
     configurePostgres = true;
     configureNginx = true;
     domain = "gradient.wavelens.io";
 
     # we recommend the use of sops-nix
     cryptSecretFile = "/var/lib/gradient/crypt-secret"; # a password base64 encoded
-    jwtSecretFile = "/var/lib/gradient/jwt-secret"; # random alphanumeric string
+    jwtSecretFile = "/var/lib/gradient/jwt-secret"; # random alphanumeric string (RS256 JWT secret)
   };
 }
 ```

@@ -73,7 +73,7 @@ pub async fn get(
     Ok(Json(res))
 }
 
-pub async fn post(
+pub async fn put(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,

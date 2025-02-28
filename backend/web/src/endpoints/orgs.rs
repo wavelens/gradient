@@ -52,7 +52,7 @@ pub async fn get(
     Ok(Json(res))
 }
 
-pub async fn post(
+pub async fn put(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Json(body): Json<MakeOrganizationRequest>,
@@ -159,6 +159,9 @@ pub async fn delete_organization(
                 ))
             }
         };
+
+    let aorganization: AOrganization = organization.into();
+    aorganization.delete(&state.db).await.unwrap();
 
     let res = BaseResponse {
         error: false,

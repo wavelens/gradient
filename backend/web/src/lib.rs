@@ -57,7 +57,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         );
 
     let api = Router::new()
-        .route("/orgs", get(orgs::get).post(orgs::post))
+        .route("/orgs", get(orgs::get).put(orgs::put))
         .route(
             "/orgs/{organization}",
             get(orgs::get_organization).delete(orgs::delete_organization),
@@ -68,7 +68,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         )
         .route(
             "/projects/{organization}",
-            get(projects::get).post(projects::post),
+            get(projects::get).put(projects::put),
         )
         .route(
             "/projects/{organization}/{project}",
@@ -88,11 +88,11 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         )
         .route(
             "/evals/{evaluation}/builds",
-            get(evals::get_evaluation_builds).post(evals::connect_evaluation_builds),
+            get(evals::get_evaluation_builds).connect(evals::connect_evaluation_builds),
         )
         .route(
             "/builds/{build}",
-            get(builds::get_build).post(builds::connect_build),
+            get(builds::get_build).connect(builds::connect_build),
         )
         .route("/user", get(user::get).delete(user::delete))
         .route(
@@ -105,7 +105,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/user/settings",
             get(user::get_settings).post(user::post_settings),
         )
-        .route("/servers/{organization}", get(servers::get).post(servers::post))
+        .route("/servers/{organization}", get(servers::get).put(servers::put))
         .route(
             "/servers/{organization}/{server}",
             get(servers::get_server).delete(servers::delete_server),
@@ -141,6 +141,18 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
 
     let app = Router::new()
         .nest("/api/v1", api)
+        .route(
+            "/cache/{cache}/nix-cache-info",
+            get(cache::get_nix_cache_info),
+        )
+        .route(
+            "/cache/{cache}/{path}",
+            get(cache::get_path),
+        )
+        .route(
+            "/cache/{cache}/nar/{path}",
+            get(cache::get_nar),
+        )
         .fallback(handle_404)
         .layer(cors)
         .layer(trace)
