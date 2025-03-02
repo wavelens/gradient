@@ -180,11 +180,14 @@ in {
       };
     };
 
-    nix.settings.experimental-features = [
-      "nix-command"
-      "flakes"
-      "ca-derivations"
-    ];
+    nix.settings = {
+      allowed-users = [ "gradient" ];
+      experimental-features = [
+        "nix-command"
+        "flakes"
+        "ca-derivations"
+      ];
+    };
 
     services = {
       nginx = lib.mkIf cfg.configureNginx {

@@ -61,7 +61,15 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
         .unwrap()
         .unwrap();
 
-    let local_daemon = get_local_store(organization).await;
+    let local_daemon = match get_local_store(organization).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Failed).await;
+            return;
+        }
+    };
+
     let builds = match local_daemon {
         LocalNixStore::UnixStream(mut store) => {
             evaluate(Arc::clone(&state), &mut store, &evaluation).await
@@ -157,7 +165,14 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         .unwrap()
         .unwrap();
 
-    let mut local_daemon = get_local_store(organization.clone()).await;
+    let mut local_daemon = match get_local_store(organization.clone()).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            update_build_status_recursivly(state, build.clone(), BuildStatus::Aborted).await;
+            return;
+        }
+    };
 
     let (private_key, public_key) =
         decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization).unwrap();

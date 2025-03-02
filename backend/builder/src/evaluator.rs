@@ -5,6 +5,7 @@
  */
 
 use chrono::Utc;
+use nix_daemon::{Progress, Store};
 use core::database::add_features;
 use core::executer::*;
 use core::input::{parse_evaluation_wildcard, repository_url_to_nix, vec_to_hex};
@@ -14,6 +15,7 @@ use entity::evaluation::EvaluationStatus;
 use nix_daemon::nix::DaemonStore;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, JoinType, QuerySelect};
+use sea_orm::ActiveValue::Set;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::option::Option;
@@ -75,7 +77,9 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             match get_derivation_cmd(state.cli.binpath_nix.as_str(), &path).await {
                 Ok((d, r)) => (d, r),
                 Err(e) => {
-                    println!("Error: {}", e);
+                    // TODO: log error
+                    println!("A derivation failed: {}", e);
+                    println!("Skipping broken package: {}", derivation_string);
                     continue;
                 }
             };
@@ -143,18 +147,22 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         let already_exsists = find_builds(Arc::clone(&state), organization_id, references.clone())
             .await
             .unwrap();
+
         let mut references = references
             .clone()
             .into_iter()
             .map(|d| (d, Some(build_id), Uuid::new_v4()))
             .collect::<Vec<(String, Option<Uuid>, Uuid)>>();
 
+        let mut check_availablity: Vec<MBuild> = Vec::new();
+
         references.retain(|d| {
             let d_path = d.0.clone();
 
             let in_builds = all_builds.iter().any(|b| b.derivation_path == d_path);
-            let in_exsists = already_exsists.iter().any(|b| b.derivation_path == d_path);
+            let in_exsists = already_exsists.iter().find(|b| b.derivation_path == d_path);
             let in_dependencies = dependencies.iter().any(|(path, _, _)| *path == d_path);
+
 
             if in_builds || in_dependencies {
                 let d_id = if in_builds {
@@ -180,10 +188,39 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 all_dependencies.push(dep);
 
                 false
+            } else if let Some(in_exsists) = in_exsists {
+                check_availablity.push(in_exsists.clone());
+                true
             } else {
-                !in_exsists
+                true
             }
         });
+
+        for b in check_availablity {
+            let dep = MBuildDependency {
+                id: Uuid::new_v4(),
+                build: b.id,
+                dependency: build_id,
+            };
+
+            if store.query_pathinfo(b.derivation_path.clone()).result().await.unwrap().is_none() {
+                references.retain(|(d, _, _)| *d != b.derivation_path);
+
+                if b.status != BuildStatus::Completed {
+                    let mut abuild: ABuild = b.into();
+                    abuild.status = Set(BuildStatus::Completed);
+                    abuild.log = Set(None);
+                    abuild.save(&state.db).await.unwrap();
+                }
+            } else {
+                let mut abuild: ABuild = b.into();
+                abuild.status = Set(BuildStatus::Queued);
+                abuild.log = Set(None);
+                abuild.save(&state.db).await.unwrap();
+            }
+
+            all_dependencies.push(dep);
+        }
 
         let (system, features) =
             get_features_cmd(state.cli.binpath_nix.as_str(), dependency.as_str())
@@ -261,7 +298,8 @@ pub async fn get_derivation_cmd(
 
     if !output.status.success() {
         return Err(format!(
-            "Command failed with status: {:?}, stderr: {}",
+            "Command \"nix path-info --derivation {}\" failed with status: {:?}, stderr: {}",
+            path,
             output.status,
             String::from_utf8_lossy(&output.stderr)
         ));
@@ -311,7 +349,8 @@ pub async fn get_features_cmd(
 
     if !output.status.success() {
         return Err(format!(
-            "Command failed with status: {:?}, stderr: {}",
+            "Command \"nix derivation show {}\" failed with status: {:?}, stderr: {}",
+            path,
             output.status,
             String::from_utf8_lossy(&output.stderr)
         ));

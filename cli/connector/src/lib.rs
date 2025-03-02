@@ -64,6 +64,7 @@ async fn parse_response<T: DeserializeOwned>(res: reqwest::Response) -> BaseResp
     }
 }
 
+// TODO: Better error handling for "connection refused"
 fn get_client(
     config: RequestConfig,
     endpoint: String,
