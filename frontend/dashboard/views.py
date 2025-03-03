@@ -155,6 +155,8 @@ def download(request, org, evaluation_id=None):
     },
     ]
     context = {
+        'org_id': org,
+        'evaluation_id': evaluation_id,
         'files': files,
     }
     return render(request, "dashboard/download.html", context)

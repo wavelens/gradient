@@ -14,41 +14,44 @@
             <div class="logo-container">
                 <a href="/" class="no-hovereffect"><img src="{% static '/dashboard/images/wavelens-LOGO.svg' %}" alt="Logo"></a>
             </div>
-            <div>
-                <div class="dropdown">
-                    <div onclick="toggleDropdown('dropdownHeaderAdd', 'tooltipAdd', 'dropdownHeader', 'tooltip'); event.stopPropagation();" class="tooltip">
-                        <span class="material-symbols-outlined icon-arrow pointer">
-                            add
-                        </span>
-                        <span class="material-symbols-outlined icon-arrow pointer m-l--11 m-r-1rem">
-                            arrow_drop_down
-                        </span>
-                        <span class="tooltiptext" id="tooltipAdd">{% trans 'Create' %}</span>
+            {% if request.user.is_authenticated %}
+                <div>
+                    <div class="dropdown">
+                        <div onclick="toggleDropdown('dropdownHeaderAdd', 'tooltipAdd', 'dropdownHeader', 'tooltip'); event.stopPropagation();" class="tooltip">
+                            <span class="material-symbols-outlined icon-arrow pointer">
+                                add
+                            </span>
+                            <span class="material-symbols-outlined icon-arrow pointer m-l--11 m-r-1rem">
+                                arrow_drop_down
+                            </span>
+                            <span class="tooltiptext" id="tooltipAdd">{% trans 'Create' %}</span>
+                        </div>
+                        <div id="dropdownHeaderAdd" class="dropdown-content dropdown-add">
+                            <a href="{% url 'new_project' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">add</span><span>{% trans 'New Project' %}</span></a>
+                            <a href="{% url 'new_organization' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">apartment</span><span>{% trans 'New Organization' %}</span></a>
+                            <a href="{% url 'new_server' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">host</span><span>{% trans 'New Server' %}</span></a>
+                        </div>
                     </div>
-                    <div id="dropdownHeaderAdd" class="dropdown-content">
-                        <a href="{% url 'new_project' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">add</span><span>{% trans 'New Project' %}</span></a>
-                        <a href="{% url 'new_organization' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">apartment</span><span>{% trans 'New Organization' %}</span></a>
+                    <div class="dropdown">
+                        <div onclick="toggleDropdown('dropdownHeader', 'tooltip', 'dropdownHeaderAdd', 'tooltipAdd'); event.stopPropagation();" class="tooltip">
+                            <img src="{{ request.user.image }}" class="h-30 border-radius-5">
+                            <span class="material-symbols-outlined icon-arrow pointer">
+                                arrow_drop_down
+                            </span>
+                            <span class="tooltiptext" id="tooltip">{% trans 'Profile and settings...' %}</span>
+                        </div>
+                        <div id="dropdownHeader" class="dropdown-content">
+                            <p>{% trans 'signed in as' %} {{ request.user.name }}</p>
+                            <a href="#home" class="flex-c"><span class="material-symbols-outlined m-r-5">account_circle</span><span>{% trans 'Profile' %}</span></a>
+                            <a href="#about" class="flex-c"><span class="material-symbols-outlined m-r-5">star</span><span>{% trans 'Starred' %}</span></a>
+                            <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">notifications</span><span>{% trans 'Subscriptions' %}</span></a>
+                            <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">settings</span><span>{% trans 'Settings' %}</span></a>
+                            <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">help</span><span>{% trans 'Help' %}</span></a>
+                            <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">tune</span><span>{% trans 'Side Administration' %}</span></a>
+                            <a href="{% url 'logout' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">logout</span><span>{% trans 'Sign Out' %}</span></a>
+                        </div>
                     </div>
                 </div>
-                <div class="dropdown">
-                    <div onclick="toggleDropdown('dropdownHeader', 'tooltip', 'dropdownHeaderAdd', 'tooltipAdd'); event.stopPropagation();" class="tooltip">
-                        <img src="{{ request.user.image }}" class="h-30 border-radius-5">
-                        <span class="material-symbols-outlined icon-arrow pointer">
-                            arrow_drop_down
-                        </span>
-                        <span class="tooltiptext" id="tooltip">{% trans 'Profile and settings...' %}</span>
-                    </div>
-                    <div id="dropdownHeader" class="dropdown-content">
-                        <p>{% trans 'signed in as' %} {{ request.user.name }}</p>
-                        <a href="#home" class="flex-c"><span class="material-symbols-outlined m-r-5">account_circle</span><span>{% trans 'Profile' %}</span></a>
-                        <a href="#about" class="flex-c"><span class="material-symbols-outlined m-r-5">star</span><span>{% trans 'Starred' %}</span></a>
-                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">notifications</span><span>{% trans 'Subscriptions' %}</span></a>
-                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">settings</span><span>{% trans 'Settings' %}</span></a>
-                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">help</span><span>{% trans 'Help' %}</span></a>
-                        <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">tune</span><span>{% trans 'Side Administration' %}</span></a>
-                        <a href="{% url 'logout' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">logout</span><span>{% trans 'Sign Out' %}</span></a>
-                    </div>
-                </div>
-            </div>
+            {% endif %}
         </div> 
     </header>
