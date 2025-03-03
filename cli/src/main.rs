@@ -390,7 +390,7 @@ pub async fn main() -> std::io::Result<()> {
                         None => ask_for_input("Description"),
                     };
 
-                    let res = orgs::post(
+                    let res = orgs::put(
                         get_request_config(load_config()).unwrap(),
                         name.clone(),
                         display_name,
@@ -720,7 +720,7 @@ pub async fn main() -> std::io::Result<()> {
                             None => ask_for_input("Evaluation Wildcard"),
                         };
 
-                        let res = projects::post(
+                        let res = projects::put(
                             get_request_config(load_config()).unwrap(),
                             organization.clone(),
                             name.clone(),
@@ -843,7 +843,7 @@ pub async fn main() -> std::io::Result<()> {
                             None => ask_for_list("Features"),
                         };
 
-                        let res = servers::post(
+                        let res = servers::put(
                             get_request_config(load_config()).unwrap(),
                             organization,
                             name,

@@ -38,7 +38,7 @@ pub async fn post_basic_register(
     let res = get_client(
         config,
         "auth/basic/register".to_string(),
-        RequestType::Post,
+        RequestType::POST,
         false,
     )
     .unwrap()
@@ -63,7 +63,7 @@ pub async fn post_basic_login(
     let res = get_client(
         config,
         "auth/basic/login".to_string(),
-        RequestType::Post,
+        RequestType::POST,
         false,
     )
     .unwrap()
@@ -79,7 +79,7 @@ pub async fn get_oauth_authorize(config: RequestConfig) -> Result<BaseResponse<S
     let res = get_client(
         config,
         "auth/oauth/authorize".to_string(),
-        RequestType::Get,
+        RequestType::GET,
         false,
     )
     .unwrap()
@@ -97,7 +97,7 @@ pub async fn post_oauth_authorize(
     let res = get_client(
         config,
         "auth/oauth/authorize".to_string(),
-        RequestType::Post,
+        RequestType::POST,
         false,
     )
     .unwrap()
@@ -110,7 +110,7 @@ pub async fn post_oauth_authorize(
 }
 
 pub async fn post_logout(config: RequestConfig) -> Result<BaseResponse<String>, String> {
-    let res = get_client(config, "auth/logout".to_string(), RequestType::Post, false)
+    let res = get_client(config, "auth/logout".to_string(), RequestType::POST, false)
         .unwrap()
         .send()
         .await

@@ -29,7 +29,7 @@ pub async fn get_evaluation(
     let res = get_client(
         config,
         format!("evals/{}", evaluation_id),
-        RequestType::Get,
+        RequestType::GET,
         true,
     )
     .unwrap()
@@ -47,7 +47,7 @@ pub async fn post_evaluation(
     let res = get_client(
         config,
         format!("evals/{}", evaluation_id),
-        RequestType::Post,
+        RequestType::POST,
         true,
     )
     .unwrap()
@@ -65,7 +65,7 @@ pub async fn get_evaluation_builds(
     let res = get_client(
         config,
         format!("evals/{}/builds", evaluation_id),
-        RequestType::Get,
+        RequestType::GET,
         true,
     )
     .unwrap()
@@ -83,7 +83,7 @@ pub async fn connect_evaluation(
     let mut stream = get_client(
         config,
         format!("evals/{}/builds", evaluation_id),
-        RequestType::Post,
+        RequestType::CONNECT,
         true,
     )
     .unwrap()

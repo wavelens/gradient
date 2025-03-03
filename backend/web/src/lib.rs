@@ -67,6 +67,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             get(orgs::get_organization_ssh).post(orgs::post_organization_ssh),
         )
         .route(
+            "/orgs/{organization}/subscribe/{cache}",
+            post(orgs::post_organization_subscribe_cache).delete(orgs::delete_organization_subscribe_cache),
+        )
+        .route(
             "/projects/{organization}",
             get(projects::get).put(projects::put),
         )
@@ -83,12 +87,28 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             post(projects::post_project_evaluate),
         )
         .route(
+            "/projects/{organization}/{project}/active",
+            post(projects::post_project_active).delete(projects::delete_project_active),
+        )
+        .route(
             "/evals/{evaluation}",
             get(evals::get_evaluation).post(evals::post_evaluation),
         )
         .route(
             "/evals/{evaluation}/builds",
             get(evals::get_evaluation_builds).connect(evals::connect_evaluation_builds),
+        )
+        .route(
+            "/caches",
+            get(caches::get).put(caches::put),
+        )
+        .route(
+            "/caches/{cache}",
+            get(caches::get_cache).delete(caches::delete_cache),
+        )
+        .route(
+            "/caches/{cache}/active",
+            post(caches::post_cache_active).delete(caches::delete_cache_active),
         )
         .route(
             "/builds/{build}",
@@ -115,12 +135,8 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             post(servers::post_server_check_connection),
         )
         .route(
-            "/servers/{organization}/{server}/enable",
-            post(servers::post_server_enable),
-        )
-        .route(
-            "/servers/{organization}/{server}/disable",
-            post(servers::post_server_disable),
+            "/servers/{organization}/{server}/active",
+            post(servers::post_server_active).delete(servers::delete_server_active),
         )
         .route(
             "/commits/{commit}",
@@ -143,15 +159,15 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .nest("/api/v1", api)
         .route(
             "/cache/{cache}/nix-cache-info",
-            get(cache::get_nix_cache_info),
+            get(caches::nix_cache_info),
         )
         .route(
             "/cache/{cache}/{path}",
-            get(cache::get_path),
+            get(caches::path),
         )
         .route(
             "/cache/{cache}/nar/{path}",
-            get(cache::get_nar),
+            get(caches::nar),
         )
         .fallback(handle_404)
         .layer(cors)

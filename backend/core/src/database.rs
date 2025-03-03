@@ -120,3 +120,19 @@ pub async fn get_server_by_name(
         None => None,
     }
 }
+
+pub async fn get_cache_by_name(
+    state: Arc<ServerState>,
+    user_id: Uuid,
+    name: String,
+) -> Option<MCache> {
+    ECache::find()
+        .filter(
+            Condition::all()
+                .add(CCache::CreatedBy.eq(user_id))
+                .add(CCache::Name.eq(name)),
+        )
+        .one(&state.db)
+        .await
+        .unwrap()
+}

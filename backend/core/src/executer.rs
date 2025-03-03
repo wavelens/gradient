@@ -250,7 +250,7 @@ pub fn get_buildlog_stream(
     Ok(Box::pin(stream))
 }
 
-pub async fn get_local_store(organization: MOrganization) -> LocalNixStore {
+pub async fn get_local_store(organization: MOrganization) -> Result<LocalNixStore, String> {
     if organization.use_nix_store {
         let store = DaemonStore::builder()
             .init(
@@ -259,7 +259,7 @@ pub async fn get_local_store(organization: MOrganization) -> LocalNixStore {
                     .unwrap(),
             )
             .await
-            .unwrap();
+            .map_err(|_| "Failed to Connect to Local Nix Deamon".to_string())?;
 
         // let nix_path_hashmap = HashMap::new();
         // nix_path_hashmap.insert(
@@ -271,7 +271,7 @@ pub async fn get_local_store(organization: MOrganization) -> LocalNixStore {
         // store.set_options(nix_daemon::ClientSettings { keep_failed: (), keep_going: (), try_fallback: (), verbosity: (), max_build_jobs: (), max_silent_time: (), verbose_build: (), build_cores: (), use_substitutes: (), overrides:  }
         // }
 
-        LocalNixStore::UnixStream(store)
+        Ok(LocalNixStore::UnixStream(store))
     } else {
         let nix_store_dir = format!("/var/lib/gradient/store/{}", organization.id);
         let mut child = Command::new("nix-store")
@@ -283,7 +283,7 @@ pub async fn get_local_store(organization: MOrganization) -> LocalNixStore {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .unwrap();
+            .map_err(|_| "Failed to Connect to Local Nix Deamon".to_string())?;
 
         let stdin = child.stdin.take().expect("Failed to open stdin");
         let stdout = child.stdout.take().expect("Failed to open stdout");
@@ -293,7 +293,7 @@ pub async fn get_local_store(organization: MOrganization) -> LocalNixStore {
 
         let store = DaemonStore::builder().init(duplex).await.unwrap();
 
-        LocalNixStore::CommandDuplex(store)
+        Ok(LocalNixStore::CommandDuplex(store))
     }
 }
 

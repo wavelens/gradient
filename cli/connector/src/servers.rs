@@ -13,7 +13,7 @@ pub struct ServerResponse {
     pub name: String,
     pub display_name: String,
     pub organization: String,
-    pub enabled: bool,
+    pub active: bool,
     pub host: String,
     pub port: i32,
     pub username: String,
@@ -45,7 +45,7 @@ pub async fn get(
     let res = get_client(
         config,
         format!("servers/{}", organization),
-        RequestType::Get,
+        RequestType::GET,
         true,
     )
     .unwrap()
@@ -56,7 +56,7 @@ pub async fn get(
     Ok(parse_response(res).await)
 }
 
-pub async fn post(
+pub async fn put(
     config: RequestConfig,
     organization: String,
     name: String,
@@ -80,7 +80,7 @@ pub async fn post(
     let res = get_client(
         config,
         format!("servers/{}", organization),
-        RequestType::Post,
+        RequestType::PUT,
         true,
     )
     .unwrap()
@@ -100,7 +100,7 @@ pub async fn get_server(
     let res = get_client(
         config,
         format!("servers/{}/{}", organization, server),
-        RequestType::Get,
+        RequestType::GET,
         true,
     )
     .unwrap()
@@ -119,7 +119,7 @@ pub async fn delete_server(
     let res = get_client(
         config,
         format!("servers/{}/{}", organization, server),
-        RequestType::Delete,
+        RequestType::DELETE,
         true,
     )
     .unwrap()
@@ -130,15 +130,15 @@ pub async fn delete_server(
     Ok(parse_response(res).await)
 }
 
-pub async fn post_server_enable(
+pub async fn post_server_active(
     config: RequestConfig,
     organization: String,
     server: String,
 ) -> Result<BaseResponse<String>, String> {
     let res = get_client(
         config,
-        format!("servers/{}/{}/enable", organization, server),
-        RequestType::Post,
+        format!("servers/{}/{}/active", organization, server),
+        RequestType::POST,
         true,
     )
     .unwrap()
@@ -149,15 +149,15 @@ pub async fn post_server_enable(
     Ok(parse_response(res).await)
 }
 
-pub async fn post_server_disable(
+pub async fn delete_server_active(
     config: RequestConfig,
     organization: String,
     server: String,
 ) -> Result<BaseResponse<String>, String> {
     let res = get_client(
         config,
-        format!("servers/{}/{}/disable", organization, server),
-        RequestType::Post,
+        format!("servers/{}/{}/active", organization, server),
+        RequestType::DELETE,
         true,
     )
     .unwrap()
@@ -176,7 +176,7 @@ pub async fn post_server_check_connection(
     let res = get_client(
         config,
         format!("servers/{}/{}/check-connection", organization, server),
-        RequestType::Post,
+        RequestType::POST,
         true,
     )
     .unwrap()

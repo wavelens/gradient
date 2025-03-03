@@ -93,6 +93,10 @@ pub fn repository_url_to_nix(url: &str, commit_hash: &str) -> Result<String, Str
     Ok(format!("{}?rev={}", url, commit_hash))
 }
 
+pub fn check_repository_url_is_ssh(url: &str) -> bool {
+    url.starts_with("git+ssh://")
+}
+
 pub fn parse_evaluation_wildcard(s: &str) -> Result<Vec<&str>, String> {
     if s.trim() != s {
         return Err("Evaluation wildcard cannot have leading or trailing whitespace".to_string());

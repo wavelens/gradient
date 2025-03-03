@@ -43,6 +43,8 @@ pub struct Cli {
     pub evaluation_timeout: i64,
     #[arg(long, env = "GRADIENT_STORE_PATH")]
     pub store_path: Option<String>,
+    #[arg(long, env = "GRADIENT_BASE_PATH", default_value = ".")]
+    pub base_path: String,
     #[arg(long, env = "GRADIENT_DISABLE_REGISTRATION", default_value = "false")]
     pub disable_registration: bool,
     #[arg(long, env = "GRADIENT_OAUTH_ENABLED", default_value = "false")]
@@ -136,10 +138,12 @@ pub type EApi = api::Entity;
 pub type EBuild = build::Entity;
 pub type EBuildDependency = build_dependency::Entity;
 pub type EBuildFeature = build_feature::Entity;
+pub type ECache = cache::Entity;
 pub type ECommit = commit::Entity;
 pub type EEvaluation = evaluation::Entity;
 pub type EFeature = feature::Entity;
 pub type EOrganization = organization::Entity;
+pub type EOrganizationCache = organization_cache::Entity;
 pub type EProject = project::Entity;
 pub type EServer = server::Entity;
 pub type EServerArchitecture = server_architecture::Entity;
@@ -150,10 +154,12 @@ pub type MApi = api::Model;
 pub type MBuild = build::Model;
 pub type MBuildDependency = build_dependency::Model;
 pub type MBuildFeature = build_feature::Model;
+pub type MCache = cache::Model;
 pub type MCommit = commit::Model;
 pub type MEvaluation = evaluation::Model;
 pub type MFeature = feature::Model;
 pub type MOrganization = organization::Model;
+pub type MOrganizationCache = organization_cache::Model;
 pub type MProject = project::Model;
 pub type MServer = server::Model;
 pub type MServerArchitecture = server_architecture::Model;
@@ -164,10 +170,12 @@ pub type AApi = api::ActiveModel;
 pub type ABuild = build::ActiveModel;
 pub type ABuildDependency = build_dependency::ActiveModel;
 pub type ABuildFeature = build_feature::ActiveModel;
+pub type ACache = cache::ActiveModel;
 pub type ACommit = commit::ActiveModel;
 pub type AEvaluation = evaluation::ActiveModel;
 pub type AFeature = feature::ActiveModel;
 pub type AOrganization = organization::ActiveModel;
+pub type AOrganizationCache = organization_cache::ActiveModel;
 pub type AProject = project::ActiveModel;
 pub type AServer = server::ActiveModel;
 pub type AServerArchitecture = server_architecture::ActiveModel;
@@ -178,10 +186,12 @@ pub type CApi = api::Column;
 pub type CBuild = build::Column;
 pub type CBuildDependency = build_dependency::Column;
 pub type CBuildFeature = build_feature::Column;
+pub type CCache = cache::Column;
 pub type CCommit = commit::Column;
 pub type CEvaluation = evaluation::Column;
 pub type CFeature = feature::Column;
 pub type COrganization = organization::Column;
+pub type COrganizationCache = organization_cache::Column;
 pub type CProject = project::Column;
 pub type CServer = server::Column;
 pub type CServerArchitecture = server_architecture::Column;
@@ -192,10 +202,12 @@ pub type RApi = api::Relation;
 pub type RBuild = build::Relation;
 pub type RBuildDependency = build_dependency::Relation;
 pub type RBuildFeature = build_feature::Relation;
+pub type RCache = cache::Relation;
 pub type RCommit = commit::Relation;
 pub type REvaluation = evaluation::Relation;
 pub type RFeature = feature::Relation;
 pub type ROrganization = organization::Relation;
+pub type ROrganizationCache = organization_cache::Relation;
 pub type RProject = project::Relation;
 pub type RServer = server::Relation;
 pub type RServerArchitecture = server_architecture::Relation;

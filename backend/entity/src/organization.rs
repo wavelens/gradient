@@ -31,6 +31,7 @@ impl std::fmt::Debug for Model {
         f.debug_struct("Organization")
             .field("id", &self.id)
             .field("name", &self.name)
+            .field("display_name", &self.display_name)
             .field("description", &self.description)
             .field("public_key", &format!("{} {}", self.public_key, self.id))
             .field("private_key", &"[redacted]")

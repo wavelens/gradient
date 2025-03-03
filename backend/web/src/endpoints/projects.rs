@@ -146,7 +146,7 @@ pub async fn put(
         id: Set(Uuid::new_v4()),
         organization: Set(organization.id),
         name: Set(body.name.clone()),
-        enabled: Set(true),
+        active: Set(true),
         display_name: Set(body.display_name.clone()),
         description: Set(body.description.clone()),
         repository: Set(repository_url.to_string()),
@@ -232,6 +232,80 @@ pub async fn delete_project(
     let res = BaseResponse {
         error: false,
         message: "Project deleted".to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn post_project_active(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, project)): Path<(String, String)>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let (_organization, project): (MOrganization, MProject) = match get_project_by_name(
+        state.0.clone(),
+        user.id,
+        organization.clone(),
+        project.clone(),
+    )
+    .await
+    {
+        Some(p) => p,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Project not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let mut aproject: AProject = project.into();
+    aproject.active = Set(true);
+    aproject.update(&state.db).await.unwrap();
+
+    let res = BaseResponse {
+        error: false,
+        message: "Project enabled".to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn delete_project_active(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, project)): Path<(String, String)>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let (_organization, project): (MOrganization, MProject) = match get_project_by_name(
+        state.0.clone(),
+        user.id,
+        organization.clone(),
+        project.clone(),
+    )
+    .await
+    {
+        Some(p) => p,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Project not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let mut aproject: AProject = project.into();
+    aproject.active = Set(false);
+    aproject.update(&state.db).await.unwrap();
+
+    let res = BaseResponse {
+        error: false,
+        message: "Project disabled".to_string(),
     };
 
     Ok(Json(res))

@@ -61,7 +61,15 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
         .unwrap()
         .unwrap();
 
-    let local_daemon = get_local_store(organization).await;
+    let local_daemon = match get_local_store(organization).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Failed).await;
+            return;
+        }
+    };
+
     let builds = match local_daemon {
         LocalNixStore::UnixStream(mut store) => {
             evaluate(Arc::clone(&state), &mut store, &evaluation).await
@@ -157,7 +165,14 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         .unwrap()
         .unwrap();
 
-    let mut local_daemon = get_local_store(organization.clone()).await;
+    let mut local_daemon = match get_local_store(organization.clone()).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            update_build_status_recursivly(state, build.clone(), BuildStatus::Aborted).await;
+            return;
+        }
+    };
 
     let (private_key, public_key) =
         decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization).unwrap();
@@ -282,6 +297,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             .join(JoinType::InnerJoin, RProject::LastEvaluation.def())
             .filter(
                 Condition::all()
+                    .add(CProject::Active.eq(true))
                     .add(CProject::LastCheckAt.lte(threshold_time))
                     .add(
                         Condition::any()
@@ -299,6 +315,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             EProject::find()
                 .filter(
                     Condition::all()
+                        .add(CProject::Active.eq(true))
                         .add(CProject::LastCheckAt.lte(threshold_time))
                         .add(CProject::LastEvaluation.is_null()),
                 )
@@ -344,7 +361,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                                 project: p.id,
                                 repository: p.repository,
                                 commit: Uuid::nil(),
-                                evaluation_wildcard: p.evaluation_wildcard,
+                                wildcard: p.evaluation_wildcard,
                                 status: EvaluationStatus::Queued,
                                 previous: None,
                                 next: None,
@@ -399,7 +416,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             project: Set(project.id),
             repository: Set(project.repository.clone()),
             commit: Set(commit.id),
-            evaluation_wildcard: Set(project.evaluation_wildcard.clone()),
+            wildcard: Set(project.evaluation_wildcard.clone()),
             status: Set(EvaluationStatus::Queued),
             previous: Set(evaluation_id),
             next: Set(None),
@@ -503,7 +520,7 @@ async fn reserve_available_server(
 
     let mut cond = Condition::all()
         .add(CServer::Organization.eq(project.organization))
-        .add(CServer::Enabled.eq(true))
+        .add(CServer::Active.eq(true))
         .add(CServerArchitecture::Architecture.eq(build.architecture.clone()));
 
     for feature in features {

@@ -8,26 +8,27 @@ use crate::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct OrganizationResponse {
+pub struct CacheResponse {
     pub id: String,
     pub name: String,
+    pub active: bool,
     pub display_name: String,
     pub description: String,
-    pub public_key: String,
-    pub use_nix_store: bool,
+    pub priority: i32,
     pub created_by: String,
     pub created_at: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct MakeOrganizationRequest {
+struct MakeCacheRequest {
     pub name: String,
     pub display_name: String,
     pub description: String,
+    pub priority: i32,
 }
 
 pub async fn get(config: RequestConfig) -> Result<BaseResponse<ListResponse>, String> {
-    let res = get_client(config, "orgs".to_string(), RequestType::GET, true)
+    let res = get_client(config, "caches".to_string(), RequestType::GET, true)
         .unwrap()
         .send()
         .await;
@@ -45,14 +46,16 @@ pub async fn put(
     name: String,
     display_name: String,
     description: String,
+    priority: i32,
 ) -> Result<BaseResponse<String>, String> {
-    let req = MakeOrganizationRequest {
+    let req = MakeCacheRequest {
         name,
         display_name,
         description,
+        priority,
     };
 
-    let res = get_client(config, "orgs".to_string(), RequestType::PUT, true)
+    let res = get_client(config, "caches".to_string(), RequestType::PUT, true)
         .unwrap()
         .json(&req)
         .send()
@@ -62,13 +65,13 @@ pub async fn put(
     Ok(parse_response(res).await)
 }
 
-pub async fn get_organization(
+pub async fn get_cache(
     config: RequestConfig,
     organization: String,
-) -> Result<BaseResponse<OrganizationResponse>, String> {
+) -> Result<BaseResponse<CacheResponse>, String> {
     let res = get_client(
         config,
-        format!("orgs/{}", organization),
+        format!("caches/{}", organization),
         RequestType::GET,
         true,
     )
@@ -80,13 +83,13 @@ pub async fn get_organization(
     Ok(parse_response(res).await)
 }
 
-pub async fn delete_organization(
+pub async fn delete_cache(
     config: RequestConfig,
     organization: String,
 ) -> Result<BaseResponse<String>, String> {
     let res = get_client(
         config,
-        format!("orgs/{}", organization),
+        format!("caches/{}", organization),
         RequestType::DELETE,
         true,
     )
@@ -98,14 +101,14 @@ pub async fn delete_organization(
     Ok(parse_response(res).await)
 }
 
-pub async fn get_organization_ssh(
+pub async fn post_cache_active(
     config: RequestConfig,
     organization: String,
 ) -> Result<BaseResponse<String>, String> {
     let res = get_client(
         config,
-        format!("orgs/{}/ssh", organization),
-        RequestType::GET,
+        format!("caches/{}/active", organization),
+        RequestType::POST,
         true,
     )
     .unwrap()
@@ -116,14 +119,14 @@ pub async fn get_organization_ssh(
     Ok(parse_response(res).await)
 }
 
-pub async fn post_organization_ssh(
+pub async fn delete_cache_active(
     config: RequestConfig,
     organization: String,
 ) -> Result<BaseResponse<String>, String> {
     let res = get_client(
         config,
-        format!("orgs/{}/ssh", organization),
-        RequestType::POST,
+        format!("caches/{}/active", organization),
+        RequestType::DELETE,
         true,
     )
     .unwrap()

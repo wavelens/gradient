@@ -27,7 +27,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Evaluation::Repository).string().not_null())
                     .col(ColumnDef::new(Evaluation::Commit).uuid().not_null())
                     .col(
-                        ColumnDef::new(Evaluation::EvaluationWildcard)
+                        ColumnDef::new(Evaluation::Wildcard)
                             .string()
                             .not_null(),
                     )
@@ -75,7 +75,7 @@ enum Evaluation {
     Project,
     Repository,
     Commit,
-    EvaluationWildcard,
+    Wildcard,
     Status,
     Previous,
     Next,
