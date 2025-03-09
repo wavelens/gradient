@@ -26,6 +26,13 @@ struct MakeOrganizationRequest {
     pub description: String,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct PatchOrganizationRequest {
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+}
+
 pub async fn get(config: RequestConfig) -> Result<BaseResponse<ListResponse>, String> {
     let res = get_client(config, "orgs".to_string(), RequestType::GET, true)
         .unwrap()
@@ -73,6 +80,34 @@ pub async fn get_organization(
         true,
     )
     .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn patch_organization(
+    config: RequestConfig,
+    organization: String,
+    name: Option<String>,
+    display_name: Option<String>,
+    description: Option<String>,
+) -> Result<BaseResponse<String>, String> {
+    let req = PatchOrganizationRequest {
+        name,
+        display_name,
+        description,
+    };
+
+    let res = get_client(
+        config,
+        format!("orgs/{}", organization),
+        RequestType::PATCH,
+        true,
+    )
+    .unwrap()
+    .json(&req)
     .send()
     .await
     .unwrap();

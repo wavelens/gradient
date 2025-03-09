@@ -31,6 +31,17 @@ pub struct MakeServerRequest {
     pub features: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PatchServerRequest {
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub host: Option<String>,
+    pub port: Option<i32>,
+    pub username: Option<String>,
+    pub architectures: Option<Vec<String>>,
+    pub features: Option<Vec<String>>,
+}
+
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -213,6 +224,138 @@ pub async fn get_server(
     let res = BaseResponse {
         error: false,
         message: server,
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn patch_server(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, server)): Path<(String, String)>,
+    Json(body): Json<PatchServerRequest>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let (organization, server): (MOrganization, MServer) = match get_server_by_name(
+        state.0.clone(),
+        user.id,
+        organization.clone(),
+        server.clone(),
+    )
+    .await
+    {
+        Some(s) => s,
+        None => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Server not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let mut aserver: AServer = server.into();
+
+    if let Some(name) = body.name.clone() {
+        if check_index_name(name.as_str()).is_err() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Invalid Server Name".to_string(),
+                }),
+            ));
+        }
+
+        let server = EServer::find()
+            .filter(
+                Condition::all()
+                    .add(CServer::Organization.eq(organization.id))
+                    .add(CServer::Name.eq(name.clone())),
+            )
+            .one(&state.db)
+            .await
+            .unwrap();
+
+        if server.is_some() {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Server Name already exists".to_string(),
+                }),
+            ));
+        };
+
+        aserver.name = Set(name);
+    }
+
+    if let Some(display_name) = body.display_name.clone() {
+        aserver.display_name = Set(display_name);
+    }
+
+    if let Some(host) = body.host.clone() {
+        aserver.host = Set(host);
+    }
+
+    if let Some(port) = body.port {
+        aserver.port = Set(port);
+    }
+
+    if let Some(username) = body.username.clone() {
+        aserver.username = Set(username);
+    }
+
+    if let Some(architectures) = body.architectures.clone() {
+        let architectures = architectures
+            .iter()
+            .map(|a| entity::server::Architecture::try_from(a.as_str()))
+            .filter_map(|a| a.ok())
+            .collect::<Vec<entity::server::Architecture>>();
+
+        if architectures.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Invalid Architectures".to_string(),
+                }),
+            ));
+        }
+
+        let server_architecture = architectures
+            .iter()
+            .map(|a| AServerArchitecture {
+                id: Set(Uuid::new_v4()),
+                server: aserver.id.clone(),
+                architecture: Set(a.clone()),
+            })
+            .collect::<Vec<AServerArchitecture>>();
+
+        EServerArchitecture::insert_many(server_architecture)
+            .exec(&state.db)
+            .await
+            .unwrap();
+    }
+
+    if let Some(features) = body.features.clone() {
+        let server_id = *aserver.id.clone().into_value().unwrap().as_ref_uuid().unwrap();
+
+        add_features(
+            Arc::clone(&state),
+            features,
+            None,
+            Some(server_id),
+        )
+        .await;
+    }
+
+    aserver.update(&state.db).await.unwrap();
+
+    let res = BaseResponse {
+        error: false,
+        message: "Server updated".to_string(),
     };
 
     Ok(Json(res))

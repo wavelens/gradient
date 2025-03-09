@@ -35,6 +35,14 @@ pub struct MakeCacheRequest {
     pub priority: i32,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PatchCacheRequest {
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub priority: Option<i32>,
+}
+
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -77,7 +85,11 @@ pub async fn put(
         ));
     }
 
-    let cache = get_cache_by_name(state.0.clone(), user.id, body.name.clone()).await;
+    let cache = ECache::find()
+        .filter(CCache::Name.eq(body.name.clone()))
+        .one(&state.db)
+        .await
+        .unwrap();
 
     if cache.is_some() {
         return Err((
@@ -134,6 +146,80 @@ pub async fn get_cache(
     let res = BaseResponse {
         error: false,
         message: cache,
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn patch_cache(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(cache): Path<String>,
+    Json(body): Json<PatchCacheRequest>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let cache: MCache =
+        match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
+            Some(c) => c,
+            None => {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Cache not found".to_string(),
+                    }),
+                ))
+            }
+        };
+
+    let mut acache: ACache = cache.into();
+
+    if let Some(name) = body.name {
+        if check_index_name(name.as_str()).is_err() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Invalid Cache Name".to_string(),
+                }),
+            ));
+        }
+
+        let cache = ECache::find()
+            .filter(CCache::Name.eq(name.clone()))
+            .one(&state.db)
+            .await
+            .unwrap();
+
+        if cache.is_some() {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Cache Name already exists".to_string(),
+                }),
+            ));
+        }
+
+        acache.name = Set(name);
+    }
+
+    if let Some(display_name) = body.display_name {
+        acache.display_name = Set(display_name);
+    }
+
+    if let Some(description) = body.description {
+        acache.description = Set(description);
+    }
+
+    if let Some(priority) = body.priority {
+        acache.priority = Set(priority);
+    }
+
+    acache.update(&state.db).await.unwrap();
+
+    let res = BaseResponse {
+        error: false,
+        message: "Cache updated".to_string(),
     };
 
     Ok(Json(res))

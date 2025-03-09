@@ -18,6 +18,7 @@ def get_client(user, endpoint, request_type, body=None):
 
     url = f"{settings.GRADIENT_BASE_URL}/{endpoint}"
 
+    response = None
     try:
         data = None if isinstance(body, type(None)) else json.dumps(body)
         if request_type == "GET":
@@ -33,6 +34,9 @@ def get_client(user, endpoint, request_type, body=None):
 
     if settings.DEBUG:
         print(f'request to {url} resulted in {response}')
+
+    if response is None:
+        return None
 
     if response.status_code == 200:
         return response.json()
@@ -68,13 +72,16 @@ def put_orgs(request, name, display_name, description):
 def get_orgs_organization(request, organization):
     return get_client(request.user, f"orgs/{organization}", "GET")
 
+def patch_orgs_organization(request, organization=None, name=None, display_name=None, description=None):
+    return get_client(request.user, f"orgs/{organization}", "PATCH", body={'name': name, 'display_name': display_name, 'description': description})
+
 def delete_orgs_organization(request, organization):
     return get_client(request.user, f"orgs/{organization}", "DELETE")
 
 def get_orgs_organization_ssh(request, organization):
     return get_client(request.user, f"orgs/{organization}/ssh", "GET")
 
-def post_orgs_organization_ssh(request, organization, public_key):
+def post_orgs_organization_ssh(request, organization):
     return get_client(request.user, f"orgs/{organization}/ssh", "POST")
 
 def post_orgs_organization_subscribe_cache(request, organization, cache):
@@ -92,6 +99,9 @@ def put_projects(request, organization, name, display_name, description, reposit
 
 def get_projects_project(request, organization, project):
     return get_client(request.user, f"projects/{organization}/{project}", "GET")
+
+def patch_projects_project(request, organization, project, name=None, display_name=None, description=None, repository=None, evaluation_wildcard=None):
+    return get_client(request.user, f"projects/{organization}/{project}", "PATCH", body={'name': name, 'display_name': display_name, 'description': description, 'repository': repository, 'evaluation_wildcard': evaluation_wildcard})
 
 def delete_projects_project(request, organization, project):
     return get_client(request.user, f"projects/{organization}/{project}", "DELETE")
@@ -142,6 +152,12 @@ def post_user_keys(request, name):
 def delete_user_keys(request, name):
     return get_client(request.user, f"user/keys/{name}", "DELETE")
 
+def get_user_settings(request):
+    return get_client(request.user, "user/settings", "GET")
+
+def patch_user_settings(request, username=None, name=None, email=None):
+    return get_client(request.user, "user/settings", "PATCH", body={'username': username, 'name': name, 'email': email})
+
 
 def get_servers(request, organization):
     return get_client(request.user, f"servers/{organization}", "GET")
@@ -151,6 +167,9 @@ def put_servers(request, organization, name, display_name, host, port, username,
 
 def get_servers_server(request, organization, server):
     return get_client(request.user, f"servers/{organization}/{server}", "GET")
+
+def patch_servers_server(request, organization, server, name=None, display_name=None, host=None, port=None, username=None, architectures=None, features=None):
+    return get_client(request.user, f"servers/{organization}/{server}", "PATCH", body={'name': name, 'display_name': display_name, 'host': host, 'port': port, 'username': username, 'architectures': architectures, 'features': features})
 
 def delete_servers_server(request, organization, server):
     return get_client(request.user, f"servers/{organization}/{server}", "DELETE")
@@ -173,6 +192,9 @@ def put_caches(request, name, display_name, description, priority):
 
 def get_caches_cache(request, cache):
     return get_client(request.user, f"caches/{cache}", "GET")
+
+def patch_caches_cache(request, cache, name=None, display_name=None, description=None, priority=None):
+    return get_client(request.user, f"caches/{cache}", "PATCH", body={'name': name, 'display_name': display_name, 'description': description, 'priority': priority})
 
 def delete_caches_cache(request, cache):
     return get_client(request.user, f"caches/{cache}", "DELETE")

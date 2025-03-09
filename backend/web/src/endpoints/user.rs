@@ -30,6 +30,20 @@ pub struct ApiKeyRequest {
     pub name: String,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PatchUserSettingsRequest {
+    pub username: Option<String>,
+    pub name: Option<String>,
+    pub email: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GetUserSettingsResponse {
+    pub username: String,
+    pub name: String,
+    pub email: String,
+}
+
 pub async fn get(
     Extension(user): Extension<MUser>,
 ) -> Result<Json<BaseResponse<UserInfoResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
@@ -173,29 +187,78 @@ pub async fn delete_keys(
     Ok(Json(res))
 }
 
-// TODO: Implement User Settings; but more important user permissions
 pub async fn get_settings(
-    _state: State<Arc<ServerState>>,
-    Extension(_user): Extension<MUser>,
-) -> Result<Json<BaseResponse<MUser>>, (StatusCode, Json<BaseResponse<String>>)> {
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(BaseResponse {
-            error: true,
-            message: "not implemented yet".to_string(),
-        }),
-    ))
+    Extension(user): Extension<MUser>,
+) -> Result<Json<BaseResponse<GetUserSettingsResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let res = BaseResponse {
+        error: false,
+        message: GetUserSettingsResponse {
+            username: user.username.clone(),
+            name: user.name.clone(),
+            email: user.email.clone(),
+        },
+    };
+
+    Ok(Json(res))
 }
 
-pub async fn post_settings(
-    _state: State<Arc<ServerState>>,
-    Extension(_user): Extension<MUser>,
+pub async fn patch_settings(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Json(body): Json<PatchUserSettingsRequest>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(BaseResponse {
-            error: true,
-            message: "not implemented yet".to_string(),
-        }),
-    ))
+    let mut auser: AUser = user.into();
+
+    if let Some(username) = body.username {
+        let user = EUser::find()
+            .filter(CUser::Username.eq(username.clone()))
+            .one(&state.db)
+            .await
+            .unwrap();
+
+        if user.is_some() {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Username already exists".to_string(),
+                }),
+            ));
+        }
+
+        auser.username = Set(username);
+    }
+
+    if let Some(name) = body.name {
+        auser.name = Set(name);
+    }
+
+    if let Some(email) = body.email {
+        let user = EUser::find()
+            .filter(CUser::Email.eq(email.clone()))
+            .one(&state.db)
+            .await
+            .unwrap();
+
+        if user.is_some() {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Email already exists".to_string(),
+                }),
+            ));
+        }
+
+        auser.email = Set(email);
+    }
+
+    auser.update(&state.db).await.unwrap();
+
+    let res = BaseResponse {
+        error: false,
+        message: "User updated".to_string(),
+    };
+
+    Ok(Json(res))
 }

@@ -60,7 +60,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route("/orgs", get(orgs::get).put(orgs::put))
         .route(
             "/orgs/{organization}",
-            get(orgs::get_organization).delete(orgs::delete_organization),
+            get(orgs::get_organization).patch(orgs::patch_organization).delete(orgs::delete_organization),
         )
         .route(
             "/orgs/{organization}/ssh",
@@ -76,7 +76,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         )
         .route(
             "/projects/{organization}/{project}",
-            get(projects::get_project).delete(projects::delete_project),
+            get(projects::get_project).patch(projects::patch_project).delete(projects::delete_project),
         )
         .route(
             "/projects/{organization}/{project}/check-repository",
@@ -104,7 +104,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         )
         .route(
             "/caches/{cache}",
-            get(caches::get_cache).delete(caches::delete_cache),
+            get(caches::get_cache).patch(caches::patch_cache).delete(caches::delete_cache),
         )
         .route(
             "/caches/{cache}/active",
@@ -123,12 +123,12 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         )
         .route(
             "/user/settings",
-            get(user::get_settings).post(user::post_settings),
+            get(user::get_settings).patch(user::patch_settings),
         )
         .route("/servers/{organization}", get(servers::get).put(servers::put))
         .route(
             "/servers/{organization}/{server}",
-            get(servers::get_server).delete(servers::delete_server),
+            get(servers::get_server).patch(servers::patch_server).delete(servers::delete_server),
         )
         .route(
             "/servers/{organization}/{server}/check-connection",

@@ -27,6 +27,14 @@ struct MakeCacheRequest {
     pub priority: i32,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct PatchCacheRequest {
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub priority: Option<i32>,
+}
+
 pub async fn get(config: RequestConfig) -> Result<BaseResponse<ListResponse>, String> {
     let res = get_client(config, "caches".to_string(), RequestType::GET, true)
         .unwrap()
@@ -76,6 +84,36 @@ pub async fn get_cache(
         true,
     )
     .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn patch_cache(
+    config: RequestConfig,
+    organization: String,
+    name: Option<String>,
+    display_name: Option<String>,
+    description: Option<String>,
+    priority: Option<i32>,
+) -> Result<BaseResponse<String>, String> {
+    let req = PatchCacheRequest {
+        name,
+        display_name,
+        description,
+        priority,
+    };
+
+    let res = get_client(
+        config,
+        format!("caches/{}", organization),
+        RequestType::PATCH,
+        true,
+    )
+    .unwrap()
+    .json(&req)
     .send()
     .await
     .unwrap();

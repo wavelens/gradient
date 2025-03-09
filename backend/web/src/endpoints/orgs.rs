@@ -25,6 +25,13 @@ pub struct MakeOrganizationRequest {
     pub description: String,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PatchOrganizationRequest {
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+}
+
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -67,7 +74,11 @@ pub async fn put(
         ));
     }
 
-    let organization = get_organization_by_name(state.0.clone(), user.id, body.name.clone()).await;
+    let organization = EOrganization::find()
+        .filter(COrganization::Name.eq(body.name.clone()))
+        .one(&state.db)
+        .await
+        .unwrap();
 
     if organization.is_some() {
         return Err((
@@ -136,6 +147,76 @@ pub async fn get_organization(
     let res = BaseResponse {
         error: false,
         message: organization,
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn patch_organization(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(organization): Path<String>,
+    Json(body): Json<PatchOrganizationRequest>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let organization: MOrganization =
+        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
+            Some(o) => o,
+            None => {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Organization not found".to_string(),
+                    }),
+                ))
+            }
+        };
+
+    let mut aorganization: AOrganization = organization.into();
+
+    if let Some(name) = body.name {
+        if check_index_name(name.as_str()).is_err() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Invalid Organization Name".to_string(),
+                }),
+            ));
+        }
+
+        let organization = EOrganization::find()
+            .filter(COrganization::Name.eq(name.clone()))
+            .one(&state.db)
+            .await
+            .unwrap();
+
+        if organization.is_some() {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Organization Name already exists".to_string(),
+                }),
+            ));
+        }
+
+        aorganization.name = Set(name);
+    }
+
+    if let Some(display_name) = body.display_name {
+        aorganization.display_name = Set(display_name);
+    }
+
+    if let Some(description) = body.description {
+        aorganization.description = Set(description);
+    }
+
+    let organization = aorganization.update(&state.db).await.unwrap();
+
+    let res = BaseResponse {
+        error: false,
+        message: organization.id.to_string(),
     };
 
     Ok(Json(res))
