@@ -12,9 +12,10 @@ use config::*;
 use connector::*;
 use rpassword::read_password;
 use std::collections::HashMap;
-use std::io;
+use std::{io, fs};
 use std::io::Write;
 use std::process::exit;
+use std::process::Command;
 
 #[derive(Parser, Debug)]
 #[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient", author = "Wavelens", version, about, long_about = None)]
@@ -167,19 +168,6 @@ fn ask_for_password() -> String {
     inp
 }
 
-fn ask_for_list(prompt: &str) -> Vec<String> {
-    print!("{} (list of items separated by commas): ", prompt);
-    std::io::stdout().flush().unwrap();
-    let mut inp = String::new();
-    io::stdin()
-        .read_line(&mut inp)
-        .expect("Failed to read list.");
-    inp.trim()
-        .split(",")
-        .map(|s| s.trim().to_string())
-        .collect()
-}
-
 // fn very_input(prompt: &str, input: &str) -> bool {
 //     loop {
 //         print!("Do you really want to {}: {} [y/n]", prompt, input);
@@ -189,6 +177,78 @@ fn ask_for_list(prompt: &str) -> Vec<String> {
 //         return inp.trim().to_lowercase() == "y";
 //     };
 // }
+
+fn handle_input(values: Vec<(String, Option<String>)>) -> HashMap<String, String> {
+    if values.is_empty() {
+        println!("No input fields");
+        exit(1);
+    }
+
+    if !values.iter().any(|(_, v)| v.is_none()) {
+        return values.iter().map(|(k, v)| {
+            (k.clone(), v.clone().unwrap())
+        }).collect();
+    }
+
+    let input_fields: String = values.iter().map(|(k, v)| {
+        format!(
+            "{}: {}\n",
+            k,
+            if let Some(val) = v {
+                val.clone()
+            } else {
+                "".to_string()
+            }
+        )
+    }).collect();
+
+    let name = "./GRADIENT-CONFIGURATOR";
+
+    if fs::exists(name).unwrap() {
+        println!("GRADIENT-CONFIGURATOR file currently open");
+        exit(1);
+    }
+
+    let mut file = fs::File::create(name).unwrap();
+    file.write_all(input_fields.as_bytes()).unwrap();
+
+    let editor = std::env::var("EDITOR").unwrap();
+    let output = Command::new(editor.clone())
+        .arg(name)
+        .status()
+        .unwrap();
+
+    if !output.success() {
+        println!("Failed to open editor {}", editor);
+        exit(1);
+    }
+
+    let contents = fs::read_to_string(name).unwrap();
+    fs::remove_file(name).unwrap();
+
+    let mut result: HashMap<String, String> = HashMap::new();
+    for line in contents.lines() {
+        let parts: Vec<&str> = line.split(":").map(|v| v.trim()).collect();
+        if parts.len() != 2 {
+            eprintln!("Invalid input: {}", line);
+            exit(1);
+        }
+
+        if !values.iter().any(|(k, _)| k == parts[0]) {
+            eprintln!("Invalid input field: {}", parts[0]);
+            exit(1);
+        }
+
+        if parts[1].is_empty() {
+            eprintln!("{} cannot be empty.", parts[0]);
+            exit(1);
+        }
+
+        result.insert(parts[0].to_string(), parts[1].to_string());
+    }
+
+    result
+}
 
 fn get_request_config(config: HashMap<ConfigKey, Option<String>>) -> Result<RequestConfig, String> {
     let server_url: String =
@@ -263,28 +323,23 @@ pub async fn main() -> std::io::Result<()> {
 
                 if server_url.is_none() {};
 
-                let username = match username {
-                    Some(username) => username,
-                    None => ask_for_input("Username"),
-                };
+                let input_fields = vec![
+                    ("Username", username),
+                    ("Name", name),
+                    ("Email", email),
+                ].iter().map(|(k, v)| {
+                    (k.to_string(), v.clone())
+                }).collect();
 
-                let name = match name {
-                    Some(name) => name,
-                    None => ask_for_input("Name"),
-                };
-
-                let email = match email {
-                    Some(email) => email,
-                    None => ask_for_input("Email"),
-                };
+                let input = handle_input(input_fields);
 
                 let password = ask_for_password();
 
                 let res = auth::post_basic_register(
                     get_request_config(load_config()).unwrap(),
-                    username,
-                    name,
-                    email,
+                    input.get("Username").unwrap().clone(),
+                    input.get("Name").unwrap().clone(),
+                    input.get("Email").unwrap().clone(),
                     password,
                 )
                 .await
@@ -375,26 +430,22 @@ pub async fn main() -> std::io::Result<()> {
                     display_name,
                     description,
                 } => {
-                    let name = match name {
-                        Some(name) => name,
-                        None => ask_for_input("Name"),
-                    };
+                    let input_fields = vec![
+                        ("Name", name),
+                        ("Display Name", display_name),
+                        ("Description", description),
+                    ].iter().map(|(k, v)| {
+                        (k.to_string(), v.clone())
+                    }).collect();
 
-                    let display_name = match display_name {
-                        Some(display_name) => display_name,
-                        None => ask_for_input("Display Name"),
-                    };
-
-                    let description = match description {
-                        Some(description) => description,
-                        None => ask_for_input("Description"),
-                    };
+                    let input = handle_input(input_fields);
+                    let name = input.get("Name").unwrap().clone();
 
                     let res = orgs::put(
                         get_request_config(load_config()).unwrap(),
                         name.clone(),
-                        display_name,
-                        description,
+                        input.get("Display Name").unwrap().clone(),
+                        input.get("Description").unwrap().clone(),
                     )
                     .await
                     .map_err(|e| {
@@ -695,39 +746,27 @@ pub async fn main() -> std::io::Result<()> {
                                 }
                             };
 
-                        let name = match name {
-                            Some(name) => name,
-                            None => ask_for_input("Name"),
-                        };
+                        let input_fields = vec![
+                            ("Name", name),
+                            ("Display Name", display_name),
+                            ("Description", description),
+                            ("Repository", repository),
+                            ("Evaluation Wildcard", evaluation_wildcard),
+                        ].iter().map(|(k, v)| {
+                            (k.to_string(), v.clone())
+                        }).collect();
 
-                        let display_name = match display_name {
-                            Some(display_name) => display_name,
-                            None => ask_for_input("Display Name"),
-                        };
-
-                        let description = match description {
-                            Some(description) => description,
-                            None => ask_for_input("Description"),
-                        };
-
-                        let repository = match repository {
-                            Some(repository) => repository,
-                            None => ask_for_input("Repository"),
-                        };
-
-                        let evaluation_wildcard = match evaluation_wildcard {
-                            Some(evaluation_wildcard) => evaluation_wildcard,
-                            None => ask_for_input("Evaluation Wildcard"),
-                        };
+                        let input = handle_input(input_fields);
+                        let name = input.get("Name").unwrap().clone();
 
                         let res = projects::put(
                             get_request_config(load_config()).unwrap(),
                             organization.clone(),
                             name.clone(),
-                            display_name,
-                            description,
-                            repository,
-                            evaluation_wildcard,
+                            input.get("Display Name").unwrap().clone(),
+                            input.get("Description").unwrap().clone(),
+                            input.get("Repository").unwrap().clone(),
+                            input.get("Evaluation Wildcard").unwrap().clone(),
                         )
                         .await
                         .map_err(|e| {
@@ -797,62 +836,31 @@ pub async fn main() -> std::io::Result<()> {
                                 }
                             };
 
-                        let name = match name {
-                            Some(name) => name,
-                            None => ask_for_input("Name"),
-                        };
+                        let input_fields = vec![
+                            ("Name", name),
+                            ("Display Name", display_name),
+                            ("Host", host),
+                            ("Port", port.map(|p| p.to_string())),
+                            ("SSH User", ssh_user),
+                            ("Architectures", architectures),
+                            ("Features", features),
+                        ].iter().map(|(k, v)| {
+                            (k.to_string(), v.clone())
+                        }).collect();
 
-                        let display_name = match display_name {
-                            Some(display_name) => display_name,
-                            None => ask_for_input("Display Name"),
-                        };
-
-                        let host = match host {
-                            Some(host) => host,
-                            None => ask_for_input("Host"),
-                        };
-
-                        let port = match port {
-                            Some(port) => port,
-                            None => ask_for_input("Port")
-                                .parse::<i32>()
-                                .map_err(|_| {
-                                    eprintln!("Not a valid port.");
-                                    exit(1);
-                                })
-                                .unwrap(),
-                        };
-
-                        let ssh_user = match ssh_user {
-                            Some(ssh_user) => ssh_user,
-                            None => ask_for_input("SSH User"),
-                        };
-
-                        let architectures = match architectures {
-                            Some(architectures) => architectures
-                                .split(",")
-                                .map(|s| s.trim().to_string())
-                                .collect(),
-                            None => ask_for_list("Architectures"),
-                        };
-
-                        let features = match features {
-                            Some(features) => {
-                                features.split(",").map(|s| s.trim().to_string()).collect()
-                            }
-                            None => ask_for_list("Features"),
-                        };
+                        let input = handle_input(input_fields);
+                        let name = input.get("Name").unwrap().clone();
 
                         let res = servers::put(
                             get_request_config(load_config()).unwrap(),
                             organization,
                             name,
-                            display_name,
-                            host,
-                            port,
-                            ssh_user,
-                            architectures,
-                            features,
+                            input.get("Display Name").unwrap().clone(),
+                            input.get("Host").unwrap().clone(),
+                            input.get("Port").unwrap().parse().unwrap(),
+                            input.get("SSH User").unwrap().clone(),
+                            input.get("Architectures").unwrap().split(",").map(|s| s.to_string()).collect(),
+                            input.get("Features").unwrap().split(",").map(|s| s.to_string()).collect(),
                         )
                         .await
                         .map_err(|e| {
