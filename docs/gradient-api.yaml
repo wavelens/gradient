@@ -378,6 +378,115 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
+  /orgs/{organization}/users:
+    get:
+      tags:
+        - orgs
+      summary: Get list of users
+      description: Get list of users of the organization by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    post:
+      tags:
+        - orgs
+      summary: Add user
+      description: Add user to the organization by name
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddUserRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '409':
+          description: User already in organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+      patch:
+        tags:
+          - orgs
+        summary: Update user
+        description: Update user in the organization by name
+        requestBody:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoveUserRequest'
+          required: true
+        responses:
+          '200':
+            description: Successful
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/BasicResponse'
+          '404':
+            description: Organization not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/BasicResponse'
+          '409':
+            description: User not in organization
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/BasicResponse'
+    delete:
+      tags:
+        - orgs
+      summary: Remove user
+      description: Remove user from the organization by name
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddUserRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '409':
+          description: User not in organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
   /orgs/{organization}/ssh:
     get:
       tags:
@@ -1341,6 +1450,21 @@ components:
           type: string
           format: email
           examples: [alex@example.com]
+    AddUserRequest:
+      type: object
+      properties:
+        user:
+          type: string
+          examples: [testuser]
+        role:
+          type: string
+          examples: [Admin]
+    RemoveUserRequest:
+      type: object
+      properties:
+        user:
+          type: string
+          examples: [testuser]
   securitySchemes:
     token:
       type: http

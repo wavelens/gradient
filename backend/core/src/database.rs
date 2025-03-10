@@ -7,20 +7,110 @@
 use migration::Migrator;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Database, DatabaseConnection, EntityTrait,
-    QueryFilter,
+    QueryFilter, QuerySelect,
 };
 use sea_orm_migration::prelude::*;
 use std::sync::Arc;
 use uuid::Uuid;
+use entity::build::BuildStatus;
+use entity::evaluation::EvaluationStatus;
 
 use super::types::*;
+use super::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_WRITE_ID, BASE_ROLE_VIEW_ID};
 
 pub async fn connect_db(cli: &Cli) -> DatabaseConnection {
     let db = Database::connect(cli.database_uri.clone())
         .await
         .expect("Failed to connect to database");
     Migrator::up(&db, None).await.unwrap();
+    update_db(&db).await.unwrap();
     db
+}
+
+async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
+    let builds = EBuild::find()
+        .filter(
+            Condition::any()
+                .add(CBuild::Status.eq(BuildStatus::Created))
+                .add(CBuild::Status.eq(BuildStatus::Queued))
+                .add(CBuild::Status.eq(BuildStatus::Building)),
+        )
+        .all(db)
+        .await
+        .unwrap();
+
+    for build in builds {
+        let mut abuild: ABuild = build.into();
+        abuild.status = Set(BuildStatus::Aborted);
+        abuild.update(db).await.unwrap();
+    }
+
+    let evaluations = EEvaluation::find()
+        .filter(
+            Condition::any()
+                .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
+                .add(CEvaluation::Status.eq(EvaluationStatus::Evaluating))
+                .add(CEvaluation::Status.eq(EvaluationStatus::Building)),
+        )
+        .all(db)
+        .await
+        .unwrap();
+
+    for evaluation in evaluations {
+        let mut aevaluation: AEvaluation = evaluation.into();
+        aevaluation.status = Set(EvaluationStatus::Aborted);
+        aevaluation.update(db).await.unwrap();
+    }
+
+    let base_role_admin = ERole::find_by_id(BASE_ROLE_ADMIN_ID)
+        .one(db)
+        .await
+        .unwrap();
+
+    if base_role_admin.is_none() {
+        let arole = ARole {
+            id: Set(BASE_ROLE_ADMIN_ID),
+            name: Set("Admin".to_string()),
+            organization: Set(None),
+            permission: Set(0x7FFFFFFFFFFFFFFF),
+        };
+
+        arole.insert(db).await.unwrap();
+    }
+
+    let base_role_write = ERole::find_by_id(BASE_ROLE_WRITE_ID)
+        .one(db)
+        .await
+        .unwrap();
+
+    if base_role_write.is_none() {
+        let arole = ARole {
+            id: Set(BASE_ROLE_WRITE_ID),
+            name: Set("Write".to_string()),
+            organization: Set(None),
+            permission: Set(0x000000000000000),
+        };
+
+        arole.insert(db).await.unwrap();
+    }
+
+    let base_role_view = ERole::find_by_id(BASE_ROLE_VIEW_ID)
+        .one(db)
+        .await
+        .unwrap();
+
+    if base_role_view.is_none() {
+        let arole = ARole {
+            id: Set(BASE_ROLE_VIEW_ID),
+            name: Set("View".to_string()),
+            organization: Set(None),
+            permission: Set(0x000000000000000),
+        };
+
+        arole.insert(db).await.unwrap();
+    }
+
+    Ok(())
 }
 
 pub async fn add_features(
@@ -75,9 +165,16 @@ pub async fn get_organization_by_name(
     name: String,
 ) -> Option<MOrganization> {
     EOrganization::find()
+        .join_rev(
+            JoinType::InnerJoin,
+            EOrganizationUser::belongs_to(entity::organization::Entity)
+                .from(COrganizationUser::Organization)
+                .to(COrganization::Id)
+                .into(),
+        )
         .filter(
             Condition::all()
-                .add(COrganization::CreatedBy.eq(user_id))
+                .add(COrganizationUser::User.eq(user_id))
                 .add(COrganization::Name.eq(name)),
         )
         .one(&state.db)
