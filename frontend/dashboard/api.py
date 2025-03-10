@@ -78,6 +78,18 @@ def patch_orgs_organization(request, organization=None, name=None, display_name=
 def delete_orgs_organization(request, organization):
     return get_client(request.user, f"orgs/{organization}", "DELETE")
 
+def get_orgs_organization_users(request, organization):
+    return get_client(request.user, f"orgs/{organization}/users", "GET")
+
+def post_orgs_organization_users(request, organization, user, role):
+    return get_client(request.user, f"orgs/{organization}/users", "POST", body={'user': user, 'role': role})
+
+def patch_orgs_organization_users(request, organization, user, role):
+    return get_client(request.user, f"orgs/{organization}/users", "PATCH", body={'user': user, 'role': role})
+
+def delete_orgs_organization_users(request, organization, user):
+    return get_client(request.user, f"orgs/{organization}/users", "DELETE", body={'user': user})
+
 def get_orgs_organization_ssh(request, organization):
     return get_client(request.user, f"orgs/{organization}/ssh", "GET")
 

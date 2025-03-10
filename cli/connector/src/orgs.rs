@@ -33,6 +33,17 @@ struct PatchOrganizationRequest {
     pub description: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AddUserRequest {
+    pub user: String,
+    pub role: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct RemoveUserRequest {
+    pub user: String,
+}
+
 pub async fn get(config: RequestConfig) -> Result<BaseResponse<ListResponse>, String> {
     let res = get_client(config, "orgs".to_string(), RequestType::GET, true)
         .unwrap()
@@ -126,6 +137,92 @@ pub async fn delete_organization(
         true,
     )
     .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn get_organization_users(
+    config: RequestConfig,
+    organization: String,
+) -> Result<BaseResponse<ListResponse>, String> {
+    let res = get_client(
+        config,
+        format!("orgs/{}/users", organization),
+        RequestType::GET,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn post_organization_users(
+    config: RequestConfig,
+    organization: String,
+    user: String,
+    role: String,
+) -> Result<BaseResponse<String>, String> {
+    let req = AddUserRequest { user, role };
+
+    let res = get_client(
+        config,
+        format!("orgs/{}/users", organization),
+        RequestType::POST,
+        true,
+    )
+    .unwrap()
+    .json(&req)
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn patch_organization_users(
+    config: RequestConfig,
+    organization: String,
+    user: String,
+    role: String,
+) -> Result<BaseResponse<String>, String> {
+    let req = AddUserRequest { user, role };
+
+    let res = get_client(
+        config,
+        format!("orgs/{}/users", organization),
+        RequestType::PATCH,
+        true,
+    )
+    .unwrap()
+    .json(&req)
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn delete_organization_users(
+    config: RequestConfig,
+    organization: String,
+    user: String,
+) -> Result<BaseResponse<String>, String> {
+    let req = RemoveUserRequest { user };
+
+    let res = get_client(
+        config,
+        format!("orgs/{}/users", organization),
+        RequestType::DELETE,
+        true,
+    )
+    .unwrap()
+    .json(&req)
     .send()
     .await
     .unwrap();

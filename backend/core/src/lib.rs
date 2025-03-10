@@ -8,6 +8,7 @@ pub mod consts;
 pub mod database;
 pub mod executer;
 pub mod input;
+pub mod permission;
 pub mod sources;
 pub mod types;
 

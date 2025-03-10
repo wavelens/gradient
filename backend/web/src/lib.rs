@@ -63,6 +63,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             get(orgs::get_organization).patch(orgs::patch_organization).delete(orgs::delete_organization),
         )
         .route(
+            "/orgs/{organization}/users",
+            get(orgs::get_organization_users).post(orgs::post_organization_users).patch(orgs::patch_organization_users).delete(orgs::delete_organization_users),
+        )
+        .route(
             "/orgs/{organization}/ssh",
             get(orgs::get_organization_ssh).post(orgs::post_organization_ssh),
         )
