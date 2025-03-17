@@ -60,6 +60,13 @@ in {
         default = "postgresql://localhost/gradient?host=/run/postgresql";
       };
 
+      databaseUrlFile = lib.mkOption {
+        description = "The URL-file of the database to use.";
+        type = lib.types.str;
+        default = toString (pkgs.writeText "database_url" cfg.databaseUrl);
+        example = "/etc/gradient/database_url";
+      };
+
       oauth = {
         enable = lib.mkEnableOption "Enable OAuth";
         required = lib.mkEnableOption "Require OAuth for registration.";
@@ -145,6 +152,7 @@ in {
         RestrictSUIDSGID = true;
         WorkingDirectory = cfg.baseDir;
         LoadCredential = [
+          "gradient_database_url:${cfg.databaseUrlFile}"
           "gradient_crypt_secret:${cfg.cryptSecretFile}"
           "gradient_jwt_secret:${cfg.jwtSecretFile}"
         ] ++ lib.optional cfg.oauth.enable [
@@ -159,7 +167,7 @@ in {
         GRADIENT_PORT = toString cfg.port;
         GRADIENT_SERVE_URL = "https://${cfg.domain}";
         GRADIENT_BASE_PATH = cfg.baseDir;
-        GRADIENT_DATABASE_URL = cfg.databaseUrl;
+        GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString cfg.settings.maxConcurrentEvaluations;
         GRADIENT_MAX_CONCURRENT_BUILDS = toString cfg.settings.maxConcurrentBuilds;
         GRADIENT_BINPATH_NIX = lib.getExe cfg.package_nix;

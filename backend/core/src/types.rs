@@ -34,7 +34,9 @@ pub struct Cli {
     )]
     pub serve_url: String,
     #[arg(long, env = "GRADIENT_DATABASE_URL")]
-    pub database_uri: String,
+    pub database_url: Option<String>,
+    #[arg(long, env = "GRADIENT_DATABASE_URL_FILE")]
+    pub database_url_file: Option<String>,
     #[arg(long, env = "GRADIENT_MAX_CONCURRENT_EVALUATIONS", value_parser = greater_than_zero::<usize>, default_value = "10")]
     pub max_concurrent_evaluations: usize,
     #[arg(long, env = "GRADIENT_MAX_CONCURRENT_BUILDS", value_parser = greater_than_zero::<usize>, default_value = "1000")]

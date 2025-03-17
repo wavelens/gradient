@@ -19,7 +19,15 @@ use super::types::*;
 use super::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_WRITE_ID, BASE_ROLE_VIEW_ID};
 
 pub async fn connect_db(cli: &Cli) -> DatabaseConnection {
-    let db = Database::connect(cli.database_uri.clone())
+    let db_url = if let Some(file) = &cli.database_url_file {
+        std::fs::read_to_string(file).expect("Failed to read database url from file")
+    } else if let Some(url) = &cli.database_url {
+        url.clone()
+    } else {
+        panic!("No database url provided")
+    };
+
+    let db = Database::connect(db_url)
         .await
         .expect("Failed to connect to database");
     Migrator::up(&db, None).await.unwrap();
