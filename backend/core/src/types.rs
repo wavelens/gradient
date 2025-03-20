@@ -75,6 +75,8 @@ pub struct Cli {
     pub binpath_nix: String,
     #[arg(long, env = "GRADIENT_BINPATH_GIT", default_value = "git")]
     pub binpath_git: String,
+    #[arg(long, env = "GRADIENT_REPORT_ERRORS", default_value = "false")]
+    pub report_errors: bool,
 }
 
 #[derive(Debug)]

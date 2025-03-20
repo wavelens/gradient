@@ -41,6 +41,7 @@ in python.pkgs.buildPythonApplication rec {
     redis
     requests
     selenium
+    sentry-sdk
     uritemplate
     urllib3
     whitenoise

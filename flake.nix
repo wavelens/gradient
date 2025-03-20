@@ -50,6 +50,7 @@
       redis
       requests
       selenium
+      sentry-sdk
       uritemplate
       urllib3
       whitenoise

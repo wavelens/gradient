@@ -62,6 +62,7 @@ Configure Gradient in your `configuration.nix`:
     enable = true;
     frontend.enable = true;
     serveCache = true;
+    reportErrors = true;
     configurePostgres = true;
     configureNginx = true;
     domain = "gradient.wavelens.io";

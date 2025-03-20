@@ -20,6 +20,7 @@ in {
       package_nix = lib.mkPackageOption pkgs "nix" { };
       package_git = lib.mkPackageOption pkgs "git" { };
       serveCache = lib.mkEnableOption "Serve cache";
+      reportErrors = lib.mkEnableOption "Report errors to Sentry";
       domain = lib.mkOption {
         description = "The domain under which Gradient runs.";
         type = lib.types.str;
@@ -177,6 +178,7 @@ in {
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
         GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";
         GRADIENT_SERVE_CACHE = lib.boolToString cfg.serveCache;
+        GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
       } // lib.optionalAttrs cfg.oauth.enable {
         GRADIENT_OAUTH_CLIENT_ID = cfg.oauth.clientId;
         GRADIENT_OAUTH_CLIENT_SECRET_FILE = "%d/gradient_oauth_client_secret";
