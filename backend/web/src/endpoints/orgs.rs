@@ -645,6 +645,47 @@ pub async fn post_organization_ssh(
     Ok(Json(res))
 }
 
+pub async fn get_organization_subscribe(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(organization): Path<String>,
+) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let organization: MOrganization =
+        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
+            Some(o) => o,
+            None => {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Organization not found".to_string(),
+                    }),
+                ))
+            }
+        };
+
+    let organization_caches = EOrganizationCache::find()
+        .filter(COrganizationCache::Organization.eq(organization.id))
+        .all(&state.db)
+        .await
+        .unwrap();
+
+    let organization_users: ListResponse = organization_caches
+        .iter()
+        .map(|ou| ListItem {
+            id: ou.cache,
+            name: ou.cache.to_string(),
+        })
+        .collect();
+
+    let res = BaseResponse {
+        error: false,
+        message: organization_users,
+    };
+
+    Ok(Json(res))
+}
+
 pub async fn post_organization_subscribe_cache(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

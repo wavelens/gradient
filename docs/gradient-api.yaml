@@ -524,6 +524,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
+  /orgs/{organization}/subscribe:
+    get:
+      tags:
+        - orgs
+      summary: Get list of caches
+      description: Get list of caches the organization is subscribed to by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
   /orgs/{organization}/subscribe/{cache}:
     post:
       tags:

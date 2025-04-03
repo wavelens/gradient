@@ -265,3 +265,59 @@ pub async fn post_organization_ssh(
 
     Ok(parse_response(res).await)
 }
+
+pub async fn get_organization_subscribe(
+    config: RequestConfig,
+    organization: String,
+) -> Result<BaseResponse<ListResponse>, String> {
+    let res = get_client(
+        config,
+        format!("orgs/{}/subscribe", organization),
+        RequestType::GET,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn post_organization_subscribe_cache(
+    config: RequestConfig,
+    organization: String,
+    cache: String,
+) -> Result<BaseResponse<String>, String> {
+    let res = get_client(
+        config,
+        format!("orgs/{}/subscribe/{}", organization, cache),
+        RequestType::POST,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn delete_organization_subscribe_cache(
+    config: RequestConfig,
+    organization: String,
+    cache: String,
+) -> Result<BaseResponse<String>, String> {
+    let res = get_client(
+        config,
+        format!("orgs/{}/subscribe/{}", organization, cache),
+        RequestType::DELETE,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}

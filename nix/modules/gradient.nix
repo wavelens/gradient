@@ -230,14 +230,15 @@ in {
       };
     };
 
-    users.users.gradient = {
-      description = "Gradient user";
-      isSystemUser = true;
-      home = cfg.baseDir;
-      createHome = true;
-      group = "gradient";
+    users = {
+      groups.gradient = { };
+      users.gradient = {
+        description = "Gradient user";
+        isSystemUser = true;
+        home = cfg.baseDir;
+        createHome = true;
+        group = "gradient";
+      };
     };
-
-    users.groups.gradient = { };
   };
 }
