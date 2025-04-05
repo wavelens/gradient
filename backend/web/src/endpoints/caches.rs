@@ -341,15 +341,50 @@ pub async fn path(
 }
 
 pub async fn nar(
-    _state: State<Arc<ServerState>>,
-    Path((_cache, _path)): Path<(String, String)>,
+    state: State<Arc<ServerState>>,
+    Path((cache, path)): Path<(String, String)>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(BaseResponse {
-            error: true,
-            message: "not implemented yet".to_string(),
-        }),
-    ))
+    let path_split = path.split('.').collect::<Vec<&str>>();
+
+    if path_split.len() != 2
+     && path_split[0].len() != 32
+     && path_split[1] != "nar"
+     && !path_split[0]
+        .chars()
+        .all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: "Invalid path".to_string(),
+            }),
+        ));
+    }
+
+
+    let cache: MCache =
+        match get_cache_by_name(state.0.clone(), Uuid::nil(), cache.clone()).await {
+            Some(c) => c,
+            None => {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Cache not found".to_string(),
+                    }),
+                ))
+            }
+        };
+
+    if !cache.active {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: "Cache is disabled".to_string(),
+            }),
+        ))
+    }
 }
 
