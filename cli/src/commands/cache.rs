@@ -45,7 +45,7 @@ pub async fn handle(cmd: Commands) {
             description,
             priority,
         } => {
-            let input_fields = vec![
+            let input_fields = [
                 ("Name", name),
                 ("Display Name", display_name),
                 ("Description", description),
@@ -117,7 +117,7 @@ pub async fn handle(cmd: Commands) {
             description,
             priority,
         } => {
-            let input_fields = vec![
+            let input_fields = [
                 ("Display Name", display_name),
                 ("Description", description),
                 ("Priority", priority.map(|p| p.to_string())),

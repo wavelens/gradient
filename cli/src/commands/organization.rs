@@ -91,7 +91,7 @@ pub async fn handle(cmd: Commands) {
             display_name,
             description,
         } => {
-            let input_fields = vec![
+            let input_fields = [
                 ("Name", name),
                 ("Display Name", display_name),
                 ("Description", description),
@@ -205,7 +205,7 @@ pub async fn handle(cmd: Commands) {
                 .unwrap()
                 .message;
 
-            let input_fields = vec![
+            let input_fields = [
                 ("Name", Some(new_name.unwrap_or(current_organization.name))),
                 ("Display Name", Some(display_name.unwrap_or(current_organization.display_name))),
                 ("Description", Some(description.unwrap_or(current_organization.description))),

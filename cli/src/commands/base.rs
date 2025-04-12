@@ -62,6 +62,9 @@ enum MainCommands {
         #[command(subcommand)]
         cmd: cache::Commands,
     },
+    Build {
+        derivation: String,
+    },
 }
 
 pub async fn run_cli() -> std::io::Result<()> {
@@ -121,7 +124,7 @@ pub async fn run_cli() -> std::io::Result<()> {
 
                 if server_url.is_none() {};
 
-                let input_fields = vec![
+                let input_fields = [
                     ("Username", username),
                     ("Name", name),
                     ("Email", email),
@@ -216,6 +219,7 @@ pub async fn run_cli() -> std::io::Result<()> {
                 println!("Logged out.");
             }
 
+            MainCommands::Build { derivation } => build::handle_build(derivation).await,
             MainCommands::Organization { cmd } => organization::handle(cmd).await,
             MainCommands::Project { cmd } => project::handle(cmd).await,
             MainCommands::Server { cmd } => server::handle(cmd).await,

@@ -191,7 +191,7 @@ pub async fn handle(cmd: Commands) {
                     }
                 };
 
-            let input_fields = vec![
+            let input_fields = [
                 ("Name", name),
                 ("Display Name", display_name),
                 ("Description", description),
@@ -297,7 +297,7 @@ pub async fn handle(cmd: Commands) {
                 .unwrap()
                 .message;
 
-            let input_fields = vec![
+            let input_fields = [
                 ("Name", Some(new_name.unwrap_or(current_project.name))),
                 ("Display Name", Some(display_name.unwrap_or(current_project.display_name))),
                 ("Description", Some(description.unwrap_or(current_project.description))),

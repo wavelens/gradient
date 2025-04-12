@@ -5,6 +5,7 @@
  */
 
 pub mod base;
+pub mod build;
 pub mod cache;
 pub mod organization;
 pub mod project;

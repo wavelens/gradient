@@ -386,5 +386,13 @@ pub async fn nar(
             }),
         ))
     }
+
+    Err((
+        StatusCode::NOT_IMPLEMENTED,
+        Json(BaseResponse {
+            error: true,
+            message: "not implemented yet".to_string(),
+        }),
+    ))
 }
 
