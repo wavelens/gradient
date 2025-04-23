@@ -71,6 +71,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             get(orgs::get_organization_ssh).post(orgs::post_organization_ssh),
         )
         .route(
+            "/orgs/{organization}/subscribe",
+            get(orgs::get_organization_subscribe)
+        )
+        .route(
             "/orgs/{organization}/subscribe/{cache}",
             post(orgs::post_organization_subscribe_cache).delete(orgs::delete_organization_subscribe_cache),
         )
@@ -113,6 +117,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route(
             "/caches/{cache}/active",
             post(caches::post_cache_active).delete(caches::delete_cache_active),
+        )
+        .route(
+            "/caches/{cache}/key",
+            get(caches::get_cache_key),
         )
         .route(
             "/builds/{build}",

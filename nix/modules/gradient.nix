@@ -19,6 +19,7 @@ in {
       package = lib.mkPackageOption pkgs "gradient-server" { };
       package_nix = lib.mkPackageOption pkgs "nix" { };
       package_git = lib.mkPackageOption pkgs "git" { };
+      package_zstd = lib.mkPackageOption pkgs "zstd" { };
       serveCache = lib.mkEnableOption "Serve cache";
       reportErrors = lib.mkEnableOption "Report errors to Sentry";
       domain = lib.mkOption {
@@ -173,6 +174,7 @@ in {
         GRADIENT_MAX_CONCURRENT_BUILDS = toString cfg.settings.maxConcurrentBuilds;
         GRADIENT_BINPATH_NIX = lib.getExe cfg.package_nix;
         GRADIENT_BINPATH_GIT = lib.getExe cfg.package_git;
+        GRADIENT_BINPATH_ZSTD = lib.getExe cfg.package_zstd;
         GRADIENT_OAUTH_ENABLE = lib.boolToString cfg.oauth.enable;
         GRADIENT_DISABLE_REGISTER = lib.boolToString cfg.settings.disableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";

@@ -416,9 +416,9 @@ dependencies = [
 
 [[package]]
 name = "axum-streams"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e706938a2f02ac53dac79575d99819fa6285a5eae35b0fa27b959affb80c435"
+checksum = "5de41ac9161c75912e405c28b1b60f3309081f72ef1fa04b5ccec6f1d3fa715b"
 dependencies = [
  "axum",
  "bytes",
@@ -612,6 +612,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
+name = "cache"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "core",
+ "entity",
+ "sea-orm",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -728,6 +742,7 @@ dependencies = [
  "chrono",
  "clap",
  "crypter",
+ "ed25519-compact",
  "entity",
  "futures",
  "git-url-parse",
@@ -830,6 +845,12 @@ dependencies = [
  "rand_core 0.6.4",
  "typenum",
 ]
+
+[[package]]
+name = "ct-codecs"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b916ba8ce9e4182696896f015e8a5ae6081b305f74690baa8465e35f5a142ea4"
 
 [[package]]
 name = "ctr"
@@ -981,6 +1002,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115531babc129696a58c64a4fef0a8bf9e9698629fb97e9e40767d235cfbcd53"
 dependencies = [
  "signature",
+]
+
+[[package]]
+name = "ed25519-compact"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9b3460f44bea8cd47f45a0c70892f1eff856d97cd55358b2f73f663789f6190"
+dependencies = [
+ "ct-codecs",
+ "getrandom 0.2.15",
 ]
 
 [[package]]
@@ -1374,6 +1405,7 @@ name = "gradient-server"
 version = "0.1.0"
 dependencies = [
  "builder",
+ "cache",
  "clap",
  "core",
  "sentry",

@@ -10,6 +10,8 @@ pub mod api;
 pub mod build;
 pub mod build_dependency;
 pub mod build_feature;
+pub mod build_output;
+pub mod build_output_signature;
 pub mod cache;
 pub mod commit;
 pub mod evaluation;

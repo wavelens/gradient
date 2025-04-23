@@ -29,3 +29,4 @@ serde = { version = "1", features = ["derive"] }
 ssh-key = { version = "0.6", features = ["ed25519"] }
 tokio = { version = "1.44", features = ["process", "rt-multi-thread"] }
 uuid = { version = "1.16", features = ["fast-rng", "macro-diagnostics", "v4"] }
+ed25519-compact = { version = "2.1", features = ["random"] }

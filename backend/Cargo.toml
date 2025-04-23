@@ -12,6 +12,7 @@ members = [".", "core", "builder", "web", "entity", "migration"]
 
 [dependencies]
 builder = { path = "builder" }
+cache = { path = "cache" }
 clap = { version = "4.5", features = ["derive"] }
 core = { path = "core" }
 sentry = "0.37"

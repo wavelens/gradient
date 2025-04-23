@@ -75,6 +75,8 @@ pub struct Cli {
     pub binpath_nix: String,
     #[arg(long, env = "GRADIENT_BINPATH_GIT", default_value = "git")]
     pub binpath_git: String,
+    #[arg(long, env = "GRADIENT_BINPATH_ZSTD", default_value = "zstd")]
+    pub binpath_zstd: String,
     #[arg(long, env = "GRADIENT_REPORT_ERRORS", default_value = "false")]
     pub report_errors: bool,
 }
@@ -135,6 +137,67 @@ pub enum LocalNixStore {
     CommandDuplex(DaemonStore<CommandDuplex>),
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct NixCacheInfo {
+    #[serde(rename = "WantMassQuery")]
+    pub want_mass_query: bool,
+    #[serde(rename = "StoreDir")]
+    pub store_dir: String,
+    #[serde(rename = "Priority")]
+    pub priority: i32,
+}
+
+impl NixCacheInfo {
+    pub fn to_nix_string(&self) -> String {
+        format!(
+            "WantMassQuery: {}\nStoreDir: {}\nPriority: {}",
+            self.want_mass_query, self.store_dir, self.priority
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NixPathInfo {
+    #[serde(rename = "StorePath")]
+    pub store_path: String,
+    #[serde(rename = "URL")]
+    pub url: String,
+    #[serde(rename = "Compression")]
+    pub compression: String,
+    #[serde(rename = "FileHash")]
+    pub file_hash: String,
+    #[serde(rename = "FileSize")]
+    pub file_size: u32,
+    #[serde(rename = "NarHash")]
+    pub nar_hash: String,
+    #[serde(rename = "NarSize")]
+    pub nar_size: u64,
+    #[serde(rename = "References")]
+    pub references: Vec<String>,
+    #[serde(rename = "Sig")]
+    pub sig: String,
+    #[serde(rename = "CA")]
+    pub ca: Option<String>,
+}
+
+impl NixPathInfo {
+    pub fn to_nix_string(&self) -> String {
+        format!(
+            "StorePath: {}\nURL: {}\nCompression: {}\nFileHash: {}\nFileSize: {}\nNarHash: {}\nNarSize: {}\nReferences: {:?}\nSig: {}\nCA: {:?}",
+            self.store_path,
+            self.url,
+            self.compression,
+            self.file_hash,
+            self.file_size,
+            self.nar_hash,
+            self.nar_size,
+            self.references,
+            self.sig,
+            self.ca
+        )
+    }
+}
+
 pub type ListResponse = Vec<ListItem>;
 pub type NixStore = DaemonStore<AsyncChannel<TokioTcpStream>>;
 
@@ -142,6 +205,8 @@ pub type EApi = api::Entity;
 pub type EBuild = build::Entity;
 pub type EBuildDependency = build_dependency::Entity;
 pub type EBuildFeature = build_feature::Entity;
+pub type EBuildOutput = build_output::Entity;
+pub type EBuildOutputSignature = build_output_signature::Entity;
 pub type ECache = cache::Entity;
 pub type ECommit = commit::Entity;
 pub type EEvaluation = evaluation::Entity;
@@ -160,6 +225,8 @@ pub type MApi = api::Model;
 pub type MBuild = build::Model;
 pub type MBuildDependency = build_dependency::Model;
 pub type MBuildFeature = build_feature::Model;
+pub type MBuildOutput = build_output::Model;
+pub type MBuildOutputSignature = build_output_signature::Model;
 pub type MCache = cache::Model;
 pub type MCommit = commit::Model;
 pub type MEvaluation = evaluation::Model;
@@ -178,6 +245,8 @@ pub type AApi = api::ActiveModel;
 pub type ABuild = build::ActiveModel;
 pub type ABuildDependency = build_dependency::ActiveModel;
 pub type ABuildFeature = build_feature::ActiveModel;
+pub type ABuildOutput = build_output::ActiveModel;
+pub type ABuildOutputSignature = build_output_signature::ActiveModel;
 pub type ACache = cache::ActiveModel;
 pub type ACommit = commit::ActiveModel;
 pub type AEvaluation = evaluation::ActiveModel;
@@ -196,6 +265,8 @@ pub type CApi = api::Column;
 pub type CBuild = build::Column;
 pub type CBuildDependency = build_dependency::Column;
 pub type CBuildFeature = build_feature::Column;
+pub type CBuildOutput = build_output::Column;
+pub type CBuildOutputSignature = build_output_signature::Column;
 pub type CCache = cache::Column;
 pub type CCommit = commit::Column;
 pub type CEvaluation = evaluation::Column;
@@ -214,6 +285,8 @@ pub type RApi = api::Relation;
 pub type RBuild = build::Relation;
 pub type RBuildDependency = build_dependency::Relation;
 pub type RBuildFeature = build_feature::Relation;
+pub type RBuildOutput = build_output::Relation;
+pub type RBuildOutputSignature = build_output_signature::Relation;
 pub type RCache = cache::Relation;
 pub type RCommit = commit::Relation;
 pub type REvaluation = evaluation::Relation;

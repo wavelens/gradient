@@ -250,8 +250,8 @@ pub fn get_buildlog_stream(
     Ok(Box::pin(stream))
 }
 
-pub async fn get_local_store(organization: MOrganization) -> Result<LocalNixStore, String> {
-    if organization.use_nix_store {
+pub async fn get_local_store(organization: Option<MOrganization>) -> Result<LocalNixStore, String> {
+    if organization.is_none() || organization.clone().unwrap().use_nix_store {
         let store = DaemonStore::builder()
             .init(
                 UnixStream::connect("/nix/var/nix/daemon-socket/socket")
@@ -273,7 +273,7 @@ pub async fn get_local_store(organization: MOrganization) -> Result<LocalNixStor
 
         Ok(LocalNixStore::UnixStream(store))
     } else {
-        let nix_store_dir = format!("/var/lib/gradient/store/{}", organization.id);
+        let nix_store_dir = format!("/var/lib/gradient/store/{}", organization.unwrap().id);
         let mut child = Command::new("nix-store")
             .arg("--eval-store")
             .arg(nix_store_dir.clone())
@@ -329,4 +329,17 @@ pub async fn get_output_path<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
         .values()
         .cloned()
         .collect())
+}
+
+pub async fn get_pathinfo<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
+    path: String,
+    store: &mut DaemonStore<A>,
+) -> Result<nix_daemon::PathInfo, String> {
+    Ok(store
+        .query_pathinfo(path)
+        .result()
+        .await
+        .map_err(|e| e.to_string())
+        .unwrap()
+        .unwrap())
 }

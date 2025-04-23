@@ -9,12 +9,13 @@ use entity::evaluation::EvaluationStatus;
 use rand::rngs::OsRng;
 use sea_orm::EntityTrait;
 use ssh_key::{Algorithm, LineEnding, PrivateKey};
+use ed25519_compact::KeyPair;
 use std::sync::Arc;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use tokio::process::Command;
 
-use super::input::{load_secret, hex_to_vec, check_repository_url_is_ssh};
+use super::input::{load_secret, hex_to_vec, vec_to_hex, check_repository_url_is_ssh};
 use super::types::*;
 
 pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) -> (bool, Vec<u8>) {
@@ -31,7 +32,7 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
             organization,
         ).unwrap();
 
-        let ssh_key_path = write_ssh_key(
+        let ssh_key_path = write_key(
             private_key,
             state.cli.base_path.clone(),
         ).unwrap();
@@ -44,7 +45,7 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
         .output()
         .await;
 
-        clear_ssh_key(ssh_key_path).unwrap();
+        clear_key(ssh_key_path).unwrap();
 
         cmd
     } else {
@@ -112,7 +113,7 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
     (true, remote_hash)
 }
 
-pub fn write_ssh_key(private_key: String, to_path: String) -> Result<String, String> {
+pub fn write_key(private_key: String, to_path: String) -> Result<String, String> {
     let path = format!("{}/loaded_credentials_{}.key", to_path, uuid::Uuid::new_v4());
 
     fs::write(&path, private_key).map_err(|e| e.to_string())?;
@@ -121,15 +122,19 @@ pub fn write_ssh_key(private_key: String, to_path: String) -> Result<String, Str
     Ok(path)
 }
 
-pub fn clear_ssh_key(path: String) -> Result<(), String> {
+pub fn clear_key(path: String) -> Result<(), String> {
     fs::remove_file(&path).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), String> {
+    let secret = general_purpose::STANDARD.decode(load_secret(&secret_file)).map_err(|_| {
+        "Failed to decode GRADIENT_CRYPT_SECRET".to_string()
+    })?;
+
     let mut csprng = OsRng;
     let private_key = PrivateKey::random(&mut csprng, Algorithm::Ed25519)
-        .map_err(|e| "Failed to generate SSH key pair: ".to_string() + &e.to_string())?;
+        .map_err(|e| "Failed to generate SSH-keypair: ".to_string() + &e.to_string())?;
 
     let private_key_openssh = private_key.to_openssh(LineEnding::LF).unwrap().to_string();
 
@@ -143,10 +148,6 @@ pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), String>
         .to_string();
 
     let public_key_openssh = format!("{} {}", Algorithm::Ed25519.as_str(), public_key_openssh);
-
-    let secret = general_purpose::STANDARD.decode(load_secret(&secret_file)).map_err(|_| {
-        "Failed to decode GRADIENT_CRYPT_SECRET".to_string()
-    })?;
 
     let encrypted_private_key = if let Some(p) = crypter::encrypt(secret, &private_key_openssh) {
         p
@@ -185,6 +186,94 @@ pub fn decrypt_ssh_private_key(
 
 pub fn format_public_key(organization: MOrganization) -> String {
     format!("{} {}", organization.public_key, organization.id)
+}
+
+pub fn generate_signing_key(secret_file: String) -> Result<String, String> {
+    let secret = general_purpose::STANDARD.decode(load_secret(&secret_file)).map_err(|_| {
+        "Failed to decode GRADIENT_CRYPT_SECRET".to_string()
+    })?;
+
+    let private_key = KeyPair::generate();
+    let encrypted_private_key = if let Some(p) = crypter::encrypt(secret, *private_key) {
+        p
+    } else {
+        return Err("Failed to encrypt private key".to_string());
+    };
+
+    let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_private_key);
+
+    Ok(encrypted_private_key)
+}
+
+pub fn decrypt_signing_key(
+    secret_file: String,
+    cache: MCache,
+) -> Result<KeyPair, String> {
+    let secret = general_purpose::STANDARD.decode(load_secret(&secret_file)).map_err(|_| {
+        "Failed to decode GRADIENT_CRYPT_SECRET".to_string()
+    })?;
+
+    let encrypted_private_key = general_purpose::STANDARD
+        .decode(cache.clone().signing_key)
+        .unwrap();
+
+    let decrypted_private_key = if let Some(p) = crypter::decrypt(secret, encrypted_private_key) {
+        p
+    } else {
+        return Err("Failed to decrypt private key".to_string());
+    };
+
+    let decrypted_private_key = KeyPair::from_slice(&decrypted_private_key).map_err(|_| {
+        "Failed to convert decrypted private key to KeyPair".to_string()
+    })?;
+
+    Ok(decrypted_private_key)
+}
+
+pub fn format_signing_key(secret_file: String, cache: MCache, url: String) -> String {
+    let secret = decrypt_signing_key(secret_file, cache.clone()).unwrap();
+    let public_key = general_purpose::STANDARD.encode(secret.pk.as_ref());
+    let base_url = url.replace("https://", "").replace("http://", "").replace(":", "-");
+
+    format!("{}-{}:{}", base_url, cache.name, public_key)
+}
+
+pub fn get_hash_from_url(url: String) -> Result<String, String> {
+    let path_split = url.split('.').collect::<Vec<&str>>();
+
+    if path_split.len() != 2
+     && path_split[0].len() != 32
+     && (path_split[1] != "narinfo" || path_split[1] != "nar")
+     && !path_split[0]
+        .chars()
+        .all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))
+    {
+        return Err("Invalid path".to_string());
+    }
+
+    Ok(path_split[0].to_string())
+}
+
+pub fn get_hash_from_path(path: String) -> Result<(Vec<u8>, String), String> {
+    let path_split = path.split('/').collect::<Vec<&str>>();
+    if path_split.len() < 4 {
+        return Err("Invalid path".to_string());
+    }
+
+    let path_split = path_split[3].split('-').collect::<Vec<&str>>();
+    if path_split.len() < 2 {
+        return Err("Invalid path".to_string());
+    }
+
+
+    let package = path_split[1..].concat();
+    let hash = hex_to_vec(path_split[0]).unwrap();
+
+    Ok((hash, package))
+}
+
+pub fn get_path_from_build_output(build_output: MBuildOutput) -> String {
+    format!("/nix/store/{}-{}", vec_to_hex(&build_output.hash), build_output.package)
 }
 
 #[cfg(test)]

@@ -1090,6 +1090,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
+  /cache/{cache}/key:
+    get:
+      tags:
+        - caches
+      summary: Get cache public key
+      description: Get the public key from cache
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
   /evals/{evaluation}:
     get:
       tags:

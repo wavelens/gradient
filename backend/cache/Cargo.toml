@@ -1,0 +1,21 @@
+[package]
+name = "cache"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0"
+authors = ["Wavelens UG <info@wavelens.io>"]
+
+[lib]
+name = "cache"
+path = "src/lib.rs"
+
+[dependencies]
+chrono = "0.4"
+core = { path = "../core" }
+entity = { path = "../entity" }
+sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
+serde_json = "1.0"
+tokio = { version = "1.44", features = ["process", "rt-multi-thread"] }
+uuid = { version = "1.16", features = ["fast-rng", "macro-diagnostics", "v4"] }
+async-trait = "0.1"

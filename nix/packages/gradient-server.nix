@@ -12,6 +12,7 @@
 , openssl
 , pkg-config
 , rustPlatform
+, zstd
 }: let
   ignoredPaths = [ ".github" "target" ];
 in rustPlatform.buildRustPackage {
@@ -34,6 +35,7 @@ in rustPlatform.buildRustPackage {
     nixVersions.latest
     openssl
     pkg-config
+    zstd
   ];
 
   cargoLock = {

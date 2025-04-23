@@ -12,7 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 axum = "0.8"
-axum-streams = { version = "0.20", features = ["json"] }
+axum-streams = { version = "0.21", features = ["json"] }
 async-stream = "0.3"
 chrono = "0.4"
 core = { path = "../core" }

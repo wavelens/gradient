@@ -92,6 +92,7 @@
         postgresql_17
         pgadmin4-desktopmode
         nixVersions.latest
+        zstd
       ];
 
       nativeBuildInputs = [
@@ -102,7 +103,7 @@
       RUST_BACKTRACE = 1;
 
       GRADIENT_DEBUG = "true";
-      GRADIENT_DOMAIN = "http://localhost:3000";
+      GRADIENT_SERVE_URL = "http://localhost:3000";
       GRADIENT_DATABASE_URL = "postgres://postgres:postgres@localhost:54321/gradient";
       GRADIENT_MAX_CONCURRENT_EVALUATIONS = 1;
       GRADIENT_MAX_CONCURRENT_BUILDS = 10;

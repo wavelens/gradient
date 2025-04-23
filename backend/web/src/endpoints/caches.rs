@@ -9,23 +9,15 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use chrono::Utc;
 use core::types::*;
-use core::input::check_index_name;
+use core::input::{check_index_name, hex_to_vec};
 use core::database::get_cache_by_name;
+use core::sources::{generate_signing_key, get_hash_from_url, format_signing_key, get_path_from_build_output};
+use core::executer::{get_local_store, get_pathinfo};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Condition};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
-
-#[derive(Debug, Clone, Serialize)]
-pub struct NixCacheInfo {
-    #[serde(rename = "WantMassQuery")]
-    want_mass_query: bool,
-    #[serde(rename = "StoreDir")]
-    store_dir: String,
-    #[serde(rename = "Priority")]
-    priority: i32,
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeCacheRequest {
@@ -41,6 +33,64 @@ pub struct PatchCacheRequest {
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub priority: Option<i32>,
+}
+
+async fn get_nar_by_hash(state: Arc<ServerState>, cache: MCache, hash: String) -> Result<NixPathInfo, String> {
+    let hash_vec = hex_to_vec(hash.as_str()).unwrap();
+    let build_output = EBuildOutput::find()
+        .filter(
+            Condition::all()
+                .add(CBuildOutput::IsCached.eq(true))
+                .add(CBuildOutput::Hash.eq(hash_vec))
+        )
+        .one(&state.db)
+        .await
+        .unwrap();
+
+    if build_output.is_none() {
+        return Err("Path not found".to_string());
+    }
+
+    let build_output_signature = EBuildOutputSignature::find()
+        .filter(
+            Condition::all()
+                .add(CBuildOutputSignature::Cache.eq(cache.id))
+                .add(CBuildOutputSignature::BuildOutput.eq(build_output.clone().unwrap().id))
+        )
+        .one(&state.db)
+        .await
+        .unwrap();
+
+    if build_output_signature.is_none() {
+        return Err("Signature not found".to_string());
+    }
+
+
+    let build_output = build_output.unwrap();
+    let path = get_path_from_build_output(build_output.clone());
+
+    let local_store = get_local_store(None).await.unwrap();
+    let pathinfo = match local_store {
+        LocalNixStore::UnixStream(mut store) => {
+            get_pathinfo(path.to_string(), &mut store).await.unwrap()
+        }
+        LocalNixStore::CommandDuplex(mut store) => {
+            get_pathinfo(path.to_string(), &mut store).await.unwrap()
+        }
+    };
+
+    Ok(NixPathInfo {
+        store_path: path,
+        url: format!("nar/{}.nar.zst", hash),
+        compression: "zstd".to_string(),
+        file_hash: build_output.file_hash.unwrap(),
+        file_size: build_output.file_size.unwrap(),
+        nar_hash: pathinfo.nar_hash,
+        nar_size: pathinfo.nar_size,
+        references: pathinfo.references,
+        sig: build_output_signature.unwrap().signature,
+        ca: pathinfo.ca,
+    })
 }
 
 pub async fn get(
@@ -101,6 +151,19 @@ pub async fn put(
         ));
     }
 
+    let signing_key = match generate_signing_key(state.cli.crypt_secret_file.clone()) {
+        Ok(key) => key,
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: e.to_string(),
+                }),
+            ))
+        }
+    };
+
     let cache = ACache {
         id: Set(Uuid::new_v4()),
         name: Set(body.name.clone()),
@@ -108,8 +171,7 @@ pub async fn put(
         display_name: Set(body.display_name.clone()),
         description: Set(body.description.clone()),
         priority: Set(body.priority),
-        // TODO: Generate signing key
-        signing_key: Set("".to_string()),
+        signing_key: Set(signing_key),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
     };
@@ -317,27 +379,119 @@ pub async fn delete_cache_active(
     Ok(Json(res))
 }
 
-pub async fn nix_cache_info() -> Result<Json<NixCacheInfo>, (StatusCode, Json<BaseResponse<String>>)> {
-    let res = NixCacheInfo {
-        want_mass_query: true,
-        store_dir: "/nix/store".to_string(),
-        priority: 0,
+pub async fn get_cache_key(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(cache): Path<String>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let cache: MCache =
+        match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
+            Some(c) => c,
+            None => {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Cache not found".to_string(),
+                    }),
+                ))
+            }
+        };
+
+    let res = BaseResponse {
+        error: false,
+        message: format_signing_key(state.cli.crypt_secret_file.clone(), cache, state.cli.serve_url.clone()),
     };
 
     Ok(Json(res))
 }
 
+pub async fn nix_cache_info(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(cache): Path<String>,
+) -> Result<String, (StatusCode, Json<BaseResponse<String>>)> {
+    let cache: MCache =
+        match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
+            Some(c) => c,
+            None => {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Cache not found".to_string(),
+                    }),
+                ))
+            }
+        };
+
+    if !cache.active {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: "Cache is disabled".to_string(),
+            }),
+        ))
+    }
+
+    let res = NixCacheInfo {
+        want_mass_query: true,
+        store_dir: "/nix/store".to_string(),
+        priority: cache.priority,
+    };
+
+    Ok(res.to_nix_string())
+}
+
 pub async fn path(
-    _state: State<Arc<ServerState>>,
-    Path((_cache, _path)): Path<(String, String)>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
+    state: State<Arc<ServerState>>,
+    Path((cache, path)): Path<(String, String)>,
+) -> Result<String, (StatusCode, Json<BaseResponse<String>>)> {
+    let path_hash = get_hash_from_url(path).map_err(|e| (
+        StatusCode::BAD_REQUEST,
         Json(BaseResponse {
             error: true,
-            message: "not implemented yet".to_string(),
+            message: e,
         }),
-    ))
+    ));
+
+    let cache: MCache = match ECache::find()
+        .filter(CCache::Name.eq(cache))
+        .one(&state.db)
+        .await
+        .unwrap() {
+            Some(c) => c,
+            None => {
+                return Err((
+                    StatusCode::NOT_FOUND,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Cache not found".to_string(),
+                    }),
+                ))
+            }
+        };
+
+    if !cache.active {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: "Cache is disabled".to_string(),
+            }),
+        ))
+    }
+
+    let path_info = get_nar_by_hash(Arc::clone(&state), cache, path_hash.unwrap()).await.map_err(|e| (
+        StatusCode::NOT_FOUND,
+        Json(BaseResponse {
+            error: true,
+            message: e,
+        }),
+    )).unwrap();
+
+    Ok(path_info.to_nix_string())
 }
 
 pub async fn nar(
@@ -363,8 +517,11 @@ pub async fn nar(
     }
 
 
-    let cache: MCache =
-        match get_cache_by_name(state.0.clone(), Uuid::nil(), cache.clone()).await {
+    let cache: MCache = match ECache::find()
+        .filter(CCache::Name.eq(cache))
+        .one(&state.db)
+        .await
+        .unwrap() {
             Some(c) => c,
             None => {
                 return Err((
