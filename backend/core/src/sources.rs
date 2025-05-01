@@ -291,6 +291,18 @@ pub fn get_path_from_build_output(build_output: MBuildOutput) -> String {
     format!("/nix/store/{}-{}", build_output.hash, build_output.package)
 }
 
+pub fn get_cache_nar_location(base_path: String, hash: String, compressed: bool) -> String {
+    let hash_hex = hash.as_str();
+    std::fs::create_dir_all(format!("{}/nars/{}", base_path, &hash_hex[0..2])).unwrap();
+    format!(
+        "{}/nars/{}/{}.nar{}",
+        base_path,
+        &hash_hex[0..2],
+        &hash_hex[2..],
+        if compressed { ".zst" } else { "" }
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

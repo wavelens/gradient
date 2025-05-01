@@ -6,7 +6,7 @@
 
 use chrono::Utc;
 use core::sources::{
-    clear_key, format_cache_key, get_hash_from_path, get_path_from_build_output, write_key,
+    clear_key, format_cache_key, get_hash_from_path, get_path_from_build_output, write_key, get_cache_nar_location
 };
 use core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -259,18 +259,6 @@ pub async fn pack_build_output(
     let file_size = file_metadata.len() as u32;
 
     Ok((format!("sha256:{}", file_hash), file_size))
-}
-
-pub fn get_cache_nar_location(base_path: String, hash: String, compressed: bool) -> String {
-    let hash_hex = hash.as_str();
-    std::fs::create_dir_all(format!("{}/nars/{}", base_path, &hash_hex[0..2])).unwrap();
-    format!(
-        "{}/nars/{}/{}.nar{}",
-        base_path,
-        &hash_hex[0..2],
-        &hash_hex[2..],
-        if compressed { ".zst" } else { "" }
-    )
 }
 
 async fn get_next_build_output(state: Arc<ServerState>) -> Option<MBuildOutput> {

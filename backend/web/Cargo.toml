@@ -25,6 +25,7 @@ rand = "0.9"
 sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1.44", features = ["process", "rt-multi-thread"] }
+tokio-util = { version = "0.7", features = ["io"] }
 uuid = { version = "1.16", features = ["fast-rng", "macro-diagnostics", "v4"] }
 serde_json = "1.0"
 oauth2 = "5.0"

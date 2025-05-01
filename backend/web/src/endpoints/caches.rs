@@ -5,20 +5,23 @@
  */
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::{Extension, Json};
+use axum::response::Response;
+use axum::body::Body;
 use chrono::Utc;
 use core::database::get_cache_by_name;
 use core::executer::{get_local_store, get_pathinfo};
 use core::input::check_index_name;
 use core::sources::{
-    format_cache_key, generate_signing_key, get_hash_from_url, get_path_from_build_output,
+    format_cache_key, generate_signing_key, get_hash_from_url, get_path_from_build_output, get_cache_nar_location
 };
 use core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -412,7 +415,7 @@ pub async fn get_cache_key(
 pub async fn nix_cache_info(
     state: State<Arc<ServerState>>,
     Path(cache): Path<String>,
-) -> Result<String, (StatusCode, Json<BaseResponse<String>>)> {
+) -> Result<Response<String>, (StatusCode, Json<BaseResponse<String>>)> {
     let cache: MCache = match ECache::find()
         .filter(CCache::Name.eq(cache))
         .one(&state.db)
@@ -447,14 +450,18 @@ pub async fn nix_cache_info(
         priority: cache.priority,
     };
 
-    Ok(res.to_nix_string())
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, HeaderValue::from_static("text/x-nix-cache-info"))
+        .body(res.to_nix_string())
+        .unwrap())
 }
 
 pub async fn path(
     state: State<Arc<ServerState>>,
     Path((cache, path)): Path<(String, String)>,
-) -> Result<String, (StatusCode, Json<BaseResponse<String>>)> {
-    let path_hash = get_hash_from_url(path).map_err(|e| {
+) -> Result<Response<String>, (StatusCode, Json<BaseResponse<String>>)> {
+    let path_hash = get_hash_from_url(path.clone()).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             Json(BaseResponse {
@@ -463,6 +470,16 @@ pub async fn path(
             }),
         )
     });
+
+    if !path.ends_with(".narinfo") {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(BaseResponse {
+                error: true,
+                message: "Invalid path".to_string(),
+            }),
+        ));
+    }
 
     let cache: MCache = match ECache::find()
         .filter(CCache::Name.eq(cache))
@@ -488,16 +505,6 @@ pub async fn path(
             Json(BaseResponse {
                 error: true,
                 message: "Cache is disabled".to_string(),
-            }),
-        ));
-    }
-
-    if !path_hash.as_ref().unwrap().ends_with(".narinfo") {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(BaseResponse {
-                error: true,
-                message: "Invalid path".to_string(),
             }),
         ));
     }
@@ -515,24 +522,30 @@ pub async fn path(
         })
         .unwrap();
 
-    Ok(path_info.to_nix_string())
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, HeaderValue::from_static("text/x-nix-narinfo"))
+        .body(path_info.to_nix_string())
+        .unwrap())
 }
 
 pub async fn nar(
     state: State<Arc<ServerState>>,
     Path((cache, path)): Path<(String, String)>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let path_split = path.split('.').collect::<Vec<&str>>();
-
-    if path_split.len() != 2
-        && path_split[0].len() != 32
-        && path_split[1] != "nar"
-        && !path_split[0]
-            .chars()
-            .all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))
-    {
-        return Err((
+) -> Result<Response, (StatusCode, Json<BaseResponse<String>>)> {
+    let path_hash = get_hash_from_url(path.clone()).map_err(|e| {
+        (
             StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: e,
+            }),
+        )
+    });
+
+    if !path.ends_with(".nar") && !path.contains(".nar.") {
+        return Err((
+            StatusCode::NOT_FOUND,
             Json(BaseResponse {
                 error: true,
                 message: "Invalid path".to_string(),
@@ -568,11 +581,28 @@ pub async fn nar(
         ));
     }
 
-    Err((
-        StatusCode::NOT_IMPLEMENTED,
-        Json(BaseResponse {
-            error: true,
-            message: "not implemented yet".to_string(),
-        }),
-    ))
+    let file_path = get_cache_nar_location(
+        state.cli.base_path.clone(),
+        path_hash.unwrap(),
+        true,
+    );
+
+    let file = tokio::fs::File::open(&file_path).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(BaseResponse {
+                error: true,
+                message: format!("Failed to open file: {}", e),
+            }),
+        )
+    })?;
+
+    let stream = ReaderStream::new(file);
+    let body = Body::from_stream(stream);
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, HeaderValue::from_static("application/x-nix-nar"))
+        .body(body)
+        .unwrap())
 }
