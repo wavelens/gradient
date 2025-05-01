@@ -80,15 +80,16 @@ pub fn repository_url_to_nix(url: &str, commit_hash: &str) -> Result<String, Str
         return Err("commit hash must be 40 characters long".to_string());
     }
 
-    if url.contains("file://") {
-        return Err("\"file://\" is not allowed in url".to_string());
+    if url.contains("file://") || url.starts_with("file") {
+        return Err("URLs pointing to local files are not allowed".to_string());
     }
 
-    let url = if url.starts_with("ssh://") || url.starts_with("http") {
-        format!("git+{}", url)
-    } else {
-        url.to_string()
-    };
+    let url =
+        if url.starts_with("ssh://") || url.starts_with("http://") || url.starts_with("https://") {
+            format!("git+{}", url)
+        } else {
+            url.to_string()
+        };
 
     Ok(format!("{}?rev={}", url, commit_hash))
 }

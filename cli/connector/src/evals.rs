@@ -15,7 +15,7 @@ pub struct EvaluationResponse {
     pub project: String,
     pub repository: String,
     pub commit: String,
-    pub evaluation_wildcard: String,
+    pub wildcard: String,
     pub status: String,
     pub previous: Option<String>,
     pub next: Option<String>,

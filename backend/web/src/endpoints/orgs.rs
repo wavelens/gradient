@@ -8,13 +8,15 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use chrono::Utc;
-use core::database::{get_organization_by_name, get_cache_by_name};
+use core::consts::BASE_ROLE_ADMIN_ID;
+use core::database::{get_cache_by_name, get_organization_by_name};
 use core::input::check_index_name;
 use core::sources::{format_public_key, generate_ssh_key};
 use core::types::*;
-use core::consts::BASE_ROLE_ADMIN_ID;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, QuerySelect, JoinType};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QuerySelect,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -381,13 +383,11 @@ pub async fn post_organization_users(
 
     let role = ERole::find()
         .filter(
-            Condition::all()
-                .add(CRole::Name.eq(body.role.clone()))
-                .add(
-                    Condition::any()
-                        .add(CRole::Organization.eq(organization.id))
-                        .add(CRole::Organization.is_null())
-                )
+            Condition::all().add(CRole::Name.eq(body.role.clone())).add(
+                Condition::any()
+                    .add(CRole::Organization.eq(organization.id))
+                    .add(CRole::Organization.is_null()),
+            ),
         )
         .one(&state.db)
         .await
@@ -795,8 +795,6 @@ pub async fn delete_organization_subscribe_cache(
         .one(&state.db)
         .await
         .unwrap();
-
-
 
     if let Some(organization_cache) = organization_cache {
         let aorganization_cache: AOrganizationCache = organization_cache.into();

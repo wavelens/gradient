@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::{io, fs};
-use std::io::Write;
-use std::collections::HashMap;
-use std::process::Command;
-use rpassword::read_password;
-use std::process::exit;
-use connector::RequestConfig;
 use super::config::*;
+use connector::RequestConfig;
+use rpassword::read_password;
+use std::collections::HashMap;
+use std::io::Write;
+use std::process::exit;
+use std::process::Command;
+use std::{fs, io};
 
 pub fn handle_input(values: Vec<(String, Option<String>)>, skip: bool) -> HashMap<String, String> {
     if values.is_empty() {
@@ -20,22 +20,26 @@ pub fn handle_input(values: Vec<(String, Option<String>)>, skip: bool) -> HashMa
     }
 
     if skip && !values.iter().any(|(_, v)| v.is_none()) {
-        return values.iter().map(|(k, v)| {
-            (k.clone(), v.clone().unwrap())
-        }).collect();
+        return values
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone().unwrap()))
+            .collect();
     }
 
-    let input_fields: String = values.iter().map(|(k, v)| {
-        format!(
-            "{}: {}\n",
-            k,
-            if let Some(val) = v {
-                val.clone()
-            } else {
-                "".to_string()
-            }
-        )
-    }).collect();
+    let input_fields: String = values
+        .iter()
+        .map(|(k, v)| {
+            format!(
+                "{}: {}\n",
+                k,
+                if let Some(val) = v {
+                    val.clone()
+                } else {
+                    "".to_string()
+                }
+            )
+        })
+        .collect();
 
     let name = format!("/tmp/GRADIENT-CONFIGURATOR-{}", std::process::id());
 
@@ -59,10 +63,6 @@ pub fn handle_input(values: Vec<(String, Option<String>)>, skip: bool) -> HashMa
     let mut result: HashMap<String, String> = HashMap::new();
     for line in contents.lines() {
         let parts: Vec<&str> = line.split(":").map(|v| v.trim()).collect();
-        if parts.len() != 2 {
-            eprintln!("Invalid input: {}", line);
-            exit(1);
-        }
 
         if !values.iter().any(|(k, _)| k == parts[0]) {
             eprintln!("Invalid input field: {}", parts[0]);
@@ -74,7 +74,7 @@ pub fn handle_input(values: Vec<(String, Option<String>)>, skip: bool) -> HashMa
             exit(1);
         }
 
-        result.insert(parts[0].to_string(), parts[1].to_string());
+        result.insert(parts[0].to_string(), parts[1..].join(":").to_string());
     }
 
     result
@@ -110,7 +110,9 @@ pub fn ask_for_input(prompt: &str) -> String {
     inp
 }
 
-pub fn get_request_config(config: HashMap<ConfigKey, Option<String>>) -> Result<RequestConfig, String> {
+pub fn get_request_config(
+    config: HashMap<ConfigKey, Option<String>>,
+) -> Result<RequestConfig, String> {
     let server_url: String =
         if let Some(server_url) = config.get(&ConfigKey::Server).unwrap().clone() {
             server_url

@@ -5,45 +5,47 @@
  */
 
 use base64::{engine::general_purpose, Engine};
+use ed25519_compact::KeyPair;
 use entity::evaluation::EvaluationStatus;
 use rand::rngs::OsRng;
 use sea_orm::EntityTrait;
 use ssh_key::{Algorithm, LineEnding, PrivateKey};
-use ed25519_compact::KeyPair;
-use std::sync::Arc;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::sync::Arc;
 use tokio::process::Command;
 
-use super::input::{load_secret, hex_to_vec, vec_to_hex, check_repository_url_is_ssh};
+use super::input::{check_repository_url_is_ssh, hex_to_vec, load_secret};
 use super::types::*;
 
 pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) -> (bool, Vec<u8>) {
     if state.cli.debug {
-        println!("Checking for updates on project: {} [{}]", project.id, project.name);
+        println!(
+            "Checking for updates on project: {} [{}]",
+            project.id, project.name
+        );
     };
 
     let cmd = match if check_repository_url_is_ssh(&project.repository) {
-        let organization = EOrganization::find_by_id(project.organization).one(&state.db).await.unwrap().unwrap();
+        let organization = EOrganization::find_by_id(project.organization)
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap();
 
+        let (private_key, _public_key) =
+            decrypt_ssh_private_key(load_secret(&state.cli.crypt_secret_file), organization)
+                .unwrap();
 
-        let (private_key, _public_key) = decrypt_ssh_private_key(
-            load_secret(&state.cli.crypt_secret_file),
-            organization,
-        ).unwrap();
-
-        let ssh_key_path = write_key(
-            private_key,
-            state.cli.base_path.clone(),
-        ).unwrap();
+        let ssh_key_path = write_key(private_key, state.cli.base_path.clone()).unwrap();
 
         let cmd = Command::new(state.cli.binpath_git.clone())
             .arg("ls-remote")
             .arg("-c")
             .arg(format!("core.sshCommand=ssh -i {}", ssh_key_path))
             .arg(&project.repository)
-        .output()
-        .await;
+            .output()
+            .await;
 
         clear_key(ssh_key_path).unwrap();
 
@@ -52,8 +54,8 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
         Command::new(state.cli.binpath_git.clone())
             .arg("ls-remote")
             .arg(&project.repository)
-        .output()
-        .await
+            .output()
+            .await
     } {
         Ok(output) => output,
         Err(e) => {
@@ -114,7 +116,11 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
 }
 
 pub fn write_key(private_key: String, to_path: String) -> Result<String, String> {
-    let path = format!("{}/loaded_credentials_{}.key", to_path, uuid::Uuid::new_v4());
+    let path = format!(
+        "{}/loaded-credentials_{}.key",
+        to_path,
+        uuid::Uuid::new_v4()
+    );
 
     fs::write(&path, private_key).map_err(|e| e.to_string())?;
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
@@ -128,9 +134,9 @@ pub fn clear_key(path: String) -> Result<(), String> {
 }
 
 pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), String> {
-    let secret = general_purpose::STANDARD.decode(load_secret(&secret_file)).map_err(|_| {
-        "Failed to decode GRADIENT_CRYPT_SECRET".to_string()
-    })?;
+    let secret = general_purpose::STANDARD
+        .decode(load_secret(&secret_file))
+        .map_err(|_| "Failed to decode GRADIENT_CRYPT_SECRET".to_string())?;
 
     let mut csprng = OsRng;
     let private_key = PrivateKey::random(&mut csprng, Algorithm::Ed25519)
@@ -164,9 +170,9 @@ pub fn decrypt_ssh_private_key(
     secret_file: String,
     organization: MOrganization,
 ) -> Result<(String, String), String> {
-    let secret = general_purpose::STANDARD.decode(load_secret(&secret_file)).map_err(|_| {
-        "Failed to decode GRADIENT_CRYPT_SECRET".to_string()
-    })?;
+    let secret = general_purpose::STANDARD
+        .decode(load_secret(&secret_file))
+        .map_err(|_| "Failed to decode GRADIENT_CRYPT_SECRET".to_string())?;
 
     let encrypted_private_key = general_purpose::STANDARD
         .decode(organization.clone().private_key)
@@ -189,9 +195,9 @@ pub fn format_public_key(organization: MOrganization) -> String {
 }
 
 pub fn generate_signing_key(secret_file: String) -> Result<String, String> {
-    let secret = general_purpose::STANDARD.decode(load_secret(&secret_file)).map_err(|_| {
-        "Failed to decode GRADIENT_CRYPT_SECRET".to_string()
-    })?;
+    let secret = general_purpose::STANDARD
+        .decode(load_secret(&secret_file))
+        .map_err(|_| "Failed to decode GRADIENT_CRYPT_SECRET".to_string())?;
 
     let private_key = KeyPair::generate();
     let encrypted_private_key = if let Some(p) = crypter::encrypt(secret, *private_key) {
@@ -205,13 +211,10 @@ pub fn generate_signing_key(secret_file: String) -> Result<String, String> {
     Ok(encrypted_private_key)
 }
 
-pub fn decrypt_signing_key(
-    secret_file: String,
-    cache: MCache,
-) -> Result<KeyPair, String> {
-    let secret = general_purpose::STANDARD.decode(load_secret(&secret_file)).map_err(|_| {
-        "Failed to decode GRADIENT_CRYPT_SECRET".to_string()
-    })?;
+pub fn decrypt_signing_key(secret_file: String, cache: MCache) -> Result<KeyPair, String> {
+    let secret = general_purpose::STANDARD
+        .decode(load_secret(&secret_file))
+        .map_err(|_| "Failed to decode GRADIENT_CRYPT_SECRET".to_string())?;
 
     let encrypted_private_key = general_purpose::STANDARD
         .decode(cache.clone().signing_key)
@@ -223,17 +226,30 @@ pub fn decrypt_signing_key(
         return Err("Failed to decrypt private key".to_string());
     };
 
-    let decrypted_private_key = KeyPair::from_slice(&decrypted_private_key).map_err(|_| {
-        "Failed to convert decrypted private key to KeyPair".to_string()
-    })?;
+    let decrypted_private_key = KeyPair::from_slice(&decrypted_private_key)
+        .map_err(|_| "Failed to convert decrypted private key to KeyPair".to_string())?;
 
     Ok(decrypted_private_key)
 }
 
-pub fn format_signing_key(secret_file: String, cache: MCache, url: String) -> String {
+pub fn format_cache_key(
+    secret_file: String,
+    cache: MCache,
+    url: String,
+    public_key: bool,
+) -> String {
     let secret = decrypt_signing_key(secret_file, cache.clone()).unwrap();
-    let public_key = general_purpose::STANDARD.encode(secret.pk.as_ref());
-    let base_url = url.replace("https://", "").replace("http://", "").replace(":", "-");
+    let key = if public_key {
+        secret.pk.as_ref()
+    } else {
+        secret.sk.as_ref()
+    };
+
+    let public_key = general_purpose::STANDARD.encode(key);
+    let base_url = url
+        .replace("https://", "")
+        .replace("http://", "")
+        .replace(":", "-");
 
     format!("{}-{}:{}", base_url, cache.name, public_key)
 }
@@ -242,11 +258,11 @@ pub fn get_hash_from_url(url: String) -> Result<String, String> {
     let path_split = url.split('.').collect::<Vec<&str>>();
 
     if path_split.len() != 2
-     && path_split[0].len() != 32
-     && (path_split[1] != "narinfo" || path_split[1] != "nar")
-     && !path_split[0]
-        .chars()
-        .all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))
+        && path_split[0].len() != 32
+        && (path_split[1] != "narinfo" || path_split[1] != "nar")
+        && !path_split[0]
+            .chars()
+            .all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))
     {
         return Err("Invalid path".to_string());
     }
@@ -254,7 +270,7 @@ pub fn get_hash_from_url(url: String) -> Result<String, String> {
     Ok(path_split[0].to_string())
 }
 
-pub fn get_hash_from_path(path: String) -> Result<(Vec<u8>, String), String> {
+pub fn get_hash_from_path(path: String) -> Result<(String, String), String> {
     let path_split = path.split('/').collect::<Vec<&str>>();
     if path_split.len() < 4 {
         return Err("Invalid path".to_string());
@@ -265,15 +281,14 @@ pub fn get_hash_from_path(path: String) -> Result<(Vec<u8>, String), String> {
         return Err("Invalid path".to_string());
     }
 
-
-    let package = path_split[1..].concat();
-    let hash = hex_to_vec(path_split[0]).unwrap();
+    let package = path_split[1..].join("-");
+    let hash = path_split[0].to_string();
 
     Ok((hash, package))
 }
 
 pub fn get_path_from_build_output(build_output: MBuildOutput) -> String {
-    format!("/nix/store/{}-{}", vec_to_hex(&build_output.hash), build_output.package)
+    format!("/nix/store/{}-{}", build_output.hash, build_output.package)
 }
 
 #[cfg(test)]

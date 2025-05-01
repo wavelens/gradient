@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use entity::build::BuildStatus;
+use entity::evaluation::EvaluationStatus;
 use migration::Migrator;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Database, DatabaseConnection, EntityTrait,
@@ -12,11 +14,9 @@ use sea_orm::{
 use sea_orm_migration::prelude::*;
 use std::sync::Arc;
 use uuid::Uuid;
-use entity::build::BuildStatus;
-use entity::evaluation::EvaluationStatus;
 
+use super::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use super::types::*;
-use super::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_WRITE_ID, BASE_ROLE_VIEW_ID};
 
 pub async fn connect_db(cli: &Cli) -> DatabaseConnection {
     let db_url = if let Some(file) = &cli.database_url_file {
@@ -70,10 +70,7 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
         aevaluation.update(db).await.unwrap();
     }
 
-    let base_role_admin = ERole::find_by_id(BASE_ROLE_ADMIN_ID)
-        .one(db)
-        .await
-        .unwrap();
+    let base_role_admin = ERole::find_by_id(BASE_ROLE_ADMIN_ID).one(db).await.unwrap();
 
     if base_role_admin.is_none() {
         let arole = ARole {
@@ -86,10 +83,7 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
         arole.insert(db).await.unwrap();
     }
 
-    let base_role_write = ERole::find_by_id(BASE_ROLE_WRITE_ID)
-        .one(db)
-        .await
-        .unwrap();
+    let base_role_write = ERole::find_by_id(BASE_ROLE_WRITE_ID).one(db).await.unwrap();
 
     if base_role_write.is_none() {
         let arole = ARole {
@@ -102,10 +96,7 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
         arole.insert(db).await.unwrap();
     }
 
-    let base_role_view = ERole::find_by_id(BASE_ROLE_VIEW_ID)
-        .one(db)
-        .await
-        .unwrap();
+    let base_role_view = ERole::find_by_id(BASE_ROLE_VIEW_ID).one(db).await.unwrap();
 
     if base_role_view.is_none() {
         let arole = ARole {

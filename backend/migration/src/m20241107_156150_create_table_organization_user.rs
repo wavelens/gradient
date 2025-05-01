@@ -23,7 +23,11 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(OrganizationUser::Organization).uuid().not_null())
+                    .col(
+                        ColumnDef::new(OrganizationUser::Organization)
+                            .uuid()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(OrganizationUser::User).uuid().not_null())
                     .col(ColumnDef::new(OrganizationUser::Role).uuid().not_null())
                     .foreign_key(

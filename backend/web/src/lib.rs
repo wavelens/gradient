@@ -60,11 +60,16 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route("/orgs", get(orgs::get).put(orgs::put))
         .route(
             "/orgs/{organization}",
-            get(orgs::get_organization).patch(orgs::patch_organization).delete(orgs::delete_organization),
+            get(orgs::get_organization)
+                .patch(orgs::patch_organization)
+                .delete(orgs::delete_organization),
         )
         .route(
             "/orgs/{organization}/users",
-            get(orgs::get_organization_users).post(orgs::post_organization_users).patch(orgs::patch_organization_users).delete(orgs::delete_organization_users),
+            get(orgs::get_organization_users)
+                .post(orgs::post_organization_users)
+                .patch(orgs::patch_organization_users)
+                .delete(orgs::delete_organization_users),
         )
         .route(
             "/orgs/{organization}/ssh",
@@ -72,11 +77,12 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         )
         .route(
             "/orgs/{organization}/subscribe",
-            get(orgs::get_organization_subscribe)
+            get(orgs::get_organization_subscribe),
         )
         .route(
             "/orgs/{organization}/subscribe/{cache}",
-            post(orgs::post_organization_subscribe_cache).delete(orgs::delete_organization_subscribe_cache),
+            post(orgs::post_organization_subscribe_cache)
+                .delete(orgs::delete_organization_subscribe_cache),
         )
         .route(
             "/projects/{organization}",
@@ -84,7 +90,9 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         )
         .route(
             "/projects/{organization}/{project}",
-            get(projects::get_project).patch(projects::patch_project).delete(projects::delete_project),
+            get(projects::get_project)
+                .patch(projects::patch_project)
+                .delete(projects::delete_project),
         )
         .route(
             "/projects/{organization}/{project}/check-repository",
@@ -106,22 +114,18 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/evals/{evaluation}/builds",
             get(evals::get_evaluation_builds).connect(evals::connect_evaluation_builds),
         )
-        .route(
-            "/caches",
-            get(caches::get).put(caches::put),
-        )
+        .route("/caches", get(caches::get).put(caches::put))
         .route(
             "/caches/{cache}",
-            get(caches::get_cache).patch(caches::patch_cache).delete(caches::delete_cache),
+            get(caches::get_cache)
+                .patch(caches::patch_cache)
+                .delete(caches::delete_cache),
         )
         .route(
             "/caches/{cache}/active",
             post(caches::post_cache_active).delete(caches::delete_cache_active),
         )
-        .route(
-            "/caches/{cache}/key",
-            get(caches::get_cache_key),
-        )
+        .route("/caches/{cache}/key", get(caches::get_cache_key))
         .route(
             "/builds/{build}",
             get(builds::get_build).connect(builds::connect_build),
@@ -137,10 +141,15 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/user/settings",
             get(user::get_settings).patch(user::patch_settings),
         )
-        .route("/servers/{organization}", get(servers::get).put(servers::put))
+        .route(
+            "/servers/{organization}",
+            get(servers::get).put(servers::put),
+        )
         .route(
             "/servers/{organization}/{server}",
-            get(servers::get_server).patch(servers::patch_server).delete(servers::delete_server),
+            get(servers::get_server)
+                .patch(servers::patch_server)
+                .delete(servers::delete_server),
         )
         .route(
             "/servers/{organization}/{server}/check-connection",
@@ -150,10 +159,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/servers/{organization}/{server}/active",
             post(servers::post_server_active).delete(servers::delete_server_active),
         )
-        .route(
-            "/commits/{commit}",
-            get(commits::get_commit),
-        )
+        .route("/commits/{commit}", get(commits::get_commit))
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize,
@@ -169,26 +175,19 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
 
     let app = Router::new()
         .nest("/api/v1", api)
-        .route(
-            "/cache/{cache}/nix-cache-info",
-            get(caches::nix_cache_info),
-        )
-        .route(
-            "/cache/{cache}/{path}",
-            get(caches::path),
-        )
-        .route(
-            "/cache/{cache}/nar/{path}",
-            get(caches::nar),
-        )
+        .route("/cache/{cache}/nix-cache-info", get(caches::nix_cache_info))
+        .route("/cache/{cache}/{path}", get(caches::path))
+        .route("/cache/{cache}/nar/{path}", get(caches::nar))
         .fallback(handle_404)
         .layer(cors)
         .layer(trace)
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(&server_url).await.map_err(|e| {
-        tracing::error!("Failed to bind to {}: {}", server_url, e);
-        e
-    })?;
+    let listener = tokio::net::TcpListener::bind(&server_url)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to bind to {}: {}", server_url, e);
+            e
+        })?;
     axum::serve(listener, app).await
 }

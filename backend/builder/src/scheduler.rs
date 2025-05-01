@@ -65,7 +65,8 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error: {}", e);
-            update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Failed).await;
+            update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Failed)
+                .await;
             return;
         }
     };
@@ -248,8 +249,15 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
             let status = if results.1.values().all(|r| r.error_msg.is_empty()) {
                 for build_result in results.1.values() {
                     for (build_output, build_output_path) in build_result.built_outputs.clone() {
-                        let (build_output_path_hash, build_output_path_package) = get_hash_from_path(build_output_path).unwrap();
+                        let build_output_path =
+                            serde_json::from_str::<BuildOutputPath>(&build_output_path).unwrap();
 
+                        let (build_output_path_hash, build_output_path_package) =
+                            get_hash_from_path(format!(
+                                "/nix/store/{}",
+                                build_output_path.out_path
+                            ))
+                            .unwrap();
                         build_outputs.push(ABuildOutput {
                             id: Set(Uuid::new_v4()),
                             build: Set(build.id),
@@ -329,7 +337,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                         Condition::any()
                             .add(CEvaluation::Status.eq(EvaluationStatus::Completed))
                             .add(CEvaluation::Status.eq(EvaluationStatus::Failed))
-                            .add(CProject::ForceEvaluation.eq(true))
+                            .add(CProject::ForceEvaluation.eq(true)),
                     ),
             )
             .order_by_asc(CProject::LastCheckAt)

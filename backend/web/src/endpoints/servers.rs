@@ -340,15 +340,15 @@ pub async fn patch_server(
     }
 
     if let Some(features) = body.features.clone() {
-        let server_id = *aserver.id.clone().into_value().unwrap().as_ref_uuid().unwrap();
+        let server_id = *aserver
+            .id
+            .clone()
+            .into_value()
+            .unwrap()
+            .as_ref_uuid()
+            .unwrap();
 
-        add_features(
-            Arc::clone(&state),
-            features,
-            None,
-            Some(server_id),
-        )
-        .await;
+        add_features(Arc::clone(&state), features, None, Some(server_id)).await;
     }
 
     aserver.update(&state.db).await.unwrap();

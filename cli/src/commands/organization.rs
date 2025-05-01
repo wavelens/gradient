@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use clap::{arg, Subcommand};
-use std::process::exit;
-use connector::*;
 use crate::config::*;
 use crate::input::*;
+use clap::{arg, Subcommand};
+use connector::*;
+use std::process::exit;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -51,13 +51,8 @@ pub enum Commands {
 #[derive(Subcommand, Debug)]
 pub enum UserCommands {
     List,
-    Add {
-        user: String,
-        role: Option<String>,
-    },
-    Remove {
-        user: String,
-    },
+    Add { user: String, role: Option<String> },
+    Remove { user: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -69,20 +64,14 @@ pub enum SshCommands {
 #[derive(Subcommand, Debug)]
 pub enum CacheCommands {
     List,
-    Add {
-        cache: String,
-    },
-    Remove {
-        cache: String,
-    }
+    Add { cache: String },
+    Remove { cache: String },
 }
-
 
 pub async fn handle(cmd: Commands) {
     match cmd {
         Commands::Select { organization } => {
-            set_get_value(ConfigKey::SelectedOrganization, Some(organization), true)
-                .unwrap();
+            set_get_value(ConfigKey::SelectedOrganization, Some(organization), true).unwrap();
             println!("Organization selected.");
         }
 
@@ -95,9 +84,10 @@ pub async fn handle(cmd: Commands) {
                 ("Name", name),
                 ("Display Name", display_name),
                 ("Description", description),
-            ].iter().map(|(k, v)| {
-                (k.to_string(), v.clone())
-            }).collect();
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
 
             let input = handle_input(input_fields, true);
             let name = input.get("Name").unwrap().clone();
@@ -125,25 +115,22 @@ pub async fn handle(cmd: Commands) {
         }
 
         Commands::Show => {
-            let organization =
-                match set_get_value(ConfigKey::SelectedOrganization, None, true) {
-                    Some(id) => id,
-                    None => {
-                        eprintln!("Organization is required for command.");
-                        exit(1);
-                    }
-                };
+            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+                Some(id) => id,
+                None => {
+                    eprintln!("Organization is required for command.");
+                    exit(1);
+                }
+            };
 
-            let res = orgs::get_organization(
-                get_request_config(load_config()).unwrap(),
-                organization,
-            )
-            .await
-            .map_err(|e| {
-                eprintln!("{}", e);
-                exit(1);
-            })
-            .unwrap();
+            let res =
+                orgs::get_organization(get_request_config(load_config()).unwrap(), organization)
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{}", e);
+                        exit(1);
+                    })
+                    .unwrap();
 
             if res.error {
                 eprintln!("Failed to show organization.");
@@ -183,35 +170,40 @@ pub async fn handle(cmd: Commands) {
             display_name,
             description,
         } => {
-            let organization =
-                match set_get_value(ConfigKey::SelectedOrganization, None, true) {
-                    Some(id) => id,
-                    None => {
-                        eprintln!("Organization is required for command.");
-                        exit(1);
-                    }
-                };
-
-            let current_organization =
-                orgs::get_organization(
-                    get_request_config(load_config()).unwrap(),
-                    organization.clone(),
-                )
-                .await
-                .map_err(|e| {
-                    eprintln!("{}", e);
+            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+                Some(id) => id,
+                None => {
+                    eprintln!("Organization is required for command.");
                     exit(1);
-                })
-                .unwrap()
-                .message;
+                }
+            };
+
+            let current_organization = orgs::get_organization(
+                get_request_config(load_config()).unwrap(),
+                organization.clone(),
+            )
+            .await
+            .map_err(|e| {
+                eprintln!("{}", e);
+                exit(1);
+            })
+            .unwrap()
+            .message;
 
             let input_fields = [
                 ("Name", Some(new_name.unwrap_or(current_organization.name))),
-                ("Display Name", Some(display_name.unwrap_or(current_organization.display_name))),
-                ("Description", Some(description.unwrap_or(current_organization.description))),
-            ].iter().map(|(k, v)| {
-                (k.to_string(), v.clone())
-            }).collect();
+                (
+                    "Display Name",
+                    Some(display_name.unwrap_or(current_organization.display_name)),
+                ),
+                (
+                    "Description",
+                    Some(description.unwrap_or(current_organization.description)),
+                ),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
 
             let input = handle_input(input_fields, true);
 
@@ -238,25 +230,22 @@ pub async fn handle(cmd: Commands) {
         }
 
         Commands::Delete => {
-            let organization =
-                match set_get_value(ConfigKey::SelectedOrganization, None, true) {
-                    Some(id) => id,
-                    None => {
-                        eprintln!("Organization is required for command.");
-                        exit(1);
-                    }
-                };
+            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+                Some(id) => id,
+                None => {
+                    eprintln!("Organization is required for command.");
+                    exit(1);
+                }
+            };
 
-            let res = orgs::delete_organization(
-                get_request_config(load_config()).unwrap(),
-                organization,
-            )
-            .await
-            .map_err(|e| {
-                eprintln!("{}", e);
-                exit(1);
-            })
-            .unwrap();
+            let res =
+                orgs::delete_organization(get_request_config(load_config()).unwrap(), organization)
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{}", e);
+                        exit(1);
+                    })
+                    .unwrap();
 
             if res.error {
                 eprintln!("Failed to delete organization: {}", res.message);
@@ -267,14 +256,13 @@ pub async fn handle(cmd: Commands) {
         }
 
         Commands::User { cmd } => {
-            let organization =
-                match set_get_value(ConfigKey::SelectedOrganization, None, true) {
-                    Some(id) => id,
-                    None => {
-                        eprintln!("Organization is required for command.");
-                        exit(1);
-                    }
-                };
+            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+                Some(id) => id,
+                None => {
+                    eprintln!("Organization is required for command.");
+                    exit(1);
+                }
+            };
 
             match cmd {
                 UserCommands::List => {
@@ -303,11 +291,12 @@ pub async fn handle(cmd: Commands) {
                     }
                 }
 
-                UserCommands::Add {
-                    user,
-                    role,
-                } => {
-                    if role.is_some() && role.as_ref().unwrap() != "View" && role.as_ref().unwrap() != "Write" && role.as_ref().unwrap() != "Admin" {
+                UserCommands::Add { user, role } => {
+                    if role.is_some()
+                        && role.as_ref().unwrap() != "View"
+                        && role.as_ref().unwrap() != "Write"
+                        && role.as_ref().unwrap() != "Admin"
+                    {
                         eprintln!("Role must be either 'View', 'Write' or 'Admin'.");
                         exit(1);
                     }
@@ -357,14 +346,13 @@ pub async fn handle(cmd: Commands) {
         }
 
         Commands::Ssh { cmd } => {
-            let organization =
-                match set_get_value(ConfigKey::SelectedOrganization, None, true) {
-                    Some(id) => id,
-                    None => {
-                        eprintln!("Organization is required for command.");
-                        exit(1);
-                    }
-                };
+            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+                Some(id) => id,
+                None => {
+                    eprintln!("Organization is required for command.");
+                    exit(1);
+                }
+            };
 
             match cmd {
                 SshCommands::Show => {
@@ -410,27 +398,26 @@ pub async fn handle(cmd: Commands) {
         }
 
         Commands::Cache { cmd } => {
-            let organization =
-                match set_get_value(ConfigKey::SelectedOrganization, None, true) {
-                    Some(id) => id,
-                    None => {
-                        eprintln!("Organization is required for command.");
-                        exit(1);
-                    }
-                };
+            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+                Some(id) => id,
+                None => {
+                    eprintln!("Organization is required for command.");
+                    exit(1);
+                }
+            };
 
             match cmd {
                 CacheCommands::List => {
                     let res = orgs::get_organization_subscribe(
                         get_request_config(load_config()).unwrap(),
-                        organization
+                        organization,
                     )
-                        .await
-                        .map_err(|e| {
-                            eprintln!("{}", e);
-                            exit(1);
-                        })
-                        .unwrap();
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{}", e);
+                        exit(1);
+                    })
+                    .unwrap();
 
                     if res.error {
                         eprintln!("failed to list subscribed caches");
@@ -450,14 +437,14 @@ pub async fn handle(cmd: Commands) {
                     let res = orgs::post_organization_subscribe_cache(
                         get_request_config(load_config()).unwrap(),
                         organization,
-                        cache
+                        cache,
                     )
-                        .await
-                        .map_err(|e| {
-                            eprintln!("{}", e);
-                            exit(1);
-                        })
-                        .unwrap();
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{}", e);
+                        exit(1);
+                    })
+                    .unwrap();
 
                     if res.error {
                         eprintln!("Failed to subscribe to cache: {}", res.message);
@@ -471,14 +458,14 @@ pub async fn handle(cmd: Commands) {
                     let res = orgs::delete_organization_subscribe_cache(
                         get_request_config(load_config()).unwrap(),
                         organization,
-                        cache
+                        cache,
                     )
-                        .await
-                        .map_err(|e| {
-                            eprintln!("{}", e);
-                            exit(1);
-                        })
-                        .unwrap();
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{}", e);
+                        exit(1);
+                    })
+                    .unwrap();
 
                     if res.error {
                         eprintln!("Failed to unsubscribe from cache: {}", res.message);

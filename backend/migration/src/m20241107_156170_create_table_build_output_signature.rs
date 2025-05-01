@@ -23,14 +23,29 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(BuildOutputSignature::BuildOutput).uuid().not_null())
-                    .col(ColumnDef::new(BuildOutputSignature::Cache).uuid().not_null())
+                    .col(
+                        ColumnDef::new(BuildOutputSignature::BuildOutput)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(BuildOutputSignature::Cache)
+                            .uuid()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(BuildOutputSignature::Signature).string())
-                    .col(ColumnDef::new(BuildOutputSignature::CreatedAt).date_time().not_null())
+                    .col(
+                        ColumnDef::new(BuildOutputSignature::CreatedAt)
+                            .date_time()
+                            .not_null(),
+                    )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-build_output_signature-build_output")
-                            .from(BuildOutputSignature::Table, BuildOutputSignature::BuildOutput)
+                            .from(
+                                BuildOutputSignature::Table,
+                                BuildOutputSignature::BuildOutput,
+                            )
                             .to(BuildOutput::Table, BuildOutput::Id)
                             .on_delete(ForeignKeyAction::Cascade)
                             .on_update(ForeignKeyAction::Cascade),

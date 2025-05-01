@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use clap::{arg, Subcommand};
-use std::process::exit;
-use connector::*;
 use crate::config::*;
 use crate::input::*;
+use clap::{arg, Subcommand};
+use connector::*;
+use std::process::exit;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -50,9 +50,10 @@ pub async fn handle(cmd: Commands) {
                 ("Display Name", display_name),
                 ("Description", description),
                 ("Priority", priority.map(|p| p.to_string())),
-            ].iter().map(|(k, v)| {
-                (k.to_string(), v.clone())
-            }).collect();
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
 
             let input = handle_input(input_fields, true);
             let name = input.get("Name").unwrap().clone();
@@ -80,33 +81,32 @@ pub async fn handle(cmd: Commands) {
             .unwrap();
 
             if res.error {
-                eprintln!("Server creation failed: {}", res.message);
+                eprintln!("Cache creation failed: {}", res.message);
                 exit(1);
             }
 
-            println!("Server created.");
+            println!("Cache created.");
         }
 
         Commands::List => {
-            let res =
-                caches::get(get_request_config(load_config()).unwrap())
-                    .await
-                    .map_err(|e| {
-                        eprintln!("{}", e);
-                        exit(1);
-                    })
-                    .unwrap();
+            let res = caches::get(get_request_config(load_config()).unwrap())
+                .await
+                .map_err(|e| {
+                    eprintln!("{}", e);
+                    exit(1);
+                })
+                .unwrap();
 
             if res.error {
-                eprintln!("Failed to list servers");
+                eprintln!("Failed to list caches");
                 exit(1);
             }
 
             if res.message.is_empty() {
-                println!("You have no servers.");
+                println!("You have no caches.");
             } else {
-                for server in res.message {
-                    println!("{}: {}", server.name, server.id);
+                for cache in res.message {
+                    println!("{}: {}", cache.name, cache.id);
                 }
             }
         }
@@ -121,9 +121,10 @@ pub async fn handle(cmd: Commands) {
                 ("Display Name", display_name),
                 ("Description", description),
                 ("Priority", priority.map(|p| p.to_string())),
-            ].iter().map(|(k, v)| {
-                (k.to_string(), v.clone())
-            }).collect();
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
 
             let input = handle_input(input_fields, false);
 
@@ -150,31 +151,29 @@ pub async fn handle(cmd: Commands) {
             .unwrap();
 
             if res.error {
-                eprintln!("Server creation failed: {}", res.message);
+                eprintln!("Cache creation failed: {}", res.message);
                 exit(1);
             }
 
-            println!("Server updated.");
+            println!("Cache updated.");
         }
 
         Commands::Delete { name } => {
-            let res = caches::delete_cache(
-                get_request_config(load_config()).unwrap(),
-                name.clone(),
-            )
-            .await
-            .map_err(|e| {
-                eprintln!("{}", e);
-                exit(1);
-            })
-            .unwrap();
+            let res =
+                caches::delete_cache(get_request_config(load_config()).unwrap(), name.clone())
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{}", e);
+                        exit(1);
+                    })
+                    .unwrap();
 
             if res.error {
-                eprintln!("Server deletion failed: {}", res.message);
+                eprintln!("Cache deletion failed: {}", res.message);
                 exit(1);
             }
 
-            println!("Server deleted.");
+            println!("Cache deleted.");
         }
     }
 }

@@ -18,17 +18,8 @@ impl MigrationTrait for Migration {
                     .table(Cache::Table)
                     .if_not_exists()
                     .col(ColumnDef::new(Cache::Id).uuid().not_null().primary_key())
-                    .col(
-                        ColumnDef::new(Cache::Name)
-                            .string()
-                            .not_null()
-                            .unique_key(),
-                    )
-                    .col(
-                        ColumnDef::new(Cache::DisplayName)
-                            .string()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Cache::Name).string().not_null().unique_key())
+                    .col(ColumnDef::new(Cache::DisplayName).string().not_null())
                     .col(ColumnDef::new(Cache::Description).text().not_null())
                     .col(ColumnDef::new(Cache::Active).boolean().not_null())
                     .col(ColumnDef::new(Cache::Priority).integer().not_null())

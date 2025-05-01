@@ -23,7 +23,11 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(OrganizationCache::Organization).uuid().not_null())
+                    .col(
+                        ColumnDef::new(OrganizationCache::Organization)
+                            .uuid()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(OrganizationCache::Cache).uuid().not_null())
                     .foreign_key(
                         ForeignKey::create()

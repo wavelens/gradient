@@ -4,15 +4,14 @@
  * spdx-license-identifier: agpl-3.0-only
  */
 
-use clap::{arg, CommandFactory, Parser, Subcommand};
-use clap_complete::{generate, Shell};
-use std::io;
-use std::process::exit;
-use connector::*;
 use super::*;
 use crate::config::*;
 use crate::input::*;
-
+use clap::{arg, CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
+use connector::*;
+use std::io;
+use std::process::exit;
 
 #[derive(Parser, Debug)]
 #[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient", author = "Wavelens", version, about, long_about = None)]
@@ -124,13 +123,10 @@ pub async fn run_cli() -> std::io::Result<()> {
 
                 if server_url.is_none() {};
 
-                let input_fields = [
-                    ("Username", username),
-                    ("Name", name),
-                    ("Email", email),
-                ].iter().map(|(k, v)| {
-                    (k.to_string(), v.clone())
-                }).collect();
+                let input_fields = [("Username", username), ("Name", name), ("Email", email)]
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.clone()))
+                    .collect();
 
                 let input = handle_input(input_fields, true);
 

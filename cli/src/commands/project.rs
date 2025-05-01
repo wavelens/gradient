@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use clap::{arg, Subcommand};
-use std::process::exit;
-use connector::*;
 use crate::config::*;
 use crate::input::*;
+use clap::{arg, Subcommand};
+use connector::*;
+use std::process::exit;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -43,19 +43,19 @@ pub enum Commands {
         evaluation_wildcard: Option<String>,
     },
     Delete,
+    Evaluate,
 }
 
 pub async fn handle(cmd: Commands) {
     match cmd {
         Commands::Select { project } => {
-            let organization =
-                match set_get_value(ConfigKey::SelectedOrganization, None, true) {
-                    Some(id) => id,
-                    None => {
-                        eprintln!("Organization is required for command.");
-                        exit(1);
-                    }
-                };
+            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+                Some(id) => id,
+                None => {
+                    eprintln!("Organization is required for command.");
+                    exit(1);
+                }
+            };
 
             set_get_value(
                 ConfigKey::SelectedProject,
@@ -73,7 +73,7 @@ pub async fn handle(cmd: Commands) {
                         let parts: Vec<&str> = id.split("/").collect();
                         (parts[0].to_string(), parts[1].to_string())
                     }
-                    None => {
+                    _ => {
                         eprintln!("Project is required for command.");
                         exit(1);
                     }
@@ -162,13 +162,19 @@ pub async fn handle(cmd: Commands) {
             }
             println!();
 
-            println!("===== Log =====");
-            evals::connect_evaluation(
-                get_request_config(load_config()).unwrap(),
-                evaluation.message.id,
-            )
-            .await
-            .unwrap();
+            if evaluation.message.status != "Aborted" {
+                println!("===== Log =====");
+                evals::connect_evaluation(
+                    get_request_config(load_config()).unwrap(),
+                    evaluation.message.id,
+                )
+                .await
+                .map_err(|e| {
+                    eprintln!("{}", e);
+                    exit(1);
+                })
+                .unwrap();
+            }
         }
 
         Commands::Log => {
@@ -182,14 +188,13 @@ pub async fn handle(cmd: Commands) {
             repository,
             evaluation_wildcard,
         } => {
-            let organization =
-                match set_get_value(ConfigKey::SelectedOrganization, None, true) {
-                    Some(id) => id,
-                    None => {
-                        eprintln!("Organization is required for command.");
-                        exit(1);
-                    }
-                };
+            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+                Some(id) => id,
+                _ => {
+                    eprintln!("Organization is required for command.");
+                    exit(1);
+                }
+            };
 
             let input_fields = [
                 ("Name", name),
@@ -197,9 +202,10 @@ pub async fn handle(cmd: Commands) {
                 ("Description", description),
                 ("Repository", repository),
                 ("Evaluation Wildcard", evaluation_wildcard),
-            ].iter().map(|(k, v)| {
-                (k.to_string(), v.clone())
-            }).collect();
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
 
             let input = handle_input(input_fields, true);
             let name = input.get("Name").unwrap().clone();
@@ -235,25 +241,21 @@ pub async fn handle(cmd: Commands) {
         }
 
         Commands::List => {
-            let organization =
-                match set_get_value(ConfigKey::SelectedOrganization, None, true) {
-                    Some(id) => id,
-                    None => {
-                        eprintln!("Organization is required for command.");
-                        exit(1);
-                    }
-                };
+            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+                Some(id) => id,
+                _ => {
+                    eprintln!("Organization is required for command.");
+                    exit(1);
+                }
+            };
 
-            let res = projects::get(
-                get_request_config(load_config()).unwrap(),
-                organization,
-            )
-            .await
-            .map_err(|e| {
-                eprintln!("{}", e);
-                exit(1);
-            })
-            .unwrap();
+            let res = projects::get(get_request_config(load_config()).unwrap(), organization)
+                .await
+                .map_err(|e| {
+                    eprintln!("{}", e);
+                    exit(1);
+                })
+                .unwrap();
 
             if res.message.is_empty() {
                 println!("You have no projects.");
@@ -277,37 +279,49 @@ pub async fn handle(cmd: Commands) {
                         let parts: Vec<&str> = id.split("/").collect();
                         (parts[0].to_string(), parts[1].to_string())
                     }
-                    None => {
+                    _ => {
                         eprintln!("Project is required for command.");
                         exit(1);
                     }
                 };
 
-            let current_project =
-                projects::get_project(
-                    get_request_config(load_config()).unwrap(),
-                    organization.clone(),
-                    project.clone(),
-                )
-                .await
-                .map_err(|e| {
-                    eprintln!("{}", e);
-                    exit(1);
-                })
-                .unwrap()
-                .message;
+            let current_project = projects::get_project(
+                get_request_config(load_config()).unwrap(),
+                organization.clone(),
+                project.clone(),
+            )
+            .await
+            .map_err(|e| {
+                eprintln!("{}", e);
+                exit(1);
+            })
+            .unwrap()
+            .message;
 
             let input_fields = [
                 ("Name", Some(new_name.unwrap_or(current_project.name))),
-                ("Display Name", Some(display_name.unwrap_or(current_project.display_name))),
-                ("Description", Some(description.unwrap_or(current_project.description))),
-                ("Repository", Some(repository.unwrap_or(current_project.repository))),
-                ("Evaluation Wildcard", Some(evaluation_wildcard.unwrap_or(current_project.evaluation_wildcard))),
-            ].iter().map(|(k, v)| {
-                (k.to_string(), v.clone())
-            }).collect();
+                (
+                    "Display Name",
+                    Some(display_name.unwrap_or(current_project.display_name)),
+                ),
+                (
+                    "Description",
+                    Some(description.unwrap_or(current_project.description)),
+                ),
+                (
+                    "Repository",
+                    Some(repository.unwrap_or(current_project.repository)),
+                ),
+                (
+                    "Evaluation Wildcard",
+                    Some(evaluation_wildcard.unwrap_or(current_project.evaluation_wildcard)),
+                ),
+            ]
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
 
-            let input = handle_input(input_fields, true);
+            let input = handle_input(input_fields, false);
 
             let res = projects::patch_project(
                 get_request_config(load_config()).unwrap(),
@@ -331,7 +345,7 @@ pub async fn handle(cmd: Commands) {
                 exit(1);
             }
 
-            println!("Project edited.");
+            println!("Project updated.");
         }
 
         Commands::Delete => {
@@ -341,7 +355,7 @@ pub async fn handle(cmd: Commands) {
                         let parts: Vec<&str> = id.split("/").collect();
                         (parts[0].to_string(), parts[1].to_string())
                     }
-                    None => {
+                    _ => {
                         eprintln!("Project is required for command.");
                         exit(1);
                     }
@@ -365,6 +379,39 @@ pub async fn handle(cmd: Commands) {
             }
 
             println!("Project deleted.");
+        }
+
+        Commands::Evaluate => {
+            let (organization, project) =
+                match set_get_value(ConfigKey::SelectedProject, None, true) {
+                    Some(id) => {
+                        let parts: Vec<&str> = id.split("/").collect();
+                        (parts[0].to_string(), parts[1].to_string())
+                    }
+                    _ => {
+                        eprintln!("Project is required for command.");
+                        exit(1);
+                    }
+                };
+
+            let res = projects::post_project_evaluate(
+                get_request_config(load_config()).unwrap(),
+                organization,
+                project,
+            )
+            .await
+            .map_err(|e| {
+                eprintln!("{}", e);
+                exit(1);
+            })
+            .unwrap();
+
+            if res.error {
+                eprintln!("Failed to start project evaluation: {}", res.message);
+                exit(1);
+            }
+
+            println!("Project evaluation started.");
         }
     }
 }

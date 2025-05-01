@@ -12,7 +12,6 @@ use sea_orm::EntityTrait;
 use std::sync::Arc;
 use uuid::Uuid;
 
-
 pub async fn get_commit(
     state: State<Arc<ServerState>>,
     Extension(_user): Extension<MUser>,

@@ -25,13 +25,17 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(BuildOutput::Build).uuid().not_null())
                     .col(ColumnDef::new(BuildOutput::Output).string().not_null())
-                    .col(ColumnDef::new(BuildOutput::Hash).blob().not_null())
+                    .col(ColumnDef::new(BuildOutput::Hash).string().not_null())
                     .col(ColumnDef::new(BuildOutput::Package).string().not_null())
                     .col(ColumnDef::new(BuildOutput::FileHash).string())
-                    .col(ColumnDef::new(BuildOutput::FileSize).unsigned())
+                    .col(ColumnDef::new(BuildOutput::FileSize).big_integer())
                     .col(ColumnDef::new(BuildOutput::IsCached).boolean().not_null())
                     .col(ColumnDef::new(BuildOutput::Ca).string())
-                    .col(ColumnDef::new(BuildOutput::CreatedAt).date_time().not_null())
+                    .col(
+                        ColumnDef::new(BuildOutput::CreatedAt)
+                            .date_time()
+                            .not_null(),
+                    )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-build_output-build")

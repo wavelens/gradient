@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use sea_orm::{IntoActiveModel, ActiveModelTrait, ActiveValue::Set, EntityTrait, ColumnTrait, Condition, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, IntoActiveModel,
+    QueryFilter,
+};
 use std::sync::Arc;
 
 use super::types::*;
@@ -27,7 +30,12 @@ fn set_permission_bit(permissions: i64, permission: Permission, value: bool) -> 
     }
 }
 
-pub async fn set_permission(state: Arc<ServerState>, role: MRole, permission: Permission, value: bool) {
+pub async fn set_permission(
+    state: Arc<ServerState>,
+    role: MRole,
+    permission: Permission,
+    value: bool,
+) {
     if get_permission_bit(role.permission, permission) == value {
         return;
     }
@@ -37,7 +45,12 @@ pub async fn set_permission(state: Arc<ServerState>, role: MRole, permission: Pe
     arole.save(&state.db).await.unwrap();
 }
 
-pub async fn get_permission(state: Arc<ServerState>, organization: MOrganization, user: MUser, permission: Permission) -> bool {
+pub async fn get_permission(
+    state: Arc<ServerState>,
+    organization: MOrganization,
+    user: MUser,
+    permission: Permission,
+) -> bool {
     let organization_user = EOrganizationUser::find()
         .filter(
             Condition::all()

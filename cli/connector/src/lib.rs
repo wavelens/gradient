@@ -14,8 +14,8 @@ pub mod projects;
 pub mod servers;
 pub mod user;
 
-use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct RequestConfig {
@@ -49,18 +49,16 @@ async fn parse_response<T: DeserializeOwned>(res: reqwest::Response) -> BaseResp
 
     match serde_json::from_slice::<BaseResponse<T>>(&bytes) {
         Ok(parsed_res) => parsed_res,
-        Err(_) => {
-            match serde_json::from_slice::<BaseResponse<String>>(&bytes) {
-                Ok(error_res) => {
-                    eprintln!("{}", error_res.message);
-                    std::process::exit(1);
-                }
-                Err(_) => {
-                    eprintln!("{}", String::from_utf8_lossy(&bytes));
-                    std::process::exit(1);
-                }
+        Err(_) => match serde_json::from_slice::<BaseResponse<String>>(&bytes) {
+            Ok(error_res) => {
+                eprintln!("{}", error_res.message);
+                std::process::exit(1);
             }
-        }
+            Err(_) => {
+                eprintln!("{}", String::from_utf8_lossy(&bytes));
+                std::process::exit(1);
+            }
+        },
     }
 }
 
@@ -72,7 +70,10 @@ fn get_client(
     login: bool,
 ) -> Result<reqwest::RequestBuilder, String> {
     let client = reqwest::Client::new();
-    let mut client = client.request(request_type, format!("{}/api/v1/{}", config.server_url, endpoint));
+    let mut client = client.request(
+        request_type,
+        format!("{}/api/v1/{}", config.server_url, endpoint),
+    );
 
     client = client.header("Content-Type", "application/json");
 

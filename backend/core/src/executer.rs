@@ -163,7 +163,7 @@ pub async fn copy_builds<
 
         let path_info = match from_store.query_pathinfo(path.clone()).result().await? {
             Some(path_info) => path_info,
-            None => return Err(format!("Path not found: {}", path.clone()).into()),
+            _ => return Err(format!("Path not found: {}", path.clone()).into()),
         };
 
         from_store.nar_from_path(path.clone()).result().await?;
@@ -195,11 +195,14 @@ pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
         }
     }
 
-    let valid_paths = store
+    let valid_paths = match store
         .query_valid_paths(output_paths.values().clone(), true)
         .result()
         .await
-        .unwrap();
+    {
+        Ok(v) => v,
+        Err(e) => return Err(e.to_string()),
+    };
 
     let missing = output_paths
         .into_iter()

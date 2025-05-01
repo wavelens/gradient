@@ -93,7 +93,9 @@ pub async fn delete_key(
     Ok(parse_response(res).await)
 }
 
-pub async fn get_settings(config: RequestConfig) -> Result<BaseResponse<GetUserSettingsResponse>, String> {
+pub async fn get_settings(
+    config: RequestConfig,
+) -> Result<BaseResponse<GetUserSettingsResponse>, String> {
     let res = get_client(config, "user/settings".to_string(), RequestType::GET, true)
         .unwrap()
         .send()
@@ -109,14 +111,23 @@ pub async fn patch_settings(
     name: Option<String>,
     email: Option<String>,
 ) -> Result<BaseResponse<String>, String> {
-    let req = PatchUserSettingsRequest { username, name, email };
+    let req = PatchUserSettingsRequest {
+        username,
+        name,
+        email,
+    };
 
-    let res = get_client(config, "user/settings".to_string(), RequestType::PATCH, true)
-        .unwrap()
-        .json(&req)
-        .send()
-        .await
-        .unwrap();
+    let res = get_client(
+        config,
+        "user/settings".to_string(),
+        RequestType::PATCH,
+        true,
+    )
+    .unwrap()
+    .json(&req)
+    .send()
+    .await
+    .unwrap();
 
     Ok(parse_response(res).await)
 }

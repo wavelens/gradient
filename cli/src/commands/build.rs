@@ -4,11 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use clap::{arg, Subcommand};
-use std::process::exit;
-use connector::*;
 use crate::config::*;
 use crate::input::*;
+use clap::{arg, Subcommand};
+use connector::*;
+use std::process::exit;
 
-pub async fn handle_build(derivation: String) {
-}
+pub async fn handle_build(derivation: String) {}

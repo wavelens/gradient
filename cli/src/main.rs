@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-mod config;
 mod commands;
+mod config;
 mod input;
 
 use commands::base;

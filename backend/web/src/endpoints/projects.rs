@@ -191,7 +191,7 @@ pub async fn get_project(
     .await
     {
         Some((o, p)) => (o, p),
-        None => {
+        _ => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
@@ -225,7 +225,7 @@ pub async fn patch_project(
     .await
     {
         Some((o, p)) => (o, p),
-        None => {
+        _ => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
@@ -304,8 +304,11 @@ pub async fn patch_project(
                 }),
             ));
         }
+
+        aproject.evaluation_wildcard = Set(evaluation_wildcard);
     }
 
+    aproject.force_evaluation = Set(true);
     aproject.update(&state.db).await.unwrap();
 
     let res = BaseResponse {
@@ -330,7 +333,7 @@ pub async fn delete_project(
     .await
     {
         Some((o, p)) => (o, p),
-        None => {
+        _ => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
@@ -366,7 +369,7 @@ pub async fn post_project_active(
     .await
     {
         Some(p) => p,
-        None => {
+        _ => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
@@ -403,7 +406,7 @@ pub async fn delete_project_active(
     .await
     {
         Some(p) => p,
-        None => {
+        _ => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
@@ -485,7 +488,7 @@ pub async fn post_project_evaluate(
     .await
     {
         Some((o, p)) => (o, p),
-        None => {
+        _ => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {

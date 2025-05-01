@@ -26,7 +26,6 @@ mod m20241107_156150_create_table_organization_user;
 mod m20241107_156160_create_table_build_output;
 mod m20241107_156170_create_table_build_output_signature;
 
-
 pub struct Migrator;
 
 #[async_trait::async_trait]

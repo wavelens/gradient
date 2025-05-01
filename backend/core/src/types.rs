@@ -183,7 +183,7 @@ pub struct NixPathInfo {
 impl NixPathInfo {
     pub fn to_nix_string(&self) -> String {
         format!(
-            "StorePath: {}\nURL: {}\nCompression: {}\nFileHash: {}\nFileSize: {}\nNarHash: {}\nNarSize: {}\nReferences: {:?}\nSig: {}\nCA: {:?}",
+            "StorePath: {}\nURL: {}\nCompression: {}\nFileHash: {}\nFileSize: {}\nNarHash: {}\nNarSize: {}\nReferences: {}\nSig: {}{}",
             self.store_path,
             self.url,
             self.compression,
@@ -191,11 +191,25 @@ impl NixPathInfo {
             self.file_size,
             self.nar_hash,
             self.nar_size,
-            self.references,
+            self.references.join(" "),
             self.sig,
-            self.ca
+            if self.ca.is_some() {
+                format!("\nCA: {}", self.ca.as_ref().unwrap())
+            } else {
+                "".to_string()
+            }
         )
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BuildOutputPath {
+    #[serde(rename = "id")]
+    pub id: String,
+    #[serde(rename = "outPath")]
+    pub out_path: String,
+    #[serde(rename = "signatures")]
+    pub signatures: Vec<String>,
 }
 
 pub type ListResponse = Vec<ListItem>;

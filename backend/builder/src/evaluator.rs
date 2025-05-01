@@ -5,7 +5,6 @@
  */
 
 use chrono::Utc;
-use nix_daemon::{Progress, Store};
 use core::database::add_features;
 use core::executer::*;
 use core::input::{parse_evaluation_wildcard, repository_url_to_nix, vec_to_hex};
@@ -13,9 +12,10 @@ use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use nix_daemon::nix::DaemonStore;
+use nix_daemon::{Progress, Store};
 use sea_orm::entity::prelude::*;
-use sea_orm::{ColumnTrait, Condition, EntityTrait, JoinType, QuerySelect};
 use sea_orm::ActiveValue::Set;
+use sea_orm::{ColumnTrait, Condition, EntityTrait, JoinType, QuerySelect};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::option::Option;
@@ -88,6 +88,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
         if missing.is_empty() {
             println!("Skipping package: {}", derivation);
+            // TODO: add build output
             continue;
         }
 
@@ -101,6 +102,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 .is_empty()
         {
             println!("Skipping package: {}", derivation);
+            // TODO: add build output
             continue;
         }
 
@@ -163,7 +165,6 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             let in_exsists = already_exsists.iter().find(|b| b.derivation_path == d_path);
             let in_dependencies = dependencies.iter().any(|(path, _, _)| *path == d_path);
 
-
             if in_builds || in_dependencies {
                 let d_id = if in_builds {
                     all_builds
@@ -203,7 +204,13 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 dependency: build_id,
             };
 
-            if store.query_pathinfo(b.derivation_path.clone()).result().await.unwrap().is_none() {
+            if store
+                .query_pathinfo(b.derivation_path.clone())
+                .result()
+                .await
+                .unwrap()
+                .is_none()
+            {
                 references.retain(|(d, _, _)| *d != b.derivation_path);
 
                 if b.status != BuildStatus::Completed {
