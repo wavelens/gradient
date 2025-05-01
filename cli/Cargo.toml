@@ -1,7 +1,7 @@
 [package]
 name = "gradient-cli"
-version = "0.1.0"
-edition = "2021"
+version = "0.2.0"
+edition = "2024"
 license = "AGPL-3.0"
 authors = ["Wavelens UG <info@wavelens.io>"]
 description = "CLI-Tool for Gradient"
@@ -16,7 +16,7 @@ members = [".", "connector"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-rpassword = "7.3"
+rpassword = "7.4"
 clap_complete = "4"
 strum = "0.27"
 strum_macros = "0.27"
