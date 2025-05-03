@@ -1,7 +1,7 @@
 async function makeRequest() {
   try {
     fetch(url, {
-      method: "CONNECT",
+      method: "POST",
       credentials: "include",
       withCredentials: true,
       mode: "cors",

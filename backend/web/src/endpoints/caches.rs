@@ -21,6 +21,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio::process::Command;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
@@ -86,13 +87,41 @@ async fn get_nar_by_hash(
         }
     };
 
+    let output = match Command::new(state.cli.binpath_nix.clone())
+        .arg("hash")
+        .arg("convert")
+        .arg("--from")
+        .arg("base16")
+        .arg("--to")
+        .arg("nix32")
+        .arg("--hash-algo")
+        .arg("sha256")
+        .arg(pathinfo.nar_hash)
+        .output()
+        .await
+    {
+        Ok(output) => output,
+        Err(e) => {
+            return Err(format!("Failed to convert hash: {}", e));
+        }
+    };
+
+    if !output.status.success() {
+        return Err(format!(
+            "Failed to convert hash: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let nar_hash = String::from_utf8_lossy(&output.stdout).to_string();
+
     Ok(NixPathInfo {
         store_path: path,
         url: format!("nar/{}.nar.zst", hash),
         compression: "zstd".to_string(),
         file_hash: build_output.file_hash.unwrap(),
         file_size: build_output.file_size.unwrap() as u32,
-        nar_hash: pathinfo.nar_hash,
+        nar_hash: format!("sha256:{}", nar_hash.trim()),
         nar_size: pathinfo.nar_size,
         references: pathinfo.references,
         sig: build_output_signature.unwrap().signature,
@@ -509,18 +538,18 @@ pub async fn path(
         ));
     }
 
-    let path_info = get_nar_by_hash(Arc::clone(&state), cache, path_hash.unwrap())
-        .await
-        .map_err(|e| {
-            (
+    let path_info = match get_nar_by_hash(Arc::clone(&state), cache, path_hash.unwrap()).await {
+        Ok(path_info) => path_info,
+        Err(_) => {
+            return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
                     error: true,
-                    message: e,
+                    message: "Path not found".to_string(),
                 }),
-            )
-        })
-        .unwrap();
+            ))
+        }
+    };
 
     Ok(Response::builder()
         .status(StatusCode::OK)

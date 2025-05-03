@@ -140,14 +140,14 @@ def post_evals_evaluation(request, evaluation):
 def get_evals_evaluation_builds(request, evaluation):
     return get_client(request.user, f"evaluations/{evaluation}/builds", "GET")
 
-def connect_evals_evaluation_builds(request, evaluation):
+def post_evals_evaluation_builds(request, evaluation):
     return get_client(request.user, f"evaluations/{evaluation}/builds", "POST")
 
 
 def get_builds_build(request, build):
     return get_client(request.user, f"builds/{build}", "GET")
 
-def connect_builds_build(request, build):
+def post_builds_build(request, build):
     return get_client(request.user, f"builds/{build}", "POST")
 
 

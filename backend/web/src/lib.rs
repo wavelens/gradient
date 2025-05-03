@@ -112,7 +112,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         )
         .route(
             "/evals/{evaluation}/builds",
-            get(evals::get_evaluation_builds).connect(evals::connect_evaluation_builds),
+            get(evals::get_evaluation_builds).post(evals::post_evaluation_builds),
         )
         .route("/caches", get(caches::get).put(caches::put))
         .route(
@@ -128,7 +128,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route("/caches/{cache}/key", get(caches::get_cache_key))
         .route(
             "/builds/{build}",
-            get(builds::get_build).connect(builds::connect_build),
+            get(builds::get_build).post(builds::post_build),
         )
         .route("/user", get(user::get).delete(user::delete))
         .route(

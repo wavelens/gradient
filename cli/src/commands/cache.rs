@@ -35,6 +35,9 @@ pub enum Commands {
     Delete {
         name: String,
     },
+    Show {
+        name: String,
+    },
 }
 
 pub async fn handle(cmd: Commands) {
@@ -174,6 +177,23 @@ pub async fn handle(cmd: Commands) {
             }
 
             println!("Cache deleted.");
+        }
+
+        Commands::Show { name } => {
+            let res = caches::get_cache_key(get_request_config(load_config()).unwrap(), name.clone())
+                .await
+                .map_err(|e| {
+                    eprintln!("{}", e);
+                    exit(1);
+                })
+                .unwrap();
+
+            if res.error {
+                eprintln!("Cache Key retrieval failed: {}", res.message);
+                exit(1);
+            }
+
+            println!("Cache Public Key: {:?}", res.message);
         }
     }
 }

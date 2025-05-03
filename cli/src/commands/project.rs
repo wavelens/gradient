@@ -164,7 +164,7 @@ pub async fn handle(cmd: Commands) {
 
             if evaluation.message.status != "Aborted" {
                 println!("===== Log =====");
-                evals::connect_evaluation(
+                evals::post_evaluation_builds(
                     get_request_config(load_config()).unwrap(),
                     evaluation.message.id,
                 )

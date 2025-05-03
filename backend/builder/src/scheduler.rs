@@ -258,6 +258,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                                 build_output_path.out_path
                             ))
                             .unwrap();
+
                         build_outputs.push(ABuildOutput {
                             id: Set(Uuid::new_v4()),
                             build: Set(build.id),
@@ -359,7 +360,24 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                 .unwrap(),
         );
 
-        // TODO: check if organization has at least one server
+        let mut i_offset = 0;
+        for (i, project) in projects.clone().iter().enumerate() {
+            let has_no_servers = EServer::find()
+                .filter(
+                    Condition::all()
+                        .add(CServer::Active.eq(true))
+                        .add(CServer::Organization.eq(project.organization))
+                )
+                .one(&state.db)
+                .await
+                .unwrap()
+                .is_none();
+
+            if has_no_servers {
+                projects.remove(i - i_offset);
+                i_offset += 1;
+            }
+        }
 
         let evaluations = stream::iter(projects.clone().into_iter())
             .filter_map(|p| {
@@ -498,6 +516,7 @@ async fn requeue_build(state: Arc<ServerState>, build: MBuild) -> MBuild {
 
 async fn get_next_build(state: Arc<ServerState>) -> MBuild {
     loop {
+        // TODO: check if organization has servers
         let builds_sql = sea_orm::Statement::from_string(
             sea_orm::DbBackend::Postgres,
             r#"
@@ -582,7 +601,7 @@ async fn reserve_available_server(
         .unwrap();
 
     if servers.is_empty() {
-        update_build_status(state, build.clone(), BuildStatus::Aborted).await;
+        update_build_status_recursivly(state, build.clone(), BuildStatus::Aborted).await;
         println!("Aborted build (No Servers Found): {}", build.id);
 
         return None;
@@ -682,7 +701,10 @@ async fn update_build_status_recursivly(
         update_build_status(Arc::clone(&state), dependent_build, status.clone()).await;
     }
 
-    update_build_status(Arc::clone(&state), build, status.clone()).await
+    let build = update_build_status(Arc::clone(&state), build, status.clone()).await;
+    check_evaluation_status(state, build.evaluation).await;
+
+    build
 }
 
 pub async fn update_evaluation_status(
