@@ -97,7 +97,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         let build = vec![derivation.clone()];
 
         if already_exsists
-            || !find_builds(Arc::clone(&state), organization_id, build.clone())
+            || !find_builds(Arc::clone(&state), organization_id, build.clone(), true)
                 .await?
                 .is_empty()
         {
@@ -146,7 +146,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             .await
             .unwrap();
 
-        let already_exsists = find_builds(Arc::clone(&state), organization_id, references.clone())
+        let already_exsists = find_builds(Arc::clone(&state), organization_id, references.clone(), false)
             .await
             .unwrap();
 
@@ -272,17 +272,25 @@ async fn find_builds(
     state: Arc<ServerState>,
     organization_id: Uuid,
     build_paths: Vec<String>,
+    successful: bool,
 ) -> Result<Vec<MBuild>, String> {
     let mut condition = Condition::any();
     for path in build_paths {
         condition = condition.add(CBuild::DerivationPath.eq(path.as_str()));
     }
 
+    let mut filter = Condition::all()
+        .add(CProject::Organization.eq(organization_id))
+        .add(condition);
+
+    if successful {
+        filter = filter.add(CBuild::Status.eq(BuildStatus::Completed));
+    }
+
     let builds = EBuild::find()
         .join(JoinType::InnerJoin, RBuild::Evaluation.def())
         .join(JoinType::InnerJoin, REvaluation::Project.def())
-        .filter(CProject::Organization.eq(organization_id))
-        .filter(condition)
+        .filter(filter)
         .all(&state.db)
         .await
         .map_err(|e| e.to_string())?;
