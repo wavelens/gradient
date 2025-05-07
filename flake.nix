@@ -50,6 +50,7 @@
       redis
       requests
       selenium
+      sentry-sdk
       uritemplate
       urllib3
       whitenoise
@@ -91,6 +92,7 @@
         postgresql_17
         pgadmin4-desktopmode
         nixVersions.latest
+        zstd
       ];
 
       nativeBuildInputs = [
@@ -101,7 +103,7 @@
       RUST_BACKTRACE = 1;
 
       GRADIENT_DEBUG = "true";
-      GRADIENT_DOMAIN = "http://localhost:3000";
+      GRADIENT_SERVE_URL = "http://localhost:3000";
       GRADIENT_DATABASE_URL = "postgres://postgres:postgres@localhost:54321/gradient";
       GRADIENT_MAX_CONCURRENT_EVALUATIONS = 1;
       GRADIENT_MAX_CONCURRENT_BUILDS = 10;
@@ -109,6 +111,7 @@
       GRADIENT_CRYPT_SECRET_FILE = pkgs.writeText "crypt_secret_file" "aW52YWxpZAo=";
       GRADIENT_JWT_SECRET_FILE = pkgs.writeText "jwt_secret_file" "8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9d";
       GRADIENT_SERVE_CACHE = "true";
+      GRADIENT_REPORT_ERRORS = "false";
     };
   }) // {
     overlays = {

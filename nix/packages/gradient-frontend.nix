@@ -12,7 +12,7 @@
   ignoredPaths = [ ".github" "target" ];
 in python.pkgs.buildPythonApplication rec {
   pname = "gradient-frontend";
-  version = "0.1.0";
+  version = "0.2.0";
   pyproject = false;
 
   src = lib.cleanSourceWith {
@@ -41,6 +41,7 @@ in python.pkgs.buildPythonApplication rec {
     redis
     requests
     selenium
+    sentry-sdk
     uritemplate
     urllib3
     whitenoise

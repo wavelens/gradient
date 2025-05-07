@@ -195,7 +195,7 @@ pub async fn get_evaluation_builds(
     Ok(Json(res))
 }
 
-pub async fn connect_evaluation_builds(
+pub async fn post_evaluation_builds(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(evaluation_id): Path<Uuid>,

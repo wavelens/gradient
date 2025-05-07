@@ -40,11 +40,11 @@ pub async fn get_build(
     Ok(parse_response(res).await)
 }
 
-pub async fn connect_build(config: RequestConfig, build_id: String) -> Result<(), String> {
+pub async fn post_build(config: RequestConfig, build_id: String) -> Result<(), String> {
     let mut stream = get_client(
         config,
         format!("builds/{}", build_id),
-        RequestType::CONNECT,
+        RequestType::POST,
         true,
     )
     .unwrap()

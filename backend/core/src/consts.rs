@@ -7,6 +7,7 @@
 use chrono::{DateTime, NaiveDateTime};
 use std::ops::RangeInclusive;
 use std::sync::LazyLock;
+use uuid::{uuid, Uuid};
 
 pub const PORT_RANGE: RangeInclusive<usize> = 1..=65535;
 
@@ -22,3 +23,7 @@ pub const FLAKE_START: [&str; 7] = [
     "devShells",
     "hydraJobs",
 ];
+
+pub const BASE_ROLE_ADMIN_ID: Uuid = uuid!("00000000-0000-0000-0000-000000000001");
+pub const BASE_ROLE_WRITE_ID: Uuid = uuid!("00000000-0000-0000-0000-000000000002");
+pub const BASE_ROLE_VIEW_ID: Uuid = uuid!("00000000-0000-0000-0000-000000000003");

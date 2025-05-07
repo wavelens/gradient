@@ -1,7 +1,7 @@
 [package]
 name = "core"
-version = "0.1.0"
-edition = "2021"
+version = "0.2.0"
+edition = "2024"
 publish = false
 license = "AGPL-3.0"
 authors = ["Wavelens UG <info@wavelens.io>"]
@@ -27,10 +27,6 @@ sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array",
 sea-orm-migration = { version = "1.1", features = ["with-uuid", "with-chrono", "with-json", "sqlx-postgres", "sea-orm-cli", "runtime-tokio"] }
 serde = { version = "1", features = ["derive"] }
 ssh-key = { version = "0.6", features = ["ed25519"] }
-tokio = { version = "1.43", features = ["process", "rt-multi-thread"] }
-uuid = { version = "1.14", features = ["fast-rng", "macro-diagnostics", "v4"] }
-# tvix-build = { git = "https://github.com/tvlfyi/tvix.git", rev = "d31eb5e60e1db2f5b99c4ff1695178bd500bc953", default-features = false, features = []}
-# tvix-eval = { git = "https://github.com/tvlfyi/tvix.git", rev = "d31eb5e60e1db2f5b99c4ff1695178bd500bc953" }
-# tvix-castore = { git = "https://github.com/tvlfyi/tvix.git", rev = "d31eb5e60e1db2f5b99c4ff1695178bd500bc953" }
-# tvix-store = { git = "https://github.com/tvlfyi/tvix.git", rev = "d31eb5e60e1db2f5b99c4ff1695178bd500bc953", default-features = false, features = []}
-# tvix-tracing = { git = "https://github.com/tvlfyi/tvix.git", rev = "d31eb5e60e1db2f5b99c4ff1695178bd500bc953" }
+tokio = { version = "1.44", features = ["process", "rt-multi-thread"] }
+uuid = { version = "1.16", features = ["fast-rng", "macro-diagnostics", "v4"] }
+ed25519-compact = { version = "2.1", features = ["random"] }

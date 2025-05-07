@@ -19,7 +19,9 @@ in {
       package = lib.mkPackageOption pkgs "gradient-server" { };
       package_nix = lib.mkPackageOption pkgs "nix" { };
       package_git = lib.mkPackageOption pkgs "git" { };
+      package_zstd = lib.mkPackageOption pkgs "zstd" { };
       serveCache = lib.mkEnableOption "Serve cache";
+      reportErrors = lib.mkEnableOption "Report errors to Sentry";
       domain = lib.mkOption {
         description = "The domain under which Gradient runs.";
         type = lib.types.str;
@@ -58,6 +60,13 @@ in {
         description = "The URL of the database to use.";
         type = lib.types.str;
         default = "postgresql://localhost/gradient?host=/run/postgresql";
+      };
+
+      databaseUrlFile = lib.mkOption {
+        description = "The URL-file of the database to use.";
+        type = lib.types.str;
+        default = toString (pkgs.writeText "database_url" cfg.databaseUrl);
+        example = "/etc/gradient/database_url";
       };
 
       oauth = {
@@ -145,6 +154,7 @@ in {
         RestrictSUIDSGID = true;
         WorkingDirectory = cfg.baseDir;
         LoadCredential = [
+          "gradient_database_url:${cfg.databaseUrlFile}"
           "gradient_crypt_secret:${cfg.cryptSecretFile}"
           "gradient_jwt_secret:${cfg.jwtSecretFile}"
         ] ++ lib.optional cfg.oauth.enable [
@@ -159,16 +169,18 @@ in {
         GRADIENT_PORT = toString cfg.port;
         GRADIENT_SERVE_URL = "https://${cfg.domain}";
         GRADIENT_BASE_PATH = cfg.baseDir;
-        GRADIENT_DATABASE_URL = cfg.databaseUrl;
+        GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString cfg.settings.maxConcurrentEvaluations;
         GRADIENT_MAX_CONCURRENT_BUILDS = toString cfg.settings.maxConcurrentBuilds;
         GRADIENT_BINPATH_NIX = lib.getExe cfg.package_nix;
         GRADIENT_BINPATH_GIT = lib.getExe cfg.package_git;
+        GRADIENT_BINPATH_ZSTD = lib.getExe cfg.package_zstd;
         GRADIENT_OAUTH_ENABLE = lib.boolToString cfg.oauth.enable;
         GRADIENT_DISABLE_REGISTER = lib.boolToString cfg.settings.disableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
         GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";
         GRADIENT_SERVE_CACHE = lib.boolToString cfg.serveCache;
+        GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
       } // lib.optionalAttrs cfg.oauth.enable {
         GRADIENT_OAUTH_CLIENT_ID = cfg.oauth.clientId;
         GRADIENT_OAUTH_CLIENT_SECRET_FILE = "%d/gradient_oauth_client_secret";
@@ -220,14 +232,15 @@ in {
       };
     };
 
-    users.users.gradient = {
-      description = "Gradient user";
-      isSystemUser = true;
-      home = cfg.baseDir;
-      createHome = true;
-      group = "gradient";
+    users = {
+      groups.gradient = { };
+      users.gradient = {
+        description = "Gradient user";
+        isSystemUser = true;
+        home = cfg.baseDir;
+        createHome = true;
+        group = "gradient";
+      };
     };
-
-    users.groups.gradient = { };
   };
 }

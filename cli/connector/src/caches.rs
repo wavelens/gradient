@@ -27,6 +27,14 @@ struct MakeCacheRequest {
     pub priority: i32,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct PatchCacheRequest {
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub priority: Option<i32>,
+}
+
 pub async fn get(config: RequestConfig) -> Result<BaseResponse<ListResponse>, String> {
     let res = get_client(config, "caches".to_string(), RequestType::GET, true)
         .unwrap()
@@ -67,11 +75,11 @@ pub async fn put(
 
 pub async fn get_cache(
     config: RequestConfig,
-    organization: String,
+    cache: String,
 ) -> Result<BaseResponse<CacheResponse>, String> {
     let res = get_client(
         config,
-        format!("caches/{}", organization),
+        format!("caches/{}", cache),
         RequestType::GET,
         true,
     )
@@ -83,13 +91,43 @@ pub async fn get_cache(
     Ok(parse_response(res).await)
 }
 
+pub async fn patch_cache(
+    config: RequestConfig,
+    cache: String,
+    name: Option<String>,
+    display_name: Option<String>,
+    description: Option<String>,
+    priority: Option<i32>,
+) -> Result<BaseResponse<String>, String> {
+    let req = PatchCacheRequest {
+        name,
+        display_name,
+        description,
+        priority,
+    };
+
+    let res = get_client(
+        config,
+        format!("caches/{}", cache),
+        RequestType::PATCH,
+        true,
+    )
+    .unwrap()
+    .json(&req)
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
 pub async fn delete_cache(
     config: RequestConfig,
-    organization: String,
+    cache: String,
 ) -> Result<BaseResponse<String>, String> {
     let res = get_client(
         config,
-        format!("caches/{}", organization),
+        format!("caches/{}", cache),
         RequestType::DELETE,
         true,
     )
@@ -103,11 +141,11 @@ pub async fn delete_cache(
 
 pub async fn post_cache_active(
     config: RequestConfig,
-    organization: String,
+    cache: String,
 ) -> Result<BaseResponse<String>, String> {
     let res = get_client(
         config,
-        format!("caches/{}/active", organization),
+        format!("caches/{}/active", cache),
         RequestType::POST,
         true,
     )
@@ -121,12 +159,30 @@ pub async fn post_cache_active(
 
 pub async fn delete_cache_active(
     config: RequestConfig,
-    organization: String,
+    cache: String,
 ) -> Result<BaseResponse<String>, String> {
     let res = get_client(
         config,
-        format!("caches/{}/active", organization),
+        format!("caches/{}/active", cache),
         RequestType::DELETE,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn get_cache_key(
+    config: RequestConfig,
+    cache: String,
+) -> Result<BaseResponse<String>, String> {
+    let res = get_client(
+        config,
+        format!("caches/{}/key", cache),
+        RequestType::GET,
         true,
     )
     .unwrap()
