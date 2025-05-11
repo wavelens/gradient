@@ -1,7 +1,8 @@
 # Gradient
 
 [Options Search](https://wavelens.github.io/gradient-search)
-[Demo Instance (non frontend version)](https://gradient.wavelens.io/api/v1)
+[Demo Instance](https://gradient.wavelens.io/api/v1/health)
+[API Docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml)
 
 Gradient is a web-based Nix-based Continuous Integration (CI) system.
 
@@ -18,9 +19,15 @@ Gradient is a web-based Nix-based Continuous Integration (CI) system.
 - **Streaming Logs**: real-time log streaming for builds.
 - **Rich Project Configuration**: check all branches, pull requests, and tags. (planned)
 - **OAuth2**: support for OAuth2 for user authentication.
-- **Cache**: integrated nix store cache. (planned)
+- **Cache**: integrated nix store cache.
 
 ## Installation
+
+Add Cache for prebuilt Gradient packages (Optional):
+```
+URL: https://gradient.wavelens.io/cache/main
+Public Key: gradient.wavelens.io-main:SPmc2Hd/plYDpxX+K1hEYJs+g6D3a9nUj0dDA4ow1vI=
+```
 
 Extend your `flake.nix` with Gradient module:
 
@@ -61,6 +68,7 @@ Configure Gradient in your `configuration.nix`:
     enable = true;
     frontend.enable = true;
     serveCache = true;
+    reportErrors = true;
     configurePostgres = true;
     configureNginx = true;
     domain = "gradient.wavelens.io";

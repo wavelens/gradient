@@ -61,11 +61,12 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
         .unwrap()
         .unwrap();
 
-    let local_daemon = match get_local_store(organization).await {
+    let local_daemon = match get_local_store(Some(organization)).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error: {}", e);
-            update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Failed).await;
+            update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Failed)
+                .await;
             return;
         }
     };
@@ -165,7 +166,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         .unwrap()
         .unwrap();
 
-    let mut local_daemon = match get_local_store(organization.clone()).await {
+    let mut local_daemon = match get_local_store(Some(organization.clone())).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -241,9 +242,38 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         }
     }
 
+    let mut build_outputs: Vec<ABuildOutput> = vec![];
+
     match execute_build(&build, &mut server_daemon, Arc::clone(&state)).await {
         Ok(results) => {
             let status = if results.1.values().all(|r| r.error_msg.is_empty()) {
+                for build_result in results.1.values() {
+                    for (build_output, build_output_path) in build_result.built_outputs.clone() {
+                        let build_output_path =
+                            serde_json::from_str::<BuildOutputPath>(&build_output_path).unwrap();
+
+                        let (build_output_path_hash, build_output_path_package) =
+                            get_hash_from_path(format!(
+                                "/nix/store/{}",
+                                build_output_path.out_path
+                            ))
+                            .unwrap();
+
+                        build_outputs.push(ABuildOutput {
+                            id: Set(Uuid::new_v4()),
+                            build: Set(build.id),
+                            output: Set(build_output),
+                            hash: Set(build_output_path_hash),
+                            package: Set(build_output_path_package),
+                            file_hash: Set(None),
+                            file_size: Set(None),
+                            is_cached: Set(false),
+                            ca: Set(None),
+                            created_at: Set(Utc::now().naive_utc()),
+                        });
+                    }
+                }
+
                 BuildStatus::Completed
             } else {
                 for (path, result) in results.1 {
@@ -286,6 +316,11 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                 .await;
         }
     }
+
+    EBuildOutput::insert_many(build_outputs)
+        .exec(&state.db)
+        .await
+        .unwrap();
 }
 
 async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
@@ -303,7 +338,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                         Condition::any()
                             .add(CEvaluation::Status.eq(EvaluationStatus::Completed))
                             .add(CEvaluation::Status.eq(EvaluationStatus::Failed))
-                            .add(CProject::ForceEvaluation.eq(true))
+                            .add(CProject::ForceEvaluation.eq(true)),
                     ),
             )
             .order_by_asc(CProject::LastCheckAt)
@@ -325,7 +360,24 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                 .unwrap(),
         );
 
-        // TODO: check if organization has at least one server
+        let mut i_offset = 0;
+        for (i, project) in projects.clone().iter().enumerate() {
+            let has_no_servers = EServer::find()
+                .filter(
+                    Condition::all()
+                        .add(CServer::Active.eq(true))
+                        .add(CServer::Organization.eq(project.organization))
+                )
+                .one(&state.db)
+                .await
+                .unwrap()
+                .is_none();
+
+            if has_no_servers {
+                projects.remove(i - i_offset);
+                i_offset += 1;
+            }
+        }
 
         let evaluations = stream::iter(projects.clone().into_iter())
             .filter_map(|p| {
@@ -464,6 +516,7 @@ async fn requeue_build(state: Arc<ServerState>, build: MBuild) -> MBuild {
 
 async fn get_next_build(state: Arc<ServerState>) -> MBuild {
     loop {
+        // TODO: check if organization has servers
         let builds_sql = sea_orm::Statement::from_string(
             sea_orm::DbBackend::Postgres,
             r#"
@@ -548,7 +601,7 @@ async fn reserve_available_server(
         .unwrap();
 
     if servers.is_empty() {
-        update_build_status(state, build.clone(), BuildStatus::Aborted).await;
+        update_build_status_recursivly(state, build.clone(), BuildStatus::Aborted).await;
         println!("Aborted build (No Servers Found): {}", build.id);
 
         return None;
@@ -648,7 +701,10 @@ async fn update_build_status_recursivly(
         update_build_status(Arc::clone(&state), dependent_build, status.clone()).await;
     }
 
-    update_build_status(Arc::clone(&state), build, status.clone()).await
+    let build = update_build_status(Arc::clone(&state), build, status.clone()).await;
+    check_evaluation_status(state, build.evaluation).await;
+
+    build
 }
 
 pub async fn update_evaluation_status(

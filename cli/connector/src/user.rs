@@ -16,6 +16,20 @@ pub struct UserInfoResponse {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+struct PatchUserSettingsRequest {
+    pub username: Option<String>,
+    pub name: Option<String>,
+    pub email: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GetUserSettingsResponse {
+    pub username: String,
+    pub name: String,
+    pub email: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 struct MakeApiKeyRequest {
     pub name: String,
 }
@@ -75,6 +89,45 @@ pub async fn delete_key(
         .send()
         .await
         .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn get_settings(
+    config: RequestConfig,
+) -> Result<BaseResponse<GetUserSettingsResponse>, String> {
+    let res = get_client(config, "user/settings".to_string(), RequestType::GET, true)
+        .unwrap()
+        .send()
+        .await
+        .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn patch_settings(
+    config: RequestConfig,
+    username: Option<String>,
+    name: Option<String>,
+    email: Option<String>,
+) -> Result<BaseResponse<String>, String> {
+    let req = PatchUserSettingsRequest {
+        username,
+        name,
+        email,
+    };
+
+    let res = get_client(
+        config,
+        "user/settings".to_string(),
+        RequestType::PATCH,
+        true,
+    )
+    .unwrap()
+    .json(&req)
+    .send()
+    .await
+    .unwrap();
 
     Ok(parse_response(res).await)
 }

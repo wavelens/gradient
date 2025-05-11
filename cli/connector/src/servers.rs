@@ -34,6 +34,17 @@ struct MakeServerRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct PatchServerRequest {
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub host: Option<String>,
+    pub port: Option<i32>,
+    pub username: Option<String>,
+    pub architectures: Option<Vec<String>>,
+    pub features: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 struct MakeBuildRequest {
     pub log_streaming: bool,
 }
@@ -104,6 +115,43 @@ pub async fn get_server(
         true,
     )
     .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn patch_server(
+    config: RequestConfig,
+    organization: String,
+    server: String,
+    name: Option<String>,
+    display_name: Option<String>,
+    host: Option<String>,
+    port: Option<i32>,
+    ssh_user: Option<String>,
+    architectures: Option<Vec<String>>,
+    features: Option<Vec<String>>,
+) -> Result<BaseResponse<String>, String> {
+    let req = PatchServerRequest {
+        name,
+        display_name,
+        host,
+        port,
+        username: ssh_user,
+        architectures,
+        features,
+    };
+
+    let res = get_client(
+        config,
+        format!("servers/{}/{}", organization, server),
+        RequestType::PATCH,
+        true,
+    )
+    .unwrap()
+    .json(&req)
     .send()
     .await
     .unwrap();

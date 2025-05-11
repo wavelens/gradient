@@ -66,7 +66,7 @@ pub async fn get_build(
     Ok(Json(res))
 }
 
-pub async fn connect_build(
+pub async fn post_build(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(build_id): Path<Uuid>,

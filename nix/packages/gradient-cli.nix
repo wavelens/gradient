@@ -16,7 +16,7 @@
   ignoredPaths = [ ".github" "target" ];
 in rustPlatform.buildRustPackage {
   pname = "gradient-cli";
-  version = "0.1.0";
+  version = "0.2.0";
 
   src = lib.cleanSourceWith {
     filter = name: type: !(type == "directory" && builtins.elem (baseNameOf name) ignoredPaths);

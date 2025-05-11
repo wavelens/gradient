@@ -15,7 +15,7 @@ pub struct EvaluationResponse {
     pub project: String,
     pub repository: String,
     pub commit: String,
-    pub evaluation_wildcard: String,
+    pub wildcard: String,
     pub status: String,
     pub previous: Option<String>,
     pub next: Option<String>,
@@ -76,14 +76,14 @@ pub async fn get_evaluation_builds(
     Ok(parse_response(res).await)
 }
 
-pub async fn connect_evaluation(
+pub async fn post_evaluation_builds(
     config: RequestConfig,
     evaluation_id: String,
 ) -> Result<(), String> {
     let mut stream = get_client(
         config,
         format!("evals/{}/builds", evaluation_id),
-        RequestType::CONNECT,
+        RequestType::POST,
         true,
     )
     .unwrap()

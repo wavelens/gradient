@@ -18,6 +18,9 @@ import os
 from pathlib import Path
 from django.utils.translation import gettext_lazy
 
+import sentry_sdk
+from sentry_sdk.integrations.django import DjangoIntegration
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -170,3 +173,13 @@ GRADIENT_OAUTH_REQUIRED = os.environ.get('GRADIENT_OAUTH_REQUIRED', 'false') == 
 
 LOGIN_REDIRECT_URL = '/'
 LOGIN_URL = '/account/login'
+
+# Sentry
+
+if os.environ.get('GRADIENT_REPORT_ERRORS', 'false') == 'true':
+    sentry_sdk.init(
+        dsn="https://93dbad33e86147dcac5230b2ba7764a2@reports.wavelens.io/2",
+        integrations=[DjangoIntegration()],
+        auto_session_tracking=False,
+        traces_sample_rate=0
+    )

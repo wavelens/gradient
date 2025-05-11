@@ -19,6 +19,7 @@ pub struct ProjectResponse {
     pub evaluation_wildcard: String,
     pub last_evaluation: Option<String>,
     pub last_check_at: String,
+    pub force_evaluation: bool,
     pub created_by: String,
     pub created_at: String,
 }
@@ -30,6 +31,15 @@ struct MakeProjectRequest {
     pub description: String,
     pub repository: String,
     pub evaluation_wildcard: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct PatchProjectRequest {
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub repository: Option<String>,
+    pub evaluation_wildcard: Option<String>,
 }
 
 pub async fn get(
@@ -94,6 +104,39 @@ pub async fn get_project(
         true,
     )
     .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn patch_project(
+    config: RequestConfig,
+    organization: String,
+    project: String,
+    name: Option<String>,
+    display_name: Option<String>,
+    description: Option<String>,
+    repository: Option<String>,
+    evaluation_wildcard: Option<String>,
+) -> Result<BaseResponse<String>, String> {
+    let req = PatchProjectRequest {
+        name,
+        display_name,
+        description,
+        repository,
+        evaluation_wildcard,
+    };
+
+    let res = get_client(
+        config,
+        format!("projects/{}/{}", organization, project),
+        RequestType::PATCH,
+        true,
+    )
+    .unwrap()
+    .json(&req)
     .send()
     .await
     .unwrap();

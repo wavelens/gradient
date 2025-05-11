@@ -30,6 +30,15 @@ pub struct MakeProjectRequest {
     pub evaluation_wildcard: String,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PatchProjectRequest {
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub repository: Option<String>,
+    pub evaluation_wildcard: Option<String>,
+}
+
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -182,7 +191,7 @@ pub async fn get_project(
     .await
     {
         Some((o, p)) => (o, p),
-        None => {
+        _ => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
@@ -196,6 +205,115 @@ pub async fn get_project(
     let res = BaseResponse {
         error: false,
         message: project,
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn patch_project(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, project)): Path<(String, String)>,
+    Json(body): Json<PatchProjectRequest>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let (organization, project): (MOrganization, MProject) = match get_project_by_name(
+        state.0.clone(),
+        user.id,
+        organization.clone(),
+        project.clone(),
+    )
+    .await
+    {
+        Some((o, p)) => (o, p),
+        _ => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Project not found".to_string(),
+                }),
+            ))
+        }
+    };
+
+    let mut aproject: AProject = project.into();
+
+    if let Some(name) = body.name {
+        if check_index_name(name.as_str()).is_err() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Invalid Project Name".to_string(),
+                }),
+            ));
+        }
+
+        let project = EProject::find()
+            .filter(
+                Condition::all()
+                    .add(CProject::Organization.eq(organization.id))
+                    .add(CProject::Name.eq(name.clone())),
+            )
+            .one(&state.db)
+            .await
+            .unwrap();
+
+        if project.is_some() {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Project Name already exists".to_string(),
+                }),
+            ));
+        };
+
+        aproject.name = Set(name);
+    }
+
+    if let Some(display_name) = body.display_name {
+        aproject.display_name = Set(display_name);
+    }
+
+    if let Some(description) = body.description {
+        aproject.description = Set(description);
+    }
+
+    if let Some(repository) = body.repository {
+        let repository_url = normalize_url(repository.as_str()).map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Invalid Repository URL".to_string(),
+                }),
+            )
+        })?;
+
+        aproject.repository = Set(repository_url.to_string());
+    }
+
+    if let Some(evaluation_wildcard) = body.evaluation_wildcard {
+        if !valid_evaluation_wildcard(evaluation_wildcard.as_str()) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Invalid Evaluation Wildcard".to_string(),
+                }),
+            ));
+        }
+
+        aproject.evaluation_wildcard = Set(evaluation_wildcard);
+    }
+
+    aproject.force_evaluation = Set(true);
+    aproject.update(&state.db).await.unwrap();
+
+    let res = BaseResponse {
+        error: false,
+        message: "Project updated".to_string(),
     };
 
     Ok(Json(res))
@@ -215,7 +333,7 @@ pub async fn delete_project(
     .await
     {
         Some((o, p)) => (o, p),
-        None => {
+        _ => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
@@ -251,7 +369,7 @@ pub async fn post_project_active(
     .await
     {
         Some(p) => p,
-        None => {
+        _ => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
@@ -288,7 +406,7 @@ pub async fn delete_project_active(
     .await
     {
         Some(p) => p,
-        None => {
+        _ => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
@@ -370,7 +488,7 @@ pub async fn post_project_evaluate(
     .await
     {
         Some((o, p)) => (o, p),
-        None => {
+        _ => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {

@@ -163,7 +163,7 @@ pub async fn copy_builds<
 
         let path_info = match from_store.query_pathinfo(path.clone()).result().await? {
             Some(path_info) => path_info,
-            None => return Err(format!("Path not found: {}", path.clone()).into()),
+            _ => return Err(format!("Path not found: {}", path.clone()).into()),
         };
 
         from_store.nar_from_path(path.clone()).result().await?;
@@ -195,11 +195,14 @@ pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
         }
     }
 
-    let valid_paths = store
+    let valid_paths = match store
         .query_valid_paths(output_paths.values().clone(), true)
         .result()
         .await
-        .unwrap();
+    {
+        Ok(v) => v,
+        Err(e) => return Err(e.to_string()),
+    };
 
     let missing = output_paths
         .into_iter()
@@ -250,8 +253,8 @@ pub fn get_buildlog_stream(
     Ok(Box::pin(stream))
 }
 
-pub async fn get_local_store(organization: MOrganization) -> Result<LocalNixStore, String> {
-    if organization.use_nix_store {
+pub async fn get_local_store(organization: Option<MOrganization>) -> Result<LocalNixStore, String> {
+    if organization.is_none() || organization.clone().unwrap().use_nix_store {
         let store = DaemonStore::builder()
             .init(
                 UnixStream::connect("/nix/var/nix/daemon-socket/socket")
@@ -273,7 +276,7 @@ pub async fn get_local_store(organization: MOrganization) -> Result<LocalNixStor
 
         Ok(LocalNixStore::UnixStream(store))
     } else {
-        let nix_store_dir = format!("/var/lib/gradient/store/{}", organization.id);
+        let nix_store_dir = format!("/var/lib/gradient/store/{}", organization.unwrap().id);
         let mut child = Command::new("nix-store")
             .arg("--eval-store")
             .arg(nix_store_dir.clone())
@@ -329,4 +332,17 @@ pub async fn get_output_path<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
         .values()
         .cloned()
         .collect())
+}
+
+pub async fn get_pathinfo<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
+    path: String,
+    store: &mut DaemonStore<A>,
+) -> Result<nix_daemon::PathInfo, String> {
+    Ok(store
+        .query_pathinfo(path)
+        .result()
+        .await
+        .map_err(|e| e.to_string())
+        .unwrap()
+        .unwrap())
 }

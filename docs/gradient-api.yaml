@@ -261,8 +261,8 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
-    post:
+                $ref: '#/components/schemas/GetUserSettingsResponse'
+    patch:
       tags:
         - user
       summary: Update user settings
@@ -271,7 +271,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/BasicResponse'
+              $ref: '#/components/schemas/PatchUserSettingsRequest'
         required: true
       responses:
         '200':
@@ -336,6 +336,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
+    patch:
+      tags:
+        - orgs
+      summary: Update organization
+      description: Update organization by name
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeOrganizationRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrganizationResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
     delete:
       tags:
         - orgs
@@ -350,6 +374,115 @@ paths:
                 $ref: '#/components/schemas/BasicResponse'
         '404':
           description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /orgs/{organization}/users:
+    get:
+      tags:
+        - orgs
+      summary: Get list of users
+      description: Get list of users of the organization by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    post:
+      tags:
+        - orgs
+      summary: Add user
+      description: Add user to the organization by name
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddUserRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '409':
+          description: User already in organization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+      patch:
+        tags:
+          - orgs
+        summary: Update user
+        description: Update user in the organization by name
+        requestBody:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemoveUserRequest'
+          required: true
+        responses:
+          '200':
+            description: Successful
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/BasicResponse'
+          '404':
+            description: Organization not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/BasicResponse'
+          '409':
+            description: User not in organization
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/BasicResponse'
+    delete:
+      tags:
+        - orgs
+      summary: Remove user
+      description: Remove user from the organization by name
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddUserRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '409':
+          description: User not in organization
           content:
             application/json:
               schema:
@@ -385,6 +518,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrganizationResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /orgs/{organization}/subscribe:
+    get:
+      tags:
+        - orgs
+      summary: Get list of caches
+      description: Get list of caches the organization is subscribed to by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListResponse'
         '404':
           description: Organization not found
           content:
@@ -495,6 +647,30 @@ paths:
         - projects
       summary: Get project info
       description: Get details about the project by name
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    patch:
+      tags:
+        - projects
+      summary: Update project
+      description: Update project by name
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeProjectRequest'
+        required: true
       responses:
         '200':
           description: Successful
@@ -675,6 +851,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
+    patch:
+      tags:
+        - servers
+      summary: Update server
+      description: Update server by name
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeServerRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServerResponse'
+        '404':
+          description: Server not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
     delete:
       tags:
         - servers
@@ -811,6 +1011,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
+    patch:
+      tags:
+        - caches
+      summary: Update cache entry
+      description: Update cache entry by id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeCacheRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: Cache entry not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
     delete:
       tags:
         - caches
@@ -862,6 +1086,19 @@ paths:
                 $ref: '#/components/schemas/BasicResponse'
         '404':
           description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /cache/{cache}/key:
+    get:
+      tags:
+        - caches
+      summary: Get cache public key
+      description: Get the public key from cache
+      responses:
+        '200':
+          description: Successful
           content:
             application/json:
               schema:
@@ -1116,6 +1353,19 @@ components:
           type: string
           format: email
           examples: [alex@example.com]
+    GetUserSettingsResponse:
+      type: object
+      properties:
+        username:
+          type: string
+          examples: [testuser]
+        name:
+          type: string
+          examples: [TestUser]
+        email:
+          type: string
+          format: email
+          examples: ["alex@example.com"]
     MakeLoginRequest:
       type: object
       properties:
@@ -1219,6 +1469,34 @@ components:
         name:
           type: string
           examples: [CLI-Key]
+    PatchUserSettingsRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          examples: [testuser]
+        name:
+          type: string
+          examples: [TestUser]
+        email:
+          type: string
+          format: email
+          examples: [alex@example.com]
+    AddUserRequest:
+      type: object
+      properties:
+        user:
+          type: string
+          examples: [testuser]
+        role:
+          type: string
+          examples: [Admin]
+    RemoveUserRequest:
+      type: object
+      properties:
+        user:
+          type: string
+          examples: [testuser]
   securitySchemes:
     token:
       type: http
