@@ -33,7 +33,7 @@ def home(request):
 
         details_blocks.append({
             'name': org['name'],
-            # 'display_name': org['display_name'],
+            'display_name': org_details['display_name'],
             'id': org['id'],
             'description': org_details['description'],
             'exec': 34,
@@ -81,7 +81,7 @@ def workflow(request, org):
 
         details_blocks.append({
             'project': project['name'],
-            # 'display_name': project['display_name'],
+            'display_name': project_details['display_name'],
             'id': project_details['last_evaluation'],
             'description': project_details['description'],
             'exec': 34,

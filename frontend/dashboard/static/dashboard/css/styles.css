@@ -53,7 +53,7 @@ a:hover {
     font-size: 19px !important;
     color: #abb0b4;
     position: relative;
-    bottom: 2px;
+    /* bottom: 2px; */
 }
 
 .filled {
@@ -233,7 +233,22 @@ input[type="text"]:focus-visible, input[type="password"]:focus-visible, .form-fi
     border-radius: 5px;
     width: 18rem;
     height: 19px;
+    padding-left: 30px;
 }
+
+.search-container {
+    position: relative;
+    display: inline-block;
+}
+
+.search-container span {
+    position: absolute;
+    left: 8px;
+    top: 46%;
+    transform: translateY(-50%);
+    color: #818181;
+}
+
 
 .filter-container {
     display: flex;
@@ -821,8 +836,8 @@ tr:hover td{
 }
 
 .form-check-input {
-    width: 20px;
-    height: 20px;
+    width: 15px;
+    height: 15px;
     appearance: none;
     border: 1px solid var(--secondary);
     border-radius: 2px;
@@ -887,8 +902,18 @@ tr:hover td{
 }
 
 .register {
-    justify-content: center;
+    /* justify-content: center; */
     display: flex;
     margin-top: 0.5rem;
-    text-decoration: underline;
+    text-decoration: none;font-size: 0.8rem;
+    color: #a8a7a7;
+}
+
+.register:hover {
+    background-color: transparent;
+    color: #818181;
+}
+
+.bg-none {
+    background-color: transparent !important;
 }
