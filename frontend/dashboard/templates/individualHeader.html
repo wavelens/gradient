@@ -11,7 +11,7 @@
 <body>
     <header class="m-t--1rem">
         <div class="logo-container header-workflow">
-            <img src="{% static '/dashboard/images/pb2.png' %}"class="h-30 border-radius-5 vertical-align-bottom">
+            <img src="{% static 'dashboard/images/pb2.png' %}"class="h-30 border-radius-5 vertical-align-bottom">
             <span><a class="header-link" href="{% url 'workflow' org_id %}">{{ projectname }}</a>/<a class="header-link" href="{% url 'model' org_id %}"><b>{{ model }}</b></a></span>
         </div>
         <nav role="navigation">

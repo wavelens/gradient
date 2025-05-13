@@ -34,6 +34,9 @@ SECRET_KEY = open(SECRET_KEY_FILE).read().strip() if SECRET_KEY_FILE else 'djang
 DEBUG = os.environ.get('GRADIENT_DEBUG', 'true') == 'true'
 
 ALLOWED_HOSTS = [ "*" ]
+CSRF_TRUSTED_ORIGINS = [
+    os.environ.get('GRADIENT_SERVE_URL', 'http://127.0.0.1:8000')
+]
 
 # Application definition
 
@@ -218,6 +221,7 @@ LOGGING = {
 }
 
 if os.environ.get('GRADIENT_REPORT_ERRORS', 'false') == 'true':
+    print("Reporting Enabled")
     sentry_sdk.init(
         dsn="https://93dbad33e86147dcac5230b2ba7764a2@reports.wavelens.io/2",
         integrations=[DjangoIntegration()],

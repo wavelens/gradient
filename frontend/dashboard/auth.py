@@ -184,7 +184,7 @@ class User(object):
         if session:
             self.session = session
 
-        self.image = static('/dashboard/images/pb.png')
+        self.image = static('dashboard/images/pb.png')
 
     def __str__(self):
         return self.name
