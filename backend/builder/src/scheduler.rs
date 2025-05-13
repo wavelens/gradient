@@ -525,7 +525,7 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                     SELECT 1
                     FROM public.build_dependency d
                     JOIN public.build dep ON d.dependency = dep.id
-                    WHERE d.build = b.id AND dep.status = 3
+                    WHERE d.build = b.id AND dep.status != 3
                 )
                 AND b.status = 1
                 ORDER BY b.updated_at ASC

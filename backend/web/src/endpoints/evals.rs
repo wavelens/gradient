@@ -228,6 +228,7 @@ pub async fn post_evaluation_builds(
         .unwrap()
         .unwrap();
 
+    // TODO: Check if user is in organization
     if organization.created_by != user.id {
         return Err((
             StatusCode::NOT_FOUND,
@@ -252,13 +253,15 @@ pub async fn post_evaluation_builds(
             .unwrap();
 
         for build in past_builds {
+            let name = build.derivation_path.split("-").next().unwrap();
+            let name = build.derivation_path.replace(format!("{}-", name).as_str(), "").replace(".drv", "");
             let log = build.log.unwrap_or("".to_string());
             last_logs.insert(build.id, log.clone());
 
             // TODO: Chunkify past log
             yield log
                 .split("\n")
-                .map(|l| format!("{}> {}", build.derivation_path, l))
+                .map(|l| format!("{}> {}", name, l))
                 .collect::<Vec<String>>()
                 .join("\n");
         }
