@@ -73,7 +73,7 @@ in {
         GRADIENT_FRONTEND_IP = cfg.listenAddr;
         GRADIENT_FRONTEND_PORT = toString cfg.port;
         GRADIENT_API_URL = cfg.apiUrl;
-        GRADIENT_SERVE_URL = "https://${gradientCfg.domain}";
+        GRADIENT_SERVE_URL = gradientCfg.domain;
         GRADIENT_BASE_PATH = gradientCfg.baseDir;
         GRADIENT_OAUTH_ENABLE = lib.boolToString gradientCfg.oauth.enable;
         GRADIENT_DISABLE_REGISTER = lib.boolToString gradientCfg.settings.disableRegistration;

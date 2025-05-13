@@ -33,11 +33,7 @@ SECRET_KEY = open(SECRET_KEY_FILE).read().strip() if SECRET_KEY_FILE else 'djang
 
 DEBUG = os.environ.get('GRADIENT_DEBUG', 'true') == 'true'
 
-ALLOWED_HOSTS = [ os.environ.get('GRADIENT_SERVE_URL', 'http://127.0.0.1:8000'), 'http://localhost:8000', 'http://127.0.0.1:8000' ]
-
-CSRF_TRUSTED_ORIGINS = [
-    os.environ.get('GRADIENT_SERVE_URL', 'http://127.0.0.1:8000')
-]
+ALLOWED_HOSTS = [ "*" ]
 
 # Application definition
 
