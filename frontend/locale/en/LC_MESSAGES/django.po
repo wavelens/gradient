@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-02-28 18:15+0000\n"
+"POT-Creation-Date: 2025-05-13 19:50+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -62,14 +62,17 @@ msgid "Download"
 msgstr ""
 
 #: dashboard/templates/dashboard/download.html:27
+#: dashboard/templates/dashboard/download.html:35
 msgid "Type"
 msgstr ""
 
 #: dashboard/templates/dashboard/download.html:28
+#: dashboard/templates/dashboard/download.html:35
 msgid "Link"
 msgstr ""
 
 #: dashboard/templates/dashboard/download.html:29
+#: dashboard/templates/dashboard/download.html:35
 msgid "Actions"
 msgstr ""
 
@@ -133,19 +136,19 @@ msgstr ""
 
 #: dashboard/templates/dashboard/newOrganization.html:14
 #: dashboard/templates/dashboard/newOrganization.html:19
-#: dashboard/templates/header.html:30
+#: dashboard/templates/header.html:31
 msgid "New Organization"
 msgstr ""
 
 #: dashboard/templates/dashboard/newOrganization.html:38
 #: dashboard/templates/dashboard/newProject.html:43
 #: dashboard/templates/dashboard/newServer.html:38
-#: dashboard/templates/header.html:26
+#: dashboard/templates/header.html:27
 msgid "Create"
 msgstr ""
 
 #: dashboard/templates/dashboard/newProject.html:14
-#: dashboard/templates/header.html:29
+#: dashboard/templates/header.html:30
 msgid "New Project"
 msgstr ""
 
@@ -155,6 +158,7 @@ msgstr ""
 
 #: dashboard/templates/dashboard/newServer.html:14
 #: dashboard/templates/dashboard/newServer.html:19
+#: dashboard/templates/header.html:32
 msgid "New Server"
 msgstr ""
 
@@ -208,40 +212,40 @@ msgstr ""
 msgid "Latest 5 runs"
 msgstr ""
 
-#: dashboard/templates/header.html:39
+#: dashboard/templates/header.html:41
 msgid "Profile and settings..."
 msgstr ""
 
-#: dashboard/templates/header.html:42
+#: dashboard/templates/header.html:44
 msgid "signed in as"
 msgstr ""
 
-#: dashboard/templates/header.html:43
+#: dashboard/templates/header.html:45
 msgid "Profile"
 msgstr ""
 
-#: dashboard/templates/header.html:44
+#: dashboard/templates/header.html:46
 msgid "Starred"
 msgstr ""
 
-#: dashboard/templates/header.html:45
+#: dashboard/templates/header.html:47
 msgid "Subscriptions"
 msgstr ""
 
-#: dashboard/templates/header.html:46
+#: dashboard/templates/header.html:48
 #: dashboard/templates/individualHeader.html:25
 msgid "Settings"
 msgstr ""
 
-#: dashboard/templates/header.html:47
+#: dashboard/templates/header.html:49
 msgid "Help"
 msgstr ""
 
-#: dashboard/templates/header.html:48
+#: dashboard/templates/header.html:50
 msgid "Side Administration"
 msgstr ""
 
-#: dashboard/templates/header.html:49
+#: dashboard/templates/header.html:51
 msgid "Sign Out"
 msgstr ""
 
@@ -250,11 +254,11 @@ msgstr ""
 msgid "Login"
 msgstr ""
 
-#: dashboard/templates/register.html:14 dashboard/templates/register.html:19
-#: dashboard/templates/register.html:31
+#: dashboard/templates/login.html:45 dashboard/templates/register.html:14
+#: dashboard/templates/register.html:19 dashboard/templates/register.html:31
 msgid "Register"
 msgstr ""
 
-#: frontend/settings.py:129
+#: frontend/settings.py:127
 msgid "English"
 msgstr ""
