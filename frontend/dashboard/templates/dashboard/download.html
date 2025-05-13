@@ -19,8 +19,8 @@
 
 
 
-<div class="container-table">
-    <table class="workflows-table">
+<div class="container">
+    <!-- <table class="workflows-table">
         <thead>
             <tr>
                 <th></th>
@@ -29,16 +29,32 @@
                 <th>{% trans 'Actions' %}</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody> -->
+            <div class="home-container">
+                <div class="workflow-item">
+                    <span>{% trans 'Type' %} {% trans 'Link' %} {% trans 'Actions' %}</span>
+                </div>
             {% for file in files %}
-                <tr>
-                    <td>{{ file.file }}</td>
-                    <td>{{ file.type }}</td>
-                    <td><a>{{ file.link }}</a></td>
-                    <td>{{ file.actions }}</td>
-                </tr>
+                
+                <div  class="workflow-item">
+                    <div class="d-flex p-0">
+                        <span class="flex-c m-r-1rem">
+                            <span>{{ file.file }}</span>
+                        </span>
+                        <span class="flex-c m-r-1rem">
+                            <span>{{ file.type }}</span>
+                        </span>
+                        <span class="flex-c m-r-1rem">
+                            <span>{{ file.link }}</span>
+                        </span>
+                        <span class="flex-c">
+                            <span>{{ file.actions }}</span>
+                        </span>
+                    </div>
+                </div>
             {% endfor %}
-        </tbody>
-    </table>
+            </div>
+        <!-- </tbody>
+    </table> -->
 </div>
 {% endblock %}

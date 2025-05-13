@@ -25,7 +25,10 @@
     <div class="m-b-1rem">
         <div class="filter-container">
             <div class="search-container">
-                <input type="text" id="searchInput" placeholder="Search">
+                <span class="material-symbols-outlined">
+                    search
+                </span>
+                <input type="text" id="searchInput" placeholder="Search" class="bg-none">
             </div>
         </div>
     </div>
@@ -35,15 +38,15 @@
         {% for block in details_blocks %}
             <div class="workflow-item">
                 <a class="full-width normal-hover" href="{% url 'workflow' block.name %}">
-                    <span class="workflow-title">{% trans block.project %}</span><br><span class="text-light">{{ block.description }}</span>
+                    <span class="workflow-title">{{ block.display_name }}</span><br><span class="text-light">{% trans block.description %}</span>
                 </a>
                 <div class="d-flex p-0">
-                    <span class="flex-c m-r-1rem">
+                    <!-- <span class="flex-c m-r-1rem">
                         <span class="material-symbols-outlined m-r-3">
                             mode_standby
                         </span>
                         <span class="text-light-n-s">hier kommt die anzahl der ausführungen hin</span>
-                    </span>
+                    </span> -->
                     <span class="flex-c">
                         <span class="material-symbols-outlined m-r-3">
                             graph_1
