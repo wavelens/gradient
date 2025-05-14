@@ -4,14 +4,13 @@
 
 from django.shortcuts import render, redirect
 from django.http import HttpResponse, HttpResponseRedirect
-from django.template import loader
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
 from django.contrib.auth import logout
 from . import api
 from .auth import LoginForm, login, RegisterForm
 from .forms import *
-from django.contrib.auth.models import User
+from django.conf import settings
 
 @login_required
 def home(request):
@@ -106,32 +105,89 @@ def workflow(request, org):
         'org_id': org,
         'details_blocks': details_blocks
     }
+
     return render(request, "dashboard/overview.html", context)
 
 @login_required
 def log(request, org, evaluation_id=None):
+    evaluation = api.get_evals_evaluation(request, evaluation_id)
+    if isinstance(evaluation, type(None)) or evaluation['error']:
+        return HttpResponse(status=404)
+    evaluation = evaluation['message']
+
+    project = api.get_projects(request, org)
+    if isinstance(project, type(None)) or project['error']:
+        return HttpResponse(status=500)
+    project = [p for p in project['message'] if p['id'] == evaluation['project']]
+    if len(project) == 0:
+        return HttpResponse(status=404)
+    project = project[0]
+
+    commit = api.get_commits_commit(request, evaluation['commit'])
+    if isinstance(commit, type(None)) or commit['error']:
+        return HttpResponse(status=500)
+    commit = commit['message']
+
+    builds = api.get_evals_evaluation_builds(request, evaluation_id)
+    if isinstance(builds, type(None)) or builds['error']:
+        return HttpResponse(status=500)
+    builds = builds['message']
+
+    success = "waiting"
+    if evaluation['status'] == 'Completed':
+        success = "true"
+    elif evaluation['status'] == 'Failed' or evaluation['status'] == 'Aborted':
+        success = "false"
+
     details_blocks = [{
         'summary': "Loading Log...",
         'details': [ "Loading Log..." ]
     }]
 
+    if success == "true":
+        details_blocks = []
+        for build in builds:
+            build_details = api.get_builds_build(request, build['id'])
+
+            if isinstance(build_details, type(None)) or build_details['error']:
+                return HttpResponse(status=500)
+
+            build_details = build_details['message']
+            log = build_details['log'].splitlines()
+
+            if len(log) > 1 or (len(log) > 0 and log[0] != ""):
+                details_blocks.append({
+                    'summary': build['name'],
+                    'details': log
+                })
+
+        if len(details_blocks) == 0:
+            details_blocks.append({
+                'summary': "No Log available",
+                'details': [ "No Log available" ]
+            })
+
     context = {
         'org_id': org,
+        'project_id': project['name'],
         'evaluation_id': evaluation_id,
         'details_blocks': details_blocks,
-        'built_version' : 'Vbuild (x86_64-linux)',
-        'status' : 'Vsucceeded',
-        'time' : 'V2',
+        'built_version' : 'Build (x86_64-linux)',
+        'status' : evaluation['status'],
+        'time' : '0',
         'duration' : '1s',
-        'id' : 'v940',
-        'built_name' : 'Vdataset.corpus',
+        'id' : '0',
+        'built_name' : 'Evaluation',
         'triggerArt' : 'schedule',
-        'triggerTime' : '8 months',
-        'git' : 'f72bjds',
+        'triggerTime' : '0 months',
+        'commit' : ''.join(hex(x)[2:] for x in commit['hash'][:4])[:-1],
         'branch' : 'main',
-        'artifacts' : '-',
+        'builds' : len(builds),
+        'success' : success,
+        'api_url' : settings.GRADIENT_BASE_URL,
         # 'icon' : 'green-filter'
     }
+
     return render(request, "dashboard/log.html", context)
 
 @login_required

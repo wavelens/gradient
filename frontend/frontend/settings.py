@@ -35,8 +35,11 @@ DEBUG = os.environ.get('GRADIENT_DEBUG', 'true') == 'true'
 
 ALLOWED_HOSTS = [ "*" ]
 CSRF_TRUSTED_ORIGINS = [
-    os.environ.get('GRADIENT_SERVE_URL', 'http://127.0.0.1:8000')
+    os.environ.get('GRADIENT_SERVE_URL', 'http://127.0.0.1:8000'),
 ]
+
+if DEBUG:
+    CSRF_TRUSTED_ORIGINS.append('http://localhost:3000')
 
 # Application definition
 

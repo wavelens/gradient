@@ -25,11 +25,20 @@ use std::sync::Arc;
 
 pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     let server_url = format!("{}:{}", state.cli.ip.clone(), state.cli.port.clone());
+    let cors_allow_origin = if state.cli.debug {
+        AllowOrigin::list(vec![
+            state.cli.serve_url.clone().try_into().unwrap(),
+            format!(
+                "http://{}:8000",
+                state.cli.ip.clone(),
+            ).try_into().unwrap(),
+        ])
+    } else {
+        AllowOrigin::exact(state.cli.serve_url.clone().try_into().unwrap())
+    };
 
     let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::exact(
-            state.cli.serve_url.clone().try_into().unwrap(),
-        ))
+        .allow_origin(cors_allow_origin)
         .allow_headers(vec![AUTHORIZATION, ACCEPT, CONTENT_TYPE])
         .allow_credentials(true);
 

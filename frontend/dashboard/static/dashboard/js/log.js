@@ -18,7 +18,7 @@ async function makeRequest() {
         const text = new TextDecoder("utf-8").decode(value);
 
         if (done) {
-          logContainer.innerHTML += `<div class="line">Log beendet</div>`;
+          logContainer.innerHTML += `<div class="line">End of Log</div>`;
           break;
         }
 
@@ -33,7 +33,7 @@ async function makeRequest() {
               logContainer.scrollTop = logContainer.scrollHeight;
             }
           } catch (err) {
-            console.error("Fehler beim Parsen von JSON:", err);
+            console.error("JSON parsing error:", err);
           }
         }
       }

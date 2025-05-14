@@ -15,5 +15,5 @@ let
   tests = map-folder "gradient" tests-gradient;
 in builtins.listToAttrs (map (test: {
   name =  builtins.replaceStrings [ "/" ] [ "-" ] test;
-  value = pkgs.testers.runNixOSTest ./${test} { inherit (inputs) microvm; };
+  value = pkgs.testers.runNixOSTest ./${test};
 }) tests)

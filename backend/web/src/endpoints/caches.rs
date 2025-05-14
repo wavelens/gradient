@@ -87,6 +87,11 @@ async fn get_nar_by_hash(
         }
     };
 
+    if pathinfo.is_none() {
+        return Err("Path not found".to_string());
+    }
+
+    let pathinfo = pathinfo.unwrap();
     let output = match Command::new(state.cli.binpath_nix.clone())
         .arg("hash")
         .arg("convert")

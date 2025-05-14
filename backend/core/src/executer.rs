@@ -337,12 +337,11 @@ pub async fn get_output_path<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
 pub async fn get_pathinfo<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
     path: String,
     store: &mut DaemonStore<A>,
-) -> Result<nix_daemon::PathInfo, String> {
+) -> Result<Option<nix_daemon::PathInfo>, String> {
     Ok(store
         .query_pathinfo(path)
         .result()
         .await
         .map_err(|e| e.to_string())
-        .unwrap()
         .unwrap())
 }

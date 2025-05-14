@@ -132,16 +132,16 @@ def post_projects_project_evaluations(request, organization, project):
 
 
 def get_evals_evaluation(request, evaluation):
-    return get_client(request.user, f"evaluations/{evaluation}", "GET")
+    return get_client(request.user, f"evals/{evaluation}", "GET")
 
 def post_evals_evaluation(request, evaluation):
-    return get_client(request.user, f"evaluations/{evaluation}", "POST")
+    return get_client(request.user, f"evals/{evaluation}", "POST")
 
 def get_evals_evaluation_builds(request, evaluation):
-    return get_client(request.user, f"evaluations/{evaluation}/builds", "GET")
+    return get_client(request.user, f"evals/{evaluation}/builds", "GET")
 
 def post_evals_evaluation_builds(request, evaluation):
-    return get_client(request.user, f"evaluations/{evaluation}/builds", "POST")
+    return get_client(request.user, f"evals/{evaluation}/builds", "POST")
 
 
 def get_builds_build(request, build):

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ pkgs, lib, microvm, ... }:
+{ pkgs, lib, ... }:
 {
   name = "gradient-building";
   globalTimeout = 120;
@@ -16,7 +16,6 @@
   nodes = {
     machine = { config, pkgs, lib, ... }@inputs: {
       imports = [
-        microvm.nixosModules.host
         ../../../modules/gradient.nix
       ];
 

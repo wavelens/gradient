@@ -40,7 +40,7 @@
         <div class="innerbody-top d-flex">
             <div class="m-r-2rem">
                <div class="text-light m-b-05rem">{% trans 'Triggered via' %} {{ triggerArt }} {{ triggerTime }} {% trans 'ago' %}</div>
-               <div><a class="normal-hover" href=""><img src="{{ request.user.image }}" class="icon-center border-radius-5"><span>{{ request.user.name }} </span></a> <span class="material-symbols-outlined icon-center f-s-21px">{% trans 'commit' %}</span> {{ git }} <span class="branch">{{ branch }}</span></div>
+               <div><a class="normal-hover" href=""><img src="{{ request.user.image }}" class="icon-center border-radius-5"><span>{{ request.user.name }} </span></a> <span class="material-symbols-outlined icon-center f-s-21px">{% trans 'commit' %}</span> {{ commit }} <span class="branch">{{ branch }}</span></div>
             </div>
             <div class="m-r-2rem">
                 <div class="text-light m-b-05rem">{% trans 'Status' %}</div>
@@ -51,8 +51,8 @@
                 <div>{{ duration }}</div>
             </div>
             <div class="m-r-2rem">
-                <div class="text-light m-b-05rem">{% trans 'Artifacts' %}</div>
-                <div>{{ artifacts }}</div>
+                <div class="text-light m-b-05rem">{% trans 'Builds' %}</div>
+                <div>{{ builds }}</div>
             </div>
         </div>
         <div class="innerbody">
@@ -94,12 +94,10 @@
 
 <script>
     const token = "{{ request.user.session }}";
-    const url = "http://127.0.0.1:3000/api/evaluation/{{ evaluation_id }}/builds";
+    const url = "{{ api_url }}/api/evals/{{ evaluation_id }}/builds";
 </script>
 
 <script src="../../static/dashboard/js/log.js"></script>
-
-
 <script>
     let lineCounter = 1;
 

@@ -8,6 +8,9 @@ start_all()
 
 machine.wait_for_unit("gradient-server.service")
 
+with subtest("check nix"):
+    machine.succeed("nix --version")
+
 with subtest("check api health"):
     print(machine.succeed("curl http://localhost:3000/api/health -i --fail"))
 

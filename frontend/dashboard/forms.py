@@ -21,21 +21,21 @@ class NewOrganizationForm(forms.Form):
     #     label='Besitzer'
     # )
     name = forms.CharField(
-        label='Organisations-Name',
+        label='Name',
         required=True,
         widget=forms.TextInput(attrs={
             'class': 'form-control'
         })
     )
     display_name = forms.CharField(
-        label='Organisations-Name',
+        label='Display Name',
         required=True,
         widget=forms.TextInput(attrs={
             'class': 'form-control'
         })
     )
     description = forms.CharField(
-        label='Beschreibung',
+        label='Description',
         required=True,
         widget=forms.TextInput(attrs={
             'class': 'form-control'
@@ -139,21 +139,21 @@ class NewProjectForm(forms.Form):
     )
 
     name = forms.CharField(
-        label='Projekt Name',
+        label='Name',
         required=True,
         widget=forms.TextInput(attrs={
             'class': 'form-control'
         })
     )
     display_name = forms.CharField(
-        label='Organisations-Name',
+        label='Display Name',
         required=True,
         widget=forms.TextInput(attrs={
             'class': 'form-control'
         })
     )
     description = forms.CharField(
-        label='Beschreibung',
+        label='Description',
         required=True,
         widget=forms.TextInput(attrs={
             'class': 'form-control'
@@ -183,7 +183,7 @@ class NewServerForm(forms.Form):
         })
     )
     server_name = forms.CharField(
-        label='Server-Name',
+        label='Name',
         required=True,
         widget=forms.TextInput(attrs={
             'class': 'form-control'
@@ -196,17 +196,19 @@ class NewServerForm(forms.Form):
             'class': 'form-control'
         })
     )
-    port = forms.ChoiceField(
-        choices=GEEKS_CHOICES,
+    port = forms.IntegerField(
+        label='Port',
         required=True,
-        widget=forms.Select,
-        label='Port'
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control',
+        })
     )
-    username = forms.ChoiceField(
-        choices=GEEKS_CHOICES,
+    host = forms.CharField(
+        label='Username',
         required=True,
-        widget=forms.Select,
-        label='Username'
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
     )
     architectures = forms.ChoiceField(
         choices=GEEKS_CHOICES,
