@@ -118,6 +118,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 update_build_status(Arc::clone(&state), build, BuildStatus::Queued).await;
             }
 
+            println!("Building Evaluation: {}", evaluation.id);
             update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Building)
                 .await;
         }

@@ -37,7 +37,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     update_evaluation_status(
         Arc::clone(&state),
         evaluation.clone(),
-        EvaluationStatus::Building,
+        EvaluationStatus::Evaluating,
     )
     .await;
 
