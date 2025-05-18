@@ -74,7 +74,7 @@ h2 {
     color: white;
 }
 
-input[type="text"], input[type="password"] {
+input[type="text"], input[type="password"], input[type="number"] {
     padding: 5px;
     background-color: var(--tertiary);
     border: 1px solid rgb(118, 118, 118);
@@ -559,6 +559,10 @@ pre span {
     margin-right: 3px;
 }
 
+.m-r-4 {
+    margin-right: 4px;
+}
+
 .m-r-1rem {
     margin-right: 1rem !important;
 }
@@ -701,18 +705,24 @@ tr:hover td{
   
 .tooltip .tooltiptext {
     visibility: hidden;
-    width: 120px;
-    background-color: #151b23;
+    background-color: #3c4551;
     color: #fff;
     text-align: center;
     border-radius: 6px;
-    padding: 5px 0;
+    padding: 5px 1rem;
     position: absolute;
     z-index: 1;
     top: 100%;
     left: 50%;
     margin-left: -60px;
-    border: 1px solid #444;
+    /* border: 1px solid #444; */
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.tooltip:hover .tooltiptext {
+    opacity: 1;
 }
 
 .tooltiptext.hidden {
@@ -781,7 +791,7 @@ tr:hover td{
     margin: auto;
     border: 1px solid rgb(118, 118, 118);
     position: relative;
-    top: -2.5rem;
+    /* top: -2.5rem; */
 }
 .form-field {
     margin-bottom: 15px;
@@ -916,4 +926,14 @@ tr:hover td{
 
 .bg-none {
     background-color: transparent !important;
+}
+
+.blue-link:hover {
+    text-decoration: underline;
+    color: #007BFF;
+}
+
+.blue-span:hover span:first-child {
+    text-decoration: underline;
+    color: #007BFF;
 }

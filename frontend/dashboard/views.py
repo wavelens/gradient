@@ -77,11 +77,12 @@ def workflow(request, org):
             return HttpResponse(status=500)
 
         project_details = project_details['message']
-
+        print(project_details)
         details_blocks.append({
             'project': project['name'],
             'display_name': project_details['display_name'],
             'id': project_details['last_evaluation'],
+            'id2': project_details['id'],
             'description': project_details['description'],
             'exec': 34,
             'duration': '12m 11s',

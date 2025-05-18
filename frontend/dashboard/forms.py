@@ -210,15 +210,17 @@ class NewServerForm(forms.Form):
             'class': 'form-control'
         })
     )
-    architectures = forms.ChoiceField(
-        choices=GEEKS_CHOICES,
+    architectures = forms.CharField(
         required=True,
-        widget=forms.Select,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        }),
         label='Architectures'
     )
-    features = forms.ChoiceField(
-        choices=GEEKS_CHOICES,
+    features = forms.CharField(
         required=True,
-        widget=forms.Select,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        }),
         label='Features'
     )
