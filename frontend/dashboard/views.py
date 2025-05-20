@@ -332,3 +332,6 @@ def register(request):
         form = RegisterForm()
 
     return render(request, "register.html", {'form': form})
+
+def settingsServer(request):
+    return render(request, "dashboard/settings/server.html")

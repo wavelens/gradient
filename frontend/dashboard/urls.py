@@ -24,4 +24,6 @@ urlpatterns = [
     path("new/server", new_server, name="new_server"),
 
     path("", home, name="home"),
+
+    path("settings/server", settingsServer, name="settingsServer"),
 ]

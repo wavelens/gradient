@@ -1,0 +1,33 @@
+<!--
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ -->
+
+ {% extends 'dashboard/index.html' %}
+
+
+ <head>
+     {% load static %}
+     {% load i18n %}
+ </head>
+ 
+ {% block title %}{% trans 'Settings' %}{% endblock %}
+ 
+ {% block content %}
+ <nav>
+    <h2>Navigation</h2>
+    <ul>
+      <li><a href="#">Startseite</a></li>
+      <li><a href="#">Über uns</a></li>
+      <li><a href="#">Leistungen</a></li>
+      <li><a href="#">Kontakt</a></li>
+    </ul>
+  </nav>
+
+  <div class="content">
+    {% block inhalt %}
+    {% endblock %}
+  </div>
+ {% endblock %}
+ 
