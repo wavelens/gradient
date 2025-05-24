@@ -942,3 +942,44 @@ tr:hover td{
     text-decoration: underline;
     color: #007BFF;
 }
+
+.settings-container {
+    max-width: 1200px;
+    margin: 40px auto;
+    padding: 0 24px;
+}
+  
+.settings-layout {
+    display: flex;
+    align-items: flex-start;
+    gap: 48px;
+}
+  
+.settings-sidebar {
+    width: 250px;
+    padding: 16px;
+}
+  
+.settings-sidebar ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+  
+.settings-sidebar li + li {
+    margin-top: 12px;
+}
+  
+.settings-sidebar a {
+    text-decoration: none;
+    font-weight: 500;
+    display: block;
+    padding: 8px 12px;
+    border-radius: 6px;
+    transition: background-color 0.2s;
+}
+  
+.settings-content {
+    flex-grow: 1;
+    padding: 24px;
+}

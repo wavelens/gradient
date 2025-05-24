@@ -254,7 +254,7 @@ def new_cache(request):
     if request.method == 'POST':
         form = NewCacheForm(request.POST)
         if form.is_valid():
-            api.put_orgs(request, form.cleaned_data['name'], form.cleaned_data['display_name'], form.cleaned_data['description'])
+            api.put_orgs(request, form.cleaned_data['name'], form.cleaned_data['display_name'], form.cleaned_data['description'], form.cleaned_data['priority'])
             return redirect('/')
     else:
         form = NewCacheForm()

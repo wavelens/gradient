@@ -13,21 +13,30 @@
  </head>
  
  {% block title %}{% trans 'Settings' %}{% endblock %}
- 
- {% block content %}
- <nav>
-    <h2>Navigation</h2>
-    <ul>
-      <li><a href="#">Startseite</a></li>
-      <li><a href="#">Über uns</a></li>
-      <li><a href="#">Leistungen</a></li>
-      <li><a href="#">Kontakt</a></li>
-    </ul>
-  </nav>
 
-  <div class="content">
-    {% block inhalt %}
-    {% endblock %}
-  </div>
+ {% block content %}
+ <div class="settings-container">
+   <h1 class="settings-title">{% trans 'Settings' %}</h1>
+ 
+   <div class="settings-layout">
+     <aside class="settings-sidebar">
+       <nav>
+         <ul>
+           <li><a href="#">Startseite</a></li>
+           <li><a href="#">Über uns</a></li>
+           <li><a href="#">Leistungen</a></li>
+           <li><a href="#">Kontakt</a></li>
+         </ul>
+       </nav>
+     </aside>
+ 
+     <main class="settings-content">
+       {% block inhalt %}
+       {% endblock %}
+     </main>
+   </div>
+ </div>
  {% endblock %}
+ 
+ 
  
