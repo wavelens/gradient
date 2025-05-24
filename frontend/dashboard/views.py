@@ -250,6 +250,18 @@ def new_organization(request):
     return render(request, "dashboard/newOrganization.html", {'form': form})
 
 @login_required
+def new_cache(request):
+    if request.method == 'POST':
+        form = NewCacheForm(request.POST)
+        if form.is_valid():
+            api.put_orgs(request, form.cleaned_data['name'], form.cleaned_data['display_name'], form.cleaned_data['description'])
+            return redirect('/')
+    else:
+        form = NewCacheForm()
+
+    return render(request, "dashboard/NewCache.html", {'form': form})
+
+@login_required
 def new_project(request):
     org = request.GET.get("org")
     all_orgs = api.get_orgs(request)

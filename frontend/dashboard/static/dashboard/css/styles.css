@@ -244,7 +244,7 @@ input[type="text"]:focus-visible, input[type="password"]:focus-visible, .form-fi
 .search-container span {
     position: absolute;
     left: 8px;
-    top: 46%;
+    top: 50%;
     transform: translateY(-50%);
     color: #818181;
 }
@@ -913,15 +913,20 @@ tr:hover td{
 
 .register {
     /* justify-content: center; */
-    display: flex;
+    /* display: flex; */
     margin-top: 0.5rem;
-    text-decoration: none;font-size: 0.8rem;
+    text-decoration: none;
+    font-size: 0.9rem;
     color: #a8a7a7;
+}
+
+.register a {
+    padding-bottom: 0 !important;
 }
 
 .register:hover {
     background-color: transparent;
-    color: #818181;
+    /* color: #818181; */
 }
 
 .bg-none {

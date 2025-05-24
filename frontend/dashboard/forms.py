@@ -224,3 +224,33 @@ class NewServerForm(forms.Form):
         }),
         label='Features'
     )
+
+class NewCacheForm(forms.Form):
+    name = forms.CharField(
+        label='Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    display_name = forms.CharField(
+        label='Display Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    description = forms.CharField(
+        label='Description',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    priority = forms.CharField(
+        label='Priority',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+        })
+    )

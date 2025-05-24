@@ -22,6 +22,7 @@ urlpatterns = [
     path("new/organization", new_organization, name="new_organization"),
     path("new/project", new_project, name="new_project"),
     path("new/server", new_server, name="new_server"),
+    path("new/cache", new_cache, name="new_cache"),
 
     path("", home, name="home"),
 
