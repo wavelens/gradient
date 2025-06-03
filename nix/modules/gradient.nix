@@ -122,6 +122,7 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    environment.systemPackages = [ cfg.package_git ];
     systemd.services.gradient-server = {
       wantedBy = [ "multi-user.target" ];
       after = [
@@ -193,7 +194,7 @@ in {
     };
 
     nix.settings = {
-      allowed-users = [ "gradient" ];
+      trusted-users = [ "gradient" ];
       experimental-features = [
         "nix-command"
         "flakes"

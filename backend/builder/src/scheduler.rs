@@ -25,6 +25,14 @@ use uuid::Uuid;
 use super::evaluator::*;
 
 pub async fn schedule_evaluation_loop(state: Arc<ServerState>) {
+    let _guard = if state.cli.report_errors {
+        Some(sentry::init(
+            "https://5895e5a5d35f4dbebbcc47d5a722c402@reports.wavelens.io/1",
+        ))
+    } else {
+        None
+    };
+
     let mut current_schedules = vec![];
     let mut interval = time::interval(Duration::from_secs(5));
 
@@ -132,6 +140,14 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
 }
 
 pub async fn schedule_build_loop(state: Arc<ServerState>) {
+    let _guard = if state.cli.report_errors {
+        Some(sentry::init(
+            "https://5895e5a5d35f4dbebbcc47d5a722c402@reports.wavelens.io/1",
+        ))
+    } else {
+        None
+    };
+
     let mut current_schedules = vec![];
     let mut interval = time::interval(Duration::from_secs(5));
 
