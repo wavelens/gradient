@@ -223,5 +223,5 @@ pub async fn run_cli() -> std::io::Result<()> {
         }
     }
 
-    exit(1);
+    exit(0);
 }

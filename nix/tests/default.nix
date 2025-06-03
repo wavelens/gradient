@@ -13,7 +13,8 @@ let
 
   tests-gradient = builtins.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./gradient));
   tests = map-folder "gradient" tests-gradient;
-in builtins.listToAttrs (map (test: {
+in builtins.listToAttrs (map (test: ({
   name =  builtins.replaceStrings [ "/" ] [ "-" ] test;
-  value = pkgs.testers.runNixOSTest ./${test};
-}) tests)
+} // (
+  import ./${test} { inherit pkgs; }
+))) tests)

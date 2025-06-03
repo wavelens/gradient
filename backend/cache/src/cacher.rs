@@ -20,6 +20,14 @@ use tokio::time;
 use uuid::Uuid;
 
 pub async fn cache_loop(state: Arc<ServerState>) {
+    let _guard = if state.cli.report_errors {
+        Some(sentry::init(
+            "https://5895e5a5d35f4dbebbcc47d5a722c402@reports.wavelens.io/1",
+        ))
+    } else {
+        None
+    };
+
     let mut interval = time::interval(Duration::from_secs(5));
 
     loop {
