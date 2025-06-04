@@ -12,8 +12,6 @@
     defaults = {
       networking.firewall.enable = false;
       virtualisation.writableStore = true;
-      # virtualisation.useNixStoreImage = true;
-      # virtualisation.useBootLoader = true;
       documentation.enable = false;
       nix.settings.substituters = lib.mkForce [ ];
     };
@@ -126,7 +124,6 @@
 
     interactive.nodes = {
       server = import ../../modules/debug-host.nix;
-      builder = import ../../modules/debug-host.nix;
     };
 
     testScript = { nodes, ... }:
@@ -135,7 +132,6 @@
 
       server.wait_for_unit("gradient-server.service")
       server.wait_for_unit("git-daemon.service")
-      server.succeed("systemctl restart nix-daemon.service")
       print(server.succeed("journalctl -u nix-daemon -n 200 --no-pager"))
       builder.succeed("systemctl restart nix-daemon.service")
       print(builder.succeed("journalctl -u nix-daemon -n 200 --no-pager"))
@@ -226,7 +222,7 @@
       print(server.succeed("cat /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv"))
       builder.succeed("cat /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv || true")
 
-      print(server.succeed("nix copy --to ssh-ng://builder /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv --offline"))
+      print(server.succeed("nix path-info /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv"))
       builder.succeed("cat /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv")
 
       # project_data = x(f"""

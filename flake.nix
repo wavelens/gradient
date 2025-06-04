@@ -61,6 +61,7 @@
   in
   {
     checks = import ./nix/tests { inherit inputs system pkgs; };
+    apps = import ./nix/vms { inherit inputs system pkgs; };
     packages = rec {
       gradient-server = pkgs.callPackage ./nix/packages/gradient-server.nix { };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };

@@ -14,7 +14,7 @@ let
   tests-gradient = builtins.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./gradient));
   tests = map-folder "gradient" tests-gradient;
 in builtins.listToAttrs (map (test: ({
-  name =  builtins.replaceStrings [ "/" ] [ "-" ] test;
+  name = builtins.replaceStrings [ "/" ] [ "-" ] test;
 } // (
   import ./${test} { inherit pkgs; }
 ))) tests)
