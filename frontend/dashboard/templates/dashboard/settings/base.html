@@ -22,10 +22,10 @@
      <aside class="settings-sidebar">
        <nav>
          <ul>
-           <li><a href="#">Startseite</a></li>
-           <li><a href="#">Über uns</a></li>
-           <li><a href="#">Leistungen</a></li>
-           <li><a href="#">Kontakt</a></li>
+           <li><a href="{% url 'settingsProject' %}">{% trans 'Project' %}</a></li>
+           <li><a href="{% url 'settingsOrganization' %}">{% trans 'Organization' %}</a></li>
+           <li><a href="{% url 'settingsServer' %}">{% trans 'Server' %}</a></li>
+           <li><a href="{% url 'settingsServer' %}">{% trans 'Public Profile' %}</a></li>
          </ul>
        </nav>
      </aside>

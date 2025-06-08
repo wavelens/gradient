@@ -250,6 +250,18 @@ def new_organization(request):
     return render(request, "dashboard/newOrganization.html", {'form': form})
 
 @login_required
+def edit_organization(request):
+    if request.method == 'POST':
+        form = EditOrganizationForm(request.POST)
+        if form.is_valid():
+            api.patch_orgs_organization(request, form.cleaned_data['name'], form.cleaned_data['display_name'], form.cleaned_data['description'])
+            return redirect('/')
+    else:
+        form = EditOrganizationForm()
+
+    return render(request, "dashboard/settings/organization.html", {'form': form})
+
+@login_required
 def new_cache(request):
     if request.method == 'POST':
         form = NewCacheForm(request.POST)
@@ -293,10 +305,47 @@ def new_project(request):
     return render(request, "dashboard/newProject.html", {'form': form})
 
 @login_required
+def edit_project(request):
+    org = request.GET.get("org")
+    all_orgs = api.get_orgs(request)
+
+    if isinstance(all_orgs, type(None)) or all_orgs['error']:
+        return HttpResponse(status=500)
+
+    all_orgs = all_orgs['message']
+
+    org_choices = [ (o['name'], o['name']) for o in all_orgs ]
+
+    if request.method == 'POST':
+        form = EditProjectForm(request.POST)
+        form.fields['organization'].choices = org_choices
+        if form.is_valid():
+            # TODO: ADD display_name
+            res = api.patch_projects_project(request, **form.cleaned_data)
+            if res is None:
+                form.add_error(None, "Das Projekt konnte nicht bearbeitet werden.")
+            elif 'error' in res and res['error'] != False:
+                error_msg = res['error']
+                form.add_error(None, f"Projekt konnte nicht bearbeitet werden: {error_msg}")
+                pass
+            else:
+                return redirect('/')
+    else:
+        form = EditProjectForm()
+        form.fields['organization'].choices = org_choices
+    return render(request, "dashboard/settings/project.html", {'form': form})
+
+@login_required
 def new_server(request):
     org = request.GET.get("org")
     form = NewServerForm()
     return render(request, "dashboard/newServer.html", {'form': form})
+
+@login_required
+def edit_server(request):
+    org = request.GET.get("org")
+    form = EditServerForm()
+    return render(request, "dashboard/settings/server.html", {'form': form})
 
 class UserLoginView(LoginView):
     template_name = "login.html"

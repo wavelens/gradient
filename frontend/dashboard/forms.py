@@ -254,3 +254,120 @@ class NewCacheForm(forms.Form):
             'class': 'form-control',
         })
     )
+
+class EditServerForm(forms.Form):
+    organization = forms.CharField(
+        label='Organization',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    server_name = forms.CharField(
+        label='Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    host = forms.CharField(
+        label='Host',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    port = forms.IntegerField(
+        label='Port',
+        required=True,
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control',
+        })
+    )
+    host = forms.CharField(
+        label='Username',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    architectures = forms.CharField(
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        }),
+        label='Architectures'
+    )
+    features = forms.CharField(
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        }),
+        label='Features'
+    )
+
+class EditOrganizationForm(forms.Form):
+    name = forms.CharField(
+        label='Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    display_name = forms.CharField(
+        label='Display Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    description = forms.CharField(
+        label='Description',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    
+class EditProjectForm(forms.Form):
+    organization = forms.ChoiceField(
+        label='Organization',
+        required=True,
+        widget=forms.Select
+    )
+
+    name = forms.CharField(
+        label='Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    display_name = forms.CharField(
+        label='Display Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    description = forms.CharField(
+        label='Description',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    repository = forms.CharField(
+        label='Repository',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    evaluation_wildcard = forms.CharField(
+        label='Wildcard',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )

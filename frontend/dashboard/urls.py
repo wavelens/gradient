@@ -26,5 +26,7 @@ urlpatterns = [
 
     path("", home, name="home"),
 
-    path("settings/server", settingsServer, name="settingsServer"),
+    path("settings/server", edit_server, name="settingsServer"),
+    path("settings/project", edit_project, name="settingsProject"),
+    path("settings/organization", edit_organization, name="settingsOrganization"),
 ]
