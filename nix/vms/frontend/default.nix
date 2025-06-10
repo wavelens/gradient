@@ -15,7 +15,7 @@
         ${lib.getExe pkgs.curl} \
         -X POST \
         -H "Content-Type: application/json" \
-        -d '{"username": "test", "name": "Test User", "email": "test@localhost.localdomain", "password": "password"}' \
+        -d '{"username": "test", "name": "Test User", "email": "test@localhost.local", "password": "password"}' \
         http://gradient.local/api/v1/auth/basic/register
     """)
 
@@ -55,8 +55,8 @@
       }
       {
         from = "host";
-        host.port = 8000;
-        guest.port = 8000;
+        host.port = 3000;
+        guest.port = 80;
       }
     ];
 
