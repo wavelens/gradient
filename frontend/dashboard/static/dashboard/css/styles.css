@@ -808,10 +808,12 @@ tr:hover td{
 }
 
 .form-field input {
-    width: 94.5%;
-    padding: 10px;
+    width: 100%;
     font-size: 16px;
     border-radius: 5px;
+    padding-block: 0;
+    padding-inline: 0;
+    padding: 10px 0;
 }
 
 .form-field select {
@@ -957,7 +959,7 @@ tr:hover td{
   
 .settings-sidebar {
     width: 250px;
-    padding: 16px;
+    /* padding: 16px; */
 }
   
 .settings-sidebar ul {
@@ -973,13 +975,37 @@ tr:hover td{
 .settings-sidebar a {
     text-decoration: none;
     font-weight: 500;
-    display: block;
-    padding: 8px 12px;
+    display: flex;
+    align-items: anchor-center;
     border-radius: 6px;
     transition: background-color 0.2s;
 }
   
 .settings-content {
     flex-grow: 1;
-    padding: 24px;
+    /* padding: 24px; */
+}
+
+.settings-nav {
+    padding: 0;
+    margin: 0;
+}
+
+.settings-nav a {
+    /* padding: 0; */
+    margin: 0;
+}
+
+.settings-content h2 {
+    margin-top: 0;
+}
+
+.settings-nav-link.active {
+    border-bottom: none;
+    border-left: 2px solid #007BFF;
+    border-radius: 0 5px 5px 0;
+}
+
+.settings-nav-link {
+    padding-left: 1rem;
 }

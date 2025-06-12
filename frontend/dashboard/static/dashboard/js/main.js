@@ -14,6 +14,16 @@ document.addEventListener("DOMContentLoaded", function() {
     });
 });
 
+document.addEventListener("DOMContentLoaded", function() {
+    const links = document.querySelectorAll('.settings-nav-link');
+    const currentURL = window.location.href;
+    links.forEach(link => {
+        if (link.href === currentURL) {
+            link.classList.add('active');
+        }
+    });
+});
+
 function toggleDropdown(openDropdownId, openTooltipId, closeDropdownId, closeTooltipId) {
     const openDropdown = document.getElementById(openDropdownId);
     const openTooltip = document.getElementById(openTooltipId);

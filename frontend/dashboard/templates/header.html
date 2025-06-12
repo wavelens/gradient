@@ -45,9 +45,9 @@
                             <p>{% trans 'signed in as' %} {{ request.user.name }}</p>
                             <!-- <a href="#home" class="flex-c"><span class="material-symbols-outlined m-r-5">account_circle</span><span>{% trans 'Profile' %}</span></a>
                             <a href="#about" class="flex-c"><span class="material-symbols-outlined m-r-5">star</span><span>{% trans 'Starred' %}</span></a>
-                            <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">notifications</span><span>{% trans 'Subscriptions' %}</span></a>
-                            <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">settings</span><span>{% trans 'Settings' %}</span></a>
-                            <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">help</span><span>{% trans 'Help' %}</span></a>
+                            <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">notifications</span><span>{% trans 'Subscriptions' %}</span></a> -->
+                            <a href="{% url 'settingsServer' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">settings</span><span>{% trans 'Settings' %}</span></a>
+                            <!-- <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">help</span><span>{% trans 'Help' %}</span></a>
                             <a href="#contact" class="flex-c"><span class="material-symbols-outlined m-r-5">tune</span><span>{% trans 'Side Administration' %}</span></a> -->
                             <a href="{% url 'logout' %}" class="flex-c"><span class="material-symbols-outlined m-r-5">logout</span><span>{% trans 'Sign Out' %}</span></a>
                         </div>

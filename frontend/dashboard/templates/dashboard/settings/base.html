@@ -20,12 +20,12 @@
  
    <div class="settings-layout">
      <aside class="settings-sidebar">
-       <nav>
+       <nav class="settings-nav">
          <ul>
-           <li><a href="{% url 'settingsProject' %}">{% trans 'Project' %}</a></li>
-           <li><a href="{% url 'settingsOrganization' %}">{% trans 'Organization' %}</a></li>
-           <li><a href="{% url 'settingsServer' %}">{% trans 'Server' %}</a></li>
-           <li><a href="{% url 'settingsServer' %}">{% trans 'Public Profile' %}</a></li>
+           <li><a class="settings-nav-link" href="{% url 'settingsProject' %}"><span class="material-symbols-outlined m-r-5">assignment</span>{% trans 'Project' %}</a></li>
+           <li><a class="settings-nav-link" href="{% url 'settingsOrganization' %}"><span class="material-symbols-outlined m-r-5">apartment</span>{% trans 'Organization' %}</a></li>
+           <li><a class="settings-nav-link" href="{% url 'settingsServer' %}"><span class="material-symbols-outlined m-r-5">host</span>{% trans 'Server' %}</a></li>
+           <li><a class="settings-nav-link" href="{% url 'settingsServer' %}"><span class="material-symbols-outlined m-r-5">person</span>{% trans 'Public Profile' %}</a></li>
          </ul>
        </nav>
      </aside>

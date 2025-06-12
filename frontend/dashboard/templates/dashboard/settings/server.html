@@ -15,9 +15,9 @@
  {% block title %}{% trans 'Settings' %}{% endblock %}
 
  {% block inhalt %}
- <div class="outer-form">
-    <div class="form-container">
-        <h2 class="form-header-label">{% trans 'New Server' %}</h2>
+ <div class="">
+    <div class="">
+        <h2 class="">{% trans 'New Server' %}</h2>
         <form method="post">
             {% csrf_token %}
             {% for field in form %}
