@@ -17,7 +17,7 @@
  {% block inhalt %}
  <div class="">
     <div class="">
-        <h2 class="">{% trans 'New Server' %}</h2>
+        <h2 class="">{% trans 'Edit Server' %}</h2>
         <form method="post">
             {% csrf_token %}
             {% for field in form %}
@@ -36,7 +36,7 @@
                     </div>
                 {% endif %}
             {% endfor %}
-            <button type="submit" class="submit-btn">{% trans 'Create' %}</button>
+            <button type="submit" class="submit-btn">{% trans 'Save' %}</button>
         </form>
     </div>
 </div>

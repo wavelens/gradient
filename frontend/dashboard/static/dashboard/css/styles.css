@@ -808,12 +808,12 @@ tr:hover td{
 }
 
 .form-field input {
-    width: 100%;
+    width: 97.5%;
     font-size: 16px;
     border-radius: 5px;
     padding-block: 0;
     padding-inline: 0;
-    padding: 10px 0;
+    padding: 10px;
 }
 
 .form-field select {
@@ -959,7 +959,7 @@ tr:hover td{
   
 .settings-sidebar {
     width: 250px;
-    /* padding: 16px; */
+    border-right: 1px solid rgba(118, 118, 118);
 }
   
 .settings-sidebar ul {
@@ -983,7 +983,7 @@ tr:hover td{
   
 .settings-content {
     flex-grow: 1;
-    /* padding: 24px; */
+    padding: 0 24px;
 }
 
 .settings-nav {
@@ -992,7 +992,6 @@ tr:hover td{
 }
 
 .settings-nav a {
-    /* padding: 0; */
     margin: 0;
 }
 
@@ -1008,4 +1007,12 @@ tr:hover td{
 
 .settings-nav-link {
     padding-left: 1rem;
+    border-left: 2px solid transparent;
+}
+
+.settings-nav a:hover {
+    border-bottom: none;
+    border-left: 2px solid #007bff91;
+    border-radius: 0 5px 5px 0;
+    background-color: transparent;
 }

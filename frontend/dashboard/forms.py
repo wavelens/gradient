@@ -203,7 +203,7 @@ class NewServerForm(forms.Form):
             'class': 'form-control',
         })
     )
-    host = forms.CharField(
+    username = forms.CharField(
         label='Username',
         required=True,
         widget=forms.TextInput(attrs={
@@ -256,8 +256,8 @@ class NewCacheForm(forms.Form):
     )
 
 class EditServerForm(forms.Form):
-    organization = forms.CharField(
-        label='Organization',
+    server = forms.CharField(
+        label='Server',
         required=True,
         widget=forms.TextInput(attrs={
             'class': 'form-control'
@@ -284,7 +284,7 @@ class EditServerForm(forms.Form):
             'class': 'form-control',
         })
     )
-    host = forms.CharField(
+    username = forms.CharField(
         label='Username',
         required=True,
         widget=forms.TextInput(attrs={
@@ -307,6 +307,11 @@ class EditServerForm(forms.Form):
     )
 
 class EditOrganizationForm(forms.Form):
+    organization = forms.ChoiceField(
+        label='Organization',
+        required=True,
+        widget=forms.Select
+    )
     name = forms.CharField(
         label='Name',
         required=True,
@@ -330,8 +335,8 @@ class EditOrganizationForm(forms.Form):
     )
     
 class EditProjectForm(forms.Form):
-    organization = forms.ChoiceField(
-        label='Organization',
+    project = forms.ChoiceField(
+        label='Project',
         required=True,
         widget=forms.Select
     )
@@ -366,6 +371,29 @@ class EditProjectForm(forms.Form):
     )
     evaluation_wildcard = forms.CharField(
         label='Wildcard',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+
+class EditUserForm(forms.Form):
+    name = forms.CharField(
+        label='Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    username = forms.CharField(
+        label='Username',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    email = forms.CharField(
+        label='Email',
         required=True,
         widget=forms.TextInput(attrs={
             'class': 'form-control'
