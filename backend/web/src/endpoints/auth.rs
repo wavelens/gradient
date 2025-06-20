@@ -257,7 +257,7 @@ pub async fn post_oauth_authorize(
         ));
     }
 
-    let authorize_url = oauth_login_create(state).map_err(|e| {
+    let authorize_url = oauth_login_create(state).await.map_err(|e| {
         (
             StatusCode::UNAUTHORIZED,
             Json(BaseResponse {

@@ -65,6 +65,8 @@ pub struct Cli {
     pub oauth_api_url: Option<String>,
     #[arg(long, env = "GRADIENT_OAUTH_SCOPES")]
     pub oauth_scopes: Option<String>,
+    #[arg(long, env = "GRADIENT_OIDC_DISCOVERY_URL")]
+    pub oidc_discovery_url: Option<String>,
     #[arg(long, env = "GRADIENT_CRYPT_SECRET_FILE")]
     pub crypt_secret_file: String,
     #[arg(long, env = "GRADIENT_JWT_SECRET_FILE")]

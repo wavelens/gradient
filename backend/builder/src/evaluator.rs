@@ -33,7 +33,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     store: &mut DaemonStore<C>,
     evaluation: &MEvaluation,
 ) -> Result<(Vec<MBuild>, Vec<MBuildDependency>), String> {
-    println!("Evaluating Evaluation: {}", evaluation.id);
+    println!("Evaluating: {}", evaluation.id);
     update_evaluation_status(
         Arc::clone(&state),
         evaluation.clone(),
@@ -84,13 +84,21 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 }
             };
 
-        let missing = get_missing_builds(vec![derivation.clone()], store).await?;
+        // TODO: switch back to using references from path_info
+        // let missing = get_missing_builds(vec![derivation.clone()], store).await?;
 
-        if missing.is_empty() {
-            println!("Skipping package: {}", derivation);
-            // TODO: add build output
-            continue;
-        }
+        // if missing.is_empty() {
+        //     println!("Skipping package: {}", derivation);
+
+        //     add_exsisting_build(
+        //         Arc::clone(&state),
+        //         organization_id,
+        //         derivation.clone(),
+        //         evaluation.id,
+        //     );
+
+        //     continue;
+        // }
 
         let already_exsists = all_builds.iter().any(|b| b.derivation_path == derivation);
 
@@ -102,7 +110,6 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 .is_empty()
         {
             println!("Skipping package: {}", derivation);
-            // TODO: add build output
             continue;
         }
 
@@ -142,9 +149,12 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
     while let Some((dependency, dependency_id, build_id)) = dependencies.pop() {
         let path_info = get_derivation(dependency.clone(), store).await.unwrap();
-        let references = get_missing_builds(path_info.references.clone(), store)
-            .await
-            .unwrap();
+
+        // TODO: switch back to using references from path_info
+        let references = path_info.references.clone();
+        // let references = get_missing_builds(path_info.references.clone(), store)
+        //     .await
+        //     .unwrap();
 
         let already_exsists = find_builds(Arc::clone(&state), organization_id, references.clone(), false)
             .await
@@ -418,6 +428,42 @@ pub async fn get_features_cmd(
         .unwrap();
 
     Ok((system, features))
+}
+
+async fn add_exsisting_build(
+    state: Arc<ServerState>,
+    organization_id: Uuid,
+    derivation: String,
+    evaluation_id: Uuid,
+) {
+    let abuild = ABuild {
+        id: Set(Uuid::new_v4()),
+        evaluation: Set(evaluation_id),
+        derivation_path: Set(derivation.clone()),
+        architecture: Set(entity::server::Architecture::X86_64Linux),
+        status: Set(BuildStatus::Completed),
+        server: Set(None),
+        log: Set(None),
+        created_at: Set(Utc::now().naive_utc()),
+        updated_at: Set(Utc::now().naive_utc()),
+    };
+
+    let build = abuild.insert(&state.db).await.unwrap();
+
+    // let abuild_output = ABuildOutput {
+    //     id: Set(Uuid::new_v4()),
+    //     build: Set(build.id),
+    //     output: Set(build_output),
+    //     hash: Set(build_output_path_hash),
+    //     package: Set(build_output_path_package),
+    //     file_hash: Set(None),
+    //     file_size: Set(None),
+    //     is_cached: Set(false),
+    //     ca: Set(None),
+    //     created_at: Set(Utc::now().naive_utc()),
+    // };
+
+    // abuild_output.insert(&state.db).await.unwrap();
 }
 
 async fn get_flake_derivations(

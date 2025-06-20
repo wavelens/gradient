@@ -223,7 +223,7 @@
       builder.succeed("cat /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv || true")
 
       print(server.succeed("nix path-info /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv"))
-      builder.succeed("cat /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv")
+      # builder.succeed("cat /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv")
 
       # project_data = x(f"""
       #   ${lib.getExe pkgs.curl} \
@@ -236,7 +236,7 @@
       # print(f"Got Project Data: {project_data}")
 
       # print(x("journalctl -u gradient-server -n 100 --no-pager"))
-      print(server.succeed("ssh server ${lib.getExe pkgs.tree} /var/lib/gradient"))
+      # print(server.succeed("ssh server ${lib.getExe pkgs.tree} /var/lib/gradient"))
 
       # TODO wait until project last_evaluation != null
       '';
