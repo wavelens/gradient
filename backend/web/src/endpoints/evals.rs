@@ -6,10 +6,10 @@
 
 use async_stream::stream;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
 use builder::scheduler::abort_evaluation;
+use crate::error::{WebError, WebResult};
 use core::types::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -26,43 +26,29 @@ pub async fn get_evaluation(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(evaluation_id): Path<Uuid>,
-) -> Result<Json<BaseResponse<MEvaluation>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let evaluation = match EEvaluation::find_by_id(evaluation_id)
+) -> WebResult<Json<BaseResponse<MEvaluation>>> {
+    let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&state.db)
-        .await
-        .unwrap()
-    {
-        Some(e) => e,
-        None => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Evaluation not found".to_string(),
-                }),
-            ))
-        }
-    };
+        .await?
+        .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
     let project = EProject::find_by_id(evaluation.project)
         .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+        .await?
+        .ok_or_else(|| {
+            tracing::error!("Project {} not found for evaluation {}", evaluation.project, evaluation_id);
+            WebError::InternalServerError("Evaluation data inconsistency".to_string())
+        })?;
     let organization = EOrganization::find_by_id(project.organization)
         .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+        .await?
+        .ok_or_else(|| {
+            tracing::error!("Organization {} not found for project {}", project.organization, project.id);
+            WebError::InternalServerError("Project data inconsistency".to_string())
+        })?;
 
     if organization.created_by != user.id {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(BaseResponse {
-                error: true,
-                message: "Evaluation not found".to_string(),
-            }),
-        ));
+        return Err(WebError::not_found("Evaluation"));
     }
 
     let res = BaseResponse {
@@ -78,43 +64,29 @@ pub async fn post_evaluation(
     Extension(user): Extension<MUser>,
     Path(evaluation_id): Path<Uuid>,
     Json(body): Json<MakeEvaluationRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let evaluation = match EEvaluation::find_by_id(evaluation_id)
+) -> WebResult<Json<BaseResponse<String>>> {
+    let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&state.db)
-        .await
-        .unwrap()
-    {
-        Some(e) => e,
-        None => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Evaluation not found".to_string(),
-                }),
-            ))
-        }
-    };
+        .await?
+        .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
     let project = EProject::find_by_id(evaluation.project)
         .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+        .await?
+        .ok_or_else(|| {
+            tracing::error!("Project {} not found for evaluation {}", evaluation.project, evaluation_id);
+            WebError::InternalServerError("Evaluation data inconsistency".to_string())
+        })?;
     let organization = EOrganization::find_by_id(project.organization)
         .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+        .await?
+        .ok_or_else(|| {
+            tracing::error!("Organization {} not found for project {}", project.organization, project.id);
+            WebError::InternalServerError("Project data inconsistency".to_string())
+        })?;
 
     if organization.created_by != user.id {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(BaseResponse {
-                error: true,
-                message: "Evaluation not found".to_string(),
-            }),
-        ));
+        return Err(WebError::not_found("Evaluation"));
     }
 
     if body.method == "abort" {
@@ -133,51 +105,36 @@ pub async fn get_evaluation_builds(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(evaluation_id): Path<Uuid>,
-) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let evaluation = match EEvaluation::find_by_id(evaluation_id)
+) -> WebResult<Json<BaseResponse<ListResponse>>> {
+    let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&state.db)
-        .await
-        .unwrap()
-    {
-        Some(e) => e,
-        None => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Evaluation not found".to_string(),
-                }),
-            ))
-        }
-    };
+        .await?
+        .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
     let project = EProject::find_by_id(evaluation.project)
         .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+        .await?
+        .ok_or_else(|| {
+            tracing::error!("Project {} not found for evaluation {}", evaluation.project, evaluation_id);
+            WebError::InternalServerError("Evaluation data inconsistency".to_string())
+        })?;
 
     let organization = EOrganization::find_by_id(project.organization)
         .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+        .await?
+        .ok_or_else(|| {
+            tracing::error!("Organization {} not found for project {}", project.organization, project.id);
+            WebError::InternalServerError("Project data inconsistency".to_string())
+        })?;
 
     if organization.created_by != user.id {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(BaseResponse {
-                error: true,
-                message: "Evaluation not found".to_string(),
-            }),
-        ));
+        return Err(WebError::not_found("Evaluation"));
     }
 
     let builds = EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation.id))
         .all(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
     let builds: ListResponse = builds
         .iter()
@@ -199,44 +156,30 @@ pub async fn post_evaluation_builds(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(evaluation_id): Path<Uuid>,
-) -> Result<StreamBodyAs<'static>, (StatusCode, Json<BaseResponse<String>>)> {
-    let evaluation = match EEvaluation::find_by_id(evaluation_id)
+) -> Result<StreamBodyAs<'static>, WebError> {
+    let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&state.db)
-        .await
-        .unwrap()
-    {
-        Some(e) => e,
-        None => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Evaluation not found".to_string(),
-                }),
-            ))
-        }
-    };
+        .await?
+        .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
     let project = EProject::find_by_id(evaluation.project)
         .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+        .await?
+        .ok_or_else(|| {
+            tracing::error!("Project {} not found for evaluation {}", evaluation.project, evaluation_id);
+            WebError::InternalServerError("Evaluation data inconsistency".to_string())
+        })?;
     let organization = EOrganization::find_by_id(project.organization)
         .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+        .await?
+        .ok_or_else(|| {
+            tracing::error!("Organization {} not found for project {}", project.organization, project.id);
+            WebError::InternalServerError("Project data inconsistency".to_string())
+        })?;
 
     // TODO: Check if user is in organization
     if organization.created_by != user.id {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(BaseResponse {
-                error: true,
-                message: "Evaluation not found".to_string(),
-            }),
-        ));
+        return Err(WebError::not_found("Evaluation"));
     }
 
     let condition = Condition::all()

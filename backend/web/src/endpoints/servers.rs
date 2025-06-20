@@ -7,6 +7,7 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use crate::error::{WebError, WebResult};
 use chrono::Utc;
 use core::consts::*;
 use core::database::{add_features, get_organization_by_name, get_server_by_name};
@@ -46,27 +47,15 @@ pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<ListResponse>>> {
     // TODO: Implement pagination
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let servers = EServer::find()
         .filter(CServer::Organization.eq(organization.id))
         .all(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
     let servers: ListResponse = servers
         .iter()
@@ -89,30 +78,13 @@ pub async fn put(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
     Json(body): Json<MakeServerRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<String>>> {
     if check_index_name(body.name.clone().as_str()).is_err() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(BaseResponse {
-                error: true,
-                message: "Invalid Server Name".to_string(),
-            }),
-        ));
+        return Err(WebError::invalid_name("Server Name"));
     }
 
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let server = EServer::find()
         .filter(
@@ -121,18 +93,11 @@ pub async fn put(
                 .add(CServer::Name.eq(body.name.clone())),
         )
         .one(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
     if server.is_some() {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(BaseResponse {
-                error: true,
-                message: "Server Name already exists".to_string(),
-            }),
-        ));
-    };
+        return Err(WebError::already_exists("Server Name"));
+    }
 
     let server = AServer {
         id: Set(Uuid::new_v4()),
@@ -156,16 +121,10 @@ pub async fn put(
         .collect::<Vec<entity::server::Architecture>>();
 
     if architectures.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(BaseResponse {
-                error: true,
-                message: "Invalid Architectures".to_string(),
-            }),
-        ));
+        return Err(WebError::BadRequest("Invalid Architectures".to_string()));
     }
 
-    let server = server.insert(&state.db).await.unwrap();
+    let server = server.insert(&state.db).await?;
     let server_architecture = architectures
         .iter()
         .map(|a| AServerArchitecture {
@@ -185,8 +144,7 @@ pub async fn put(
 
     EServerArchitecture::insert_many(server_architecture)
         .exec(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
     let res = BaseResponse {
         error: false,

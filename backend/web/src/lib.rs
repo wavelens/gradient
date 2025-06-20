@@ -6,6 +6,7 @@
 
 pub mod authorization;
 mod endpoints;
+pub mod error;
 
 use axum::body::Body;
 use axum::routing::{get, post};

@@ -5,8 +5,8 @@
  */
 
 use crate::authorization::{encode_jwt, oauth_login_create, oauth_login_verify, update_last_login};
+use crate::error::{WebError, WebResult};
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
 use axum::Json;
 use chrono::Utc;
 use core::consts::*;
@@ -38,56 +38,31 @@ pub struct MakeUserRequest {
 pub async fn post_basic_register(
     state: State<Arc<ServerState>>,
     Json(body): Json<MakeUserRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<String>>> {
     if state.cli.oauth_required || state.cli.disable_registration {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(BaseResponse {
-                error: true,
-                message: "Registration is disabled".to_string(),
-            }),
-        ));
+        return Err(WebError::registration_disabled());
     }
 
     if check_index_name(body.username.clone().as_str()).is_err() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(BaseResponse {
-                error: true,
-                message: "Invalid Username".to_string(),
-            }),
-        ));
+        return Err(WebError::invalid_name("Username"));
     }
 
     if !EmailAddress::is_valid(body.email.clone().as_str()) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(BaseResponse {
-                error: true,
-                message: "Invalid Email".to_string(),
-            }),
-        ));
+        return Err(WebError::invalid_email());
     }
 
-    let user = EUser::find()
+    let existing_user = EUser::find()
         .filter(
             Condition::any()
                 .add(CUser::Username.eq(body.username.clone()))
                 .add(CUser::Email.eq(body.email.clone())),
         )
         .one(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
-    if user.is_some() {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(BaseResponse {
-                error: true,
-                message: "User already exists".to_string(),
-            }),
-        ));
-    };
+    if existing_user.is_some() {
+        return Err(WebError::already_exists("User"));
+    }
 
     let user = AUser {
         id: Set(Uuid::new_v4()),
@@ -99,7 +74,7 @@ pub async fn post_basic_register(
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    let user = user.insert(&state.db).await.unwrap();
+    let user = user.insert(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -112,81 +87,32 @@ pub async fn post_basic_register(
 pub async fn post_basic_login(
     state: State<Arc<ServerState>>,
     Json(body): Json<MakeLoginRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<String>>> {
     if state.cli.oauth_required {
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(BaseResponse {
-                error: true,
-                message: "Please login via OAuth".to_string(),
-            }),
-        ));
+        return Err(WebError::oauth_required());
     }
 
-    let user = match EUser::find()
+    let user = EUser::find()
         .filter(
             Condition::any()
                 .add(CUser::Username.eq(body.loginname.clone()))
                 .add(CUser::Email.eq(body.loginname.clone())),
         )
         .one(&state.db)
-        .await
-        .unwrap()
-    {
-        Some(u) => u,
-        None => {
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Invalid credentials".to_string(),
-                }),
-            ))
-        }
-    };
+        .await?
+        .ok_or_else(|| WebError::invalid_credentials())?;
 
-    let user_password = match user.password.clone() {
-        Some(p) => p,
-        None => {
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Please login via OAuth".to_string(),
-                }),
-            ))
-        }
-    };
+    let user_password = user.password.clone()
+        .ok_or_else(|| WebError::oauth_required())?;
 
-    verify_password(body.password, &user_password).map_err(|_| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(BaseResponse {
-                error: true,
-                message: "Invalid credentials".to_string(),
-            }),
-        )
-    })?;
+    verify_password(body.password, &user_password)
+        .map_err(|_| WebError::invalid_credentials())?;
 
-    let token = encode_jwt(state.clone(), user.id).map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(BaseResponse {
-                error: true,
-                message: "Failed to generate token".to_string(),
-            }),
-        )
-    })?;
+    let token = encode_jwt(state.clone(), user.id)
+        .map_err(|_| WebError::failed_to_generate_token())?;
 
-    update_last_login(state, user).await.map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(BaseResponse {
-                error: true,
-                message: "Failed to update user".to_string(),
-            }),
-        )
-    })?;
+    update_last_login(state, user).await
+        .map_err(|_| WebError::failed_to_update_user())?;
 
     let res = BaseResponse {
         error: false,
@@ -199,42 +125,15 @@ pub async fn post_basic_login(
 pub async fn get_oauth_authorize(
     state: State<Arc<ServerState>>,
     Query(query): Query<HashMap<String, String>>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let code = match query.get("code") {
-        Some(c) => c,
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Invalid OAuth Code".to_string(),
-                }),
-            ))
-        }
-    };
+) -> WebResult<Json<BaseResponse<String>>> {
+    let code = query.get("code")
+        .ok_or_else(|| WebError::invalid_oauth_code())?;
 
-    let user: MUser = match oauth_login_verify(state.clone(), code.to_string()).await {
-        Ok(u) => u,
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: e.to_string(),
-                }),
-            ))
-        }
-    };
+    let user: MUser = oauth_login_verify(state.clone(), code.to_string()).await
+        .map_err(|e| WebError::InternalServerError(e.to_string()))?;
 
-    let token = encode_jwt(state, user.id).map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(BaseResponse {
-                error: true,
-                message: "Failed to generate token".to_string(),
-            }),
-        )
-    })?;
+    let token = encode_jwt(state, user.id)
+        .map_err(|_| WebError::failed_to_generate_token())?;
 
     let res = BaseResponse {
         error: false,
@@ -246,26 +145,13 @@ pub async fn get_oauth_authorize(
 
 pub async fn post_oauth_authorize(
     state: State<Arc<ServerState>>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<String>>> {
     if !state.cli.oauth_enabled {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(BaseResponse {
-                error: true,
-                message: "OAuth login is disabled".to_string(),
-            }),
-        ));
+        return Err(WebError::oauth_disabled());
     }
 
-    let authorize_url = oauth_login_create(state).await.map_err(|e| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(BaseResponse {
-                error: true,
-                message: e.to_string(),
-            }),
-        )
-    })?;
+    let authorize_url = oauth_login_create(state).await
+        .map_err(|e| WebError::Unauthorized(e.to_string()))?;
 
     let res = BaseResponse {
         error: false,
@@ -277,7 +163,7 @@ pub async fn post_oauth_authorize(
 
 pub async fn post_logout(
     _state: State<Arc<ServerState>>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<String>>> {
     // TODO: invalidate token if needed
     let res = BaseResponse {
         error: false,

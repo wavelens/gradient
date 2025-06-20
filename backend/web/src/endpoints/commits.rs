@@ -5,8 +5,8 @@
  */
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
 use axum::{Extension, Json};
+use crate::error::{WebError, WebResult};
 use core::types::*;
 use sea_orm::EntityTrait;
 use std::sync::Arc;
@@ -16,19 +16,9 @@ pub async fn get_commit(
     state: State<Arc<ServerState>>,
     Extension(_user): Extension<MUser>,
     Path(commit_id): Path<Uuid>,
-) -> Result<Json<BaseResponse<MCommit>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let commit = match ECommit::find_by_id(commit_id).one(&state.db).await.unwrap() {
-        Some(b) => b,
-        None => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Commit not found".to_string(),
-                }),
-            ))
-        }
-    };
+) -> WebResult<Json<BaseResponse<MCommit>>> {
+    let commit = ECommit::find_by_id(commit_id).one(&state.db).await?
+        .ok_or_else(|| WebError::not_found("Commit"))?;
 
     // TODO: Check if user has access to the commit
 

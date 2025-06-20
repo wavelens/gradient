@@ -5,8 +5,8 @@
  */
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
 use axum::{Extension, Json};
+use crate::error::{WebError, WebResult};
 use chrono::Utc;
 use core::consts::*;
 use core::database::{get_organization_by_name, get_project_by_name};
@@ -43,27 +43,15 @@ pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<ListResponse>>> {
     // TODO: Implement pagination
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let projects = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
         .all(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
     let projects: ListResponse = projects
         .iter()
@@ -86,69 +74,32 @@ pub async fn put(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
     Json(body): Json<MakeProjectRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<String>>> {
     if check_index_name(body.name.clone().as_str()).is_err() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(BaseResponse {
-                error: true,
-                message: "Invalid Project Name".to_string(),
-            }),
-        ));
+        return Err(WebError::invalid_name("Project Name"));
     }
 
-    let repository_url = normalize_url(body.repository.clone().as_str()).map_err(|_| {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(BaseResponse {
-                error: true,
-                message: "Invalid Repository URL".to_string(),
-            }),
-        )
-    })?;
+    let repository_url = normalize_url(body.repository.clone().as_str())
+        .map_err(|_| WebError::BadRequest("Invalid Repository URL".to_string()))?;
 
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    let project = EProject::find()
+    let existing_project = EProject::find()
         .filter(
             Condition::all()
                 .add(CProject::Organization.eq(organization.id))
                 .add(CProject::Name.eq(body.name.clone())),
         )
         .one(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
-    if project.is_some() {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(BaseResponse {
-                error: true,
-                message: "Project Name already exists".to_string(),
-            }),
-        ));
-    };
+    if existing_project.is_some() {
+        return Err(WebError::already_exists("Project Name"));
+    }
 
     if !valid_evaluation_wildcard(body.evaluation_wildcard.clone().as_str()) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(BaseResponse {
-                error: true,
-                message: "Invalid Evaluation Wildcard".to_string(),
-            }),
-        ));
+        return Err(WebError::BadRequest("Invalid Evaluation Wildcard".to_string()));
     }
 
     let project = AProject {
@@ -167,7 +118,7 @@ pub async fn put(
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    let project = project.insert(&state.db).await.unwrap();
+    let project = project.insert(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -181,26 +132,15 @@ pub async fn get_project(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
-) -> Result<Json<BaseResponse<MProject>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let (_organization, project): (MOrganization, MProject) = match get_project_by_name(
+) -> WebResult<Json<BaseResponse<MProject>>> {
+    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
         state.0.clone(),
         user.id,
         organization.clone(),
         project.clone(),
     )
     .await
-    {
-        Some((o, p)) => (o, p),
-        _ => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Project not found".to_string(),
-                }),
-            ))
-        }
-    };
+    .ok_or_else(|| WebError::not_found("Project"))?;
 
     let res = BaseResponse {
         error: false,
@@ -215,59 +155,35 @@ pub async fn patch_project(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
     Json(body): Json<PatchProjectRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let (organization, project): (MOrganization, MProject) = match get_project_by_name(
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (organization, project): (MOrganization, MProject) = get_project_by_name(
         state.0.clone(),
         user.id,
         organization.clone(),
         project.clone(),
     )
     .await
-    {
-        Some((o, p)) => (o, p),
-        _ => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Project not found".to_string(),
-                }),
-            ))
-        }
-    };
+    .ok_or_else(|| WebError::not_found("Project"))?;
 
     let mut aproject: AProject = project.into();
 
     if let Some(name) = body.name {
         if check_index_name(name.as_str()).is_err() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Invalid Project Name".to_string(),
-                }),
-            ));
+            return Err(WebError::invalid_name("Project Name"));
         }
 
-        let project = EProject::find()
+        let existing_project = EProject::find()
             .filter(
                 Condition::all()
                     .add(CProject::Organization.eq(organization.id))
                     .add(CProject::Name.eq(name.clone())),
             )
             .one(&state.db)
-            .await
-            .unwrap();
+            .await?;
 
-        if project.is_some() {
-            return Err((
-                StatusCode::CONFLICT,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Project Name already exists".to_string(),
-                }),
-            ));
-        };
+        if existing_project.is_some() {
+            return Err(WebError::already_exists("Project Name"));
+        }
 
         aproject.name = Set(name);
     }
@@ -281,35 +197,22 @@ pub async fn patch_project(
     }
 
     if let Some(repository) = body.repository {
-        let repository_url = normalize_url(repository.as_str()).map_err(|_| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Invalid Repository URL".to_string(),
-                }),
-            )
-        })?;
+        let repository_url = normalize_url(repository.as_str())
+            .map_err(|_| WebError::BadRequest("Invalid Repository URL".to_string()))?;
 
         aproject.repository = Set(repository_url.to_string());
     }
 
     if let Some(evaluation_wildcard) = body.evaluation_wildcard {
         if !valid_evaluation_wildcard(evaluation_wildcard.as_str()) {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Invalid Evaluation Wildcard".to_string(),
-                }),
-            ));
+            return Err(WebError::BadRequest("Invalid Evaluation Wildcard".to_string()));
         }
 
         aproject.evaluation_wildcard = Set(evaluation_wildcard);
     }
 
     aproject.force_evaluation = Set(true);
-    aproject.update(&state.db).await.unwrap();
+    aproject.update(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -323,29 +226,18 @@ pub async fn delete_project(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let (_organization, project): (MOrganization, MProject) = match get_project_by_name(
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
         state.0.clone(),
         user.id,
         organization.clone(),
         project.clone(),
     )
     .await
-    {
-        Some((o, p)) => (o, p),
-        _ => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Project not found".to_string(),
-                }),
-            ))
-        }
-    };
+    .ok_or_else(|| WebError::not_found("Project"))?;
 
     let aproject: AProject = project.into();
-    aproject.delete(&state.db).await.unwrap();
+    aproject.delete(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -359,30 +251,19 @@ pub async fn post_project_active(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let (_organization, project): (MOrganization, MProject) = match get_project_by_name(
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
         state.0.clone(),
         user.id,
         organization.clone(),
         project.clone(),
     )
     .await
-    {
-        Some(p) => p,
-        _ => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Project not found".to_string(),
-                }),
-            ))
-        }
-    };
+    .ok_or_else(|| WebError::not_found("Project"))?;
 
     let mut aproject: AProject = project.into();
     aproject.active = Set(true);
-    aproject.update(&state.db).await.unwrap();
+    aproject.update(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -396,30 +277,19 @@ pub async fn delete_project_active(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let (_organization, project): (MOrganization, MProject) = match get_project_by_name(
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
         state.0.clone(),
         user.id,
         organization.clone(),
         project.clone(),
     )
     .await
-    {
-        Some(p) => p,
-        _ => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Project not found".to_string(),
-                }),
-            ))
-        }
-    };
+    .ok_or_else(|| WebError::not_found("Project"))?;
 
     let mut aproject: AProject = project.into();
     aproject.active = Set(false);
-    aproject.update(&state.db).await.unwrap();
+    aproject.update(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -433,26 +303,15 @@ pub async fn post_project_check_repository(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let (_organization, project): (MOrganization, MProject) = match get_project_by_name(
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
         state.0.clone(),
         user.id,
         organization.clone(),
         project.clone(),
     )
     .await
-    {
-        Some((o, p)) => (o, p),
-        None => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Project not found".to_string(),
-                }),
-            ))
-        }
-    };
+    .ok_or_else(|| WebError::not_found("Project"))?;
 
     let (_has_updates, remote_hash) = check_project_updates(Arc::clone(&state), &project).await;
 
@@ -464,13 +323,7 @@ pub async fn post_project_check_repository(
 
         Ok(Json(res))
     } else {
-        Err((
-            StatusCode::GATEWAY_TIMEOUT,
-            Json(BaseResponse {
-                error: true,
-                message: "Failed to check repository".to_string(),
-            }),
-        ))
+        Err(WebError::InternalServerError("Failed to check repository".to_string()))
     }
 }
 
@@ -478,45 +331,30 @@ pub async fn post_project_evaluate(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let (_organization, project): (MOrganization, MProject) = match get_project_by_name(
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
         state.0.clone(),
         user.id,
         organization.clone(),
         project.clone(),
     )
     .await
-    {
-        Some((o, p)) => (o, p),
-        _ => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Project not found".to_string(),
-                }),
-            ))
-        }
-    };
+    .ok_or_else(|| WebError::not_found("Project"))?;
 
     if let Some(evaluation_id) = project.last_evaluation {
         let evaluation: MEvaluation = EEvaluation::find_by_id(evaluation_id)
             .one(&state.db)
-            .await
-            .unwrap()
-            .unwrap();
+            .await?
+            .ok_or_else(|| {
+                tracing::error!("Evaluation {} not found for project {}", evaluation_id, project.id);
+                WebError::InternalServerError("Evaluation data inconsistency".to_string())
+            })?;
 
         if evaluation.status == EvaluationStatus::Queued
             || evaluation.status == EvaluationStatus::Evaluating
             || evaluation.status == EvaluationStatus::Building
         {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Evaluation already in progress".to_string(),
-                }),
-            ));
+            return Err(WebError::BadRequest("Evaluation already in progress".to_string()));
         }
     }
 
@@ -524,7 +362,7 @@ pub async fn post_project_evaluate(
 
     aproject.last_check_at = Set(*NULL_TIME);
     aproject.force_evaluation = Set(true);
-    aproject.save(&state.db).await.unwrap();
+    aproject.save(&state.db).await?;
 
     let res = BaseResponse {
         error: false,

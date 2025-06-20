@@ -5,8 +5,8 @@
  */
 
 use crate::authorization::generate_api_key;
+use crate::error::{WebError, WebResult};
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::{Extension, Json};
 use chrono::Utc;
 use core::consts::*;
@@ -46,7 +46,7 @@ pub struct GetUserSettingsResponse {
 
 pub async fn get(
     Extension(user): Extension<MUser>,
-) -> Result<Json<BaseResponse<UserInfoResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<UserInfoResponse>>> {
     let user_info = UserInfoResponse {
         id: user.id.to_string(),
         username: user.username.clone(),
@@ -65,10 +65,10 @@ pub async fn get(
 pub async fn delete(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<String>>> {
     // TODO: Make sure to delete all related data and that cascade is working
     let auser: AUser = user.into();
-    auser.delete(&state.db).await.unwrap();
+    auser.delete(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -81,12 +81,11 @@ pub async fn delete(
 pub async fn get_keys(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<ListResponse>>> {
     let api_keys = EApi::find()
         .filter(CApi::OwnedBy.eq(user.id))
         .all(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
     let api_keys: ListResponse = api_keys
         .iter()
@@ -108,26 +107,19 @@ pub async fn post_keys(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Json(body): Json<ApiKeyRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let api_key = EApi::find()
+) -> WebResult<Json<BaseResponse<String>>> {
+    let existing_api_key = EApi::find()
         .filter(
             Condition::all()
                 .add(CApi::OwnedBy.eq(user.id))
                 .add(CApi::Name.eq(body.name.clone())),
         )
         .one(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
-    if api_key.is_some() {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(BaseResponse {
-                error: true,
-                message: "API-Key Name already exists".to_string(),
-            }),
-        ));
-    };
+    if existing_api_key.is_some() {
+        return Err(WebError::already_exists("API-Key Name"));
+    }
 
     let api_key = AApi {
         id: Set(Uuid::new_v4()),
@@ -138,7 +130,7 @@ pub async fn post_keys(
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    let api_key = api_key.insert(&state.db).await.unwrap();
+    let api_key = api_key.insert(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -152,7 +144,7 @@ pub async fn delete_keys(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Json(body): Json<ApiKeyRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<String>>> {
     let api_key = EApi::find()
         .filter(
             Condition::all()
@@ -160,24 +152,11 @@ pub async fn delete_keys(
                 .add(CApi::Name.eq(body.name.clone())),
         )
         .one(&state.db)
-        .await
-        .unwrap();
-
-    let api_key = match api_key {
-        Some(api_key) => api_key,
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(BaseResponse {
-                    error: true,
-                    message: "API-Key not found".to_string(),
-                }),
-            ));
-        }
-    };
+        .await?
+        .ok_or_else(|| WebError::not_found("API-Key"))?;
 
     let aapi_key: AApi = api_key.into();
-    aapi_key.delete(&state.db).await.unwrap();
+    aapi_key.delete(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -189,7 +168,7 @@ pub async fn delete_keys(
 
 pub async fn get_settings(
     Extension(user): Extension<MUser>,
-) -> Result<Json<BaseResponse<GetUserSettingsResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<GetUserSettingsResponse>>> {
     let res = BaseResponse {
         error: false,
         message: GetUserSettingsResponse {
@@ -206,24 +185,17 @@ pub async fn patch_settings(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Json(body): Json<PatchUserSettingsRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<String>>> {
     let mut auser: AUser = user.into();
 
     if let Some(username) = body.username {
-        let user = EUser::find()
+        let existing_user = EUser::find()
             .filter(CUser::Username.eq(username.clone()))
             .one(&state.db)
-            .await
-            .unwrap();
+            .await?;
 
-        if user.is_some() {
-            return Err((
-                StatusCode::CONFLICT,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Username already exists".to_string(),
-                }),
-            ));
+        if existing_user.is_some() {
+            return Err(WebError::already_exists("Username"));
         }
 
         auser.username = Set(username);
@@ -234,26 +206,19 @@ pub async fn patch_settings(
     }
 
     if let Some(email) = body.email {
-        let user = EUser::find()
+        let existing_user = EUser::find()
             .filter(CUser::Email.eq(email.clone()))
             .one(&state.db)
-            .await
-            .unwrap();
+            .await?;
 
-        if user.is_some() {
-            return Err((
-                StatusCode::CONFLICT,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Email already exists".to_string(),
-                }),
-            ));
+        if existing_user.is_some() {
+            return Err(WebError::already_exists("Email"));
         }
 
         auser.email = Set(email);
     }
 
-    auser.update(&state.db).await.unwrap();
+    auser.update(&state.db).await?;
 
     let res = BaseResponse {
         error: false,

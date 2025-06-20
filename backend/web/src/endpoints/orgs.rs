@@ -5,8 +5,8 @@
  */
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
 use axum::{Extension, Json};
+use crate::error::{WebError, WebResult};
 use chrono::Utc;
 use core::consts::BASE_ROLE_ADMIN_ID;
 use core::database::{get_cache_by_name, get_organization_by_name};
@@ -49,7 +49,7 @@ pub struct RemoveUserRequest {
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<ListResponse>>> {
     // TODO: Implement pagination
     let organizations = EOrganization::find()
         .join_rev(
@@ -61,8 +61,7 @@ pub async fn get(
         )
         .filter(COrganizationUser::User.eq(user.id))
         .all(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
     let organizations: ListResponse = organizations
         .iter()
@@ -84,44 +83,24 @@ pub async fn put(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Json(body): Json<MakeOrganizationRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<String>>> {
     if check_index_name(body.name.clone().as_str()).is_err() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(BaseResponse {
-                error: true,
-                message: "Invalid Organization Name".to_string(),
-            }),
-        ));
+        return Err(WebError::invalid_name("Organization Name"));
     }
 
-    let organization = EOrganization::find()
+    let existing_organization = EOrganization::find()
         .filter(COrganization::Name.eq(body.name.clone()))
         .one(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
-    if organization.is_some() {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(BaseResponse {
-                error: true,
-                message: "Organization Name already exists".to_string(),
-            }),
-        ));
+    if existing_organization.is_some() {
+        return Err(WebError::already_exists("Organization Name"));
     }
 
-    let (private_key, public_key) =
-        generate_ssh_key(state.cli.crypt_secret_file.clone()).map_err(|e| {
-            println!("{}", e);
-
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Failed to generate SSH key".to_string(),
-                }),
-            )
+    let (private_key, public_key) = generate_ssh_key(state.cli.crypt_secret_file.clone())
+        .map_err(|e| {
+            tracing::error!("Failed to generate SSH key: {}", e);
+            WebError::failed_ssh_key_generation()
         })?;
 
     let organization = AOrganization {
@@ -136,7 +115,7 @@ pub async fn put(
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    let organization = organization.insert(&state.db).await.unwrap();
+    let organization = organization.insert(&state.db).await?;
 
     let organization_user = AOrganizationUser {
         id: Set(Uuid::new_v4()),
@@ -145,7 +124,7 @@ pub async fn put(
         role: Set(BASE_ROLE_ADMIN_ID),
     };
 
-    organization_user.insert(&state.db).await.unwrap();
+    organization_user.insert(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -159,20 +138,9 @@ pub async fn get_organization(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> Result<Json<BaseResponse<MOrganization>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+) -> WebResult<Json<BaseResponse<MOrganization>>> {
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let res = BaseResponse {
         error: false,
@@ -187,48 +155,24 @@ pub async fn patch_organization(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
     Json(body): Json<PatchOrganizationRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+) -> WebResult<Json<BaseResponse<String>>> {
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let mut aorganization: AOrganization = organization.into();
 
     if let Some(name) = body.name {
         if check_index_name(name.as_str()).is_err() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Invalid Organization Name".to_string(),
-                }),
-            ));
+            return Err(WebError::invalid_name("Organization Name"));
         }
 
-        let organization = EOrganization::find()
+        let existing_organization = EOrganization::find()
             .filter(COrganization::Name.eq(name.clone()))
             .one(&state.db)
-            .await
-            .unwrap();
+            .await?;
 
-        if organization.is_some() {
-            return Err((
-                StatusCode::CONFLICT,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Organization Name already exists".to_string(),
-                }),
-            ));
+        if existing_organization.is_some() {
+            return Err(WebError::already_exists("Organization Name"));
         }
 
         aorganization.name = Set(name);
@@ -242,7 +186,7 @@ pub async fn patch_organization(
         aorganization.description = Set(description);
     }
 
-    let organization = aorganization.update(&state.db).await.unwrap();
+    let organization = aorganization.update(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -256,23 +200,12 @@ pub async fn delete_organization(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+) -> WebResult<Json<BaseResponse<String>>> {
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let aorganization: AOrganization = organization.into();
-    aorganization.delete(&state.db).await.unwrap();
+    aorganization.delete(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -286,26 +219,14 @@ pub async fn get_organization_users(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+) -> WebResult<Json<BaseResponse<ListResponse>>> {
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let organization_users = EOrganizationUser::find()
         .filter(COrganizationUser::Organization.eq(organization.id))
         .all(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
     let organization_users: ListResponse = organization_users
         .iter()
@@ -328,57 +249,27 @@ pub async fn post_organization_users(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
     Json(body): Json<AddUserRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+) -> WebResult<Json<BaseResponse<String>>> {
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    let user = EUser::find()
+    let target_user = EUser::find()
         .filter(CUser::Name.eq(body.user.clone()))
         .one(&state.db)
-        .await
-        .unwrap();
-
-    if user.is_none() {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(BaseResponse {
-                error: true,
-                message: "User not found".to_string(),
-            }),
-        ));
-    }
-
-    let user = user.unwrap();
+        .await?
+        .ok_or_else(|| WebError::not_found("User"))?;
 
     let organization_user = EOrganizationUser::find()
         .filter(
             Condition::all()
                 .add(COrganizationUser::Organization.eq(organization.id))
-                .add(COrganizationUser::User.eq(user.id)),
+                .add(COrganizationUser::User.eq(target_user.id)),
         )
         .one(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
     if organization_user.is_some() {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(BaseResponse {
-                error: true,
-                message: "User already in Organization".to_string(),
-            }),
-        ));
+        return Err(WebError::already_exists("User already in Organization"));
     }
 
     let role = ERole::find()
@@ -390,29 +281,17 @@ pub async fn post_organization_users(
             ),
         )
         .one(&state.db)
-        .await
-        .unwrap();
-
-    if role.is_none() {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(BaseResponse {
-                error: true,
-                message: "Role not found".to_string(),
-            }),
-        ));
-    }
-
-    let role = role.unwrap();
+        .await?
+        .ok_or_else(|| WebError::not_found("Role"))?;
 
     let organization_user = AOrganizationUser {
         id: Set(Uuid::new_v4()),
         organization: Set(organization.id),
-        user: Set(user.id),
+        user: Set(target_user.id),
         role: Set(role.id),
     };
 
-    organization_user.insert(&state.db).await.unwrap();
+    organization_user.insert(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -427,82 +306,35 @@ pub async fn patch_organization_users(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
     Json(body): Json<AddUserRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+) -> WebResult<Json<BaseResponse<String>>> {
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    let user = EUser::find()
+    let target_user = EUser::find()
         .filter(CUser::Name.eq(body.user.clone()))
         .one(&state.db)
-        .await
-        .unwrap();
-
-    if user.is_none() {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(BaseResponse {
-                error: true,
-                message: "User not found".to_string(),
-            }),
-        ));
-    }
-
-    let user = user.unwrap();
+        .await?
+        .ok_or_else(|| WebError::not_found("User"))?;
 
     let organization_user = EOrganizationUser::find()
         .filter(
             Condition::all()
                 .add(COrganizationUser::Organization.eq(organization.id))
-                .add(COrganizationUser::User.eq(user.id)),
+                .add(COrganizationUser::User.eq(target_user.id)),
         )
         .one(&state.db)
-        .await
-        .unwrap();
-
-    if organization_user.is_none() {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(BaseResponse {
-                error: true,
-                message: "User not in Organization".to_string(),
-            }),
-        ));
-    }
-
-    let organization_user = organization_user.unwrap();
+        .await?
+        .ok_or_else(|| WebError::BadRequest("User not in Organization".to_string()))?;
 
     let role = ERole::find()
         .filter(CRole::Name.eq(body.role.clone()))
         .one(&state.db)
-        .await
-        .unwrap();
-
-    if role.is_none() {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(BaseResponse {
-                error: true,
-                message: "Role not found".to_string(),
-            }),
-        ));
-    }
-
-    let role = role.unwrap();
+        .await?
+        .ok_or_else(|| WebError::not_found("Role"))?;
 
     let mut aorganization_user: AOrganizationUser = organization_user.into();
     aorganization_user.role = Set(role.id);
-    aorganization_user.update(&state.db).await.unwrap();
+    aorganization_user.update(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -517,63 +349,28 @@ pub async fn delete_organization_users(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
     Json(body): Json<RemoveUserRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+) -> WebResult<Json<BaseResponse<String>>> {
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    let user = EUser::find()
+    let target_user = EUser::find()
         .filter(CUser::Name.eq(body.user.clone()))
         .one(&state.db)
-        .await
-        .unwrap();
-
-    if user.is_none() {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(BaseResponse {
-                error: true,
-                message: "User not found".to_string(),
-            }),
-        ));
-    }
-
-    let user = user.unwrap();
+        .await?
+        .ok_or_else(|| WebError::not_found("User"))?;
 
     let organization_user = EOrganizationUser::find()
         .filter(
             Condition::all()
                 .add(COrganizationUser::Organization.eq(organization.id))
-                .add(COrganizationUser::User.eq(user.id)),
+                .add(COrganizationUser::User.eq(target_user.id)),
         )
         .one(&state.db)
-        .await
-        .unwrap();
-
-    if organization_user.is_none() {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(BaseResponse {
-                error: true,
-                message: "User not in Organization".to_string(),
-            }),
-        ));
-    }
-
-    let organization_user = organization_user.unwrap();
+        .await?
+        .ok_or_else(|| WebError::BadRequest("User not in Organization".to_string()))?;
 
     let aorganization_user: AOrganizationUser = organization_user.into();
-    aorganization_user.delete(&state.db).await.unwrap();
+    aorganization_user.delete(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -587,20 +384,9 @@ pub async fn get_organization_ssh(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+) -> WebResult<Json<BaseResponse<String>>> {
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let res = BaseResponse {
         error: false,
@@ -614,28 +400,21 @@ pub async fn post_organization_ssh(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+) -> WebResult<Json<BaseResponse<String>>> {
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    let (private_key, public_key) = generate_ssh_key(state.cli.crypt_secret_file.clone()).unwrap();
+    let (private_key, public_key) = generate_ssh_key(state.cli.crypt_secret_file.clone())
+        .map_err(|e| {
+            tracing::error!("Failed to generate SSH key: {}", e);
+            WebError::failed_ssh_key_generation()
+        })?;
 
     let mut aorganization: AOrganization = organization.into();
 
     aorganization.private_key = Set(private_key.clone());
     aorganization.public_key = Set(public_key.clone());
-    let organization = aorganization.update(&state.db).await.unwrap();
+    let organization = aorganization.update(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -649,26 +428,14 @@ pub async fn get_organization_subscribe(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+) -> WebResult<Json<BaseResponse<ListResponse>>> {
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let organization_caches = EOrganizationCache::find()
         .filter(COrganizationCache::Organization.eq(organization.id))
         .all(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
     let organization_users: ListResponse = organization_caches
         .iter()
@@ -690,33 +457,12 @@ pub async fn post_organization_subscribe_cache(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, cache)): Path<(String, String)>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+) -> WebResult<Json<BaseResponse<String>>> {
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
-        Some(c) => c,
-        None => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Cache not found".to_string(),
-                }),
-            ))
-        }
-    };
+    let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone()).await
+        .ok_or_else(|| WebError::not_found("Cache"))?;
 
     let organization_cache = EOrganizationCache::find()
         .filter(
@@ -725,17 +471,10 @@ pub async fn post_organization_subscribe_cache(
                 .add(COrganizationCache::Cache.eq(cache.id)),
         )
         .one(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
     if organization_cache.is_some() {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(BaseResponse {
-                error: true,
-                message: "Organization already subscribed to Cache".to_string(),
-            }),
-        ));
+        return Err(WebError::already_exists("Organization already subscribed to Cache"));
     }
 
     let aorganization_cache = AOrganizationCache {
@@ -744,7 +483,7 @@ pub async fn post_organization_subscribe_cache(
         cache: Set(cache.id),
     };
 
-    aorganization_cache.insert(&state.db).await.unwrap();
+    aorganization_cache.insert(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -758,33 +497,12 @@ pub async fn delete_organization_subscribe_cache(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, cache)): Path<(String, String)>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let organization: MOrganization =
-        match get_organization_by_name(state.0.clone(), user.id, organization.clone()).await {
-            Some(o) => o,
-            None => {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Organization not found".to_string(),
-                    }),
-                ))
-            }
-        };
+) -> WebResult<Json<BaseResponse<String>>> {
+    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
+        .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
-        Some(c) => c,
-        None => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Cache not found".to_string(),
-                }),
-            ))
-        }
-    };
+    let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone()).await
+        .ok_or_else(|| WebError::not_found("Cache"))?;
 
     let organization_cache = EOrganizationCache::find()
         .filter(
@@ -793,21 +511,11 @@ pub async fn delete_organization_subscribe_cache(
                 .add(COrganizationCache::Cache.eq(cache.id)),
         )
         .one(&state.db)
-        .await
-        .unwrap();
+        .await?
+        .ok_or_else(|| WebError::BadRequest("Organization not subscribed to Cache".to_string()))?;
 
-    if let Some(organization_cache) = organization_cache {
-        let aorganization_cache: AOrganizationCache = organization_cache.into();
-        aorganization_cache.delete(&state.db).await.unwrap();
-    } else {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(BaseResponse {
-                error: true,
-                message: "Organization not subscribed to Cache".to_string(),
-            }),
-        ));
-    }
+    let aorganization_cache: AOrganizationCache = organization_cache.into();
+    aorganization_cache.delete(&state.db).await?;
 
     let res = BaseResponse {
         error: false,

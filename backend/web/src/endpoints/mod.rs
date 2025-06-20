@@ -15,21 +15,14 @@ pub mod servers;
 pub mod user;
 
 use axum::extract::Json;
-use axum::http::StatusCode;
+use crate::error::{WebError, WebResult};
 use core::types::BaseResponse;
 
-pub async fn handle_404() -> (StatusCode, Json<BaseResponse<String>>) {
-    (
-        StatusCode::NOT_FOUND,
-        Json(BaseResponse {
-            error: true,
-            message: "Not Found".to_string(),
-        }),
-    )
+pub async fn handle_404() -> WebError {
+    WebError::NotFound("Not Found".to_string())
 }
 
-pub async fn get_health(
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+pub async fn get_health() -> WebResult<Json<BaseResponse<String>>> {
     let res = BaseResponse {
         error: false,
         message: "200 ALIVE".to_string(),

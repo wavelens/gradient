@@ -9,6 +9,7 @@ use axum::http::{header, HeaderValue, StatusCode};
 use axum::{Extension, Json};
 use axum::response::Response;
 use axum::body::Body;
+use crate::error::{WebError, WebResult};
 use chrono::Utc;
 use core::database::get_cache_by_name;
 use core::executer::{get_local_store, get_pathinfo};
@@ -45,7 +46,7 @@ async fn get_nar_by_hash(
     state: Arc<ServerState>,
     cache: MCache,
     hash: String,
-) -> Result<NixPathInfo, String> {
+) -> Result<NixPathInfo, WebError> {
     let build_output = EBuildOutput::find()
         .filter(
             Condition::all()
@@ -54,13 +55,9 @@ async fn get_nar_by_hash(
         )
         .one(&state.db)
         .await
-        .unwrap();
+        .map_err(WebError::from)?
+        .ok_or_else(|| WebError::not_found("Path"))?;
 
-    if build_output.is_none() {
-        return Err("Path not found".to_string());
-    }
-
-    let build_output = build_output.unwrap();
     let build_output_signature = EBuildOutputSignature::find()
         .filter(
             Condition::all()
@@ -69,30 +66,34 @@ async fn get_nar_by_hash(
         )
         .one(&state.db)
         .await
-        .unwrap();
-
-    if build_output_signature.is_none() {
-        return Err("Signature not found".to_string());
-    }
+        .map_err(WebError::from)?
+        .ok_or_else(|| WebError::not_found("Signature"))?;
 
     let path = get_path_from_build_output(build_output.clone());
 
-    let local_store = get_local_store(None).await.unwrap();
+    let local_store = get_local_store(None).await
+        .map_err(|e| {
+            tracing::error!("Failed to get local store: {}", e);
+            WebError::InternalServerError("Failed to access local store".to_string())
+        })?;
     let pathinfo = match local_store {
         LocalNixStore::UnixStream(mut store) => {
-            get_pathinfo(path.to_string(), &mut store).await.unwrap()
+            get_pathinfo(path.to_string(), &mut store).await
+                .map_err(|e| {
+                    tracing::error!("Failed to get pathinfo: {}", e);
+                    WebError::InternalServerError("Failed to get path information".to_string())
+                })?
         }
         LocalNixStore::CommandDuplex(mut store) => {
-            get_pathinfo(path.to_string(), &mut store).await.unwrap()
+            get_pathinfo(path.to_string(), &mut store).await
+                .map_err(|e| {
+                    tracing::error!("Failed to get pathinfo: {}", e);
+                    WebError::InternalServerError("Failed to get path information".to_string())
+                })?
         }
-    };
+    }.ok_or_else(|| WebError::not_found("Path"))?;
 
-    if pathinfo.is_none() {
-        return Err("Path not found".to_string());
-    }
-
-    let pathinfo = pathinfo.unwrap();
-    let output = match Command::new(state.cli.binpath_nix.clone())
+    let output = Command::new(state.cli.binpath_nix.clone())
         .arg("hash")
         .arg("convert")
         .arg("--from")
@@ -104,18 +105,14 @@ async fn get_nar_by_hash(
         .arg(pathinfo.nar_hash)
         .output()
         .await
-    {
-        Ok(output) => output,
-        Err(e) => {
-            return Err(format!("Failed to convert hash: {}", e));
-        }
-    };
+        .map_err(|e| {
+            tracing::error!("Failed to execute nix hash convert: {}", e);
+            WebError::InternalServerError("Failed to convert hash".to_string())
+        })?;
 
     if !output.status.success() {
-        return Err(format!(
-            "Failed to convert hash: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+        tracing::error!("Nix hash convert failed: {}", String::from_utf8_lossy(&output.stderr));
+        return Err(WebError::InternalServerError("Failed to convert hash".to_string()));
     }
 
     let nar_hash = String::from_utf8_lossy(&output.stdout).to_string();
@@ -129,7 +126,7 @@ async fn get_nar_by_hash(
         nar_hash: format!("sha256:{}", nar_hash.trim()),
         nar_size: pathinfo.nar_size,
         references: pathinfo.references,
-        sig: build_output_signature.unwrap().signature,
+        sig: build_output_signature.signature,
         ca: pathinfo.ca,
     })
 }
@@ -137,13 +134,12 @@ async fn get_nar_by_hash(
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-) -> Result<Json<BaseResponse<ListResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<ListResponse>>> {
     // TODO: Implement pagination
     let caches = ECache::find()
         .filter(CCache::CreatedBy.eq(user.id))
         .all(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
     let caches: ListResponse = caches
         .iter()
@@ -165,45 +161,25 @@ pub async fn put(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Json(body): Json<MakeCacheRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> WebResult<Json<BaseResponse<String>>> {
     if check_index_name(body.name.clone().as_str()).is_err() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(BaseResponse {
-                error: true,
-                message: "Invalid Cache Name".to_string(),
-            }),
-        ));
+        return Err(WebError::invalid_name("Cache Name"));
     }
 
-    let cache = ECache::find()
+    let existing_cache = ECache::find()
         .filter(CCache::Name.eq(body.name.clone()))
         .one(&state.db)
-        .await
-        .unwrap();
+        .await?;
 
-    if cache.is_some() {
-        return Err((
-            StatusCode::CONFLICT,
-            Json(BaseResponse {
-                error: true,
-                message: "Cache Name already exists".to_string(),
-            }),
-        ));
+    if existing_cache.is_some() {
+        return Err(WebError::already_exists("Cache Name"));
     }
 
-    let signing_key = match generate_signing_key(state.cli.crypt_secret_file.clone()) {
-        Ok(key) => key,
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: e.to_string(),
-                }),
-            ))
-        }
-    };
+    let signing_key = generate_signing_key(state.cli.crypt_secret_file.clone())
+        .map_err(|e| {
+            tracing::error!("Failed to generate signing key: {}", e);
+            WebError::InternalServerError("Failed to generate signing key".to_string())
+        })?;
 
     let cache = ACache {
         id: Set(Uuid::new_v4()),
@@ -217,7 +193,7 @@ pub async fn put(
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    let cache = cache.insert(&state.db).await.unwrap();
+    let cache = cache.insert(&state.db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -231,19 +207,9 @@ pub async fn get_cache(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
-) -> Result<Json<BaseResponse<MCache>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
-        Some(c) => c,
-        None => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Cache not found".to_string(),
-                }),
-            ))
-        }
-    };
+) -> WebResult<Json<BaseResponse<MCache>>> {
+    let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone()).await
+        .ok_or_else(|| WebError::not_found("Cache"))?;
 
     let res = BaseResponse {
         error: false,
