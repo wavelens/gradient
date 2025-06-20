@@ -12,6 +12,9 @@ pub mod permission;
 pub mod sources;
 pub mod types;
 
+#[cfg(test)]
+mod tests;
+
 use clap::Parser;
 use database::connect_db;
 use std::sync::Arc;

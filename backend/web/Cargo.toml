@@ -39,3 +39,8 @@ tower = "0.5"
 http-body-util = "0.1"
 bytes = "1.10"
 tracing = "0.1"
+
+[dev-dependencies]
+tokio-test = "0.4"
+axum-test = "16.4"
+tower = "0.5"

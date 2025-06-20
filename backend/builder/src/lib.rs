@@ -7,6 +7,9 @@
 pub mod evaluator;
 pub mod scheduler;
 
+#[cfg(test)]
+mod tests;
+
 use core::types::ServerState;
 use std::sync::Arc;
 

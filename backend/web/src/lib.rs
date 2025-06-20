@@ -8,6 +8,9 @@ pub mod authorization;
 mod endpoints;
 pub mod error;
 
+#[cfg(test)]
+mod tests;
+
 use axum::body::Body;
 use axum::routing::{get, post};
 use axum::{middleware, Router};
