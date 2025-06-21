@@ -80,7 +80,16 @@ def get_orgs_organization(request, organization):
     return get_client(request.user, f"orgs/{organization}", "GET")
 
 def patch_orgs_organization(request, organization=None, name=None, display_name=None, description=None):
-    return get_client(request.user, f"orgs/{organization}", "PATCH", body={'name': name, 'display_name': display_name, 'description': description})
+    body = {}
+
+    if name is not None:
+        body['name'] = name
+    if display_name is not None:
+        body['display_name'] = display_name
+    if description is not None:
+        body['description'] = description
+
+    return get_client(request.user, f"orgs/{organization}", "PATCH", body=body)
 
 def delete_orgs_organization(request, organization):
     return get_client(request.user, f"orgs/{organization}", "DELETE")

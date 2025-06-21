@@ -261,18 +261,22 @@ def edit_organization(request, org):
     if request.method == 'POST':
         form = EditOrganizationForm(request.POST)
         if form.is_valid():
-            response = api.patch_orgs_organization(
-                request,
-                organization=org,
-                name=form.cleaned_data['name'],
-                display_name=form.cleaned_data['display_name'],
-                description=form.cleaned_data['description']
-            )
-            print(response)
-            if not response:
-                form.add_error(None, "Ein Fehler ist beim Speichern aufgetreten.")
-            elif response.get("error") is True:
-                form.add_error(None, response.get("message", "Unbekannter Fehler"))
+            cleaned = form.cleaned_data
+            patch_data = {}
+
+            if cleaned['name'] != org_message.get('name'):
+                patch_data['name'] = cleaned['name']
+            if cleaned['display_name'] != org_message.get('display_name'):
+                patch_data['display_name'] = cleaned['display_name']
+            if cleaned['description'] != org_message.get('description'):
+                patch_data['description'] = cleaned['description']
+            
+            if patch_data:
+                response = api.patch_orgs_organization(request, org, **patch_data)
+                if response.get("error"):
+                    form.add_error(None, response.get("message", "Unbekannter Fehler"))
+                else:
+                    return redirect('/')
             else:
                 return redirect('/')
     else:
