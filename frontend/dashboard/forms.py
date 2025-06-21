@@ -307,11 +307,6 @@ class EditServerForm(forms.Form):
     )
 
 class EditOrganizationForm(forms.Form):
-    organization = forms.ChoiceField(
-        label='Organization',
-        required=True,
-        widget=forms.Select
-    )
     name = forms.CharField(
         label='Name',
         required=True,

@@ -18,6 +18,11 @@
  <div class="">
     <div class="">
         <h2 class="">{% trans 'Edit Organization' %}</h2>
+        {% if form.non_field_errors %}
+            <div class="alert alert-danger">
+                {{ form.non_field_errors }}
+            </div>
+        {% endif %}
         <form method="post">
             {% csrf_token %}
             {% for field in form %}

@@ -27,6 +27,8 @@ def get_client(user, endpoint, request_type, body=None):
             response = requests.post(url, data=data, headers=headers)
         elif request_type == "PUT":
             response = requests.put(url, data=data, headers=headers)
+        elif request_type == "PATCH":
+            response = requests.patch(url, data=data, headers=headers)
         elif request_type == "DELETE":
             response = requests.delete(url, data=data, headers=headers)
     except:
@@ -40,6 +42,11 @@ def get_client(user, endpoint, request_type, body=None):
 
     if response.status_code == 200:
         return response.json()
+    elif response.status_code == 409:
+        try:
+            return response.json()
+        except ValueError:
+            return {"error": True, "message": response.text}
     else:
         return None
 

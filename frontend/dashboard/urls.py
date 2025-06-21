@@ -28,6 +28,6 @@ urlpatterns = [
 
     path("settings/server", edit_server, name="settingsServer"),
     path("settings/project", edit_project, name="settingsProject"),
-    path("settings/organization", edit_organization, name="settingsOrganization"),
+    path("organization/<str:org>/settings", edit_organization, name="settingsOrganization"),
     path("settings/profile", settingsProfile, name="settingsProfile"),
 ]

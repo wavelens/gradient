@@ -77,7 +77,6 @@ def workflow(request, org):
             return HttpResponse(status=500)
 
         project_details = project_details['message']
-        print(project_details)
         details_blocks.append({
             'project': project['name'],
             'display_name': project_details['display_name'],
@@ -250,14 +249,34 @@ def new_organization(request):
     return render(request, "dashboard/newOrganization.html", {'form': form})
 
 @login_required
-def edit_organization(request):
+def edit_organization(request, org):
+    org_data = api.get_orgs_organization(request, org)
+    org_message = org_data.get('message', {})
+    initial_data = {
+        'name': org_message.get('name', ''),
+        'display_name': org_message.get('display_name', ''),
+        'description': org_message.get('description', '')
+    }
+
     if request.method == 'POST':
         form = EditOrganizationForm(request.POST)
         if form.is_valid():
-            api.patch_orgs_organization(request, form.cleaned_data['name'], form.cleaned_data['display_name'], form.cleaned_data['description'])
-            return redirect('/')
+            response = api.patch_orgs_organization(
+                request,
+                organization=org,
+                name=form.cleaned_data['name'],
+                display_name=form.cleaned_data['display_name'],
+                description=form.cleaned_data['description']
+            )
+            print(response)
+            if not response:
+                form.add_error(None, "Ein Fehler ist beim Speichern aufgetreten.")
+            elif response.get("error") is True:
+                form.add_error(None, response.get("message", "Unbekannter Fehler"))
+            else:
+                return redirect('/')
     else:
-        form = EditOrganizationForm()
+        form = EditOrganizationForm(initial=initial_data)
 
     return render(request, "dashboard/settings/organization.html", {'form': form})
 
@@ -332,7 +351,7 @@ def edit_project(request):
                 return redirect('/')
     else:
         form = EditProjectForm()
-        form.fields['organization'].choices = org_choices
+        form.fields['project'].choices = org_choices
     return render(request, "dashboard/settings/project.html", {'form': form})
 
 @login_required

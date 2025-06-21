@@ -16,7 +16,8 @@
 
 {% block content %}
 
-{% include "../individualHeader.html" %}
+{% url 'settingsOrganization' org_id as link_url %}
+{% include "../individualHeader.html" with link_url=link_url %}
 
 <!-- <div class="container">
     <div class="header">
