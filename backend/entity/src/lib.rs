@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub mod tests;
-
 pub mod api;
 pub mod build;
 pub mod build_dependency;

@@ -13,8 +13,8 @@ use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use nix_daemon::nix::DaemonStore;
 use nix_daemon::{Progress, Store};
-use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue::Set;
+use sea_orm::entity::prelude::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, JoinType, QuerySelect};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -156,9 +156,14 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         //     .await
         //     .unwrap();
 
-        let already_exsists = find_builds(Arc::clone(&state), organization_id, references.clone(), false)
-            .await
-            .unwrap();
+        let already_exsists = find_builds(
+            Arc::clone(&state),
+            organization_id,
+            references.clone(),
+            false,
+        )
+        .await
+        .unwrap();
 
         let mut references = references
             .clone()

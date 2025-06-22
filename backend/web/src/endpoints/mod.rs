@@ -14,8 +14,8 @@ pub mod projects;
 pub mod servers;
 pub mod user;
 
-use axum::extract::Json;
 use crate::error::{WebError, WebResult};
+use axum::extract::Json;
 use core::types::BaseResponse;
 
 pub async fn handle_404() -> WebError {

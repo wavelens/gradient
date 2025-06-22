@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
-use crate::error::{WebError, WebResult};
 use chrono::Utc;
 use core::consts::*;
 use core::database::{add_features, get_organization_by_name, get_server_by_name};
@@ -49,8 +49,10 @@ pub async fn get(
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<ListResponse>>> {
     // TODO: Implement pagination
-    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
-        .ok_or_else(|| WebError::not_found("Organization"))?;
+    let organization: MOrganization =
+        get_organization_by_name(state.0.clone(), user.id, organization.clone())
+            .await
+            .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let servers = EServer::find()
         .filter(CServer::Organization.eq(organization.id))
@@ -83,8 +85,10 @@ pub async fn put(
         return Err(WebError::invalid_name("Server Name"));
     }
 
-    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
-        .ok_or_else(|| WebError::not_found("Organization"))?;
+    let organization: MOrganization =
+        get_organization_by_name(state.0.clone(), user.id, organization.clone())
+            .await
+            .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let server = EServer::find()
         .filter(
@@ -175,7 +179,7 @@ pub async fn get_server(
                     error: true,
                     message: "Server not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -209,7 +213,7 @@ pub async fn patch_server(
                     error: true,
                     message: "Server not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -340,7 +344,7 @@ pub async fn delete_server(
                     error: true,
                     message: "Server not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -376,7 +380,7 @@ pub async fn post_server_active(
                     error: true,
                     message: "Server not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -413,7 +417,7 @@ pub async fn delete_server_active(
                     error: true,
                     message: "Server not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -450,7 +454,7 @@ pub async fn post_server_check_connection(
                     error: true,
                     message: "Server not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 

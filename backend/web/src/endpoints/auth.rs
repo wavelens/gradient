@@ -6,8 +6,8 @@
 
 use crate::authorization::{encode_jwt, oauth_login_create, oauth_login_verify, update_last_login};
 use crate::error::{WebError, WebResult};
-use axum::extract::{Query, State};
 use axum::Json;
+use axum::extract::{Query, State};
 use chrono::Utc;
 use core::consts::*;
 use core::input::check_index_name;
@@ -102,16 +102,18 @@ pub async fn post_basic_login(
         .await?
         .ok_or_else(|| WebError::invalid_credentials())?;
 
-    let user_password = user.password.clone()
+    let user_password = user
+        .password
+        .clone()
         .ok_or_else(|| WebError::oauth_required())?;
 
-    verify_password(body.password, &user_password)
-        .map_err(|_| WebError::invalid_credentials())?;
+    verify_password(body.password, &user_password).map_err(|_| WebError::invalid_credentials())?;
 
-    let token = encode_jwt(state.clone(), user.id)
-        .map_err(|_| WebError::failed_to_generate_token())?;
+    let token =
+        encode_jwt(state.clone(), user.id).map_err(|_| WebError::failed_to_generate_token())?;
 
-    update_last_login(state, user).await
+    update_last_login(state, user)
+        .await
         .map_err(|_| WebError::failed_to_update_user())?;
 
     let res = BaseResponse {
@@ -126,14 +128,15 @@ pub async fn get_oauth_authorize(
     state: State<Arc<ServerState>>,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let code = query.get("code")
+    let code = query
+        .get("code")
         .ok_or_else(|| WebError::invalid_oauth_code())?;
 
-    let user: MUser = oauth_login_verify(state.clone(), code.to_string()).await
+    let user: MUser = oauth_login_verify(state.clone(), code.to_string())
+        .await
         .map_err(|e| WebError::InternalServerError(e.to_string()))?;
 
-    let token = encode_jwt(state, user.id)
-        .map_err(|_| WebError::failed_to_generate_token())?;
+    let token = encode_jwt(state, user.id).map_err(|_| WebError::failed_to_generate_token())?;
 
     let res = BaseResponse {
         error: false,
@@ -150,7 +153,8 @@ pub async fn post_oauth_authorize(
         return Err(WebError::oauth_disabled());
     }
 
-    let authorize_url = oauth_login_create(state).await
+    let authorize_url = oauth_login_create(state)
+        .await
         .map_err(|e| WebError::Unauthorized(e.to_string()))?;
 
     let res = BaseResponse {
@@ -161,9 +165,7 @@ pub async fn post_oauth_authorize(
     Ok(Json(res))
 }
 
-pub async fn post_logout(
-    _state: State<Arc<ServerState>>,
-) -> WebResult<Json<BaseResponse<String>>> {
+pub async fn post_logout(_state: State<Arc<ServerState>>) -> WebResult<Json<BaseResponse<String>>> {
     // TODO: invalidate token if needed
     let res = BaseResponse {
         error: false,

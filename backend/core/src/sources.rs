@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use base64::{engine::general_purpose, Engine};
+use base64::{Engine, engine::general_purpose};
 use ed25519_compact::KeyPair;
 use entity::evaluation::EvaluationStatus;
 use rand::rngs::OsRng;
@@ -15,7 +15,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use tokio::process::Command;
 
-use super::input::{check_repository_url_is_ssh, hex_to_vec, load_secret};
+use super::input::{check_repository_url_is_ssh, hex_to_vec, load_secret, vec_to_hex};
 use super::types::*;
 
 pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) -> (bool, Vec<u8>) {
@@ -114,6 +114,114 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
     }
 
     (true, remote_hash)
+}
+
+pub async fn get_commit_info(
+    state: Arc<ServerState>,
+    project: &MProject,
+    commit_hash: &[u8],
+) -> Result<(String, Option<String>, String), String> {
+    if state.cli.debug {
+        println!(
+            "Fetching commit info for project: {} [{}]",
+            project.id, project.name
+        );
+    };
+
+    let hash_str = vec_to_hex(commit_hash);
+    let temp_dir = format!(
+        "{}/temp_clone_{}",
+        state.cli.base_path,
+        uuid::Uuid::new_v4()
+    );
+
+    let clone_cmd = if check_repository_url_is_ssh(&project.repository) {
+        let organization = EOrganization::find_by_id(project.organization)
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let (private_key, _public_key) =
+            decrypt_ssh_private_key(load_secret(&state.cli.crypt_secret_file), organization)
+                .unwrap();
+
+        let ssh_key_path = write_key(private_key, state.cli.base_path.clone()).unwrap();
+
+        let cmd = Command::new(state.cli.binpath_git.clone())
+            .arg("clone")
+            .arg("--bare")
+            .arg("-c")
+            .arg(format!("core.sshCommand=ssh -i {}", ssh_key_path))
+            .arg(&project.repository)
+            .arg(&temp_dir)
+            .output()
+            .await;
+
+        clear_key(ssh_key_path).unwrap();
+
+        cmd
+    } else {
+        Command::new(state.cli.binpath_git.clone())
+            .arg("clone")
+            .arg("--bare")
+            .arg(&project.repository)
+            .arg(&temp_dir)
+            .output()
+            .await
+    };
+
+    match clone_cmd {
+        Ok(output) => {
+            if !output.status.success() {
+                let err = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("Failed to clone repository: {}", err));
+            }
+        }
+        Err(e) => {
+            return Err(format!("Error executing git clone: {}", e));
+        }
+    }
+
+    let show_cmd = Command::new(state.cli.binpath_git.clone())
+        .arg("show")
+        .arg("--format=%s%n%ae%n%an")
+        .arg("--no-patch")
+        .arg(&hash_str)
+        .current_dir(&temp_dir)
+        .output()
+        .await;
+
+    let result = match show_cmd {
+        Ok(output) => {
+            if !output.status.success() {
+                let err = String::from_utf8_lossy(&output.stderr);
+                Err(format!("Git show failed: {}", err))
+            } else {
+                let stdout = String::from_utf8(output.stdout)
+                    .map_err(|e| format!("Failed to parse stdout: {}", e))?;
+                let lines: Vec<&str> = stdout.lines().collect();
+
+                if lines.len() < 3 {
+                    Err("Insufficient commit information returned from git".to_string())
+                } else {
+                    let message = lines[0].to_string();
+                    let author_email = if lines[1].is_empty() {
+                        None
+                    } else {
+                        Some(lines[1].to_string())
+                    };
+                    let author_name = lines[2].to_string();
+                    Ok((message, author_email, author_name))
+                }
+            }
+        }
+        Err(e) => Err(format!("Error executing git show: {}", e)),
+    };
+
+    std::fs::remove_dir_all(&temp_dir).ok();
+
+    result
 }
 
 pub fn write_key(private_key: String, to_path: String) -> Result<String, String> {
@@ -258,12 +366,25 @@ pub fn format_cache_key(
 pub fn get_hash_from_url(url: String) -> Result<String, String> {
     let path_split = url.split('.').collect::<Vec<&str>>();
 
-    if path_split.len() != 2
-        && path_split[0].len() != 32
-        && (path_split[1] != "narinfo" || path_split[1] != "nar")
-        && !path_split[0]
-            .chars()
-            .all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))
+    // Check if we have exactly 2 parts (hash.extension)
+    if path_split.len() != 2 {
+        return Err("Invalid path".to_string());
+    }
+
+    // Check hash length (32 characters)
+    if path_split[0].len() != 32 {
+        return Err("Invalid path".to_string());
+    }
+
+    // Check extension
+    if path_split[1] != "narinfo" && path_split[1] != "nar" {
+        return Err("Invalid path".to_string());
+    }
+
+    // Check hash characters (base32)
+    if !path_split[0]
+        .chars()
+        .all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))
     {
         return Err("Invalid path".to_string());
     }
@@ -302,38 +423,4 @@ pub fn get_cache_nar_location(base_path: String, hash: String, compressed: bool)
         &hash_hex[2..],
         if compressed { ".zst" } else { "" }
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::consts::NULL_TIME;
-
-    #[test]
-    fn test_check_generate_ssh_key() {
-        let secret = general_purpose::STANDARD.encode("invalid");
-        let (encrypted_private_key, public_key_openssh) = generate_ssh_key(secret.clone()).unwrap();
-
-        let organization = MOrganization {
-            id: uuid::Uuid::nil(),
-            name: "test".to_string(),
-            display_name: "test".to_string(),
-            description: "test".to_string(),
-            public_key: public_key_openssh,
-            private_key: encrypted_private_key,
-            use_nix_store: true,
-            created_by: uuid::Uuid::nil(),
-            created_at: *NULL_TIME,
-        };
-
-        let (_decrypted_private_key, _formatted_public_key) =
-            decrypt_ssh_private_key(secret, organization.clone()).unwrap();
-
-        println!("{}", _decrypted_private_key);
-        println!("{}", format_public_key(organization.clone()));
-
-        assert!(
-            format_public_key(organization).starts_with("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI")
-        );
-    }
 }

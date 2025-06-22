@@ -17,7 +17,7 @@ entity = { path = "../entity" }
 futures = "0.3"
 nix-daemon = { git = "https://github.com/wavelens/nix-daemon", tag = "v0.1.2" }
 sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
-sentry = "0.38"
+sentry = "0.40"
 serde_json = "1.0"
 tokio = { version = "1.44", features = ["process", "rt-multi-thread"] }
 uuid = { version = "1.16", features = ["fast-rng", "macro-diagnostics", "v4"] }

@@ -42,5 +42,5 @@ tracing = "0.1"
 
 [dev-dependencies]
 tokio-test = "0.4"
-axum-test = "16.4"
+axum-test = "17.3"
 tower = "0.5"

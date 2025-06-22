@@ -5,15 +5,12 @@
  */
 
 pub mod authorization;
-mod endpoints;
+pub mod endpoints;
 pub mod error;
-
-#[cfg(test)]
-mod tests;
 
 use axum::body::Body;
 use axum::routing::{get, post};
-use axum::{middleware, Router};
+use axum::{Router, middleware};
 use bytes::Bytes;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use http::{HeaderMap, Request, Response};
@@ -32,10 +29,9 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     let cors_allow_origin = if state.cli.debug {
         AllowOrigin::list(vec![
             state.cli.serve_url.clone().try_into().unwrap(),
-            format!(
-                "http://{}:8000",
-                state.cli.ip.clone(),
-            ).try_into().unwrap(),
+            format!("http://{}:8000", state.cli.ip.clone(),)
+                .try_into()
+                .unwrap(),
         ])
     } else {
         AllowOrigin::exact(state.cli.serve_url.clone().try_into().unwrap())

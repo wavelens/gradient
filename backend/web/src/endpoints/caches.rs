@@ -4,18 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use axum::extract::{Path, State};
-use axum::http::{header, HeaderValue, StatusCode};
-use axum::{Extension, Json};
-use axum::response::Response;
-use axum::body::Body;
 use crate::error::{WebError, WebResult};
+use axum::body::Body;
+use axum::extract::{Path, State};
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::response::Response;
+use axum::{Extension, Json};
 use chrono::Utc;
 use core::database::get_cache_by_name;
 use core::executer::{get_local_store, get_pathinfo};
 use core::input::check_index_name;
 use core::sources::{
-    format_cache_key, generate_signing_key, get_hash_from_url, get_path_from_build_output, get_cache_nar_location
+    format_cache_key, generate_signing_key, get_cache_nar_location, get_hash_from_url,
+    get_path_from_build_output,
 };
 use core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -71,27 +72,25 @@ async fn get_nar_by_hash(
 
     let path = get_path_from_build_output(build_output.clone());
 
-    let local_store = get_local_store(None).await
-        .map_err(|e| {
-            tracing::error!("Failed to get local store: {}", e);
-            WebError::InternalServerError("Failed to access local store".to_string())
-        })?;
+    let local_store = get_local_store(None).await.map_err(|e| {
+        tracing::error!("Failed to get local store: {}", e);
+        WebError::InternalServerError("Failed to access local store".to_string())
+    })?;
     let pathinfo = match local_store {
-        LocalNixStore::UnixStream(mut store) => {
-            get_pathinfo(path.to_string(), &mut store).await
-                .map_err(|e| {
-                    tracing::error!("Failed to get pathinfo: {}", e);
-                    WebError::InternalServerError("Failed to get path information".to_string())
-                })?
-        }
-        LocalNixStore::CommandDuplex(mut store) => {
-            get_pathinfo(path.to_string(), &mut store).await
-                .map_err(|e| {
-                    tracing::error!("Failed to get pathinfo: {}", e);
-                    WebError::InternalServerError("Failed to get path information".to_string())
-                })?
-        }
-    }.ok_or_else(|| WebError::not_found("Path"))?;
+        LocalNixStore::UnixStream(mut store) => get_pathinfo(path.to_string(), &mut store)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to get pathinfo: {}", e);
+                WebError::InternalServerError("Failed to get path information".to_string())
+            })?,
+        LocalNixStore::CommandDuplex(mut store) => get_pathinfo(path.to_string(), &mut store)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to get pathinfo: {}", e);
+                WebError::InternalServerError("Failed to get path information".to_string())
+            })?,
+    }
+    .ok_or_else(|| WebError::not_found("Path"))?;
 
     let output = Command::new(state.cli.binpath_nix.clone())
         .arg("hash")
@@ -111,8 +110,13 @@ async fn get_nar_by_hash(
         })?;
 
     if !output.status.success() {
-        tracing::error!("Nix hash convert failed: {}", String::from_utf8_lossy(&output.stderr));
-        return Err(WebError::InternalServerError("Failed to convert hash".to_string()));
+        tracing::error!(
+            "Nix hash convert failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return Err(WebError::InternalServerError(
+            "Failed to convert hash".to_string(),
+        ));
     }
 
     let nar_hash = String::from_utf8_lossy(&output.stdout).to_string();
@@ -175,11 +179,10 @@ pub async fn put(
         return Err(WebError::already_exists("Cache Name"));
     }
 
-    let signing_key = generate_signing_key(state.cli.crypt_secret_file.clone())
-        .map_err(|e| {
-            tracing::error!("Failed to generate signing key: {}", e);
-            WebError::InternalServerError("Failed to generate signing key".to_string())
-        })?;
+    let signing_key = generate_signing_key(state.cli.crypt_secret_file.clone()).map_err(|e| {
+        tracing::error!("Failed to generate signing key: {}", e);
+        WebError::InternalServerError("Failed to generate signing key".to_string())
+    })?;
 
     let cache = ACache {
         id: Set(Uuid::new_v4()),
@@ -208,7 +211,8 @@ pub async fn get_cache(
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<MCache>>> {
-    let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone()).await
+    let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone())
+        .await
         .ok_or_else(|| WebError::not_found("Cache"))?;
 
     let res = BaseResponse {
@@ -234,7 +238,7 @@ pub async fn patch_cache(
                     error: true,
                     message: "Cache not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -306,7 +310,7 @@ pub async fn delete_cache(
                     error: true,
                     message: "Cache not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -335,7 +339,7 @@ pub async fn post_cache_active(
                     error: true,
                     message: "Cache not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -365,7 +369,7 @@ pub async fn delete_cache_active(
                     error: true,
                     message: "Cache not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -395,7 +399,7 @@ pub async fn get_cache_key(
                     error: true,
                     message: "Cache not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -430,7 +434,7 @@ pub async fn nix_cache_info(
                     error: true,
                     message: "Cache not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -452,7 +456,10 @@ pub async fn nix_cache_info(
 
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, HeaderValue::from_static("text/x-nix-cache-info"))
+        .header(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/x-nix-cache-info"),
+        )
         .body(res.to_nix_string())
         .unwrap())
 }
@@ -495,7 +502,7 @@ pub async fn path(
                     error: true,
                     message: "Cache not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -518,13 +525,16 @@ pub async fn path(
                     error: true,
                     message: "Path not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, HeaderValue::from_static("text/x-nix-narinfo"))
+        .header(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/x-nix-narinfo"),
+        )
         .body(path_info.to_nix_string())
         .unwrap())
 }
@@ -567,7 +577,7 @@ pub async fn nar(
                     error: true,
                     message: "Cache not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -581,11 +591,7 @@ pub async fn nar(
         ));
     }
 
-    let file_path = get_cache_nar_location(
-        state.cli.base_path.clone(),
-        path_hash.unwrap(),
-        true,
-    );
+    let file_path = get_cache_nar_location(state.cli.base_path.clone(), path_hash.unwrap(), true);
 
     let file = tokio::fs::File::open(&file_path).await.map_err(|e| {
         (
@@ -602,7 +608,10 @@ pub async fn nar(
 
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, HeaderValue::from_static("application/x-nix-nar"))
+        .header(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/x-nix-nar"),
+        )
         .body(body)
         .unwrap())
 }

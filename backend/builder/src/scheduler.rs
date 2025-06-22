@@ -383,7 +383,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                 .filter(
                     Condition::all()
                         .add(CServer::Active.eq(true))
-                        .add(CServer::Organization.eq(project.organization))
+                        .add(CServer::Organization.eq(project.organization)),
                 )
                 .one(&state.db)
                 .await
@@ -468,14 +468,34 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             Some(evaluation.id)
         };
 
+        let (commit_message, author_email, author_name) =
+            match get_commit_info(Arc::clone(&state), &project, &commit_hash).await {
+                Ok((msg, email, name)) => (msg, email, name),
+                Err(e) => {
+                    eprintln!(
+                        "Warning: Failed to fetch commit info: {}. Using defaults.",
+                        e
+                    );
+                    ("".to_string(), None, "".to_string())
+                }
+            };
+
+        let author_display = if let Some(email) = author_email {
+            if !author_name.is_empty() {
+                format!("{} <{}>", author_name, email)
+            } else {
+                email
+            }
+        } else {
+            author_name
+        };
+
         let acommit = ACommit {
             id: Set(Uuid::new_v4()),
-            // TODO: fetch commit message
-            message: Set("".to_string()),
+            message: Set(commit_message),
             hash: Set(commit_hash.clone()),
-            // TODO: fetch author
             author: Set(None),
-            author_name: Set("".to_string()),
+            author_name: Set(author_display),
         };
 
         let commit = acommit.insert(&state.db).await.unwrap();
@@ -533,7 +553,6 @@ async fn requeue_build(state: Arc<ServerState>, build: MBuild) -> MBuild {
 
 async fn get_next_build(state: Arc<ServerState>) -> MBuild {
     loop {
-        // TODO: check if organization has servers
         let builds_sql = sea_orm::Statement::from_string(
             sea_orm::DbBackend::Postgres,
             r#"
@@ -549,17 +568,45 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
             "#,
         );
 
-        let build = EBuild::find()
+        let builds = EBuild::find()
             .from_raw_sql(builds_sql)
-            .one(&state.db)
+            .all(&state.db)
             .await
             .unwrap();
 
-        if let Some(build) = build {
-            return build;
-        } else {
-            time::sleep(Duration::from_secs(5)).await;
+        for build in builds {
+            let evaluation = EEvaluation::find_by_id(build.evaluation)
+                .one(&state.db)
+                .await
+                .unwrap()
+                .unwrap();
+
+            let project = EProject::find_by_id(evaluation.project)
+                .one(&state.db)
+                .await
+                .unwrap()
+                .unwrap();
+
+            let has_servers = EServer::find()
+                .filter(
+                    Condition::all()
+                        .add(CServer::Active.eq(true))
+                        .add(CServer::Organization.eq(project.organization)),
+                )
+                .one(&state.db)
+                .await
+                .unwrap()
+                .is_some();
+
+            if has_servers {
+                return build;
+            } else {
+                update_build_status_recursivly(Arc::clone(&state), build, BuildStatus::Aborted)
+                    .await;
+            }
         }
+
+        time::sleep(Duration::from_secs(5)).await;
     }
 }
 

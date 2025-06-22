@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::error::{WebError, WebResult};
 use async_stream::stream;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
 use builder::scheduler::abort_evaluation;
-use crate::error::{WebError, WebResult};
 use core::types::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -36,14 +36,22 @@ pub async fn get_evaluation(
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Project {} not found for evaluation {}", evaluation.project, evaluation_id);
+            tracing::error!(
+                "Project {} not found for evaluation {}",
+                evaluation.project,
+                evaluation_id
+            );
             WebError::InternalServerError("Evaluation data inconsistency".to_string())
         })?;
     let organization = EOrganization::find_by_id(project.organization)
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Organization {} not found for project {}", project.organization, project.id);
+            tracing::error!(
+                "Organization {} not found for project {}",
+                project.organization,
+                project.id
+            );
             WebError::InternalServerError("Project data inconsistency".to_string())
         })?;
 
@@ -74,14 +82,22 @@ pub async fn post_evaluation(
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Project {} not found for evaluation {}", evaluation.project, evaluation_id);
+            tracing::error!(
+                "Project {} not found for evaluation {}",
+                evaluation.project,
+                evaluation_id
+            );
             WebError::InternalServerError("Evaluation data inconsistency".to_string())
         })?;
     let organization = EOrganization::find_by_id(project.organization)
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Organization {} not found for project {}", project.organization, project.id);
+            tracing::error!(
+                "Organization {} not found for project {}",
+                project.organization,
+                project.id
+            );
             WebError::InternalServerError("Project data inconsistency".to_string())
         })?;
 
@@ -115,7 +131,11 @@ pub async fn get_evaluation_builds(
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Project {} not found for evaluation {}", evaluation.project, evaluation_id);
+            tracing::error!(
+                "Project {} not found for evaluation {}",
+                evaluation.project,
+                evaluation_id
+            );
             WebError::InternalServerError("Evaluation data inconsistency".to_string())
         })?;
 
@@ -123,7 +143,11 @@ pub async fn get_evaluation_builds(
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Organization {} not found for project {}", project.organization, project.id);
+            tracing::error!(
+                "Organization {} not found for project {}",
+                project.organization,
+                project.id
+            );
             WebError::InternalServerError("Project data inconsistency".to_string())
         })?;
 
@@ -166,14 +190,22 @@ pub async fn post_evaluation_builds(
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Project {} not found for evaluation {}", evaluation.project, evaluation_id);
+            tracing::error!(
+                "Project {} not found for evaluation {}",
+                evaluation.project,
+                evaluation_id
+            );
             WebError::InternalServerError("Evaluation data inconsistency".to_string())
         })?;
     let organization = EOrganization::find_by_id(project.organization)
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Organization {} not found for project {}", project.organization, project.id);
+            tracing::error!(
+                "Organization {} not found for project {}",
+                project.organization,
+                project.id
+            );
             WebError::InternalServerError("Project data inconsistency".to_string())
         })?;
 

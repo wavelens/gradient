@@ -4,4 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub mod test_entity;
+//! Test modules for core crate
+
+pub mod input_tests;
+pub mod sources_tests;
+pub mod types_tests;

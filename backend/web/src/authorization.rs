@@ -12,12 +12,12 @@ use axum::response::{Json, Response};
 use chrono::{Duration, Utc};
 use core::input::load_secret;
 use core::types::*;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation, decode, encode};
 use oauth2::basic::BasicClient;
 use oauth2::reqwest;
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge,
-    RedirectUrl, Scope, TokenResponse, TokenUrl,
+    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge, RedirectUrl,
+    Scope, TokenResponse, TokenUrl,
 };
 use rand::distr::{Alphanumeric, SampleString};
 use sea_orm::{
@@ -38,7 +38,6 @@ pub struct OAuthUser {
     pub name: String,
     pub sub: String,
 }
-
 
 #[derive(Serialize, Deserialize)]
 pub struct Cliams {
@@ -71,7 +70,7 @@ pub async fn authorize(
                     error: true,
                     message: "Authorization header not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -98,7 +97,7 @@ pub async fn authorize(
                     error: true,
                     message: "Unable to decode token".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -115,7 +114,7 @@ pub async fn authorize(
                     error: true,
                     message: "User not found".to_string(),
                 }),
-            ))
+            ));
         }
     };
 
@@ -204,11 +203,16 @@ async fn get_oidc_metadata(discovery_url: &str) -> Result<serde_json::Value, Str
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
     let metadata = http_client
-        .get(if discovery_url.ends_with("/.well-known/openid-configuration") {
-            discovery_url.to_string()
-        } else {
-            format!("{}/.well-known/openid-configuration", discovery_url.trim_end_matches('/'))
-        })
+        .get(
+            if discovery_url.ends_with("/.well-known/openid-configuration") {
+                discovery_url.to_string()
+            } else {
+                format!(
+                    "{}/.well-known/openid-configuration",
+                    discovery_url.trim_end_matches('/')
+                )
+            },
+        )
         .send()
         .await
         .map_err(|e| format!("Failed to fetch OIDC metadata: {}", e))?
@@ -226,19 +230,22 @@ pub async fn oauth_login_create(state: State<Arc<ServerState>>) -> Result<Url, S
 
     if let Some(discovery_url) = &state.cli.oidc_discovery_url {
         let metadata = get_oidc_metadata(discovery_url).await?;
-        
+
         let auth_endpoint = metadata["authorization_endpoint"]
             .as_str()
             .ok_or("No authorization_endpoint in OIDC metadata")?;
 
-        let client_id = state.cli.oauth_client_id.as_ref()
+        let client_id = state
+            .cli
+            .oauth_client_id
+            .as_ref()
             .ok_or("OIDC client ID not configured")?;
 
         let redirect_uri = format!("{}/api/v1/auth/oauth/authorize", state.cli.serve_url);
-        
+
         let (pkce_challenge, _pkce_verifier) = PkceCodeChallenge::new_random_sha256();
         let state_param = uuid::Uuid::new_v4().to_string();
-        
+
         let mut params = vec![
             ("response_type", "code"),
             ("client_id", client_id),
@@ -322,7 +329,7 @@ pub async fn oauth_login_verify(
     if let Some(discovery_url) = &state.cli.oidc_discovery_url {
         // OIDC flow with token exchange
         let metadata = get_oidc_metadata(discovery_url).await?;
-        
+
         let token_endpoint = metadata["token_endpoint"]
             .as_str()
             .ok_or("No token_endpoint in OIDC metadata")?;
@@ -331,9 +338,15 @@ pub async fn oauth_login_verify(
             .as_str()
             .ok_or("No userinfo_endpoint in OIDC metadata")?;
 
-        let client_id = state.cli.oauth_client_id.as_ref()
+        let client_id = state
+            .cli
+            .oauth_client_id
+            .as_ref()
             .ok_or("OIDC client ID not configured")?;
-        let client_secret_file = state.cli.oauth_client_secret_file.as_ref()
+        let client_secret_file = state
+            .cli
+            .oauth_client_secret_file
+            .as_ref()
             .ok_or("OIDC client secret file not configured")?;
 
         let http_client = reqwest::ClientBuilder::new()
@@ -476,7 +489,9 @@ async fn create_or_update_user(
             if user.email != user_info.email {
                 let mut auser: AUser = user.into();
                 auser.email = Set(user_info.email.clone());
-                user = auser.update(&state.db).await
+                user = auser
+                    .update(&state.db)
+                    .await
                     .map_err(|e| format!("Failed to update user email: {}", e))?;
                 updated = true;
             }
@@ -484,7 +499,9 @@ async fn create_or_update_user(
             if user.username != user_info.sub {
                 let mut auser: AUser = user.into();
                 auser.username = Set(user_info.sub.clone());
-                user = auser.update(&state.db).await
+                user = auser
+                    .update(&state.db)
+                    .await
                     .map_err(|e| format!("Failed to update username: {}", e))?;
                 updated = true;
             }
@@ -492,7 +509,9 @@ async fn create_or_update_user(
             if user.name != user_info.name {
                 let mut auser: AUser = user.into();
                 auser.name = Set(user_info.name.clone());
-                user = auser.update(&state.db).await
+                user = auser
+                    .update(&state.db)
+                    .await
                     .map_err(|e| format!("Failed to update user name: {}", e))?;
                 updated = true;
             }

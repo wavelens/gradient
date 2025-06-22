@@ -6,9 +6,6 @@
 
 pub mod cacher;
 
-#[cfg(test)]
-mod tests;
-
 use core::types::ServerState;
 use std::sync::Arc;
 

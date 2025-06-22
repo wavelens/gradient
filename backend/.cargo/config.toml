@@ -1,0 +1,35 @@
+# Cargo configuration for the Gradient workspace
+
+[build]
+# Enable incremental compilation for faster builds
+incremental = true
+
+[target.x86_64-unknown-linux-gnu]
+# Optimize for current CPU when running tests locally
+rustflags = ["-C", "target-cpu=native"]
+
+[alias]
+# Custom aliases for common tasks
+test-all = "test --workspace --all-features"
+test-unit = "test --workspace --lib"
+test-integration = "test --workspace --test '*'"
+test-doc = "test --workspace --doc"
+check-all = "check --workspace --all-targets --all-features"
+clippy-all = "clippy --workspace --all-targets --all-features"
+
+# Test with coverage reporting (requires cargo-tarpaulin)
+test-coverage = "tarpaulin --workspace --out xml --output-dir coverage"
+
+# Run tests with verbose output for debugging
+test-verbose = "test --workspace --all-features -- --nocapture"
+
+# Run specific package tests
+test-core = "test -p core"
+test-builder = "test -p builder"
+test-web = "test -p web"
+test-cache = "test -p cache"
+test-entity = "test -p entity"
+test-migration = "test -p migration"
+
+# Run all tests via script
+test-script = "!./test.sh"

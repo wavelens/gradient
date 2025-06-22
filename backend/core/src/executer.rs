@@ -118,7 +118,9 @@ pub async fn execute_build(
                 .collect::<Vec<String>>()
                 .join("");
 
-            let full_log = format!("{}\n{}", build.log.as_ref().unwrap_or(&"".to_string()), log).trim().to_string();
+            let full_log = format!("{}\n{}", build.log.as_ref().unwrap_or(&"".to_string()), log)
+                .trim()
+                .to_string();
 
             let mut abuild: ABuild = build.clone().into();
             abuild.log = Set(Some(full_log));

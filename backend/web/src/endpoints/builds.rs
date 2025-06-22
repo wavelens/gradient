@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::error::{WebError, WebResult};
 use async_stream::stream;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
-use crate::error::{WebError, WebResult};
 use core::types::*;
 use sea_orm::EntityTrait;
 use std::sync::Arc;
@@ -19,28 +19,42 @@ pub async fn get_build(
     Extension(user): Extension<MUser>,
     Path(build_id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<MBuild>>> {
-    let build = EBuild::find_by_id(build_id).one(&state.db).await?
+    let build = EBuild::find_by_id(build_id)
+        .one(&state.db)
+        .await?
         .ok_or_else(|| WebError::not_found("Build"))?;
 
     let evaluation = EEvaluation::find_by_id(build.evaluation)
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Evaluation {} not found for build {}", build.evaluation, build_id);
+            tracing::error!(
+                "Evaluation {} not found for build {}",
+                build.evaluation,
+                build_id
+            );
             WebError::InternalServerError("Build data inconsistency".to_string())
         })?;
     let project = EProject::find_by_id(evaluation.project)
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Project {} not found for evaluation {}", evaluation.project, evaluation.id);
+            tracing::error!(
+                "Project {} not found for evaluation {}",
+                evaluation.project,
+                evaluation.id
+            );
             WebError::InternalServerError("Evaluation data inconsistency".to_string())
         })?;
     let organization = EOrganization::find_by_id(project.organization)
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Organization {} not found for project {}", project.organization, project.id);
+            tracing::error!(
+                "Organization {} not found for project {}",
+                project.organization,
+                project.id
+            );
             WebError::InternalServerError("Project data inconsistency".to_string())
         })?;
 
@@ -61,28 +75,42 @@ pub async fn post_build(
     Extension(user): Extension<MUser>,
     Path(build_id): Path<Uuid>,
 ) -> Result<StreamBodyAs<'static>, WebError> {
-    let build = EBuild::find_by_id(build_id).one(&state.db).await?
+    let build = EBuild::find_by_id(build_id)
+        .one(&state.db)
+        .await?
         .ok_or_else(|| WebError::not_found("Build"))?;
 
     let evaluation = EEvaluation::find_by_id(build.evaluation)
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Evaluation {} not found for build {}", build.evaluation, build_id);
+            tracing::error!(
+                "Evaluation {} not found for build {}",
+                build.evaluation,
+                build_id
+            );
             WebError::InternalServerError("Build data inconsistency".to_string())
         })?;
     let project = EProject::find_by_id(evaluation.project)
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Project {} not found for evaluation {}", evaluation.project, evaluation.id);
+            tracing::error!(
+                "Project {} not found for evaluation {}",
+                evaluation.project,
+                evaluation.id
+            );
             WebError::InternalServerError("Evaluation data inconsistency".to_string())
         })?;
     let organization = EOrganization::find_by_id(project.organization)
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!("Organization {} not found for project {}", project.organization, project.id);
+            tracing::error!(
+                "Organization {} not found for project {}",
+                project.organization,
+                project.id
+            );
             WebError::InternalServerError("Project data inconsistency".to_string())
         })?;
 

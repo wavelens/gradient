@@ -6,7 +6,8 @@
 
 use chrono::Utc;
 use core::sources::{
-    clear_key, format_cache_key, get_hash_from_path, get_path_from_build_output, write_key, get_cache_nar_location
+    clear_key, format_cache_key, get_cache_nar_location, get_hash_from_path,
+    get_path_from_build_output, write_key,
 };
 use core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -92,7 +93,10 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         }
     }
 
-    println!("Caching build output: {}-{}", build_output.hash, build_output.package);
+    println!(
+        "Caching build output: {}-{}",
+        build_output.hash, build_output.package
+    );
     let (file_hash, file_size) = pack_build_output(Arc::clone(&state), build_output.clone())
         .await
         .map_err(|e| {
@@ -171,7 +175,6 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
             break;
         }
     }
-
 
     let build_path_signature = ABuildOutputSignature {
         id: Set(Uuid::new_v4()),

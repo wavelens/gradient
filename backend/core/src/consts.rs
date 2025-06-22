@@ -7,7 +7,7 @@
 use chrono::{DateTime, NaiveDateTime};
 use std::ops::RangeInclusive;
 use std::sync::LazyLock;
-use uuid::{uuid, Uuid};
+use uuid::{Uuid, uuid};
 
 pub const PORT_RANGE: RangeInclusive<usize> = 1..=65535;
 

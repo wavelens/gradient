@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use core::types::BaseResponse;
 use sea_orm::DbErr;
 use std::fmt;
@@ -64,7 +64,10 @@ impl IntoResponse for WebError {
             WebError::InternalServerError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             WebError::Database(err) => {
                 tracing::error!("Database error: {}", err);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
             }
             WebError::Validation(msg) => (StatusCode::BAD_REQUEST, msg),
             WebError::Authentication(msg) => (StatusCode::UNAUTHORIZED, msg),

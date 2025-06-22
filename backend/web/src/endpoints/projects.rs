@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use crate::error::{WebError, WebResult};
 use chrono::Utc;
 use core::consts::*;
 use core::database::{get_organization_by_name, get_project_by_name};
@@ -45,8 +45,10 @@ pub async fn get(
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<ListResponse>>> {
     // TODO: Implement pagination
-    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
-        .ok_or_else(|| WebError::not_found("Organization"))?;
+    let organization: MOrganization =
+        get_organization_by_name(state.0.clone(), user.id, organization.clone())
+            .await
+            .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let projects = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
@@ -82,8 +84,10 @@ pub async fn put(
     let repository_url = normalize_url(body.repository.clone().as_str())
         .map_err(|_| WebError::BadRequest("Invalid Repository URL".to_string()))?;
 
-    let organization: MOrganization = get_organization_by_name(state.0.clone(), user.id, organization.clone()).await
-        .ok_or_else(|| WebError::not_found("Organization"))?;
+    let organization: MOrganization =
+        get_organization_by_name(state.0.clone(), user.id, organization.clone())
+            .await
+            .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let existing_project = EProject::find()
         .filter(
@@ -99,7 +103,9 @@ pub async fn put(
     }
 
     if !valid_evaluation_wildcard(body.evaluation_wildcard.clone().as_str()) {
-        return Err(WebError::BadRequest("Invalid Evaluation Wildcard".to_string()));
+        return Err(WebError::BadRequest(
+            "Invalid Evaluation Wildcard".to_string(),
+        ));
     }
 
     let project = AProject {
@@ -205,7 +211,9 @@ pub async fn patch_project(
 
     if let Some(evaluation_wildcard) = body.evaluation_wildcard {
         if !valid_evaluation_wildcard(evaluation_wildcard.as_str()) {
-            return Err(WebError::BadRequest("Invalid Evaluation Wildcard".to_string()));
+            return Err(WebError::BadRequest(
+                "Invalid Evaluation Wildcard".to_string(),
+            ));
         }
 
         aproject.evaluation_wildcard = Set(evaluation_wildcard);
@@ -323,7 +331,9 @@ pub async fn post_project_check_repository(
 
         Ok(Json(res))
     } else {
-        Err(WebError::InternalServerError("Failed to check repository".to_string()))
+        Err(WebError::InternalServerError(
+            "Failed to check repository".to_string(),
+        ))
     }
 }
 
@@ -346,7 +356,11 @@ pub async fn post_project_evaluate(
             .one(&state.db)
             .await?
             .ok_or_else(|| {
-                tracing::error!("Evaluation {} not found for project {}", evaluation_id, project.id);
+                tracing::error!(
+                    "Evaluation {} not found for project {}",
+                    evaluation_id,
+                    project.id
+                );
                 WebError::InternalServerError("Evaluation data inconsistency".to_string())
             })?;
 
@@ -354,7 +368,9 @@ pub async fn post_project_evaluate(
             || evaluation.status == EvaluationStatus::Evaluating
             || evaluation.status == EvaluationStatus::Building
         {
-            return Err(WebError::BadRequest("Evaluation already in progress".to_string()));
+            return Err(WebError::BadRequest(
+                "Evaluation already in progress".to_string(),
+            ));
         }
     }
 

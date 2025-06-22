@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use crate::error::{WebError, WebResult};
 use core::types::*;
 use sea_orm::EntityTrait;
 use std::sync::Arc;
@@ -17,7 +17,9 @@ pub async fn get_commit(
     Extension(_user): Extension<MUser>,
     Path(commit_id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<MCommit>>> {
-    let commit = ECommit::find_by_id(commit_id).one(&state.db).await?
+    let commit = ECommit::find_by_id(commit_id)
+        .one(&state.db)
+        .await?
         .ok_or_else(|| WebError::not_found("Commit"))?;
 
     // TODO: Check if user has access to the commit
