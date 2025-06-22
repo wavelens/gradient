@@ -330,12 +330,6 @@ class EditOrganizationForm(forms.Form):
     )
     
 class EditProjectForm(forms.Form):
-    project = forms.ChoiceField(
-        label='Project',
-        required=True,
-        widget=forms.Select
-    )
-
     name = forms.CharField(
         label='Name',
         required=True,

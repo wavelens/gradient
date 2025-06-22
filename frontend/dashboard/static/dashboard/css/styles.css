@@ -816,6 +816,10 @@ tr:hover td{
     padding: 10px;
 }
 
+.form-container .form-field input {
+    width: 94.5%;
+}
+
 .form-field select {
     width: 100%;
     padding: 10px;

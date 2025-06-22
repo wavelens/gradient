@@ -328,34 +328,39 @@ def new_project(request):
     return render(request, "dashboard/newProject.html", {'form': form})
 
 @login_required
-def edit_project(request):
-    org = request.GET.get("org")
-    all_orgs = api.get_orgs(request)
-
-    if isinstance(all_orgs, type(None)) or all_orgs['error']:
-        return HttpResponse(status=500)
-
-    all_orgs = all_orgs['message']
-
-    org_choices = [ (o['name'], o['name']) for o in all_orgs ]
+def edit_project(request, org, project):
+    project_data = api.get_projects_project(request, org, project)
+    project_message = project_data.get('message', {})
+    initial_data = {
+        'name': project_message.get('name', ''),
+        'display_name': project_message.get('display_name', ''),
+        'description': project_message.get('description', ''),
+        'repository': project_message.get('repository', ''),
+        'evaluation_wildcard': project_message.get('evaluation_wildcard', '')
+    }
 
     if request.method == 'POST':
         form = EditProjectForm(request.POST)
-        form.fields['organization'].choices = org_choices
         if form.is_valid():
-            # TODO: ADD display_name
-            res = api.patch_projects_project(request, **form.cleaned_data)
-            if res is None:
-                form.add_error(None, "Das Projekt konnte nicht bearbeitet werden.")
-            elif 'error' in res and res['error'] != False:
-                error_msg = res['error']
-                form.add_error(None, f"Projekt konnte nicht bearbeitet werden: {error_msg}")
-                pass
+            cleaned = form.cleaned_data
+            patch_data = {}
+            if cleaned['name'] != project_message.get('name'):
+                patch_data['name'] = cleaned['name']
+            if cleaned['display_name'] != project_message.get('display_name'):
+                patch_data['display_name'] = cleaned['display_name']
+            if cleaned['description'] != project_message.get('description'):
+                patch_data['description'] = cleaned['description']
+
+            if patch_data:
+                response = api.patch_projects_project(request, org, project, **patch_data)
+                if response.get("error"):
+                    form.add_error(None, response.get("message", "Unbekannter Fehler"))
+                else:
+                    return redirect('/')
             else:
                 return redirect('/')
     else:
-        form = EditProjectForm()
-        form.fields['project'].choices = org_choices
+        form = EditProjectForm(initial=initial_data)
     return render(request, "dashboard/settings/project.html", {'form': form})
 
 @login_required
@@ -418,5 +423,32 @@ def register(request):
     return render(request, "register.html", {'form': form})
 
 def settingsProfile(request):
-    form = EditUserForm()
+    user = request.user
+    initial_data = {
+        'name': user.name,
+        'username': user.username,
+        'email': user.email
+    }
+    if request.method == 'POST':
+        form = EditUserForm(request.POST)
+        if form.is_valid():
+            cleaned = form.cleaned_data
+            patch_data = {}
+            if cleaned['name'] != user.name:
+                patch_data['name'] = cleaned['name']
+            if cleaned['username'] != user.username:
+                patch_data['username'] = cleaned['username']
+            if cleaned['email'] != user.email:
+                patch_data['email'] = cleaned['email']
+
+            if patch_data:
+                response = api.patch_user_settings(request, **patch_data)
+                if response.get("error"):
+                    form.add_error(None, response.get("message", "Unbekannter Fehler"))
+                else:
+                    return redirect('/')
+            else:
+                return redirect('/')
+    else:
+        form = EditUserForm(initial=initial_data)
     return render(request, "dashboard/settings/profile.html", {'form': form})
