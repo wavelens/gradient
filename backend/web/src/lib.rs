@@ -104,6 +104,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
                 .delete(projects::delete_project),
         )
         .route(
+            "/projects/{organization}/{project}/details",
+            get(projects::get_project_details),
+        )
+        .route(
             "/projects/{organization}/{project}/check-repository",
             post(projects::post_project_check_repository),
         )

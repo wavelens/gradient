@@ -22,6 +22,7 @@ use tokio::{
 use uuid::Uuid;
 
 use super::input;
+use super::sources::get_hash_from_path;
 use super::types::*;
 
 #[derive(Debug, Clone, Serialize)]
@@ -154,22 +155,21 @@ pub async fn copy_builds<
             continue;
         }
 
-        if from_store
-            .is_valid_path(path.clone())
-            .result()
-            .await
-            .unwrap()
-        {
-            return Err("Path is not valid on store to copy from".into());
+        if !from_store.is_valid_path(path.clone()).result().await.unwrap_or(false) {
+            return Err(format!("Path {} is not valid in source store", path).into());
         }
 
-        let path_info = match from_store.query_pathinfo(path.clone()).result().await? {
-            Some(path_info) => path_info,
-            _ => return Err(format!("Path not found: {}", path.clone()).into()),
-        };
+        // TODO: Copy the path from the source store to the destination store
 
-        from_store.nar_from_path(path.clone()).result().await?;
-        to_store.add_to_store_nar(path_info, &mut from_store.conn);
+        // if !to_store
+        //     .copy_path(path.clone(), from_store)
+        //     .result()
+        //     .await
+        //     .map_err(|e| e.to_string())?
+        // {
+        //     return Err(format!("Failed to copy path {}", path).into());
+        // }
+
     }
 
     Ok(())
@@ -347,3 +347,47 @@ pub async fn get_pathinfo<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
         .map_err(|e| e.to_string())
         .unwrap())
 }
+
+#[derive(Debug, Clone)]
+pub struct BuildOutputInfo {
+    pub path: String,
+    pub hash: String,
+    pub package: String,
+    pub ca: Option<String>,
+}
+
+pub async fn get_build_outputs_from_derivation<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
+    derivation_path: String,
+    store: &mut DaemonStore<A>,
+) -> Result<Vec<BuildOutputInfo>, String> {
+    let output_map = store
+        .query_derivation_output_map(derivation_path)
+        .result()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let mut outputs = Vec::new();
+    
+    for (_output_name, output_path) in output_map {
+        if let Some(path_info) = store
+            .query_pathinfo(output_path.clone())
+            .result()
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            let (hash, package) = get_hash_from_path(output_path.clone())
+                .map_err(|e| format!("Failed to parse path {}: {}", output_path, e))?;
+            
+            outputs.push(BuildOutputInfo {
+                path: output_path,
+                hash,
+                package,
+                ca: path_info.ca,
+            });
+        }
+    }
+    
+    Ok(outputs)
+}
+
+

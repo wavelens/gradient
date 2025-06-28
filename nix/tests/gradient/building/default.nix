@@ -181,6 +181,8 @@
       server.succeed("${lib.getExe pkgs.git} clone git://localhost/test test")
       print(server.succeed("${lib.getExe pkgs.git} ls-remote git://server/test"))
 
+      # print(server.succeed("${lib.getExe pkgs.nix} eval --json ./test#buildWait5Sec --store unix:///nix/var/nix/daemon-socket/socket"))
+      # print(server.succeed("${lib.getExe pkgs.nix} copy --to ssh://builder /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv"))
       # print(server.succeed("${lib.getExe pkgs.nix} build ./test#buildWait5Sec -L"))
       # print(server.succeed("ls -lah"))
 
@@ -223,6 +225,7 @@
       builder.succeed("cat /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv || true")
 
       print(server.succeed("nix path-info /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv"))
+      print(server.succeed("NIX_REMOTE=daemon nix path-info /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv"))
       # builder.succeed("cat /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv")
 
       # project_data = x(f"""

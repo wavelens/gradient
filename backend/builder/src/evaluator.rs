@@ -84,21 +84,21 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 }
             };
 
-        // TODO: switch back to using references from path_info
-        // let missing = get_missing_builds(vec![derivation.clone()], store).await?;
+        let missing = core::executer::get_missing_builds(vec![derivation.clone()], store).await?;
 
-        // if missing.is_empty() {
-        //     println!("Skipping package: {}", derivation);
+        if missing.is_empty() {
+            println!("Skipping package (already in store): {}", derivation);
 
-        //     add_exsisting_build(
-        //         Arc::clone(&state),
-        //         organization_id,
-        //         derivation.clone(),
-        //         evaluation.id,
-        //     );
+            add_existing_build(
+                Arc::clone(&state),
+                organization_id,
+                derivation.clone(),
+                evaluation.id,
+            )
+            .await;
 
-        //     continue;
-        // }
+            continue;
+        }
 
         let already_exsists = all_builds.iter().any(|b| b.derivation_path == derivation);
 
@@ -150,11 +150,9 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     while let Some((dependency, dependency_id, build_id)) = dependencies.pop() {
         let path_info = get_derivation(dependency.clone(), store).await.unwrap();
 
-        // TODO: switch back to using references from path_info
-        let references = path_info.references.clone();
-        // let references = get_missing_builds(path_info.references.clone(), store)
-        //     .await
-        //     .unwrap();
+        let references = core::executer::get_missing_builds(path_info.references.clone(), store)
+            .await
+            .unwrap();
 
         let already_exsists = find_builds(
             Arc::clone(&state),
@@ -224,7 +222,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 .result()
                 .await
                 .unwrap()
-                .is_none()
+                .is_some()
             {
                 references.retain(|(d, _, _)| *d != b.derivation_path);
 
@@ -435,17 +433,23 @@ pub async fn get_features_cmd(
     Ok((system, features))
 }
 
-async fn add_exsisting_build(
+
+async fn add_existing_build(
     state: Arc<ServerState>,
-    organization_id: Uuid,
+    _organization_id: Uuid,
     derivation: String,
     evaluation_id: Uuid,
 ) {
+    let (system, features) =
+        get_features_cmd(state.cli.binpath_nix.as_str(), derivation.as_str())
+            .await
+            .unwrap();
+
     let abuild = ABuild {
         id: Set(Uuid::new_v4()),
         evaluation: Set(evaluation_id),
         derivation_path: Set(derivation.clone()),
-        architecture: Set(entity::server::Architecture::X86_64Linux),
+        architecture: Set(system),
         status: Set(BuildStatus::Completed),
         server: Set(None),
         log: Set(None),
@@ -455,20 +459,36 @@ async fn add_exsisting_build(
 
     let build = abuild.insert(&state.db).await.unwrap();
 
-    // let abuild_output = ABuildOutput {
-    //     id: Set(Uuid::new_v4()),
-    //     build: Set(build.id),
-    //     output: Set(build_output),
-    //     hash: Set(build_output_path_hash),
-    //     package: Set(build_output_path_package),
-    //     file_hash: Set(None),
-    //     file_size: Set(None),
-    //     is_cached: Set(false),
-    //     ca: Set(None),
-    //     created_at: Set(Utc::now().naive_utc()),
-    // };
+    add_features(Arc::clone(&state), features, Some(build.id), None).await;
 
-    // abuild_output.insert(&state.db).await.unwrap();
+    let local_store = get_local_store(None).await.unwrap();
+    let outputs = match local_store {
+        LocalNixStore::UnixStream(mut store) => {
+            core::executer::get_build_outputs_from_derivation(derivation.clone(), &mut store).await
+        }
+        LocalNixStore::CommandDuplex(mut store) => {
+            core::executer::get_build_outputs_from_derivation(derivation.clone(), &mut store).await
+        }
+    };
+
+    if let Ok(outputs) = outputs {
+        for output in outputs {
+            let abuild_output = ABuildOutput {
+                id: Set(Uuid::new_v4()),
+                build: Set(build.id),
+                output: Set(output.path.clone()),
+                hash: Set(output.hash),
+                package: Set(output.package),
+                file_hash: Set(None),
+                file_size: Set(None),
+                is_cached: Set(false),
+                ca: Set(output.ca),
+                created_at: Set(Utc::now().naive_utc()),
+            };
+
+            abuild_output.insert(&state.db).await.unwrap();
+        }
+    }
 }
 
 async fn get_flake_derivations(

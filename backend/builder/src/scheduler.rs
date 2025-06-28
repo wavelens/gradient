@@ -8,6 +8,7 @@ use chrono::Utc;
 use core::executer::*;
 use core::sources::*;
 use core::types::*;
+use core::input::load_secret;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use futures::stream::{self, StreamExt};
@@ -18,6 +19,7 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::process::Command;
 use tokio::task::JoinHandle;
 use tokio::time;
 use uuid::Uuid;
@@ -240,24 +242,46 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         dependencies.extend(output_paths);
     }
 
-    let copy_build = match local_daemon {
-        LocalNixStore::UnixStream(ref mut store) => {
-            copy_builds(dependencies.clone(), store, &mut server_daemon, false).await
-        }
-        LocalNixStore::CommandDuplex(ref mut store) => {
-            copy_builds(dependencies.clone(), store, &mut server_daemon, false).await
-        }
-    };
+    // let copy_build = match local_daemon {
+    //     LocalNixStore::UnixStream(ref mut store) => {
+    //         copy_builds(dependencies.clone(), store, &mut server_daemon, false).await
+    //     }
+    //     LocalNixStore::CommandDuplex(ref mut store) => {
+    //         copy_builds(dependencies.clone(), store, &mut server_daemon, false).await
+    //     }
+    // };
 
-    match copy_build {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("Failed to copy builds: {}", e);
-            // TODO: maybe retry
-            update_build_status_recursivly(state, build.clone(), BuildStatus::Failed).await;
-            return;
-        }
+    // match copy_build {
+    //     Ok(_) => {}
+    //     Err(e) => {
+    //         eprintln!("Failed to copy builds: {}", e);
+    //         // TODO: maybe retry
+    //         update_build_status_recursivly(state, build.clone(), BuildStatus::Failed).await;
+    //         return;
+    //     }
+    // }
+
+    let ssh_key_path = write_key(private_key.clone(), state.cli.base_path.clone()).unwrap();
+
+    for path in dependencies {
+        let exec = Command::new(state.cli.binpath_nix.clone())
+            .arg("copy")
+            .arg("--to")
+            .arg(format!("ssh://{}@{}:{}",
+                server.username, server.host, server.port))
+            .arg(&path)
+            .env("NIX_SSHOPTS", format!("-i {}", ssh_key_path))
+            .output()
+            .await
+            .unwrap();
+        println!(
+            "Output of copying {}: {}",
+            path,
+            String::from_utf8_lossy(&exec.stdout)
+        );
     }
+
+    clear_key(ssh_key_path).unwrap();
 
     let mut build_outputs: Vec<ABuildOutput> = vec![];
 
@@ -265,7 +289,20 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         Ok(results) => {
             let status = if results.1.values().all(|r| r.error_msg.is_empty()) {
                 for build_result in results.1.values() {
+                    let ssh_key_path = write_key(private_key.clone(), state.cli.base_path.clone()).unwrap();
                     for (build_output, build_output_path) in build_result.built_outputs.clone() {
+                        Command::new(state.cli.binpath_nix.clone())
+                            .arg("copy")
+                            .arg("--from")
+                            .arg(format!("ssh://{}@{}:{}",
+                                server.username, server.host, server.port))
+                            .arg(&build_output_path)
+                            .env("NIX_SSHOPTS", format!("-i {}", ssh_key_path))
+                            .output()
+                            .await
+                            .unwrap();
+
+
                         let build_output_path =
                             serde_json::from_str::<BuildOutputPath>(&build_output_path).unwrap();
 
@@ -289,6 +326,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                             created_at: Set(Utc::now().naive_utc()),
                         });
                     }
+                    clear_key(ssh_key_path).unwrap();
                 }
 
                 BuildStatus::Completed
@@ -315,29 +353,31 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         }
     };
 
-    let copy_build = match local_daemon {
-        LocalNixStore::UnixStream(ref mut store) => {
-            copy_builds(dependencies, store, &mut server_daemon, false).await
-        }
-        LocalNixStore::CommandDuplex(ref mut store) => {
-            copy_builds(dependencies, store, &mut server_daemon, false).await
-        }
-    };
+    // let copy_build = match local_daemon {
+    //     LocalNixStore::UnixStream(ref mut store) => {
+    //         copy_builds(dependencies, store, &mut server_daemon, false).await
+    //     }
+    //     LocalNixStore::CommandDuplex(ref mut store) => {
+    //         copy_builds(dependencies, store, &mut server_daemon, false).await
+    //     }
+    // };
 
-    match copy_build {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("Failed to copy builds: {}", e);
-            // TODO: maybe retry
-            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed)
-                .await;
-        }
+    // match copy_build {
+    //     Ok(_) => {}
+    //     Err(e) => {
+    //         eprintln!("Failed to copy builds: {}", e);
+    //         // TODO: maybe retry
+    //         update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed)
+    //             .await;
+    //     }
+    // }
+
+    if !build_outputs.is_empty() {
+        EBuildOutput::insert_many(build_outputs)
+            .exec(&state.db)
+            .await
+            .unwrap();
     }
-
-    EBuildOutput::insert_many(build_outputs)
-        .exec(&state.db)
-        .await
-        .unwrap();
 }
 
 async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {

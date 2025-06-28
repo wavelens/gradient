@@ -154,6 +154,9 @@ in {
         RestrictRealtime = true;
         RestrictSUIDSGID = true;
         WorkingDirectory = cfg.baseDir;
+        BindPaths = [
+          "/nix"
+        ];
         LoadCredential = [
           "gradient_database_url:${cfg.databaseUrlFile}"
           "gradient_crypt_secret:${cfg.cryptSecretFile}"
@@ -164,6 +167,7 @@ in {
       };
 
       environment = {
+        NIX_REMOTE = "daemon";
         XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
         GRADIENT_DEBUG = "false";
         GRADIENT_IP = cfg.listenAddr;
