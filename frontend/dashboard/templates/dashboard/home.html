@@ -55,6 +55,23 @@
                     </span>
                 </div>
             </div>
+        {% empty %}
+            <div class="no-caches" style="text-align: center; padding: 2rem; color: #6c757d;">
+                <span class="material-symbols-outlined" style="font-size: 4rem; margin-bottom: 1rem; display: block;">
+                    database
+                </span>
+                {% if error_message %}
+                    <h3>{% trans 'Error loading Organizations' %}</h3>
+                    <p>{{ error_message }}</p>
+                    <p style="margin-top: 1rem;">{% trans 'The organization API endpoints may not be implemented yet.' %}</p>
+                {% else %}
+                    <h3>{% trans 'No organizations found' %}</h3>
+                    <p>{% trans 'Create your first organization to get started.' %}</p>
+                    <a href="{% url 'new_organization' %}" class="submit-btn" style="display: inline-block; margin-top: 1rem;">
+                        {% trans 'Create Organization' %}
+                    </a>
+                {% endif %}
+            </div>
         {% endfor %}
     </div>
 </div>

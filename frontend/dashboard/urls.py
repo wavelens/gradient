@@ -11,13 +11,13 @@ urlpatterns = [
     path("account/register", register, name="register"),
     path("account/logout", logout_view, name="logout"),
 
-    path("<str:org>", workflow, name="workflow"),
-    path("<str:org>/log", log, name="log"),
-    path("<str:org>/log/<str:evaluation_id>", log, name="log-eval"),
-    path("<str:org>/download", download, name="download"),
-    path("<str:org>/download/<str:evaluation_id>", download, name="download-eval"),
-    path("<str:org>/model", model, name="model"),
-    path("<str:org>/model/<str:evaluation_id>", model, name="model-eval"),
+    path("organization/<str:org>", workflow, name="workflow"),
+    path("organization/<str:org>/log", log, name="log"),
+    path("organization/<str:org>/log/<str:evaluation_id>", log, name="log-eval"),
+    path("organization/<str:org>/download", download, name="download"),
+    path("organization/<str:org>/download/<str:evaluation_id>", download, name="download-eval"),
+    path("organization/<str:org>/model", model, name="model"),
+    path("organization/<str:org>/model/<str:evaluation_id>", model, name="model-eval"),
 
     path("new/organization", new_organization, name="new_organization"),
     path("new/project", new_project, name="new_project"),
@@ -25,9 +25,12 @@ urlpatterns = [
     path("new/cache", new_cache, name="new_cache"),
 
     path("", home, name="home"),
+    path("cache", caches, name="caches"),
 
     path("settings/server", edit_server, name="settingsServer"),
-    path("<str:org>/project/<str:project>/settings", edit_project, name="settingsProject"),
+    path("organization/<str:org>/project/<str:project>/settings", edit_project, name="settingsProject"),
     path("organization/<str:org>/settings", edit_organization, name="settingsOrganization"),
+    path("organization/<str:org>/members", organization_members, name="organizationMembers"),
+    path("cache/<str:cache>/settings", edit_cache, name="settingsCache"),
     path("settings/profile", settingsProfile, name="settingsProfile"),
 ]

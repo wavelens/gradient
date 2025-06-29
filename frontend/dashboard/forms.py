@@ -247,7 +247,7 @@ class NewCacheForm(forms.Form):
             'class': 'form-control'
         })
     )
-    priority = forms.CharField(
+    priority = forms.IntegerField(
         label='Priority',
         required=True,
         widget=forms.TextInput(attrs={
@@ -366,6 +366,36 @@ class EditProjectForm(forms.Form):
         })
     )
 
+class EditCacheForm(forms.Form):
+    name = forms.CharField(
+        label='Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    display_name = forms.CharField(
+        label='Display Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    description = forms.CharField(
+        label='Description',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    priority = forms.IntegerField(
+        label='Priority',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+        })
+    )
+
 class EditUserForm(forms.Form):
     name = forms.CharField(
         label='Name',
@@ -385,6 +415,45 @@ class EditUserForm(forms.Form):
         label='Email',
         required=True,
         widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+
+class AddOrganizationMemberForm(forms.Form):
+    ROLE_CHOICES = [
+        ('admin', 'Admin'),
+        ('member', 'Member'),
+        ('viewer', 'Viewer'),
+    ]
+    
+    user = forms.CharField(
+        label='Username',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    role = forms.ChoiceField(
+        label='Role',
+        choices=ROLE_CHOICES,
+        required=True,
+        widget=forms.Select(attrs={
+            'class': 'form-control'
+        })
+    )
+
+class EditOrganizationMemberForm(forms.Form):
+    ROLE_CHOICES = [
+        ('admin', 'Admin'),
+        ('member', 'Member'),
+        ('viewer', 'Viewer'),
+    ]
+    
+    role = forms.ChoiceField(
+        label='Role',
+        choices=ROLE_CHOICES,
+        required=True,
+        widget=forms.Select(attrs={
             'class': 'form-control'
         })
     )

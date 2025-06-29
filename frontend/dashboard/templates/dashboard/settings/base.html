@@ -12,20 +12,18 @@
      {% load i18n %}
  </head>
  
- {% block title %}{% trans 'Settings' %}{% endblock %}
+ {% block title %}{% block page_title %}{% trans 'Settings' %}{% endblock %}{% endblock %}
 
  {% block content %}
  <div class="settings-container">
-   <h1 class="settings-title">{% trans 'Settings' %}</h1>
+   <h1 class="settings-title">{% block settings_title %}{% trans 'Settings' %}{% endblock %}</h1>
  
    <div class="settings-layout">
      <aside class="settings-sidebar">
        <nav class="settings-nav">
          <ul>
-           <li><a class="settings-nav-link" href=""><span class="material-symbols-outlined m-r-5">assignment</span>{% trans 'Project' %}</a></li>
-           <li><a class="settings-nav-link" href=""><span class="material-symbols-outlined m-r-5">apartment</span>{% trans 'Organization' %}</a></li>
-           <li><a class="settings-nav-link" href=""><span class="material-symbols-outlined m-r-5">host</span>{% trans 'Server' %}</a></li>
-           <li><a class="settings-nav-link" href=""><span class="material-symbols-outlined m-r-5">person</span>{% trans 'Public Profile' %}</a></li>
+          {% block navigation_items %}
+          {% endblock %}
          </ul>
        </nav>
      </aside>

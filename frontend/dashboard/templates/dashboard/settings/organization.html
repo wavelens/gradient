@@ -12,7 +12,16 @@
      {% load i18n %}
  </head>
  
- {% block title %}{% trans 'Settings' %}{% endblock %}
+ {% block page_title %}{% trans 'Organization Settings' %}{% endblock %}
+
+{% block settings_title %}{% trans 'Organization Settings' %}{% endblock %}
+
+{% block navigation_items %}
+    <li><a class="settings-nav-link active" href=""><span class="material-symbols-outlined m-r-5">apartment</span>{% trans 'Organization' %}</a></li>
+    {% if org %}
+        <li><a class="settings-nav-link" href="{% url 'organizationMembers' org %}"><span class="material-symbols-outlined m-r-5">group</span>{% trans 'Members' %}</a></li>
+    {% endif %}
+{% endblock %}
 
  {% block inhalt %}
  <div class="">

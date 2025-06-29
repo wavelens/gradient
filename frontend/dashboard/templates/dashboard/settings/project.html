@@ -12,7 +12,13 @@
      {% load i18n %}
  </head>
  
- {% block title %}{% trans 'Settings' %}{% endblock %}
+ {% block page_title %}{% trans 'Project Settings' %}{% endblock %}
+
+{% block settings_title %}{% trans 'Project Settings' %}{% endblock %}
+
+{% block navigation_items %}
+    <li><a class="settings-nav-link active" href=""><span class="material-symbols-outlined m-r-5">assignment</span>{% trans 'Project' %}</a></li>
+{% endblock %}
 
  {% block inhalt %}
  <div class="">

@@ -282,19 +282,153 @@ def edit_organization(request, org):
     else:
         form = EditOrganizationForm(initial=initial_data)
 
-    return render(request, "dashboard/settings/organization.html", {'form': form})
+    return render(request, "dashboard/settings/organization.html", {'form': form, 'org': org})
 
 @login_required
 def new_cache(request):
     if request.method == 'POST':
         form = NewCacheForm(request.POST)
         if form.is_valid():
-            api.put_orgs(request, form.cleaned_data['name'], form.cleaned_data['display_name'], form.cleaned_data['description'], form.cleaned_data['priority'])
+            api.put_caches(request, form.cleaned_data['name'], form.cleaned_data['display_name'], form.cleaned_data['description'], form.cleaned_data['priority'])
             return redirect('/')
     else:
         form = NewCacheForm()
 
     return render(request, "dashboard/NewCache.html", {'form': form})
+
+@login_required
+def edit_cache(request, cache):
+    cache_data = api.get_caches_cache(request, cache)
+    cache_message = cache_data.get('message', {})
+    initial_data = {
+        'name': cache_message.get('name', ''),
+        'display_name': cache_message.get('display_name', ''),
+        'description': cache_message.get('description', ''),
+        'priority': cache_message.get('priority', '')
+    }
+
+    if request.method == 'POST':
+        form = EditCacheForm(request.POST)
+        if form.is_valid():
+            cleaned = form.cleaned_data
+            patch_data = {}
+
+            if cleaned['name'] != cache_message.get('name'):
+                patch_data['name'] = cleaned['name']
+            if cleaned['display_name'] != cache_message.get('display_name'):
+                patch_data['display_name'] = cleaned['display_name']
+            if cleaned['description'] != cache_message.get('description'):
+                patch_data['description'] = cleaned['description']
+            if cleaned['priority'] != cache_message.get('priority'):
+                patch_data['priority'] = cleaned['priority']
+            
+            if patch_data:
+                response = api.patch_caches_cache(request, cache, **patch_data)
+                if response.get("error"):
+                    form.add_error(None, response.get("message", "Unbekannter Fehler"))
+                else:
+                    return redirect('/')
+            else:
+                return redirect('/')
+    else:
+        form = EditCacheForm(initial=initial_data)
+
+    return render(request, "dashboard/settings/cache.html", {'form': form})
+
+@login_required
+def organization_members(request, org):
+    members_data = api.get_orgs_organization_users(request, org)
+    
+    if isinstance(members_data, type(None)) or members_data.get('error'):
+        members = []
+    else:
+        members = members_data.get('message', [])
+    
+    add_form = None
+    if request.method == 'POST':
+        if 'add_member' in request.POST:
+            add_form = AddOrganizationMemberForm(request.POST)
+            if add_form.is_valid():
+                response = api.post_orgs_organization_users(
+                    request, 
+                    org, 
+                    add_form.cleaned_data['user'], 
+                    add_form.cleaned_data['role']
+                )
+                if response and not response.get('error'):
+                    return redirect(f'/organization/{org}/members')
+                else:
+                    add_form.add_error(None, response.get('message', 'Failed to add member'))
+        
+        elif 'remove_member' in request.POST:
+            user_to_remove = request.POST.get('user')
+            if user_to_remove:
+                response = api.delete_orgs_organization_users(request, org, user_to_remove)
+                if response and not response.get('error'):
+                    return redirect(f'/organization/{org}/members')
+        
+        elif 'edit_role' in request.POST:
+            user_to_edit = request.POST.get('user')
+            new_role = request.POST.get('role')
+            if user_to_edit and new_role:
+                response = api.patch_orgs_organization_users(request, org, user_to_edit, new_role)
+                if response and not response.get('error'):
+                    return redirect(f'/organization/{org}/members')
+    
+    if not add_form:
+        add_form = AddOrganizationMemberForm()
+    
+    context = {
+        'org': org,
+        'members': members,
+        'add_form': add_form,
+        'role_choices': AddOrganizationMemberForm.ROLE_CHOICES
+    }
+    
+    return render(request, "dashboard/settings/organization_members.html", context)
+
+@login_required
+def caches(request):
+    print('Hello')
+    details_blocks = []
+    all_caches = api.get_caches(request)
+    print(all_caches)
+    if isinstance(all_caches, type(None)):
+        # API call failed - show empty state
+        context = {'details_blocks': []}
+        return render(request, "dashboard/caches.html", context)
+    
+    if all_caches.get('error'):
+        # API returned error - show empty state with error message
+        context = {'details_blocks': [], 'error_message': all_caches.get('message', 'Failed to load caches')}
+        return render(request, "dashboard/caches.html", context)
+
+    all_caches = all_caches.get('message', [])
+
+    for cache in all_caches:
+        cache_details = api.get_caches_cache(request, cache['name'])
+
+        if isinstance(cache_details, type(None)) or cache_details.get('error'):
+            # Skip this cache if we can't get details
+            continue
+
+        cache_details = cache_details['message']
+
+        details_blocks.append({
+            'name': cache['name'],
+            'display_name': cache_details['display_name'],
+            'id': cache['id'],
+            'description': cache_details['description'],
+            'priority': cache_details.get('priority', 'N/A'),
+            'status': cache_details.get('status', 'inactive'),
+            'size': cache_details.get('size', 'N/A'),
+            'hit_rate': cache_details.get('hit_rate', 'N/A'),
+        })
+
+    context = {
+        'details_blocks': details_blocks
+    }
+    return render(request, "dashboard/caches.html", context)
 
 @login_required
 def new_project(request):

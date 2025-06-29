@@ -23,6 +23,10 @@
             <span class="material-symbols-outlined f-s-19px m-r-4">keyboard_command_key</span>
             <span>{% trans 'Workflows' %}</span>
         </a>
+        <a class="nav-link flex-end" href="{% url 'caches' %}">
+            <span class="material-symbols-outlined f-s-19px m-r-4">hub</span>
+            <span>{% trans 'Caches' %}</span>
+        </a>
 
         {% if project_id %}
         <a class="nav-link flex-end" href="{% url 'log' org_id %}"><span class="material-symbols-outlined f-s-19px m-r-4">vital_signs</span><span>{% trans 'Log' %}</span></a>
