@@ -164,6 +164,7 @@ in {
       };
 
       environment = {
+        NIX_REMOTE = "daemon";
         XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
         GRADIENT_DEBUG = "false";
         GRADIENT_IP = cfg.listenAddr;
@@ -176,7 +177,7 @@ in {
         GRADIENT_BINPATH_NIX = lib.getExe cfg.package_nix;
         GRADIENT_BINPATH_GIT = lib.getExe cfg.package_git;
         GRADIENT_BINPATH_ZSTD = lib.getExe cfg.package_zstd;
-        GRADIENT_OAUTH_ENABLE = lib.boolToString cfg.oauth.enable;
+        GRADIENT_OAUTH_ENABLED = lib.boolToString cfg.oauth.enable;
         GRADIENT_DISABLE_REGISTER = lib.boolToString cfg.settings.disableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
         GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";

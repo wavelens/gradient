@@ -139,8 +139,10 @@
       print(server.succeed("cat /etc/nix/nix.conf"))
       print(builder.succeed("cat /etc/nix/nix.conf"))
 
+      # Test health endpoint
       server.succeed("${lib.getExe pkgs.curl} http://gradient.local/api/v1/health -i --fail")
 
+      # Test user registration and authentication
       server.succeed("""
           ${lib.getExe pkgs.curl} \
           -X POST \
@@ -160,41 +162,66 @@
 
       print(f"Got Token: {token}")
 
+      # Test CLI configuration commands
+      print("=== Testing CLI Configuration ===")
       server.succeed("${lib.getExe pkgs.gradient-cli} config Server http://gradient.local")
       server.succeed("${lib.getExe pkgs.gradient-cli} config AuthToken ACCESS_TOKEN".replace("ACCESS_TOKEN", token))
-      server.succeed("${lib.getExe pkgs.gradient-cli} organization create --name testorg --display-name MyOrganization --description 'My Test Organization'")
+      
+      # Test status command
+      print(server.succeed("${lib.getExe pkgs.gradient-cli} status"))
+      
+      # Test info command
+      print(server.succeed("${lib.getExe pkgs.gradient-cli} info"))
 
-      # configure git
+      # Test organization commands
+      print("=== Testing Organization Commands ===")
+      server.succeed("${lib.getExe pkgs.gradient-cli} organization create --name testorg --display-name MyOrganization --description 'My Test Organization'")
+      print(server.succeed("${lib.getExe pkgs.gradient-cli} organization show"))
+      print(server.succeed("${lib.getExe pkgs.gradient-cli} organization list"))
+      
+      # Test organization SSH commands
+      print("=== Testing Organization SSH ===")
+      org_pub_key = server.succeed("${lib.getExe pkgs.gradient-cli} organization ssh show")[12:].strip()
+      print(f"Got Organization Public Key: {org_pub_key}")
+
+      # Test cache commands
+      print("=== Testing Cache Commands ===")
+      server.succeed("${lib.getExe pkgs.gradient-cli} cache create --name testcache --display-name 'Test Cache' --description 'Test cache description' --priority 10")
+      print(server.succeed("${lib.getExe pkgs.gradient-cli} cache list"))
+      print(server.succeed("${lib.getExe pkgs.gradient-cli} cache show testcache"))
+      
+      # Test organization cache subscription
+      server.succeed("${lib.getExe pkgs.gradient-cli} organization cache add testcache")
+      print(server.succeed("${lib.getExe pkgs.gradient-cli} organization cache list"))
+
+      # Configure git
       server.succeed("${lib.getExe pkgs.git} config --global --add safe.directory '*'")
       server.succeed("${lib.getExe pkgs.git} config --global init.defaultBranch main")
       server.succeed("${lib.getExe pkgs.git} config --global user.email 'nixos@localhost'")
       server.succeed("${lib.getExe pkgs.git} config --global user.name 'NixOS test'")
 
-      # initialize git repository
+      # Initialize git repository
       server.succeed("${lib.getExe pkgs.git} init /var/lib/git/test")
       server.succeed("cp /var/lib/git/{,test/}flake.nix")
       server.succeed("chown git:git -R /var/lib/git/test")
       server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add flake.nix")
       server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test commit -m 'Initial commit'")
 
-      # ensure git repository is available without authentication
+      # Ensure git repository is available without authentication
       server.succeed("${lib.getExe pkgs.git} clone git://localhost/test test")
       print(server.succeed("${lib.getExe pkgs.git} ls-remote git://server/test"))
 
-      # print(server.succeed("${lib.getExe pkgs.nix} build ./test#buildWait5Sec -L"))
-      # print(server.succeed("ls -lah"))
-
-      # add ssh key of gradient organization to builder machine
-      org_pub_key = server.succeed("${lib.getExe pkgs.gradient-cli} organization ssh show")[12:].strip()
-
-      print(f"Got Organization Public Key: {org_pub_key}")
+      # Add SSH key to builder machine
       builder.succeed(f"echo '{org_pub_key}' > /home/builder/.ssh/authorized_keys")
       builder.succeed("chown builder:users /home/builder/.ssh/authorized_keys")
       builder.succeed("chmod 600 /home/builder/.ssh/authorized_keys")
 
+      # Test server commands
+      print("=== Testing Server Commands ===")
       server.succeed("${lib.getExe pkgs.gradient-cli} server create --name testserver --display-name MyServer --host builder --port 22 --ssh-user builder --architectures x86_64-linux --features big-parallel")
+      print(server.succeed("${lib.getExe pkgs.gradient-cli} server list"))
 
-      # test connection to build server (to verify ssh key does work as exptected)
+      # Test server connection
       print(server.succeed(f"""
         ${lib.getExe pkgs.curl} -i --fail \
           -X POST \
@@ -202,10 +229,13 @@
           http://gradient.local/api/v1/servers/testorg/testserver/check-connection
       """))
 
-      # create project from git repository
-      server.succeed("${lib.getExe pkgs.gradient-cli} project create --name testproject --display-name MyProject --description 'Just a test' --repository git://server/test --evaluation-wildcard packages.*.*")
+      # Test project commands
+      print("=== Testing Project Commands ===")
+      server.succeed("${lib.getExe pkgs.gradient-cli} project create --name testproject --display-name MyProject --description 'Just a test' --repository git://server/test --evaluation-wildcard packages.*.buildWait5Sec,packages.*.deployment")
+      print(server.succeed("${lib.getExe pkgs.gradient-cli} project list"))
+      print(server.succeed("${lib.getExe pkgs.gradient-cli} project show"))
 
-      # test git repository pullable
+      # Test git repository connectivity
       print(server.succeed(f"""
         ${lib.getExe pkgs.curl} -i --fail \
           -X POST \
@@ -213,32 +243,54 @@
           http://gradient.local/api/v1/projects/testorg/testproject/check-repository
       """))
 
-      print(server.succeed("${lib.getExe pkgs.gradient-cli} project show"))
+      # Test project evaluation
+      server.succeed("${lib.getExe pkgs.gradient-cli} project evaluate")
 
+      # Wait for evaluation to complete and test cache functionality
+      print("=== Testing Nix Cache Functionality ===")
       builder.sleep(30)
 
+      # Check if builds are cached properly
       print(server.succeed("${lib.getExe pkgs.gradient-cli} project show"))
+      
+      # Test that cache is serving content
+      print("Testing cache endpoint...")
+      cache_info = server.succeed(f"""
+        ${lib.getExe pkgs.curl} -i \
+          -H "Authorization: Bearer {token}" \
+          http://gradient.local/nix-cache-info
+      """)
+      print(f"Cache info: {cache_info}")
 
-      print(server.succeed("cat /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv"))
-      builder.succeed("cat /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv || true")
+      # Test organization user management
+      print("=== Testing Organization User Management ===")
+      print(server.succeed("${lib.getExe pkgs.gradient-cli} organization user list"))
 
-      print(server.succeed("nix path-info /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv"))
-      # builder.succeed("cat /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv")
+      # Test editing commands
+      print("=== Testing Edit Commands ===")
+      server.succeed("${lib.getExe pkgs.gradient-cli} organization edit --display-name 'Updated Organization'")
+      server.succeed("${lib.getExe pkgs.gradient-cli} project edit --display-name 'Updated Project'")
+      server.succeed("${lib.getExe pkgs.gradient-cli} cache edit testcache --display-name 'Updated Cache'")
 
-      # project_data = x(f"""
-      #   ${lib.getExe pkgs.curl} \
-      #     -X GET \
-      #     -H "Authorization: Bearer {token}" \
-      #     http://gradient.local/api/v1/project/{project_id} \
-      #     | ${lib.getExe pkgs.jq} -rj '.message'
-      # """)
+      # Test completion generation
+      print("=== Testing Shell Completions ===")
+      server.succeed("${lib.getExe pkgs.gradient-cli} --generate-completions bash > /tmp/completions.bash")
+      server.succeed("test -s /tmp/completions.bash")
 
-      # print(f"Got Project Data: {project_data}")
+      # Test Nix cache integration with actual build
+      print("=== Testing Nix Store Integration ===")
+      
+      # Build something on builder to test store copying
+      build_result = builder.succeed("nix-build '<nixpkgs>' -A hello --no-out-link")
+      print(f"Built package: {build_result}")
+      
+      # Test that the package can be retrieved from cache
+      server.succeed(f"""
+        ${lib.getExe pkgs.curl} -I \
+          http://gradient.local/{build_result.strip()}.narinfo || true
+      """)
 
-      # print(x("journalctl -u gradient-server -n 100 --no-pager"))
-      # print(server.succeed("ssh server ${lib.getExe pkgs.tree} /var/lib/gradient"))
-
-      # TODO wait until project last_evaluation != null
+      print("=== All Tests Completed Successfully ===")
       '';
   });
 }

@@ -14,9 +14,10 @@ use core::input::{check_index_name, valid_evaluation_wildcard, vec_to_hex};
 use core::sources::check_project_updates;
 use core::types::*;
 use entity::evaluation::EvaluationStatus;
+use entity::build::BuildStatus;
 use git_url_parse::normalize_url;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder, QuerySelect, PaginatorTrait};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -37,6 +38,28 @@ pub struct PatchProjectRequest {
     pub description: Option<String>,
     pub repository: Option<String>,
     pub evaluation_wildcard: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct EvaluationSummary {
+    pub id: Uuid,
+    pub status: EvaluationStatus,
+    pub total_builds: i64,
+    pub failed_builds: i64,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ProjectDetailsResponse {
+    pub id: Uuid,
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    pub repository: String,
+    pub evaluation_wildcard: String,
+    pub active: bool,
+    pub created_at: chrono::NaiveDateTime,
+    pub last_evaluations: Vec<EvaluationSummary>,
 }
 
 pub async fn get(
@@ -383,6 +406,76 @@ pub async fn post_project_evaluate(
     let res = BaseResponse {
         error: false,
         message: "Evaluation started".to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn get_project_details(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, project)): Path<(String, String)>,
+) -> WebResult<Json<BaseResponse<ProjectDetailsResponse>>> {
+    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
+        state.0.clone(),
+        user.id,
+        organization.clone(),
+        project.clone(),
+    )
+    .await
+    .ok_or_else(|| WebError::not_found("Project"))?;
+
+    // Get last 5 evaluations for this project
+    let evaluations = EEvaluation::find()
+        .filter(CEvaluation::Project.eq(project.id))
+        .order_by_desc(CEvaluation::CreatedAt)
+        .limit(5)
+        .all(&state.db)
+        .await?;
+
+    let mut evaluation_summaries = Vec::new();
+    
+    for evaluation in evaluations {
+        // Count total builds for this evaluation
+        let total_builds = EBuild::find()
+            .filter(CBuild::Evaluation.eq(evaluation.id))
+            .count(&state.db)
+            .await?;
+
+        // Count failed builds for this evaluation  
+        let failed_builds = EBuild::find()
+            .filter(
+                Condition::all()
+                    .add(CBuild::Evaluation.eq(evaluation.id))
+                    .add(CBuild::Status.eq(BuildStatus::Failed))
+            )
+            .count(&state.db)
+            .await?;
+
+        evaluation_summaries.push(EvaluationSummary {
+            id: evaluation.id,
+            status: evaluation.status,
+            total_builds: total_builds as i64,
+            failed_builds: failed_builds as i64,
+            created_at: evaluation.created_at,
+        });
+    }
+
+    let project_details = ProjectDetailsResponse {
+        id: project.id,
+        name: project.name,
+        display_name: project.display_name,
+        description: project.description,
+        repository: project.repository,
+        evaluation_wildcard: project.evaluation_wildcard,
+        active: project.active,
+        created_at: project.created_at,
+        last_evaluations: evaluation_summaries,
+    };
+
+    let res = BaseResponse {
+        error: false,
+        message: project_details,
     };
 
     Ok(Json(res))

@@ -11,6 +11,7 @@ use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use futures::stream::{self, StreamExt};
+use nix_daemon::nix::DaemonStore;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, JoinType, QueryFilter,
@@ -18,6 +19,7 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
 use tokio::time;
 use uuid::Uuid;
@@ -228,19 +230,17 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
 
     println!("Connected to server: {}", server.id);
 
-    let bdependencies = get_build_dependencies(Arc::clone(&state), &build)
+    // Get all dependencies in topological order from the database
+    let dependencies = get_build_dependencies_sorted(Arc::clone(&state), &build, &mut server_daemon)
         .await
         .unwrap();
-    let mut dependencies = vec![build.derivation_path.clone()];
-
-    for dependency in bdependencies {
-        let output_paths = get_output_path(dependency.derivation_path, &mut server_daemon)
-            .await
-            .unwrap();
-        dependencies.extend(output_paths);
+    
+    println!("Copying {} dependencies in order:", dependencies.len());
+    for (i, dep) in dependencies.iter().enumerate() {
+        println!("  {}: {}", i, dep);
     }
 
-    let copy_build = match local_daemon {
+    match local_daemon {
         LocalNixStore::UnixStream(ref mut store) => {
             copy_builds(dependencies.clone(), store, &mut server_daemon, false).await
         }
@@ -249,22 +249,22 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         }
     };
 
-    match copy_build {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("Failed to copy builds: {}", e);
-            // TODO: maybe retry
-            update_build_status_recursivly(state, build.clone(), BuildStatus::Failed).await;
-            return;
-        }
-    }
-
     let mut build_outputs: Vec<ABuildOutput> = vec![];
 
     match execute_build(&build, &mut server_daemon, Arc::clone(&state)).await {
         Ok(results) => {
             let status = if results.1.values().all(|r| r.error_msg.is_empty()) {
                 for build_result in results.1.values() {
+                    let build_results = build_result.built_outputs.clone().into_iter().map(|(_output, path)| format!("/nix/store/{}", serde_json::from_str::<BuildOutputPath>(&path).unwrap().out_path)).collect::<Vec<_>>();
+                    match local_daemon {
+                        LocalNixStore::UnixStream(ref mut store) => {
+                            copy_builds(build_results, &mut server_daemon, store, true).await
+                        }
+                        LocalNixStore::CommandDuplex(ref mut store) => {
+                            copy_builds(build_results, &mut server_daemon, store, true).await
+                        }
+                    };
+
                     for (build_output, build_output_path) in build_result.built_outputs.clone() {
                         let build_output_path =
                             serde_json::from_str::<BuildOutputPath>(&build_output_path).unwrap();
@@ -315,29 +315,12 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         }
     };
 
-    let copy_build = match local_daemon {
-        LocalNixStore::UnixStream(ref mut store) => {
-            copy_builds(dependencies, store, &mut server_daemon, false).await
-        }
-        LocalNixStore::CommandDuplex(ref mut store) => {
-            copy_builds(dependencies, store, &mut server_daemon, false).await
-        }
-    };
-
-    match copy_build {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("Failed to copy builds: {}", e);
-            // TODO: maybe retry
-            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed)
-                .await;
-        }
+    if !build_outputs.is_empty() {
+        EBuildOutput::insert_many(build_outputs)
+            .exec(&state.db)
+            .await
+            .unwrap();
     }
-
-    EBuildOutput::insert_many(build_outputs)
-        .exec(&state.db)
-        .await
-        .unwrap();
 }
 
 async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
@@ -871,4 +854,33 @@ async fn get_build_dependencies(
         .unwrap();
 
     Ok(builds)
+}
+
+async fn get_build_dependencies_sorted<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
+    state: Arc<ServerState>,
+    build: &MBuild,
+    server_daemon: &mut DaemonStore<A>,
+) -> Result<Vec<String>, String> {
+    // Use a simpler approach: get direct dependencies and add them first, then the main build
+    let bdependencies = get_build_dependencies(Arc::clone(&state), &build)
+        .await
+        .unwrap();
+    
+    let mut dependencies = Vec::new();
+    
+    // Add all dependency output paths first (these need to be copied before the main build)
+    for dependency in &bdependencies {
+        let output_paths = get_output_path(dependency.derivation_path.clone(), server_daemon)
+            .await
+            .unwrap();
+        dependencies.extend(output_paths);
+    }
+    
+    // Add the main build's output paths last
+    let main_output_paths = get_output_path(build.derivation_path.clone(), server_daemon)
+        .await
+        .unwrap();
+    dependencies.extend(main_output_paths);
+    
+    Ok(dependencies)
 }

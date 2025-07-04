@@ -8,6 +8,9 @@ use crate::authorization::{encode_jwt, oauth_login_create, oauth_login_verify, u
 use crate::error::{WebError, WebResult};
 use axum::Json;
 use axum::extract::{Query, State};
+use axum::response::Response;
+use axum::http::StatusCode;
+use axum::body::Body;
 use chrono::Utc;
 use core::consts::*;
 use core::input::check_index_name;
@@ -160,6 +163,47 @@ pub async fn post_oauth_authorize(
     let res = BaseResponse {
         error: false,
         message: authorize_url.to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn get_oidc_login(
+    state: State<Arc<ServerState>>,
+    Query(query): Query<HashMap<String, String>>,
+) -> WebResult<Response> {
+    if !state.cli.oauth_enabled {
+        return Err(WebError::oauth_disabled());
+    }
+
+    let authorize_url = oauth_login_create(state)
+        .await
+        .map_err(|e| WebError::Unauthorized(e.to_string()))?;
+
+    Ok(Response::builder()
+        .status(StatusCode::FOUND)
+        .header("Location", authorize_url.to_string())
+        .body(Body::empty())
+        .unwrap())
+}
+
+pub async fn get_oidc_callback(
+    state: State<Arc<ServerState>>,
+    Query(query): Query<HashMap<String, String>>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let code = query
+        .get("code")
+        .ok_or_else(|| WebError::invalid_oauth_code())?;
+
+    let user: MUser = oauth_login_verify(state.clone(), code.to_string())
+        .await
+        .map_err(|e| WebError::InternalServerError(e.to_string()))?;
+
+    let token = encode_jwt(state, user.id).map_err(|_| WebError::failed_to_generate_token())?;
+
+    let res = BaseResponse {
+        error: false,
+        message: token,
     };
 
     Ok(Json(res))

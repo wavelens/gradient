@@ -104,6 +104,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
                 .delete(projects::delete_project),
         )
         .route(
+            "/projects/{organization}/{project}/details",
+            get(projects::get_project_details),
+        )
+        .route(
             "/projects/{organization}/{project}/check-repository",
             post(projects::post_project_check_repository),
         )
@@ -179,6 +183,8 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/auth/oauth/authorize",
             get(auth::get_oauth_authorize).post(auth::post_oauth_authorize),
         )
+        .route("/auth/oidc/login", get(auth::get_oidc_login))
+        .route("/auth/oidc/callback", get(auth::get_oidc_callback))
         .route("/auth/logout", post(auth::post_logout))
         .route("/health", get(get_health));
 

@@ -40,7 +40,6 @@ in rustPlatform.buildRustPackage {
 
   cargoLock = {
     lockFile = ../../backend/Cargo.lock;
-    outputHashes."nix-daemon-0.1.2" = "sha256-VOvtYN1+QwHmLqoGS5N5e9Wrtba+RY9vSPuBw/7hu9o=";
     allowBuiltinFetchGit = true;
   };
 
