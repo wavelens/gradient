@@ -97,13 +97,14 @@ impl From<TryFromPrimitiveError<Op>> for Error {
 /// Each "frame" is a u64 length, followed by that number of bytes.
 /// The stream is terminated by a frame of length 0.
 #[derive(Debug)]
-pub struct FramedReader<'r, R: AsyncReadExt + Unpin + Debug> {
+pub struct FramedReader<'r, R: AsyncReadExt + Unpin> {
     r: std::pin::Pin<&'r mut R>,
     header: [u8; 8],
     header_read: u8,
     done: bool,
 }
-impl<'r, R: AsyncReadExt + Unpin + Debug> FramedReader<'r, R> {
+
+impl<'r, R: AsyncReadExt + Unpin> FramedReader<'r, R> {
     pub fn new(r: &'r mut R) -> Self {
         Self {
             r: std::pin::Pin::new(r),
@@ -147,7 +148,7 @@ impl<'r, R: AsyncReadExt + Unpin + Debug> FramedReader<'r, R> {
     }
 }
 
-impl<'r, R: AsyncReadExt + Unpin + Debug> AsyncRead for FramedReader<'r, R> {
+impl<'r, R: AsyncReadExt + Unpin> AsyncRead for FramedReader<'r, R> {
     #[instrument(name = "FramedReader", skip_all)]
     fn poll_read(
         mut self: std::pin::Pin<&mut Self>,

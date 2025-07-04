@@ -6,12 +6,161 @@
 {
   description = "Test Repository for Gradient Build Server";
   outputs = { self, ... }: {
-    # /nix/store/693ll1r48s9y91habhl0li13qxd8bmwf-buildWait5Sec.drv -> /nix/store/pwvabgapxvwwi42grcm0af5j1xaa0hzh-buildWait5Sec
-    packages.x86_64-linux.buildWait5Sec = builtins.derivation {
-      name = "buildWait5Sec";
-      system = "x86_64-linux";
-      builder = "/bin/sh";
-      args = [ "-c" "echo \"Hello World!\" > $out" ];
+    packages.x86_64-linux = let
+      # Base derivation - no dependencies
+      base = builtins.derivation {
+        name = "base-package";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "echo 'Base package content' > $out" ];
+      };
+
+      # Layer 1 - depends on base
+      lib1 = builtins.derivation {
+        name = "lib1";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${base} > $out && echo 'lib1 addition' >> $out" ];
+      };
+
+      lib2 = builtins.derivation {
+        name = "lib2";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${base} > $out && echo 'lib2 addition' >> $out" ];
+      };
+
+      # Layer 2 - depends on layer 1
+      util1 = builtins.derivation {
+        name = "util1";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${lib1} ${lib2} > $out && echo 'util1 combination' >> $out" ];
+      };
+
+      util2 = builtins.derivation {
+        name = "util2";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${lib1} > $out && echo 'util2 processing' >> $out" ];
+      };
+
+      util3 = builtins.derivation {
+        name = "util3";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${lib2} > $out && echo 'util3 processing' >> $out" ];
+      };
+
+      # Layer 3 - depends on layer 2
+      tool1 = builtins.derivation {
+        name = "tool1";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${util1} ${util2} > $out && echo 'tool1 integration' >> $out" ];
+      };
+
+      tool2 = builtins.derivation {
+        name = "tool2";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${util2} ${util3} > $out && echo 'tool2 integration' >> $out" ];
+      };
+
+      tool3 = builtins.derivation {
+        name = "tool3";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${util1} ${util3} > $out && echo 'tool3 integration' >> $out" ];
+      };
+
+      # Layer 4 - depends on layer 3
+      service1 = builtins.derivation {
+        name = "service1";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${tool1} ${tool2} > $out && echo 'service1 implementation' >> $out" ];
+      };
+
+      service2 = builtins.derivation {
+        name = "service2";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${tool2} ${tool3} > $out && echo 'service2 implementation' >> $out" ];
+      };
+
+      service3 = builtins.derivation {
+        name = "service3";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${tool1} ${tool3} > $out && echo 'service3 implementation' >> $out" ];
+      };
+
+      # Layer 5 - depends on layer 4
+      app1 = builtins.derivation {
+        name = "app1";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${service1} ${service2} > $out && echo 'app1 assembly' >> $out" ];
+      };
+
+      app2 = builtins.derivation {
+        name = "app2";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${service2} ${service3} > $out && echo 'app2 assembly' >> $out" ];
+      };
+
+      app3 = builtins.derivation {
+        name = "app3";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${service1} ${service3} > $out && echo 'app3 assembly' >> $out" ];
+      };
+
+      # Layer 6 - depends on layer 5
+      system1 = builtins.derivation {
+        name = "system1";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${app1} ${app2} > $out && echo 'system1 orchestration' >> $out" ];
+      };
+
+      system2 = builtins.derivation {
+        name = "system2";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${app2} ${app3} > $out && echo 'system2 orchestration' >> $out" ];
+      };
+
+      # Layer 7 - final integration
+      platform = builtins.derivation {
+        name = "platform";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${system1} ${system2} > $out && echo 'platform complete' >> $out" ];
+      };
+
+      # Final deployment - depends on everything
+      deployment = builtins.derivation {
+        name = "deployment";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "cat ${platform} ${app1} ${service1} ${tool1} ${util1} ${lib1} ${base} > $out && echo 'deployment ready' >> $out" ];
+      };
+
+      buildWait5Sec = builtins.derivation {
+        name = "buildWait5Sec";
+        system = "x86_64-linux";
+        builder = "/bin/sh";
+        args = [ "-c" "echo \"Hello World!\" > $out" ];
+      };
+
+    in {
+      # Expose all 20 derivations + legacy
+      inherit base lib1 lib2 util1 util2 util3 tool1 tool2 tool3 
+              service1 service2 service3 app1 app2 app3 system1 system2 
+              platform deployment buildWait5Sec;
     };
   };
 }

@@ -159,16 +159,18 @@ pub async fn copy_builds<
             return Err(format!("Path {} is not valid in source store", path).into());
         }
 
-        // TODO: Copy the path from the source store to the destination store
+        let nar = from_store.nar_from_path(path.clone()).result().await?;
+        let path_info = from_store.query_pathinfo(path.clone()).result().await?.unwrap();
+        to_store.add_to_store_nar(
+            path.clone(),
+            path_info,
+            nar,
+        ).result().await.unwrap();
 
-        // if !to_store
-        //     .copy_path(path.clone(), from_store)
-        //     .result()
-        //     .await
-        //     .map_err(|e| e.to_string())?
-        // {
-        //     return Err(format!("Failed to copy path {}", path).into());
-        // }
+
+        if !to_store.is_valid_path(path.clone()).result().await.unwrap() {
+            return Err(format!("Path {} is not valid in destination store", path).into());
+        }
 
     }
 

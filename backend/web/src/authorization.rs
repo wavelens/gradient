@@ -241,7 +241,7 @@ pub async fn oauth_login_create(state: State<Arc<ServerState>>) -> Result<Url, S
             .as_ref()
             .ok_or("OIDC client ID not configured")?;
 
-        let redirect_uri = format!("{}/api/v1/auth/oauth/authorize", state.cli.serve_url);
+        let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.cli.serve_url);
 
         let (pkce_challenge, _pkce_verifier) = PkceCodeChallenge::new_random_sha256();
         let state_param = uuid::Uuid::new_v4().to_string();
@@ -284,7 +284,7 @@ pub async fn oauth_login_create(state: State<Arc<ServerState>>) -> Result<Url, S
                 .set_token_uri(TokenUrl::new(oauth_token_url).unwrap())
                 .set_redirect_uri(
                     RedirectUrl::new(format!(
-                        "{}/api/v1/auth/oauth/authorize",
+                        "{}/api/v1/auth/oidc/callback",
                         state.cli.serve_url.clone()
                     ))
                     .unwrap(),
@@ -354,7 +354,7 @@ pub async fn oauth_login_verify(
             .build()
             .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-        let redirect_uri = format!("{}/api/v1/auth/oauth/authorize", state.cli.serve_url);
+        let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.cli.serve_url);
 
         // Exchange authorization code for tokens
         let token_response = http_client
@@ -422,7 +422,7 @@ pub async fn oauth_login_verify(
                 .set_token_uri(TokenUrl::new(oauth_token_url).unwrap())
                 .set_redirect_uri(
                     RedirectUrl::new(format!(
-                        "{}/api/v1/auth/oauth/authorize",
+                        "{}/api/v1/auth/oidc/callback",
                         state.cli.serve_url.clone()
                     ))
                     .unwrap(),

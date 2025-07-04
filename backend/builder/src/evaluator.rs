@@ -661,9 +661,21 @@ trait JsonOutput {
 
 impl JsonOutput for Output {
     fn json_to_vec(&self) -> Result<Vec<String>, String> {
+        if !self.status.success() {
+            return Err(format!(
+                "Command failed with status: {:?}, stderr: {}",
+                self.status,
+                String::from_utf8_lossy(&self.stderr)
+            ));
+        }
+
         let json_output = String::from_utf8_lossy(&self.stdout);
+        if json_output.trim().is_empty() {
+            return Err("Command returned empty output".to_string());
+        }
+
         let parsed_json: Value = serde_json::from_str(&json_output)
-            .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+            .map_err(|e| format!("Failed to parse JSON: {:?}, output: '{}'", e, json_output))?;
 
         let parsed_json = parsed_json
             .as_array()
@@ -676,9 +688,21 @@ impl JsonOutput for Output {
     }
 
     fn json_to_string(&self) -> Result<String, String> {
+        if !self.status.success() {
+            return Err(format!(
+                "Command failed with status: {:?}, stderr: {}",
+                self.status,
+                String::from_utf8_lossy(&self.stderr)
+            ));
+        }
+
         let json_output = String::from_utf8_lossy(&self.stdout);
+        if json_output.trim().is_empty() {
+            return Err("Command returned empty output".to_string());
+        }
+
         let parsed_json: Value = serde_json::from_str(&json_output)
-            .map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+            .map_err(|e| format!("Failed to parse JSON: {:?}, output: '{}'", e, json_output))?;
 
         let parsed_json = parsed_json
             .as_str()

@@ -290,120 +290,6 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin> DaemonStore<C> {
         while let Some(_) = wire::read_stderr(&mut self.conn).await? {}
         Ok(())
     }
-    /// Execute a function with a framed sink, similar to C++ conn.withFramedSink()
-    pub async fn with_framed_sink<F, Fut>(&mut self, f: F) -> Result<()>
-    where
-        F: FnOnce(&mut FramedSink<&mut C>) -> Fut + Send,
-        Fut: std::future::Future<Output = Result<()>> + Send,
-    {
-        // Flush the connection first
-        self.conn.flush().await?;
-        
-        let mut framed_sink = FramedSink::new(&mut self.conn);
-        f(&mut framed_sink).await?;
-        
-        // Properly terminate the framed sink
-        framed_sink.shutdown().await?;
-        
-        Ok(())
-    }
-}
-
-/// A sink that writes data in frames (size-prefixed chunks), equivalent to C++ FramedSink
-pub struct FramedSink<W: AsyncWriteExt + Unpin> {
-    writer: W,
-    finished: bool,
-}
-
-impl<W: AsyncWriteExt + Unpin> FramedSink<W> {
-    pub fn new(writer: W) -> Self {
-        Self { writer, finished: false }
-    }
-}
-
-impl<W: AsyncWriteExt + Unpin> AsyncWrite for FramedSink<W> {
-    fn poll_write(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<Result<usize, std::io::Error>> {
-        use std::pin::Pin;
-        use std::task::Poll;
-        
-        if self.finished {
-            return Poll::Ready(Ok(0));
-        }
-        
-        // We need to delegate to the underlying writer properly
-        // For framed sinks, we should write the frame size first, then the data
-        // But AsyncWrite trait expects us to write the buf directly
-        // So we use the write_frame method instead via the higher-level interface
-        
-        // This is a fallback implementation - the real usage should go through write_frame
-        Pin::new(&mut self.writer).poll_write(cx, buf)
-    }
-
-    fn poll_flush(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), std::io::Error>> {
-        use std::pin::Pin;
-        
-        Pin::new(&mut self.writer).poll_flush(cx)
-    }
-
-    fn poll_shutdown(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), std::io::Error>> {
-        use std::pin::Pin;
-        
-        if !self.finished {
-            self.finished = true;
-        }
-        Pin::new(&mut self.writer).poll_shutdown(cx)
-    }
-}
-
-impl<W: AsyncWriteExt + Unpin> FramedSink<W> {
-    /// Write data as a frame
-    pub async fn write_frame(&mut self, buf: &[u8]) -> tokio::io::Result<()> {
-        if self.finished {
-            return Ok(());
-        }
-        
-        // Write frame size (as u64)
-        let size_bytes = (buf.len() as u64).to_le_bytes();
-        self.writer.write_all(&size_bytes).await?;
-        
-        // Write frame data
-        self.writer.write_all(buf).await?;
-        
-        Ok(())
-    }
-
-    /// Write all data as a single frame
-    pub async fn write_all_framed(&mut self, buf: &[u8]) -> tokio::io::Result<()> {
-        self.write_frame(buf).await
-    }
-
-    /// Flush the underlying writer
-    pub async fn flush(&mut self) -> tokio::io::Result<()> {
-        self.writer.flush().await
-    }
-
-    /// Shutdown and write terminating frame
-    pub async fn shutdown(&mut self) -> tokio::io::Result<()> {
-        if !self.finished {
-            // Write terminating zero frame
-            let zero_bytes = 0u64.to_le_bytes();
-            self.writer.write_all(&zero_bytes).await?;
-            self.writer.flush().await?;
-            self.finished = true;
-        }
-        Ok(())
-    }
-}
-
-impl<W: AsyncWriteExt + Unpin> Drop for FramedSink<W> {
-    fn drop(&mut self) {
-        // Note: In async Rust, we can't do async work in Drop
-        // The shutdown() method should be called explicitly
-    }
 }
 
 impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
@@ -1375,7 +1261,7 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
     fn nar_from_path<P: AsRef<str> + Send + Sync + Debug>(
         &mut self,
         path: P,
-    ) -> impl Progress<T = Vec<u8>, Error = Self::Error> {
+    ) -> impl Progress<T = Vec<String>, Error = Self::Error> {
         struct Caller<P>
         where
             P: AsRef<str> + Send + Sync + Debug,
@@ -1393,12 +1279,6 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
                 self,
                 store: &mut DaemonStore<C>,
             ) -> Result<(), E> {
-                // Send NarFromPath operation - based on C++ RemoteStore::narFromPath
-                // Check if this operation is supported by this protocol version
-                if store.proto < Proto(1, 25) {
-                    return Err(Error::Invalid(format!("NarFromPath not supported in protocol {}", store.proto)).into());
-                }
-                
                 wire::write_op(&mut store.conn, wire::Op::NarFromPath)
                     .await
                     .with_field("NarFromPath.<op>")?;
@@ -1411,7 +1291,7 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
 
         struct Returner;
         impl DaemonProgressReturner for Returner {
-            type T = Vec<u8>;
+            type T = Vec<String>;
             async fn result<
                 E: From<Error> + From<std::io::Error> + Send + Sync,
                 C: AsyncReadExt + AsyncWriteExt + Unpin + Send,
@@ -1419,26 +1299,33 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
                 self,
                 store: &mut DaemonStore<C>,
             ) -> Result<Self::T, E> {
-                // Read NAR data using framed protocol
-                // The C++ version uses FramedSource to read framed data
                 let mut nar_data = Vec::new();
+                let mut paren_count = 0;
+                let mut found_start = false;
                 
-                loop {
-                    // Read frame size
-                    let frame_size = wire::read_u64(&mut store.conn).await?;
-                    
-                    if frame_size == 0 {
-                        // Zero frame indicates end of stream
-                        break;
-                    }
-                    
-                    // Read frame data
-                    let mut frame_data = vec![0u8; frame_size as usize];
-                    store.conn.read_exact(&mut frame_data).await?;
-                    nar_data.extend_from_slice(&frame_data);
+                // First check for narVersionMagic1
+                let magic = wire::read_string(&mut store.conn).await?;
+                if magic != "nix-archive-1" {
+                    return Err(Error::Invalid(format!("Expected nix-archive-1, got {}", magic)).into());
                 }
+
+                nar_data.push(magic);
                 
-                Ok(nar_data)
+                // Read framed data until we find the complete NAR structure
+                loop {
+                    let nar_string = wire::read_string(&mut store.conn).await?;
+                    nar_data.push(nar_string.clone());
+                    
+                    if nar_string == "(" {
+                        paren_count += 1;
+                        found_start = true;
+                    } else if nar_string == ")" && found_start {
+                        paren_count -= 1;
+                        if paren_count == 0 {
+                            return Ok(nar_data);
+                        }
+                    }
+                }
             }
         }
 
@@ -1446,16 +1333,23 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
     }
 
     #[instrument(skip(self, nar_source))]
-    fn add_to_store_nar<P: AsRef<str> + Send + Sync + Debug, R: AsyncReadExt + Unpin + Send + Debug>(
+    fn add_to_store_nar<P: AsRef<str> + Send + Sync + Debug, R>(
         &mut self,
         path: P,
         path_info: PathInfo,
         nar_source: R,
-    ) -> impl Progress<T = (), Error = Self::Error> {
+    ) -> impl Progress<T = (), Error = Self::Error>
+    where
+        R: IntoIterator + Send + Debug,
+        R::IntoIter: ExactSizeIterator + Send,
+        R::Item: AsRef<str> + Send + Sync,
+    {
         struct Caller<P, R>
         where
             P: AsRef<str> + Send + Sync + Debug,
-            R: AsyncReadExt + Unpin + Send + Debug,
+            R: IntoIterator + Send + Debug,
+            R::IntoIter: ExactSizeIterator + Send,
+            R::Item: AsRef<str> + Send + Sync,
         {
             path: P,
             path_info: PathInfo,
@@ -1464,7 +1358,9 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
         impl<P, R> DaemonProgressCaller for Caller<P, R>
         where
             P: AsRef<str> + Send + Sync + Debug,
-            R: AsyncReadExt + Unpin + Send + Debug,
+            R: IntoIterator + Send + Debug,
+            R::IntoIter: ExactSizeIterator + Send,
+            R::Item: AsRef<str> + Send + Sync,
         {
             async fn call<
                 E: From<Error> + From<std::io::Error> + Send + Sync,
@@ -1478,10 +1374,6 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
                 if store.proto < Proto(1, 25) {
                     return Err(Error::Invalid(format!("AddToStoreNar not supported in protocol {}", store.proto)).into());
                 }
-                
-                // Read NAR data first
-                let mut nar_data = Vec::new();
-                self.nar_source.read_to_end(&mut nar_data).await?;
                 
                 // Send AddToStoreNar operation - matches C++ exactly
                 wire::write_op(&mut store.conn, wire::Op::AddToStoreNar)
@@ -1530,25 +1422,28 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
                 wire::write_bool(&mut store.conn, false)
                     .await
                     .with_field("AddToStoreNar.repair")?;
+
                 wire::write_bool(&mut store.conn, true) // !checkSigs = true means don't check sigs
                     .await
                     .with_field("AddToStoreNar.dontCheckSigs")?;
-                
-                // Use framed sink for NAR data (protocol >= 23)
-                // For now, assume modern protocol and use framed sink
-                // Write frame size first
-                wire::write_u64(&mut store.conn, nar_data.len() as u64)
-                    .await
-                    .with_field("AddToStoreNar.nar_size")?;
-                
-                // Write NAR data
-                store.conn.write_all(&nar_data).await
-                    .with_field("AddToStoreNar.nar_data")?;
-                
-                // Write terminating zero frame to end the framed sink
-                wire::write_u64(&mut store.conn, 0)
-                    .await
-                    .with_field("AddToStoreNar.terminating_frame")?;
+
+                let mut nar_binary = Vec::new();
+                for nar_string in self.nar_source {
+                    let s = nar_string.as_ref();
+                    let bytes = s.as_bytes();
+                    
+                    nar_binary.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+                    nar_binary.extend_from_slice(bytes);
+
+                    let padding_needed = if bytes.len() % 8 > 0 { 8 - (bytes.len() % 8) } else { 0 };
+                    for _ in 0..padding_needed {
+                        nar_binary.push(0);
+                    }
+                }
+
+                wire::write_u64(&mut store.conn, nar_binary.len() as u64).await?;
+                store.conn.write_all(&nar_binary).await?;
+                wire::write_u64(&mut store.conn, 0).await?; // Terminating frame
                 
                 Ok(())
             }

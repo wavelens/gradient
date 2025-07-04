@@ -154,9 +154,6 @@ in {
         RestrictRealtime = true;
         RestrictSUIDSGID = true;
         WorkingDirectory = cfg.baseDir;
-        BindPaths = [
-          "/nix"
-        ];
         LoadCredential = [
           "gradient_database_url:${cfg.databaseUrlFile}"
           "gradient_crypt_secret:${cfg.cryptSecretFile}"
@@ -180,7 +177,7 @@ in {
         GRADIENT_BINPATH_NIX = lib.getExe cfg.package_nix;
         GRADIENT_BINPATH_GIT = lib.getExe cfg.package_git;
         GRADIENT_BINPATH_ZSTD = lib.getExe cfg.package_zstd;
-        GRADIENT_OAUTH_ENABLE = lib.boolToString cfg.oauth.enable;
+        GRADIENT_OAUTH_ENABLED = lib.boolToString cfg.oauth.enable;
         GRADIENT_DISABLE_REGISTER = lib.boolToString cfg.settings.disableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
         GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";

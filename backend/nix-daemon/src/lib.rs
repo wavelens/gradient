@@ -737,15 +737,19 @@ pub trait Store {
     fn nar_from_path<P: AsRef<str> + Send + Sync + Debug>(
         &mut self,
         path: P,
-    ) -> impl Progress<T = Vec<u8>, Error = Self::Error>;
+    ) -> impl Progress<T = Vec<String>, Error = Self::Error>;
 
     /// Add a path to the store with ValidPathInfo and NAR data (equivalent to C++ addToStore with info and source).
-    fn add_to_store_nar<P: AsRef<str> + Send + Sync + Debug, R: AsyncReadExt + Unpin + Send + Debug>(
+    fn add_to_store_nar<P: AsRef<str> + Send + Sync + Debug, R>(
         &mut self,
         path: P,
         path_info: PathInfo,
         nar_source: R,
-    ) -> impl Progress<T = (), Error = Self::Error>;
+    ) -> impl Progress<T = (), Error = Self::Error>
+    where
+        R: IntoIterator + Send + Debug,
+        R::IntoIter: ExactSizeIterator + Send,
+        R::Item: AsRef<str> + Send + Sync;
 }
 
 /// Returned from [`Store::query_missing()`].
