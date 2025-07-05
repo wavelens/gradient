@@ -35,126 +35,77 @@
    </div>
  </div>
 
-<div id="deleteModal" class="modal" style="display: none;">
+<div id="deleteModal" class="modal modal-container">
   <div class="modal-content">
     <div class="modal-header">
       <h3 id="modalTitle">Confirm Delete</h3>
-      <span class="close" onclick="closeDeleteModal()">&times;</span>
+      <span class="close" id="closeModalBtn">&times;</span>
     </div>
     <div class="modal-body">
       <p id="modalMessage">Are you sure you want to delete this item? This action cannot be undone.</p>
     </div>
     <div class="modal-footer">
-      <button type="button" class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
+      <button type="button" class="btn btn-secondary" id="cancelDeleteBtn">Cancel</button>
       <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Delete</button>
     </div>
   </div>
 </div>
 
-<style>
-.modal {
-  position: fixed;
-  z-index: 1000;
-  left: 0;
-  top: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0,0,0,0.4);
-}
-
-.modal-content {
-  background-color: #fefefe;
-  margin: 15% auto;
-  padding: 0;
-  border: 1px solid #888;
-  border-radius: 8px;
-  width: 400px;
-  max-width: 90%;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-.modal-header {
-  padding: 1rem;
-  border-bottom: 1px solid #ddd;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.modal-header h3 {
-  margin: 0;
-  color: #dc3545;
-}
-
-.close {
-  color: #aaa;
-  font-size: 28px;
-  font-weight: bold;
-  cursor: pointer;
-}
-
-.close:hover {
-  color: #000;
-}
-
-.modal-body {
-  padding: 1rem;
-  color: #000;
-}
-
-.modal-footer {
-  padding: 1rem;
-  border-top: 1px solid #ddd;
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-}
-
-.btn {
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-.btn-secondary {
-  background-color: #6c757d;
-  color: white;
-}
-
-.btn-danger {
-  background-color: #dc3545;
-  color: white;
-}
-
-.btn:hover {
-  opacity: 0.9;
-}
-</style>
 
 <script>
-function showDeleteModal(title, message, onConfirm) {
-  document.getElementById('modalTitle').textContent = title;
-  document.getElementById('modalMessage').textContent = message;
-  document.getElementById('deleteModal').style.display = 'block';
-  
-  document.getElementById('confirmDeleteBtn').onclick = function() {
-    closeDeleteModal();
-    onConfirm();
-  };
-}
-
-function closeDeleteModal() {
-  document.getElementById('deleteModal').style.display = 'none';
-}
-
-window.onclick = function(event) {
+document.addEventListener('DOMContentLoaded', function() {
   const modal = document.getElementById('deleteModal');
-  if (event.target === modal) {
+  const closeBtn = document.getElementById('closeModalBtn');
+  const cancelBtn = document.getElementById('cancelDeleteBtn');
+  const confirmBtn = document.getElementById('confirmDeleteBtn');
+  
+  let currentFormToSubmit = null;
+  
+  // Handle delete button clicks
+  document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('delete-trigger')) {
+      e.preventDefault();
+      
+      const title = e.target.dataset.title || 'Confirm Delete';
+      const message = e.target.dataset.message || 'Are you sure you want to delete this item? This action cannot be undone.';
+      const formId = e.target.dataset.form;
+      
+      currentFormToSubmit = document.getElementById(formId);
+      
+      showDeleteModal(title, message);
+    }
+  });
+  
+  // Close modal event listeners
+  closeBtn.addEventListener('click', closeDeleteModal);
+  cancelBtn.addEventListener('click', closeDeleteModal);
+  
+  // Confirm delete
+  confirmBtn.addEventListener('click', function() {
+    if (currentFormToSubmit) {
+      currentFormToSubmit.submit();
+    }
     closeDeleteModal();
+  });
+  
+  // Close modal when clicking outside
+  window.addEventListener('click', function(event) {
+    if (event.target === modal) {
+      closeDeleteModal();
+    }
+  });
+  
+  function showDeleteModal(title, message) {
+    document.getElementById('modalTitle').textContent = title;
+    document.getElementById('modalMessage').textContent = message;
+    modal.style.display = 'block';
   }
-}
+  
+  function closeDeleteModal() {
+    modal.style.display = 'none';
+    currentFormToSubmit = null;
+  }
+});
 </script>
 
 {% endblock %}

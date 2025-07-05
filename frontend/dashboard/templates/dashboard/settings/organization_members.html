@@ -29,7 +29,7 @@
         <h2 class="">{% trans 'Organization Members' %}</h2>
         
         <!-- Add Member Form -->
-        <div class="add-member-section" style="margin-bottom: 2rem; padding: 1rem; border: 1px solid #ddd; border-radius: 4px;">
+        <div class="add-member-section">
             <h3>{% trans 'Add New Member' %}</h3>
             {% if add_form.non_field_errors %}
                 <div class="alert alert-danger">
@@ -39,15 +39,15 @@
             <form method="post">
                 {% csrf_token %}
                 <input type="hidden" name="add_member" value="1">
-                <div style="display: flex; gap: 1rem; align-items: end;">
-                    <div class="form-field" style="flex: 1;">
+                <div class="member-form-layout">
+                    <div class="form-field member-form-field">
                         <label for="{{ add_form.user.id_for_label }}" class="required-label">{% trans add_form.user.label %}</label>
                         {{ add_form.user }}
                         {% if add_form.user.errors %}
                             <div class="error">{{ add_form.user.errors }}</div>
                         {% endif %}
                     </div>
-                    <div class="form-field" style="flex: 1;">
+                    <div class="form-field member-form-field">
                         <label for="{{ add_form.role.id_for_label }}" class="required-label">{% trans add_form.role.label %}</label>
                         {{ add_form.role }}
                         {% if add_form.role.errors %}
@@ -65,37 +65,37 @@
         <div class="members-list">
             <h3>{% trans 'Current Members' %}</h3>
             {% if members %}
-                <div class="members-table" style="overflow-x: auto;">
-                    <table style="width: 100%; border-collapse: collapse; margin-top: 1rem;">
+                <div class="members-table-container">
+                    <table class="members-table">
                         <thead>
-                            <tr style="background-color: #f8f9fa; border-bottom: 2px solid #dee2e6;">
-                                <th style="padding: 0.75rem; text-align: left; border: 1px solid #dee2e6;">{% trans 'Username' %}</th>
-                                <th style="padding: 0.75rem; text-align: left; border: 1px solid #dee2e6;">{% trans 'Role' %}</th>
-                                <th style="padding: 0.75rem; text-align: left; border: 1px solid #dee2e6;">{% trans 'Actions' %}</th>
+                            <tr>
+                                <th >{% trans 'Username' %}</th>
+                                <th >{% trans 'Role' %}</th>
+                                <th >{% trans 'Actions' %}</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for member in members %}
-                            <tr style="border-bottom: 1px solid #dee2e6;">
-                                <td style="padding: 0.75rem; border: 1px solid #dee2e6;">{{ member.name }}</td>
-                                <td style="padding: 0.75rem; border: 1px solid #dee2e6;">
+                            <tr>
+                                <td >{{ member.name }}</td>
+                                <td >
                                     <form method="post" style="display: inline;">
                                         {% csrf_token %}
                                         <input type="hidden" name="edit_role" value="1">
                                         <input type="hidden" name="user" value="{{ member.user }}">
-                                        <select name="role" class="form-control" style="display: inline-block; width: auto; min-width: 120px;" onchange="this.form.submit()">
+                                        <select name="role" class="form-control member-form-element" onchange="this.form.submit()">
                                             {% for role_value, role_label in role_choices %}
                                                 <option value="{{ role_value }}" {% if member.role == role_value %}selected{% endif %}>{{ role_label }}</option>
                                             {% endfor %}
                                         </select>
                                     </form>
                                 </td>
-                                <td style="padding: 0.75rem; border: 1px solid #dee2e6;">
+                                <td >
                                     <form method="post" style="display: inline;">
                                         {% csrf_token %}
                                         <input type="hidden" name="remove_member" value="1">
                                         <input type="hidden" name="user" value="{{ member.id }}">
-                                        <button type="submit" class="btn btn-danger btn-sm" style="background-color: #dc3545; color: white; border: none; padding: 0.25rem 0.5rem; border-radius: 3px; cursor: pointer;">
+                                        <button type="submit" class="btn btn-danger btn-sm remove-member-button">
                                             {% trans 'Remove' %}
                                         </button>
                                     </form>
@@ -106,7 +106,7 @@
                     </table>
                 </div>
             {% else %}
-                <div class="no-members" style="padding: 2rem; text-align: center; color: #6c757d; border: 1px solid #dee2e6; border-radius: 4px; margin-top: 1rem;">
+                <div class="no-members no-members-message">
                     <p>{% trans 'No members found in this organization.' %}</p>
                 </div>
             {% endif %}
