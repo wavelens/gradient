@@ -77,7 +77,7 @@
                         <tbody>
                             {% for member in members %}
                             <tr style="border-bottom: 1px solid #dee2e6;">
-                                <td style="padding: 0.75rem; border: 1px solid #dee2e6;">{{ member.user }}</td>
+                                <td style="padding: 0.75rem; border: 1px solid #dee2e6;">{{ member.name }}</td>
                                 <td style="padding: 0.75rem; border: 1px solid #dee2e6;">
                                     <form method="post" style="display: inline;">
                                         {% csrf_token %}
@@ -94,7 +94,7 @@
                                     <form method="post" style="display: inline;">
                                         {% csrf_token %}
                                         <input type="hidden" name="remove_member" value="1">
-                                        <input type="hidden" name="user" value="{{ member.user }}">
+                                        <input type="hidden" name="user" value="{{ member.id }}">
                                         <button type="submit" class="btn btn-danger btn-sm" style="background-color: #dc3545; color: white; border: none; padding: 0.25rem 0.5rem; border-radius: 3px; cursor: pointer;">
                                             {% trans 'Remove' %}
                                         </button>

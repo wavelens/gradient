@@ -421,9 +421,9 @@ class EditUserForm(forms.Form):
 
 class AddOrganizationMemberForm(forms.Form):
     ROLE_CHOICES = [
-        ('admin', 'Admin'),
-        ('member', 'Member'),
-        ('viewer', 'Viewer'),
+        ('Admin', 'Admin'),
+        ('Write', 'Write'),
+        ('View', 'View'),
     ]
     
     user = forms.CharField(

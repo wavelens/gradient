@@ -338,7 +338,6 @@ def edit_cache(request, cache):
 @login_required
 def organization_members(request, org):
     members_data = api.get_orgs_organization_users(request, org)
-    
     if isinstance(members_data, type(None)) or members_data.get('error'):
         members = []
     else:
@@ -349,16 +348,19 @@ def organization_members(request, org):
         if 'add_member' in request.POST:
             add_form = AddOrganizationMemberForm(request.POST)
             if add_form.is_valid():
+
                 response = api.post_orgs_organization_users(
                     request, 
                     org, 
                     add_form.cleaned_data['user'], 
-                    add_form.cleaned_data['role']
+                    add_form.cleaned_data['role'].upper()
                 )
+
                 if response and not response.get('error'):
                     return redirect(f'/organization/{org}/members')
                 else:
-                    add_form.add_error(None, response.get('message', 'Failed to add member'))
+                    error_message = response.get('message') if response else 'Failed to add member (no response from API)'
+                    add_form.add_error(None, error_message)
         
         elif 'remove_member' in request.POST:
             user_to_remove = request.POST.get('user')
