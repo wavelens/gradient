@@ -49,6 +49,15 @@
             {% endfor %}
             <button type="submit" class="submit-btn">{% trans 'Save' %}</button>
         </form>
+        
+        <div class="delete-section" style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #ddd;">
+            <h3 class="text-danger">{% trans 'Danger Zone' %}</h3>
+            <p>{% trans 'Once you delete a cache, there is no going back. Please be certain.' %}</p>
+            <form method="post" action="{% url 'deleteCache' cache %}" id="deleteCacheForm">
+                {% csrf_token %}
+                <button type="button" onclick="showDeleteModal('{% trans "Delete Cache" %}', '{% trans "Are you sure you want to delete this cache? This action cannot be undone." %}', function() { document.getElementById('deleteCacheForm').submit(); })" class="btn btn-danger">{% trans 'Delete Cache' %}</button>
+            </form>
+        </div>
     </div>
 </div>
  {% endblock %}

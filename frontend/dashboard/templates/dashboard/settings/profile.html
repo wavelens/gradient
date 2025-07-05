@@ -21,7 +21,7 @@
  {% block inhalt %}
  <div class="">
     <div class="">
-        <h2 class="">{% trans 'Edit Project' %}</h2>
+        <h2 class="">{% trans 'Edit Profile' %}</h2>
         {% if form.non_field_errors %}
             <div class="alert alert-danger">
                 {{ form.non_field_errors }}
@@ -47,6 +47,14 @@
             {% endfor %}
             <button type="submit" class="submit-btn">{% trans 'Save' %}</button>
         </form>
+        
+        <hr style="margin: 2rem 0; border: none; border-top: 1px solid rgba(118, 118, 118, 0.5);">
+        <div style="margin-top: 2rem;">
+            <form method="post" action="{% url 'deleteUser' %}" id="deleteUserForm">
+                {% csrf_token %}
+                <button type="button" onclick="showDeleteModal('{% trans "Delete Account" %}', '{% trans "Are you sure you want to delete your account? This action cannot be undone." %}', function() { document.getElementById('deleteUserForm').submit(); })" style="background-color: #dc3545; color: white; border: 1px solid #dc3545; padding: 0.5rem 1rem; border-radius: 4px; cursor: pointer;">{% trans 'Delete Account' %}</button>
+            </form>
+        </div>
     </div>
 </div>
  {% endblock %}

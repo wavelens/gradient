@@ -7,6 +7,7 @@ from django.http import HttpResponse, HttpResponseRedirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
 from django.contrib.auth import logout
+from django.contrib import messages
 from . import api
 from .auth import LoginForm, login, RegisterForm
 from .forms import *
@@ -285,6 +286,19 @@ def edit_organization(request, org):
     return render(request, "dashboard/settings/organization.html", {'form': form, 'org': org})
 
 @login_required
+def delete_organization(request, org):
+    if request.method == 'POST':
+        response = api.delete_orgs_organization(request, org)
+        if response is None or response.get("error"):
+            messages.error(request, "Failed to delete organization.")
+            return redirect('settingsOrganization', org=org)
+        else:
+            messages.success(request, "Organization deleted successfully.")
+            return redirect('home')
+    else:
+        return redirect('settingsOrganization', org=org)
+
+@login_required
 def new_cache(request):
     if request.method == 'POST':
         form = NewCacheForm(request.POST)
@@ -333,7 +347,20 @@ def edit_cache(request, cache):
     else:
         form = EditCacheForm(initial=initial_data)
 
-    return render(request, "dashboard/settings/cache.html", {'form': form})
+    return render(request, "dashboard/settings/cache.html", {'form': form, 'cache': cache})
+
+@login_required
+def delete_cache(request, cache):
+    if request.method == 'POST':
+        response = api.delete_caches_cache(request, cache)
+        if response is None or response.get("error"):
+            messages.error(request, "Failed to delete cache.")
+            return redirect('settingsCache', cache=cache)
+        else:
+            messages.success(request, "Cache deleted successfully.")
+            return redirect('caches')
+    else:
+        return redirect('settingsCache', cache=cache)
 
 @login_required
 def organization_members(request, org):
@@ -497,7 +524,20 @@ def edit_project(request, org, project):
                 return redirect('/')
     else:
         form = EditProjectForm(initial=initial_data)
-    return render(request, "dashboard/settings/project.html", {'form': form})
+    return render(request, "dashboard/settings/project.html", {'form': form, 'org': org, 'project': project})
+
+@login_required
+def delete_project(request, org, project):
+    if request.method == 'POST':
+        response = api.delete_projects_project(request, org, project)
+        if response is None or response.get("error"):
+            messages.error(request, "Failed to delete project.")
+            return redirect('settingsProject', org=org, project=project)
+        else:
+            messages.success(request, "Project deleted successfully.")
+            return redirect('workflow', org=org)
+    else:
+        return redirect('settingsProject', org=org, project=project)
 
 @login_required
 def new_server(request):
@@ -588,3 +628,17 @@ def settingsProfile(request):
     else:
         form = EditUserForm(initial=initial_data)
     return render(request, "dashboard/settings/profile.html", {'form': form})
+
+@login_required
+def delete_user(request):
+    if request.method == 'POST':
+        response = api.delete_user(request)
+        if response is None or response.get("error"):
+            messages.error(request, "Failed to delete account.")
+            return redirect('settingsProfile')
+        else:
+            logout(request)
+            messages.success(request, "Account deleted successfully.")
+            return redirect('login')
+    else:
+        return redirect('settingsProfile')

@@ -29,8 +29,12 @@ urlpatterns = [
 
     path("settings/server", edit_server, name="settingsServer"),
     path("organization/<str:org>/project/<str:project>/settings", edit_project, name="settingsProject"),
+    path("organization/<str:org>/project/<str:project>/delete", delete_project, name="deleteProject"),
     path("organization/<str:org>/settings", edit_organization, name="settingsOrganization"),
+    path("organization/<str:org>/delete", delete_organization, name="deleteOrganization"),
     path("organization/<str:org>/members", organization_members, name="organizationMembers"),
     path("cache/<str:cache>/settings", edit_cache, name="settingsCache"),
+    path("cache/<str:cache>/delete", delete_cache, name="deleteCache"),
     path("settings/profile", settingsProfile, name="settingsProfile"),
+    path("settings/profile/delete", delete_user, name="deleteUser"),
 ]
