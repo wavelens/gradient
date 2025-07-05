@@ -23,6 +23,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
 use tokio::time;
 use tracing::{debug, error, info, warn, instrument};
+use nix_daemon::{Store, Progress};
 use uuid::Uuid;
 
 use super::evaluator::*;
@@ -61,17 +62,36 @@ pub async fn schedule_evaluation_loop(state: Arc<ServerState>) {
 pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) {
     info!("Reviewing evaluation");
 
-    let project = EProject::find_by_id(evaluation.project)
-        .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+    let (project, organization) = if let Some(project_id) = evaluation.project {
+        // Regular project-based evaluation
+        let project = EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap();
 
-    let organization = EOrganization::find_by_id(project.organization)
-        .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+        let organization = EOrganization::find_by_id(project.organization)
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap();
+        (Some(project), organization)
+    } else {
+        // Direct build - get organization from DirectBuild record
+        let direct_build = EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let organization = EOrganization::find_by_id(direct_build.organization)
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap();
+        (None, organization)
+    };
 
     let local_daemon = match get_local_store(Some(organization)).await {
         Ok(s) => s,
@@ -109,7 +129,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 dependency_count = dependencies.len(),
                 "Created builds and dependencies"
             );
-            
+
             if state.cli.debug {
                 for build in &builds {
                     debug!(build_id = %build.id, derivation_path = %build.derivation_path, "Created build");
@@ -139,7 +159,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                     .exec(&state.db)
                     .await
                     .unwrap();
-                
+
                 debug!(count = dependencies.len(), "Successfully inserted build dependencies into database");
             } else {
                 debug!("No dependencies to insert for evaluation");
@@ -174,16 +194,17 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
     let mut current_schedules = vec![];
     let mut interval = time::interval(Duration::from_secs(5));
 
+    info!("Build scheduler loop started");
+
     loop {
         let mut added_schedule = false;
         current_schedules.retain(|schedule: &JoinHandle<()>| !schedule.is_finished());
 
         while current_schedules.len() < state.cli.max_concurrent_builds {
             let build = get_next_build(Arc::clone(&state)).await;
+            debug!(build_id = %build.id, derivation = %build.derivation_path, "Processing build from queue");
 
-            if let Some((build, server)) =
-                reserve_available_server(Arc::clone(&state), &build).await
-            {
+            if let Some((build, server)) = reserve_available_server(Arc::clone(&state), &build).await {
                 info!(server_id = %server.id, build_id = %build.id, "Reserving server for build");
                 let schedule = tokio::spawn(schedule_build(Arc::clone(&state), build, server));
                 current_schedules.push(schedule);
@@ -192,6 +213,7 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
         }
 
         if !added_schedule {
+            debug!("No builds scheduled this cycle, waiting 5 seconds");
             interval.tick().await;
         }
     }
@@ -253,7 +275,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
     info!("Connected to server successfully");
 
     // Get all dependencies in topological order from the database
-    let dependencies = get_build_dependencies_sorted(Arc::clone(&state), &build, &mut server_daemon)
+    let dependencies = get_build_dependencies_sorted(Arc::clone(&state), &build)
         .await
         .unwrap();
 
@@ -434,7 +456,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                         Some((
                             MEvaluation {
                                 id: Uuid::nil(),
-                                project: p.id,
+                                project: Some(p.id),
                                 repository: p.repository,
                                 commit: Uuid::nil(),
                                 wildcard: p.evaluation_wildcard,
@@ -458,17 +480,26 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
 
         let (evaluation, commit_hash) = evaluations.first().unwrap();
 
-        let project = projects
-            .into_iter()
-            .find(|p| p.id == evaluation.project)
-            .unwrap_or_else(|| {
-                error!(
-                    project_id = %evaluation.project,
-                    evaluation_id = %evaluation.id,
-                    "Failed to find project for evaluation - critical error"
-                );
-                std::process::exit(1);
-            });
+        let project = if let Some(project_id) = evaluation.project {
+            projects
+                .into_iter()
+                .find(|p| p.id == project_id)
+                .unwrap_or_else(|| {
+                    error!(
+                        project_id = %project_id,
+                        evaluation_id = %evaluation.id,
+                        "Failed to find project for evaluation - critical error"
+                    );
+                    std::process::exit(1);
+                })
+        } else {
+            // For direct builds, we don't have a project
+            error!(
+                evaluation_id = %evaluation.id,
+                "Direct build evaluation scheduled as regular project evaluation - critical error"
+            );
+            std::process::exit(1);
+        };
 
         let evaluation_id = if evaluation.id == Uuid::nil() {
             None
@@ -510,7 +541,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
 
         let new_evaluation = AEvaluation {
             id: Set(Uuid::new_v4()),
-            project: Set(project.id),
+            project: Set(Some(project.id)),
             repository: Set(project.repository.clone()),
             commit: Set(commit.id),
             wildcard: Set(project.evaluation_wildcard.clone()),
@@ -576,11 +607,19 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
             "#,
         );
 
+        println!("Executing LOOOOOOOP");
+
+        if let Some(b) = EBuild::find().all(&state.db).await.unwrap().first() {
+            println!("all builds: {}", b.status == BuildStatus::Queued);
+        }
+
         let builds = EBuild::find()
             .from_raw_sql(builds_sql)
             .all(&state.db)
             .await
             .unwrap();
+
+        debug!(build_count = builds.len(), "Found queued builds");
 
         for build in builds {
             let evaluation = EEvaluation::find_by_id(build.evaluation)
@@ -589,17 +628,34 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                 .unwrap()
                 .unwrap();
 
-            let project = EProject::find_by_id(evaluation.project)
-                .one(&state.db)
-                .await
-                .unwrap()
-                .unwrap();
+            let project = if let Some(project_id) = evaluation.project {
+                Some(EProject::find_by_id(project_id)
+                    .one(&state.db)
+                    .await
+                    .unwrap()
+                    .unwrap())
+            } else {
+                None
+            };
+
+            let organization_id = if let Some(project) = &project {
+                project.organization
+            } else {
+                // Direct build - get organization from DirectBuild record
+                EDirectBuild::find()
+                    .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+                    .one(&state.db)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .organization
+            };
 
             let has_servers = EServer::find()
                 .filter(
                     Condition::all()
                         .add(CServer::Active.eq(true))
-                        .add(CServer::Organization.eq(project.organization)),
+                        .add(CServer::Organization.eq(organization_id)),
                 )
                 .one(&state.db)
                 .await
@@ -607,9 +663,15 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                 .is_some();
 
             if !has_servers {
-                update_build_status_recursivly(Arc::clone(&state), build, BuildStatus::Aborted)
-                    .await;
-                continue;
+                // For direct builds, allow local execution instead of aborting
+                if evaluation.project.is_none() {
+                    debug!(build_id = %build.id, "No servers available, but this is a direct build - will try local execution");
+                    return build; // Return for local execution
+                } else {
+                    update_build_status_recursivly(Arc::clone(&state), build, BuildStatus::Aborted)
+                        .await;
+                    continue;
+                }
             }
 
             // Debug: Check what dependencies exist for this build
@@ -620,29 +682,29 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                     .all(&state.db)
                     .await
                     .unwrap();
-                
+
                 debug!(
                     build_id = %build.id,
                     derivation_path = %build.derivation_path,
                     raw_dependency_count = raw_deps.len(),
                     "Raw dependency records"
                 );
-                
+
                 for dep in &raw_deps {
                     debug!(build = %dep.build, dependency = %dep.dependency, "Raw dependency");
                 }
-                
+
                 let dependencies = get_build_dependencies(Arc::clone(&state), &build)
                     .await
                     .unwrap();
-                
+
                 debug!(
                     build_id = %build.id,
                     derivation_path = %build.derivation_path,
                     resolved_dependency_count = dependencies.len(),
                     "Resolved dependencies"
                 );
-                
+
                 for dep in &dependencies {
                     debug!(
                         dependency_id = %dep.id,
@@ -651,7 +713,7 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                         "Dependency status"
                     );
                 }
-                
+
                 if dependencies.is_empty() {
                     debug!("No dependencies found - build ready to execute");
                 } else {
@@ -692,14 +754,27 @@ async fn reserve_available_server(
         .unwrap()
         .unwrap();
 
-    let project = EProject::find_by_id(evaluation.project)
-        .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+    let organization_id = if let Some(project_id) = evaluation.project {
+        // Regular project-based evaluation
+        let project = EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap();
+        project.organization
+    } else {
+        // Direct build - get organization from DirectBuild record
+        EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .organization
+    };
 
     let mut cond = Condition::all()
-        .add(CServer::Organization.eq(project.organization))
+        .add(CServer::Organization.eq(organization_id))
         .add(CServer::Active.eq(true))
         .add(CServerArchitecture::Architecture.eq(build.architecture.clone()));
 
@@ -761,7 +836,7 @@ async fn reserve_available_server(
     None
 }
 
-async fn update_build_status(
+pub async fn update_build_status(
     state: Arc<ServerState>,
     build: MBuild,
     status: BuildStatus,
@@ -777,9 +852,9 @@ async fn update_build_status(
     }
 
     debug!(build_id = %build.id, status = ?status, "Updating build status");
-    
+
     let mut active_build: ABuild = build.into_active_model();
-    
+
     active_build.status = Set(status);
     active_build.updated_at = Set(Utc::now().naive_utc());
 
@@ -845,13 +920,11 @@ pub async fn update_evaluation_status(
     }
 
     debug!(evaluation_id = %evaluation.id, status = ?status, "Updating evaluation status");
-    
+
     let mut active_evaluation: AEvaluation = evaluation.into_active_model();
     active_evaluation.status = Set(status);
 
-    let evaluation = active_evaluation.update(&state.db).await.unwrap();
-
-    evaluation
+    active_evaluation.update(&state.db).await.unwrap()
 }
 
 pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) {
@@ -937,10 +1010,9 @@ async fn get_build_dependencies(
     Ok(builds)
 }
 
-async fn get_build_dependencies_sorted<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
+async fn get_build_dependencies_sorted(
     state: Arc<ServerState>,
     build: &MBuild,
-    server_daemon: &mut DaemonStore<A>,
 ) -> Result<Vec<String>, String> {
     // Get direct dependencies and add them first, then the main build
     let bdependencies = get_build_dependencies(Arc::clone(&state), &build)
@@ -959,3 +1031,4 @@ async fn get_build_dependencies_sorted<A: AsyncReadExt + AsyncWriteExt + Unpin +
     
     Ok(dependencies)
 }
+

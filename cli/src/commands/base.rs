@@ -63,6 +63,16 @@ enum MainCommands {
     },
     Build {
         derivation: String,
+        #[arg(short, long)]
+        organization: Option<String>,
+        #[arg(short, long)]
+        quiet: bool,
+    },
+    Download {
+        #[arg(short, long)]
+        build_id: Option<String>,
+        #[arg(short, long)]
+        filename: Option<String>,
     },
 }
 
@@ -215,7 +225,8 @@ pub async fn run_cli() -> std::io::Result<()> {
                 println!("Logged out.");
             }
 
-            MainCommands::Build { derivation } => build::handle_build(derivation).await,
+            MainCommands::Build { derivation, organization, quiet } => build::handle_build(derivation, organization, quiet).await,
+            MainCommands::Download { build_id, filename } => download::handle_download(build_id, filename).await,
             MainCommands::Organization { cmd } => organization::handle(cmd).await,
             MainCommands::Project { cmd } => project::handle(cmd).await,
             MainCommands::Server { cmd } => server::handle(cmd).await,

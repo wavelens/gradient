@@ -18,6 +18,7 @@ pub enum ConfigKey {
     Server,
     SelectedOrganization,
     SelectedProject,
+    SelectedBuild,
 }
 
 impl fmt::Display for ConfigKey {

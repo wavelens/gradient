@@ -31,7 +31,7 @@ pub enum EvaluationStatus {
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
-    pub project: Uuid,
+    pub project: Option<Uuid>,
     pub repository: String,
     pub commit: Uuid,
     pub wildcard: String,

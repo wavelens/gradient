@@ -15,7 +15,7 @@ use nix_daemon::nix::DaemonStore;
 use nix_daemon::{Progress, Store};
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ColumnTrait, Condition, EntityTrait, JoinType, QuerySelect};
+use sea_orm::{ColumnTrait, Condition, EntityTrait, JoinType, QuerySelect, IntoActiveModel};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::option::Option;
@@ -43,12 +43,24 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     )
     .await;
 
-    let organization_id = EProject::find_by_id(evaluation.project)
-        .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap()
-        .organization;
+    let organization_id = if let Some(project_id) = evaluation.project {
+        // Regular project-based evaluation
+        EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .organization
+    } else {
+        // Direct build - get organization from DirectBuild record
+        EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .organization
+    };
 
     let commit = ECommit::find_by_id(evaluation.commit)
         .one(&state.db)
@@ -728,5 +740,101 @@ impl JsonOutput for Output {
             .to_string();
 
         Ok(parsed_json)
+    }
+}
+
+pub async fn evaluate_direct(
+    state: Arc<ServerState>,
+    evaluation: MEvaluation,
+    temp_dir: String,
+) -> Result<(), String> {
+    info!(evaluation_id = %evaluation.id, "Starting direct evaluation");
+
+    // Get local store
+    let local_store = get_local_store(None).await.map_err(|e| {
+        error!(error = %e, "Failed to get local store for direct evaluation");
+        e
+    })?;
+
+    // Create a modified evaluation with the temp directory as repository
+    let mut direct_evaluation = evaluation.clone();
+    direct_evaluation.repository = temp_dir.clone();
+
+    // Reuse the existing evaluate function with the modified evaluation
+    let evaluation_result = match local_store {
+        LocalNixStore::UnixStream(mut store) => {
+            evaluate(Arc::clone(&state), &mut store, &direct_evaluation).await
+        }
+        LocalNixStore::CommandDuplex(mut store) => {
+            evaluate(Arc::clone(&state), &mut store, &direct_evaluation).await
+        }
+    };
+
+    match evaluation_result {
+        Ok((builds, dependencies)) => {
+            info!(
+                build_count = builds.len(),
+                dependency_count = dependencies.len(),
+                "Direct evaluation completed successfully"
+            );
+
+            // Insert builds and dependencies into database (reuse existing logic)
+            let active_builds = builds
+                .iter()
+                .map(|b| b.clone().into_active_model())
+                .collect::<Vec<ABuild>>();
+            let active_dependencies = dependencies
+                .iter()
+                .map(|d| d.clone().into_active_model())
+                .collect::<Vec<ABuildDependency>>();
+
+            if !active_builds.is_empty() {
+                EBuild::insert_many(active_builds)
+                    .exec(&state.db)
+                    .await
+                    .map_err(|e| format!("Failed to insert builds: {}", e))?;
+            }
+
+            if !active_dependencies.is_empty() {
+                EBuildDependency::insert_many(active_dependencies)
+                    .exec(&state.db)
+                    .await
+                    .map_err(|e| format!("Failed to insert dependencies: {}", e))?;
+            }
+
+            for build in builds {
+                crate::scheduler::update_build_status(
+                    Arc::clone(&state),
+                    build,
+                    BuildStatus::Queued,
+                ).await;
+            }
+
+            update_evaluation_status(
+                Arc::clone(&state),
+                evaluation,
+                EvaluationStatus::Building,
+            ).await;
+
+            if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
+                warn!(error = %e, temp_dir = %temp_dir, "Failed to cleanup temp directory");
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            error!(error = %e, "Direct evaluation failed");
+            update_evaluation_status(
+                Arc::clone(&state),
+                evaluation,
+                EvaluationStatus::Failed,
+            ).await;
+
+            if let Err(cleanup_err) = tokio::fs::remove_dir_all(&temp_dir).await {
+                warn!(error = %cleanup_err, temp_dir = %temp_dir, "Failed to cleanup temp directory after evaluation failure");
+            }
+
+            Err(e)
+        }
     }
 }

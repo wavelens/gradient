@@ -7,6 +7,7 @@
 pub mod base;
 pub mod build;
 pub mod cache;
+pub mod download;
 pub mod organization;
 pub mod project;
 pub mod server;

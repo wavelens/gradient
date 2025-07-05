@@ -32,27 +32,44 @@ pub async fn get_evaluation(
         .await?
         .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
-    let project = EProject::find_by_id(evaluation.project)
+    let organization_id = if let Some(project_id) = evaluation.project {
+        // Regular project-based evaluation
+        let project = EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                tracing::error!(
+                    "Project {} not found for evaluation {}",
+                    project_id,
+                    evaluation_id
+                );
+                WebError::InternalServerError("Evaluation data inconsistency".to_string())
+            })?;
+        project.organization
+    } else {
+        // Direct build - get organization from DirectBuild record
+        EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                tracing::error!(
+                    "DirectBuild not found for evaluation {}",
+                    evaluation_id
+                );
+                WebError::InternalServerError("Direct build data inconsistency".to_string())
+            })?
+            .organization
+    };
+    let organization = EOrganization::find_by_id(organization_id)
         .one(&state.db)
         .await?
         .ok_or_else(|| {
             tracing::error!(
-                "Project {} not found for evaluation {}",
-                evaluation.project,
-                evaluation_id
+                "Organization {} not found",
+                organization_id
             );
-            WebError::InternalServerError("Evaluation data inconsistency".to_string())
-        })?;
-    let organization = EOrganization::find_by_id(project.organization)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| {
-            tracing::error!(
-                "Organization {} not found for project {}",
-                project.organization,
-                project.id
-            );
-            WebError::InternalServerError("Project data inconsistency".to_string())
+            WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
     if organization.created_by != user.id {
@@ -78,27 +95,44 @@ pub async fn post_evaluation(
         .await?
         .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
-    let project = EProject::find_by_id(evaluation.project)
+    let organization_id = if let Some(project_id) = evaluation.project {
+        // Regular project-based evaluation
+        let project = EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                tracing::error!(
+                    "Project {} not found for evaluation {}",
+                    project_id,
+                    evaluation_id
+                );
+                WebError::InternalServerError("Evaluation data inconsistency".to_string())
+            })?;
+        project.organization
+    } else {
+        // Direct build - get organization from DirectBuild record
+        EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                tracing::error!(
+                    "DirectBuild not found for evaluation {}",
+                    evaluation_id
+                );
+                WebError::InternalServerError("Direct build data inconsistency".to_string())
+            })?
+            .organization
+    };
+    let organization = EOrganization::find_by_id(organization_id)
         .one(&state.db)
         .await?
         .ok_or_else(|| {
             tracing::error!(
-                "Project {} not found for evaluation {}",
-                evaluation.project,
-                evaluation_id
+                "Organization {} not found",
+                organization_id
             );
-            WebError::InternalServerError("Evaluation data inconsistency".to_string())
-        })?;
-    let organization = EOrganization::find_by_id(project.organization)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| {
-            tracing::error!(
-                "Organization {} not found for project {}",
-                project.organization,
-                project.id
-            );
-            WebError::InternalServerError("Project data inconsistency".to_string())
+            WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
     if organization.created_by != user.id {
@@ -127,28 +161,45 @@ pub async fn get_evaluation_builds(
         .await?
         .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
-    let project = EProject::find_by_id(evaluation.project)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| {
-            tracing::error!(
-                "Project {} not found for evaluation {}",
-                evaluation.project,
-                evaluation_id
-            );
-            WebError::InternalServerError("Evaluation data inconsistency".to_string())
-        })?;
+    let organization_id = if let Some(project_id) = evaluation.project {
+        // Regular project-based evaluation
+        let project = EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                tracing::error!(
+                    "Project {} not found for evaluation {}",
+                    project_id,
+                    evaluation_id
+                );
+                WebError::InternalServerError("Evaluation data inconsistency".to_string())
+            })?;
+        project.organization
+    } else {
+        // Direct build - get organization from DirectBuild record
+        EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                tracing::error!(
+                    "DirectBuild not found for evaluation {}",
+                    evaluation_id
+                );
+                WebError::InternalServerError("Direct build data inconsistency".to_string())
+            })?
+            .organization
+    };
 
-    let organization = EOrganization::find_by_id(project.organization)
+    let organization = EOrganization::find_by_id(organization_id)
         .one(&state.db)
         .await?
         .ok_or_else(|| {
             tracing::error!(
-                "Organization {} not found for project {}",
-                project.organization,
-                project.id
+                "Organization {} not found",
+                organization_id
             );
-            WebError::InternalServerError("Project data inconsistency".to_string())
+            WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
     if organization.created_by != user.id {
@@ -186,27 +237,44 @@ pub async fn post_evaluation_builds(
         .await?
         .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
-    let project = EProject::find_by_id(evaluation.project)
+    let organization_id = if let Some(project_id) = evaluation.project {
+        // Regular project-based evaluation
+        let project = EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                tracing::error!(
+                    "Project {} not found for evaluation {}",
+                    project_id,
+                    evaluation_id
+                );
+                WebError::InternalServerError("Evaluation data inconsistency".to_string())
+            })?;
+        project.organization
+    } else {
+        // Direct build - get organization from DirectBuild record
+        EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                tracing::error!(
+                    "DirectBuild not found for evaluation {}",
+                    evaluation_id
+                );
+                WebError::InternalServerError("Direct build data inconsistency".to_string())
+            })?
+            .organization
+    };
+    let organization = EOrganization::find_by_id(organization_id)
         .one(&state.db)
         .await?
         .ok_or_else(|| {
             tracing::error!(
-                "Project {} not found for evaluation {}",
-                evaluation.project,
-                evaluation_id
+                "Organization {} not found",
+                organization_id
             );
-            WebError::InternalServerError("Evaluation data inconsistency".to_string())
-        })?;
-    let organization = EOrganization::find_by_id(project.organization)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| {
-            tracing::error!(
-                "Organization {} not found for project {}",
-                project.organization,
-                project.id
-            );
-            WebError::InternalServerError("Project data inconsistency".to_string())
+            WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
     // TODO: Check if user is in organization

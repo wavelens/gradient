@@ -70,13 +70,26 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         .unwrap()
         .unwrap();
 
-    let project = EProject::find_by_id(evaluation.project)
-        .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+    let organization_id = if let Some(project_id) = evaluation.project {
+        // Regular project-based evaluation
+        let project = EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap();
+        project.organization
+    } else {
+        // Direct build - get organization from DirectBuild record
+        EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap()
+            .organization
+    };
 
-    let organization = EOrganization::find_by_id(project.organization)
+    let organization = EOrganization::find_by_id(organization_id)
         .one(&state.db)
         .await
         .unwrap()

@@ -25,6 +25,8 @@ mod m20241107_156140_create_table_role;
 mod m20241107_156150_create_table_organization_user;
 mod m20241107_156160_create_table_build_output;
 mod m20241107_156170_create_table_build_output_signature;
+mod m20250705_000000_create_table_direct_build;
+mod m20250705_000001_make_evaluation_project_nullable;
 
 pub struct Migrator;
 
@@ -51,6 +53,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20241107_156150_create_table_organization_user::Migration),
             Box::new(m20241107_156160_create_table_build_output::Migration),
             Box::new(m20241107_156170_create_table_build_output_signature::Migration),
+            Box::new(m20250705_000000_create_table_direct_build::Migration),
+            Box::new(m20250705_000001_make_evaluation_project_nullable::Migration),
         ]
     }
 }

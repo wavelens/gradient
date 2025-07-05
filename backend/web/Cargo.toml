@@ -11,7 +11,7 @@ name = "web"
 path = "src/lib.rs"
 
 [dependencies]
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart"] }
 axum-streams = { version = "0.21", features = ["json"] }
 async-stream = "0.3"
 chrono = "0.4"
