@@ -23,6 +23,8 @@ use uuid::Uuid;
 pub struct Cli {
     #[arg(long, env = "GRADIENT_DEBUG", default_value = "false")]
     pub debug: bool,
+    #[arg(long, env = "GRADIENT_LOG_LEVEL", default_value = "info")]
+    pub log_level: String,
     #[arg(long, env = "GRADIENT_IP", default_value = "127.0.0.1")]
     pub ip: String,
     #[arg(long, env = "GRADIENT_PORT", value_parser = port_in_range, default_value_t = 3000)]
@@ -49,22 +51,16 @@ pub struct Cli {
     pub base_path: String,
     #[arg(long, env = "GRADIENT_DISABLE_REGISTRATION", default_value = "false")]
     pub disable_registration: bool,
-    #[arg(long, env = "GRADIENT_OAUTH_ENABLED", default_value = "false")]
-    pub oauth_enabled: bool,
-    #[arg(long, env = "GRADIENT_OAUTH_REQUIRED", default_value = "false")]
-    pub oauth_required: bool,
-    #[arg(long, env = "GRADIENT_OAUTH_CLIENT_ID")]
-    pub oauth_client_id: Option<String>,
-    #[arg(long, env = "GRADIENT_OAUTH_CLIENT_SECRET_FILE")]
-    pub oauth_client_secret_file: Option<String>,
-    #[arg(long, env = "GRADIENT_OAUTH_AUTH_URL")]
-    pub oauth_auth_url: Option<String>,
-    #[arg(long, env = "GRADIENT_OAUTH_TOKEN_URL")]
-    pub oauth_token_url: Option<String>,
-    #[arg(long, env = "GRADIENT_OAUTH_API_URL")]
-    pub oauth_api_url: Option<String>,
-    #[arg(long, env = "GRADIENT_OAUTH_SCOPES")]
-    pub oauth_scopes: Option<String>,
+    #[arg(long, env = "GRADIENT_OIDC_ENABLED", default_value = "false")]
+    pub oidc_enabled: bool,
+    #[arg(long, env = "GRADIENT_OIDC_REQUIRED", default_value = "false")]
+    pub oidc_required: bool,
+    #[arg(long, env = "GRADIENT_OIDC_CLIENT_ID")]
+    pub oidc_client_id: Option<String>,
+    #[arg(long, env = "GRADIENT_OIDC_CLIENT_SECRET_FILE")]
+    pub oidc_client_secret_file: Option<String>,
+    #[arg(long, env = "GRADIENT_OIDC_SCOPES")]
+    pub oidc_scopes: Option<String>,
     #[arg(long, env = "GRADIENT_OIDC_DISCOVERY_URL")]
     pub oidc_discovery_url: Option<String>,
     #[arg(long, env = "GRADIENT_CRYPT_SECRET_FILE")]

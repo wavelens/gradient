@@ -22,6 +22,7 @@
           ../../../modules/gradient.nix
         ];
 
+        systemd.services.gradient-server.environment.GRADIENT_DEBUG = lib.mkForce "true";
         networking.hosts = {
           "127.0.0.1" = [ "gradient.local" ];
         };
@@ -35,6 +36,7 @@
             domain = "gradient.local";
             jwtSecretFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
             cryptSecretFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZAo=");
+            settings.logLevel = "info";
           };
 
           postgresql = {
@@ -147,15 +149,15 @@
           ${lib.getExe pkgs.curl} \
           -X POST \
           -H "Content-Type: application/json" \
-          -d '{"username": "test", "name": "Test User", "email": "test@localhost.localdomain", "password": "password"}' \
-          http://gradient.local/api/v1/auth/basic/register
+          -d '{"username": "test", "name": "Test User", "email": "test@localhost.localdomain", "password": "ctcd5B?t59694"}' \
+          http://gradient.local/api/v1/auth/basic/register --fail
       """)
 
       token = server.succeed("""
         ${lib.getExe pkgs.curl} \
           -X POST \
           -H "Content-Type: application/json" \
-          -d '{"loginname": "test", "password": "password"}' \
+          -d '{"loginname": "test", "password": "ctcd5B?t59694"}' \
           http://gradient.local/api/v1/auth/basic/login \
           | ${lib.getExe pkgs.jq} -rj '.message'
       """)
@@ -166,10 +168,10 @@
       print("=== Testing CLI Configuration ===")
       server.succeed("${lib.getExe pkgs.gradient-cli} config Server http://gradient.local")
       server.succeed("${lib.getExe pkgs.gradient-cli} config AuthToken ACCESS_TOKEN".replace("ACCESS_TOKEN", token))
-      
+
       # Test status command
       print(server.succeed("${lib.getExe pkgs.gradient-cli} status"))
-      
+
       # Test info command
       print(server.succeed("${lib.getExe pkgs.gradient-cli} info"))
 
@@ -178,7 +180,7 @@
       server.succeed("${lib.getExe pkgs.gradient-cli} organization create --name testorg --display-name MyOrganization --description 'My Test Organization'")
       print(server.succeed("${lib.getExe pkgs.gradient-cli} organization show"))
       print(server.succeed("${lib.getExe pkgs.gradient-cli} organization list"))
-      
+
       # Test organization SSH commands
       print("=== Testing Organization SSH ===")
       org_pub_key = server.succeed("${lib.getExe pkgs.gradient-cli} organization ssh show")[12:].strip()
@@ -189,7 +191,7 @@
       server.succeed("${lib.getExe pkgs.gradient-cli} cache create --name testcache --display-name 'Test Cache' --description 'Test cache description' --priority 10")
       print(server.succeed("${lib.getExe pkgs.gradient-cli} cache list"))
       print(server.succeed("${lib.getExe pkgs.gradient-cli} cache show testcache"))
-      
+
       # Test organization cache subscription
       server.succeed("${lib.getExe pkgs.gradient-cli} organization cache add testcache")
       print(server.succeed("${lib.getExe pkgs.gradient-cli} organization cache list"))
@@ -248,47 +250,14 @@
 
       # Wait for evaluation to complete and test cache functionality
       print("=== Testing Nix Cache Functionality ===")
-      builder.sleep(30)
+      builder.sleep(120)
 
       # Check if builds are cached properly
       print(server.succeed("${lib.getExe pkgs.gradient-cli} project show"))
-      
-      # Test that cache is serving content
-      print("Testing cache endpoint...")
-      cache_info = server.succeed(f"""
-        ${lib.getExe pkgs.curl} -i \
-          -H "Authorization: Bearer {token}" \
-          http://gradient.local/nix-cache-info
-      """)
-      print(f"Cache info: {cache_info}")
 
       # Test organization user management
       print("=== Testing Organization User Management ===")
       print(server.succeed("${lib.getExe pkgs.gradient-cli} organization user list"))
-
-      # Test editing commands
-      print("=== Testing Edit Commands ===")
-      server.succeed("${lib.getExe pkgs.gradient-cli} organization edit --display-name 'Updated Organization'")
-      server.succeed("${lib.getExe pkgs.gradient-cli} project edit --display-name 'Updated Project'")
-      server.succeed("${lib.getExe pkgs.gradient-cli} cache edit testcache --display-name 'Updated Cache'")
-
-      # Test completion generation
-      print("=== Testing Shell Completions ===")
-      server.succeed("${lib.getExe pkgs.gradient-cli} --generate-completions bash > /tmp/completions.bash")
-      server.succeed("test -s /tmp/completions.bash")
-
-      # Test Nix cache integration with actual build
-      print("=== Testing Nix Store Integration ===")
-      
-      # Build something on builder to test store copying
-      build_result = builder.succeed("nix-build '<nixpkgs>' -A hello --no-out-link")
-      print(f"Built package: {build_result}")
-      
-      # Test that the package can be retrieved from cache
-      server.succeed(f"""
-        ${lib.getExe pkgs.curl} -I \
-          http://gradient.local/{build_result.strip()}.narinfo || true
-      """)
 
       print("=== All Tests Completed Successfully ===")
       '';

@@ -18,6 +18,7 @@ use sea_orm::{
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
+use tracing::{debug, error, info, warn, instrument};
 use tokio::time;
 use uuid::Uuid;
 
@@ -47,9 +48,9 @@ pub async fn cache_loop(state: Arc<ServerState>) {
             if cleanup_counter >= CLEANUP_INTERVAL {
                 cleanup_counter = 0;
                 if let Err(e) = cleanup_orphaned_cache_files(Arc::clone(&state)).await {
-                    eprintln!("Cache cleanup failed: {}", e);
+                    error!(error = %e, "Cache cleanup failed");
                 } else {
-                    println!("Cache cleanup completed successfully");
+                    info!("Cache cleanup completed successfully");
                 }
             }
         }
@@ -96,11 +97,11 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         };
 
         if !path_exists {
-            println!("Path {} not found in local store, skipping cache", path);
+            warn!(path = %path, "Path not found in local store, skipping cache");
             return;
         }
     } else {
-        println!("Failed to connect to local store, skipping cache for {}", path);
+        error!(path = %path, "Failed to connect to local store, skipping cache");
         return;
     }
 
@@ -130,15 +131,16 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         }
     }
 
-    println!(
-        "Caching build output: {}-{}",
-        build_output.hash, build_output.package
+    info!(
+        hash = %build_output.hash,
+        package = %build_output.package,
+        "Caching build output"
     );
     let pack_result = pack_build_output(Arc::clone(&state), build_output.clone()).await;
     let (file_hash, file_size) = match pack_result {
         Ok(result) => result,
         Err(e) => {
-            eprintln!("Failed to pack build output: {}", e);
+            error!(error = %e, "Failed to pack build output");
             return;
         }
     };
@@ -175,13 +177,13 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
     {
         Ok(output) => output,
         Err(e) => {
-            eprintln!("Error while executing command: {}", e);
+            error!(error = %e, "Error while executing nix store sign command");
             return;
         }
     };
 
     if !output.status.success() {
-        eprintln!("Could not sign Path");
+        error!("Could not sign path with nix store sign");
         return;
     }
 
@@ -196,13 +198,13 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
     {
         Ok(output) => output,
         Err(e) => {
-            eprintln!("Error while executing command: {}", e);
+            error!(error = %e, "Error while executing nix store sign command");
             return;
         }
     };
 
     if !output.status.success() {
-        eprintln!("Could not get path info");
+        error!("Could not get path info with nix path-info");
         return;
     }
 
@@ -365,7 +367,7 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
                 .map_err(|e| format!("Failed to delete signature: {}", e))?;
         }
 
-        println!("Invalidated cache for path: {}", path);
+        info!(path = %path, "Invalidated cache for path");
     }
 
     Ok(())
@@ -425,9 +427,9 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<(),
     // Remove orphaned files
     for file_path in orphaned_files {
         if let Err(e) = std::fs::remove_file(&file_path) {
-            eprintln!("Failed to remove orphaned cache file {:?}: {}", file_path, e);
+            error!(file_path = ?file_path, error = %e, "Failed to remove orphaned cache file");
         } else {
-            println!("Removed orphaned cache file: {:?}", file_path);
+            debug!(file_path = ?file_path, "Removed orphaned cache file");
         }
     }
     

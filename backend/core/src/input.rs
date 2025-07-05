@@ -158,3 +158,56 @@ pub fn load_secret(f: &str) -> String {
     let s = std::fs::read_to_string(f).unwrap_or_default();
     s.trim().replace(char::from(25), "")
 }
+
+/// Validates password strength requirements
+pub fn validate_password(password: &str) -> Result<(), String> {
+    if password.len() < 8 {
+        return Err("Password must be at least 8 characters long".to_string());
+    }
+    
+    if password.len() > 128 {
+        return Err("Password cannot exceed 128 characters".to_string());
+    }
+    
+    // Check for common patterns first
+    if password.to_lowercase().contains("password") {
+        return Err("Password cannot contain the word 'password'".to_string());
+    }
+    
+    let has_uppercase = password.chars().any(|c| c.is_uppercase());
+    let has_lowercase = password.chars().any(|c| c.is_lowercase());
+    let has_digit = password.chars().any(|c| c.is_ascii_digit());
+    let has_special = password.chars().any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c));
+    
+    if !has_uppercase {
+        return Err("Password must contain at least one uppercase letter".to_string());
+    }
+    
+    if !has_lowercase {
+        return Err("Password must contain at least one lowercase letter".to_string());
+    }
+    
+    if !has_digit {
+        return Err("Password must contain at least one digit".to_string());
+    }
+    
+    if !has_special {
+        return Err("Password must contain at least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)".to_string());
+    }
+    
+    // Check for common weak sequences (4+ characters)
+    if password.chars().collect::<Vec<_>>().windows(4).any(|w| {
+        w[0] as u8 + 1 == w[1] as u8 && w[1] as u8 + 1 == w[2] as u8 && w[2] as u8 + 1 == w[3] as u8
+    }) {
+        return Err("Password cannot contain sequential characters (e.g., 'abcd', '1234')".to_string());
+    }
+    
+    // Check for repeated characters (3+ in a row)
+    if password.chars().collect::<Vec<_>>().windows(3).any(|w| {
+        w[0] == w[1] && w[1] == w[2]
+    }) {
+        return Err("Password cannot contain repeated characters (e.g., 'aaa', '111')".to_string());
+    }
+    
+    Ok(())
+}

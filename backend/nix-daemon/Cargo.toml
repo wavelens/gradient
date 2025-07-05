@@ -5,7 +5,7 @@
 [package]
 name = "nix-daemon"
 version = "0.1.1"
-edition = "2021"
+edition = "2024"
 license = "EUPL-1.2"
 authors = ["embr <git@liclac.eu>"]
 description = "A library for talking directly to the Nix Daemon"
@@ -22,11 +22,11 @@ chrono = "0.4"
 futures = "0.3"
 num_enum = "0.7"
 serde = { version = "1.0", features = ["derive"] }
-serde_with = "3.12"
+serde_with = "3.14"
 strum = { version = "0.27", features = ["derive"] }
 tap = "1.0"
-thiserror = "1.0"
-tokio = { version = "1.34", features = [
+thiserror = "2.0"
+tokio = { version = "1.46", features = [
     "rt",
     "macros",
     "parking_lot",
@@ -38,5 +38,5 @@ tokio-test = "0.4"
 tracing = "0.1"
 
 [dev-dependencies]
-rand = "0.8"
+rand = "0.9"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

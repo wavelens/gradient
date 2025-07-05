@@ -21,13 +21,15 @@ entity = { path = "../entity" }
 futures = "0.3"
 git-url-parse = "0.4"
 migration = { path = "../migration" }
-rand = "0.8"
+rand = "0.9"
+rand_core = "0.6"
 sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
 sea-orm-migration = { version = "1.1", features = ["with-uuid", "with-chrono", "with-json", "sqlx-postgres", "sea-orm-cli", "runtime-tokio"] }
 serde = { version = "1", features = ["derive"] }
 ssh-key = { version = "0.6", features = ["ed25519"] }
-tokio = { version = "1.44", features = ["process", "rt-multi-thread"] }
-uuid = { version = "1.16", features = ["fast-rng", "macro-diagnostics", "v4"] }
+tokio = { version = "1.46", features = ["process", "rt-multi-thread"] }
+tracing = { workspace = true }
+uuid = { version = "1.17", features = ["fast-rng", "macro-diagnostics", "v4"] }
 ed25519-compact = { version = "2.1", features = ["random"] }
 nix-daemon = { path = "../nix-daemon" }
 

@@ -22,6 +22,7 @@
           ../../../modules/gradient.nix
         ];
 
+        systemd.services.gradient-server.environment.GRADIENT_DEBUG = lib.mkForce "true";
         networking.hosts = {
           "127.0.0.1" = [ "gradient.local" "oidc.local" ];
         };
@@ -35,20 +36,21 @@
             domain = "gradient.local";
             jwtSecretFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
             cryptSecretFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZAo=");
-            
+
             # Enable OIDC
-            oauth = {
+            oidc = {
               enable = true;
               required = true;
               clientId = "gradient-test";
-              clientSecretFile = toString (pkgs.writeText "oauthSecret" "test-secret");
+              clientSecretFile = toString (pkgs.writeText "oidcSecret" "test-secret");
               scopes = [ "openid" "profile" "email" ];
-              tokenUrl = "http://oidc.local:8080/oauth/token";
-              authUrl = "http://oidc.local:8080/oauth/authorize";
-              apiUrl = "http://oidc.local:8080/userinfo";
+              discoveryUrl = "http://oidc.local:8080";
             };
-            
-            settings.disableRegistration = true;
+
+            settings = {
+              disableRegistration = true;
+              logLevel = "warn";
+            };
           };
 
           postgresql = {
@@ -90,11 +92,11 @@
                   }}'";
                   extraConfig = "add_header Content-Type application/json;";
                 };
-                
+
                 "/oauth/authorize" = {
                   return = "302 http://gradient.local/api/v1/auth/oidc/callback?code=test-auth-code&state=$arg_state";
                 };
-                
+
                 "/oauth/token" = {
                   extraConfig = ''
                     limit_except POST {
@@ -109,7 +111,7 @@
                     }}';
                   '';
                 };
-                
+
                 "/userinfo" = {
                   return = "200 '${builtins.toJSON {
                     sub = "test-user";
@@ -127,9 +129,6 @@
         nix.settings = {
           max-jobs = 0;
         };
-
-        # Add OIDC discovery URL as environment variable
-        systemd.services.gradient-server.environment.GRADIENT_OIDC_DISCOVERY_URL = "http://oidc.local:8080";
       };
     };
 
@@ -167,7 +166,7 @@
           "http://gradient.local/api/v1/auth/oidc/callback?code=test-auth-code&state=test-state"
       """)
       print(f"Callback response: {callback_response}")
-      
+
       # Check that the callback didn't return an error
       if "500 Internal Server Error" in callback_response or '"error":true' in callback_response:
           raise Exception(f"OIDC callback failed with error: {callback_response}")

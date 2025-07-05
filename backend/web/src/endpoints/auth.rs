@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::authorization::{encode_jwt, oauth_login_create, oauth_login_verify, update_last_login};
+use crate::authorization::{encode_jwt, oidc_login_create, oidc_login_verify, update_last_login};
 use crate::error::{WebError, WebResult};
 use axum::Json;
 use axum::extract::{Query, State};
@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::body::Body;
 use chrono::Utc;
 use core::consts::*;
-use core::input::check_index_name;
+use core::input::{check_index_name, validate_password};
 use core::types::*;
 use email_address::EmailAddress;
 use password_auth::{generate_hash, verify_password};
@@ -42,7 +42,7 @@ pub async fn post_basic_register(
     state: State<Arc<ServerState>>,
     Json(body): Json<MakeUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if state.cli.oauth_required || state.cli.disable_registration {
+    if state.cli.oidc_required || state.cli.disable_registration {
         return Err(WebError::registration_disabled());
     }
 
@@ -52,6 +52,10 @@ pub async fn post_basic_register(
 
     if !EmailAddress::is_valid(body.email.clone().as_str()) {
         return Err(WebError::invalid_email());
+    }
+
+    if let Err(e) = validate_password(&body.password) {
+        return Err(WebError::invalid_password(e));
     }
 
     let existing_user = EUser::find()
@@ -91,7 +95,7 @@ pub async fn post_basic_login(
     state: State<Arc<ServerState>>,
     Json(body): Json<MakeLoginRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if state.cli.oauth_required {
+    if state.cli.oidc_required {
         return Err(WebError::oauth_required());
     }
 
@@ -135,7 +139,7 @@ pub async fn get_oauth_authorize(
         .get("code")
         .ok_or_else(|| WebError::invalid_oauth_code())?;
 
-    let user: MUser = oauth_login_verify(state.clone(), code.to_string())
+    let user: MUser = oidc_login_verify(state.clone(), code.to_string())
         .await
         .map_err(|e| WebError::InternalServerError(e.to_string()))?;
 
@@ -152,11 +156,11 @@ pub async fn get_oauth_authorize(
 pub async fn post_oauth_authorize(
     state: State<Arc<ServerState>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if !state.cli.oauth_enabled {
+    if !state.cli.oidc_enabled {
         return Err(WebError::oauth_disabled());
     }
 
-    let authorize_url = oauth_login_create(state)
+    let authorize_url = oidc_login_create(state)
         .await
         .map_err(|e| WebError::Unauthorized(e.to_string()))?;
 
@@ -172,11 +176,11 @@ pub async fn get_oidc_login(
     state: State<Arc<ServerState>>,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
-    if !state.cli.oauth_enabled {
+    if !state.cli.oidc_enabled {
         return Err(WebError::oauth_disabled());
     }
 
-    let authorize_url = oauth_login_create(state)
+    let authorize_url = oidc_login_create(state)
         .await
         .map_err(|e| WebError::Unauthorized(e.to_string()))?;
 
@@ -195,7 +199,7 @@ pub async fn get_oidc_callback(
         .get("code")
         .ok_or_else(|| WebError::invalid_oauth_code())?;
 
-    let user: MUser = oauth_login_verify(state.clone(), code.to_string())
+    let user: MUser = oidc_login_verify(state.clone(), code.to_string())
         .await
         .map_err(|e| WebError::InternalServerError(e.to_string()))?;
 

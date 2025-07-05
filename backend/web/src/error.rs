@@ -145,4 +145,8 @@ impl WebError {
     pub fn failed_ssh_key_generation() -> Self {
         WebError::InternalServerError("Failed to generate SSH key".to_string())
     }
+
+    pub fn invalid_password(reason: String) -> Self {
+        WebError::BadRequest(format!("Invalid password: {}", reason))
+    }
 }

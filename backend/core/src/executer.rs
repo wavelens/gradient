@@ -19,6 +19,7 @@ use tokio::{
     net::UnixStream,
     process::Command,
 };
+use tracing::{error, info, instrument};
 use uuid::Uuid;
 
 use super::input;
@@ -68,7 +69,7 @@ pub async fn init_session(
     private_key: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     session.handshake().await.unwrap_or_else(|err| {
-        println!("Handshake failed: {:?}", err);
+        error!(error = ?err, "SSH handshake failed");
     });
 
     session
@@ -84,12 +85,13 @@ pub async fn init_session(
     Ok(())
 }
 
+#[instrument(skip(remote_store, state), fields(build_id = %build.id, derivation_path = %build.derivation_path))]
 pub async fn execute_build(
     build: &MBuild,
     remote_store: &mut NixStore,
     state: Arc<ServerState>,
 ) -> Result<(MBuild, HashMap<String, BuildResult>), Box<dyn std::error::Error + Send + Sync>> {
-    println!("Executing builds");
+    info!("Executing build");
 
     let paths = get_builds_path(vec![&build]);
     let mut build = build.clone();
@@ -135,6 +137,7 @@ pub async fn execute_build(
     }
 }
 
+#[instrument(skip(from_store, to_store), fields(path_count = paths.len(), local_is_receiver))]
 pub async fn copy_builds<
     A: AsyncReadExt + AsyncWriteExt + Unpin + Send,
     B: AsyncReadExt + AsyncWriteExt + Unpin + Send,
@@ -145,10 +148,10 @@ pub async fn copy_builds<
     local_is_receiver: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for path in paths {
-        println!(
-            "Copying build {} to {}",
-            path,
-            if local_is_receiver { "local" } else { "remote" }
+        info!(
+            path = %path,
+            destination = if local_is_receiver { "local" } else { "remote" },
+            "Copying build"
         );
 
         if to_store.is_valid_path(path.clone()).result().await.unwrap() {
@@ -327,15 +330,15 @@ pub async fn get_output_path<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
     path: String,
     store: &mut DaemonStore<A>,
 ) -> Result<Vec<String>, String> {
-    Ok(store
-        .query_derivation_output_map(path)
+    match store
+        .query_derivation_output_map(path.clone())
         .result()
         .await
         .map_err(|e| e.to_string())
-        .unwrap()
-        .values()
-        .cloned()
-        .collect())
+    {
+        Ok(output_map) => Ok(output_map.values().cloned().collect()),
+        Err(e) => Err(format!("Failed to get output path for {}: {}", path, e)),
+    }
 }
 
 pub async fn get_pathinfo<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(

@@ -69,43 +69,33 @@ in {
         example = "/etc/gradient/database_url";
       };
 
-      oauth = {
-        enable = lib.mkEnableOption "Enable OAuth";
-        required = lib.mkEnableOption "Require OAuth for registration.";
+      oidc = {
+        enable = lib.mkEnableOption "Enable OIDC";
+        required = lib.mkEnableOption "Require OIDC for registration.";
         clientId = lib.mkOption {
-          description = "The client ID for OAuth.";
+          description = "The client ID for OIDC.";
           type = lib.types.str;
         };
 
         clientSecretFile = lib.mkOption {
-          description = "The client secret file for OAuth.";
+          description = "The client secret file for OIDC.";
           type = lib.types.str;
         };
 
         scopes = lib.mkOption {
-          description = "The scopes for OAuth.";
+          description = "The scopes for OIDC.";
           type = lib.types.listOf lib.types.str;
-          default = [];
+          default = ["openid" "email" "profile"];
         };
 
-        tokenUrl = lib.mkOption {
-          description = "The token URL for OAuth.";
-          type = lib.types.str;
-        };
-
-        authUrl = lib.mkOption {
-          description = "The auth URL for OAuth.";
-          type = lib.types.str;
-        };
-
-        apiUrl = lib.mkOption {
-          description = "The API URL for OAuth.";
+        discoveryUrl = lib.mkOption {
+          description = "The discovery URL for OIDC.";
           type = lib.types.str;
         };
       };
 
       settings = {
-        disableRegistration = lib.mkEnableOption "Disable registration. Users must be registered via OAuth2.";
+        disableRegistration = lib.mkEnableOption "Disable registration. Users must be registered via OIDC.";
         maxConcurrentEvaluations = lib.mkOption {
           description = "The maximum number of concurrent evaluations.";
           type = lib.types.ints.unsigned;
@@ -116,6 +106,12 @@ in {
           description = "The maximum number of concurrent builds.";
           type = lib.types.ints.unsigned;
           default = 1;
+        };
+
+        logLevel = lib.mkOption {
+          description = "The log level for the application.";
+          type = lib.types.enum ["trace" "debug" "info" "warn" "error"];
+          default = "info";
         };
       };
     };
@@ -158,8 +154,8 @@ in {
           "gradient_database_url:${cfg.databaseUrlFile}"
           "gradient_crypt_secret:${cfg.cryptSecretFile}"
           "gradient_jwt_secret:${cfg.jwtSecretFile}"
-        ] ++ lib.optional cfg.oauth.enable [
-          "gradient_oauth_client_secret:${cfg.oauth.clientSecretFile}"
+        ] ++ lib.optional cfg.oidc.enable [
+          "gradient_oidc_client_secret:${cfg.oidc.clientSecretFile}"
         ];
       };
 
@@ -177,20 +173,21 @@ in {
         GRADIENT_BINPATH_NIX = lib.getExe cfg.package_nix;
         GRADIENT_BINPATH_GIT = lib.getExe cfg.package_git;
         GRADIENT_BINPATH_ZSTD = lib.getExe cfg.package_zstd;
-        GRADIENT_OAUTH_ENABLED = lib.boolToString cfg.oauth.enable;
-        GRADIENT_DISABLE_REGISTER = lib.boolToString cfg.settings.disableRegistration;
+        GRADIENT_OIDC_ENABLED = lib.boolToString cfg.oidc.enable;
+        GRADIENT_DISABLE_REGISTRATION = lib.boolToString cfg.settings.disableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
         GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";
         GRADIENT_SERVE_CACHE = lib.boolToString cfg.serveCache;
         GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
-      } // lib.optionalAttrs cfg.oauth.enable {
-        GRADIENT_OAUTH_CLIENT_ID = cfg.oauth.clientId;
-        GRADIENT_OAUTH_CLIENT_SECRET_FILE = "%d/gradient_oauth_client_secret";
-        GRADIENT_OAUTH_SCOPES = builtins.concatStringsSep " " cfg.oauth.scopes;
-        GRADIENT_OAUTH_TOKEN_URL = cfg.oauth.tokenUrl;
-        GRADIENT_OAUTH_AUTH_URL = cfg.oauth.authUrl;
-        GRADIENT_OAUTH_API_URL = cfg.oauth.apiUrl;
-        GRADIENT_OAUTH_REQUIRED = lib.boolToString cfg.oauth.required;
+        GRADIENT_LOG_LEVEL = cfg.settings.logLevel;
+        # Set RUST_LOG environment variable for enhanced logging
+        RUST_LOG = cfg.settings.logLevel;
+      } // lib.optionalAttrs cfg.oidc.enable {
+        GRADIENT_OIDC_CLIENT_ID = cfg.oidc.clientId;
+        GRADIENT_OIDC_CLIENT_SECRET_FILE = "%d/gradient_oidc_client_secret";
+        GRADIENT_OIDC_SCOPES = builtins.concatStringsSep " " cfg.oidc.scopes;
+        GRADIENT_OIDC_DISCOVERY_URL = cfg.oidc.discoveryUrl;
+        GRADIENT_OIDC_REQUIRED = lib.boolToString cfg.oidc.required;
       };
     };
 

@@ -23,17 +23,19 @@ use std::process::Output;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
+use tracing::{debug, error, info, warn, instrument};
 use uuid::Uuid;
 
 use super::scheduler::update_evaluation_status;
 use core::consts::FLAKE_START;
 
+#[instrument(skip(state, store), fields(evaluation_id = %evaluation.id))]
 pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     state: Arc<ServerState>,
     store: &mut DaemonStore<C>,
     evaluation: &MEvaluation,
 ) -> Result<(Vec<MBuild>, Vec<MBuildDependency>), String> {
-    println!("Evaluating: {}", evaluation.id);
+    info!("Starting evaluation");
     update_evaluation_status(
         Arc::clone(&state),
         evaluation.clone(),
@@ -62,7 +64,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         get_flake_derivations(Arc::clone(&state), repository.clone(), wildcards).await?;
 
     if all_derivations.is_empty() {
-        println!("No derivations found for evaluation: {}", evaluation.id);
+        warn!("No derivations found for evaluation");
         return Ok((vec![], vec![]));
     }
 
@@ -77,9 +79,11 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             match get_derivation_cmd(state.cli.binpath_nix.as_str(), &path).await {
                 Ok((d, r)) => (d, r),
                 Err(e) => {
-                    // TODO: log error
-                    println!("A derivation failed: {}", e);
-                    println!("Skipping broken package: {}", derivation_string);
+                    warn!(
+                        error = %e,
+                        derivation = %derivation_string,
+                        "Derivation failed, skipping broken package"
+                    );
                     continue;
                 }
             };
@@ -87,7 +91,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         let missing = core::executer::get_missing_builds(vec![derivation.clone()], store).await?;
 
         if missing.is_empty() {
-            println!("Skipping package (already in store): {}", derivation);
+            debug!(derivation = %derivation, "Skipping package - already in store");
 
             add_existing_build(
                 Arc::clone(&state),
@@ -109,11 +113,11 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 .await?
                 .is_empty()
         {
-            println!("Skipping package: {}", derivation);
+            debug!(derivation = %derivation, "Skipping package - already exists");
             continue;
         }
 
-        println!("Creating build {} with path {}", derivation, path);
+        info!(derivation = %derivation, path = %path, "Creating build");
 
         query_all_dependencies(
             Arc::clone(&state),
@@ -126,7 +130,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         )
         .await;
 
-        println!("Found package: {}", derivation);
+        debug!(derivation = %derivation, "Successfully processed package");
     }
 
     Ok((all_builds, all_dependencies))
@@ -148,6 +152,13 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         .collect::<Vec<(String, Option<Uuid>, Uuid)>>();
 
     while let Some((dependency, dependency_id, build_id)) = dependencies.pop() {
+        debug!(
+            derivation = %dependency,
+            build_id = %build_id,
+            parent_dependency_id = ?dependency_id,
+            "Processing derivation"
+        );
+        
         let path_info = get_derivation(dependency.clone(), store).await.unwrap();
 
         let references = core::executer::get_missing_builds(path_info.references.clone(), store)
@@ -195,9 +206,11 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
                 let dep = MBuildDependency {
                     id: Uuid::new_v4(),
-                    build: d_id,
-                    dependency: build_id,
+                    build: build_id,
+                    dependency: d_id,
                 };
+
+                debug!(build = %build_id, dependency = %d_id, "Creating dependency");
 
                 all_dependencies.push(dep);
 
@@ -213,9 +226,11 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         for b in check_availablity {
             let dep = MBuildDependency {
                 id: Uuid::new_v4(),
-                build: b.id,
-                dependency: build_id,
+                build: build_id,
+                dependency: b.id,
             };
+
+            debug!(build = %build_id, dependency = %b.id, "Creating dependency for existing build");
 
             if store
                 .query_pathinfo(b.derivation_path.clone())
@@ -268,12 +283,15 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 dependency: build_id,
             };
 
+            debug!(build = %d_id, dependency = %build_id, "Creating parent dependency");
+
             all_dependencies.push(dep);
         }
 
-        println!(
-            "Creating build {} with path {}",
-            build.id, build.derivation_path
+        info!(
+            build_id = %build.id,
+            derivation_path = %build.derivation_path,
+            "Creating build"
         );
 
         all_builds.push(build);

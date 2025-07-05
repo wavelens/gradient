@@ -9,8 +9,10 @@ use entity::evaluation::EvaluationStatus;
 use migration::Migrator;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Database, DatabaseConnection, EntityTrait,
-    QueryFilter, QuerySelect,
+    QueryFilter, QuerySelect, ConnectOptions,
 };
+use std::time::Duration;
+use tracing::log::LevelFilter;
 use sea_orm_migration::prelude::*;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -27,7 +29,26 @@ pub async fn connect_db(cli: &Cli) -> DatabaseConnection {
         panic!("No database url provided")
     };
 
-    let db = Database::connect(db_url)
+    // Configure database connection options
+    let mut opt = ConnectOptions::new(db_url);
+    
+    // Only enable SQL logging at debug level
+    if cli.log_level == "debug" {
+        opt.sqlx_logging(true)
+           .sqlx_logging_level(LevelFilter::Debug);
+    } else {
+        opt.sqlx_logging(false);
+    }
+    
+    // Set other connection options
+    opt.max_connections(100)
+       .min_connections(5)
+       .connect_timeout(Duration::from_secs(8))
+       .acquire_timeout(Duration::from_secs(8))
+       .idle_timeout(Duration::from_secs(8))
+       .max_lifetime(Duration::from_secs(8));
+
+    let db = Database::connect(opt)
         .await
         .expect("Failed to connect to database");
     Migrator::up(&db, None).await.unwrap();

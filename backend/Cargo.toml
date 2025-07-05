@@ -13,17 +13,21 @@ resolver = "2"
 
 [workspace.dependencies]
 # Common dependencies shared across workspace members
-tokio = { version = "1.44", features = ["rt-multi-thread"] }
-uuid = { version = "1.16", features = ["fast-rng", "macro-diagnostics", "v4"] }
+tokio = { version = "1.46", features = ["rt-multi-thread"] }
+uuid = { version = "1.17", features = ["fast-rng", "macro-diagnostics", "v4"] }
 sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
 chrono = "0.4"
 serde = { version = "1", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [dependencies]
 builder = { path = "builder" }
 cache = { path = "cache" }
 clap = { version = "4.5", features = ["derive"] }
 core = { path = "core" }
-sentry = "0.40"
-tokio = { version = "1.44", features = ["process", "rt-multi-thread"] }
+sentry = "0.41"
+tokio = { version = "1.46", features = ["process", "rt-multi-thread"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 web = { path = "web" }

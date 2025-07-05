@@ -207,3 +207,167 @@ fn test_valid_evaluation_wildcard() {
     assert!(!valid_evaluation_wildcard(""));
     assert!(!valid_evaluation_wildcard("test,,test"));
 }
+
+#[test]
+fn test_validate_password_valid() {
+    // Valid passwords that meet all requirements
+    assert!(validate_password("StrongPass123!").is_ok());
+    assert!(validate_password("MySecure@2024").is_ok());
+    assert!(validate_password("Complex#Pass9").is_ok());
+    assert!(validate_password("Valid$123Abc").is_ok());
+    assert!(validate_password("Testing@2025!").is_ok());
+    assert!(validate_password("GoodP@ssw0rd").is_ok());
+
+    // Valid with different special characters
+    assert!(validate_password("Test123#").is_ok());
+    assert!(validate_password("Test123$").is_ok());
+    assert!(validate_password("Test123%").is_ok());
+    assert!(validate_password("Test123^").is_ok());
+    assert!(validate_password("Test123&").is_ok());
+    assert!(validate_password("Test123*").is_ok());
+    assert!(validate_password("Test123()").is_ok());
+    assert!(validate_password("Test123_").is_ok());
+    assert!(validate_password("Test123+").is_ok());
+    assert!(validate_password("Test123-").is_ok());
+    assert!(validate_password("Test123=").is_ok());
+    assert!(validate_password("Test123[]").is_ok());
+    assert!(validate_password("Test123{}").is_ok());
+    assert!(validate_password("Test123|").is_ok());
+    assert!(validate_password("Test123;").is_ok());
+    assert!(validate_password("Test123:").is_ok());
+    assert!(validate_password("Test123,").is_ok());
+    assert!(validate_password("Test123.").is_ok());
+    assert!(validate_password("Test123<").is_ok());
+    assert!(validate_password("Test123>").is_ok());
+    assert!(validate_password("Test123?").is_ok());
+}
+
+#[test]
+fn test_validate_password_length_errors() {
+    // Too short
+    let result = validate_password("Abc1!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password must be at least 8 characters long");
+
+    let result = validate_password("Ab1!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password must be at least 8 characters long");
+
+    let result = validate_password("");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password must be at least 8 characters long");
+
+    // Too long (over 128 characters)
+    let long_password = "Ab1!".repeat(33); // 132 characters
+    let result = validate_password(&long_password);
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password cannot exceed 128 characters");
+
+    // Exactly 128 characters should be valid  
+    let max_password = "Ab1!".repeat(32); // 128 characters
+    assert!(validate_password(&max_password).is_ok());
+}
+
+#[test]
+fn test_validate_password_complexity_errors() {
+    // Missing uppercase
+    let result = validate_password("lowercase123!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password must contain at least one uppercase letter");
+
+    // Missing lowercase
+    let result = validate_password("UPPERCASE123!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password must contain at least one lowercase letter");
+
+    // Missing digit
+    let result = validate_password("NoDigitsHere!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password must contain at least one digit");
+
+    // Missing special character
+    let result = validate_password("NoSpecial123");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password must contain at least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)");
+
+    // Missing multiple requirements
+    let result = validate_password("lowercase");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password must contain at least one uppercase letter");
+}
+
+#[test]
+fn test_validate_password_pattern_errors() {
+    // Contains "password"
+    let result = validate_password("MyPassword123!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password cannot contain the word 'password'");
+
+    let result = validate_password("password123!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password cannot contain the word 'password'");
+
+    let result = validate_password("Password123!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password cannot contain the word 'password'");
+
+    let result = validate_password("MyPassWord123!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password cannot contain the word 'password'");
+
+    // Sequential characters (4+ chars)
+    let result = validate_password("Testabcde123!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password cannot contain sequential characters (e.g., 'abcd', '1234')");
+
+    let result = validate_password("Test12345!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password cannot contain sequential characters (e.g., 'abcd', '1234')");
+
+    let result = validate_password("Testmnop123!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password cannot contain sequential characters (e.g., 'abcd', '1234')");
+
+    // Repeated characters
+    let result = validate_password("Testaaa123!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password cannot contain repeated characters (e.g., 'aaa', '111')");
+
+    let result = validate_password("Test111Pass!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password cannot contain repeated characters (e.g., 'aaa', '111')");
+
+    let result = validate_password("TestAAA123!");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password cannot contain repeated characters (e.g., 'aaa', '111')");
+}
+
+#[test]
+fn test_validate_password_edge_cases() {
+    // Exactly 8 characters with all requirements
+    assert!(validate_password("Abc123!@").is_ok());
+
+    // Non-sequential repeated patterns (should be valid)
+    assert!(validate_password("TestAaAa1!").is_ok());
+    assert!(validate_password("Test1a1a!").is_ok());
+
+    // Non-consecutive sequential characters (should be valid)
+    assert!(validate_password("TaestBcd1!").is_ok());
+    assert!(validate_password("Test1a3c!").is_ok());
+    
+    // Short sequential sequences should be valid now (3 chars)
+    assert!(validate_password("Test123!A").is_ok());
+    assert!(validate_password("TestAbc9!").is_ok());
+
+    // Password contains "pass" but not "password" (should be valid)
+    assert!(validate_password("MyPass123!").is_ok());
+    assert!(validate_password("PassThru9!").is_ok());
+
+    // Case sensitivity for sequential check
+    assert!(validate_password("TestAbC123!").is_ok()); // A, b, C are not sequential in ASCII
+
+    // Unicode characters (should be rejected as they're not in allowed special chars)
+    let result = validate_password("TestÜber123");
+    assert!(result.is_err());
+    assert_eq!(result.unwrap_err(), "Password must contain at least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)");
+}

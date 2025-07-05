@@ -7,24 +7,21 @@
 use base64::{Engine, engine::general_purpose};
 use ed25519_compact::KeyPair;
 use entity::evaluation::EvaluationStatus;
-use rand::rngs::OsRng;
+use rand_core::OsRng;
 use sea_orm::EntityTrait;
 use ssh_key::{Algorithm, LineEnding, PrivateKey};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use tokio::process::Command;
+use tracing::{debug, error, info, instrument};
 
 use super::input::{check_repository_url_is_ssh, hex_to_vec, load_secret, vec_to_hex};
 use super::types::*;
 
+#[instrument(skip(state), fields(project_id = %project.id, project_name = %project.name))]
 pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) -> (bool, Vec<u8>) {
-    if state.cli.debug {
-        println!(
-            "Checking for updates on project: {} [{}]",
-            project.id, project.name
-        );
-    };
+    debug!("Checking for updates on project");
 
     let cmd = match if check_repository_url_is_ssh(&project.repository) {
         let organization = EOrganization::find_by_id(project.organization)
@@ -60,7 +57,7 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
     } {
         Ok(output) => output,
         Err(e) => {
-            println!("Error on executing command: {}", e);
+            error!(error = %e, "Failed to execute git ls-remote command");
             return (false, vec![]);
         }
     };
@@ -68,7 +65,7 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
     let errmsg = String::from_utf8(cmd.stderr).unwrap();
 
     if !errmsg.is_empty() {
-        println!("Error: {}", errmsg);
+        error!(stderr = %errmsg, "Git ls-remote returned error");
         return (false, vec![]);
     }
 
@@ -78,13 +75,16 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
         .collect::<Vec<&str>>();
 
     if output.len() != 2 {
-        println!("Error: no hash in git ls-remote output");
+        error!("Invalid git ls-remote output format: expected hash and ref");
         return (false, vec![]);
     }
 
     let remote_hash = hex_to_vec(output[0]).unwrap();
+    let remote_hash_str = output[0];
+    debug!(remote_hash = %remote_hash_str, "Retrieved remote hash");
 
     if project.force_evaluation {
+        info!("Force evaluation enabled, updating project");
         return (true, remote_hash);
     }
 
@@ -99,6 +99,7 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
             || evaluation.status == EvaluationStatus::Evaluating
             || evaluation.status == EvaluationStatus::Building
         {
+            debug!(status = ?evaluation.status, "Evaluation already in progress, skipping");
             return (false, remote_hash);
         }
 
@@ -109,24 +110,25 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
             .unwrap();
 
         if commit.hash == remote_hash {
+            debug!("Remote hash matches current evaluation commit, no update needed");
             return (false, remote_hash);
         }
+        
+        info!("Remote hash differs from current evaluation commit, update needed");
+    } else {
+        info!("No previous evaluation found, update needed");
     }
 
     (true, remote_hash)
 }
 
+#[instrument(skip(state), fields(project_id = %project.id, project_name = %project.name, commit_hash = %vec_to_hex(commit_hash)))]
 pub async fn get_commit_info(
     state: Arc<ServerState>,
     project: &MProject,
     commit_hash: &[u8],
 ) -> Result<(String, Option<String>, String), String> {
-    if state.cli.debug {
-        println!(
-            "Fetching commit info for project: {} [{}]",
-            project.id, project.name
-        );
-    };
+    debug!("Fetching commit info");
 
     let hash_str = vec_to_hex(commit_hash);
     let temp_dir = format!(
@@ -243,33 +245,39 @@ pub fn clear_key(path: String) -> Result<(), String> {
 }
 
 pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), String> {
+    // Step 1: Load and decode secret
     let secret = general_purpose::STANDARD
         .decode(load_secret(&secret_file))
-        .map_err(|_| "Failed to decode GRADIENT_CRYPT_SECRET".to_string())?;
+        .map_err(|e| format!("Failed to decode GRADIENT_CRYPT_SECRET: {}", e))?;
 
+    // Step 2: Generate private key
     let mut csprng = OsRng;
     let private_key = PrivateKey::random(&mut csprng, Algorithm::Ed25519)
-        .map_err(|e| "Failed to generate SSH-keypair: ".to_string() + &e.to_string())?;
+        .map_err(|e| format!("Failed to generate SSH private key: {}", e))?;
 
-    let private_key_openssh = private_key.to_openssh(LineEnding::LF).unwrap().to_string();
+    // Step 3: Convert private key to OpenSSH format
+    let private_key_openssh = private_key.to_openssh(LineEnding::LF)
+        .map_err(|e| format!("Failed to convert private key to OpenSSH format: {}", e))?
+        .to_string();
 
+    // Step 4: Extract public key
     let public_key_openssh = private_key
         .public_key()
         .to_openssh()
-        .unwrap()
+        .map_err(|e| format!("Failed to convert public key to OpenSSH format: {}", e))?
         .to_string()
         .split_whitespace()
         .collect::<Vec<&str>>()[1]
         .to_string();
 
+    // Step 5: Format final public key with algorithm
     let public_key_openssh = format!("{} {}", Algorithm::Ed25519.as_str(), public_key_openssh);
 
-    let encrypted_private_key = if let Some(p) = crypter::encrypt(secret, &private_key_openssh) {
-        p
-    } else {
-        return Err("Failed to encrypt private key".to_string());
-    };
+    // Step 6: Encrypt private key
+    let encrypted_private_key = crypter::encrypt(secret, &private_key_openssh)
+        .ok_or_else(|| "Failed to encrypt private key with crypter".to_string())?;
 
+    // Step 7: Encode encrypted key
     let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_private_key);
 
     Ok((encrypted_private_key, public_key_openssh))
@@ -348,7 +356,7 @@ pub fn format_cache_key(
     public_key: bool,
 ) -> String {
     let secret = decrypt_signing_key(secret_file, cache.clone()).unwrap();
-    let key = if public_key {
+    let key: &[u8] = if public_key {
         secret.pk.as_ref()
     } else {
         secret.sk.as_ref()

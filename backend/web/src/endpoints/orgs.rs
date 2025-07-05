@@ -16,8 +16,15 @@ use core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QuerySelect,
+    RelationTrait,
 };
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StringListItem {
+    pub id: String,
+    pub name: String,
+}
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -225,21 +232,23 @@ pub async fn get_organization_users(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> WebResult<Json<BaseResponse<ListResponse>>> {
+) -> WebResult<Json<BaseResponse<Vec<StringListItem>>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
             .await
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let organization_users = EOrganizationUser::find()
+        .join(JoinType::InnerJoin, ROrganizationUser::User.def())
+        .select_also(entity::user::Entity)
         .filter(COrganizationUser::Organization.eq(organization.id))
         .all(&state.db)
         .await?;
 
-    let organization_users: ListResponse = organization_users
+    let organization_users: Vec<StringListItem> = organization_users
         .iter()
-        .map(|ou| ListItem {
-            id: ou.user,
+        .map(|(ou, user)| StringListItem {
+            id: user.as_ref().map(|u| u.username.clone()).unwrap_or_else(|| ou.user.to_string()),
             name: ou.role.to_string(),
         })
         .collect();

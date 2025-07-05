@@ -22,6 +22,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
 use tokio::time;
+use tracing::{debug, error, info, warn, instrument};
 use uuid::Uuid;
 
 use super::evaluator::*;
@@ -56,8 +57,9 @@ pub async fn schedule_evaluation_loop(state: Arc<ServerState>) {
     }
 }
 
+#[instrument(skip(state), fields(evaluation_id = %evaluation.id))]
 pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) {
-    println!("Reviewing Evaluation: {}", evaluation.id);
+    info!("Reviewing evaluation");
 
     let project = EProject::find_by_id(evaluation.project)
         .one(&state.db)
@@ -74,7 +76,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
     let local_daemon = match get_local_store(Some(organization)).await {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error: {}", e);
+            error!(error = %e, "Failed to get local store");
             update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Failed)
                 .await;
             return;
@@ -102,6 +104,21 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 .map(|d| d.clone().into_active_model())
                 .collect::<Vec<ABuildDependency>>();
 
+            info!(
+                build_count = builds.len(),
+                dependency_count = dependencies.len(),
+                "Created builds and dependencies"
+            );
+            
+            if state.cli.debug {
+                for build in &builds {
+                    debug!(build_id = %build.id, derivation_path = %build.derivation_path, "Created build");
+                }
+                for dep in &dependencies {
+                    debug!(build = %dep.build, dependency = %dep.dependency, "Created dependency");
+                }
+            }
+
             if active_builds.is_empty() {
                 update_evaluation_status(
                     Arc::clone(&state),
@@ -122,21 +139,25 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                     .exec(&state.db)
                     .await
                     .unwrap();
+                
+                debug!(count = dependencies.len(), "Successfully inserted build dependencies into database");
+            } else {
+                debug!("No dependencies to insert for evaluation");
             }
 
             for build in builds {
                 update_build_status(Arc::clone(&state), build, BuildStatus::Queued).await;
             }
 
-            println!("Building Evaluation: {}", evaluation.id);
+            info!("Starting evaluation build phase");
             update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Building)
                 .await;
         }
 
         Err(e) => {
+            error!(error = %e, "Failed to evaluate");
             update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Failed)
                 .await;
-            eprintln!("Failed to evaluate: {}", e);
         }
     }
 }
@@ -163,7 +184,7 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
             if let Some((build, server)) =
                 reserve_available_server(Arc::clone(&state), &build).await
             {
-                println!("Reserving Server: {}", server.id);
+                info!(server_id = %server.id, build_id = %build.id, "Reserving server for build");
                 let schedule = tokio::spawn(schedule_build(Arc::clone(&state), build, server));
                 current_schedules.push(schedule);
                 added_schedule = true;
@@ -176,8 +197,9 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
     }
 }
 
+#[instrument(skip(state), fields(build_id = %build.id, server_id = %server.id, derivation_path = %build.derivation_path))]
 pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: MServer) {
-    println!("Executing Build: {}", build.id);
+    info!("Executing build");
 
     let organization = EOrganization::find_by_id(server.organization)
         .one(&state.db)
@@ -188,7 +210,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
     let mut local_daemon = match get_local_store(Some(organization.clone())).await {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error: {}", e);
+            error!(error = %e, "Failed to get local store for build");
             update_build_status_recursivly(state, build.clone(), BuildStatus::Aborted).await;
             return;
         }
@@ -223,21 +245,23 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
     let mut server_daemon = if let Ok(daemon) = server_deamon {
         daemon
     } else {
-        eprintln!("Failed to connect to server: {}", server.id);
+        error!("Failed to connect to server after retries");
         requeue_build(state, build.clone()).await;
         return;
     };
 
-    println!("Connected to server: {}", server.id);
+    info!("Connected to server successfully");
 
     // Get all dependencies in topological order from the database
     let dependencies = get_build_dependencies_sorted(Arc::clone(&state), &build, &mut server_daemon)
         .await
         .unwrap();
-    
-    println!("Copying {} dependencies in order:", dependencies.len());
-    for (i, dep) in dependencies.iter().enumerate() {
-        println!("  {}: {}", i, dep);
+
+    info!(dependency_count = dependencies.len(), "Copying dependencies in order");
+    if state.cli.debug {
+        for (i, dep) in dependencies.iter().enumerate() {
+            debug!(index = i, dependency = %dep, "Dependency order");
+        }
     }
 
     match local_daemon {
@@ -247,7 +271,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         LocalNixStore::CommandDuplex(ref mut store) => {
             copy_builds(dependencies.clone(), store, &mut server_daemon, false).await
         }
-    };
+    }.unwrap();
 
     let mut build_outputs: Vec<ABuildOutput> = vec![];
 
@@ -263,7 +287,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                         LocalNixStore::CommandDuplex(ref mut store) => {
                             copy_builds(build_results, &mut server_daemon, store, true).await
                         }
-                    };
+                    }.unwrap();
 
                     for (build_output, build_output_path) in build_result.built_outputs.clone() {
                         let build_output_path =
@@ -295,7 +319,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
             } else {
                 for (path, result) in results.1 {
                     if !result.error_msg.is_empty() {
-                        eprintln!("Failed to build {}: {}", path, result.error_msg);
+                        error!(path = %path, error = %result.error_msg, "Build failed");
                     }
                 }
 
@@ -309,7 +333,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         }
 
         Err(e) => {
-            eprintln!("Failed to execute build: {}", e);
+            error!(error = %e, "Failed to execute build");
             update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed)
                 .await;
         }
@@ -438,9 +462,10 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             .into_iter()
             .find(|p| p.id == evaluation.project)
             .unwrap_or_else(|| {
-                eprintln!(
-                    "Failed to find project {} for evaluation {}",
-                    evaluation.project, evaluation.id
+                error!(
+                    project_id = %evaluation.project,
+                    evaluation_id = %evaluation.id,
+                    "Failed to find project for evaluation - critical error"
                 );
                 std::process::exit(1);
             });
@@ -455,9 +480,9 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             match get_commit_info(Arc::clone(&state), &project, &commit_hash).await {
                 Ok((msg, email, name)) => (msg, email, name),
                 Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to fetch commit info: {}. Using defaults.",
-                        e
+                    warn!(
+                        error = %e,
+                        "Failed to fetch commit info, using defaults"
                     );
                     ("".to_string(), None, "".to_string())
                 }
@@ -496,7 +521,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         };
 
         let new_evaluation = new_evaluation.insert(&state.db).await.unwrap();
-        println!("Created evaluation: {}", new_evaluation.id);
+        info!(evaluation_id = %new_evaluation.id, "Created new evaluation");
 
         let mut active_project: AProject = project.clone().into();
 
@@ -530,7 +555,7 @@ async fn requeue_build(state: Arc<ServerState>, build: MBuild) -> MBuild {
     build.updated_at = Set(Utc::now().naive_utc());
     let build = build.update(&state.db).await.unwrap();
 
-    println!("Requeueing build: {}", build.id);
+    info!(build_id = %build.id, "Requeueing build");
     build
 }
 
@@ -581,12 +606,67 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                 .unwrap()
                 .is_some();
 
-            if has_servers {
-                return build;
-            } else {
+            if !has_servers {
                 update_build_status_recursivly(Arc::clone(&state), build, BuildStatus::Aborted)
                     .await;
+                continue;
             }
+
+            // Debug: Check what dependencies exist for this build
+            if state.cli.debug {
+                // First, check raw dependency records
+                let raw_deps = EBuildDependency::find()
+                    .filter(CBuildDependency::Build.eq(build.id))
+                    .all(&state.db)
+                    .await
+                    .unwrap();
+                
+                debug!(
+                    build_id = %build.id,
+                    derivation_path = %build.derivation_path,
+                    raw_dependency_count = raw_deps.len(),
+                    "Raw dependency records"
+                );
+                
+                for dep in &raw_deps {
+                    debug!(build = %dep.build, dependency = %dep.dependency, "Raw dependency");
+                }
+                
+                let dependencies = get_build_dependencies(Arc::clone(&state), &build)
+                    .await
+                    .unwrap();
+                
+                debug!(
+                    build_id = %build.id,
+                    derivation_path = %build.derivation_path,
+                    resolved_dependency_count = dependencies.len(),
+                    "Resolved dependencies"
+                );
+                
+                for dep in &dependencies {
+                    debug!(
+                        dependency_id = %dep.id,
+                        derivation_path = %dep.derivation_path,
+                        status = ?dep.status,
+                        "Dependency status"
+                    );
+                }
+                
+                if dependencies.is_empty() {
+                    debug!("No dependencies found - build ready to execute");
+                } else {
+                    let completed_deps = dependencies.iter()
+                        .filter(|d| d.status == BuildStatus::Completed)
+                        .count();
+                    debug!(
+                        completed = completed_deps,
+                        total = dependencies.len(),
+                        "Dependency completion status"
+                    );
+                }
+            }
+
+            return build;
         }
 
         time::sleep(Duration::from_secs(5)).await;
@@ -649,7 +729,7 @@ async fn reserve_available_server(
 
     if servers.is_empty() {
         update_build_status_recursivly(state, build.clone(), BuildStatus::Aborted).await;
-        println!("Aborted build (No Servers Found): {}", build.id);
+        warn!(build_id = %build.id, "Aborted build - no servers found");
 
         return None;
     }
@@ -669,7 +749,7 @@ async fn reserve_available_server(
             abuild.updated_at = Set(Utc::now().naive_utc());
             let build = abuild.update(&state.db).await.unwrap();
 
-            println!("Getting next build: {}", build.id);
+            debug!(build_id = %build.id, "Selected next build");
 
             return Some((build, s));
         } else {
@@ -696,13 +776,14 @@ async fn update_build_status(
         return build;
     }
 
+    debug!(build_id = %build.id, status = ?status, "Updating build status");
+    
     let mut active_build: ABuild = build.into_active_model();
+    
     active_build.status = Set(status);
     active_build.updated_at = Set(Utc::now().naive_utc());
 
     let build = active_build.update(&state.db).await.unwrap();
-
-    println!("Updated build status: {}", build.id);
 
     build
 }
@@ -763,12 +844,12 @@ pub async fn update_evaluation_status(
         return evaluation;
     }
 
+    debug!(evaluation_id = %evaluation.id, status = ?status, "Updating evaluation status");
+    
     let mut active_evaluation: AEvaluation = evaluation.into_active_model();
     active_evaluation.status = Set(status);
 
     let evaluation = active_evaluation.update(&state.db).await.unwrap();
-
-    println!("Updated evaluation status: {}", evaluation.id);
 
     evaluation
 }
@@ -861,26 +942,20 @@ async fn get_build_dependencies_sorted<A: AsyncReadExt + AsyncWriteExt + Unpin +
     build: &MBuild,
     server_daemon: &mut DaemonStore<A>,
 ) -> Result<Vec<String>, String> {
-    // Use a simpler approach: get direct dependencies and add them first, then the main build
+    // Get direct dependencies and add them first, then the main build
     let bdependencies = get_build_dependencies(Arc::clone(&state), &build)
         .await
         .unwrap();
     
     let mut dependencies = Vec::new();
     
-    // Add all dependency output paths first (these need to be copied before the main build)
+    // Add all dependency derivation paths first (these need to be copied before the main build)
     for dependency in &bdependencies {
-        let output_paths = get_output_path(dependency.derivation_path.clone(), server_daemon)
-            .await
-            .unwrap();
-        dependencies.extend(output_paths);
+        dependencies.push(dependency.derivation_path.clone());
     }
     
-    // Add the main build's output paths last
-    let main_output_paths = get_output_path(build.derivation_path.clone(), server_daemon)
-        .await
-        .unwrap();
-    dependencies.extend(main_output_paths);
+    // Add the main build's derivation path last
+    dependencies.push(build.derivation_path.clone());
     
     Ok(dependencies)
 }

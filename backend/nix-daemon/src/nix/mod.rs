@@ -19,7 +19,7 @@ use crate::{
 use std::future::Future;
 use std::{collections::HashMap, fmt::Debug};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, AsyncWrite},
+    io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
 };
 use tokio_stream::StreamExt;
@@ -1366,7 +1366,7 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
                 E: From<Error> + From<std::io::Error> + Send + Sync,
                 C: AsyncReadExt + AsyncWriteExt + Unpin + Send,
             >(
-                mut self,
+                self,
                 store: &mut DaemonStore<C>,
             ) -> Result<(), E> {
                 // Based on C++ RemoteStore::addToStore with ValidPathInfo
