@@ -20,6 +20,7 @@ Gradient is a web-based Nix-based Continuous Integration (CI) system.
 - **Rich Project Configuration**: check all branches, pull requests, and tags. (planned)
 - **OAuth2**: support for OAuth2 for user authentication.
 - **Cache**: integrated nix store cache.
+- **Remote Builds**: support for building nix derviations without having nix installed locally.
 
 ## Installation
 

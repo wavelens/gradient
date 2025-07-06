@@ -12,7 +12,7 @@
   ignoredPaths = [ ".github" "target" ];
 in python.pkgs.buildPythonApplication rec {
   pname = "gradient-frontend";
-  version = "0.2.0";
+  version = "0.3.0";
   pyproject = false;
 
   src = lib.cleanSourceWith {

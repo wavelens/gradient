@@ -1,4 +1,4 @@
-#!/nix/store/l014xp1qxdl6gim3zc0jv3mpxhbp346s-python3-3.12.4/bin/python
+#!/usr/bin/env python
 # SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
 #
 # SPDX-License-Identifier: AGPL-3.0-only
