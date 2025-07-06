@@ -143,10 +143,19 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/builds/{build}",
             get(builds::get_build).post(builds::post_build),
         )
-        .route("/builds/{build}/downloads", get(builds::get_build_downloads))
-        .route("/builds/{build}/download/{filename}", get(builds::get_build_download))
+        .route(
+            "/builds/{build}/downloads",
+            get(builds::get_build_downloads),
+        )
+        .route(
+            "/builds/{build}/download/{filename}",
+            get(builds::get_build_download),
+        )
         .route("/builds", post(builds::post_direct_build))
-        .route("/builds/direct/recent", get(builds::get_recent_direct_builds))
+        .route(
+            "/builds/direct/recent",
+            get(builds::get_recent_direct_builds),
+        )
         .route("/user", get(user::get).delete(user::delete))
         .route(
             "/user/keys",
@@ -183,6 +192,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         ))
         .route("/auth/basic/login", post(auth::post_basic_login))
         .route("/auth/basic/register", post(auth::post_basic_register))
+        .route("/auth/check-username", post(auth::post_check_username))
         .route(
             "/auth/oauth/authorize",
             get(auth::get_oauth_authorize).post(auth::post_oauth_authorize),

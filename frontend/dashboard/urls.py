@@ -10,6 +10,7 @@ urlpatterns = [
     path("account/login", UserLoginView.as_view(), name="login"),
     path("account/register", register, name="register"),
     path("account/logout", logout_view, name="logout"),
+    path("account/check-username/", check_username_availability, name="check_username"),
 
     path("organization/<str:org>", workflow, name="workflow"),
     path("organization/<str:org>/log", log, name="log"),
@@ -33,6 +34,7 @@ urlpatterns = [
     path("organization/<str:org>/settings", edit_organization, name="settingsOrganization"),
     path("organization/<str:org>/delete", delete_organization, name="deleteOrganization"),
     path("organization/<str:org>/members", organization_members, name="organizationMembers"),
+    path("organization/<str:org>/servers", organization_servers, name="organizationServers"),
     path("cache/<str:cache>/settings", edit_cache, name="settingsCache"),
     path("cache/<str:cache>/delete", delete_cache, name="deleteCache"),
     path("settings/profile", settingsProfile, name="settingsProfile"),

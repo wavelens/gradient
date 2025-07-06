@@ -74,7 +74,7 @@ h2 {
     color: white;
 }
 
-input[type="text"], input[type="password"], input[type="number"] {
+input[type="text"], input[type="password"], input[type="number"], input[type="email"] {
     padding: 5px;
     background-color: var(--tertiary);
     border: 1px solid rgb(118, 118, 118);
@@ -83,7 +83,7 @@ input[type="text"], input[type="password"], input[type="number"] {
     width: 18rem;
 }
 
-input[type="text"]:focus-visible, input[type="password"]:focus-visible, .form-field select:focus-visible {
+input[type="text"]:focus-visible, input[type="password"]:focus-visible, input[type="email"]:focus-visible, .form-field select:focus-visible {
     outline: none;
     border: 1px solid #007BFF;
 }
@@ -1233,4 +1233,15 @@ tr:hover td{
 
 .add-member-section .submit-btn {
     margin-bottom: 1rem;
+}
+
+.red-button {
+    background-color: #dc3545;
+    color: white;
+    border: 1px solid #dc3545;
+}
+
+.red-button:hover {
+    background-color: #c82333;
+    border-color: #c82333;
 }

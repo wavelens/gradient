@@ -57,6 +57,9 @@ def health(request):
 def post_auth_basic_register(username, name, email, password):
     return get_client(None, "auth/basic/register", "POST", body={'username': username, 'name': name, 'email': email, 'password': password})
 
+def post_auth_check_username(username):
+    return get_client(None, "auth/check-username", "POST", body={'username': username})
+
 def post_auth_basic_login(loginname, password):
     return get_client(None, "auth/basic/login", "POST", body={'loginname': loginname, 'password': password})
 
@@ -152,6 +155,9 @@ def get_evals_evaluation(request, evaluation):
 
 def post_evals_evaluation(request, evaluation):
     return get_client(request.user, f"evals/{evaluation}", "POST")
+
+def post_evals_evaluation_abort(request, evaluation):
+    return get_client(request.user, f"evals/{evaluation}", "POST", body={'method': 'abort'})
 
 def get_evals_evaluation_builds(request, evaluation):
     return get_client(request.user, f"evals/{evaluation}/builds", "GET")

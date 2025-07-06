@@ -6,7 +6,7 @@
 
 use crate::config::*;
 use crate::input::*;
-use clap::{arg, Subcommand};
+use clap::{Subcommand, arg};
 use connector::*;
 use std::process::exit;
 

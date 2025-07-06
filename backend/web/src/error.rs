@@ -149,4 +149,8 @@ impl WebError {
     pub fn invalid_password(reason: String) -> Self {
         WebError::BadRequest(format!("Invalid password: {}", reason))
     }
+
+    pub fn invalid_username(reason: String) -> Self {
+        WebError::BadRequest(format!("Invalid username: {}", reason))
+    }
 }

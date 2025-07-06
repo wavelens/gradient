@@ -77,16 +77,11 @@ pub async fn get_cache(
     config: RequestConfig,
     cache: String,
 ) -> Result<BaseResponse<CacheResponse>, String> {
-    let res = get_client(
-        config,
-        format!("caches/{}", cache),
-        RequestType::GET,
-        true,
-    )
-    .unwrap()
-    .send()
-    .await
-    .unwrap();
+    let res = get_client(config, format!("caches/{}", cache), RequestType::GET, true)
+        .unwrap()
+        .send()
+        .await
+        .unwrap();
 
     Ok(parse_response(res).await)
 }

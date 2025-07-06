@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 from django.shortcuts import render, redirect
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
 from django.contrib.auth import logout
@@ -417,6 +417,149 @@ def organization_members(request, org):
     return render(request, "dashboard/settings/organization_members.html", context)
 
 @login_required
+def organization_servers(request, org):
+    servers_data = api.get_servers(request, org)
+    if isinstance(servers_data, type(None)) or servers_data.get('error'):
+        servers = []
+    else:
+        # Get basic server list
+        server_list = servers_data.get('message', [])
+        servers = []
+        
+        # Fetch detailed info for each server
+        for server_basic in server_list:
+            server_name = server_basic.get('name') or server_basic.get('id')
+            if server_name:
+                server_details = api.get_servers_server(request, org, server_name)
+                if server_details and not server_details.get('error'):
+                    detailed_server = server_details.get('message', {})
+                    # Add the name from the list if it's missing in details
+                    if 'name' not in detailed_server and 'name' in server_basic:
+                        detailed_server['name'] = server_basic['name']
+                    
+                    # Normalize the enabled field name (backend uses 'active')
+                    detailed_server['enabled'] = detailed_server.get('active', False)
+                    
+                    servers.append(detailed_server)
+                else:
+                    # Fallback to basic info if details fetch fails
+                    servers.append(server_basic)
+    
+    add_form = None
+    if request.method == 'POST':
+        if 'add_server' in request.POST:
+            add_form = AddOrganizationServerForm(request.POST)
+            if add_form.is_valid():
+                response = api.put_servers(
+                    request, 
+                    org,
+                    add_form.cleaned_data['name'],
+                    add_form.cleaned_data['display_name'],
+                    add_form.cleaned_data['host'],
+                    add_form.cleaned_data['port'],
+                    add_form.cleaned_data['username'],
+                    add_form.cleaned_data['architectures'],
+                    add_form.cleaned_data['features']
+                )
+
+                if response and not response.get('error'):
+                    return redirect(f'/organization/{org}/servers')
+                else:
+                    error_message = response.get('message') if response else 'Failed to add server (no response from API)'
+                    add_form.add_error(None, error_message)
+        
+        elif 'delete_server' in request.POST:
+            server_id = request.POST.get('server_id')
+            if server_id:
+                response = api.delete_servers_server(request, org, server_id)
+                if response and not response.get('error'):
+                    return redirect(f'/organization/{org}/servers')
+        
+        elif 'edit_server' in request.POST:
+            server_id = request.POST.get('server_id')
+            if server_id:
+                patch_data = {}
+                
+                # Get current server data to compare changes
+                server_details = api.get_servers_server(request, org, server_id)
+                if server_details and not server_details.get('error'):
+                    current_data = server_details.get('message', {})
+                    
+                    # Check each field for changes
+                    if request.POST.get('name') != current_data.get('name'):
+                        patch_data['name'] = request.POST.get('name')
+                    if request.POST.get('display_name') != current_data.get('display_name'):
+                        patch_data['display_name'] = request.POST.get('display_name')
+                    if request.POST.get('host') != current_data.get('host'):
+                        patch_data['host'] = request.POST.get('host')
+                    if int(request.POST.get('port', 0)) != current_data.get('port'):
+                        patch_data['port'] = int(request.POST.get('port', 0))
+                    if request.POST.get('username') != current_data.get('username'):
+                        patch_data['username'] = request.POST.get('username')
+                    if request.POST.get('architectures') != current_data.get('architectures'):
+                        patch_data['architectures'] = request.POST.get('architectures')
+                    if request.POST.get('features') != current_data.get('features'):
+                        patch_data['features'] = request.POST.get('features')
+                    
+                    # Update server data if there are changes
+                    if patch_data:
+                        response = api.patch_servers_server(request, org, server_id, **patch_data)
+                        if response and response.get('error'):
+                            messages.error(request, response.get('message', 'Failed to update server'))
+                            return redirect(f'/organization/{org}/servers')
+                    
+                    # Handle enabled status separately (backend uses 'active')
+                    current_enabled = current_data.get('active', False)
+                    new_enabled = 'enabled' in request.POST
+                    
+                    if current_enabled != new_enabled:
+                        if new_enabled:
+                            status_response = api.post_servers_server_active(request, org, server_id)
+                        else:
+                            status_response = api.delete_servers_server_active(request, org, server_id)
+                        
+                        if status_response and status_response.get('error'):
+                            messages.error(request, status_response.get('message', 'Failed to update server status'))
+                            return redirect(f'/organization/{org}/servers')
+                    
+                    return redirect(f'/organization/{org}/servers')
+        
+        elif 'toggle_server' in request.POST:
+            server_id = request.POST.get('server_id')
+            if server_id:
+                # First get server details to check current status
+                server_details = api.get_servers_server(request, org, server_id)
+                if server_details and not server_details.get('error'):
+                    server_data = server_details.get('message', {})
+                    # Backend uses 'active' field for enabled status
+                    current_enabled = server_data.get('active', False)
+                    
+                    if current_enabled:
+                        # Server is enabled, disable it
+                        response = api.delete_servers_server_active(request, org, server_id)
+                    else:
+                        # Server is disabled, enable it
+                        response = api.post_servers_server_active(request, org, server_id)
+                    
+                    # Some endpoints might return None for success
+                    if response is None or not response.get('error'):
+                        return redirect(f'/organization/{org}/servers')
+                    else:
+                        messages.error(request, f'Failed to toggle server status: {response.get("message", "Unknown error")}')
+    
+    if not add_form:
+        add_form = AddOrganizationServerForm()
+    
+    context = {
+        'org': org,
+        'servers': servers,
+        'add_form': add_form
+    }
+    
+    return render(request, "dashboard/settings/organization_servers.html", context)
+
+
+@login_required
 def caches(request):
     print('Hello')
     details_blocks = []
@@ -587,16 +730,50 @@ def register(request):
         form = RegisterForm(request.POST)
         if form.is_valid():
             res = api.post_auth_basic_register(**form.cleaned_data)
-            if isinstance(res, type(None)) or res['error']:
-                # form = RegisterForm()
-                # TODO: add form error
-                pass
+            if res is None:
+                form.add_error(None, form.error_messages['network_error'])
+            elif res.get('error'):
+                error_message = res.get('message', '')
+                if 'username' in error_message.lower() and 'taken' in error_message.lower():
+                    form.add_error('username', form.error_messages['username_taken'])
+                elif 'email' in error_message.lower() and ('exists' in error_message.lower() or 'taken' in error_message.lower()):
+                    form.add_error('email', form.error_messages['email_taken'])
+                elif 'email' in error_message.lower() and 'invalid' in error_message.lower():
+                    form.add_error('email', form.error_messages['invalid_email'])
+                else:
+                    form.add_error(None, error_message or form.error_messages['server_error'])
             else:
                 return redirect('login')
     else:
         form = RegisterForm()
 
     return render(request, "register.html", {'form': form})
+
+def check_username_availability(request):
+    if request.method == 'POST':
+        try:
+            import json
+            data = json.loads(request.body)
+            username = data.get('username', '')
+            
+            if not username:
+                return JsonResponse({'available': False, 'message': 'Username is required'})
+            
+            # Call the backend API
+            result = api.post_auth_check_username(username)
+            
+            if result is None:
+                return JsonResponse({'available': False, 'message': 'Unable to check username availability'})
+            
+            if result.get('error'):
+                return JsonResponse({'available': False, 'message': result.get('message', 'Username is not available')})
+            else:
+                return JsonResponse({'available': True, 'message': 'Username is available'})
+                
+        except Exception as e:
+            return JsonResponse({'available': False, 'message': 'Error checking username availability'})
+    
+    return JsonResponse({'available': False, 'message': 'Invalid request method'})
 
 def settingsProfile(request):
     user = request.user

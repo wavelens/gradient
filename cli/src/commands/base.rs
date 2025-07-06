@@ -7,8 +7,8 @@
 use super::*;
 use crate::config::*;
 use crate::input::*;
-use clap::{arg, CommandFactory, Parser, Subcommand};
-use clap_complete::{generate, Shell};
+use clap::{CommandFactory, Parser, Subcommand, arg};
+use clap_complete::{Shell, generate};
 use connector::*;
 use std::io;
 use std::process::exit;
@@ -225,8 +225,14 @@ pub async fn run_cli() -> std::io::Result<()> {
                 println!("Logged out.");
             }
 
-            MainCommands::Build { derivation, organization, quiet } => build::handle_build(derivation, organization, quiet).await,
-            MainCommands::Download { build_id, filename } => download::handle_download(build_id, filename).await,
+            MainCommands::Build {
+                derivation,
+                organization,
+                quiet,
+            } => build::handle_build(derivation, organization, quiet).await,
+            MainCommands::Download { build_id, filename } => {
+                download::handle_download(build_id, filename).await
+            }
             MainCommands::Organization { cmd } => organization::handle(cmd).await,
             MainCommands::Project { cmd } => project::handle(cmd).await,
             MainCommands::Server { cmd } => server::handle(cmd).await,

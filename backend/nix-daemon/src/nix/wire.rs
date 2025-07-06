@@ -6,8 +6,8 @@
 //! Low-level helpers for the nix-daemon wire format.
 
 use crate::{
-    nix::Proto, BuildMode, BuildResult, BuildResultStatus, ClientSettings, Error, NixError,
-    PathInfo, Result, ResultExt, Stderr, StderrField, StderrResult, StderrStartActivity, Verbosity,
+    BuildMode, BuildResult, BuildResultStatus, ClientSettings, Error, NixError, PathInfo, Result,
+    ResultExt, Stderr, StderrField, StderrResult, StderrStartActivity, Verbosity, nix::Proto,
 };
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};

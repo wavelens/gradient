@@ -2,6 +2,7 @@
 testing/
 .claude/
 CLAUDE.md
+.nixos-test-history
 
 # ---> Python
 # Byte-compiled / optimized / DLL files

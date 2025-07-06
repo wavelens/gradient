@@ -9,8 +9,8 @@ use connector::RequestConfig;
 use rpassword::read_password;
 use std::collections::HashMap;
 use std::io::Write;
-use std::process::exit;
 use std::process::Command;
+use std::process::exit;
 use std::{fs, io};
 
 pub fn handle_input(values: Vec<(String, Option<String>)>, skip: bool) -> HashMap<String, String> {

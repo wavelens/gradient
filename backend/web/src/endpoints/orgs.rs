@@ -248,7 +248,10 @@ pub async fn get_organization_users(
     let organization_users: Vec<StringListItem> = organization_users
         .iter()
         .map(|(ou, user)| StringListItem {
-            id: user.as_ref().map(|u| u.username.clone()).unwrap_or_else(|| ou.user.to_string()),
+            id: user
+                .as_ref()
+                .map(|u| u.username.clone())
+                .unwrap_or_else(|| ou.user.to_string()),
             name: ou.role.to_string(),
         })
         .collect();

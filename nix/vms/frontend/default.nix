@@ -8,6 +8,8 @@
   name = "development-frontend";
   testScript = { nodes, ... }: ''
     start_all()
+    server.wait_for_unit("gradient-server.service")
+    server.wait_for_unit("git-daemon.service")
 
     server.succeed("${lib.getExe pkgs.curl} http://gradient.local/api/v1/health -i --fail")
 
@@ -15,7 +17,7 @@
         ${lib.getExe pkgs.curl} \
         -X POST \
         -H "Content-Type: application/json" \
-        -d '{"username": "test", "name": "Test User", "email": "test@localhost.local", "password": "password"}' \
+        -d '{"username": "tes", "name": "Test User", "email": "test@localhost.local", "password": "Gradient123!"}' \
         http://gradient.local/api/v1/auth/basic/register
     """)
 
@@ -23,7 +25,7 @@
       ${lib.getExe pkgs.curl} \
         -X POST \
         -H "Content-Type: application/json" \
-        -d '{"loginname": "test", "password": "password"}' \
+        -d '{"loginname": "tes", "password": "Gradient123!"}' \
         http://gradient.local/api/v1/auth/basic/login \
         | ${lib.getExe pkgs.jq} -rj '.message'
     """)
@@ -33,6 +35,30 @@
     server.succeed("${lib.getExe pkgs.gradient-cli} config Server http://gradient.local")
     server.succeed("${lib.getExe pkgs.gradient-cli} config AuthToken ACCESS_TOKEN".replace("ACCESS_TOKEN", token))
     server.succeed("${lib.getExe pkgs.gradient-cli} organization create --name testorg --display-name MyOrganization --description 'My Test Organization'")
+
+    print("=== Adding Server ===")
+    org_pub_key = server.succeed("${lib.getExe pkgs.gradient-cli} organization ssh show")[12:].strip()
+    print(f"Got Organization Public Key: {org_pub_key}")
+
+    server.succeed(f"echo '{org_pub_key}' > /home/builder/.ssh/authorized_keys")
+    server.succeed("chown builder:users /home/builder/.ssh/authorized_keys")
+    server.succeed("chmod 600 /home/builder/.ssh/authorized_keys")
+
+    server.succeed("${lib.getExe pkgs.gradient-cli} server create --name testserver --display-name MyServer --host localhost --port 22 --ssh-user builder --architectures x86_64-linux --features big-parallel")
+
+    # Configure git
+    server.succeed("${lib.getExe pkgs.git} config --global --add safe.directory '*'")
+    server.succeed("${lib.getExe pkgs.git} config --global init.defaultBranch main")
+    server.succeed("${lib.getExe pkgs.git} config --global user.email 'nixos@localhost'")
+    server.succeed("${lib.getExe pkgs.git} config --global user.name 'NixOS test'")
+
+    # Initialize git repository
+    server.succeed("${lib.getExe pkgs.git} init /var/lib/git/test")
+    server.succeed("cp /var/lib/git/{,test/}flake.nix")
+    server.succeed("chown git:git -R /var/lib/git/test")
+    server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add flake.nix")
+    server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test commit -m 'Initial commit'")
+    server.succeed("${lib.getExe pkgs.gradient-cli} project create --name testproject --display-name MyProject --description 'Just a test' --repository git://server/test --evaluation-wildcard packages.*.buildWait5Sec,packages.*.deployment")
   '';
 
   nodes.server = { config, pkgs, lib, ... }: {
@@ -46,7 +72,6 @@
 
     networking.firewall.enable = false;
     documentation.enable = false;
-    nix.settings.substituters = lib.mkForce [ ];
     virtualisation.forwardPorts = [
       {
         from = "host";
@@ -58,6 +83,22 @@
         host.port = 3000;
         guest.port = 80;
       }
+    ];
+
+    nix.settings = {
+      substituters = lib.mkForce [ ];
+      trusted-users = [ "builder" ];
+    };
+
+    users.users.builder = {
+      isNormalUser = true;
+      group = "users";
+    };
+
+    systemd.tmpfiles.rules = [
+      "d /home/builder/.ssh 0700 builder users"
+      "d /var/lib/git 0755 git git"
+      "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
     ];
 
     security.pam.services.sshd.allowNullPassword = true;
@@ -104,6 +145,11 @@
         settings = {
           PermitRootLogin = "yes";
           PermitEmptyPasswords = "yes";
+          # rust lib ssh2 requires one of the following Message Authentication Codes:
+          # hmac-sha2-256,hmac-sha2-512,hmac-sha1,hmac-sha1-96,hmac-md5,hmac-md5-96,hmac-ripemd160,hmac-ripemd160@openssh.com
+          Macs = [
+            "hmac-sha2-512"
+          ];
         };
       };
     };

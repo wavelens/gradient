@@ -18,8 +18,8 @@ use sea_orm::{
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
-use tracing::{debug, error, info, warn, instrument};
 use tokio::time;
+use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 pub async fn cache_loop(state: Arc<ServerState>) {
@@ -42,7 +42,7 @@ pub async fn cache_loop(state: Arc<ServerState>) {
             cache_build_output(Arc::clone(&state), build).await;
         } else {
             interval.tick().await;
-            
+
             // Periodically run cleanup
             cleanup_counter += 1;
             if cleanup_counter >= CLEANUP_INTERVAL {
@@ -101,12 +101,18 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
     let local_store = core::executer::get_local_store(Some(organization.clone())).await;
     if let Ok(mut local_store) = local_store {
         let path_exists = match local_store {
-            core::types::LocalNixStore::UnixStream(ref mut store) => {
-                store.query_pathinfo(path.clone()).result().await.unwrap_or(None).is_some()
-            }
-            core::types::LocalNixStore::CommandDuplex(ref mut store) => {
-                store.query_pathinfo(path.clone()).result().await.unwrap_or(None).is_some()
-            }
+            core::types::LocalNixStore::UnixStream(ref mut store) => store
+                .query_pathinfo(path.clone())
+                .result()
+                .await
+                .unwrap_or(None)
+                .is_some(),
+            core::types::LocalNixStore::CommandDuplex(ref mut store) => store
+                .query_pathinfo(path.clone())
+                .result()
+                .await
+                .unwrap_or(None)
+                .is_some(),
         };
 
         if !path_exists {
@@ -335,7 +341,10 @@ async fn get_next_build_output(state: Arc<ServerState>) -> Option<MBuildOutput> 
         .unwrap()
 }
 
-pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) -> Result<(), String> {
+pub async fn invalidate_cache_for_path(
+    state: Arc<ServerState>,
+    path: String,
+) -> Result<(), String> {
     let (hash, package) = get_hash_from_path(path.clone())
         .map_err(|e| format!("Failed to parse path {}: {}", path, e))?;
 
@@ -357,7 +366,9 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
         abuild_output.is_cached = Set(false);
         abuild_output.file_hash = Set(None);
         abuild_output.file_size = Set(None);
-        abuild_output.update(&state.db).await
+        abuild_output
+            .update(&state.db)
+            .await
             .map_err(|e| format!("Failed to update build output: {}", e))?;
 
         // Remove cached files
@@ -376,7 +387,9 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
 
         for signature in signatures {
             let asignature = signature.into_active_model();
-            asignature.delete(&state.db).await
+            asignature
+                .delete(&state.db)
+                .await
                 .map_err(|e| format!("Failed to delete signature: {}", e))?;
         }
 
@@ -388,45 +401,47 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
 
 pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<(), String> {
     let cache_dir = format!("{}/nars", state.cli.base_path);
-    
+
     if !std::path::Path::new(&cache_dir).exists() {
         return Ok(());
     }
 
     let mut orphaned_files = Vec::new();
-    
+
     // Walk through cache directory
     for entry in std::fs::read_dir(&cache_dir)
         .map_err(|e| format!("Failed to read cache directory: {}", e))?
     {
         let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
         let path = entry.path();
-        
+
         if path.is_dir() {
             for subentry in std::fs::read_dir(&path)
                 .map_err(|e| format!("Failed to read subdirectory: {}", e))?
             {
-                let subentry = subentry.map_err(|e| format!("Failed to read subdirectory entry: {}", e))?;
+                let subentry =
+                    subentry.map_err(|e| format!("Failed to read subdirectory entry: {}", e))?;
                 let file_path = subentry.path();
-                
+
                 if file_path.extension().and_then(|s| s.to_str()) == Some("zst") {
                     if let Some(file_name) = file_path.file_stem().and_then(|s| s.to_str()) {
                         if let Some(hash_part) = file_name.strip_suffix(".nar") {
-                            let parent_dir = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                            let parent_dir =
+                                path.file_name().and_then(|s| s.to_str()).unwrap_or("");
                             let full_hash = format!("{}{}", parent_dir, hash_part);
-                            
+
                             // Check if this hash exists in database
                             let build_output_exists = EBuildOutput::find()
                                 .filter(
                                     Condition::all()
                                         .add(CBuildOutput::Hash.eq(full_hash.clone()))
-                                        .add(CBuildOutput::IsCached.eq(true))
+                                        .add(CBuildOutput::IsCached.eq(true)),
                                 )
                                 .one(&state.db)
                                 .await
                                 .map_err(|e| format!("Database error: {}", e))?
                                 .is_some();
-                            
+
                             if !build_output_exists {
                                 orphaned_files.push(file_path);
                             }
@@ -436,7 +451,7 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<(),
             }
         }
     }
-    
+
     // Remove orphaned files
     for file_path in orphaned_files {
         if let Err(e) = std::fs::remove_file(&file_path) {
@@ -445,6 +460,6 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<(),
             debug!(file_path = ?file_path, "Removed orphaned cache file");
         }
     }
-    
+
     Ok(())
 }

@@ -7,8 +7,8 @@
 use crate::config::*;
 use crate::input::get_request_config;
 use connector::builds;
-use std::process::exit;
 use std::io::{self, Write};
+use std::process::exit;
 
 pub async fn handle_download(build_id: Option<String>, filename: Option<String>) {
     let config = get_request_config(load_config()).unwrap_or_else(|_| {
@@ -24,20 +24,18 @@ pub async fn handle_download(build_id: Option<String>, filename: Option<String>)
     // If both build_id and filename are provided, download directly
     if let (Some(build_id), Some(filename)) = (build_id.as_ref(), filename.as_ref()) {
         println!("Downloading {} from build {}...", filename, build_id);
-        
+
         match builds::download_build_file(config, build_id.clone(), filename.clone()).await {
-            Ok(data) => {
-                match std::fs::write(filename, data) {
-                    Ok(()) => {
-                        println!("Downloaded {} successfully!", filename);
-                        return;
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to write file: {}", e);
-                        exit(1);
-                    }
+            Ok(data) => match std::fs::write(filename, data) {
+                Ok(()) => {
+                    println!("Downloaded {} successfully!", filename);
+                    return;
                 }
-            }
+                Err(e) => {
+                    eprintln!("Failed to write file: {}", e);
+                    exit(1);
+                }
+            },
             Err(e) => {
                 eprintln!("Failed to download file: {}", e);
                 exit(1);
@@ -48,7 +46,7 @@ pub async fn handle_download(build_id: Option<String>, filename: Option<String>)
     // If only build_id is provided, list downloads for that build
     if let Some(build_id) = build_id.as_ref() {
         println!("Fetching downloads for build {}...", build_id);
-        
+
         // First, let's check the build status for debugging
         match builds::get_build(config.clone(), build_id.clone()).await {
             Ok(response) => {
@@ -60,7 +58,7 @@ pub async fn handle_download(build_id: Option<String>, filename: Option<String>)
                 println!("Warning: Could not get build status: {}", e);
             }
         }
-        
+
         let downloads = match builds::get_build_downloads(config.clone(), build_id.clone()).await {
             Ok(response) => {
                 if response.error {
@@ -98,7 +96,7 @@ pub async fn handle_download(build_id: Option<String>, filename: Option<String>)
 
         let mut input = String::new();
         io::stdin().read_line(&mut input).unwrap();
-        
+
         let selection: usize = match input.trim().parse::<usize>() {
             Ok(n) if n > 0 && n <= downloads.len() => n - 1,
             _ => {
@@ -111,19 +109,19 @@ pub async fn handle_download(build_id: Option<String>, filename: Option<String>)
         println!("\nDownloading: {}", selected_download.name);
 
         // Download the file
-        match builds::download_build_file(config, build_id.clone(), selected_download.name.clone()).await {
-            Ok(data) => {
-                match std::fs::write(&selected_download.name, data) {
-                    Ok(()) => {
-                        println!("Downloaded {} successfully!", selected_download.name);
-                        return;
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to write file: {}", e);
-                        exit(1);
-                    }
+        match builds::download_build_file(config, build_id.clone(), selected_download.name.clone())
+            .await
+        {
+            Ok(data) => match std::fs::write(&selected_download.name, data) {
+                Ok(()) => {
+                    println!("Downloaded {} successfully!", selected_download.name);
+                    return;
                 }
-            }
+                Err(e) => {
+                    eprintln!("Failed to write file: {}", e);
+                    exit(1);
+                }
+            },
             Err(e) => {
                 eprintln!("Failed to download file: {}", e);
                 exit(1);
@@ -172,7 +170,7 @@ pub async fn handle_download(build_id: Option<String>, filename: Option<String>)
 
     let mut input = String::new();
     io::stdin().read_line(&mut input).unwrap();
-    
+
     let selection: usize = match input.trim().parse::<usize>() {
         Ok(n) if n > 0 && n <= recent_builds.len() => n - 1,
         _ => {
@@ -187,19 +185,22 @@ pub async fn handle_download(build_id: Option<String>, filename: Option<String>)
     // First, we need to find a build ID from the evaluation
     // We need to get builds for this evaluation to find download files
     // Let's call the evaluation builds endpoint to get the build IDs
-    let eval_builds = match builds::get_evaluation_builds(config.clone(), selected_build.evaluation_id.clone()).await {
-        Ok(response) => {
-            if response.error {
-                eprintln!("Failed to get evaluation builds: {:?}", response.message);
+    let eval_builds =
+        match builds::get_evaluation_builds(config.clone(), selected_build.evaluation_id.clone())
+            .await
+        {
+            Ok(response) => {
+                if response.error {
+                    eprintln!("Failed to get evaluation builds: {:?}", response.message);
+                    exit(1);
+                }
+                response.message
+            }
+            Err(e) => {
+                eprintln!("Failed to get evaluation builds: {}", e);
                 exit(1);
             }
-            response.message
-        }
-        Err(e) => {
-            eprintln!("Failed to get evaluation builds: {}", e);
-            exit(1);
-        }
-    };
+        };
 
     if eval_builds.is_empty() {
         println!("No builds found for this evaluation.");
@@ -247,7 +248,7 @@ pub async fn handle_download(build_id: Option<String>, filename: Option<String>)
 
     let mut input = String::new();
     io::stdin().read_line(&mut input).unwrap();
-    
+
     let selection: usize = match input.trim().parse::<usize>() {
         Ok(n) if n > 0 && n <= downloads.len() => n - 1,
         _ => {
@@ -260,7 +261,9 @@ pub async fn handle_download(build_id: Option<String>, filename: Option<String>)
     println!("\nDownloading: {}", selected_download.name);
 
     // Download the file
-    match builds::download_build_file(config, build_id.clone(), selected_download.name.clone()).await {
+    match builds::download_build_file(config, build_id.clone(), selected_download.name.clone())
+        .await
+    {
         Ok(data) => {
             // Write file to current directory
             match std::fs::write(&selected_download.name, data) {

@@ -158,23 +158,30 @@ pub async fn copy_builds<
             continue;
         }
 
-        if !from_store.is_valid_path(path.clone()).result().await.unwrap_or(false) {
+        if !from_store
+            .is_valid_path(path.clone())
+            .result()
+            .await
+            .unwrap_or(false)
+        {
             return Err(format!("Path {} is not valid in source store", path).into());
         }
 
         let nar = from_store.nar_from_path(path.clone()).result().await?;
-        let path_info = from_store.query_pathinfo(path.clone()).result().await?.unwrap();
-        to_store.add_to_store_nar(
-            path.clone(),
-            path_info,
-            nar,
-        ).result().await.unwrap();
-
+        let path_info = from_store
+            .query_pathinfo(path.clone())
+            .result()
+            .await?
+            .unwrap();
+        to_store
+            .add_to_store_nar(path.clone(), path_info, nar)
+            .result()
+            .await
+            .unwrap();
 
         if !to_store.is_valid_path(path.clone()).result().await.unwrap() {
             return Err(format!("Path {} is not valid in destination store", path).into());
         }
-
     }
 
     Ok(())
@@ -372,7 +379,7 @@ pub async fn get_build_outputs_from_derivation<A: AsyncReadExt + AsyncWriteExt +
         .map_err(|e| e.to_string())?;
 
     let mut outputs = Vec::new();
-    
+
     for (_output_name, output_path) in output_map {
         if let Some(path_info) = store
             .query_pathinfo(output_path.clone())
@@ -382,7 +389,7 @@ pub async fn get_build_outputs_from_derivation<A: AsyncReadExt + AsyncWriteExt +
         {
             let (hash, package) = get_hash_from_path(output_path.clone())
                 .map_err(|e| format!("Failed to parse path {}: {}", output_path, e))?;
-            
+
             outputs.push(BuildOutputInfo {
                 path: output_path,
                 hash,
@@ -391,8 +398,6 @@ pub async fn get_build_outputs_from_derivation<A: AsyncReadExt + AsyncWriteExt +
             });
         }
     }
-    
+
     Ok(outputs)
 }
-
-

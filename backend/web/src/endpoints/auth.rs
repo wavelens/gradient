@@ -7,13 +7,13 @@
 use crate::authorization::{encode_jwt, oidc_login_create, oidc_login_verify, update_last_login};
 use crate::error::{WebError, WebResult};
 use axum::Json;
-use axum::extract::{Query, State};
-use axum::response::Response;
-use axum::http::StatusCode;
 use axum::body::Body;
+use axum::extract::{Query, State};
+use axum::http::StatusCode;
+use axum::response::Response;
 use chrono::Utc;
 use core::consts::*;
-use core::input::{check_index_name, validate_password};
+use core::input::{check_index_name, validate_password, validate_username};
 use core::types::*;
 use email_address::EmailAddress;
 use password_auth::{generate_hash, verify_password};
@@ -38,6 +38,11 @@ pub struct MakeUserRequest {
     pub password: String,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CheckUsernameRequest {
+    pub username: String,
+}
+
 pub async fn post_basic_register(
     state: State<Arc<ServerState>>,
     Json(body): Json<MakeUserRequest>,
@@ -46,8 +51,8 @@ pub async fn post_basic_register(
         return Err(WebError::registration_disabled());
     }
 
-    if check_index_name(body.username.clone().as_str()).is_err() {
-        return Err(WebError::invalid_name("Username"));
+    if let Err(e) = validate_username(&body.username) {
+        return Err(WebError::invalid_username(e));
     }
 
     if !EmailAddress::is_valid(body.email.clone().as_str()) {
@@ -221,4 +226,36 @@ pub async fn post_logout(_state: State<Arc<ServerState>>) -> WebResult<Json<Base
     };
 
     Ok(Json(res))
+}
+
+pub async fn post_check_username(
+    state: State<Arc<ServerState>>,
+    Json(body): Json<CheckUsernameRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    // First validate the username format
+    if let Err(e) = validate_username(&body.username) {
+        return Ok(Json(BaseResponse {
+            error: true,
+            message: e,
+        }));
+    }
+
+    // Check if username already exists
+    let existing_user = EUser::find()
+        .filter(CUser::Username.eq(body.username.clone()))
+        .one(&state.db)
+        .await?;
+
+    if existing_user.is_some() {
+        return Ok(Json(BaseResponse {
+            error: true,
+            message: "Username is already taken".to_string(),
+        }));
+    }
+
+    // Username is available
+    Ok(Json(BaseResponse {
+        error: false,
+        message: "Username is available".to_string(),
+    }))
 }

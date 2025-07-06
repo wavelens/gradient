@@ -53,10 +53,7 @@ pub async fn get_evaluation(
             .one(&state.db)
             .await?
             .ok_or_else(|| {
-                tracing::error!(
-                    "DirectBuild not found for evaluation {}",
-                    evaluation_id
-                );
+                tracing::error!("DirectBuild not found for evaluation {}", evaluation_id);
                 WebError::InternalServerError("Direct build data inconsistency".to_string())
             })?
             .organization
@@ -65,10 +62,7 @@ pub async fn get_evaluation(
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!(
-                "Organization {} not found",
-                organization_id
-            );
+            tracing::error!("Organization {} not found", organization_id);
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
@@ -116,10 +110,7 @@ pub async fn post_evaluation(
             .one(&state.db)
             .await?
             .ok_or_else(|| {
-                tracing::error!(
-                    "DirectBuild not found for evaluation {}",
-                    evaluation_id
-                );
+                tracing::error!("DirectBuild not found for evaluation {}", evaluation_id);
                 WebError::InternalServerError("Direct build data inconsistency".to_string())
             })?
             .organization
@@ -128,10 +119,7 @@ pub async fn post_evaluation(
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!(
-                "Organization {} not found",
-                organization_id
-            );
+            tracing::error!("Organization {} not found", organization_id);
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
@@ -182,10 +170,7 @@ pub async fn get_evaluation_builds(
             .one(&state.db)
             .await?
             .ok_or_else(|| {
-                tracing::error!(
-                    "DirectBuild not found for evaluation {}",
-                    evaluation_id
-                );
+                tracing::error!("DirectBuild not found for evaluation {}", evaluation_id);
                 WebError::InternalServerError("Direct build data inconsistency".to_string())
             })?
             .organization
@@ -195,10 +180,7 @@ pub async fn get_evaluation_builds(
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!(
-                "Organization {} not found",
-                organization_id
-            );
+            tracing::error!("Organization {} not found", organization_id);
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
@@ -258,10 +240,7 @@ pub async fn post_evaluation_builds(
             .one(&state.db)
             .await?
             .ok_or_else(|| {
-                tracing::error!(
-                    "DirectBuild not found for evaluation {}",
-                    evaluation_id
-                );
+                tracing::error!("DirectBuild not found for evaluation {}", evaluation_id);
                 WebError::InternalServerError("Direct build data inconsistency".to_string())
             })?
             .organization
@@ -270,10 +249,7 @@ pub async fn post_evaluation_builds(
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!(
-                "Organization {} not found",
-                organization_id
-            );
+            tracing::error!("Organization {} not found", organization_id);
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 

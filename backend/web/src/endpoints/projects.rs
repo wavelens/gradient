@@ -13,11 +13,14 @@ use core::database::{get_organization_by_name, get_project_by_name};
 use core::input::{check_index_name, valid_evaluation_wildcard, vec_to_hex};
 use core::sources::check_project_updates;
 use core::types::*;
-use entity::evaluation::EvaluationStatus;
 use entity::build::BuildStatus;
+use entity::evaluation::EvaluationStatus;
 use git_url_parse::normalize_url;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, QueryOrder, QuerySelect, PaginatorTrait};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -434,7 +437,7 @@ pub async fn get_project_details(
         .await?;
 
     let mut evaluation_summaries = Vec::new();
-    
+
     for evaluation in evaluations {
         // Count total builds for this evaluation
         let total_builds = EBuild::find()
@@ -442,12 +445,12 @@ pub async fn get_project_details(
             .count(&state.db)
             .await?;
 
-        // Count failed builds for this evaluation  
+        // Count failed builds for this evaluation
         let failed_builds = EBuild::find()
             .filter(
                 Condition::all()
                     .add(CBuild::Evaluation.eq(evaluation.id))
-                    .add(CBuild::Status.eq(BuildStatus::Failed))
+                    .add(CBuild::Status.eq(BuildStatus::Failed)),
             )
             .count(&state.db)
             .await?;

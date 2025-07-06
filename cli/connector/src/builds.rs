@@ -6,9 +6,9 @@
 
 use crate::*;
 use futures::stream::StreamExt;
+use reqwest::multipart::{Form, Part};
 use reqwest_streams::JsonStreamResponse;
 use serde::{Deserialize, Serialize};
-use reqwest::multipart::{Form, Part};
 use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -99,10 +99,13 @@ pub async fn post_direct_build(
 
     let client = reqwest::Client::new();
     let url = format!("{}/api/v1/builds", config.server_url);
-    
+
     let res = client
         .post(&url)
-        .header("Authorization", format!("Bearer {}", config.token.unwrap_or_default()))
+        .header(
+            "Authorization",
+            format!("Bearer {}", config.token.unwrap_or_default()),
+        )
         .multipart(form)
         .send()
         .await
@@ -135,11 +138,17 @@ pub async fn download_build_file(
     filename: String,
 ) -> Result<Vec<u8>, String> {
     let client = reqwest::Client::new();
-    let url = format!("{}/api/v1/builds/{}/download/{}", config.server_url, build_id, filename);
-    
+    let url = format!(
+        "{}/api/v1/builds/{}/download/{}",
+        config.server_url, build_id, filename
+    );
+
     let res = client
         .get(&url)
-        .header("Authorization", format!("Bearer {}", config.token.unwrap_or_default()))
+        .header(
+            "Authorization",
+            format!("Bearer {}", config.token.unwrap_or_default()),
+        )
         .send()
         .await
         .map_err(|e| format!("Request failed: {}", e))?;

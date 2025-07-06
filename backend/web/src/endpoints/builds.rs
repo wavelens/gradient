@@ -6,20 +6,20 @@
 
 use crate::error::{WebError, WebResult};
 use async_stream::stream;
-use axum::extract::{Path, State, Multipart};
+use axum::extract::{Multipart, Path, State};
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
 use core::types::*;
-use sea_orm::{EntityTrait, ActiveModelTrait, ActiveValue::Set};
-use std::sync::Arc;
-use uuid::Uuid;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect};
-use axum::response::{Response, IntoResponse};
-use axum::http::{StatusCode, header};
+use uuid::Uuid;
 
 pub async fn get_build(
     state: State<Arc<ServerState>>,
@@ -42,7 +42,7 @@ pub async fn get_build(
             );
             WebError::InternalServerError("Build data inconsistency".to_string())
         })?;
-    
+
     let organization_id = if let Some(project_id) = evaluation.project {
         // Regular project-based build
         let project = EProject::find_by_id(project_id)
@@ -64,10 +64,7 @@ pub async fn get_build(
             .one(&state.db)
             .await?
             .ok_or_else(|| {
-                tracing::error!(
-                    "DirectBuild not found for evaluation {}",
-                    evaluation.id
-                );
+                tracing::error!("DirectBuild not found for evaluation {}", evaluation.id);
                 WebError::InternalServerError("Direct build data inconsistency".to_string())
             })?
             .organization
@@ -76,10 +73,7 @@ pub async fn get_build(
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!(
-                "Organization {} not found",
-                organization_id
-            );
+            tracing::error!("Organization {} not found", organization_id);
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
@@ -137,10 +131,7 @@ pub async fn post_build(
             .one(&state.db)
             .await?
             .ok_or_else(|| {
-                tracing::error!(
-                    "DirectBuild not found for evaluation {}",
-                    evaluation.id
-                );
+                tracing::error!("DirectBuild not found for evaluation {}", evaluation.id);
                 WebError::InternalServerError("Direct build data inconsistency".to_string())
             })?
             .organization
@@ -149,10 +140,7 @@ pub async fn post_build(
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!(
-                "Organization {} not found",
-                organization_id
-            );
+            tracing::error!("Organization {} not found", organization_id);
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
@@ -213,19 +201,22 @@ pub async fn post_direct_build(
     let mut files: HashMap<String, Vec<u8>> = HashMap::new();
 
     // Parse multipart form
-    while let Some(field) = multipart.next_field().await.map_err(|e| {
-        WebError::BadRequest(format!("Failed to parse multipart: {}", e))
-    })? {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| WebError::BadRequest(format!("Failed to parse multipart: {}", e)))?
+    {
         let name = field.name().unwrap_or("").to_string();
-        
+
         if name == "organization" {
             organization = Some(field.text().await.map_err(|e| {
                 WebError::BadRequest(format!("Failed to read organization: {}", e))
             })?);
         } else if name == "derivation" {
-            derivation = Some(field.text().await.map_err(|e| {
-                WebError::BadRequest(format!("Failed to read derivation: {}", e))
-            })?);
+            derivation =
+                Some(field.text().await.map_err(|e| {
+                    WebError::BadRequest(format!("Failed to read derivation: {}", e))
+                })?);
         } else if name.starts_with("file:") {
             let filename = name.strip_prefix("file:").unwrap().to_string();
             let data = field.bytes().await.map_err(|e| {
@@ -235,26 +226,21 @@ pub async fn post_direct_build(
         }
     }
 
-    let organization = organization.ok_or_else(|| {
-        WebError::BadRequest("Missing organization parameter".to_string())
-    })?;
-    
-    let derivation = derivation.ok_or_else(|| {
-        WebError::BadRequest("Missing derivation parameter".to_string())
-    })?;
+    let organization = organization
+        .ok_or_else(|| WebError::BadRequest("Missing organization parameter".to_string()))?;
+
+    let derivation = derivation
+        .ok_or_else(|| WebError::BadRequest("Missing derivation parameter".to_string()))?;
 
     if files.is_empty() {
         return Err(WebError::BadRequest("No files uploaded".to_string()));
     }
 
     // Get organization
-    let org = core::database::get_organization_by_name(
-        Arc::clone(&state),
-        user.id,
-        organization.clone(),
-    ).await.ok_or_else(|| {
-        WebError::not_found("Organization")
-    })?;
+    let org =
+        core::database::get_organization_by_name(Arc::clone(&state), user.id, organization.clone())
+            .await
+            .ok_or_else(|| WebError::not_found("Organization"))?;
 
     // We'll create the DirectBuild record after the evaluation
 
@@ -267,18 +253,18 @@ pub async fn post_direct_build(
     // Write files to temp directory
     for (filename, data) in files {
         let file_path = format!("{}/{}", temp_dir, filename);
-        
+
         // Create parent directories if needed
         if let Some(parent) = std::path::Path::new(&file_path).parent() {
             fs::create_dir_all(parent).await.map_err(|e| {
                 WebError::InternalServerError(format!("Failed to create directory: {}", e))
             })?;
         }
-        
+
         let mut file = fs::File::create(&file_path).await.map_err(|e| {
             WebError::InternalServerError(format!("Failed to create file {}: {}", filename, e))
         })?;
-        
+
         file.write_all(&data).await.map_err(|e| {
             WebError::InternalServerError(format!("Failed to write file {}: {}", filename, e))
         })?;
@@ -292,9 +278,10 @@ pub async fn post_direct_build(
         author: Set(Some(user.id)),
         author_name: Set(user.name.clone()),
     };
-    let commit = commit.insert(&state.db).await.map_err(|e| {
-        WebError::InternalServerError(format!("Failed to create commit: {}", e))
-    })?;
+    let commit = commit
+        .insert(&state.db)
+        .await
+        .map_err(|e| WebError::InternalServerError(format!("Failed to create commit: {}", e)))?;
 
     // Create evaluation record (without project for direct builds)
     let evaluation = AEvaluation {
@@ -327,13 +314,9 @@ pub async fn post_direct_build(
     })?;
 
     // Schedule evaluation
-    builder::evaluator::evaluate_direct(
-        Arc::clone(&state),
-        evaluation.clone(),
-        temp_dir,
-    ).await.map_err(|e| {
-        WebError::InternalServerError(format!("Failed to start evaluation: {}", e))
-    })?;
+    builder::evaluator::evaluate_direct(Arc::clone(&state), evaluation.clone(), temp_dir)
+        .await
+        .map_err(|e| WebError::InternalServerError(format!("Failed to start evaluation: {}", e)))?;
 
     let res = BaseResponse {
         error: false,
@@ -371,7 +354,7 @@ pub async fn get_build_downloads(
             );
             WebError::InternalServerError("Build data inconsistency".to_string())
         })?;
-    
+
     let organization_id = if let Some(project_id) = evaluation.project {
         // Regular project-based build
         let project = EProject::find_by_id(project_id)
@@ -393,10 +376,7 @@ pub async fn get_build_downloads(
             .one(&state.db)
             .await?
             .ok_or_else(|| {
-                tracing::error!(
-                    "DirectBuild not found for evaluation {}",
-                    evaluation.id
-                );
+                tracing::error!("DirectBuild not found for evaluation {}", evaluation.id);
                 WebError::InternalServerError("Direct build data inconsistency".to_string())
             })?
             .organization
@@ -405,10 +385,7 @@ pub async fn get_build_downloads(
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!(
-                "Organization {} not found",
-                organization_id
-            );
+            tracing::error!("Organization {} not found", organization_id);
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
@@ -426,14 +403,14 @@ pub async fn get_build_downloads(
 
     for output in build_outputs {
         let hydra_products_path = format!("{}/nix-support/hydra-build-products", output.output);
-        
+
         tracing::debug!(
             build_id = %build_id,
             output_path = %output.output,
             hydra_products_path = %hydra_products_path,
             "Checking for hydra-build-products file in get_build_downloads"
         );
-        
+
         // Check if hydra-build-products file exists
         if let Ok(content) = fs::read_to_string(&hydra_products_path).await {
             tracing::debug!(
@@ -441,25 +418,25 @@ pub async fn get_build_downloads(
                 content = %content,
                 "Found hydra-build-products content in get_build_downloads"
             );
-            
+
             for line in content.lines() {
                 if line.trim().is_empty() {
                     continue;
                 }
-                
+
                 // Parse line format: "file <type> <path>"
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 3 && parts[0] == "file" {
                     let file_type = parts[1].to_string();
                     let file_path = parts[2..].join(" ");
-                    
+
                     // Extract filename from path
                     let filename = std::path::Path::new(&file_path)
                         .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or(&file_path)
                         .to_string();
-                    
+
                     products.push(BuildProduct {
                         file_type,
                         name: filename,
@@ -505,7 +482,7 @@ pub async fn get_build_download(
             );
             WebError::InternalServerError("Build data inconsistency".to_string())
         })?;
-    
+
     let organization_id = if let Some(project_id) = evaluation.project {
         // Regular project-based build
         let project = EProject::find_by_id(project_id)
@@ -527,10 +504,7 @@ pub async fn get_build_download(
             .one(&state.db)
             .await?
             .ok_or_else(|| {
-                tracing::error!(
-                    "DirectBuild not found for evaluation {}",
-                    evaluation.id
-                );
+                tracing::error!("DirectBuild not found for evaluation {}", evaluation.id);
                 WebError::InternalServerError("Direct build data inconsistency".to_string())
             })?
             .organization
@@ -539,10 +513,7 @@ pub async fn get_build_download(
         .one(&state.db)
         .await?
         .ok_or_else(|| {
-            tracing::error!(
-                "Organization {} not found",
-                organization_id
-            );
+            tracing::error!("Organization {} not found", organization_id);
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
@@ -564,7 +535,7 @@ pub async fn get_build_download(
 
     for output in build_outputs {
         let hydra_products_path = format!("{}/nix-support/hydra-build-products", output.output);
-        
+
         tracing::debug!(
             build_id = %build_id,
             filename = %filename,
@@ -572,7 +543,7 @@ pub async fn get_build_download(
             hydra_products_path = %hydra_products_path,
             "Checking for hydra-build-products file in get_build_download"
         );
-        
+
         // Check if hydra-build-products file exists
         if let Ok(content) = fs::read_to_string(&hydra_products_path).await {
             tracing::debug!(
@@ -581,23 +552,23 @@ pub async fn get_build_download(
                 content = %content,
                 "Found hydra-build-products content in get_build_download"
             );
-            
+
             for line in content.lines() {
                 if line.trim().is_empty() {
                     continue;
                 }
-                
+
                 // Parse line format: "file <type> <path>"
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 3 && parts[0] == "file" {
                     let file_path = parts[2..].join(" ");
-                    
+
                     // Check if this file matches the requested filename
                     let file_name = std::path::Path::new(&file_path)
                         .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("");
-                    
+
                     tracing::debug!(
                         build_id = %build_id,
                         requested_filename = %filename,
@@ -605,7 +576,7 @@ pub async fn get_build_download(
                         file_path = %file_path,
                         "Comparing filenames"
                     );
-                    
+
                     if file_name == filename {
                         tracing::debug!(
                             build_id = %build_id,
@@ -613,7 +584,7 @@ pub async fn get_build_download(
                             file_path = %file_path,
                             "Found matching file, attempting to read"
                         );
-                        
+
                         // Try to read and serve the file
                         match fs::read(&file_path).await {
                             Ok(contents) => {
@@ -623,7 +594,7 @@ pub async fn get_build_download(
                                     file_size = contents.len(),
                                     "Successfully read file for download"
                                 );
-                                
+
                                 // Determine content type based on file extension
                                 let content_type = match std::path::Path::new(&filename)
                                     .extension()
@@ -642,10 +613,14 @@ pub async fn get_build_download(
                                     StatusCode::OK,
                                     [
                                         (header::CONTENT_TYPE, content_type),
-                                        (header::CONTENT_DISPOSITION, &format!("attachment; filename=\"{}\"", filename)),
+                                        (
+                                            header::CONTENT_DISPOSITION,
+                                            &format!("attachment; filename=\"{}\"", filename),
+                                        ),
                                     ],
                                     contents,
-                                ).into_response());
+                                )
+                                    .into_response());
                             }
                             Err(e) => {
                                 tracing::error!(
@@ -655,7 +630,9 @@ pub async fn get_build_download(
                                     error = %e,
                                     "Failed to read file"
                                 );
-                                return Err(WebError::InternalServerError("Failed to read file".to_string()));
+                                return Err(WebError::InternalServerError(
+                                    "Failed to read file".to_string(),
+                                ));
                             }
                         }
                     }
@@ -706,9 +683,8 @@ pub async fn get_recent_direct_builds(
 
         for db in direct_builds {
             // Get evaluation info
-            if let Ok(Some(evaluation)) = EEvaluation::find_by_id(db.evaluation)
-                .one(&state.db)
-                .await
+            if let Ok(Some(evaluation)) =
+                EEvaluation::find_by_id(db.evaluation).one(&state.db).await
             {
                 // Get a build from this evaluation to check status
                 let build_status = if let Ok(Some(build)) = EBuild::find()
@@ -734,7 +710,7 @@ pub async fn get_recent_direct_builds(
 
     // Sort by created_at descending
     all_direct_builds.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    
+
     // Take only the most recent 20
     all_direct_builds.truncate(20);
 

@@ -46,6 +46,57 @@
     </div>
 </div>
 <style>
+    .form-field {
+        margin-bottom: 1rem;
+    }
     
+    .form-help-text {
+        color: #6c757d;
+        font-size: 12px;
+        margin-top: 4px;
+        display: block;
+    }
+    
+    .error {
+        color: #dc3545;
+        font-size: 13px;
+        margin-top: 4px;
+        padding: 8px 12px;
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        border-radius: 4px;
+    }
+    
+    .alert {
+        padding: 12px 16px;
+        margin-bottom: 16px;
+        border-radius: 6px;
+        border: 1px solid transparent;
+    }
+    
+    .alert-danger {
+        color: #721c24;
+        background-color: #f8d7da;
+        border-color: #f5c6cb;
+    }
+    
+    .form-control {
+        transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+    }
+    
+    .form-control:focus {
+        border-color: #80bdff;
+        outline: 0;
+        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+    }
+    
+    .submit-btn {
+        transition: all 0.15s ease-in-out;
+    }
+    
+    .submit-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+    }
 </style>
 {% endblock %}

@@ -8,13 +8,13 @@ use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use migration::Migrator;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Database, DatabaseConnection, EntityTrait,
-    QueryFilter, QuerySelect, ConnectOptions,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, Database, DatabaseConnection,
+    EntityTrait, QueryFilter, QuerySelect,
 };
-use std::time::Duration;
-use tracing::log::LevelFilter;
 use sea_orm_migration::prelude::*;
 use std::sync::Arc;
+use std::time::Duration;
+use tracing::log::LevelFilter;
 use uuid::Uuid;
 
 use super::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
@@ -31,22 +31,22 @@ pub async fn connect_db(cli: &Cli) -> DatabaseConnection {
 
     // Configure database connection options
     let mut opt = ConnectOptions::new(db_url);
-    
+
     // Only enable SQL logging at debug level
     if cli.log_level == "debug" {
         opt.sqlx_logging(true)
-           .sqlx_logging_level(LevelFilter::Debug);
+            .sqlx_logging_level(LevelFilter::Debug);
     } else {
         opt.sqlx_logging(false);
     }
-    
+
     // Set other connection options
     opt.max_connections(100)
-       .min_connections(5)
-       .connect_timeout(Duration::from_secs(8))
-       .acquire_timeout(Duration::from_secs(8))
-       .idle_timeout(Duration::from_secs(8))
-       .max_lifetime(Duration::from_secs(8));
+        .min_connections(5)
+        .connect_timeout(Duration::from_secs(8))
+        .acquire_timeout(Duration::from_secs(8))
+        .idle_timeout(Duration::from_secs(8))
+        .max_lifetime(Duration::from_secs(8));
 
     let db = Database::connect(opt)
         .await

@@ -17,16 +17,59 @@
 <div class="outer-form">
     <div class="form-container">
         <h2 class="form-header-label">{% trans 'Register' %}</h2>
+        {% if form.non_field_errors %}
+            <div class="alert alert-danger">
+                {{ form.non_field_errors }}
+            </div>
+        {% endif %}
         <form method="post">
             {% csrf_token %}
             {% for field in form %}
-                    <div class="form-field">
-                        <label for="{{ field.id_for_label }}" class="required-label">{% trans field.label %}</label>
+                <div class="form-field">
+                    <label for="{{ field.id_for_label }}" class="required-label">{% trans field.label %}</label>
+                    {% if field.name == 'username' %}
+                        <div class="input-with-icon">
+                            {{ field }}
+                            <div class="field-status" id="username-status"></div>
+                        </div>
+                    {% else %}
                         {{ field }}
-                        {% if field.errors %}
-                            <div class="error">{% trans field.errors %}</div>
-                        {% endif %}
-                    </div>
+                    {% endif %}
+                    {% if field.errors %}
+                        <div class="error">{% trans field.errors %}</div>
+                    {% endif %}
+                    {% if field.help_text and field.name != 'username' and field.name != 'password' %}
+                        <small class="form-help-text">{{ field.help_text }}</small>
+                    {% endif %}
+                    {% if field.name == 'password' %}
+                        <div class="password-requirements">
+                            <div class="requirement" id="length-req">
+                                <span class="req-text">8-128 characters</span>
+                            </div>
+                            <div class="requirement" id="uppercase-req">
+                                <span class="req-text">One uppercase letter</span>
+                            </div>
+                            <div class="requirement" id="lowercase-req">
+                                <span class="req-text">One lowercase letter</span>
+                            </div>
+                            <div class="requirement" id="digit-req">
+                                <span class="req-text">One digit</span>
+                            </div>
+                            <div class="requirement" id="special-req">
+                                <span class="req-text">One special character</span>
+                            </div>
+                            <div class="requirement" id="no-password-req">
+                                <span class="req-text">No word 'password'</span>
+                            </div>
+                            <div class="requirement" id="no-sequential-req">
+                                <span class="req-text">No sequential characters</span>
+                            </div>
+                            <div class="requirement" id="no-repeated-req">
+                                <span class="req-text">No repeated characters</span>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
             {% endfor %}
             <button type="submit" class="submit-btn">{% trans 'Register' %}</button>
         </form>
@@ -34,6 +77,442 @@
     </div>
 </div>
 <style>
+    .password-requirements {
+        margin-top: 8px;
+        padding: 0;
+        background: none;
+        border: none;
+        font-size: 13px;
+    }
     
+    .input-with-icon {
+        position: relative;
+        display: block;
+        width: 100%;
+    }
+    
+    .input-with-icon input {
+        padding-right: 40px !important;
+        width: 100% !important;
+        box-sizing: border-box;
+    }
+    
+    .field-status {
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+        z-index: 10;
+        line-height: 1;
+        background: none !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        outline: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    
+    .field-status .material-icons {
+        background: none !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        outline: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+    
+    
+    .field-status.success {
+        color: #30c54c;
+    }
+    
+    .field-status.error {
+        color: #fa5e55;
+    }
+    
+    
+    
+    .field-status.loading {
+        color: #c5b03b;
+    }
+    
+    .loader {
+        width: 16px;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: #c5b03b;
+        box-shadow: 0 0 0 0 #c7b54e;
+        animation: l1 1.5s infinite;
+        display: inline-block;
+    }
+
+    @keyframes l1 {
+        100% {box-shadow: 0 0 0 10px #0000}
+    }
+    
+    .requirement {
+        display: none;
+        margin-bottom: 4px;
+        transition: all 0.2s ease;
+    }
+    
+    .requirement.invalid {
+        display: flex;
+    }
+    
+    .requirement:last-child {
+        margin-bottom: 0;
+    }
+    
+    
+    .req-text {
+        color: var(--secondary);
+        transition: color 0.2s ease;
+    }
+    
+    .requirement.invalid .req-text {
+        color: #fa5e55;
+    }
+    
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    
+    .form-field {
+        margin-bottom: 1rem;
+    }
+    
+    .form-help-text {
+        color: var(--secondary);
+        font-size: 12px;
+        margin-top: 4px;
+        display: block;
+    }
+    
+    .error {
+        color: #fa5e55;
+        font-size: 13px;
+        margin-top: 4px;
+        padding: 8px 12px;
+        background-color: rgba(250, 94, 85, 0.1);
+        border: 1px solid rgba(250, 94, 85, 0.3);
+        border-radius: 4px;
+    }
+    
+    .alert {
+        padding: 12px 16px;
+        margin-bottom: 16px;
+        border-radius: 6px;
+        border: 1px solid transparent;
+    }
+    
+    .alert-danger {
+        color: #fa5e55;
+        background-color: rgba(250, 94, 85, 0.1);
+        border-color: rgba(250, 94, 85, 0.3);
+    }
+    
+    .form-control {
+        transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+    }
+    
+    .form-control:focus {
+        border-color: #80bdff;
+        outline: 0;
+        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+    }
+    
+    .submit-btn {
+        transition: all 0.15s ease-in-out;
+    }
+    
+    .submit-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+    }
+    
+    .password-strength {
+        height: 4px;
+        background-color: #e9ecef;
+        border-radius: 2px;
+        margin-top: 8px;
+        margin-bottom: 12px;
+        overflow: hidden;
+    }
+    
+    .password-strength-bar {
+        height: 100%;
+        width: 0%;
+        transition: all 0.3s ease;
+        border-radius: 2px;
+    }
+    
+    .strength-weak {
+        background-color: #dc3545;
+    }
+    
+    .strength-fair {
+        background-color: #ffc107;
+    }
+    
+    .strength-good {
+        background-color: #fd7e14;
+    }
+    
+    .strength-strong {
+        background-color: #28a745;
+    }
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Username validation
+    const usernameInput = document.getElementById('username-input');
+    if (usernameInput) {
+        let usernameCheckTimeout;
+        const usernameStatus = document.getElementById('username-status');
+        
+        usernameInput.addEventListener('input', function() {
+            const username = this.value;
+            
+            // Clear previous timeout
+            clearTimeout(usernameCheckTimeout);
+            
+            if (!username) {
+                updateUsernameStatus('neutral');
+                return;
+            }
+            
+            const requirements = validateUsername(username);
+            const isValidFormat = requirements.length && requirements.chars && 
+                                requirements.startEnd && requirements.consecutive && requirements.reserved;
+            
+            if (!isValidFormat) {
+                updateUsernameStatus('error', 'Invalid username format');
+                return;
+            }
+            
+            // Show loading and check availability
+            updateUsernameStatus('loading', 'Checking availability...');
+            
+            // Debounce API calls
+            usernameCheckTimeout = setTimeout(() => {
+                checkUsernameAvailability(username);
+            }, 500);
+        });
+    }
+    
+    // Password validation
+    const passwordInput = document.getElementById('password-input');
+    if (!passwordInput) return;
+    
+    const passwordField = passwordInput.closest('.form-field');
+    const requirementsDiv = passwordField.querySelector('.password-requirements');
+    
+    // Add password strength indicator at the top of requirements
+    const strengthContainer = document.createElement('div');
+    strengthContainer.className = 'password-strength';
+    strengthContainer.innerHTML = '<div class="password-strength-bar"></div>';
+    requirementsDiv.insertBefore(strengthContainer, requirementsDiv.firstChild);
+    
+    const strengthBar = strengthContainer.querySelector('.password-strength-bar');
+    
+    function validateUsername(username) {
+        const requirements = {
+            length: username.length >= 3 && username.length <= 50,
+            chars: /^[a-zA-Z0-9_-]*$/.test(username),
+            startEnd: username.length === 0 || (!username.startsWith('_') && !username.startsWith('-') && 
+                     !username.endsWith('_') && !username.endsWith('-')),
+            consecutive: !/(__|--|_-|-_)/.test(username),
+            reserved: !['admin', 'root', 'system', 'api', 'www', 'mail', 'ftp', 'test', 'user', 'support', 'help', 'info', 'null', 'undefined'].includes(username.toLowerCase())
+        };
+        
+        return requirements;
+    }
+    
+    function updateUsernameStatus(status, message = '') {
+        const usernameStatus = document.getElementById('username-status');
+        if (!usernameStatus) return;
+        
+        // Reset all classes
+        usernameStatus.className = 'field-status';
+        usernameStatus.innerHTML = '';
+        usernameStatus.title = message;
+        
+        switch (status) {
+            case 'success':
+                usernameStatus.classList.add('success');
+                usernameStatus.innerHTML = '<span class="material-icons">check_circle</span>';
+                break;
+            case 'error':
+                usernameStatus.classList.add('error');
+                usernameStatus.innerHTML = '<span class="material-icons">close</span>';
+                break;
+            case 'loading':
+                usernameStatus.classList.add('loading');
+                usernameStatus.innerHTML = '<span class="loader"></span>';
+                break;
+            case 'neutral':
+            default:
+                // No icon for neutral state
+                break;
+        }
+    }
+    
+    async function checkUsernameAvailability(username) {
+        try {
+            const response = await fetch('/account/check-username/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify({username: username})
+            });
+            
+            const data = await response.json();
+            
+            if (data.available) {
+                updateUsernameStatus('success', 'Username is available');
+            } else {
+                updateUsernameStatus('error', data.message || 'Username is not available');
+            }
+        } catch (error) {
+            updateUsernameStatus('error', 'Error checking availability');
+        }
+    }
+
+    function validatePassword(password) {
+        const requirements = {
+            length: password.length >= 8 && password.length <= 128,
+            uppercase: /[A-Z]/.test(password),
+            lowercase: /[a-z]/.test(password),
+            digit: /[0-9]/.test(password),
+            special: /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password),
+            noPassword: !password.toLowerCase().includes('password'),
+            noSequential: !hasSequentialChars(password),
+            noRepeated: !hasRepeatedChars(password)
+        };
+        
+        return requirements;
+    }
+    
+    function hasSequentialChars(str) {
+        for (let i = 0; i <= str.length - 4; i++) {
+            const substr = str.substr(i, 4);
+            if (isSequential(substr)) return true;
+        }
+        return false;
+    }
+    
+    function isSequential(s) {
+        if (s.length !== 4) return false;
+        
+        // Check ascending
+        let ascending = true;
+        for (let i = 1; i < 4; i++) {
+            if (s.charCodeAt(i) !== s.charCodeAt(i-1) + 1) {
+                ascending = false;
+                break;
+            }
+        }
+        
+        // Check descending
+        let descending = true;
+        for (let i = 1; i < 4; i++) {
+            if (s.charCodeAt(i) !== s.charCodeAt(i-1) - 1) {
+                descending = false;
+                break;
+            }
+        }
+        
+        return ascending || descending;
+    }
+    
+    function hasRepeatedChars(str) {
+        for (let i = 0; i <= str.length - 3; i++) {
+            if (str[i] === str[i+1] && str[i+1] === str[i+2]) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    function updateRequirements(requirements) {
+        const reqElements = {
+            length: document.getElementById('length-req'),
+            uppercase: document.getElementById('uppercase-req'),
+            lowercase: document.getElementById('lowercase-req'),
+            digit: document.getElementById('digit-req'),
+            special: document.getElementById('special-req'),
+            noPassword: document.getElementById('no-password-req'),
+            noSequential: document.getElementById('no-sequential-req'),
+            noRepeated: document.getElementById('no-repeated-req')
+        };
+        
+        Object.keys(requirements).forEach(key => {
+            const element = reqElements[key];
+            if (element) {
+                element.classList.remove('valid', 'invalid');
+                if (requirements[key]) {
+                    // Hide valid requirements
+                    element.style.display = 'none';
+                } else {
+                    // Show invalid requirements
+                    element.style.display = 'flex';
+                    element.classList.add('invalid');
+                }
+            }
+        });
+    }
+    
+    function updateStrengthBar(requirements) {
+        const validCount = Object.values(requirements).filter(Boolean).length;
+        const percentage = (validCount / 8) * 100;
+        
+        strengthBar.style.width = percentage + '%';
+        
+        // Remove all strength classes
+        strengthBar.classList.remove('strength-weak', 'strength-fair', 'strength-good', 'strength-strong');
+        
+        if (percentage >= 100) {
+            strengthBar.classList.add('strength-strong');
+        } else if (percentage >= 75) {
+            strengthBar.classList.add('strength-good');
+        } else if (percentage >= 50) {
+            strengthBar.classList.add('strength-fair');
+        } else if (percentage > 0) {
+            strengthBar.classList.add('strength-weak');
+        }
+    }
+    
+    passwordInput.addEventListener('input', function() {
+        const password = this.value;
+        
+        if (password.length === 0) {
+            // Hide entire requirements section when empty
+            requirementsDiv.style.display = 'none';
+        } else {
+            // Show requirements section and validate
+            requirementsDiv.style.display = 'block';
+            const requirements = validatePassword(password);
+            updateRequirements(requirements);
+            updateStrengthBar(requirements);
+        }
+    });
+    
+    // Initially hide the requirements section
+    requirementsDiv.style.display = 'none';
+});
+</script>
 {% endblock %}

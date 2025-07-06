@@ -160,54 +160,130 @@ pub fn load_secret(f: &str) -> String {
 }
 
 /// Validates password strength requirements
+/// Validates username format and content requirements
+pub fn validate_username(username: &str) -> Result<(), String> {
+    if username.is_empty() {
+        return Err("Username cannot be empty".to_string());
+    }
+
+    if username.len() < 3 {
+        return Err("Username must be at least 3 characters long".to_string());
+    }
+
+    if username.len() > 50 {
+        return Err("Username cannot exceed 50 characters".to_string());
+    }
+
+    // Check for valid characters (alphanumeric, underscore, hyphen)
+    if !username
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(
+            "Username can only contain letters, numbers, underscores, and hyphens".to_string(),
+        );
+    }
+
+    // Cannot start or end with underscore or hyphen
+    if username.starts_with('_')
+        || username.starts_with('-')
+        || username.ends_with('_')
+        || username.ends_with('-')
+    {
+        return Err("Username cannot start or end with underscore or hyphen".to_string());
+    }
+
+    // Cannot contain consecutive underscores or hyphens
+    if username.contains("__")
+        || username.contains("--")
+        || username.contains("_-")
+        || username.contains("-_")
+    {
+        return Err("Username cannot contain consecutive special characters".to_string());
+    }
+
+    // Reserved usernames
+    let reserved = [
+        "admin",
+        "root",
+        "system",
+        "api",
+        "www",
+        "mail",
+        "ftp",
+        "test",
+        "user",
+        "support",
+        "help",
+        "info",
+        "null",
+        "undefined",
+    ];
+    if reserved.contains(&username.to_lowercase().as_str()) {
+        return Err("This username is reserved and cannot be used".to_string());
+    }
+
+    Ok(())
+}
+
 pub fn validate_password(password: &str) -> Result<(), String> {
     if password.len() < 8 {
         return Err("Password must be at least 8 characters long".to_string());
     }
-    
+
     if password.len() > 128 {
         return Err("Password cannot exceed 128 characters".to_string());
     }
-    
+
     // Check for common patterns first
     if password.to_lowercase().contains("password") {
         return Err("Password cannot contain the word 'password'".to_string());
     }
-    
+
     let has_uppercase = password.chars().any(|c| c.is_uppercase());
     let has_lowercase = password.chars().any(|c| c.is_lowercase());
     let has_digit = password.chars().any(|c| c.is_ascii_digit());
-    let has_special = password.chars().any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c));
-    
+    let has_special = password
+        .chars()
+        .any(|c| "!@#$%^&*()_+-=[]{}|;:,.<>?".contains(c));
+
     if !has_uppercase {
         return Err("Password must contain at least one uppercase letter".to_string());
     }
-    
+
     if !has_lowercase {
         return Err("Password must contain at least one lowercase letter".to_string());
     }
-    
+
     if !has_digit {
         return Err("Password must contain at least one digit".to_string());
     }
-    
+
     if !has_special {
-        return Err("Password must contain at least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)".to_string());
+        return Err(
+            "Password must contain at least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)"
+                .to_string(),
+        );
     }
-    
+
     // Check for common weak sequences (4+ characters)
     if password.chars().collect::<Vec<_>>().windows(4).any(|w| {
         w[0] as u8 + 1 == w[1] as u8 && w[1] as u8 + 1 == w[2] as u8 && w[2] as u8 + 1 == w[3] as u8
     }) {
-        return Err("Password cannot contain sequential characters (e.g., 'abcd', '1234')".to_string());
+        return Err(
+            "Password cannot contain sequential characters (e.g., 'abcd', '1234')".to_string(),
+        );
     }
-    
+
     // Check for repeated characters (3+ in a row)
-    if password.chars().collect::<Vec<_>>().windows(3).any(|w| {
-        w[0] == w[1] && w[1] == w[2]
-    }) {
+    if password
+        .chars()
+        .collect::<Vec<_>>()
+        .windows(3)
+        .any(|w| w[0] == w[1] && w[1] == w[2])
+    {
         return Err("Password cannot contain repeated characters (e.g., 'aaa', '111')".to_string());
     }
-    
+
     Ok(())
 }

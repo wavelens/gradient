@@ -6,7 +6,7 @@
 
 use crate::config::*;
 use crate::input::*;
-use clap::{arg, Subcommand};
+use clap::{Subcommand, arg};
 use connector::*;
 use std::process::exit;
 
@@ -180,13 +180,14 @@ pub async fn handle(cmd: Commands) {
         }
 
         Commands::Show { name } => {
-            let res = caches::get_cache_key(get_request_config(load_config()).unwrap(), name.clone())
-                .await
-                .map_err(|e| {
-                    eprintln!("{}", e);
-                    exit(1);
-                })
-                .unwrap();
+            let res =
+                caches::get_cache_key(get_request_config(load_config()).unwrap(), name.clone())
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{}", e);
+                        exit(1);
+                    })
+                    .unwrap();
 
             if res.error {
                 eprintln!("Cache Key retrieval failed: {}", res.message);

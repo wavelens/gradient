@@ -5,8 +5,8 @@
 mod utils;
 
 use nix_daemon::{
-    nix::DaemonStore, BuildMode, ClientSettings, Error, NixError, Progress, ProgressExt, Stderr,
-    Store, Verbosity,
+    BuildMode, ClientSettings, Error, NixError, Progress, ProgressExt, Stderr, Store, Verbosity,
+    nix::DaemonStore,
 };
 use std::io::Write;
 use std::{collections::HashMap, process::Stdio};

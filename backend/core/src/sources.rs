@@ -113,7 +113,7 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
             debug!("Remote hash matches current evaluation commit, no update needed");
             return (false, remote_hash);
         }
-        
+
         info!("Remote hash differs from current evaluation commit, update needed");
     } else {
         info!("No previous evaluation found, update needed");
@@ -256,7 +256,8 @@ pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), String>
         .map_err(|e| format!("Failed to generate SSH private key: {}", e))?;
 
     // Step 3: Convert private key to OpenSSH format
-    let private_key_openssh = private_key.to_openssh(LineEnding::LF)
+    let private_key_openssh = private_key
+        .to_openssh(LineEnding::LF)
         .map_err(|e| format!("Failed to convert private key to OpenSSH format: {}", e))?
         .to_string();
 

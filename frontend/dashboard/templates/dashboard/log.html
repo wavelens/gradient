@@ -29,9 +29,9 @@
                check_circle
            </span> -->
            {% if success != 'waiting' %}
-                <span class="material-icons {% if success == 'true' %}green{% else %}red{% endif %}">{% if success == 'true' %}check_circle{% else %}cancel{% endif %}</span>
+                <span class="material-icons status-icon {% if success == 'true' %}green{% else %}red{% endif %}">{% if success == 'true' %}check_circle{% else %}cancel{% endif %}</span>
            {% else %}
-               <div class="loader"></div>
+               <div class="loader status-icon"></div>
            {% endif %}
             <a>{% trans 'Build' %}</a>
         </div>
@@ -44,7 +44,7 @@
             </div>
             <div class="m-r-2rem">
                 <div class="text-light m-b-05rem">{% trans 'Status' %}</div>
-                <div>{{ status }}</div>
+                <div class="status-text">{{ status }}</div>
             </div>
             <div class="m-r-2rem">
                 <div class="text-light m-b-05rem">{% trans 'Total duration' %}</div>
@@ -54,6 +54,14 @@
                 <div class="text-light m-b-05rem">{% trans 'Builds' %}</div>
                 <div>{{ builds }}</div>
             </div>
+            {% if status == 'Building' or status == 'Evaluating' or status == 'Queued' %}
+            <div class="m-r-2rem">
+                <button id="abortButton" class="button-round red-button" onclick="abortBuild()">
+                    <span class="material-symbols-outlined m-r-5">stop</span>
+                    {% trans 'Abort Build' %}
+                </button>
+            </div>
+            {% endif %}
         </div>
         <div class="innerbody">
             <div class="innerbody-header border-bottom">
@@ -65,11 +73,11 @@
                 <div class="flex-c">
                     <!-- <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle"> -->
                     {% if success != 'waiting' %}
-                        <span class="material-icons {% if success == 'true' %}green{% else %}red{% endif %}">
+                        <span class="material-icons status-icon {% if success == 'true' %}green{% else %}red{% endif %}">
                             {% if success == 'true' %}check_circle{% else %}cancel{% endif %}
                         </span>
                     {% else %}
-                        <div class="loader"></div>
+                        <div class="loader status-icon"></div>
                     {% endif %}
                     <span>{% trans 'Build' %}</span>
                 </div>

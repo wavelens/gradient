@@ -428,12 +428,8 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
             repair: bool,
             source: R,
         }
-        impl<
-                SN: AsRef<str> + Send + Sync + Debug,
-                SC: AsRef<str> + Send + Sync + Debug,
-                Refs,
-                R,
-            > DaemonProgressCaller for Caller<SN, SC, Refs, R>
+        impl<SN: AsRef<str> + Send + Sync + Debug, SC: AsRef<str> + Send + Sync + Debug, Refs, R>
+            DaemonProgressCaller for Caller<SN, SC, Refs, R>
         where
             Refs: IntoIterator + Send + Debug,
             Refs::IntoIter: ExactSizeIterator + Send,
@@ -1302,20 +1298,22 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
                 let mut nar_data = Vec::new();
                 let mut paren_count = 0;
                 let mut found_start = false;
-                
+
                 // First check for narVersionMagic1
                 let magic = wire::read_string(&mut store.conn).await?;
                 if magic != "nix-archive-1" {
-                    return Err(Error::Invalid(format!("Expected nix-archive-1, got {}", magic)).into());
+                    return Err(
+                        Error::Invalid(format!("Expected nix-archive-1, got {}", magic)).into(),
+                    );
                 }
 
                 nar_data.push(magic);
-                
+
                 // Read framed data until we find the complete NAR structure
                 loop {
                     let nar_string = wire::read_string(&mut store.conn).await?;
                     nar_data.push(nar_string.clone());
-                    
+
                     if nar_string == "(" {
                         paren_count += 1;
                         found_start = true;
@@ -1372,52 +1370,59 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
                 // Based on C++ RemoteStore::addToStore with ValidPathInfo
                 // Check if this operation is supported by this protocol version
                 if store.proto < Proto(1, 25) {
-                    return Err(Error::Invalid(format!("AddToStoreNar not supported in protocol {}", store.proto)).into());
+                    return Err(Error::Invalid(format!(
+                        "AddToStoreNar not supported in protocol {}",
+                        store.proto
+                    ))
+                    .into());
                 }
-                
+
                 // Send AddToStoreNar operation - matches C++ exactly
                 wire::write_op(&mut store.conn, wire::Op::AddToStoreNar)
                     .await
                     .with_field("AddToStoreNar.<op>")?;
-                    
+
                 // C++ order: path, deriver, narHash, references, registrationTime, narSize, ultimate, sigs, ca, repair, !checkSigs
                 wire::write_string(&mut store.conn, self.path)
                     .await
                     .with_field("AddToStoreNar.path")?;
-                    
+
                 wire::write_string(&mut store.conn, self.path_info.deriver.unwrap_or_default())
                     .await
                     .with_field("AddToStoreNar.deriver")?;
-                    
+
                 // In C++ this is: info.narHash.to_string(HashFormat::Base16, false)
                 wire::write_string(&mut store.conn, &self.path_info.nar_hash)
                     .await
                     .with_field("AddToStoreNar.narHash")?;
-                    
+
                 wire::write_strings(&mut store.conn, &self.path_info.references)
                     .await
                     .with_field("AddToStoreNar.references")?;
-                    
-                wire::write_u64(&mut store.conn, self.path_info.registration_time.timestamp() as u64)
-                    .await
-                    .with_field("AddToStoreNar.registrationTime")?;
-                    
+
+                wire::write_u64(
+                    &mut store.conn,
+                    self.path_info.registration_time.timestamp() as u64,
+                )
+                .await
+                .with_field("AddToStoreNar.registrationTime")?;
+
                 wire::write_u64(&mut store.conn, self.path_info.nar_size)
                     .await
                     .with_field("AddToStoreNar.narSize")?;
-                    
+
                 wire::write_bool(&mut store.conn, self.path_info.ultimate)
                     .await
                     .with_field("AddToStoreNar.ultimate")?;
-                    
+
                 wire::write_strings(&mut store.conn, &self.path_info.signatures)
                     .await
                     .with_field("AddToStoreNar.sigs")?;
-                    
+
                 wire::write_string(&mut store.conn, self.path_info.ca.unwrap_or_default())
                     .await
                     .with_field("AddToStoreNar.ca")?;
-                    
+
                 // repair and !checkSigs
                 wire::write_bool(&mut store.conn, false)
                     .await
@@ -1431,11 +1436,15 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
                 for nar_string in self.nar_source {
                     let s = nar_string.as_ref();
                     let bytes = s.as_bytes();
-                    
+
                     nar_binary.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
                     nar_binary.extend_from_slice(bytes);
 
-                    let padding_needed = if bytes.len() % 8 > 0 { 8 - (bytes.len() % 8) } else { 0 };
+                    let padding_needed = if bytes.len() % 8 > 0 {
+                        8 - (bytes.len() % 8)
+                    } else {
+                        0
+                    };
                     for _ in 0..padding_needed {
                         nar_binary.push(0);
                     }
@@ -1444,7 +1453,7 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
                 wire::write_u64(&mut store.conn, nar_binary.len() as u64).await?;
                 store.conn.write_all(&nar_binary).await?;
                 wire::write_u64(&mut store.conn, 0).await?; // Terminating frame
-                
+
                 Ok(())
             }
         }
@@ -1463,7 +1472,15 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
             }
         }
 
-        DaemonProgress::new(self, Caller { path, path_info, nar_source }, Returner)
+        DaemonProgress::new(
+            self,
+            Caller {
+                path,
+                path_info,
+                nar_source,
+            },
+            Returner,
+        )
     }
 }
 
@@ -1692,7 +1709,7 @@ where
                             "AddToStore is not implemented for Protocol {}",
                             self.proto
                         ))
-                        .into())
+                        .into());
                     }
                 },
                 Ok(wire::Op::BuildPaths) => {
@@ -1808,7 +1825,7 @@ where
                             "QueryValidPaths is not implemented for Protocol {}",
                             self.proto
                         ))
-                        .into())
+                        .into());
                     }
                 },
                 Ok(wire::Op::QuerySubstitutablePaths) => {

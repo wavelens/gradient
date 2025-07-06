@@ -15,7 +15,7 @@ use nix_daemon::nix::DaemonStore;
 use nix_daemon::{Progress, Store};
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ColumnTrait, Condition, EntityTrait, JoinType, QuerySelect, IntoActiveModel};
+use sea_orm::{ColumnTrait, Condition, EntityTrait, IntoActiveModel, JoinType, QuerySelect};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::option::Option;
@@ -23,7 +23,7 @@ use std::process::Output;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
-use tracing::{debug, error, info, warn, instrument};
+use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use super::scheduler::update_evaluation_status;
@@ -170,7 +170,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             parent_dependency_id = ?dependency_id,
             "Processing derivation"
         );
-        
+
         let path_info = get_derivation(dependency.clone(), store).await.unwrap();
 
         let references = core::executer::get_missing_builds(path_info.references.clone(), store)
@@ -463,17 +463,15 @@ pub async fn get_features_cmd(
     Ok((system, features))
 }
 
-
 async fn add_existing_build(
     state: Arc<ServerState>,
     _organization_id: Uuid,
     derivation: String,
     evaluation_id: Uuid,
 ) {
-    let (system, features) =
-        get_features_cmd(state.cli.binpath_nix.as_str(), derivation.as_str())
-            .await
-            .unwrap();
+    let (system, features) = get_features_cmd(state.cli.binpath_nix.as_str(), derivation.as_str())
+        .await
+        .unwrap();
 
     let abuild = ABuild {
         id: Set(Uuid::new_v4()),
@@ -807,14 +805,12 @@ pub async fn evaluate_direct(
                     Arc::clone(&state),
                     build,
                     BuildStatus::Queued,
-                ).await;
+                )
+                .await;
             }
 
-            update_evaluation_status(
-                Arc::clone(&state),
-                evaluation,
-                EvaluationStatus::Building,
-            ).await;
+            update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Building)
+                .await;
 
             if let Err(e) = tokio::fs::remove_dir_all(&temp_dir).await {
                 warn!(error = %e, temp_dir = %temp_dir, "Failed to cleanup temp directory");
@@ -824,11 +820,8 @@ pub async fn evaluate_direct(
         }
         Err(e) => {
             error!(error = %e, "Direct evaluation failed");
-            update_evaluation_status(
-                Arc::clone(&state),
-                evaluation,
-                EvaluationStatus::Failed,
-            ).await;
+            update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Failed)
+                .await;
 
             if let Err(cleanup_err) = tokio::fs::remove_dir_all(&temp_dir).await {
                 warn!(error = %cleanup_err, temp_dir = %temp_dir, "Failed to cleanup temp directory after evaluation failure");

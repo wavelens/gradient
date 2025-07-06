@@ -13,9 +13,9 @@ use chrono::{Duration, Utc};
 use core::input::load_secret;
 use core::types::*;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation, decode, encode};
-use oauth2::{PkceCodeChallenge};
-use rand::distr::Alphanumeric;
+use oauth2::PkceCodeChallenge;
 use rand::Rng;
+use rand::distr::Alphanumeric;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter,
 };
@@ -228,7 +228,9 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<Url, St
         return Err("OIDC is not enabled".to_string());
     }
 
-    let discovery_url = state.cli.oidc_discovery_url
+    let discovery_url = state
+        .cli
+        .oidc_discovery_url
         .as_ref()
         .ok_or("OIDC discovery URL not configured")?;
 
@@ -278,7 +280,9 @@ pub async fn oidc_login_verify(
         return Err("OIDC is not enabled".to_string());
     }
 
-    let discovery_url = state.cli.oidc_discovery_url
+    let discovery_url = state
+        .cli
+        .oidc_discovery_url
         .as_ref()
         .ok_or("OIDC discovery URL not configured")?;
 

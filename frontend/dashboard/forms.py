@@ -457,3 +457,55 @@ class EditOrganizationMemberForm(forms.Form):
             'class': 'form-control'
         })
     )
+
+class AddOrganizationServerForm(forms.Form):
+    name = forms.CharField(
+        label='Server Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    display_name = forms.CharField(
+        label='Display Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    host = forms.CharField(
+        label='Host',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    port = forms.IntegerField(
+        label='Port',
+        required=True,
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    username = forms.CharField(
+        label='Username',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    architectures = forms.CharField(
+        label='Architectures',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    features = forms.CharField(
+        label='Features',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+

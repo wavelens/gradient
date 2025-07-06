@@ -19,9 +19,14 @@
 {% endblock %}
 
  {% block inhalt %}
- <div class="">
+<div class="container">
+    <div class="header m-b-1rem">
+        <div>
+            <h1>{% trans 'Edit Server' %}</h1>
+        </div>
+    </div>
+    
     <div class="">
-        <h2 class="">{% trans 'Edit Server' %}</h2>
         <form method="post">
             {% csrf_token %}
             {% for field in form %}

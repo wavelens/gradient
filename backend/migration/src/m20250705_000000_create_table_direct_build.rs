@@ -26,9 +26,17 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(DirectBuild::Organization).uuid().not_null())
                     .col(ColumnDef::new(DirectBuild::Evaluation).uuid().not_null())
                     .col(ColumnDef::new(DirectBuild::Derivation).string().not_null())
-                    .col(ColumnDef::new(DirectBuild::RepositoryPath).string().not_null())
+                    .col(
+                        ColumnDef::new(DirectBuild::RepositoryPath)
+                            .string()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(DirectBuild::CreatedBy).uuid().not_null())
-                    .col(ColumnDef::new(DirectBuild::CreatedAt).timestamp().not_null())
+                    .col(
+                        ColumnDef::new(DirectBuild::CreatedAt)
+                            .timestamp()
+                            .not_null(),
+                    )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-direct_build-organization")

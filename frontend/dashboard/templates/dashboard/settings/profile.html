@@ -19,9 +19,14 @@
 {% endblock %}
 
  {% block inhalt %}
- <div class="">
+<div class="container">
+    <div class="header m-b-1rem">
+        <div>
+            <h1>{% trans 'Edit Profile' %}</h1>
+        </div>
+    </div>
+    
     <div class="">
-        <h2 class="">{% trans 'Edit Profile' %}</h2>
         {% if form.non_field_errors %}
             <div class="alert alert-danger">
                 {{ form.non_field_errors }}

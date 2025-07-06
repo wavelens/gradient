@@ -20,13 +20,19 @@
     <li><a class="settings-nav-link active" href=""><span class="material-symbols-outlined m-r-5">apartment</span>{% trans 'Organization' %}</a></li>
     {% if org %}
         <li><a class="settings-nav-link" href="{% url 'organizationMembers' org %}"><span class="material-symbols-outlined m-r-5">group</span>{% trans 'Members' %}</a></li>
+        <li><a class="settings-nav-link" href="{% url 'organizationServers' org %}"><span class="material-symbols-outlined m-r-5">dns</span>{% trans 'Servers' %}</a></li>
     {% endif %}
 {% endblock %}
 
  {% block inhalt %}
- <div class="">
+<div class="container">
+    <div class="header m-b-1rem">
+        <div>
+            <h1>{% trans 'Edit Organization' %}</h1>
+        </div>
+    </div>
+    
     <div class="">
-        <h2 class="">{% trans 'Edit Organization' %}</h2>
         {% if form.non_field_errors %}
             <div class="alert alert-danger">
                 {{ form.non_field_errors }}
