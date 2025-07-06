@@ -894,11 +894,11 @@ tr:hover td{
     border: 1px solid rgb(118, 118, 118, 0.5);
 }
 
-.home-container div:not(:last-child) {
+.home-container > div:not(:last-child) {
     border-bottom: 1px solid rgb(118, 118, 118);
 }
 
-.home-container div {
+.home-container > div {
     padding: 20px;
 }
 
@@ -1058,7 +1058,7 @@ tr:hover td{
 .add-member-section {
     margin-bottom: 2rem;
     padding: 1rem;
-    border: 1px solid #ddd;
+    border: 1px solid rgb(118, 118, 118, 0.5);
     border-radius: 4px;
 }
 
@@ -1122,6 +1122,15 @@ tr:hover td{
     border: 1px solid #dee2e6;
     border-radius: 4px;
     margin-top: 1rem;
+}
+
+.inline-form {
+    display: inline;
+}
+
+.member-row {
+    justify-content: space-between;
+    align-items: center;
 }
 
 .empty-state {
@@ -1220,4 +1229,8 @@ tr:hover td{
 
 .btn:hover {
     opacity: 0.9;
+}
+
+.add-member-section .submit-btn {
+    margin-bottom: 1rem;
 }
