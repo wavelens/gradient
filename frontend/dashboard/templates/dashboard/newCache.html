@@ -1,7 +1,7 @@
 <!--
  * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
  *
- * SPDX-License-Identifier: AGPL-3.0-only
+ * SPDX-License-Identifier: AGPL-3.0-only OR WL-1.0
  -->
 
  {% extends 'dashboard/index.html' %}
@@ -11,17 +11,12 @@
     {% load i18n %}
 </head>
 
-{% block title %}{% trans 'Login' %}{% endblock %}
+{% block title %}{% trans 'New Cache' %}{% endblock %}
 
 {% block content %}
 <div class="outer-form">
     <div class="form-container">
-        <h2 class="form-header-label">{% trans 'Login' %}</h2>
-        {% if form.non_field_errors %}
-            <div class="alert alert-danger">
-                {{ form.non_field_errors }}
-            </div>
-        {% endif %}
+        <h2 class="form-header-label">{% trans 'New Cache' %}</h2>
         <form method="post">
             {% csrf_token %}
             {% for field in form %}
@@ -32,17 +27,16 @@
                     </div>
                 {% else %}
                     <div class="form-field">
-                        <label for="{{ field.id_for_label }}" class="required-label">{% trans field.label %}</label>
+                        <label for="{{ field.id_for_label }}" {% if field.field.required %}class="required-label"{% endif %}>{% trans field.label %}</label>
                         {{ field }}
                         {% if field.errors %}
-                            <div class="error">{% trans field.errors %}</div>
+                            <div class="error">{{ field.errors }}</div>
                         {% endif %}
                     </div>
                 {% endif %}
             {% endfor %}
-            <button type="submit" class="submit-btn">{% trans 'Login' %}</button>
+            <button type="submit" class="submit-btn">{% trans 'Create' %}</button>
         </form>
-        <div class="register">{% trans "Don't have an account?" %}<a class="register blue-link" href="{% url 'register' %}?next=/login">{% trans 'Register' %}</a></div>
     </div>
 </div>
 <style>

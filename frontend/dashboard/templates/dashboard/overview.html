@@ -16,7 +16,8 @@
 
 {% block content %}
 
-{% include "../individualHeader.html" %}
+{% url 'settingsOrganization' org_id as link_url %}
+{% include "../individualHeader.html" with link_url=link_url %}
 
 <!-- <div class="container">
     <div class="header">
@@ -120,7 +121,10 @@
     <div class="m-b-1rem">
         <div class="filter-container">
             <div class="search-container">
-                <input type="text" id="searchInput" placeholder="Search">
+                <span class="material-symbols-outlined">
+                    search
+                </span>
+                <input type="text" id="searchInput" placeholder="Search" class="bg-none">
             </div>
         </div>
     </div>
@@ -129,7 +133,7 @@
     <div class="home-container">
         {% for block in details_blocks %}
             <div  class="workflow-item">
-                <a class="full-width normal-hover" href="{% url 'log-eval' org_id block.id %}">
+                <a class="full-width normal-hover blue-span" href="{% url 'log-eval' org_id block.id %}">
                     <span class="workflow-title">{{ block.display_name }}</span><br><span class="text-light">{% trans block.description %}</span>
                 </a>
                 <div class="d-flex p-0">
@@ -143,9 +147,26 @@
                         <span class="material-symbols-outlined m-r-3">
                             graph_1
                         </span>
-                        <span class="text-light-n-s">{{ block.id }}</span>
+                        <span class="text-light-n-s">{{ block.id }}{{ block.id3 }}</span>
                     </span>
                 </div>
+            </div>
+        {% empty %}
+            <div class="no-caches empty-state">
+                <span class="material-symbols-outlined empty-state-icon">
+                    assignment
+                </span>
+                {% if error_message %}
+                    <h3>{% trans 'Error loading projects' %}</h3>
+                    <p>{{ error_message }}</p>
+                    <p class="empty-state-link">{% trans 'The project API endpoints may not be implemented yet.' %}</p>
+                {% else %}
+                    <h3>{% trans 'No projects found' %}</h3>
+                    <p>{% trans 'Create your first project to get started.' %}</p>
+                    <a href="{% url 'new_project' %}" class="submit-btn empty-state-link">
+                        {% trans 'Create Project' %}
+                    </a>
+                {% endif %}
             </div>
         {% endfor %}
     </div>

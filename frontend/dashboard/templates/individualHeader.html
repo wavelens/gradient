@@ -20,15 +20,19 @@
     </div>
     <nav role="navigation">
         <a class="nav-link flex-end" href="{% url 'workflow' org_id %}">
-            <span class="material-symbols-outlined f-s-19px m-r-3">keyboard_command_key</span>
+            <span class="material-symbols-outlined f-s-19px m-r-4">keyboard_command_key</span>
             <span>{% trans 'Workflows' %}</span>
+        </a>
+        <a class="nav-link flex-end" href="{% url 'caches' %}">
+            <span class="material-symbols-outlined f-s-19px m-r-4">hub</span>
+            <span>{% trans 'Caches' %}</span>
         </a>
 
         {% if project_id %}
-        <a class="nav-link flex-end" href="{% url 'log' org_id %}"><span class="material-symbols-outlined f-s-19px m-r-3">vital_signs</span><span>{% trans 'Log' %}</span></a>
-        <a class="nav-link flex-end" href="{% url 'download' org_id %}"><span class="material-symbols-outlined f-s-19px m-r-3">download</span><span>{% trans 'Download' %}</span></a>
+        <a class="nav-link flex-end" href="{% url 'log' org_id %}"><span class="material-symbols-outlined f-s-19px m-r-4">vital_signs</span><span>{% trans 'Log' %}</span></a>
+        <a class="nav-link flex-end" href="{% url 'download' org_id %}"><span class="material-symbols-outlined f-s-19px m-r-4">download</span><span>{% trans 'Download' %}</span></a>
         {% endif %}
-        <a class="nav-link flex-end header-icon-right" href="settings"><span class="material-symbols-outlined f-s-19px m-r-3">settings</span><span>{% trans 'Settings' %}</span></a>
+        <a class="nav-link flex-end header-icon-right" href="{{ link_url }}"><span class="material-symbols-outlined f-s-19px m-r-4">settings</span><span>{% trans 'Settings' %}</span></a>
         <!-- <img class="center-image icon" src="../static/dashboard/icons/download.svg"> -->
     </nav>
 </header>

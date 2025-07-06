@@ -1,0 +1,65 @@
+<!--
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ -->
+
+ {% extends 'dashboard/settings/base.html' %}
+
+
+ <head>
+     {% load static %}
+     {% load i18n %}
+ </head>
+ 
+ {% block page_title %}{% trans 'Organization Settings' %}{% endblock %}
+
+{% block settings_title %}{% trans 'Organization Settings' %}{% endblock %}
+
+{% block navigation_items %}
+    <li><a class="settings-nav-link active" href=""><span class="material-symbols-outlined m-r-5">apartment</span>{% trans 'Organization' %}</a></li>
+    {% if org %}
+        <li><a class="settings-nav-link" href="{% url 'organizationMembers' org %}"><span class="material-symbols-outlined m-r-5">group</span>{% trans 'Members' %}</a></li>
+    {% endif %}
+{% endblock %}
+
+ {% block inhalt %}
+ <div class="">
+    <div class="">
+        <h2 class="">{% trans 'Edit Organization' %}</h2>
+        {% if form.non_field_errors %}
+            <div class="alert alert-danger">
+                {{ form.non_field_errors }}
+            </div>
+        {% endif %}
+        <form method="post">
+            {% csrf_token %}
+            {% for field in form %}
+                {% if field.field.widget|default:"" == form.fields.remember_me.widget %}
+                    <div class="form-check">
+                        {{ field }}
+                        <label for="{{ field.id_for_label }}" class="form-check-label">{% trans field.label %}</label>
+                    </div>
+                {% else %}
+                    <div class="form-field">
+                        <label for="{{ field.id_for_label }}" {% if field.field.required %}class="required-label"{% endif %}>{% trans field.label %}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                            <div class="error">{% trans field.errors %}</div>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            {% endfor %}
+            <button type="submit" class="submit-btn">{% trans 'Save' %}</button>
+        </form>
+        
+        <hr class="settings-hr">
+        <div class="settings-section">
+            <form method="post" action="{% url 'deleteOrganization' org %}" id="deleteOrgForm">
+                {% csrf_token %}
+                <button type="button" class="delete-button delete-trigger" data-title="{% trans 'Delete Organization' %}" data-message="{% trans 'Are you sure you want to delete this organization? This action cannot be undone.' %}" data-form="deleteOrgForm">{% trans 'Delete Organization' %}</button>
+            </form>
+        </div>
+    </div>
+</div>
+ {% endblock %}

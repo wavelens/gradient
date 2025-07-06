@@ -203,22 +203,257 @@ class NewServerForm(forms.Form):
             'class': 'form-control',
         })
     )
-    host = forms.CharField(
+    username = forms.CharField(
         label='Username',
         required=True,
         widget=forms.TextInput(attrs={
             'class': 'form-control'
         })
     )
-    architectures = forms.ChoiceField(
-        choices=GEEKS_CHOICES,
+    architectures = forms.CharField(
         required=True,
-        widget=forms.Select,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        }),
         label='Architectures'
     )
-    features = forms.ChoiceField(
-        choices=GEEKS_CHOICES,
+    features = forms.CharField(
         required=True,
-        widget=forms.Select,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        }),
         label='Features'
+    )
+
+class NewCacheForm(forms.Form):
+    name = forms.CharField(
+        label='Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    display_name = forms.CharField(
+        label='Display Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    description = forms.CharField(
+        label='Description',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    priority = forms.IntegerField(
+        label='Priority',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+        })
+    )
+
+class EditServerForm(forms.Form):
+    server = forms.CharField(
+        label='Server',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    server_name = forms.CharField(
+        label='Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    host = forms.CharField(
+        label='Host',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    port = forms.IntegerField(
+        label='Port',
+        required=True,
+        widget=forms.NumberInput(attrs={
+            'class': 'form-control',
+        })
+    )
+    username = forms.CharField(
+        label='Username',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    architectures = forms.CharField(
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        }),
+        label='Architectures'
+    )
+    features = forms.CharField(
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        }),
+        label='Features'
+    )
+
+class EditOrganizationForm(forms.Form):
+    name = forms.CharField(
+        label='Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    display_name = forms.CharField(
+        label='Display Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    description = forms.CharField(
+        label='Description',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    
+class EditProjectForm(forms.Form):
+    name = forms.CharField(
+        label='Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    display_name = forms.CharField(
+        label='Display Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    description = forms.CharField(
+        label='Description',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    repository = forms.CharField(
+        label='Repository',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    evaluation_wildcard = forms.CharField(
+        label='Wildcard',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+
+class EditCacheForm(forms.Form):
+    name = forms.CharField(
+        label='Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    display_name = forms.CharField(
+        label='Display Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    description = forms.CharField(
+        label='Description',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    priority = forms.IntegerField(
+        label='Priority',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+        })
+    )
+
+class EditUserForm(forms.Form):
+    name = forms.CharField(
+        label='Name',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    username = forms.CharField(
+        label='Username',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    email = forms.CharField(
+        label='Email',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+
+class AddOrganizationMemberForm(forms.Form):
+    ROLE_CHOICES = [
+        ('Admin', 'Admin'),
+        ('Write', 'Write'),
+        ('View', 'View'),
+    ]
+    
+    user = forms.CharField(
+        label='Username',
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
+        })
+    )
+    role = forms.ChoiceField(
+        label='Role',
+        choices=ROLE_CHOICES,
+        required=True,
+        widget=forms.Select(attrs={
+            'class': 'form-control'
+        })
+    )
+
+class EditOrganizationMemberForm(forms.Form):
+    ROLE_CHOICES = [
+        ('admin', 'Admin'),
+        ('member', 'Member'),
+        ('viewer', 'Viewer'),
+    ]
+    
+    role = forms.ChoiceField(
+        label='Role',
+        choices=ROLE_CHOICES,
+        required=True,
+        widget=forms.Select(attrs={
+            'class': 'form-control'
+        })
     )

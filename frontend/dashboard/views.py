@@ -7,6 +7,7 @@ from django.http import HttpResponse, HttpResponseRedirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
 from django.contrib.auth import logout
+from django.contrib import messages
 from . import api
 from .auth import LoginForm, login, RegisterForm
 from .forms import *
@@ -77,11 +78,11 @@ def workflow(request, org):
             return HttpResponse(status=500)
 
         project_details = project_details['message']
-
         details_blocks.append({
             'project': project['name'],
             'display_name': project_details['display_name'],
             'id': project_details['last_evaluation'],
+            'id2': project_details['id'],
             'description': project_details['description'],
             'exec': 34,
             'duration': '12m 11s',
@@ -249,6 +250,216 @@ def new_organization(request):
     return render(request, "dashboard/newOrganization.html", {'form': form})
 
 @login_required
+def edit_organization(request, org):
+    org_data = api.get_orgs_organization(request, org)
+    org_message = org_data.get('message', {})
+    initial_data = {
+        'name': org_message.get('name', ''),
+        'display_name': org_message.get('display_name', ''),
+        'description': org_message.get('description', '')
+    }
+
+    if request.method == 'POST':
+        form = EditOrganizationForm(request.POST)
+        if form.is_valid():
+            cleaned = form.cleaned_data
+            patch_data = {}
+
+            if cleaned['name'] != org_message.get('name'):
+                patch_data['name'] = cleaned['name']
+            if cleaned['display_name'] != org_message.get('display_name'):
+                patch_data['display_name'] = cleaned['display_name']
+            if cleaned['description'] != org_message.get('description'):
+                patch_data['description'] = cleaned['description']
+            
+            if patch_data:
+                response = api.patch_orgs_organization(request, org, **patch_data)
+                if response.get("error"):
+                    form.add_error(None, response.get("message", "Unbekannter Fehler"))
+                else:
+                    return redirect('/')
+            else:
+                return redirect('/')
+    else:
+        form = EditOrganizationForm(initial=initial_data)
+
+    return render(request, "dashboard/settings/organization.html", {'form': form, 'org': org})
+
+@login_required
+def delete_organization(request, org):
+    if request.method == 'POST':
+        response = api.delete_orgs_organization(request, org)
+        if response is None or response.get("error"):
+            messages.error(request, "Failed to delete organization.")
+            return redirect('settingsOrganization', org=org)
+        else:
+            messages.success(request, "Organization deleted successfully.")
+            return redirect('home')
+    else:
+        return redirect('settingsOrganization', org=org)
+
+@login_required
+def new_cache(request):
+    if request.method == 'POST':
+        form = NewCacheForm(request.POST)
+        if form.is_valid():
+            api.put_caches(request, form.cleaned_data['name'], form.cleaned_data['display_name'], form.cleaned_data['description'], form.cleaned_data['priority'])
+            return redirect('/')
+    else:
+        form = NewCacheForm()
+
+    return render(request, "dashboard/NewCache.html", {'form': form})
+
+@login_required
+def edit_cache(request, cache):
+    cache_data = api.get_caches_cache(request, cache)
+    cache_message = cache_data.get('message', {})
+    initial_data = {
+        'name': cache_message.get('name', ''),
+        'display_name': cache_message.get('display_name', ''),
+        'description': cache_message.get('description', ''),
+        'priority': cache_message.get('priority', '')
+    }
+
+    if request.method == 'POST':
+        form = EditCacheForm(request.POST)
+        if form.is_valid():
+            cleaned = form.cleaned_data
+            patch_data = {}
+
+            if cleaned['name'] != cache_message.get('name'):
+                patch_data['name'] = cleaned['name']
+            if cleaned['display_name'] != cache_message.get('display_name'):
+                patch_data['display_name'] = cleaned['display_name']
+            if cleaned['description'] != cache_message.get('description'):
+                patch_data['description'] = cleaned['description']
+            if cleaned['priority'] != cache_message.get('priority'):
+                patch_data['priority'] = cleaned['priority']
+            
+            if patch_data:
+                response = api.patch_caches_cache(request, cache, **patch_data)
+                if response.get("error"):
+                    form.add_error(None, response.get("message", "Unbekannter Fehler"))
+                else:
+                    return redirect('/')
+            else:
+                return redirect('/')
+    else:
+        form = EditCacheForm(initial=initial_data)
+
+    return render(request, "dashboard/settings/cache.html", {'form': form, 'cache': cache})
+
+@login_required
+def delete_cache(request, cache):
+    if request.method == 'POST':
+        response = api.delete_caches_cache(request, cache)
+        if response is None or response.get("error"):
+            messages.error(request, "Failed to delete cache.")
+            return redirect('settingsCache', cache=cache)
+        else:
+            messages.success(request, "Cache deleted successfully.")
+            return redirect('caches')
+    else:
+        return redirect('settingsCache', cache=cache)
+
+@login_required
+def organization_members(request, org):
+    members_data = api.get_orgs_organization_users(request, org)
+    if isinstance(members_data, type(None)) or members_data.get('error'):
+        members = []
+    else:
+        members = members_data.get('message', [])
+    
+    add_form = None
+    if request.method == 'POST':
+        if 'add_member' in request.POST:
+            add_form = AddOrganizationMemberForm(request.POST)
+            if add_form.is_valid():
+
+                response = api.post_orgs_organization_users(
+                    request, 
+                    org, 
+                    add_form.cleaned_data['user'], 
+                    add_form.cleaned_data['role'].upper()
+                )
+
+                if response and not response.get('error'):
+                    return redirect(f'/organization/{org}/members')
+                else:
+                    error_message = response.get('message') if response else 'Failed to add member (no response from API)'
+                    add_form.add_error(None, error_message)
+        
+        elif 'remove_member' in request.POST:
+            user_to_remove = request.POST.get('user')
+            if user_to_remove:
+                response = api.delete_orgs_organization_users(request, org, user_to_remove)
+                if response and not response.get('error'):
+                    return redirect(f'/organization/{org}/members')
+        
+        elif 'edit_role' in request.POST:
+            user_to_edit = request.POST.get('user')
+            new_role = request.POST.get('role')
+            if user_to_edit and new_role:
+                response = api.patch_orgs_organization_users(request, org, user_to_edit, new_role)
+                if response and not response.get('error'):
+                    return redirect(f'/organization/{org}/members')
+    
+    if not add_form:
+        add_form = AddOrganizationMemberForm()
+    
+    context = {
+        'org': org,
+        'members': members,
+        'add_form': add_form,
+        'role_choices': AddOrganizationMemberForm.ROLE_CHOICES
+    }
+    
+    return render(request, "dashboard/settings/organization_members.html", context)
+
+@login_required
+def caches(request):
+    print('Hello')
+    details_blocks = []
+    all_caches = api.get_caches(request)
+    print(all_caches)
+    if isinstance(all_caches, type(None)):
+        # API call failed - show empty state
+        context = {'details_blocks': []}
+        return render(request, "dashboard/caches.html", context)
+    
+    if all_caches.get('error'):
+        # API returned error - show empty state with error message
+        context = {'details_blocks': [], 'error_message': all_caches.get('message', 'Failed to load caches')}
+        return render(request, "dashboard/caches.html", context)
+
+    all_caches = all_caches.get('message', [])
+
+    for cache in all_caches:
+        cache_details = api.get_caches_cache(request, cache['name'])
+
+        if isinstance(cache_details, type(None)) or cache_details.get('error'):
+            # Skip this cache if we can't get details
+            continue
+
+        cache_details = cache_details['message']
+
+        details_blocks.append({
+            'name': cache['name'],
+            'display_name': cache_details['display_name'],
+            'id': cache['id'],
+            'description': cache_details['description'],
+            'priority': cache_details.get('priority', 'N/A'),
+            'status': cache_details.get('status', 'inactive'),
+            'size': cache_details.get('size', 'N/A'),
+            'hit_rate': cache_details.get('hit_rate', 'N/A'),
+        })
+
+    context = {
+        'details_blocks': details_blocks
+    }
+    return render(request, "dashboard/caches.html", context)
+
+@login_required
 def new_project(request):
     org = request.GET.get("org")
     all_orgs = api.get_orgs(request)
@@ -280,10 +491,65 @@ def new_project(request):
     return render(request, "dashboard/newProject.html", {'form': form})
 
 @login_required
+def edit_project(request, org, project):
+    project_data = api.get_projects_project(request, org, project)
+    project_message = project_data.get('message', {})
+    initial_data = {
+        'name': project_message.get('name', ''),
+        'display_name': project_message.get('display_name', ''),
+        'description': project_message.get('description', ''),
+        'repository': project_message.get('repository', ''),
+        'evaluation_wildcard': project_message.get('evaluation_wildcard', '')
+    }
+
+    if request.method == 'POST':
+        form = EditProjectForm(request.POST)
+        if form.is_valid():
+            cleaned = form.cleaned_data
+            patch_data = {}
+            if cleaned['name'] != project_message.get('name'):
+                patch_data['name'] = cleaned['name']
+            if cleaned['display_name'] != project_message.get('display_name'):
+                patch_data['display_name'] = cleaned['display_name']
+            if cleaned['description'] != project_message.get('description'):
+                patch_data['description'] = cleaned['description']
+
+            if patch_data:
+                response = api.patch_projects_project(request, org, project, **patch_data)
+                if response.get("error"):
+                    form.add_error(None, response.get("message", "Unbekannter Fehler"))
+                else:
+                    return redirect('/')
+            else:
+                return redirect('/')
+    else:
+        form = EditProjectForm(initial=initial_data)
+    return render(request, "dashboard/settings/project.html", {'form': form, 'org': org, 'project': project})
+
+@login_required
+def delete_project(request, org, project):
+    if request.method == 'POST':
+        response = api.delete_projects_project(request, org, project)
+        if response is None or response.get("error"):
+            messages.error(request, "Failed to delete project.")
+            return redirect('settingsProject', org=org, project=project)
+        else:
+            messages.success(request, "Project deleted successfully.")
+            return redirect('workflow', org=org)
+    else:
+        return redirect('settingsProject', org=org, project=project)
+
+@login_required
 def new_server(request):
     org = request.GET.get("org")
     form = NewServerForm()
     return render(request, "dashboard/newServer.html", {'form': form})
+
+@login_required
+def edit_server(request):
+    org = request.GET.get("org")
+    form = EditServerForm()
+    return render(request, "dashboard/settings/server.html", {'form': form})
 
 class UserLoginView(LoginView):
     template_name = "login.html"
@@ -331,3 +597,48 @@ def register(request):
         form = RegisterForm()
 
     return render(request, "register.html", {'form': form})
+
+def settingsProfile(request):
+    user = request.user
+    initial_data = {
+        'name': user.name,
+        'username': user.username,
+        'email': user.email
+    }
+    if request.method == 'POST':
+        form = EditUserForm(request.POST)
+        if form.is_valid():
+            cleaned = form.cleaned_data
+            patch_data = {}
+            if cleaned['name'] != user.name:
+                patch_data['name'] = cleaned['name']
+            if cleaned['username'] != user.username:
+                patch_data['username'] = cleaned['username']
+            if cleaned['email'] != user.email:
+                patch_data['email'] = cleaned['email']
+
+            if patch_data:
+                response = api.patch_user_settings(request, **patch_data)
+                if response.get("error"):
+                    form.add_error(None, response.get("message", "Unbekannter Fehler"))
+                else:
+                    return redirect('/')
+            else:
+                return redirect('/')
+    else:
+        form = EditUserForm(initial=initial_data)
+    return render(request, "dashboard/settings/profile.html", {'form': form})
+
+@login_required
+def delete_user(request):
+    if request.method == 'POST':
+        response = api.delete_user(request)
+        if response is None or response.get("error"):
+            messages.error(request, "Failed to delete account.")
+            return redirect('settingsProfile')
+        else:
+            logout(request)
+            messages.success(request, "Account deleted successfully.")
+            return redirect('login')
+    else:
+        return redirect('settingsProfile')

@@ -4,24 +4,24 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  -->
 
- {% extends 'dashboard/index.html' %}
+ {% extends 'dashboard/settings/base.html' %}
+
 
  <head>
-    {% load static %}
-    {% load i18n %}
-</head>
+     {% load static %}
+     {% load i18n %}
+ </head>
+ 
+ {% block title %}{% trans 'Settings' %}{% endblock %}
 
-{% block title %}{% trans 'Login' %}{% endblock %}
+ {% block navigation_items %}
+    <li><a class="settings-nav-link active" href=""><span class="material-symbols-outlined m-r-5">assignment</span>{% trans 'Server' %}</a></li>
+{% endblock %}
 
-{% block content %}
-<div class="outer-form">
-    <div class="form-container">
-        <h2 class="form-header-label">{% trans 'Login' %}</h2>
-        {% if form.non_field_errors %}
-            <div class="alert alert-danger">
-                {{ form.non_field_errors }}
-            </div>
-        {% endif %}
+ {% block inhalt %}
+ <div class="">
+    <div class="">
+        <h2 class="">{% trans 'Edit Server' %}</h2>
         <form method="post">
             {% csrf_token %}
             {% for field in form %}
@@ -32,7 +32,7 @@
                     </div>
                 {% else %}
                     <div class="form-field">
-                        <label for="{{ field.id_for_label }}" class="required-label">{% trans field.label %}</label>
+                        <label for="{{ field.id_for_label }}" {% if field.field.required %}class="required-label"{% endif %}>{% trans field.label %}</label>
                         {{ field }}
                         {% if field.errors %}
                             <div class="error">{% trans field.errors %}</div>
@@ -40,12 +40,8 @@
                     </div>
                 {% endif %}
             {% endfor %}
-            <button type="submit" class="submit-btn">{% trans 'Login' %}</button>
+            <button type="submit" class="submit-btn">{% trans 'Save' %}</button>
         </form>
-        <div class="register">{% trans "Don't have an account?" %}<a class="register blue-link" href="{% url 'register' %}?next=/login">{% trans 'Register' %}</a></div>
     </div>
 </div>
-<style>
-    
-</style>
-{% endblock %}
+ {% endblock %}

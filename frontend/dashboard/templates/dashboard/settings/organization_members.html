@@ -1,0 +1,142 @@
+<!--
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ -->
+
+ {% extends 'dashboard/settings/base.html' %}
+
+
+ <head>
+     {% load static %}
+     {% load i18n %}
+ </head>
+ 
+ {% block page_title %}{% trans 'Organization Members' %}{% endblock %}
+
+{% block settings_title %}{% trans 'Organization Members' %}{% endblock %}
+
+{% block navigation_items %}
+    {% if org %}
+        <li><a class="settings-nav-link" href="{% url 'settingsOrganization' org %}"><span class="material-symbols-outlined m-r-5">apartment</span>{% trans 'Organization' %}</a></li>
+    {% endif %}
+    <li><a class="settings-nav-link active" href=""><span class="material-symbols-outlined m-r-5">group</span>{% trans 'Members' %}</a></li>
+{% endblock %}
+
+ {% block inhalt %}
+<div class="container">
+    <div class="header m-b-1rem">
+        <div>
+            <h1>{% trans 'Organization Members' %}</h1>
+        </div>
+    </div>
+    
+    <!-- Add Member Form -->
+    <div class="add-member-section m-b-1rem">
+        <h3>{% trans 'Add New Member' %}</h3>
+        {% if add_form.non_field_errors %}
+            <div class="alert alert-danger">
+                {{ add_form.non_field_errors }}
+            </div>
+        {% endif %}
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="add_member" value="1">
+            <div class="member-form-layout">
+                <div class="form-field member-form-field">
+                    <label for="{{ add_form.user.id_for_label }}" class="required-label">{% trans add_form.user.label %}</label>
+                    {{ add_form.user }}
+                    {% if add_form.user.errors %}
+                        <div class="error">{{ add_form.user.errors }}</div>
+                    {% endif %}
+                </div>
+                <div class="form-field member-form-field">
+                    <label for="{{ add_form.role.id_for_label }}" class="required-label">{% trans add_form.role.label %}</label>
+                    {{ add_form.role }}
+                    {% if add_form.role.errors %}
+                        <div class="error">{{ add_form.role.errors }}</div>
+                    {% endif %}
+                </div>
+                <div>
+                    <button type="submit" class="submit-btn">{% trans 'Add Member' %}</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Search Field -->
+    <div class="m-b-1rem">
+        <div class="filter-container">
+            <div class="search-container">
+                <span class="material-symbols-outlined">
+                    search
+                </span>
+                <input type="text" id="searchInput" placeholder="{% trans 'Search members' %}" class="bg-none">
+            </div>
+        </div>
+    </div>
+
+    <!-- Members List -->
+    <div class="home-container">
+        {% for member in members %}
+            <div class="workflow-item member-item">
+                <div class="full-width normal-hover">
+                    <div class="d-flex member-row">
+                        <div>
+                            <span class="workflow-title member-name">{{ member.name }}</span>
+                        </div>
+                        <div class="d-flex">
+                            <form method="post" class="inline-form m-r-1rem">
+                                {% csrf_token %}
+                                <input type="hidden" name="edit_role" value="1">
+                                <input type="hidden" name="user" value="{{ member.user }}">
+                                <select name="role" class="field-select member-form-element" onchange="this.form.submit()">
+                                    {% for role_value, role_label in role_choices %}
+                                        <option value="{{ role_value }}" {% if member.role == role_value %}selected{% endif %}>{{ role_label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </form>
+                            <form method="post" class="inline-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="remove_member" value="1">
+                                <input type="hidden" name="user" value="{{ member.id }}">
+                                <button type="submit" class="button-round remove-member-button">
+                                    {% trans 'Remove' %}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% empty %}
+            <div class="no-members empty-state">
+                <span class="material-symbols-outlined empty-state-icon">
+                    group
+                </span>
+                <h3>{% trans 'No members found' %}</h3>
+                <p>{% trans 'Add members to your organization to get started.' %}</p>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        let searchInput = document.getElementById("searchInput");
+        let items = document.querySelectorAll(".member-item");
+
+        searchInput.addEventListener("input", function() {
+            let filter = searchInput.value.toLowerCase();
+
+            items.forEach(item => {
+                let titleElement = item.querySelector(".member-name");
+                
+                if (titleElement) {
+                    let name = titleElement.textContent.toLowerCase();
+                    item.style.display = name.includes(filter) ? "" : "none";
+                }
+            });
+        });
+    });
+</script>
+ {% endblock %}

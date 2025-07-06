@@ -1,0 +1,60 @@
+<!--
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ -->
+
+ {% extends 'dashboard/settings/base.html' %}
+
+
+ <head>
+     {% load static %}
+     {% load i18n %}
+ </head>
+ 
+ {% block title %}{% trans 'Settings' %}{% endblock %}
+
+ {% block navigation_items %}
+ <li><a class="settings-nav-link active" href="{% url 'settingsProfile' %}"><span class="material-symbols-outlined m-r-5">assignment</span>{% trans 'Public Profile' %}</a></li>
+{% endblock %}
+
+ {% block inhalt %}
+ <div class="">
+    <div class="">
+        <h2 class="">{% trans 'Edit Profile' %}</h2>
+        {% if form.non_field_errors %}
+            <div class="alert alert-danger">
+                {{ form.non_field_errors }}
+            </div>
+        {% endif %}
+        <form method="post">
+            {% csrf_token %}
+            {% for field in form %}
+                {% if field.field.widget|default:"" == form.fields.remember_me.widget %}
+                    <div class="form-check">
+                        {{ field }}
+                        <label for="{{ field.id_for_label }}" class="form-check-label">{% trans field.label %}</label>
+                    </div>
+                {% else %}
+                    <div class="form-field">
+                        <label for="{{ field.id_for_label }}" {% if field.field.required %}class="required-label"{% endif %}>{% trans field.label %}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                            <div class="error">{% trans field.errors %}</div>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            {% endfor %}
+            <button type="submit" class="submit-btn">{% trans 'Save' %}</button>
+        </form>
+        
+        <hr class="settings-hr">
+        <div class="settings-section">
+            <form method="post" action="{% url 'deleteUser' %}" id="deleteUserForm">
+                {% csrf_token %}
+                <button type="button" class="delete-button delete-trigger" data-title="{% trans 'Delete Account' %}" data-message="{% trans 'Are you sure you want to delete your account? This action cannot be undone.' %}" data-form="deleteUserForm">{% trans 'Delete Account' %}</button>
+            </form>
+        </div>
+    </div>
+</div>
+ {% endblock %}
