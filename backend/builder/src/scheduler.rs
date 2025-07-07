@@ -11,8 +11,6 @@ use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use futures::stream::{self, StreamExt};
-use nix_daemon::nix::DaemonStore;
-use nix_daemon::{Progress, Store};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, JoinType, QueryFilter,
@@ -20,7 +18,6 @@ use sea_orm::{
 };
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
 use tokio::time;
 use tracing::{debug, error, info, instrument, warn};
@@ -62,7 +59,7 @@ pub async fn schedule_evaluation_loop(state: Arc<ServerState>) {
 pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) {
     info!("Reviewing evaluation");
 
-    let (project, organization) = if let Some(project_id) = evaluation.project {
+    let (_project, organization) = if let Some(project_id) = evaluation.project {
         // Regular project-based evaluation
         let project = EProject::find_by_id(project_id)
             .one(&state.db)

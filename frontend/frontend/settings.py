@@ -168,7 +168,9 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 GRADIENT_BASE_URL = f"{os.environ.get('GRADIENT_API_URL', 'http://127.0.0.1:3000')}/api/v1"
 GRADIENT_DISABLE_REGISTRATION = os.environ.get('GRADIENT_DISABLE_REGISTRATION', 'false') == 'true'
-GRADIENT_OAUTH_REQUIRED = os.environ.get('GRADIENT_OAUTH_REQUIRED', 'false') == 'true'
+GRADIENT_OIDC_REQUIRED = os.environ.get('GRADIENT_OIDC_REQUIRED', 'false') == 'true'
+GRADIENT_EMAIL_ENABLED = os.environ.get('GRADIENT_EMAIL_ENABLED', 'false') == 'true'
+GRADIENT_EMAIL_REQUIRE_VERIFICATION = os.environ.get('GRADIENT_EMAIL_REQUIRE_VERIFICATION', 'false') == 'true'
 
 # Authentication
 

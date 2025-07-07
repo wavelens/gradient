@@ -76,14 +76,17 @@ in {
         GRADIENT_SERVE_URL = "https://${gradientCfg.domain}";
         GRADIENT_BASE_PATH = gradientCfg.baseDir;
         GRADIENT_OIDC_ENABLE = lib.boolToString gradientCfg.oidc.enable;
-        GRADIENT_DISABLE_REGISTER = lib.boolToString gradientCfg.settings.disableRegistration;
+        GRADIENT_DISABLE_REGISTRATION = lib.boolToString gradientCfg.settings.disableRegistration;
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString gradientCfg.settings.maxConcurrentEvaluations;
         GRADIENT_MAX_CONCURRENT_BUILDS = toString gradientCfg.settings.maxConcurrentBuilds;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
         GRADIENT_SERVE_CACHE = lib.boolToString gradientCfg.serveCache;
         GRADIENT_REPORT_ERRORS = lib.boolToString gradientCfg.reportErrors;
       } // lib.optionalAttrs gradientCfg.oidc.enable {
-        GRADIENT_OIDC_REQUIRED = lib.boolToString cfg.oidc.required;
+        GRADIENT_OIDC_REQUIRED = lib.boolToString gradientCfg.oidc.required;
+      } // lib.optionalAttrs gradientCfg.email.enable {
+        GRADIENT_EMAIL_ENABLED = lib.boolToString gradientCfg.email.enable;
+        GRADIENT_EMAIL_REQUIRE_VERIFICATION = lib.boolToString gradientCfg.email.requireVerification;
       };
     };
   };

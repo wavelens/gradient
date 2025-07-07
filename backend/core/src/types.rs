@@ -73,10 +73,24 @@ pub struct Cli {
     pub binpath_nix: String,
     #[arg(long, env = "GRADIENT_BINPATH_GIT", default_value = "git")]
     pub binpath_git: String,
-    #[arg(long, env = "GRADIENT_BINPATH_ZSTD", default_value = "zstd")]
-    pub binpath_zstd: String,
     #[arg(long, env = "GRADIENT_REPORT_ERRORS", default_value = "false")]
     pub report_errors: bool,
+    #[arg(long, env = "GRADIENT_EMAIL_ENABLED", default_value = "false")]
+    pub email_enabled: bool,
+    #[arg(long, env = "GRADIENT_EMAIL_REQUIRE_VERIFICATION", default_value = "false")]
+    pub email_require_verification: bool,
+    #[arg(long, env = "GRADIENT_EMAIL_SMTP_HOST")]
+    pub email_smtp_host: Option<String>,
+    #[arg(long, env = "GRADIENT_EMAIL_SMTP_PORT", default_value = "587")]
+    pub email_smtp_port: u16,
+    #[arg(long, env = "GRADIENT_EMAIL_SMTP_USERNAME")]
+    pub email_smtp_username: Option<String>,
+    #[arg(long, env = "GRADIENT_EMAIL_SMTP_PASSWORD_FILE")]
+    pub email_smtp_password_file: Option<String>,
+    #[arg(long, env = "GRADIENT_EMAIL_FROM_ADDRESS")]
+    pub email_from_address: Option<String>,
+    #[arg(long, env = "GRADIENT_EMAIL_FROM_NAME", default_value = "Gradient")]
+    pub email_from_name: String,
 }
 
 #[derive(Debug)]

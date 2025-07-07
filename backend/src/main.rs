@@ -6,7 +6,7 @@
 
 use core::init_state;
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 fn init_logging(log_level: &str, debug: bool) {

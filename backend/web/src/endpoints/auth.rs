@@ -13,7 +13,8 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use chrono::Utc;
 use core::consts::*;
-use core::input::{check_index_name, validate_password, validate_username};
+use core::email::{generate_verification_token, EmailService};
+use core::input::{validate_password, validate_username};
 use core::types::*;
 use email_address::EmailAddress;
 use password_auth::{generate_hash, verify_password};
@@ -76,6 +77,17 @@ pub async fn post_basic_register(
         return Err(WebError::already_exists("User"));
     }
 
+    let email_service = EmailService::new(&state.cli).await
+        .map_err(|e| WebError::InternalServerError(format!("Failed to initialize email service: {}", e)))?;
+
+    let (email_verified, verification_token, verification_expires) = if state.cli.email_enabled && state.cli.email_require_verification {
+        let token = generate_verification_token();
+        let expires = Utc::now().naive_utc() + chrono::Duration::hours(24);
+        (false, Some(token), Some(expires))
+    } else {
+        (true, None, None)
+    };
+
     let user = AUser {
         id: Set(Uuid::new_v4()),
         username: Set(body.username.clone()),
@@ -84,13 +96,33 @@ pub async fn post_basic_register(
         password: Set(Some(generate_hash(body.password.clone()))),
         last_login_at: Set(*NULL_TIME),
         created_at: Set(Utc::now().naive_utc()),
+        email_verified: Set(email_verified),
+        email_verification_token: Set(verification_token.clone()),
+        email_verification_token_expires: Set(verification_expires),
     };
 
     let user = user.insert(&state.db).await?;
 
+    if state.cli.email_enabled && state.cli.email_require_verification && verification_token.is_some() {
+        if let Err(e) = email_service.send_verification_email(
+            &body.email,
+            &body.name,
+            verification_token.as_ref().unwrap(),
+            &state.cli.serve_url,
+        ).await {
+            tracing::warn!("Failed to send verification email: {}", e);
+        }
+    }
+
+    let message = if state.cli.email_enabled && state.cli.email_require_verification {
+        format!("User {} created. Please check your email to verify your account.", user.id)
+    } else {
+        format!("User {} created successfully.", user.id)
+    };
+
     let res = BaseResponse {
         error: false,
-        message: user.id.to_string(),
+        message,
     };
 
     Ok(Json(res))
@@ -120,6 +152,10 @@ pub async fn post_basic_login(
         .ok_or_else(|| WebError::oauth_required())?;
 
     verify_password(body.password, &user_password).map_err(|_| WebError::invalid_credentials())?;
+
+    if state.cli.email_enabled && state.cli.email_require_verification && !user.email_verified {
+        return Err(WebError::BadRequest("Email not verified. Please check your email and verify your account before logging in.".to_string()));
+    }
 
     let token =
         encode_jwt(state.clone(), user.id).map_err(|_| WebError::failed_to_generate_token())?;
@@ -179,7 +215,7 @@ pub async fn post_oauth_authorize(
 
 pub async fn get_oidc_login(
     state: State<Arc<ServerState>>,
-    Query(query): Query<HashMap<String, String>>,
+    Query(_query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
     if !state.cli.oidc_enabled {
         return Err(WebError::oauth_disabled());
@@ -257,5 +293,99 @@ pub async fn post_check_username(
     Ok(Json(BaseResponse {
         error: false,
         message: "Username is available".to_string(),
+    }))
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct VerifyEmailRequest {
+    pub token: String,
+}
+
+pub async fn get_verify_email(
+    state: State<Arc<ServerState>>,
+    Query(query): Query<HashMap<String, String>>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    if !state.cli.email_enabled || !state.cli.email_require_verification {
+        return Err(WebError::BadRequest("Email verification is not enabled".to_string()));
+    }
+
+    let token = query
+        .get("token")
+        .ok_or_else(|| WebError::BadRequest("Missing verification token".to_string()))?;
+
+    let user = EUser::find()
+        .filter(CUser::EmailVerificationToken.eq(token.clone()))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::BadRequest("Invalid verification token".to_string()))?;
+
+    if let Some(expires) = user.email_verification_token_expires {
+        if Utc::now().naive_utc() > expires {
+            return Err(WebError::BadRequest("Verification token has expired".to_string()));
+        }
+    }
+
+    if user.email_verified {
+        return Ok(Json(BaseResponse {
+            error: false,
+            message: "Email already verified".to_string(),
+        }));
+    }
+
+    let mut user_active: AUser = user.into();
+    user_active.email_verified = Set(true);
+    user_active.email_verification_token = Set(None);
+    user_active.email_verification_token_expires = Set(None);
+
+    user_active.update(&state.db).await?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: "Email verified successfully".to_string(),
+    }))
+}
+
+pub async fn post_resend_verification(
+    state: State<Arc<ServerState>>,
+    Json(body): Json<CheckUsernameRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    if !state.cli.email_enabled || !state.cli.email_require_verification {
+        return Err(WebError::BadRequest("Email verification is not enabled".to_string()));
+    }
+
+    let user = EUser::find()
+        .filter(CUser::Username.eq(body.username.clone()))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("User"))?;
+
+    if user.email_verified {
+        return Err(WebError::BadRequest("Email is already verified".to_string()));
+    }
+
+    let email_service = EmailService::new(&state.cli).await
+        .map_err(|e| WebError::InternalServerError(format!("Failed to initialize email service: {}", e)))?;
+
+    let verification_token = generate_verification_token();
+    let verification_expires = Utc::now().naive_utc() + chrono::Duration::hours(24);
+
+    let mut user_active: AUser = user.clone().into();
+    user_active.email_verification_token = Set(Some(verification_token.clone()));
+    user_active.email_verification_token_expires = Set(Some(verification_expires));
+
+    user_active.update(&state.db).await?;
+
+    if let Err(e) = email_service.send_verification_email(
+        &user.email,
+        &user.name,
+        &verification_token,
+        &state.cli.serve_url,
+    ).await {
+        return Err(WebError::InternalServerError(format!("Failed to send verification email: {}", e)));
+    }
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: "Verification email sent successfully".to_string(),
     }))
 }

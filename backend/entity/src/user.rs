@@ -21,6 +21,9 @@ pub struct Model {
     pub password: Option<String>,
     pub last_login_at: NaiveDateTime,
     pub created_at: NaiveDateTime,
+    pub email_verified: bool,
+    pub email_verification_token: Option<String>,
+    pub email_verification_token_expires: Option<NaiveDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

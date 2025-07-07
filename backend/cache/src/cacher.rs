@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
 use tokio::time;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 pub async fn cache_loop(state: Arc<ServerState>) {
@@ -282,28 +282,20 @@ pub async fn pack_build_output(
         .map_err(|e| e.to_string())
         .unwrap();
 
-    let output = match Command::new(state.cli.binpath_zstd.clone())
-        .arg("-T0")
-        .arg("-q")
-        .arg("--rm")
-        .arg("-f")
-        .arg("-19")
-        .arg(file_location_tmp.clone())
-        .arg("-o")
-        .arg(file_location.clone())
-        .output()
+    let input_data = tokio::fs::read(file_location_tmp.clone())
         .await
-        .map_err(|e| e.to_string())
-    {
-        Ok(output) => output,
-        Err(e) => {
-            return Err(format!("Error while executing command: {}", e));
-        }
-    };
-
-    if !output.status.success() {
-        return Err("Could not compress Path".to_string());
-    }
+        .map_err(|e| format!("Failed to read input file: {}", e))?;
+    
+    let compressed_data = zstd::bulk::compress(&input_data, 19)
+        .map_err(|e| format!("Failed to compress data: {}", e))?;
+    
+    tokio::fs::write(file_location.clone(), compressed_data)
+        .await
+        .map_err(|e| format!("Failed to write compressed file: {}", e))?;
+    
+    tokio::fs::remove_file(file_location_tmp.clone())
+        .await
+        .map_err(|e| format!("Failed to remove temporary file: {}", e))?;
 
     let output = match Command::new(state.cli.binpath_nix.clone())
         .arg("hash")

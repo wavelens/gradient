@@ -19,7 +19,6 @@ in {
       package = lib.mkPackageOption pkgs "gradient-server" { };
       package_nix = lib.mkPackageOption pkgs "nix" { };
       package_git = lib.mkPackageOption pkgs "git" { };
-      package_zstd = lib.mkPackageOption pkgs "zstd" { };
       serveCache = lib.mkEnableOption "Serve cache";
       reportErrors = lib.mkEnableOption "Report errors to Sentry";
       domain = lib.mkOption {
@@ -94,6 +93,37 @@ in {
         };
       };
 
+      email = {
+        enable = lib.mkEnableOption "Enable email functionality";
+        requireVerification = lib.mkEnableOption "Require email verification for new registrations";
+        smtpHost = lib.mkOption {
+          description = "SMTP server hostname";
+          type = lib.types.str;
+        };
+        smtpPort = lib.mkOption {
+          description = "SMTP server port";
+          type = lib.types.port;
+          default = 587;
+        };
+        smtpUsername = lib.mkOption {
+          description = "SMTP username";
+          type = lib.types.str;
+        };
+        smtpPasswordFile = lib.mkOption {
+          description = "File containing SMTP password";
+          type = lib.types.str;
+        };
+        fromAddress = lib.mkOption {
+          description = "Email address to send from";
+          type = lib.types.str;
+        };
+        fromName = lib.mkOption {
+          description = "Name to display in email from field";
+          type = lib.types.str;
+          default = "Gradient";
+        };
+      };
+
       settings = {
         disableRegistration = lib.mkEnableOption "Disable registration. Users must be registered via OIDC.";
         maxConcurrentEvaluations = lib.mkOption {
@@ -156,6 +186,8 @@ in {
           "gradient_jwt_secret:${cfg.jwtSecretFile}"
         ] ++ lib.optional cfg.oidc.enable [
           "gradient_oidc_client_secret:${cfg.oidc.clientSecretFile}"
+        ] ++ lib.optional cfg.email.enable [
+          "gradient_email_smtp_password:${cfg.email.smtpPasswordFile}"
         ];
       };
 
@@ -172,7 +204,6 @@ in {
         GRADIENT_MAX_CONCURRENT_BUILDS = toString cfg.settings.maxConcurrentBuilds;
         GRADIENT_BINPATH_NIX = lib.getExe cfg.package_nix;
         GRADIENT_BINPATH_GIT = lib.getExe cfg.package_git;
-        GRADIENT_BINPATH_ZSTD = lib.getExe cfg.package_zstd;
         GRADIENT_OIDC_ENABLED = lib.boolToString cfg.oidc.enable;
         GRADIENT_DISABLE_REGISTRATION = lib.boolToString cfg.settings.disableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
@@ -188,6 +219,15 @@ in {
         GRADIENT_OIDC_SCOPES = builtins.concatStringsSep " " cfg.oidc.scopes;
         GRADIENT_OIDC_DISCOVERY_URL = cfg.oidc.discoveryUrl;
         GRADIENT_OIDC_REQUIRED = lib.boolToString cfg.oidc.required;
+      } // lib.optionalAttrs cfg.email.enable {
+        GRADIENT_EMAIL_ENABLED = lib.boolToString cfg.email.enable;
+        GRADIENT_EMAIL_REQUIRE_VERIFICATION = lib.boolToString cfg.email.requireVerification;
+        GRADIENT_EMAIL_SMTP_HOST = cfg.email.smtpHost;
+        GRADIENT_EMAIL_SMTP_PORT = toString cfg.email.smtpPort;
+        GRADIENT_EMAIL_SMTP_USERNAME = cfg.email.smtpUsername;
+        GRADIENT_EMAIL_SMTP_PASSWORD_FILE = "%d/gradient_email_smtp_password";
+        GRADIENT_EMAIL_FROM_ADDRESS = cfg.email.fromAddress;
+        GRADIENT_EMAIL_FROM_NAME = cfg.email.fromName;
       };
     };
 

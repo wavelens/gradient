@@ -6,6 +6,7 @@
 
 pub mod consts;
 pub mod database;
+pub mod email;
 pub mod executer;
 pub mod input;
 pub mod permission;

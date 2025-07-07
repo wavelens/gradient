@@ -32,6 +32,8 @@ tracing = { workspace = true }
 uuid = { version = "1.17", features = ["fast-rng", "macro-diagnostics", "v4"] }
 ed25519-compact = { version = "2.1", features = ["random"] }
 nix-daemon = { path = "../nix-daemon" }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1-rustls-tls"] }
+hex = "0.4"
 
 [dev-dependencies]
 tokio-test = "0.4"

@@ -431,6 +431,9 @@ async fn create_or_update_user(
                 password: Set(None),
                 last_login_at: Set(Utc::now().naive_utc()),
                 created_at: Set(Utc::now().naive_utc()),
+                email_verified: Set(true), // OIDC users are considered verified
+                email_verification_token: Set(None),
+                email_verification_token_expires: Set(None),
             };
 
             let user = new_user

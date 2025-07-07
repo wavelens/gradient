@@ -27,6 +27,7 @@ mod m20241107_156160_create_table_build_output;
 mod m20241107_156170_create_table_build_output_signature;
 mod m20250705_000000_create_table_direct_build;
 mod m20250705_000001_make_evaluation_project_nullable;
+mod m20250707_000000_add_email_verification_to_user;
 
 pub struct Migrator;
 
@@ -55,6 +56,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20241107_156170_create_table_build_output_signature::Migration),
             Box::new(m20250705_000000_create_table_direct_build::Migration),
             Box::new(m20250705_000001_make_evaluation_project_nullable::Migration),
+            Box::new(m20250707_000000_add_email_verification_to_user::Migration),
         ]
     }
 }
