@@ -259,6 +259,10 @@ def edit_organization(request, org):
         'description': org_message.get('description', '')
     }
 
+    # Get SSH public key
+    ssh_key_data = api.get_orgs_organization_ssh(request, org)
+    ssh_public_key = ssh_key_data.get('message', '') if ssh_key_data and not ssh_key_data.get('error') else ''
+
     if request.method == 'POST':
         form = EditOrganizationForm(request.POST)
         if form.is_valid():
@@ -283,7 +287,7 @@ def edit_organization(request, org):
     else:
         form = EditOrganizationForm(initial=initial_data)
 
-    return render(request, "dashboard/settings/organization.html", {'form': form, 'org': org})
+    return render(request, "dashboard/settings/organization.html", {'form': form, 'org': org, 'ssh_public_key': ssh_public_key})
 
 @login_required
 def delete_organization(request, org):

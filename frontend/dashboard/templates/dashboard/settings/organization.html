@@ -61,6 +61,20 @@
         
         <hr class="settings-hr">
         <div class="settings-section">
+            <h3>{% trans 'SSH Public Key' %}</h3>
+            <p>{% trans 'Use this public key to authenticate with external services:' %}</p>
+            {% if ssh_public_key %}
+                <div class="ssh-key-container">
+                    <textarea readonly class="ssh-key-display" onclick="this.select()">{{ ssh_public_key }}</textarea>
+                    <button type="button" class="copy-button" onclick="copyToClipboard('{{ ssh_public_key|escapejs }}')">{% trans 'Copy' %}</button>
+                </div>
+            {% else %}
+                <p>{% trans 'No SSH public key available.' %}</p>
+            {% endif %}
+        </div>
+        
+        <hr class="settings-hr">
+        <div class="settings-section">
             <form method="post" action="{% url 'deleteOrganization' org %}" id="deleteOrgForm">
                 {% csrf_token %}
                 <button type="button" class="delete-button delete-trigger" data-title="{% trans 'Delete Organization' %}" data-message="{% trans 'Are you sure you want to delete this organization? This action cannot be undone.' %}" data-form="deleteOrgForm">{% trans 'Delete Organization' %}</button>
@@ -68,4 +82,54 @@
         </div>
     </div>
 </div>
+
+<style>
+.ssh-key-container {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-top: 10px;
+}
+
+.ssh-key-display {
+    flex: 1;
+    min-height: 80px;
+    padding: 10px;
+    font-family: monospace;
+    font-size: 12px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    resize: vertical;
+    background-color: #f9f9f9;
+}
+
+.copy-button {
+    padding: 8px 16px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.copy-button:hover {
+    background-color: #0056b3;
+}
+</style>
+
+<script>
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(function() {
+        const button = event.target;
+        const originalText = button.textContent;
+        button.textContent = '{% trans "Copied!" %}';
+        setTimeout(function() {
+            button.textContent = originalText;
+        }, 2000);
+    }).catch(function(err) {
+        console.error('Failed to copy text: ', err);
+    });
+}
+</script>
  {% endblock %}

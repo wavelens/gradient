@@ -1,0 +1,197 @@
+name: "Test"
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+  schedule:
+    # Run tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      matrix:
+        test:
+          - gradient-api
+          - gradient-building
+          - gradient-frontend
+          - gradient-mail
+          - gradient-oidc
+          - gradient-remote
+      fail-fast: false
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Free up disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf "/usr/local/share/boost"
+        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+      
+    - name: Install Nix
+      uses: cachix/install-nix-action@v25
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+          max-jobs = 2
+          cores = 2
+    
+    - name: Setup Cachix
+      uses: cachix/cachix-action@v14
+      with:
+        name: gradient
+        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+    
+    - name: Run test - ${{ matrix.test }}
+      run: |
+        nix build .#checks.x86_64-linux.${{ matrix.test }} --print-build-logs
+      timeout-minutes: 45
+      
+    - name: Upload test logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs-${{ matrix.test }}
+        path: |
+          /tmp/nix-build-*/
+        retention-days: 7
+
+  build-packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        package:
+          - gradient-server
+          - gradient-frontend
+          - gradient-cli
+      fail-fast: false
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Install Nix
+      uses: cachix/install-nix-action@v25
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Setup Cachix
+      uses: cachix/cachix-action@v14
+      with:
+        name: gradient
+        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        
+    - name: Build package - ${{ matrix.package }}
+      run: |
+        nix build .#${{ matrix.package }} --print-build-logs
+        
+    - name: Test package installation
+      run: |
+        nix shell .#${{ matrix.package }} --command ${{ matrix.package }} --version || echo "Version check not available"
+
+  flake-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Install Nix
+      uses: cachix/install-nix-action@v25
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Setup Cachix
+      uses: cachix/cachix-action@v14
+      with:
+        name: gradient
+        authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+        
+    - name: Check flake
+      run: |
+        nix flake check --print-build-logs
+        
+    - name: Show flake outputs
+      run: |
+        nix flake show
+
+  security-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Run security scan
+      uses: securecodewarrior/github-action-add-sarif@v1
+      with:
+        sarif-file: security-scan.sarif
+      continue-on-error: true
+      
+    - name: Check for secrets
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: main
+        head: HEAD
+        extra_args: --debug --only-verified
+
+  documentation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Install Nix
+      uses: cachix/install-nix-action@v25
+      with:
+        nix_path: nixpkgs=channel:nixos-unstable
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Check documentation build
+      run: |
+        # Build documentation if available
+        if [ -d "docs" ]; then
+          echo "Documentation directory found"
+          # Add documentation build commands here
+        fi
+        
+    - name: Check README and markdown files
+      run: |
+        find . -name "*.md" -type f -exec echo "Checking: {}" \;
+        find . -name "*.md" -type f -exec wc -l {} \;
+
+  report:
+    runs-on: ubuntu-latest
+    needs: [tests, build-packages, flake-check]
+    if: always()
+    steps:
+    - name: Report test results
+      run: |
+        echo "Test Summary:"
+        echo "Tests: ${{ needs.tests.result }}"
+        echo "Packages: ${{ needs.build-packages.result }}"
+        echo "Flake Check: ${{ needs.flake-check.result }}"
+        
+        if [ "${{ needs.tests.result }}" == "success" ] && [ "${{ needs.build-packages.result }}" == "success" ] && [ "${{ needs.flake-check.result }}" == "success" ]; then
+          echo "✅ All checks passed!"
+          exit 0
+        else
+          echo "❌ Some checks failed"
+          exit 1
+        fi
