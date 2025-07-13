@@ -14,6 +14,84 @@ from .forms import *
 from django.conf import settings
 
 @login_required
+def dashboard(request):
+    organizations = []
+    recent_projects = []
+    caches = []
+    organizations_count = 0
+    projects_count = 0
+    caches_count = 0
+    recent_evaluations_count = 0
+
+    # Get organizations overview
+    all_orgs = api.get_orgs(request)
+    if all_orgs and not all_orgs.get('error'):
+        all_orgs_data = all_orgs['message']
+        organizations_count = len(all_orgs_data)
+        
+        # Get detailed org info and project counts
+        for org in all_orgs_data[:3]:  # Limit to first 3 for dashboard
+            org_details = api.get_orgs_organization(request, org['name'])
+            if org_details and not org_details.get('error'):
+                org_info = org_details['message']
+                
+                # Get projects count for this org
+                projects = api.get_projects(request, org['name'])
+                projects_count_org = 0
+                if projects and not projects.get('error'):
+                    projects_count_org = len(projects['message'])
+                    projects_count += projects_count_org
+                    
+                    # Add recent projects
+                    for project in projects['message'][:2]:  # Limit per org
+                        project_details = api.get_projects_project(request, org['name'], project['name'])
+                        if project_details and not project_details.get('error'):
+                            project_info = project_details['message']
+                            project_info['org_name'] = org['name']
+                            recent_projects.append(project_info)
+
+                organizations.append({
+                    'name': org['name'],
+                    'display_name': org_info.get('display_name', org['name']),
+                    'description': org_info.get('description', ''),
+                    'projects_count': projects_count_org
+                })
+
+    # Get caches overview
+    all_caches = api.get_caches(request)
+    if all_caches and not all_caches.get('error'):
+        all_caches_data = all_caches['message']
+        caches_count = len(all_caches_data)
+        
+        # Get detailed cache info
+        for cache in all_caches_data[:3]:  # Limit to first 3 for dashboard
+            cache_details = api.get_caches_cache(request, cache['name'])
+            if cache_details and not cache_details.get('error'):
+                cache_info = cache_details['message']
+                caches.append({
+                    'name': cache['name'],
+                    'display_name': cache_info.get('display_name', cache['name']),
+                    'description': cache_info.get('description', ''),
+                    'status': cache_info.get('status', 'inactive'),
+                    'priority': cache_info.get('priority', 'N/A')
+                })
+
+    # Sort recent projects by last evaluation (mock data for now)
+    recent_projects = recent_projects[:4]  # Limit to 4 most recent
+
+    context = {
+        'organizations': organizations,
+        'recent_projects': recent_projects,
+        'caches': caches,
+        'organizations_count': organizations_count,
+        'projects_count': projects_count,
+        'caches_count': caches_count,
+        'recent_evaluations_count': recent_evaluations_count  # TODO: implement when evaluation API is available
+    }
+    
+    return render(request, "dashboard/dashboard.html", context)
+
+@login_required
 def home(request):
     details_blocks = []
     all_orgs = api.get_orgs(request)
@@ -369,6 +447,7 @@ def delete_cache(request, cache):
 @login_required
 def organization_members(request, org):
     members_data = api.get_orgs_organization_users(request, org)
+    print(members_data)
     if isinstance(members_data, type(None)) or members_data.get('error'):
         members = []
     else:

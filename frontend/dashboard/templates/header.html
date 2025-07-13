@@ -12,7 +12,7 @@
     <header>
         <div class="header">
             <div class="logo-container">
-                <a href="/" class="no-hovereffect"><img src="{% static 'dashboard/images/wavelens-LOGO.svg' %}" alt="Logo"></a>
+                <a href="{% url 'dashboard' %}" class="no-hovereffect"><img src="{% static 'dashboard/images/wavelens-LOGO.svg' %}" alt="Logo"></a>
             </div>
             {% if request.user.is_authenticated %}
                 <div>

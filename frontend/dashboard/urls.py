@@ -25,7 +25,8 @@ urlpatterns = [
     path("new/server", new_server, name="new_server"),
     path("new/cache", new_cache, name="new_cache"),
 
-    path("", home, name="home"),
+    path("", dashboard, name="dashboard"),
+    path("organizations", home, name="home"),
     path("cache", caches, name="caches"),
 
     path("settings/server", edit_server, name="settingsServer"),
