@@ -429,8 +429,11 @@ class AddOrganizationMemberForm(forms.Form):
     user = forms.CharField(
         label='Username',
         required=True,
+        min_length=3,
+        max_length=150,
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter username'
         })
     )
     role = forms.ChoiceField(
@@ -441,6 +444,18 @@ class AddOrganizationMemberForm(forms.Form):
             'class': 'form-control'
         })
     )
+    
+    def clean_user(self):
+        user = self.cleaned_data.get('user')
+        if user:
+            user = user.strip()
+            if not user:
+                raise forms.ValidationError("Username cannot be empty.")
+            if ' ' in user:
+                raise forms.ValidationError("Username cannot contain spaces.")
+            if not user.replace('_', '').replace('-', '').replace('.', '').isalnum():
+                raise forms.ValidationError("Username can only contain letters, numbers, underscores, hyphens, and periods.")
+        return user
 
 class EditOrganizationMemberForm(forms.Form):
     ROLE_CHOICES = [

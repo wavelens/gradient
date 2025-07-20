@@ -16,6 +16,24 @@
 
 {% block content %}
 
+<!-- Navigation bar directly under main header -->
+<header class="dashboard-header m-t--1rem">
+    <nav>
+        <a href="{% url 'dashboard' %}" class="nav-link">
+            <span class="material-symbols-outlined">dashboard</span>
+            {% trans 'Dashboard' %}
+        </a>
+        <a href="{% url 'home' %}" class="nav-link active">
+            <span class="material-symbols-outlined">apartment</span>
+            {% trans 'Organizations' %}
+        </a>
+        <a href="{% url 'caches' %}" class="nav-link">
+            <span class="material-symbols-outlined">hub</span>
+            {% trans 'Caches' %}
+        </a>
+    </nav>
+</header>
+
 <div class="container">
     <div class="header m-b-1rem">
         <div>

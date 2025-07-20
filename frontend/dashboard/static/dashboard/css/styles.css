@@ -911,10 +911,44 @@ tr:hover td{
     border-radius: 5px;
     background-color: #ff00001f;
     margin-bottom: 1rem;
+    padding: 1rem;
 }
 
 .alert-danger li {
     display: block;
+}
+
+.alert-danger p {
+    margin: 0;
+    color: #dc3545;
+}
+
+.alert-success {
+    border: 1px solid #28a745;
+    border-radius: 5px;
+    background-color: #28a7451f;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    color: #155724;
+}
+
+.alert-error {
+    border: 1px solid red;
+    border-radius: 5px;
+    background-color: #ff00001f;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    color: #dc3545;
+}
+
+.field-error {
+    margin-top: 0.5rem;
+}
+
+.field-error p {
+    margin: 0;
+    color: #dc3545;
+    font-size: 0.875rem;
 }
 
 .register {
@@ -944,10 +978,10 @@ tr:hover td{
     color: #007BFF;
 }
 
-.blue-span:hover span:first-child {
+/* .blue-span:hover span:first-child {
     text-decoration: underline;
     color: #007BFF;
-}
+} */
 
 .settings-container {
     max-width: 1200px;

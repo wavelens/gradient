@@ -458,26 +458,62 @@ def organization_members(request, org):
         if 'add_member' in request.POST:
             add_form = AddOrganizationMemberForm(request.POST)
             if add_form.is_valid():
-
-                response = api.post_orgs_organization_users(
-                    request, 
-                    org, 
-                    add_form.cleaned_data['user'], 
-                    add_form.cleaned_data['role'].upper()
-                )
-
-                if response and not response.get('error'):
-                    return redirect(f'/organization/{org}/members')
+                username = add_form.cleaned_data['user']
+                role = add_form.cleaned_data['role'].upper()
+                
+                # Check if user is already a member
+                existing_member = None
+                for member in members:
+                    if member.get('id') == username or member.get('user') == username:
+                        existing_member = member
+                        break
+                
+                if existing_member:
+                    add_form.add_error('user', f'User "{username}" is already a member of this organization.')
                 else:
-                    error_message = response.get('message') if response else 'Failed to add member (no response from API)'
-                    add_form.add_error(None, error_message)
+                    response = api.post_orgs_organization_users(request, org, username, role)
+
+                    if response and not response.get('error'):
+                        from django.contrib import messages
+                        messages.success(request, f'Successfully added "{username}" as {role.lower()} to the organization.')
+                        return redirect(f'/organization/{org}/members')
+                    else:
+                        # Parse API error and provide meaningful message
+                        if response:
+                            api_message = response.get('message', '')
+                            if 'not found' in api_message.lower() or 'does not exist' in api_message.lower():
+                                add_form.add_error('user', f'User "{username}" does not exist. Please check the username and try again.')
+                            elif 'already' in api_message.lower() and 'member' in api_message.lower():
+                                add_form.add_error('user', f'User "{username}" is already a member of this organization.')
+                            elif 'permission' in api_message.lower() or 'access' in api_message.lower():
+                                add_form.add_error(None, 'You do not have permission to add members to this organization.')
+                            elif 'organization' in api_message.lower() and 'not found' in api_message.lower():
+                                add_form.add_error(None, 'Organization not found. Please check the organization name.')
+                            else:
+                                add_form.add_error(None, f'Failed to add member: {api_message}')
+                        else:
+                            add_form.add_error(None, 'Failed to add member. Please check your connection and try again.')
         
         elif 'remove_member' in request.POST:
             user_to_remove = request.POST.get('user')
             if user_to_remove:
                 response = api.delete_orgs_organization_users(request, org, user_to_remove)
                 if response and not response.get('error'):
+                    from django.contrib import messages
+                    messages.success(request, f'Successfully removed "{user_to_remove}" from the organization.')
                     return redirect(f'/organization/{org}/members')
+                else:
+                    from django.contrib import messages
+                    if response:
+                        api_message = response.get('message', '')
+                        if 'not found' in api_message.lower():
+                            messages.error(request, f'User "{user_to_remove}" not found in organization.')
+                        elif 'permission' in api_message.lower():
+                            messages.error(request, 'You do not have permission to remove members from this organization.')
+                        else:
+                            messages.error(request, f'Failed to remove member: {api_message}')
+                    else:
+                        messages.error(request, 'Failed to remove member. Please try again.')
         
         elif 'edit_role' in request.POST:
             user_to_edit = request.POST.get('user')
@@ -485,7 +521,21 @@ def organization_members(request, org):
             if user_to_edit and new_role:
                 response = api.patch_orgs_organization_users(request, org, user_to_edit, new_role)
                 if response and not response.get('error'):
+                    from django.contrib import messages
+                    messages.success(request, f'Successfully updated "{user_to_edit}" role to {new_role.lower()}.')
                     return redirect(f'/organization/{org}/members')
+                else:
+                    from django.contrib import messages
+                    if response:
+                        api_message = response.get('message', '')
+                        if 'not found' in api_message.lower():
+                            messages.error(request, f'User "{user_to_edit}" not found in organization.')
+                        elif 'permission' in api_message.lower():
+                            messages.error(request, 'You do not have permission to edit member roles in this organization.')
+                        else:
+                            messages.error(request, f'Failed to update member role: {api_message}')
+                    else:
+                        messages.error(request, 'Failed to update member role. Please try again.')
     
     if not add_form:
         add_form = AddOrganizationMemberForm()

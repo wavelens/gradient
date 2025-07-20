@@ -20,41 +20,72 @@
 
 
 <div class="container">
-    <!-- <table class="workflows-table">
-        <thead>
-            <tr>
-                <th></th>
-                <th>{% trans 'Type' %}</th>
-                <th>{% trans 'Link' %}</th>
-                <th>{% trans 'Actions' %}</th>
-            </tr>
-        </thead>
-        <tbody> -->
-            <div class="home-container">
-                <div class="workflow-item">
-                    <span>{% trans 'Type' %} {% trans 'Link' %} {% trans 'Actions' %}</span>
-                </div>
-            {% for file in files %}
-                
-                <div  class="workflow-item">
-                    <div class="d-flex p-0">
-                        <span class="flex-c m-r-1rem">
-                            <span>{{ file.file }}</span>
-                        </span>
-                        <span class="flex-c m-r-1rem">
-                            <span>{{ file.type }}</span>
-                        </span>
-                        <span class="flex-c m-r-1rem">
-                            <span>{{ file.link }}</span>
-                        </span>
-                        <span class="flex-c">
-                            <span>{{ file.actions }}</span>
-                        </span>
-                    </div>
-                </div>
-            {% endfor %}
+    <div class="header m-b-1rem">
+        <div>
+            <h1>{% trans 'Downloads' %}</h1>
+        </div>
+    </div>
+    <div class="m-b-1rem">
+        <div class="filter-container">
+            <div class="search-container">
+                <span class="material-symbols-outlined">
+                    search
+                </span>
+                <input type="text" id="searchInput" placeholder="Search" class="bg-none">
             </div>
-        <!-- </tbody>
-    </table> -->
+        </div>
+    </div>
+
+    <div class="home-container">
+        {% for file in files %}
+            <div class="workflow-item">
+                <a class="full-width normal-hover blue-span" href="{{ file.link }}">
+                    <span class="workflow-title">{{ file.file }}</span><br><span class="text-light">{{ file.type }}</span>
+                </a>
+                <div class="d-flex p-0">
+                    <span class="flex-c m-r-1rem">
+                        <span class="material-symbols-outlined m-r-3">
+                            download
+                        </span>
+                        <span class="text-light-n-s">{{ file.actions }}</span>
+                    </span>
+                    <span class="flex-c">
+                        <span class="material-symbols-outlined m-r-3">
+                            link
+                        </span>
+                        <span class="text-light-n-s">{{ file.link }}</span>
+                    </span>
+                </div>
+            </div>
+        {% empty %}
+            <div class="no-caches empty-state">
+                <span class="material-symbols-outlined empty-state-icon">
+                    download
+                </span>
+                <h3>{% trans 'No downloads available' %}</h3>
+                <p>{% trans 'There are currently no files available for download.' %}</p>
+            </div>
+        {% endfor %}
+    </div>
 </div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        let searchInput = document.getElementById("searchInput");
+        let items = document.querySelectorAll(".workflow-item");
+
+        searchInput.addEventListener("input", function() {
+            let filter = searchInput.value.toLowerCase();
+
+            items.forEach(item => {
+                let titleElement = item.querySelector(".workflow-title");
+                
+                if (titleElement) {
+                    let title = titleElement.textContent.toLowerCase();
+                    item.style.display = title.includes(filter) ? "" : "none";
+                }
+            });
+        });
+    });
+</script>
 {% endblock %}
