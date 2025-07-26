@@ -141,6 +141,7 @@
       start_all()
 
       server.wait_for_unit("gradient-server.service")
+      server.sleep(5)
       server.wait_for_unit("nginx.service")
 
       server.succeed("${lib.getExe pkgs.curl} http://gradient.local/api/v1/health -i --fail")
@@ -149,7 +150,7 @@
           ${lib.getExe pkgs.curl} \
           -X POST \
           -H "Content-Type: application/json" \
-          -d '{"username": "test", "name": "Test User", "email": "test@localhost.localdomain", "password": "password"}' \
+          -d '{"username": "testuser", "name": "Test User", "email": "test@localhost.localdomain", "password": "password"}' \
           http://gradient.local/api/v1/auth/basic/register -i --fail
       """)
 

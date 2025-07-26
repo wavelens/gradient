@@ -117,6 +117,7 @@
       start_all()
 
       server.wait_for_unit("gradient-server.service")
+      server.sleep(5)
       print(server.succeed("journalctl -u nix-daemon -n 200 --no-pager"))
       print(server.succeed("cat /etc/nix/nix.conf"))
 
@@ -128,7 +129,7 @@
           ${lib.getExe pkgs.curl} \\
           -X POST \\
           -H "Content-Type: application/json" \\
-          -d '{"username": "test", "name": "Test User", "email": "test@localhost.localdomain", "password": "ctcd5B?t59694"}' \\
+          -d '{"username": "testuser", "name": "Test User", "email": "test@localhost.localdomain", "password": "ctcd5B?t59694"}' \\
           http://gradient.local/api/v1/auth/basic/register --fail
       """)
 
@@ -136,7 +137,7 @@
         ${lib.getExe pkgs.curl} \\
           -X POST \\
           -H "Content-Type: application/json" \\
-          -d '{"loginname": "test", "password": "ctcd5B?t59694"}' \\
+          -d '{"loginname": "testuser", "password": "ctcd5B?t59694"}' \\
           http://gradient.local/api/v1/auth/basic/login \\
           | ${lib.getExe pkgs.jq} -rj '.message'
       """)

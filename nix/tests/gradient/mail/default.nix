@@ -121,6 +121,7 @@
       start_all()
 
       server.wait_for_unit("gradient-server.service")
+      server.sleep(5)
       server.wait_for_unit("mock-smtp.service")
       server.wait_for_unit("nginx.service")
 
