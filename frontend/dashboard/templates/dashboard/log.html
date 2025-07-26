@@ -14,8 +14,8 @@
 {% block title %}{% trans 'Log' %}{% endblock %}
 
 {% block content %}
-
-{% include "../individualHeader.html" %}
+{% url 'settingsProject' org_id project_id as settings_url %}
+{% include "../individualHeader.html" with link_url=settings_url %}
 
 {% include "../backHeader.html" %}
 
@@ -24,10 +24,6 @@
     <div class="content-left">
         <p class="border-bottom space-normal no-side-padding"><a class="p-l-1rem d-webkit-box">{% trans 'Overview' %}</a></p>
         <div class="flex-c activeeffect-sidebar">
-            <!-- <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle">
-            <span class="material-symbols-rounded filled green">
-               check_circle
-           </span> -->
            {% if success != 'waiting' %}
                 <span class="material-icons status-icon {% if success == 'true' %}green{% else %}red{% endif %}">{% if success == 'true' %}check_circle{% else %}cancel{% endif %}</span>
            {% else %}
@@ -71,7 +67,6 @@
                 </div>
                 <br>
                 <div class="flex-c">
-                    <!-- <img class="green-filter center-image" src="{% static 'dashboard/images/check-circle.svg' %}" alt="X Circle"> -->
                     {% if success != 'waiting' %}
                         <span class="material-icons status-icon {% if success == 'true' %}green{% else %}red{% endif %}">
                             {% if success == 'true' %}check_circle{% else %}cancel{% endif %}

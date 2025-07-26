@@ -34,12 +34,25 @@
         </div>
     </div>
     
+    <!-- Display Messages -->
+    {% if messages %}
+        <div class="messages m-b-1rem">
+            {% for message in messages %}
+                <div class="alert alert-{{ message.tags }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    
     <!-- Add Member Form -->
     <div class="add-member-section m-b-1rem">
         <h3>{% trans 'Add New Member' %}</h3>
         {% if add_form.non_field_errors %}
             <div class="alert alert-danger">
-                {{ add_form.non_field_errors }}
+                {% for error in add_form.non_field_errors %}
+                    <p>{{ error }}</p>
+                {% endfor %}
             </div>
         {% endif %}
         <form method="post">
@@ -50,14 +63,22 @@
                     <label for="{{ add_form.user.id_for_label }}" class="required-label">{% trans add_form.user.label %}</label>
                     {{ add_form.user }}
                     {% if add_form.user.errors %}
-                        <div class="error">{{ add_form.user.errors }}</div>
+                        <div class="field-error">
+                            {% for error in add_form.user.errors %}
+                                <p>{{ error }}</p>
+                            {% endfor %}
+                        </div>
                     {% endif %}
                 </div>
                 <div class="form-field member-form-field">
                     <label for="{{ add_form.role.id_for_label }}" class="required-label">{% trans add_form.role.label %}</label>
                     {{ add_form.role }}
                     {% if add_form.role.errors %}
-                        <div class="error">{{ add_form.role.errors }}</div>
+                        <div class="field-error">
+                            {% for error in add_form.role.errors %}
+                                <p>{{ error }}</p>
+                            {% endfor %}
+                        </div>
                     {% endif %}
                 </div>
                 <div>
@@ -86,7 +107,7 @@
                 <div class="full-width normal-hover">
                     <div class="d-flex member-row">
                         <div>
-                            <span class="workflow-title member-name">{{ member.name }}</span>
+                            <span class="workflow-title member-name">{{ member.id }}</span>
                         </div>
                         <div class="d-flex">
                             <form method="post" class="inline-form m-r-1rem">

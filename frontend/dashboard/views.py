@@ -14,6 +14,84 @@ from .forms import *
 from django.conf import settings
 
 @login_required
+def dashboard(request):
+    organizations = []
+    recent_projects = []
+    caches = []
+    organizations_count = 0
+    projects_count = 0
+    caches_count = 0
+    recent_evaluations_count = 0
+
+    # Get organizations overview
+    all_orgs = api.get_orgs(request)
+    if all_orgs and not all_orgs.get('error'):
+        all_orgs_data = all_orgs['message']
+        organizations_count = len(all_orgs_data)
+        
+        # Get detailed org info and project counts
+        for org in all_orgs_data[:3]:  # Limit to first 3 for dashboard
+            org_details = api.get_orgs_organization(request, org['name'])
+            if org_details and not org_details.get('error'):
+                org_info = org_details['message']
+                
+                # Get projects count for this org
+                projects = api.get_projects(request, org['name'])
+                projects_count_org = 0
+                if projects and not projects.get('error'):
+                    projects_count_org = len(projects['message'])
+                    projects_count += projects_count_org
+                    
+                    # Add recent projects
+                    for project in projects['message'][:2]:  # Limit per org
+                        project_details = api.get_projects_project(request, org['name'], project['name'])
+                        if project_details and not project_details.get('error'):
+                            project_info = project_details['message']
+                            project_info['org_name'] = org['name']
+                            recent_projects.append(project_info)
+
+                organizations.append({
+                    'name': org['name'],
+                    'display_name': org_info.get('display_name', org['name']),
+                    'description': org_info.get('description', ''),
+                    'projects_count': projects_count_org
+                })
+
+    # Get caches overview
+    all_caches = api.get_caches(request)
+    if all_caches and not all_caches.get('error'):
+        all_caches_data = all_caches['message']
+        caches_count = len(all_caches_data)
+        
+        # Get detailed cache info
+        for cache in all_caches_data[:3]:  # Limit to first 3 for dashboard
+            cache_details = api.get_caches_cache(request, cache['name'])
+            if cache_details and not cache_details.get('error'):
+                cache_info = cache_details['message']
+                caches.append({
+                    'name': cache['name'],
+                    'display_name': cache_info.get('display_name', cache['name']),
+                    'description': cache_info.get('description', ''),
+                    'status': cache_info.get('status', 'inactive'),
+                    'priority': cache_info.get('priority', 'N/A')
+                })
+
+    # Sort recent projects by last evaluation (mock data for now)
+    recent_projects = recent_projects[:4]  # Limit to 4 most recent
+
+    context = {
+        'organizations': organizations,
+        'recent_projects': recent_projects,
+        'caches': caches,
+        'organizations_count': organizations_count,
+        'projects_count': projects_count,
+        'caches_count': caches_count,
+        'recent_evaluations_count': recent_evaluations_count  # TODO: implement when evaluation API is available
+    }
+    
+    return render(request, "dashboard/dashboard.html", context)
+
+@login_required
 def home(request):
     details_blocks = []
     all_orgs = api.get_orgs(request)
@@ -369,6 +447,7 @@ def delete_cache(request, cache):
 @login_required
 def organization_members(request, org):
     members_data = api.get_orgs_organization_users(request, org)
+    print(members_data)
     if isinstance(members_data, type(None)) or members_data.get('error'):
         members = []
     else:
@@ -379,26 +458,62 @@ def organization_members(request, org):
         if 'add_member' in request.POST:
             add_form = AddOrganizationMemberForm(request.POST)
             if add_form.is_valid():
-
-                response = api.post_orgs_organization_users(
-                    request, 
-                    org, 
-                    add_form.cleaned_data['user'], 
-                    add_form.cleaned_data['role'].upper()
-                )
-
-                if response and not response.get('error'):
-                    return redirect(f'/organization/{org}/members')
+                username = add_form.cleaned_data['user']
+                role = add_form.cleaned_data['role'].upper()
+                
+                # Check if user is already a member
+                existing_member = None
+                for member in members:
+                    if member.get('id') == username or member.get('user') == username:
+                        existing_member = member
+                        break
+                
+                if existing_member:
+                    add_form.add_error('user', f'User "{username}" is already a member of this organization.')
                 else:
-                    error_message = response.get('message') if response else 'Failed to add member (no response from API)'
-                    add_form.add_error(None, error_message)
+                    response = api.post_orgs_organization_users(request, org, username, role)
+
+                    if response and not response.get('error'):
+                        from django.contrib import messages
+                        messages.success(request, f'Successfully added "{username}" as {role.lower()} to the organization.')
+                        return redirect(f'/organization/{org}/members')
+                    else:
+                        # Parse API error and provide meaningful message
+                        if response:
+                            api_message = response.get('message', '')
+                            if 'not found' in api_message.lower() or 'does not exist' in api_message.lower():
+                                add_form.add_error('user', f'User "{username}" does not exist. Please check the username and try again.')
+                            elif 'already' in api_message.lower() and 'member' in api_message.lower():
+                                add_form.add_error('user', f'User "{username}" is already a member of this organization.')
+                            elif 'permission' in api_message.lower() or 'access' in api_message.lower():
+                                add_form.add_error(None, 'You do not have permission to add members to this organization.')
+                            elif 'organization' in api_message.lower() and 'not found' in api_message.lower():
+                                add_form.add_error(None, 'Organization not found. Please check the organization name.')
+                            else:
+                                add_form.add_error(None, f'Failed to add member: {api_message}')
+                        else:
+                            add_form.add_error(None, 'Failed to add member. Please check your connection and try again.')
         
         elif 'remove_member' in request.POST:
             user_to_remove = request.POST.get('user')
             if user_to_remove:
                 response = api.delete_orgs_organization_users(request, org, user_to_remove)
                 if response and not response.get('error'):
+                    from django.contrib import messages
+                    messages.success(request, f'Successfully removed "{user_to_remove}" from the organization.')
                     return redirect(f'/organization/{org}/members')
+                else:
+                    from django.contrib import messages
+                    if response:
+                        api_message = response.get('message', '')
+                        if 'not found' in api_message.lower():
+                            messages.error(request, f'User "{user_to_remove}" not found in organization.')
+                        elif 'permission' in api_message.lower():
+                            messages.error(request, 'You do not have permission to remove members from this organization.')
+                        else:
+                            messages.error(request, f'Failed to remove member: {api_message}')
+                    else:
+                        messages.error(request, 'Failed to remove member. Please try again.')
         
         elif 'edit_role' in request.POST:
             user_to_edit = request.POST.get('user')
@@ -406,7 +521,21 @@ def organization_members(request, org):
             if user_to_edit and new_role:
                 response = api.patch_orgs_organization_users(request, org, user_to_edit, new_role)
                 if response and not response.get('error'):
+                    from django.contrib import messages
+                    messages.success(request, f'Successfully updated "{user_to_edit}" role to {new_role.lower()}.')
                     return redirect(f'/organization/{org}/members')
+                else:
+                    from django.contrib import messages
+                    if response:
+                        api_message = response.get('message', '')
+                        if 'not found' in api_message.lower():
+                            messages.error(request, f'User "{user_to_edit}" not found in organization.')
+                        elif 'permission' in api_message.lower():
+                            messages.error(request, 'You do not have permission to edit member roles in this organization.')
+                        else:
+                            messages.error(request, f'Failed to update member role: {api_message}')
+                    else:
+                        messages.error(request, 'Failed to update member role. Please try again.')
     
     if not add_form:
         add_form = AddOrganizationMemberForm()

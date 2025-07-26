@@ -911,10 +911,44 @@ tr:hover td{
     border-radius: 5px;
     background-color: #ff00001f;
     margin-bottom: 1rem;
+    padding: 1rem;
 }
 
 .alert-danger li {
     display: block;
+}
+
+.alert-danger p {
+    margin: 0;
+    color: #dc3545;
+}
+
+.alert-success {
+    border: 1px solid #28a745;
+    border-radius: 5px;
+    background-color: #28a7451f;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    color: #155724;
+}
+
+.alert-error {
+    border: 1px solid red;
+    border-radius: 5px;
+    background-color: #ff00001f;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    color: #dc3545;
+}
+
+.field-error {
+    margin-top: 0.5rem;
+}
+
+.field-error p {
+    margin: 0;
+    color: #dc3545;
+    font-size: 0.875rem;
 }
 
 .register {
@@ -944,10 +978,10 @@ tr:hover td{
     color: #007BFF;
 }
 
-.blue-span:hover span:first-child {
+/* .blue-span:hover span:first-child {
     text-decoration: underline;
     color: #007BFF;
-}
+} */
 
 .settings-container {
     max-width: 1200px;
@@ -1244,4 +1278,189 @@ tr:hover td{
 .red-button:hover {
     background-color: #c82333;
     border-color: #c82333;
+}
+
+/* Dashboard Styles */
+
+/* Dashboard header navigation */
+.dashboard-header {
+    border-bottom: 1px solid rgba(118, 118, 118, 0.5);
+    background-color: var(--quaternary);
+    padding: 0;
+    margin-bottom: 1rem;
+}
+
+.dashboard-header nav {
+    display: flex;
+    justify-content: flex-start;
+    padding: 1rem;
+    padding-bottom: 0;
+}
+
+.dashboard-header nav .nav-link {
+    margin: 0 1rem;
+    padding-bottom: 5px;
+    width: max-content;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.dashboard-header nav .nav-link:hover {
+    color: var(--secondary);
+    background-color: transparent;
+    border-radius: 0px;
+}
+
+.dashboard-header nav .nav-link.active {
+    border-bottom: 1px solid white;
+    font-weight: bold;
+}
+
+.dashboard-header nav .nav-link.active span.material-symbols-outlined {
+    color: white;
+    position: relative;
+    bottom: 1px;
+}
+
+/* Dashboard stats */
+.dashboard-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.stat-card {
+    padding: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.stat-icon {
+    background: rgba(171, 176, 180, 0.1);
+    border-radius: 50%;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--secondary);
+}
+
+.stat-content h3 {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: white;
+}
+
+.stat-content p {
+    margin: 0;
+    color: var(--secondary);
+    font-size: 0.875rem;
+}
+
+/* Dashboard grid and sections */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 2rem;
+}
+
+.bordered-section {
+    background: var(--tertiary);
+    border: 1px solid rgba(118, 118, 118, 0.3);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid rgba(118, 118, 118, 0.3);
+    background: var(--quaternary);
+    height: 2rem;
+}
+
+.section-header h2 {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: white;
+}
+
+.view-all-link {
+    color: #3b82f6;
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.view-all-link:hover {
+    text-decoration: underline;
+    background-color: transparent;
+}
+
+.section-content {
+    padding: 1rem;
+}
+
+/* Item styling using existing workflow-item styles */
+.dashboard-item.workflow-item {
+    border-bottom: 1px solid rgba(118, 118, 118, 0.2);
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+}
+
+.dashboard-item.workflow-item:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.item-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.item-header .item-icon {
+    font-size: 1.25rem;
+    color: var(--secondary);
+}
+
+.item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 0.5rem;
+}
+
+/* Cache status indicators */
+.cache-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 0.5rem;
+}
+
+.cache-status-active {
+    background: #10b981;
+}
+
+.cache-status-inactive {
+    background: #f59e0b;
+}
+
+.cache-status-error {
+    background: #ef4444;
+}
+
+/* Utility classes for dashboard */
+.m-l-1rem {
+    margin-left: 1rem;
 }

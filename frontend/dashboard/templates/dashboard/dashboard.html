@@ -1,0 +1,208 @@
+<!--
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ -->
+
+{% extends 'dashboard/index.html' %}
+
+<head>
+    {% load static %}
+    {% load i18n %}
+</head>
+
+{% block title %}{% trans 'Dashboard' %}{% endblock %}
+
+{% block content %}
+
+<!-- Navigation bar directly under main header -->
+<header class="dashboard-header m-t--1rem">
+    <nav>
+        <a href="{% url 'dashboard' %}" class="nav-link active">
+            <span class="material-symbols-outlined">dashboard</span>
+            {% trans 'Dashboard' %}
+        </a>
+        <a href="{% url 'home' %}" class="nav-link">
+            <span class="material-symbols-outlined">apartment</span>
+            {% trans 'Organizations' %}
+        </a>
+        <a href="{% url 'caches' %}" class="nav-link">
+            <span class="material-symbols-outlined">hub</span>
+            {% trans 'Caches' %}
+        </a>
+    </nav>
+</header>
+
+<div class="container">
+    <!-- Welcome Section -->
+    <div class="header m-b-1rem">
+        <div>
+            <h1>{% trans 'Welcome back' %}, {{ request.user.name }}</h1>
+            <p class="text-light">{% trans 'Here\'s what\'s happening with your projects' %}</p>
+        </div>
+    </div>
+
+    <!-- Quick Stats -->
+    <div class="dashboard-stats m-b-2rem">
+        <div class="stat-card">
+            <div class="stat-icon">
+                <span class="material-symbols-outlined">apartment</span>
+            </div>
+            <div class="stat-content">
+                <h3>{{ organizations_count }}</h3>
+                <p>{% trans 'Organizations' %}</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">
+                <span class="material-symbols-outlined">assignment</span>
+            </div>
+            <div class="stat-content">
+                <h3>{{ projects_count }}</h3>
+                <p>{% trans 'Total Projects' %}</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">
+                <span class="material-symbols-outlined">hub</span>
+            </div>
+            <div class="stat-content">
+                <h3>{{ caches_count }}</h3>
+                <p>{% trans 'Active Caches' %}</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">
+                <span class="material-symbols-outlined">schedule</span>
+            </div>
+            <div class="stat-content">
+                <h3>{{ recent_evaluations_count }}</h3>
+                <p>{% trans 'Recent Runs' %}</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-grid">
+        <!-- Organizations Overview -->
+        <div class="dashboard-section bordered-section">
+            <div class="section-header">
+                <h2>{% trans 'Organizations' %}</h2>
+                <a href="{% url 'home' %}" class="view-all-link">{% trans 'View all' %}</a>
+            </div>
+            <div class="section-content">
+                {% for org in organizations %}
+                    <div class="workflow-item dashboard-item">
+                        <a href="{% url 'workflow' org.name %}" class="full-width normal-hover blue-span">
+                            <div class="item-header">
+                                <span class="material-symbols-outlined item-icon">apartment</span>
+                                <span class="workflow-title">{{ org.display_name }}</span>
+                            </div>
+                            <p class="text-light">{{ org.description|truncatechars:80 }}</p>
+                            <div class="item-meta">
+                                <span class="flex-c">
+                                    <span class="material-symbols-outlined m-r-3">assignment</span>
+                                    <span class="text-light-n-s">{{ org.projects_count }} projects</span>
+                                </span>
+                            </div>
+                        </a>
+                    </div>
+                {% empty %}
+                    <div class="no-caches empty-state">
+                        <span class="material-symbols-outlined empty-state-icon">apartment</span>
+                        <h3>{% trans 'No organizations yet' %}</h3>
+                        <p>{% trans 'Create your first organization to get started.' %}</p>
+                        <a href="{% url 'new_organization' %}" class="submit-btn empty-state-link">
+                            {% trans 'Create Organization' %}
+                        </a>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Recent Projects -->
+        <div class="dashboard-section bordered-section">
+            <div class="section-header">
+                <h2>{% trans 'Recent Projects' %}</h2>
+            </div>
+            <div class="section-content">
+                {% for project in recent_projects %}
+                    <div class="workflow-item dashboard-item">
+                        <a href="{% url 'workflow' project.org_name %}" class="full-width normal-hover blue-span">
+                            <div class="item-header">
+                                <span class="material-symbols-outlined item-icon">assignment</span>
+                                <span class="workflow-title">{{ project.display_name }}</span>
+                            </div>
+                            <p class="text-light">{{ project.org_name }} • {{ project.description|truncatechars:50 }}</p>
+                            <div class="item-meta">
+                                {% if project.last_evaluation %}
+                                    <span class="flex-c">
+                                        <span class="material-symbols-outlined m-r-3">schedule</span>
+                                        <span class="text-light-n-s">{% trans 'Last run' %}: {{ project.last_evaluation_time|timesince }} ago</span>
+                                    </span>
+                                {% else %}
+                                    <span class="flex-c">
+                                        <span class="material-symbols-outlined m-r-3">schedule</span>
+                                        <span class="text-light-n-s">{% trans 'No runs yet' %}</span>
+                                    </span>
+                                {% endif %}
+                            </div>
+                        </a>
+                    </div>
+                {% empty %}
+                    <div class="no-caches empty-state">
+                        <span class="material-symbols-outlined empty-state-icon">assignment</span>
+                        <h3>{% trans 'No projects yet' %}</h3>
+                        <p>{% trans 'Create your first project to get started.' %}</p>
+                        <a href="{% url 'new_project' %}" class="submit-btn empty-state-link">
+                            {% trans 'Create Project' %}
+                        </a>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Cache Overview -->
+        <div class="dashboard-section bordered-section">
+            <div class="section-header">
+                <h2>{% trans 'Cache Status' %}</h2>
+                <a href="{% url 'caches' %}" class="view-all-link">{% trans 'View all' %}</a>
+            </div>
+            <div class="section-content">
+                {% for cache in caches %}
+                    <div class="workflow-item dashboard-item">
+                        <div class="full-width normal-hover">
+                            <div class="item-header">
+                                <span class="material-symbols-outlined item-icon">hub</span>
+                                <span class="workflow-title">{{ cache.display_name }}</span>
+                            </div>
+                            <p class="text-light">{{ cache.description|truncatechars:60 }}</p>
+                            <div class="item-meta">
+                                <span class="flex-c">
+                                    <span class="cache-status cache-status-{{ cache.status }}"></span>
+                                    <span class="text-light-n-s">{{ cache.status|title }}</span>
+                                </span>
+                                {% if cache.priority %}
+                                    <span class="flex-c m-l-1rem">
+                                        <span class="material-symbols-outlined m-r-3">priority_high</span>
+                                        <span class="text-light-n-s">Priority: {{ cache.priority }}</span>
+                                    </span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                {% empty %}
+                    <div class="no-caches empty-state">
+                        <span class="material-symbols-outlined empty-state-icon">hub</span>
+                        <h3>{% trans 'No caches configured' %}</h3>
+                        <p>{% trans 'Create your first cache to improve performance.' %}</p>
+                        <a href="{% url 'new_cache' %}" class="submit-btn empty-state-link">
+                            {% trans 'Create Cache' %}
+                        </a>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
