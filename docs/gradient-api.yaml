@@ -97,7 +97,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
         '400':
-          description: Registration is disabled / Invalid email
+          description: Registration is disabled / Invalid username / Invalid email / Invalid password
           content:
             application/json:
               schema:
@@ -159,6 +159,63 @@ paths:
       responses:
         '200':
           description: Successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /auth/verify-email:
+    get:
+      tags:
+        - auth
+      summary: Verify Email Address
+      description: Verify user email address using verification token
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+            description: Email verification token sent to user's email
+      responses:
+        '200':
+          description: Email verified successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '400':
+          description: Email verification disabled / Invalid or expired token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+  /auth/resend-verification:
+    post:
+      tags:
+        - auth
+      summary: Resend Email Verification
+      description: Resend email verification token to user
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckUsernameRequest'
+        required: true
+      responses:
+        '200':
+          description: Verification email sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '400':
+          description: Email verification disabled / Email already verified / SMTP error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+        '404':
+          description: User not found
           content:
             application/json:
               schema:
@@ -1401,17 +1458,26 @@ components:
       properties:
         username:
           type: string
+          description: Username (3-50 chars, alphanumeric/_/-, no consecutive special chars, not reserved)
+          pattern: "^[a-zA-Z0-9]([a-zA-Z0-9_-])*[a-zA-Z0-9]$|^[a-zA-Z0-9]$"
+          minLength: 3
+          maxLength: 50
           examples: [testuser]
         name:
           type: string
+          description: Full name of the user
           examples: [Alex]
         email:
           type: string
           format: email
+          description: Valid email address
           examples: [alex@example.com]
         password:
           type: string
           format: password
+          description: Password (8-128 chars, must contain uppercase, lowercase, digit, and special char)
+          minLength: 8
+          maxLength: 128
           examples: [v3ry_s3cur3=p4ssw0rd]
     MakeOrganizationRequest:
       type: object

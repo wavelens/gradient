@@ -9,9 +9,13 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 struct MakeUserRequest {
+    /// Username (3-50 chars, alphanumeric/_/-, no consecutive special chars, not reserved)
     pub username: String,
+    /// Full name of the user
     pub name: String,
+    /// Valid email address
     pub email: String,
+    /// Password (8-128 chars, must contain uppercase, lowercase, digit, and special char)
     pub password: String,
 }
 
@@ -19,6 +23,11 @@ struct MakeUserRequest {
 struct MakeLoginRequest {
     pub loginname: String,
     pub password: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct CheckUsernameRequest {
+    pub username: String,
 }
 
 pub async fn post_basic_register(
@@ -115,6 +124,66 @@ pub async fn post_logout(config: RequestConfig) -> Result<BaseResponse<String>, 
         .send()
         .await
         .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn post_check_username(
+    config: RequestConfig,
+    username: String,
+) -> Result<BaseResponse<String>, String> {
+    let req = CheckUsernameRequest { username };
+
+    let res = get_client(
+        config,
+        "auth/check-username".to_string(),
+        RequestType::POST,
+        false,
+    )
+    .unwrap()
+    .json(&req)
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn get_verify_email(
+    config: RequestConfig,
+    token: String,
+) -> Result<BaseResponse<String>, String> {
+    let res = get_client(
+        config,
+        format!("auth/verify-email?token={}", token),
+        RequestType::GET,
+        false,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn post_resend_verification(
+    config: RequestConfig,
+    username: String,
+) -> Result<BaseResponse<String>, String> {
+    let req = CheckUsernameRequest { username };
+
+    let res = get_client(
+        config,
+        "auth/resend-verification".to_string(),
+        RequestType::POST,
+        false,
+    )
+    .unwrap()
+    .json(&req)
+    .send()
+    .await
+    .unwrap();
 
     Ok(parse_response(res).await)
 }
