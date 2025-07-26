@@ -226,6 +226,38 @@ pub fn validate_username(username: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn validate_display_name(display_name: &str) -> Result<(), String> {
+    if display_name.is_empty() {
+        return Err("Display name cannot be empty".to_string());
+    }
+
+    if display_name.len() > 100 {
+        return Err("Display name cannot exceed 100 characters".to_string());
+    }
+
+    // Check for valid characters (alphanumeric and spaces only)
+    if !display_name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == ' ')
+    {
+        return Err(
+            "Display name can only contain letters, numbers, and spaces".to_string(),
+        );
+    }
+
+    // Cannot start or end with spaces
+    if display_name.starts_with(' ') || display_name.ends_with(' ') {
+        return Err("Display name cannot start or end with spaces".to_string());
+    }
+
+    // Cannot contain consecutive spaces
+    if display_name.contains("  ") {
+        return Err("Display name cannot contain consecutive spaces".to_string());
+    }
+
+    Ok(())
+}
+
 pub fn validate_password(password: &str) -> Result<(), String> {
     if password.len() < 8 {
         return Err("Password must be at least 8 characters long".to_string());

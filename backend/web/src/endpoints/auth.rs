@@ -14,7 +14,7 @@ use axum::response::Response;
 use chrono::Utc;
 use core::consts::*;
 use core::email::{generate_verification_token, EmailService};
-use core::input::{validate_password, validate_username};
+use core::input::{validate_display_name, validate_password, validate_username};
 use core::types::*;
 use email_address::EmailAddress;
 use password_auth::{generate_hash, verify_password};
@@ -54,6 +54,10 @@ pub async fn post_basic_register(
 
     if let Err(e) = validate_username(&body.username) {
         return Err(WebError::invalid_username(e));
+    }
+
+    if let Err(e) = validate_display_name(&body.name) {
+        return Err(WebError::BadRequest(format!("Invalid name: {}", e)));
     }
 
     if !EmailAddress::is_valid(body.email.clone().as_str()) {

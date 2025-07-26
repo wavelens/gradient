@@ -10,6 +10,7 @@ use axum::extract::State;
 use axum::{Extension, Json};
 use chrono::Utc;
 use core::consts::*;
+use core::input::{validate_display_name, validate_username};
 use core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
@@ -189,6 +190,10 @@ pub async fn patch_settings(
     let mut auser: AUser = user.into();
 
     if let Some(username) = body.username {
+        if let Err(e) = validate_username(&username) {
+            return Err(WebError::invalid_username(e));
+        }
+
         let existing_user = EUser::find()
             .filter(CUser::Username.eq(username.clone()))
             .one(&state.db)
@@ -202,6 +207,9 @@ pub async fn patch_settings(
     }
 
     if let Some(name) = body.name {
+        if let Err(e) = validate_display_name(&name) {
+            return Err(WebError::BadRequest(format!("Invalid name: {}", e)));
+        }
         auser.name = Set(name);
     }
 

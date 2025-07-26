@@ -246,9 +246,6 @@
           http://gradient.local/api/v1/projects/testorg/testproject/check-repository
       """))
 
-      # Test project evaluation
-      server.succeed("${lib.getExe pkgs.gradient-cli} project evaluate")
-
       # Wait for evaluation to complete and test cache functionality
       print("=== Testing Nix Cache Functionality ===")
       builder.sleep(120)

@@ -10,7 +10,7 @@ use axum::{Extension, Json};
 use chrono::Utc;
 use core::consts::BASE_ROLE_ADMIN_ID;
 use core::database::{get_cache_by_name, get_organization_by_name};
-use core::input::check_index_name;
+use core::input::{check_index_name, validate_display_name};
 use core::sources::{format_public_key, generate_ssh_key};
 use core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -93,6 +93,10 @@ pub async fn put(
 ) -> WebResult<Json<BaseResponse<String>>> {
     if check_index_name(body.name.clone().as_str()).is_err() {
         return Err(WebError::invalid_name("Organization Name"));
+    }
+
+    if let Err(e) = validate_display_name(&body.display_name) {
+        return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
     }
 
     let existing_organization = EOrganization::find()
@@ -190,6 +194,9 @@ pub async fn patch_organization(
     }
 
     if let Some(display_name) = body.display_name {
+        if let Err(e) = validate_display_name(&display_name) {
+            return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
+        }
         aorganization.display_name = Set(display_name);
     }
 

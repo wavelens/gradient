@@ -12,7 +12,7 @@ use chrono::Utc;
 use core::consts::*;
 use core::database::{add_features, get_organization_by_name, get_server_by_name};
 use core::executer::connect;
-use core::input::check_index_name;
+use core::input::{check_index_name, validate_display_name};
 use core::sources::decrypt_ssh_private_key;
 use core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -83,6 +83,10 @@ pub async fn put(
 ) -> WebResult<Json<BaseResponse<String>>> {
     if check_index_name(body.name.clone().as_str()).is_err() {
         return Err(WebError::invalid_name("Server Name"));
+    }
+
+    if let Err(e) = validate_display_name(&body.display_name) {
+        return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
     }
 
     let organization: MOrganization =
@@ -254,6 +258,15 @@ pub async fn patch_server(
     }
 
     if let Some(display_name) = body.display_name.clone() {
+        if let Err(e) = validate_display_name(&display_name) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Invalid display name: {}", e),
+                }),
+            ));
+        }
         aserver.display_name = Set(display_name);
     }
 

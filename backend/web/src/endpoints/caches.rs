@@ -13,7 +13,7 @@ use axum::{Extension, Json};
 use chrono::Utc;
 use core::database::get_cache_by_name;
 use core::executer::{get_local_store, get_pathinfo};
-use core::input::check_index_name;
+use core::input::{check_index_name, validate_display_name};
 use core::sources::{
     format_cache_key, generate_signing_key, get_cache_nar_location, get_hash_from_url,
     get_path_from_build_output,
@@ -170,6 +170,10 @@ pub async fn put(
         return Err(WebError::invalid_name("Cache Name"));
     }
 
+    if let Err(e) = validate_display_name(&body.display_name) {
+        return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
+    }
+
     let existing_cache = ECache::find()
         .filter(CCache::Name.eq(body.name.clone()))
         .one(&state.db)
@@ -275,6 +279,15 @@ pub async fn patch_cache(
     }
 
     if let Some(display_name) = body.display_name {
+        if let Err(e) = validate_display_name(&display_name) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Invalid display name: {}", e),
+                }),
+            ));
+        }
         acache.display_name = Set(display_name);
     }
 

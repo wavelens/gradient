@@ -10,7 +10,7 @@ use axum::{Extension, Json};
 use chrono::Utc;
 use core::consts::*;
 use core::database::{get_organization_by_name, get_project_by_name};
-use core::input::{check_index_name, valid_evaluation_wildcard, vec_to_hex};
+use core::input::{check_index_name, valid_evaluation_wildcard, validate_display_name, vec_to_hex};
 use core::sources::check_project_updates;
 use core::types::*;
 use entity::build::BuildStatus;
@@ -105,6 +105,10 @@ pub async fn put(
 ) -> WebResult<Json<BaseResponse<String>>> {
     if check_index_name(body.name.clone().as_str()).is_err() {
         return Err(WebError::invalid_name("Project Name"));
+    }
+
+    if let Err(e) = validate_display_name(&body.display_name) {
+        return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
     }
 
     let repository_url = normalize_url(body.repository.clone().as_str())
@@ -221,6 +225,9 @@ pub async fn patch_project(
     }
 
     if let Some(display_name) = body.display_name {
+        if let Err(e) = validate_display_name(&display_name) {
+            return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
+        }
         aproject.display_name = Set(display_name);
     }
 

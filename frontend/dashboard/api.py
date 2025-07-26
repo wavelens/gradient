@@ -42,7 +42,7 @@ def get_client(user, endpoint, request_type, body=None):
 
     if response.status_code == 200:
         return response.json()
-    elif response.status_code == 409:
+    elif response.status_code in [400, 401, 409]:
         try:
             return response.json()
         except ValueError:
