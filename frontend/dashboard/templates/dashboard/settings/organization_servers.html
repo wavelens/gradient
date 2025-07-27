@@ -20,6 +20,7 @@
     {% if org %}
         <li><a class="settings-nav-link" href="{% url 'settingsOrganization' org %}"><span class="material-symbols-outlined m-r-5">apartment</span>{% trans 'Organization' %}</a></li>
         <li><a class="settings-nav-link" href="{% url 'organizationMembers' org %}"><span class="material-symbols-outlined m-r-5">group</span>{% trans 'Members' %}</a></li>
+        <li><a class="settings-nav-link" href="{% url 'organizationSSH' org %}"><span class="material-symbols-outlined m-r-5">key</span>{% trans 'SSH Key' %}</a></li>
     {% endif %}
     <li><a class="settings-nav-link active" href=""><span class="material-symbols-outlined m-r-5">dns</span>{% trans 'Servers' %}</a></li>
 {% endblock %}
@@ -229,11 +230,6 @@
                 }
             });
         });
-
-        // Show add form if there are errors
-        {% if add_form.errors %}
-            toggleAddServerForm();
-        {% endif %}
     });
 </script>
  {% endblock %}

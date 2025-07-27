@@ -337,10 +337,6 @@ def edit_organization(request, org):
         'description': org_message.get('description', '')
     }
 
-    # Get SSH public key
-    ssh_key_data = api.get_orgs_organization_ssh(request, org)
-    ssh_public_key = ssh_key_data.get('message', '') if ssh_key_data and not ssh_key_data.get('error') else ''
-
     if request.method == 'POST':
         form = EditOrganizationForm(request.POST)
         if form.is_valid():
@@ -365,7 +361,7 @@ def edit_organization(request, org):
     else:
         form = EditOrganizationForm(initial=initial_data)
 
-    return render(request, "dashboard/settings/organization.html", {'form': form, 'org': org, 'ssh_public_key': ssh_public_key})
+    return render(request, "dashboard/settings/organization.html", {'form': form, 'org': org})
 
 @login_required
 def delete_organization(request, org):
@@ -952,3 +948,28 @@ def delete_user(request):
             return redirect('login')
     else:
         return redirect('settingsProfile')
+
+@login_required
+def organization_ssh(request, org):
+    # Get SSH public key
+    ssh_key_data = api.get_orgs_organization_ssh(request, org)
+    ssh_public_key = ssh_key_data.get('message', '') if ssh_key_data and not ssh_key_data.get('error') else ''
+    
+    context = {
+        'org': org,
+        'ssh_public_key': ssh_public_key,
+    }
+    return render(request, "dashboard/settings/organization_ssh.html", context)
+
+@login_required
+def organization_ssh_generate(request, org):
+    if request.method == 'POST':
+        response = api.post_orgs_organization_ssh(request, org)
+        if response is None or response.get("error"):
+            error_msg = response.get('message', 'Failed to generate SSH key.') if response else 'Failed to generate SSH key.'
+            messages.error(request, error_msg)
+        else:
+            messages.success(request, "SSH key generated successfully.")
+        return redirect('organizationSSH', org=org)
+    else:
+        return redirect('organizationSSH', org=org)

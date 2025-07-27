@@ -1464,3 +1464,87 @@ tr:hover td{
 .m-l-1rem {
     margin-left: 1rem;
 }
+
+/* SSH Key Settings */
+.ssh-key-container {
+    margin-top: 10px;
+}
+
+.ssh-key-display {
+    width: 100%;
+    min-height: 80px;
+    padding: 10px;
+    font-family: monospace;
+    font-size: 16px;
+    border: 1px solid rgb(118, 118, 118);
+    border-radius: 5px;
+    resize: vertical;
+    background-color: var(--tertiary);
+    color: var(--secondary);
+    margin-bottom: 10px;
+}
+
+.ssh-key-display:focus {
+    outline: none;
+    border: 1px solid #007BFF;
+    background-color: var(--tertiary);
+}
+
+.ssh-key-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.copy-button {
+    padding: 8px 16px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.copy-button:hover {
+    background-color: #0056b3;
+}
+
+.generate-button {
+    padding: 8px 16px;
+    background-color: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.generate-button:hover {
+    background-color: #c82333;
+}
+
+.no-key-container {
+    padding: 20px;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.ssh-key-info {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #e7f3ff;
+    border-left: 4px solid #007bff;
+    border-radius: 4px;
+}
+
+.ssh-key-info h4 {
+    margin-top: 0;
+    color: #0056b3;
+}
+
+.ssh-key-info ul {
+    margin-bottom: 0;
+    text-align: left;
+}
