@@ -973,3 +973,65 @@ def organization_ssh_generate(request, org):
         return redirect('organizationSSH', org=org)
     else:
         return redirect('organizationSSH', org=org)
+
+@login_required
+def project_detail(request, org, project):
+    project_data = api.get_projects_project(request, org, project)
+    
+    if project_data is None or project_data.get('error'):
+        messages.error(request, "Project not found or access denied.")
+        return redirect('workflow', org=org)
+    
+    project_message = project_data.get('message', {})
+    
+    # Get evaluations data (mock data for now - replace with actual API call when available)
+    evaluations = []  # api.get_evaluations(request, org, project)
+    
+    # Calculate stats
+    successful_evaluations_count = sum(1 for eval in evaluations if eval.get('status') == 'completed')
+    failed_evaluations_count = sum(1 for eval in evaluations if eval.get('status') == 'failed')
+    running_evaluations_count = sum(1 for eval in evaluations if eval.get('status') in ['running', 'pending'])
+    
+    context = {
+        'org': org,
+        'project': project,
+        'project_data': project_message,
+        'evaluations': evaluations,
+        'successful_evaluations_count': successful_evaluations_count,
+        'failed_evaluations_count': failed_evaluations_count,
+        'running_evaluations_count': running_evaluations_count,
+    }
+    
+    return render(request, "dashboard/project_detail.html", context)
+
+@login_required
+def start_evaluation(request, org, project):
+    if request.method == 'POST':
+        # API call to start evaluation (replace with actual API call when available)
+        # response = api.post_evaluations_start(request, org, project)
+        # if response is None or response.get("error"):
+        #     messages.error(request, "Failed to start evaluation.")
+        # else:
+        #     messages.success(request, "Evaluation started successfully.")
+        messages.success(request, "Evaluation start requested. (API not implemented yet)")
+        return redirect('projectDetail', org=org, project=project)
+    else:
+        return redirect('projectDetail', org=org, project=project)
+
+@login_required
+def abort_evaluation(request, org, project):
+    if request.method == 'POST':
+        evaluation_id = request.POST.get('evaluation_id')
+        if evaluation_id:
+            # API call to abort evaluation (replace with actual API call when available)
+            # response = api.post_evaluations_abort(request, org, project, evaluation_id)
+            # if response is None or response.get("error"):
+            #     messages.error(request, "Failed to abort evaluation.")
+            # else:
+            #     messages.success(request, "Evaluation aborted successfully.")
+            messages.success(request, f"Evaluation {evaluation_id} abort requested. (API not implemented yet)")
+        else:
+            messages.error(request, "No evaluation ID provided.")
+        return redirect('projectDetail', org=org, project=project)
+    else:
+        return redirect('projectDetail', org=org, project=project)

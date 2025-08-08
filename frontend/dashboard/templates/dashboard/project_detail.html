@@ -15,102 +15,133 @@
 
 {% block content %}
 
-{% url 'settingsProject' org project as link_url %}
-{% include "../individualHeader.html" with link_url=link_url %}
+<!-- Navigation bar directly under main header -->
+<header class="dashboard-header m-t--1rem">
+    <nav>
+        <a href="{% url 'dashboard' %}" class="nav-link">
+            <span class="material-symbols-outlined">dashboard</span>
+            {% trans 'Dashboard' %}
+        </a>
+        <a href="{% url 'home' %}" class="nav-link">
+            <span class="material-symbols-outlined">apartment</span>
+            {% trans 'Organizations' %}
+        </a>
+        <a href="{% url 'caches' %}" class="nav-link">
+            <span class="material-symbols-outlined">hub</span>
+            {% trans 'Caches' %}
+        </a>
+        <a class="nav-link flex-end header-icon-right" href="{% url 'settingsProject' org project %}"><span class="material-symbols-outlined f-s-19px m-r-4">settings</span><span>{% trans 'Settings' %}</span></a>
+    </nav>
+</header>
 
 <div class="container">
+    <!-- Welcome Section -->
     <div class="header m-b-1rem">
         <div>
             <h1>{{ project_data.display_name }}</h1>
+            {% if project_data.description %}
+                <p class="text-light">{{ project_data.description }}</p>
+            {% else %}
+                <p class="text-light">{% trans 'Project in' %} {{ org }}</p>
+            {% endif %}
+        </div>
+        <div class="header-actions">
+            <a href="{% url 'settingsProject' org project %}" class="submit-btn">
+                <span class="material-symbols-outlined">settings</span>
+                {% trans 'Settings' %}
+            </a>
         </div>
     </div>
-    {% if project_data.description %}
-        <div class="m-b-1rem">
-            <p class="project-description">{{ project_data.description }}</p>
-        </div>
-    {% endif %}
 
-    <!-- Messages -->
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert alert-{{ message.tags }}">
-                {{ message }}
+    <!-- Quick Stats -->
+    <div class="dashboard-stats m-b-2rem">
+        <div class="stat-card">
+            <div class="stat-icon">
+                <span class="material-symbols-outlined">science</span>
             </div>
-        {% endfor %}
-    {% endif %}
+            <div class="stat-content">
+                <h3>{{ evaluations|length|default:0 }}</h3>
+                <p>{% trans 'Total Runs' %}</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">
+                <span class="material-symbols-outlined">check_circle</span>
+            </div>
+            <div class="stat-content">
+                <h3>{{ successful_evaluations_count|default:0 }}</h3>
+                <p>{% trans 'Successful Runs' %}</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">
+                <span class="material-symbols-outlined">error</span>
+            </div>
+            <div class="stat-content">
+                <h3>{{ failed_evaluations_count|default:0 }}</h3>
+                <p>{% trans 'Failed Runs' %}</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">
+                <span class="material-symbols-outlined">hourglass_empty</span>
+            </div>
+            <div class="stat-content">
+                <h3>{{ running_evaluations_count|default:0 }}</h3>
+                <p>{% trans 'Running Runs' %}</p>
+            </div>
+        </div>
+    </div>
 
-    <!-- Project Actions -->
-    <div class="project-actions m-b-2rem">
-        <form method="post" action="{% url 'startEvaluation' org project %}" style="display: inline;">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-primary">
-                <span class="material-symbols-outlined">play_arrow</span>
-                {% trans 'Start Evaluation' %}
-            </button>
-        </form>
-        
-        {% if evaluations %}
-            {% for evaluation in evaluations %}
-                {% if evaluation.status == 'running' or evaluation.status == 'pending' %}
-                    <form method="post" action="{% url 'abortEvaluation' org project %}" style="display: inline;">
+    <div class="dashboard-grid">
+
+        <!-- Project Actions -->
+        <div class="dashboard-section bordered-section">
+            <div class="section-header">
+                <h2>{% trans 'Quick Actions' %}</h2>
+            </div>
+            <div class="section-content">
+                <div class="project-actions">
+                    <form method="post" action="{% url 'startEvaluation' org project %}" style="display: inline;">
                         {% csrf_token %}
-                        <input type="hidden" name="evaluation_id" value="{{ evaluation.id }}">
-                        <button type="submit" class="btn btn-danger" onclick="return confirm('{% trans "Are you sure you want to abort this evaluation?" %}')">
-                            <span class="material-symbols-outlined">stop</span>
-                            {% trans 'Abort Evaluation' %}
+                        <button type="submit" class="submit-btn">
+                            <span class="material-symbols-outlined">play_arrow</span>
+                            {% trans 'Start Evaluation' %}
                         </button>
                     </form>
-                {% endif %}
-            {% endfor %}
-        {% endif %}
-
-        <a href="{% url 'settingsProject' org project %}" class="btn btn-secondary">
-            <span class="material-symbols-outlined">settings</span>
-            {% trans 'Settings' %}
-        </a>
-    </div>
-
-    <!-- Project Information -->
-    <div class="project-info-section m-b-2rem">
-        <h2>{% trans 'Project Information' %}</h2>
-        <div class="info-grid">
-            <div class="info-item">
-                <label>{% trans 'Name' %}:</label>
-                <span>{{ project_data.name }}</span>
-            </div>
-            <div class="info-item">
-                <label>{% trans 'Repository' %}:</label>
-                <span>
-                    {% if project_data.repository %}
-                        <a href="{{ project_data.repository }}" target="_blank" rel="noopener noreferrer">
-                            {{ project_data.repository }}
-                            <span class="material-symbols-outlined">open_in_new</span>
-                        </a>
-                    {% else %}
-                        {% trans 'Not configured' %}
+                    
+                    {% if evaluations %}
+                        {% for evaluation in evaluations %}
+                            {% if evaluation.status == 'running' or evaluation.status == 'pending' %}
+                                <form method="post" action="{% url 'abortEvaluation' org project %}" style="display: inline;">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="evaluation_id" value="{{ evaluation.id }}">
+                                    <button type="submit" class="submit-btn danger-btn" onclick="return confirm('{% trans "Are you sure you want to abort this evaluation?" %}')">
+                                        <span class="material-symbols-outlined">stop</span>
+                                        {% trans 'Abort Evaluation' %}
+                                    </button>
+                                </form>
+                            {% endif %}
+                        {% endfor %}
                     {% endif %}
-                </span>
-            </div>
-            <div class="info-item">
-                <label>{% trans 'Evaluation Wildcard' %}:</label>
-                <span>{{ project_data.evaluation_wildcard|default:'*' }}</span>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- Recent Evaluations -->
-    <div class="evaluations-section">
-        <h2>{% trans 'Recent Evaluations' %}</h2>
-        
-        {% if evaluations %}
-            <div class="evaluations-list">
-                {% for evaluation in evaluations %}
-                    <div class="evaluation-card">
-                        <div class="evaluation-header">
-                            <div class="evaluation-id">
-                                <strong>{{ evaluation.id }}</strong>
+        <!-- Recent Evaluations -->
+        <div class="dashboard-section bordered-section">
+            <div class="section-header">
+                <h2>{% trans 'Recent Evaluations' %}</h2>
+            </div>
+            <div class="section-content">
+                {% for evaluation in evaluations|slice:":5" %}
+                    <div class="workflow-item dashboard-item">
+                        <a href="{% url 'log-eval' org evaluation.id %}" class="full-width normal-hover blue-span">
+                            <div class="item-header">
+                                <span class="material-symbols-outlined item-icon">science</span>
+                                <span class="workflow-title">Evaluation #{{ evaluation.id }}</span>
                             </div>
-                            <div class="evaluation-status status-{{ evaluation.status }}">
+                            <p class="text-light">
                                 {% if evaluation.status == 'running' %}
                                     <span class="material-symbols-outlined">hourglass_empty</span>
                                     {% trans 'Running' %}
@@ -127,292 +158,66 @@
                                     <span class="material-symbols-outlined">schedule</span>
                                     {% trans 'Pending' %}
                                 {% endif %}
+                                • {{ evaluation.created_at|timesince }} ago
+                            </p>
+                            <div class="item-meta">
+                                <span class="flex-c">
+                                    <span class="material-symbols-outlined m-r-3">folder</span>
+                                    <span class="text-light-n-s">{{ evaluation.builds|length|default:"0" }} builds</span>
+                                </span>
                             </div>
-                            <div class="evaluation-actions">
-                                <a href="{% url 'log-eval' org evaluation.id %}" class="btn btn-sm">
-                                    <span class="material-symbols-outlined">visibility</span>
-                                    {% trans 'View Logs' %}
-                                </a>
-                            </div>
-                        </div>
-                        
-                        <div class="evaluation-details">
-                            {% if evaluation.created_at %}
-                                <div class="detail-item">
-                                    <label>{% trans 'Started' %}:</label>
-                                    <span>{{ evaluation.created_at|date:"Y-m-d H:i:s" }}</span>
-                                </div>
-                            {% endif %}
-                            {% if evaluation.builds %}
-                                <div class="detail-item">
-                                    <label>{% trans 'Builds' %}:</label>
-                                    <span>{{ evaluation.builds|length }}</span>
-                                </div>
-                            {% endif %}
-                        </div>
+                        </a>
+                    </div>
+                {% empty %}
+                    <div class="no-caches empty-state">
+                        <span class="material-symbols-outlined empty-state-icon">science</span>
+                        <h3>{% trans 'No evaluations yet' %}</h3>
+                        <p>{% trans 'Start your first evaluation to see results here.' %}</p>
+                        <form method="post" action="{% url 'startEvaluation' org project %}">
+                            {% csrf_token %}
+                            <button type="submit" class="submit-btn empty-state-link">
+                                <span class="material-symbols-outlined">play_arrow</span>
+                                {% trans 'Start First Evaluation' %}
+                            </button>
+                        </form>
                     </div>
                 {% endfor %}
             </div>
-        {% else %}
-            <div class="no-evaluations">
-                <div class="empty-state">
-                    <span class="material-symbols-outlined">science</span>
-                    <h3>{% trans 'No Evaluations Yet' %}</h3>
-                    <p>{% trans 'Start your first evaluation to see results here.' %}</p>
-                    <form method="post" action="{% url 'startEvaluation' org project %}">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-primary">
-                            <span class="material-symbols-outlined">play_arrow</span>
-                            {% trans 'Start First Evaluation' %}
-                        </button>
-                    </form>
+        </div>
+
+        <!-- Project Information -->
+        <div class="dashboard-section bordered-section">
+            <div class="section-header">
+                <h2>{% trans 'Project Information' %}</h2>
+                <a href="{% url 'settingsProject' org project %}" class="view-all-link">{% trans 'Edit settings' %}</a>
+            </div>
+            <div class="section-content">
+                <div class="workflow-item dashboard-item">
+                    <div class="full-width normal-hover">
+                        <div class="item-header">
+                            <span class="material-symbols-outlined item-icon">assignment</span>
+                            <span class="workflow-title">{{ project_data.name }}</span>
+                        </div>
+                        <p class="text-light">{{ project_data.description|default:"No description available"|truncatechars:80 }}</p>
+                        <div class="item-meta">
+                            {% if project_data.repository %}
+                                <span class="flex-c">
+                                    <span class="material-symbols-outlined m-r-3">code</span>
+                                    <span class="text-light-n-s">
+                                        <a href="{{ project_data.repository }}" target="_blank" rel="noopener noreferrer" class="external-link">
+                                            Repository
+                                            <span class="material-symbols-outlined">open_in_new</span>
+                                        </a>
+                                    </span>
+                                </span>
+                            {% endif %}
+                        </div>
+                    </div>
                 </div>
             </div>
-        {% endif %}
+        </div>
+
     </div>
 </div>
 
-<style>
-.container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 20px;
-}
-
-.project-description {
-    color: #666;
-    font-size: 16px;
-    margin-top: 5px;
-}
-
-.project-actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    flex-wrap: wrap;
-}
-
-.btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 10px 16px;
-    border: none;
-    border-radius: 4px;
-    text-decoration: none;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background-color 0.2s;
-}
-
-.btn-primary {
-    background-color: #007bff;
-    color: white;
-}
-
-.btn-primary:hover {
-    background-color: #0056b3;
-}
-
-.btn-danger {
-    background-color: #dc3545;
-    color: white;
-}
-
-.btn-danger:hover {
-    background-color: #c82333;
-}
-
-.btn-secondary {
-    background-color: #6c757d;
-    color: white;
-}
-
-.btn-secondary:hover {
-    background-color: #545b62;
-}
-
-.btn-sm {
-    padding: 6px 12px;
-    font-size: 12px;
-}
-
-.project-info-section h2,
-.evaluations-section h2 {
-    color: #333;
-    margin-bottom: 15px;
-    font-size: 20px;
-}
-
-.info-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 15px;
-}
-
-.info-item {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-}
-
-.info-item label {
-    font-weight: 500;
-    color: #333;
-    font-size: 14px;
-}
-
-.info-item span {
-    color: #666;
-}
-
-.info-item a {
-    color: #007bff;
-    text-decoration: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-}
-
-.evaluations-list {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-}
-
-.evaluation-card {
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    padding: 20px;
-    background-color: #fafafa;
-}
-
-.evaluation-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 15px;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-
-.evaluation-id {
-    font-family: monospace;
-    font-size: 16px;
-}
-
-.evaluation-status {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 5px 10px;
-    border-radius: 15px;
-    font-size: 12px;
-    font-weight: 500;
-}
-
-.status-running {
-    background-color: #fff3cd;
-    color: #856404;
-}
-
-.status-completed {
-    background-color: #d4edda;
-    color: #155724;
-}
-
-.status-failed {
-    background-color: #f8d7da;
-    color: #721c24;
-}
-
-.status-aborted {
-    background-color: #e2e3e5;
-    color: #383d41;
-}
-
-.status-pending {
-    background-color: #cce5ff;
-    color: #004085;
-}
-
-.evaluation-details {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 15px;
-}
-
-.detail-item {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-}
-
-.detail-item label {
-    font-size: 12px;
-    font-weight: 500;
-    color: #666;
-}
-
-.detail-item span {
-    font-size: 14px;
-    color: #333;
-}
-
-.no-evaluations {
-    text-align: center;
-    padding: 40px 20px;
-}
-
-.empty-state {
-    max-width: 400px;
-    margin: 0 auto;
-}
-
-.empty-state .material-symbols-outlined {
-    font-size: 64px;
-    color: #ccc;
-    margin-bottom: 20px;
-}
-
-.empty-state h3 {
-    color: #666;
-    margin-bottom: 10px;
-}
-
-.empty-state p {
-    color: #999;
-    margin-bottom: 20px;
-}
-
-.alert {
-    padding: 12px 16px;
-    border-radius: 4px;
-    margin-bottom: 20px;
-}
-
-.alert-success {
-    background-color: #d4edda;
-    color: #155724;
-    border: 1px solid #c3e6cb;
-}
-
-.alert-error {
-    background-color: #f8d7da;
-    color: #721c24;
-    border: 1px solid #f5c6cb;
-}
-
-@media (max-width: 768px) {
-    .evaluation-header {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-    
-    .project-actions {
-        justify-content: center;
-    }
-}
-</style>
 {% endblock %}

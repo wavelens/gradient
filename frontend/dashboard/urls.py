@@ -13,6 +13,9 @@ urlpatterns = [
     path("account/check-username/", check_username_availability, name="check_username"),
 
     path("organization/<str:org>", workflow, name="workflow"),
+    path("organization/<str:org>/project/<str:project>", project_detail, name="projectDetail"),
+    path("organization/<str:org>/project/<str:project>/start", start_evaluation, name="startEvaluation"),
+    path("organization/<str:org>/project/<str:project>/abort", abort_evaluation, name="abortEvaluation"),
     path("organization/<str:org>/log", log, name="log"),
     path("organization/<str:org>/log/<str:evaluation_id>", log, name="log-eval"),
     path("organization/<str:org>/download", download, name="download"),

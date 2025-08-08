@@ -127,7 +127,7 @@
             <div class="section-content">
                 {% for project in recent_projects %}
                     <div class="workflow-item dashboard-item">
-                        <a href="{% url 'workflow' project.org_name %}" class="full-width normal-hover blue-span">
+                        <a href="{% url 'projectDetail' project.org_name project.name %}" class="full-width normal-hover blue-span">
                             <div class="item-header">
                                 <span class="material-symbols-outlined item-icon">assignment</span>
                                 <span class="workflow-title">{{ project.display_name }}</span>
