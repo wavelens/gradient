@@ -1369,7 +1369,7 @@ tr:hover td{
 }
 
 .bordered-section {
-    background: var(--tertiary);
+    background: rgba(171, 176, 180, 0.1);
     border: 1px solid rgba(118, 118, 118, 0.3);
     border-radius: 8px;
     overflow: hidden;

@@ -195,7 +195,7 @@ def log(request, org, evaluation_id=None):
     if isinstance(evaluation, type(None)) or evaluation['error']:
         return HttpResponse(status=404)
     evaluation = evaluation['message']
-
+    print(evaluation)
     project = api.get_projects(request, org)
     if isinstance(project, type(None)) or project['error']:
         return HttpResponse(status=500)
@@ -234,6 +234,9 @@ def log(request, org, evaluation_id=None):
                 return HttpResponse(status=500)
 
             build_details = build_details['message']
+
+            if build_details['log'] is None:
+                continue
             log = build_details['log'].splitlines()
 
             if len(log) > 1 or (len(log) > 0 and log[0] != ""):
@@ -257,7 +260,7 @@ def log(request, org, evaluation_id=None):
         'status' : evaluation['status'],
         'time' : '0',
         'duration' : '1s',
-        'id' : '0',
+        'id' : evaluation['id'],
         'built_name' : 'Evaluation',
         'triggerArt' : 'schedule',
         'triggerTime' : '0 months',
@@ -986,6 +989,11 @@ def project_detail(request, org, project):
     
     project_message = project_data.get('message', {})
 
+    builds = api.get_evals_evaluation_builds(request, project_message['last_evaluation'])
+    if isinstance(builds, type(None)) or builds['error']:
+        return HttpResponse(status=500)
+    builds = builds['message']
+    print(len(builds))
     evalu = api.get_evals_evaluation(request, project_message['last_evaluation'])
 
     message = evalu.get('message', {})
@@ -1014,6 +1022,7 @@ def project_detail(request, org, project):
         'project_id': project,
         'project_data': project_message,
         'id': project_message['last_evaluation'],
+        'builds': len(builds),
         'evalu': message,
         'evaluations': evaluations,
         'successful_evaluations_count': successful_evaluations_count,
@@ -1054,3 +1063,18 @@ def abort_evaluation(request, org, project):
         return redirect('projectDetail', org=org, project=project)
     else:
         return redirect('projectDetail', org=org, project=project)
+
+@login_required
+def api_project_evaluate(request, org, project):
+    """API endpoint to start project evaluation."""
+    if request.method == 'POST':
+        try:
+            response = api.post_projects_project_evaluate(request, org, project)
+            if response is None or response.get("error"):
+                return JsonResponse({"error": "Failed to start evaluation"}, status=400)
+            else:
+                return JsonResponse({"message": "Evaluation started successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)

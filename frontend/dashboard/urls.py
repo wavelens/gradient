@@ -35,6 +35,10 @@ urlpatterns = [
     path("settings/server", edit_server, name="settingsServer"),
     path("organization/<str:org>/project/<str:project>/settings", edit_project, name="settingsProject"),
     path("organization/<str:org>/project/<str:project>/delete", delete_project, name="deleteProject"),
+    
+    # API endpoints
+    path("api/projects/<str:org>/<str:project>/evaluate", api_project_evaluate, name="api_project_evaluate"),
+    
     path("organization/<str:org>/settings", edit_organization, name="settingsOrganization"),
     path("organization/<str:org>/delete", delete_organization, name="deleteOrganization"),
     path("organization/<str:org>/members", organization_members, name="organizationMembers"),
