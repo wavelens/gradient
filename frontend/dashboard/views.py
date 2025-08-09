@@ -12,6 +12,8 @@ from . import api
 from .auth import LoginForm, login, RegisterForm
 from .forms import *
 from django.conf import settings
+from django.utils.dateparse import parse_datetime
+from django.utils.timezone import make_aware
 
 @login_required
 def dashboard(request):
@@ -983,6 +985,19 @@ def project_detail(request, org, project):
         return redirect('workflow', org=org)
     
     project_message = project_data.get('message', {})
+
+    evalu = api.get_evals_evaluation(request, project_message['last_evaluation'])
+
+    message = evalu.get('message', {})
+
+    created_at_str = message.get('created_at')
+    if created_at_str:
+        created_at_dt = parse_datetime(created_at_str)
+        if created_at_dt and created_at_dt.tzinfo is None:
+            created_at_dt = make_aware(created_at_dt)
+        message['created_at'] = created_at_dt
+
+    evalu = message
     
     # Get evaluations data (mock data for now - replace with actual API call when available)
     evaluations = []  # api.get_evaluations(request, org, project)
@@ -994,8 +1009,12 @@ def project_detail(request, org, project):
     
     context = {
         'org': org,
+        'org_id': org,
         'project': project,
+        'project_id': project,
         'project_data': project_message,
+        'id': project_message['last_evaluation'],
+        'evalu': message,
         'evaluations': evaluations,
         'successful_evaluations_count': successful_evaluations_count,
         'failed_evaluations_count': failed_evaluations_count,

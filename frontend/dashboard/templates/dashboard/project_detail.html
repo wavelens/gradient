@@ -15,24 +15,8 @@
 
 {% block content %}
 
-<!-- Navigation bar directly under main header -->
-<header class="dashboard-header m-t--1rem">
-    <nav>
-        <a href="{% url 'dashboard' %}" class="nav-link">
-            <span class="material-symbols-outlined">dashboard</span>
-            {% trans 'Dashboard' %}
-        </a>
-        <a href="{% url 'home' %}" class="nav-link">
-            <span class="material-symbols-outlined">apartment</span>
-            {% trans 'Organizations' %}
-        </a>
-        <a href="{% url 'caches' %}" class="nav-link">
-            <span class="material-symbols-outlined">hub</span>
-            {% trans 'Caches' %}
-        </a>
-        <a class="nav-link flex-end header-icon-right" href="{% url 'settingsProject' org project %}"><span class="material-symbols-outlined f-s-19px m-r-4">settings</span><span>{% trans 'Settings' %}</span></a>
-    </nav>
-</header>
+{% url 'settingsProject' org_id project_id as link_url %}
+{% include "../individualHeader.html" with link_url=link_url %}
 
 <div class="container">
     <!-- Welcome Section -->
@@ -44,12 +28,6 @@
             {% else %}
                 <p class="text-light">{% trans 'Project in' %} {{ org }}</p>
             {% endif %}
-        </div>
-        <div class="header-actions">
-            <a href="{% url 'settingsProject' org project %}" class="submit-btn">
-                <span class="material-symbols-outlined">settings</span>
-                {% trans 'Settings' %}
-            </a>
         </div>
     </div>
 
@@ -102,28 +80,21 @@
             </div>
             <div class="section-content">
                 <div class="project-actions">
-                    <form method="post" action="{% url 'startEvaluation' org project %}" style="display: inline;">
-                        {% csrf_token %}
-                        <button type="submit" class="submit-btn">
-                            <span class="material-symbols-outlined">play_arrow</span>
-                            {% trans 'Start Evaluation' %}
-                        </button>
-                    </form>
+                    <button type="button" class="submit-btn" onclick="startEvaluation('{{ org }}', '{{ project }}')">
+                        <span class="material-symbols-outlined">play_arrow</span>
+                        {% trans 'Start Evaluation' %}
+                    </button>
                     
                     {% if evaluations %}
                         {% for evaluation in evaluations %}
                             {% if evaluation.status == 'running' or evaluation.status == 'pending' %}
-                                <form method="post" action="{% url 'abortEvaluation' org project %}" style="display: inline;">
-                                    {% csrf_token %}
-                                    <input type="hidden" name="evaluation_id" value="{{ evaluation.id }}">
-                                    <button type="submit" class="submit-btn danger-btn" onclick="return confirm('{% trans "Are you sure you want to abort this evaluation?" %}')">
-                                        <span class="material-symbols-outlined">stop</span>
-                                        {% trans 'Abort Evaluation' %}
-                                    </button>
-                                </form>
+                                <button type="button" class="submit-btn danger-btn" onclick="abortEvaluation('{{ evaluation.id }}')">
+                                    <span class="material-symbols-outlined">stop</span>
+                                    {% trans 'Abort Evaluation' %}
+                                </button>
                             {% endif %}
                         {% endfor %}
-                    {% endif %}
+                    {% endif %}´
                 </div>
             </div>
         </div>
@@ -169,18 +140,51 @@
                         </a>
                     </div>
                 {% empty %}
-                    <div class="no-caches empty-state">
-                        <span class="material-symbols-outlined empty-state-icon">science</span>
-                        <h3>{% trans 'No evaluations yet' %}</h3>
-                        <p>{% trans 'Start your first evaluation to see results here.' %}</p>
-                        <form method="post" action="{% url 'startEvaluation' org project %}">
-                            {% csrf_token %}
-                            <button type="submit" class="submit-btn empty-state-link">
+                    {% if id %}
+                    <div class="workflow-item dashboard-item">
+                        <a href="{% url 'log-eval' org id %}" class="full-width normal-hover blue-span">
+                            <div class="item-header">
+                                <span class="material-symbols-outlined item-icon">science</span>
+                                <span class="workflow-title">Evaluation #{{ id }}</span>
+                            </div>
+                            <p class="text-light-n-s flex-c">
+                                {% if evalu.status == 'Running' %}
+                                    <span class="material-symbols-outlined m-r-3">hourglass_empty</span>
+                                    {% trans 'Running' %}
+                                {% elif evalu.status == 'Completed' %}
+                                    <span class="material-symbols-outlined m-r-3">check_circle</span>
+                                    {% trans 'Completed' %}
+                                {% elif evalu.status == 'Failed' %}
+                                    <span class="material-symbols-outlined m-r-3">error</span>
+                                    {% trans 'Failed' %}
+                                {% elif evalu.status == 'Aborted' %}
+                                    <span class="material-symbols-outlined m-r-3">cancel</span>
+                                    {% trans 'Aborted' %}
+                                {% else %}
+                                    <span class="material-symbols-outlined m-r-3">schedule</span>
+                                    {% trans 'Pending' %}
+                                {% endif %}
+                                • {{ evalu.created_at|timesince }} ago
+                            </p>
+                            <div class="item-meta">
+                                <span class="flex-c">
+                                    <span class="material-symbols-outlined m-r-3">folder</span>
+                                    <span class="text-light-n-s">{{ evalu.builds|length|default:"0" }} builds</span>
+                                </span>
+                            </div>
+                        </a>
+                    </div>
+                    {% else %}
+                        <div class="no-caches empty-state">
+                            <span class="material-symbols-outlined empty-state-icon">science</span>
+                            <h3>{% trans 'No evaluations yet' %}</h3>
+                            <p>{% trans 'Start your first evaluation to see results here.' %}</p>
+                            <button type="button" class="submit-btn empty-state-link" onclick="startEvaluation('{{ org }}', '{{ project }}')">
                                 <span class="material-symbols-outlined">play_arrow</span>
                                 {% trans 'Start First Evaluation' %}
                             </button>
-                        </form>
-                    </div>
+                        </div>
+                    {% endif %}
                 {% endfor %}
             </div>
         </div>
@@ -189,7 +193,6 @@
         <div class="dashboard-section bordered-section">
             <div class="section-header">
                 <h2>{% trans 'Project Information' %}</h2>
-                <a href="{% url 'settingsProject' org project %}" class="view-all-link">{% trans 'Edit settings' %}</a>
             </div>
             <div class="section-content">
                 <div class="workflow-item dashboard-item">
@@ -219,5 +222,57 @@
 
     </div>
 </div>
+
+{% csrf_token %}
+
+<script>
+async function startEvaluation(org, project) {
+    try {
+        const response = await fetch(`/api/projects/${org}/${project}/evaluate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            const error = await response.text();
+            alert('Failed to start evaluation: ' + error);
+        }
+    } catch (error) {
+        console.error('Error starting evaluation:', error);
+        alert('Error starting evaluation: ' + error.message);
+    }
+}
+
+async function abortEvaluation(evaluationId) {
+    if (!confirm('{% trans "Are you sure you want to abort this evaluation?" %}')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/evals/${evaluationId}/abort`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            const error = await response.text();
+            alert('Failed to abort evaluation: ' + error);
+        }
+    } catch (error) {
+        console.error('Error aborting evaluation:', error);
+        alert('Error aborting evaluation: ' + error.message);
+    }
+}
+</script>
 
 {% endblock %}
