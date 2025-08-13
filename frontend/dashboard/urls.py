@@ -31,6 +31,7 @@ urlpatterns = [
     path("", dashboard, name="dashboard"),
     path("organizations", home, name="home"),
     path("cache", caches, name="caches"),
+    path("cache/<str:cache>", cache_detail, name="cacheDetail"),
 
     path("settings/server", edit_server, name="settingsServer"),
     path("organization/<str:org>/project/<str:project>/settings", edit_project, name="settingsProject"),
@@ -43,6 +44,10 @@ urlpatterns = [
     path("api/evals/<str:evaluation_id>/status", api_evaluation_status, name="api_evaluation_status"),
     path("api/evals/<str:evaluation_id>/builds", api_evaluation_builds, name="api_evaluation_builds"),
     path("api/builds/<str:build_id>", api_build_details, name="api_build_details"),
+    path("api/caches/<str:cache>/status", api_cache_status, name="api_cache_status"),
+    path("api/caches/<str:cache>/activate", api_cache_activate, name="api_cache_activate"),
+    path("api/caches/<str:cache>/deactivate", api_cache_deactivate, name="api_cache_deactivate"),
+    path("api/caches/<str:cache>/clear", api_cache_clear, name="api_cache_clear"),
     
     path("organization/<str:org>/settings", edit_organization, name="settingsOrganization"),
     path("organization/<str:org>/delete", delete_organization, name="deleteOrganization"),

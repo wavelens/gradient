@@ -368,6 +368,75 @@ def new_cache(request):
     return render(request, "dashboard/NewCache.html", {'form': form})
 
 @login_required
+def cache_detail(request, cache):
+    cache_data = api.get_caches_cache(request, cache)
+    
+    if cache_data is None or cache_data.get('error'):
+        messages.error(request, "Cache not found or access denied.")
+        return redirect('caches')
+    
+    cache_message = cache_data.get('message', {})
+    
+    # Mock cache metrics data - replace with actual API call when available
+    cache_stats = {
+        'total_requests': 15420,
+        'cache_hits': 12336,
+        'cache_misses': 3084,
+        'hit_rate': round((12336 / 15420) * 100, 1) if 15420 > 0 else 0,
+        'storage_used': cache_message.get('size', 'N/A'),
+        'uptime': '15 days',
+        'avg_response_time': '2.3ms'
+    }
+    
+    # Mock recent activity data - replace with actual API call when available
+    recent_activity = [
+        {
+            'id': 1,
+            'action': 'Cache Hit',
+            'key': 'user:123:profile',
+            'timestamp': '2 minutes ago',
+            'response_time': '1.2ms'
+        },
+        {
+            'id': 2,
+            'action': 'Cache Miss',
+            'key': 'product:456:details', 
+            'timestamp': '5 minutes ago',
+            'response_time': '45ms'
+        },
+        {
+            'id': 3,
+            'action': 'Cache Eviction',
+            'key': 'session:789:data',
+            'timestamp': '12 minutes ago',
+            'response_time': 'N/A'
+        },
+        {
+            'id': 4,
+            'action': 'Cache Hit',
+            'key': 'config:app:settings',
+            'timestamp': '18 minutes ago', 
+            'response_time': '0.8ms'
+        },
+        {
+            'id': 5,
+            'action': 'Cache Store',
+            'key': 'report:monthly:sales',
+            'timestamp': '25 minutes ago',
+            'response_time': '3.1ms'
+        }
+    ]
+    
+    context = {
+        'cache_name': cache,
+        'cache_data': cache_message,
+        'cache_stats': cache_stats,
+        'recent_activity': recent_activity,
+    }
+    
+    return render(request, "dashboard/cache_detail.html", context)
+
+@login_required
 def edit_cache(request, cache):
     cache_data = api.get_caches_cache(request, cache)
     cache_message = cache_data.get('message', {})
@@ -1054,6 +1123,94 @@ def api_project_evaluate(request, org, project):
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
 @login_required
+def api_cache_status(request, cache):
+    """API endpoint to get cache status and stats."""
+    if request.method == 'GET':
+        try:
+            response = api.get_caches_cache(request, cache)
+            if response is None or response.get('error'):
+                return JsonResponse({"error": "Cache not found"}, status=404)
+            
+            cache_data = response.get('message', {})
+            
+            # Mock enhanced stats - replace with actual API call when available
+            enhanced_stats = {
+                **cache_data,
+                'cache_hits': 12450,
+                'cache_misses': 3100,
+                'total_requests': 15550,
+                'hit_rate': 80.1,
+                'avg_response_time': '2.2ms',
+                'uptime': '15 days, 3 hours',
+                'recent_activity': [
+                    {
+                        'action': 'Cache Hit',
+                        'key': 'user:124:profile',
+                        'timestamp': '1 minute ago',
+                        'response_time': '1.1ms'
+                    },
+                    {
+                        'action': 'Cache Miss',
+                        'key': 'product:789:details',
+                        'timestamp': '3 minutes ago',
+                        'response_time': '42ms'
+                    }
+                ]
+            }
+            
+            return JsonResponse({"error": False, "message": enhanced_stats})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_activate(request, cache):
+    """API endpoint to activate cache."""
+    if request.method == 'POST':
+        try:
+            response = api.post_caches_cache_active(request, cache)
+            if response is None or response.get('error'):
+                error_msg = response.get("message", "Failed to activate cache") if response else "Failed to activate cache"
+                return JsonResponse({"error": error_msg}, status=400)
+            else:
+                return JsonResponse({"message": "Cache activated successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_deactivate(request, cache):
+    """API endpoint to deactivate cache."""
+    if request.method == 'DELETE':
+        try:
+            response = api.delete_caches_cache_active(request, cache)
+            if response is None or response.get('error'):
+                error_msg = response.get("message", "Failed to deactivate cache") if response else "Failed to deactivate cache"
+                return JsonResponse({"error": error_msg}, status=400)
+            else:
+                return JsonResponse({"message": "Cache deactivated successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_clear(request, cache):
+    """API endpoint to clear cache."""
+    if request.method == 'POST':
+        try:
+            # Note: This endpoint might not exist in the backend API yet
+            # response = api.post_caches_cache_clear(request, cache)
+            # For now, return a success message
+            return JsonResponse({"message": "Cache clear request sent (API endpoint not implemented yet)"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
 def api_abort_evaluation(request, evaluation_id):
     """API endpoint to abort evaluation."""
     if request.method == 'POST':
@@ -1064,6 +1221,94 @@ def api_abort_evaluation(request, evaluation_id):
                 return JsonResponse({"error": error_msg}, status=400)
             else:
                 return JsonResponse({"message": "Evaluation aborted successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_status(request, cache):
+    """API endpoint to get cache status and stats."""
+    if request.method == 'GET':
+        try:
+            response = api.get_caches_cache(request, cache)
+            if response is None or response.get('error'):
+                return JsonResponse({"error": "Cache not found"}, status=404)
+            
+            cache_data = response.get('message', {})
+            
+            # Mock enhanced stats - replace with actual API call when available
+            enhanced_stats = {
+                **cache_data,
+                'cache_hits': 12450,
+                'cache_misses': 3100,
+                'total_requests': 15550,
+                'hit_rate': 80.1,
+                'avg_response_time': '2.2ms',
+                'uptime': '15 days, 3 hours',
+                'recent_activity': [
+                    {
+                        'action': 'Cache Hit',
+                        'key': 'user:124:profile',
+                        'timestamp': '1 minute ago',
+                        'response_time': '1.1ms'
+                    },
+                    {
+                        'action': 'Cache Miss',
+                        'key': 'product:789:details',
+                        'timestamp': '3 minutes ago',
+                        'response_time': '42ms'
+                    }
+                ]
+            }
+            
+            return JsonResponse({"error": False, "message": enhanced_stats})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_activate(request, cache):
+    """API endpoint to activate cache."""
+    if request.method == 'POST':
+        try:
+            response = api.post_caches_cache_active(request, cache)
+            if response is None or response.get('error'):
+                error_msg = response.get("message", "Failed to activate cache") if response else "Failed to activate cache"
+                return JsonResponse({"error": error_msg}, status=400)
+            else:
+                return JsonResponse({"message": "Cache activated successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_deactivate(request, cache):
+    """API endpoint to deactivate cache."""
+    if request.method == 'DELETE':
+        try:
+            response = api.delete_caches_cache_active(request, cache)
+            if response is None or response.get('error'):
+                error_msg = response.get("message", "Failed to deactivate cache") if response else "Failed to deactivate cache"
+                return JsonResponse({"error": error_msg}, status=400)
+            else:
+                return JsonResponse({"message": "Cache deactivated successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_clear(request, cache):
+    """API endpoint to clear cache."""
+    if request.method == 'POST':
+        try:
+            # Note: This endpoint might not exist in the backend API yet
+            # response = api.post_caches_cache_clear(request, cache)
+            # For now, return a success message
+            return JsonResponse({"message": "Cache clear request sent (API endpoint not implemented yet)"})
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
     else:
@@ -1103,6 +1348,94 @@ def api_project_status(request, org, project):
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
 @login_required
+def api_cache_status(request, cache):
+    """API endpoint to get cache status and stats."""
+    if request.method == 'GET':
+        try:
+            response = api.get_caches_cache(request, cache)
+            if response is None or response.get('error'):
+                return JsonResponse({"error": "Cache not found"}, status=404)
+            
+            cache_data = response.get('message', {})
+            
+            # Mock enhanced stats - replace with actual API call when available
+            enhanced_stats = {
+                **cache_data,
+                'cache_hits': 12450,
+                'cache_misses': 3100,
+                'total_requests': 15550,
+                'hit_rate': 80.1,
+                'avg_response_time': '2.2ms',
+                'uptime': '15 days, 3 hours',
+                'recent_activity': [
+                    {
+                        'action': 'Cache Hit',
+                        'key': 'user:124:profile',
+                        'timestamp': '1 minute ago',
+                        'response_time': '1.1ms'
+                    },
+                    {
+                        'action': 'Cache Miss',
+                        'key': 'product:789:details',
+                        'timestamp': '3 minutes ago',
+                        'response_time': '42ms'
+                    }
+                ]
+            }
+            
+            return JsonResponse({"error": False, "message": enhanced_stats})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_activate(request, cache):
+    """API endpoint to activate cache."""
+    if request.method == 'POST':
+        try:
+            response = api.post_caches_cache_active(request, cache)
+            if response is None or response.get('error'):
+                error_msg = response.get("message", "Failed to activate cache") if response else "Failed to activate cache"
+                return JsonResponse({"error": error_msg}, status=400)
+            else:
+                return JsonResponse({"message": "Cache activated successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_deactivate(request, cache):
+    """API endpoint to deactivate cache."""
+    if request.method == 'DELETE':
+        try:
+            response = api.delete_caches_cache_active(request, cache)
+            if response is None or response.get('error'):
+                error_msg = response.get("message", "Failed to deactivate cache") if response else "Failed to deactivate cache"
+                return JsonResponse({"error": error_msg}, status=400)
+            else:
+                return JsonResponse({"message": "Cache deactivated successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_clear(request, cache):
+    """API endpoint to clear cache."""
+    if request.method == 'POST':
+        try:
+            # Note: This endpoint might not exist in the backend API yet
+            # response = api.post_caches_cache_clear(request, cache)
+            # For now, return a success message
+            return JsonResponse({"message": "Cache clear request sent (API endpoint not implemented yet)"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
 def api_evaluation_status(request, evaluation_id):
     """API endpoint to get evaluation status."""
     if request.method == 'GET':
@@ -1112,6 +1445,94 @@ def api_evaluation_status(request, evaluation_id):
                 return JsonResponse({"error": "Evaluation not found"}, status=404)
             
             return JsonResponse({"error": False, "message": response.get('message', {})})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_status(request, cache):
+    """API endpoint to get cache status and stats."""
+    if request.method == 'GET':
+        try:
+            response = api.get_caches_cache(request, cache)
+            if response is None or response.get('error'):
+                return JsonResponse({"error": "Cache not found"}, status=404)
+            
+            cache_data = response.get('message', {})
+            
+            # Mock enhanced stats - replace with actual API call when available
+            enhanced_stats = {
+                **cache_data,
+                'cache_hits': 12450,
+                'cache_misses': 3100,
+                'total_requests': 15550,
+                'hit_rate': 80.1,
+                'avg_response_time': '2.2ms',
+                'uptime': '15 days, 3 hours',
+                'recent_activity': [
+                    {
+                        'action': 'Cache Hit',
+                        'key': 'user:124:profile',
+                        'timestamp': '1 minute ago',
+                        'response_time': '1.1ms'
+                    },
+                    {
+                        'action': 'Cache Miss',
+                        'key': 'product:789:details',
+                        'timestamp': '3 minutes ago',
+                        'response_time': '42ms'
+                    }
+                ]
+            }
+            
+            return JsonResponse({"error": False, "message": enhanced_stats})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_activate(request, cache):
+    """API endpoint to activate cache."""
+    if request.method == 'POST':
+        try:
+            response = api.post_caches_cache_active(request, cache)
+            if response is None or response.get('error'):
+                error_msg = response.get("message", "Failed to activate cache") if response else "Failed to activate cache"
+                return JsonResponse({"error": error_msg}, status=400)
+            else:
+                return JsonResponse({"message": "Cache activated successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_deactivate(request, cache):
+    """API endpoint to deactivate cache."""
+    if request.method == 'DELETE':
+        try:
+            response = api.delete_caches_cache_active(request, cache)
+            if response is None or response.get('error'):
+                error_msg = response.get("message", "Failed to deactivate cache") if response else "Failed to deactivate cache"
+                return JsonResponse({"error": error_msg}, status=400)
+            else:
+                return JsonResponse({"message": "Cache deactivated successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_clear(request, cache):
+    """API endpoint to clear cache."""
+    if request.method == 'POST':
+        try:
+            # Note: This endpoint might not exist in the backend API yet
+            # response = api.post_caches_cache_clear(request, cache)
+            # For now, return a success message
+            return JsonResponse({"message": "Cache clear request sent (API endpoint not implemented yet)"})
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
     else:
@@ -1133,6 +1554,94 @@ def api_evaluation_builds(request, evaluation_id):
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
 @login_required
+def api_cache_status(request, cache):
+    """API endpoint to get cache status and stats."""
+    if request.method == 'GET':
+        try:
+            response = api.get_caches_cache(request, cache)
+            if response is None or response.get('error'):
+                return JsonResponse({"error": "Cache not found"}, status=404)
+            
+            cache_data = response.get('message', {})
+            
+            # Mock enhanced stats - replace with actual API call when available
+            enhanced_stats = {
+                **cache_data,
+                'cache_hits': 12450,
+                'cache_misses': 3100,
+                'total_requests': 15550,
+                'hit_rate': 80.1,
+                'avg_response_time': '2.2ms',
+                'uptime': '15 days, 3 hours',
+                'recent_activity': [
+                    {
+                        'action': 'Cache Hit',
+                        'key': 'user:124:profile',
+                        'timestamp': '1 minute ago',
+                        'response_time': '1.1ms'
+                    },
+                    {
+                        'action': 'Cache Miss',
+                        'key': 'product:789:details',
+                        'timestamp': '3 minutes ago',
+                        'response_time': '42ms'
+                    }
+                ]
+            }
+            
+            return JsonResponse({"error": False, "message": enhanced_stats})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_activate(request, cache):
+    """API endpoint to activate cache."""
+    if request.method == 'POST':
+        try:
+            response = api.post_caches_cache_active(request, cache)
+            if response is None or response.get('error'):
+                error_msg = response.get("message", "Failed to activate cache") if response else "Failed to activate cache"
+                return JsonResponse({"error": error_msg}, status=400)
+            else:
+                return JsonResponse({"message": "Cache activated successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_deactivate(request, cache):
+    """API endpoint to deactivate cache."""
+    if request.method == 'DELETE':
+        try:
+            response = api.delete_caches_cache_active(request, cache)
+            if response is None or response.get('error'):
+                error_msg = response.get("message", "Failed to deactivate cache") if response else "Failed to deactivate cache"
+                return JsonResponse({"error": error_msg}, status=400)
+            else:
+                return JsonResponse({"message": "Cache deactivated successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_clear(request, cache):
+    """API endpoint to clear cache."""
+    if request.method == 'POST':
+        try:
+            # Note: This endpoint might not exist in the backend API yet
+            # response = api.post_caches_cache_clear(request, cache)
+            # For now, return a success message
+            return JsonResponse({"message": "Cache clear request sent (API endpoint not implemented yet)"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
 def api_build_details(request, build_id):
     """API endpoint to get build details and logs."""
     if request.method == 'GET':
@@ -1142,6 +1651,94 @@ def api_build_details(request, build_id):
                 return JsonResponse({"error": "Build not found"}, status=404)
             
             return JsonResponse({"error": False, "message": response.get('message', {})})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_status(request, cache):
+    """API endpoint to get cache status and stats."""
+    if request.method == 'GET':
+        try:
+            response = api.get_caches_cache(request, cache)
+            if response is None or response.get('error'):
+                return JsonResponse({"error": "Cache not found"}, status=404)
+            
+            cache_data = response.get('message', {})
+            
+            # Mock enhanced stats - replace with actual API call when available
+            enhanced_stats = {
+                **cache_data,
+                'cache_hits': 12450,
+                'cache_misses': 3100,
+                'total_requests': 15550,
+                'hit_rate': 80.1,
+                'avg_response_time': '2.2ms',
+                'uptime': '15 days, 3 hours',
+                'recent_activity': [
+                    {
+                        'action': 'Cache Hit',
+                        'key': 'user:124:profile',
+                        'timestamp': '1 minute ago',
+                        'response_time': '1.1ms'
+                    },
+                    {
+                        'action': 'Cache Miss',
+                        'key': 'product:789:details',
+                        'timestamp': '3 minutes ago',
+                        'response_time': '42ms'
+                    }
+                ]
+            }
+            
+            return JsonResponse({"error": False, "message": enhanced_stats})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_activate(request, cache):
+    """API endpoint to activate cache."""
+    if request.method == 'POST':
+        try:
+            response = api.post_caches_cache_active(request, cache)
+            if response is None or response.get('error'):
+                error_msg = response.get("message", "Failed to activate cache") if response else "Failed to activate cache"
+                return JsonResponse({"error": error_msg}, status=400)
+            else:
+                return JsonResponse({"message": "Cache activated successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_deactivate(request, cache):
+    """API endpoint to deactivate cache."""
+    if request.method == 'DELETE':
+        try:
+            response = api.delete_caches_cache_active(request, cache)
+            if response is None or response.get('error'):
+                error_msg = response.get("message", "Failed to deactivate cache") if response else "Failed to deactivate cache"
+                return JsonResponse({"error": error_msg}, status=400)
+            else:
+                return JsonResponse({"message": "Cache deactivated successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_cache_clear(request, cache):
+    """API endpoint to clear cache."""
+    if request.method == 'POST':
+        try:
+            # Note: This endpoint might not exist in the backend API yet
+            # response = api.post_caches_cache_clear(request, cache)
+            # For now, return a success message
+            return JsonResponse({"message": "Cache clear request sent (API endpoint not implemented yet)"})
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
     else:
