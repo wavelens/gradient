@@ -100,7 +100,7 @@
                             <!-- <summary></summary> -->
                             <div class="details-content color-secondary">
                                 {% for line in block.details %}
-                                    <div class="line"></div>
+                                    <div class="line">{{ line }}</div>
                                 {% endfor %}
                             </div>
                         <!-- </details> -->
@@ -111,12 +111,14 @@
     </div>
 </div>
 
+{% csrf_token %}
+
 <script>
     const token = "{{ request.user.session }}";
     const url = "{{ api_url }}/api/evals/{{ evaluation_id }}/builds";
 </script>
 
-<script src="../../static/dashboard/js/log.js"></script>
+<script src="{% static 'dashboard/js/log.js' %}"></script>
 <script>
     let lineCounter = 1;
 

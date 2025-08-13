@@ -38,6 +38,11 @@ urlpatterns = [
     
     # API endpoints
     path("api/projects/<str:org>/<str:project>/evaluate", api_project_evaluate, name="api_project_evaluate"),
+    path("api/projects/<str:org>/<str:project>/status", api_project_status, name="api_project_status"),
+    path("api/evals/<str:evaluation_id>/abort", api_abort_evaluation, name="api_abort_evaluation"),
+    path("api/evals/<str:evaluation_id>/status", api_evaluation_status, name="api_evaluation_status"),
+    path("api/evals/<str:evaluation_id>/builds", api_evaluation_builds, name="api_evaluation_builds"),
+    path("api/builds/<str:build_id>", api_build_details, name="api_build_details"),
     
     path("organization/<str:org>/settings", edit_organization, name="settingsOrganization"),
     path("organization/<str:org>/delete", delete_organization, name="deleteOrganization"),

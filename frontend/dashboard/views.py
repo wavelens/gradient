@@ -225,32 +225,6 @@ def log(request, org, evaluation_id=None):
         'details': [ "Loading Log..." ]
     }]
 
-    if success == "true":
-        details_blocks = []
-        for build in builds:
-            build_details = api.get_builds_build(request, build['id'])
-
-            if isinstance(build_details, type(None)) or build_details['error']:
-                return HttpResponse(status=500)
-
-            build_details = build_details['message']
-
-            if build_details['log'] is None:
-                continue
-            log = build_details['log'].splitlines()
-
-            if len(log) > 1 or (len(log) > 0 and log[0] != ""):
-                details_blocks.append({
-                    'summary': build['name'],
-                    'details': log
-                })
-
-        if len(details_blocks) == 0:
-            details_blocks.append({
-                'summary': "No Log available",
-                'details': [ "No Log available" ]
-            })
-
     context = {
         'org_id': org,
         'project_id': project['name'],
@@ -1074,6 +1048,100 @@ def api_project_evaluate(request, org, project):
                 return JsonResponse({"error": "Failed to start evaluation"}, status=400)
             else:
                 return JsonResponse({"message": "Evaluation started successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_abort_evaluation(request, evaluation_id):
+    """API endpoint to abort evaluation."""
+    if request.method == 'POST':
+        try:
+            response = api.post_evals_evaluation_abort(request, evaluation_id)
+            if response is None or response.get("error"):
+                error_msg = response.get("message", "Failed to abort evaluation") if response else "Failed to abort evaluation"
+                return JsonResponse({"error": error_msg}, status=400)
+            else:
+                return JsonResponse({"message": "Evaluation aborted successfully"})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_project_status(request, org, project):
+    """API endpoint to get project status with live evaluation data."""
+    if request.method == 'GET':
+        try:
+            project_data = api.get_projects_project(request, org, project)
+            if project_data is None or project_data.get('error'):
+                return JsonResponse({"error": "Project not found"}, status=404)
+            
+            project_info = project_data.get('message', {})
+            
+            # Mock evaluations data - replace with actual API call when available
+            evaluations = []  # api.get_project_evaluations(request, org, project)
+            
+            # Calculate stats
+            successful_count = sum(1 for eval in evaluations if eval.get('status') == 'Completed')
+            failed_count = sum(1 for eval in evaluations if eval.get('status') in ['Failed', 'Aborted'])
+            running_count = sum(1 for eval in evaluations if eval.get('status') in ['Running', 'Building', 'Evaluating', 'Queued'])
+            
+            response_data = {
+                'project_data': project_info,
+                'evaluations': evaluations,
+                'successful_evaluations_count': successful_count,
+                'failed_evaluations_count': failed_count,
+                'running_evaluations_count': running_count,
+            }
+            
+            return JsonResponse({"error": False, "message": response_data})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_evaluation_status(request, evaluation_id):
+    """API endpoint to get evaluation status."""
+    if request.method == 'GET':
+        try:
+            response = api.get_evals_evaluation(request, evaluation_id)
+            if response is None or response.get('error'):
+                return JsonResponse({"error": "Evaluation not found"}, status=404)
+            
+            return JsonResponse({"error": False, "message": response.get('message', {})})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_evaluation_builds(request, evaluation_id):
+    """API endpoint to get evaluation builds."""
+    if request.method == 'GET':
+        try:
+            response = api.get_evals_evaluation_builds(request, evaluation_id)
+            if response is None or response.get('error'):
+                return JsonResponse({"error": "Builds not found"}, status=404)
+            
+            return JsonResponse({"error": False, "message": response.get('message', [])})
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+    else:
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+@login_required
+def api_build_details(request, build_id):
+    """API endpoint to get build details and logs."""
+    if request.method == 'GET':
+        try:
+            response = api.get_builds_build(request, build_id)
+            if response is None or response.get('error'):
+                return JsonResponse({"error": "Build not found"}, status=404)
+            
+            return JsonResponse({"error": False, "message": response.get('message', {})})
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
     else:

@@ -249,10 +249,6 @@ async function startEvaluation(org, project) {
 }
 
 async function abortEvaluation(evaluationId) {
-    if (!confirm('{% trans "Are you sure you want to abort this evaluation?" %}')) {
-        return;
-    }
-    
     try {
         const response = await fetch(`/api/evals/${evaluationId}/abort`, {
             method: 'POST',
@@ -263,7 +259,8 @@ async function abortEvaluation(evaluationId) {
         });
         
         if (response.ok) {
-            location.reload();
+            // Don't reload, let the live updates handle it
+            console.log('Evaluation abort requested');
         } else {
             const error = await response.text();
             alert('Failed to abort evaluation: ' + error);
@@ -274,5 +271,7 @@ async function abortEvaluation(evaluationId) {
     }
 }
 </script>
+
+<script src="{% static 'dashboard/js/project_detail.js' %}"></script>
 
 {% endblock %}

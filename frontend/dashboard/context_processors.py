@@ -6,9 +6,6 @@ from django.conf import settings
 
 def global_variables(request):
     return {
-        'projectname' : 'vWorkflow',
-        'model' : 'vModel',
-        'user' : 'testuser',
         'success' : 'waiting',
         'email_enabled': settings.GRADIENT_EMAIL_ENABLED,
         'email_require_verification': settings.GRADIENT_EMAIL_REQUIRE_VERIFICATION,
