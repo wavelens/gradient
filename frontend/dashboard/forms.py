@@ -212,15 +212,15 @@ class NewServerForm(forms.Form):
     )
     architectures = forms.CharField(
         required=True,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control'
+        widget=forms.HiddenInput(attrs={
+            'id': 'architectures_hidden'
         }),
         label='Architectures'
     )
     features = forms.CharField(
         required=True,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control'
+        widget=forms.HiddenInput(attrs={
+            'id': 'features_hidden'
         }),
         label='Features'
     )

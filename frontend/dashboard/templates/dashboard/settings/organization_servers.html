@@ -35,13 +35,13 @@
     
     <!-- Add Server Button -->
     <div class="m-b-1rem">
-        <button type="button" class="submit-btn" onclick="toggleAddServerForm()">
-            <span class="material-symbols-outlined m-r-5">add</span>
+        <a href="{% url 'new_server' %}" class="submit-btn">
+            
             {% trans 'Add Server' %}
-        </button>
+        </a>
     </div>
 
-    <!-- Add Server Form (Hidden by default) -->
+    <!-- Add Server Form (Hidden by default)
     <div class="add-member-section m-b-1rem" id="addServerForm" style="display: none;">
         <h3>{% trans 'Add New Server' %}</h3>
         {% if add_form.non_field_errors %}
@@ -66,7 +66,7 @@
                 <button type="button" class="button-clear" onclick="toggleAddServerForm()">{% trans 'Cancel' %}</button>
             </div>
         </form>
-    </div>
+    </div> -->
 
     <!-- Search Field -->
     <div class="m-b-1rem">
