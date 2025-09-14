@@ -127,7 +127,7 @@
             <div class="section-content">
                 {% for project in recent_projects %}
                     <div class="workflow-item dashboard-item">
-                        <a href="{% url 'workflow' project.org_name %}" class="full-width normal-hover blue-span">
+                        <a href="{% url 'projectDetail' project.org_name project.name %}" class="full-width normal-hover blue-span">
                             <div class="item-header">
                                 <span class="material-symbols-outlined item-icon">assignment</span>
                                 <span class="workflow-title">{{ project.display_name }}</span>
@@ -171,23 +171,25 @@
                 {% for cache in caches %}
                     <div class="workflow-item dashboard-item">
                         <div class="full-width normal-hover">
-                            <div class="item-header">
-                                <span class="material-symbols-outlined item-icon">hub</span>
-                                <span class="workflow-title">{{ cache.display_name }}</span>
-                            </div>
-                            <p class="text-light">{{ cache.description|truncatechars:60 }}</p>
-                            <div class="item-meta">
-                                <span class="flex-c">
-                                    <span class="cache-status cache-status-{{ cache.status }}"></span>
-                                    <span class="text-light-n-s">{{ cache.status|title }}</span>
-                                </span>
-                                {% if cache.priority %}
-                                    <span class="flex-c m-l-1rem">
-                                        <span class="material-symbols-outlined m-r-3">priority_high</span>
-                                        <span class="text-light-n-s">Priority: {{ cache.priority }}</span>
+                            <a href="{% url 'cacheDetail' cache.name %}" class="full-width normal-hover blue-span">
+                                <div class="item-header">
+                                    <span class="material-symbols-outlined item-icon">hub</span>
+                                    <span class="workflow-title">{{ cache.display_name }}</span>
+                                </div>
+                                <p class="text-light">{{ cache.description|truncatechars:60 }}</p>
+                                <div class="item-meta">
+                                    <span class="flex-c">
+                                        <span class="cache-status cache-status-{{ cache.status }}"></span>
+                                        <span class="text-light-n-s">{{ cache.status|title }}</span>
                                     </span>
-                                {% endif %}
-                            </div>
+                                    {% if cache.priority %}
+                                        <span class="flex-c m-l-1rem">
+                                            <span class="material-symbols-outlined m-r-3">priority_high</span>
+                                            <span class="text-light-n-s">Priority: {{ cache.priority }}</span>
+                                        </span>
+                                    {% endif %}
+                                </div>
+                            </a>
                         </div>
                     </div>
                 {% empty %}

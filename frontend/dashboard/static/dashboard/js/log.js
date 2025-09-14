@@ -1,5 +1,8 @@
 let statusCheckInterval;
+let logCheckInterval;
 let buildCompleted = false;
+let lastLogLength = 0;
+let buildIds = [];
 
 // Get variables from global scope
 const baseUrl = window.location.origin;
@@ -7,12 +10,12 @@ const evaluationId = window.location.pathname.split('/').pop();
 
 async function checkBuildStatus() {
   try {
-    const response = await fetch(`${baseUrl}/evals/${evaluationId}`, {
+    const response = await fetch(`${baseUrl}/api/evals/${evaluationId}/status`, {
       method: "GET",
       credentials: "include",
       headers: {
-        "Authorization": `Bearer ${token}`,
         "Content-Type": "application/json",
+        "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
       },
     });
     
@@ -22,9 +25,13 @@ async function checkBuildStatus() {
         const evaluation = data.message;
         updateBuildStatus(evaluation.status);
         
+        // Get builds for this evaluation
+        await fetchBuilds();
+        
         // Stop polling if build is completed
         if (evaluation.status === 'Completed' || evaluation.status === 'Failed' || evaluation.status === 'Aborted') {
           clearInterval(statusCheckInterval);
+          clearInterval(logCheckInterval);
           buildCompleted = true;
           return evaluation.status;
         }
@@ -58,96 +65,167 @@ function updateBuildStatus(status) {
     text.textContent = status;
   });
   
-  // Show/hide abort button
+  // Show/hide abort button based on status
   if (abortButton) {
-    if (status === 'Building' || status === 'Evaluating' || status === 'Queued') {
-      abortButton.style.display = 'inline-block';
+    const showAbortButton = status === 'Building' || status === 'Evaluating' || status === 'Queued' || status === 'Running';
+    abortButton.style.display = showAbortButton ? 'inline-block' : 'none';
+  }
+  
+  // Update page title status indicator
+  const titleStatusIcon = document.querySelector('.webkit-middle .material-icons, .webkit-middle .loader');
+  if (titleStatusIcon) {
+    if (status === 'Completed') {
+      titleStatusIcon.className = 'material-icons center-image f-s-28px green';
+      titleStatusIcon.textContent = 'check_circle';
+    } else if (status === 'Failed' || status === 'Aborted') {
+      titleStatusIcon.className = 'material-icons center-image f-s-28px red';
+      titleStatusIcon.textContent = 'cancel';
     } else {
-      abortButton.style.display = 'none';
+      titleStatusIcon.className = 'loader';
+      titleStatusIcon.textContent = '';
     }
   }
 }
 
 async function abortBuild() {
-  if (confirm('Are you sure you want to abort this build? This action cannot be undone.')) {
+  try {
+    const response = await fetch(`${baseUrl}/api/evals/${evaluationId}/abort`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
+        "Content-Type": "application/json",
+      }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (!data.error) {
+        // Force a status check to update UI
+        await checkBuildStatus();
+      } else {
+        alert('Failed to abort build: ' + data.error);
+      }
+    } else {
+      const data = await response.json().catch(() => ({}));
+      alert('Failed to abort build: ' + (data.error || 'Unknown error'));
+    }
+  } catch (error) {
+    console.error("Error aborting build:", error);
+    alert('Error aborting build: ' + error.message);
+  }
+}
+
+async function fetchBuilds() {
+  try {
+    const response = await fetch(`${baseUrl}/api/evals/${evaluationId}/builds`, {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
+      },
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (!data.error) {
+        buildIds = data.message.map(build => build.id);
+        await updateLogs();
+      }
+    }
+  } catch (error) {
+    console.error("Error fetching builds:", error);
+  }
+}
+
+async function updateLogs() {
+  const logContainer = document.querySelector(".details-content");
+  if (!logContainer) return;
+  
+  let allLogs = [];
+  
+  for (const buildId of buildIds) {
     try {
-      const response = await fetch(`${baseUrl}/evals/${evaluationId}`, {
-        method: "POST",
+      const response = await fetch(`${baseUrl}/api/builds/${buildId}`, {
+        method: "GET",
         credentials: "include",
         headers: {
-          "Authorization": `Bearer ${token}`,
           "Content-Type": "application/json",
+          "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
         },
-        body: JSON.stringify({ method: 'abort' })
       });
       
       if (response.ok) {
         const data = await response.json();
-        if (!data.error) {
-          // Force a status check to update UI
-          await checkBuildStatus();
-        } else {
-          alert('Failed to abort build: ' + data.message);
+        if (!data.error && data.message.log) {
+          const lines = data.message.log.split('\n');
+          allLogs = allLogs.concat(lines);
         }
-      } else {
-        alert('Failed to abort build');
       }
     } catch (error) {
-      console.error("Error aborting build:", error);
-      alert('Error aborting build');
+      console.error(`Error fetching build ${buildId}:`, error);
     }
   }
-}
-
-async function makeRequest() {
-  try {
-    fetch(url, {
-      method: "POST",
-      credentials: "include",
-      withCredentials: true,
-      mode: "cors",
-      headers: {
-        "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/jsonstream",
-      },
-    }).then(async (response) => {
-      const reader = response.body.getReader();
-      const logContainer = document.querySelector(".details-content");
-
-      while (true) {
-        const { done, value } = await reader.read();
-        const text = new TextDecoder("utf-8").decode(value);
-
-        if (done) {
-          logContainer.innerHTML += `<div class="line">End of Log</div>`;
-          // Final status check when log stream ends
-          await checkBuildStatus();
-          break;
-        }
-
-        if (text) {
-          try {
-            const data = JSON.parse(text);
-
-            if (data.hasOwnProperty("error")) {
-              console.error(data["message"]);
-            } else {
-              logContainer.innerHTML += `<div class="line">${data.message}</div>`;
-              logContainer.scrollTop = logContainer.scrollHeight;
-            }
-          } catch (err) {
-            console.error("JSON parsing error:", err);
-          }
-        }
+  
+  // Only update if we have new content
+  if (allLogs.length > lastLogLength) {
+    const newLines = allLogs.slice(lastLogLength);
+    newLines.forEach(line => {
+      if (line.trim()) {
+        const lineDiv = document.createElement('div');
+        lineDiv.className = 'line';
+        lineDiv.textContent = line; // Use textContent to prevent XSS
+        logContainer.appendChild(lineDiv);
       }
     });
-  } catch (error) {
-    console.error("Error during fetch:", error);
+    lastLogLength = allLogs.length;
+    logContainer.scrollTop = logContainer.scrollHeight;
   }
 }
 
-// Start status polling
-statusCheckInterval = setInterval(checkBuildStatus, 2000); // Check every 2 seconds
+// Initialize the page
+async function initializePage() {
+  await fetchBuilds();
+  await updateLogs();
+}
 
-// Start log streaming
-makeRequest();
+// Check if evaluation is in a running state and start polling accordingly
+function shouldStartPolling() {
+  const statusElements = document.querySelectorAll('.status-text');
+  for (let element of statusElements) {
+    const status = element.textContent.toLowerCase();
+    if (status.includes('building') || status.includes('evaluating') || 
+        status.includes('running') || status.includes('queued')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Initialize page first
+initializePage();
+
+// Only start polling if evaluation is in a running state
+if (shouldStartPolling()) {
+  console.log('Starting live polling for evaluation updates');
+  
+  // Start status polling
+  statusCheckInterval = setInterval(checkBuildStatus, 2000); // Check every 2 seconds
+
+  // Start log polling for live updates
+  logCheckInterval = setInterval(updateLogs, 3000); // Check logs every 3 seconds
+
+  // Auto-stop polling after 30 minutes to prevent endless polling
+  setTimeout(() => {
+    if (statusCheckInterval) {
+      clearInterval(statusCheckInterval);
+    }
+    if (logCheckInterval) {
+      clearInterval(logCheckInterval);
+    }
+    console.log('Auto-stopped polling after 30 minutes');
+  }, 30 * 60 * 1000);
+} else {
+  console.log('Evaluation is not running, live polling not started');
+}

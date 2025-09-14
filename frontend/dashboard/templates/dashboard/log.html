@@ -17,7 +17,23 @@
 {% url 'settingsProject' org_id project_id as settings_url %}
 {% include "../individualHeader.html" with link_url=settings_url %}
 
-{% include "../backHeader.html" %}
+<div class="content-above">
+    <div><a href="{% url 'projectDetail' org_id project_id %}" class="flex-c p-r-1rem fit-content"><img class="center-image" src="{% static 'dashboard/icons/arrow_back.svg' %}"><span>{% trans 'Back' %}</span></a></div>
+    <h2 class="webkit-middle space-small" class="flex-c">
+        {% if success != 'waiting' %}
+            <div>
+                <span class="material-icons center-image f-s-28px {% if success == 'true' %}green{% else %}red{% endif %}">
+                    {% if success == 'true' %}check_circle{% else %}cancel{% endif %}
+                </span>
+        {% else %}
+            <div class="filter-container">
+                <div class="loader"></div>
+        {% endif %}
+            {{ built_name }}
+            <span class="color-light fw-normal"> #{{ id }}</span>
+            </div>
+    </h2>
+</div>
 
 
 <div class="outerbody">
@@ -84,7 +100,7 @@
                             <!-- <summary></summary> -->
                             <div class="details-content color-secondary">
                                 {% for line in block.details %}
-                                    <div class="line"></div>
+                                    <div class="line">{{ line }}</div>
                                 {% endfor %}
                             </div>
                         <!-- </details> -->
@@ -95,12 +111,14 @@
     </div>
 </div>
 
+{% csrf_token %}
+
 <script>
     const token = "{{ request.user.session }}";
     const url = "{{ api_url }}/api/evals/{{ evaluation_id }}/builds";
 </script>
 
-<script src="../../static/dashboard/js/log.js"></script>
+<script src="{% static 'dashboard/js/log.js' %}"></script>
 <script>
     let lineCounter = 1;
 

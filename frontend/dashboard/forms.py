@@ -4,6 +4,8 @@
 
 from django import forms
 from django.utils.translation import gettext_lazy as _
+from django.core.exceptions import ValidationError
+import re
 
 GEEKS_CHOICES =(
     ("1", "One"),
@@ -14,33 +16,60 @@ GEEKS_CHOICES =(
 )
 
 class NewOrganizationForm(forms.Form):
-    # owner = forms.ChoiceField(
-    #     choices=GEEKS_CHOICES,
-    #     required=True,
-    #     widget=forms.Select,
-    #     label='Besitzer'
-    # )
     name = forms.CharField(
         label='Name',
         required=True,
+        min_length=3,
+        max_length=50,
+        error_messages={
+            'required': 'Organization name is required.',
+            'min_length': 'Organization name must be at least 3 characters long.',
+            'max_length': 'Organization name cannot exceed 50 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter organization name (3-50 characters)'
         })
     )
     display_name = forms.CharField(
         label='Display Name',
         required=True,
+        max_length=100,
+        error_messages={
+            'required': 'Display name is required.',
+            'max_length': 'Display name cannot exceed 100 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter a friendly display name'
         })
     )
     description = forms.CharField(
         label='Description',
         required=True,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control'
+        max_length=500,
+        error_messages={
+            'required': 'Description is required.',
+            'max_length': 'Description cannot exceed 500 characters.',
+        },
+        widget=forms.Textarea(attrs={
+            'class': 'form-control',
+            'placeholder': 'Describe your organization (max 500 characters)',
+            'rows': 3
         })
     )
+    
+    def clean_name(self):
+        name = self.cleaned_data.get('name')
+        if name:
+            # Check for valid characters
+            if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+                raise ValidationError('Organization name can only contain letters, numbers, hyphens, and underscores.')
+            # Check for reserved names
+            reserved_names = ['admin', 'api', 'www', 'app', 'system', 'root']
+            if name.lower() in reserved_names:
+                raise ValidationError(f'The name "{name}" is reserved and cannot be used.')
+        return name
     # show = forms.BooleanField(
     #     label='In privates Repository umwandeln',
     #     required=False,
@@ -135,173 +164,398 @@ class NewProjectForm(forms.Form):
     organization = forms.ChoiceField(
         label='Organization',
         required=True,
-        widget=forms.Select
+        error_messages={
+            'required': 'Please select an organization.',
+            'invalid_choice': 'Please select a valid organization.'
+        },
+        widget=forms.Select(attrs={
+            'class': 'form-control'
+        })
     )
 
     name = forms.CharField(
         label='Name',
         required=True,
+        min_length=3,
+        max_length=50,
+        error_messages={
+            'required': 'Project name is required.',
+            'min_length': 'Project name must be at least 3 characters long.',
+            'max_length': 'Project name cannot exceed 50 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter project name (3-50 characters)'
         })
     )
     display_name = forms.CharField(
         label='Display Name',
         required=True,
+        max_length=100,
+        error_messages={
+            'required': 'Display name is required.',
+            'max_length': 'Display name cannot exceed 100 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter a friendly display name'
         })
     )
     description = forms.CharField(
         label='Description',
         required=True,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control'
+        max_length=500,
+        error_messages={
+            'required': 'Description is required.',
+            'max_length': 'Description cannot exceed 500 characters.',
+        },
+        widget=forms.Textarea(attrs={
+            'class': 'form-control',
+            'placeholder': 'Describe your project (max 500 characters)',
+            'rows': 3
         })
     )
-    repository = forms.CharField(
+    repository = forms.URLField(
         label='Repository',
         required=True,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control'
+        error_messages={
+            'required': 'Repository URL is required.',
+            'invalid': 'Please enter a valid repository URL (e.g., https://github.com/user/repo.git)',
+        },
+        widget=forms.URLInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'https://github.com/user/repository.git'
         })
     )
     evaluation_wildcard = forms.CharField(
         label='Wildcard',
         required=True,
+        error_messages={
+            'required': 'Evaluation wildcard is required.',
+        },
+        help_text='Pattern to match evaluation files (e.g., **/*.test.js)',
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': '**/*.test.js'
         })
     )
+    
+    def clean_name(self):
+        name = self.cleaned_data.get('name')
+        if name:
+            if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+                raise ValidationError('Project name can only contain letters, numbers, hyphens, and underscores.')
+            reserved_names = ['admin', 'api', 'www', 'app', 'system', 'root', 'test', 'tests']
+            if name.lower() in reserved_names:
+                raise ValidationError(f'The name "{name}" is reserved and cannot be used.')
+        return name
+    
+    def clean_repository(self):
+        repository = self.cleaned_data.get('repository')
+        if repository:
+            # Check for common repository URL patterns
+            valid_patterns = [
+                r'^https://github\.com/[\w\.-]+/[\w\.-]+(\.git)?/?$',
+                r'^https://gitlab\.com/[\w\.-]+/[\w\.-]+(\.git)?/?$',
+                r'^https://bitbucket\.org/[\w\.-]+/[\w\.-]+(\.git)?/?$',
+                r'^git@github\.com:[\w\.-]+/[\w\.-]+\.git$',
+                r'^git@gitlab\.com:[\w\.-]+/[\w\.-]+\.git$'
+            ]
+            if not any(re.match(pattern, repository) for pattern in valid_patterns):
+                raise ValidationError('Please enter a valid Git repository URL from GitHub, GitLab, or Bitbucket.')
+        return repository
 
 class NewServerForm(forms.Form):
     organization = forms.CharField(
         label='Organization',
         required=True,
+        error_messages={
+            'required': 'Organization is required.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'readonly': True
         })
     )
     server_name = forms.CharField(
         label='Name',
         required=True,
+        min_length=3,
+        max_length=50,
+        error_messages={
+            'required': 'Server name is required.',
+            'min_length': 'Server name must be at least 3 characters long.',
+            'max_length': 'Server name cannot exceed 50 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter server name (3-50 characters)'
         })
     )
     host = forms.CharField(
         label='Host',
         required=True,
+        error_messages={
+            'required': 'Server host is required.',
+        },
+        help_text='IP address or domain name of the server',
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': '192.168.1.100 or server.example.com'
         })
     )
     port = forms.IntegerField(
         label='Port',
         required=True,
+        min_value=1,
+        max_value=65535,
+        initial=22,
+        error_messages={
+            'required': 'Port number is required.',
+            'invalid': 'Please enter a valid port number.',
+            'min_value': 'Port number must be between 1 and 65535.',
+            'max_value': 'Port number must be between 1 and 65535.',
+        },
         widget=forms.NumberInput(attrs={
             'class': 'form-control',
+            'placeholder': '22',
+            'min': 1,
+            'max': 65535
         })
     )
     username = forms.CharField(
         label='Username',
         required=True,
+        min_length=1,
+        max_length=32,
+        error_messages={
+            'required': 'Username is required.',
+            'min_length': 'Username cannot be empty.',
+            'max_length': 'Username cannot exceed 32 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'root or ubuntu'
         })
     )
     architectures = forms.CharField(
         required=True,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control'
+        error_messages={
+            'required': 'At least one architecture must be selected.',
+        },
+        widget=forms.HiddenInput(attrs={
+            'id': 'architectures_hidden'
         }),
         label='Architectures'
     )
     features = forms.CharField(
         required=True,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control'
+        error_messages={
+            'required': 'At least one feature must be selected.',
+        },
+        widget=forms.HiddenInput(attrs={
+            'id': 'features_hidden'
         }),
         label='Features'
     )
+    
+    def clean_host(self):
+        host = self.cleaned_data.get('host')
+        if host:
+            # Check for valid IP address or domain name
+            ip_pattern = r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$'
+            domain_pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
+            
+            if not (re.match(ip_pattern, host) or re.match(domain_pattern, host)):
+                raise ValidationError('Please enter a valid IP address or domain name.')
+                
+            # Check for localhost variations
+            if host.lower() in ['localhost', '127.0.0.1', '::1']:
+                raise ValidationError('Localhost addresses are not allowed for remote servers.')
+        return host
+    
+    def clean_architectures(self):
+        architectures = self.cleaned_data.get('architectures')
+        if architectures:
+            arch_list = [arch.strip() for arch in architectures.split(',') if arch.strip()]
+            if not arch_list:
+                raise ValidationError('At least one architecture must be selected.')
+            valid_archs = ['x86_64', 'arm64', 'armv7', 'i386', 'ppc64le', 's390x']
+            invalid_archs = [arch for arch in arch_list if arch not in valid_archs]
+            if invalid_archs:
+                raise ValidationError(f'Invalid architectures: {", ".join(invalid_archs)}. Valid options: {", ".join(valid_archs)}.')
+        return architectures
+    
+    def clean_features(self):
+        features = self.cleaned_data.get('features')
+        if features:
+            feature_list = [feat.strip() for feat in features.split(',') if feat.strip()]
+            if not feature_list:
+                raise ValidationError('At least one feature must be selected.')
+        return features
 
 class NewCacheForm(forms.Form):
     name = forms.CharField(
         label='Name',
         required=True,
+        min_length=3,
+        max_length=50,
+        error_messages={
+            'required': 'Cache name is required.',
+            'min_length': 'Cache name must be at least 3 characters long.',
+            'max_length': 'Cache name cannot exceed 50 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter cache name (3-50 characters)'
         })
     )
     display_name = forms.CharField(
         label='Display Name',
         required=True,
+        max_length=100,
+        error_messages={
+            'required': 'Display name is required.',
+            'max_length': 'Display name cannot exceed 100 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter a friendly display name'
         })
     )
     description = forms.CharField(
         label='Description',
         required=True,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control'
+        max_length=500,
+        error_messages={
+            'required': 'Description is required.',
+            'max_length': 'Description cannot exceed 500 characters.',
+        },
+        widget=forms.Textarea(attrs={
+            'class': 'form-control',
+            'placeholder': 'Describe your cache (max 500 characters)',
+            'rows': 3
         })
     )
     priority = forms.IntegerField(
         label='Priority',
         required=True,
-        widget=forms.TextInput(attrs={
+        min_value=1,
+        max_value=100,
+        initial=50,
+        error_messages={
+            'required': 'Priority is required.',
+            'invalid': 'Please enter a valid priority number.',
+            'min_value': 'Priority must be between 1 and 100.',
+            'max_value': 'Priority must be between 1 and 100.',
+        },
+        help_text='Higher numbers indicate higher priority (1-100)',
+        widget=forms.NumberInput(attrs={
             'class': 'form-control',
+            'placeholder': '50',
+            'min': 1,
+            'max': 100
         })
     )
+    
+    def clean_name(self):
+        name = self.cleaned_data.get('name')
+        if name:
+            if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+                raise ValidationError('Cache name can only contain letters, numbers, hyphens, and underscores.')
+            reserved_names = ['admin', 'api', 'www', 'app', 'system', 'root', 'cache', 'temp']
+            if name.lower() in reserved_names:
+                raise ValidationError(f'The name "{name}" is reserved and cannot be used.')
+        return name
 
 class EditServerForm(forms.Form):
     server = forms.CharField(
         label='Server',
         required=True,
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'readonly': True
         })
     )
     server_name = forms.CharField(
         label='Name',
         required=True,
+        min_length=3,
+        max_length=50,
+        error_messages={
+            'required': 'Server name is required.',
+            'min_length': 'Server name must be at least 3 characters long.',
+            'max_length': 'Server name cannot exceed 50 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter server name (3-50 characters)'
         })
     )
     host = forms.CharField(
         label='Host',
         required=True,
+        error_messages={
+            'required': 'Server host is required.',
+        },
+        help_text='IP address or domain name of the server',
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': '192.168.1.100 or server.example.com'
         })
     )
     port = forms.IntegerField(
         label='Port',
         required=True,
+        min_value=1,
+        max_value=65535,
+        error_messages={
+            'required': 'Port number is required.',
+            'invalid': 'Please enter a valid port number.',
+            'min_value': 'Port number must be between 1 and 65535.',
+            'max_value': 'Port number must be between 1 and 65535.',
+        },
         widget=forms.NumberInput(attrs={
             'class': 'form-control',
+            'placeholder': '22',
+            'min': 1,
+            'max': 65535
         })
     )
     username = forms.CharField(
         label='Username',
         required=True,
+        min_length=1,
+        max_length=32,
+        error_messages={
+            'required': 'Username is required.',
+            'min_length': 'Username cannot be empty.',
+            'max_length': 'Username cannot exceed 32 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'root or ubuntu'
         })
     )
     architectures = forms.CharField(
         required=True,
+        error_messages={
+            'required': 'At least one architecture must be specified.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'x86_64, arm64'
         }),
         label='Architectures'
     )
     features = forms.CharField(
         required=True,
+        error_messages={
+            'required': 'At least one feature must be specified.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'docker, kubernetes'
         }),
         label='Features'
     )
@@ -310,114 +564,258 @@ class EditOrganizationForm(forms.Form):
     name = forms.CharField(
         label='Name',
         required=True,
+        min_length=3,
+        max_length=50,
+        error_messages={
+            'required': 'Organization name is required.',
+            'min_length': 'Organization name must be at least 3 characters long.',
+            'max_length': 'Organization name cannot exceed 50 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter organization name (3-50 characters)'
         })
     )
     display_name = forms.CharField(
         label='Display Name',
         required=True,
+        max_length=100,
+        error_messages={
+            'required': 'Display name is required.',
+            'max_length': 'Display name cannot exceed 100 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter a friendly display name'
         })
     )
     description = forms.CharField(
         label='Description',
         required=True,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control'
+        max_length=500,
+        error_messages={
+            'required': 'Description is required.',
+            'max_length': 'Description cannot exceed 500 characters.',
+        },
+        widget=forms.Textarea(attrs={
+            'class': 'form-control',
+            'placeholder': 'Describe your organization (max 500 characters)',
+            'rows': 3
         })
     )
+    
+    def clean_name(self):
+        name = self.cleaned_data.get('name')
+        if name:
+            if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+                raise ValidationError('Organization name can only contain letters, numbers, hyphens, and underscores.')
+        return name
     
 class EditProjectForm(forms.Form):
     name = forms.CharField(
         label='Name',
         required=True,
+        min_length=3,
+        max_length=50,
+        error_messages={
+            'required': 'Project name is required.',
+            'min_length': 'Project name must be at least 3 characters long.',
+            'max_length': 'Project name cannot exceed 50 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter project name (3-50 characters)'
         })
     )
     display_name = forms.CharField(
         label='Display Name',
         required=True,
+        max_length=100,
+        error_messages={
+            'required': 'Display name is required.',
+            'max_length': 'Display name cannot exceed 100 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter a friendly display name'
         })
     )
     description = forms.CharField(
         label='Description',
         required=True,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control'
+        max_length=500,
+        error_messages={
+            'required': 'Description is required.',
+            'max_length': 'Description cannot exceed 500 characters.',
+        },
+        widget=forms.Textarea(attrs={
+            'class': 'form-control',
+            'placeholder': 'Describe your project (max 500 characters)',
+            'rows': 3
         })
     )
-    repository = forms.CharField(
+    repository = forms.URLField(
         label='Repository',
         required=True,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control'
+        error_messages={
+            'required': 'Repository URL is required.',
+            'invalid': 'Please enter a valid repository URL (e.g., https://github.com/user/repo.git)',
+        },
+        widget=forms.URLInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'https://github.com/user/repository.git'
         })
     )
     evaluation_wildcard = forms.CharField(
         label='Wildcard',
         required=True,
+        error_messages={
+            'required': 'Evaluation wildcard is required.',
+        },
+        help_text='Pattern to match evaluation files (e.g., **/*.test.js)',
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': '**/*.test.js'
         })
     )
+    
+    def clean_name(self):
+        name = self.cleaned_data.get('name')
+        if name:
+            if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+                raise ValidationError('Project name can only contain letters, numbers, hyphens, and underscores.')
+        return name
 
 class EditCacheForm(forms.Form):
     name = forms.CharField(
         label='Name',
         required=True,
+        min_length=3,
+        max_length=50,
+        error_messages={
+            'required': 'Cache name is required.',
+            'min_length': 'Cache name must be at least 3 characters long.',
+            'max_length': 'Cache name cannot exceed 50 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter cache name (3-50 characters)'
         })
     )
     display_name = forms.CharField(
         label='Display Name',
         required=True,
+        max_length=100,
+        error_messages={
+            'required': 'Display name is required.',
+            'max_length': 'Display name cannot exceed 100 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter a friendly display name'
         })
     )
     description = forms.CharField(
         label='Description',
         required=True,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control'
+        max_length=500,
+        error_messages={
+            'required': 'Description is required.',
+            'max_length': 'Description cannot exceed 500 characters.',
+        },
+        widget=forms.Textarea(attrs={
+            'class': 'form-control',
+            'placeholder': 'Describe your cache (max 500 characters)',
+            'rows': 3
         })
     )
     priority = forms.IntegerField(
         label='Priority',
         required=True,
-        widget=forms.TextInput(attrs={
+        min_value=1,
+        max_value=100,
+        error_messages={
+            'required': 'Priority is required.',
+            'invalid': 'Please enter a valid priority number.',
+            'min_value': 'Priority must be between 1 and 100.',
+            'max_value': 'Priority must be between 1 and 100.',
+        },
+        help_text='Higher numbers indicate higher priority (1-100)',
+        widget=forms.NumberInput(attrs={
             'class': 'form-control',
+            'placeholder': '50',
+            'min': 1,
+            'max': 100
         })
     )
+    
+    def clean_name(self):
+        name = self.cleaned_data.get('name')
+        if name:
+            if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+                raise ValidationError('Cache name can only contain letters, numbers, hyphens, and underscores.')
+        return name
 
 class EditUserForm(forms.Form):
     name = forms.CharField(
-        label='Name',
+        label='Full Name',
         required=True,
+        min_length=2,
+        max_length=100,
+        error_messages={
+            'required': 'Full name is required.',
+            'min_length': 'Name must be at least 2 characters long.',
+            'max_length': 'Name cannot exceed 100 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter your full name'
         })
     )
     username = forms.CharField(
         label='Username',
         required=True,
+        min_length=3,
+        max_length=30,
+        error_messages={
+            'required': 'Username is required.',
+            'min_length': 'Username must be at least 3 characters long.',
+            'max_length': 'Username cannot exceed 30 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter username (3-30 characters)'
         })
     )
-    email = forms.CharField(
+    email = forms.EmailField(
         label='Email',
         required=True,
-        widget=forms.TextInput(attrs={
-            'class': 'form-control'
+        error_messages={
+            'required': 'Email address is required.',
+            'invalid': 'Please enter a valid email address.',
+        },
+        widget=forms.EmailInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Enter your email address'
         })
     )
+    
+    def clean_name(self):
+        name = self.cleaned_data.get('name')
+        if name:
+            # Check for valid name format (letters, spaces, hyphens, apostrophes)
+            if not re.match(r'^[a-zA-Z\s\-\']+$', name):
+                raise ValidationError('Name can only contain letters, spaces, hyphens, and apostrophes.')
+        return name
+    
+    def clean_username(self):
+        username = self.cleaned_data.get('username')
+        if username:
+            if not re.match(r'^[a-zA-Z0-9_-]+$', username):
+                raise ValidationError('Username can only contain letters, numbers, hyphens, and underscores.')
+            if username.lower() in ['admin', 'root', 'system', 'api', 'www', 'mail', 'ftp', 'test', 'user', 'support', 'help', 'info']:
+                raise ValidationError(f'The username "{username}" is reserved and cannot be used.')
+        return username
 
 class AddOrganizationMemberForm(forms.Form):
     ROLE_CHOICES = [
@@ -431,15 +829,24 @@ class AddOrganizationMemberForm(forms.Form):
         required=True,
         min_length=3,
         max_length=150,
+        error_messages={
+            'required': 'Username is required.',
+            'min_length': 'Username must be at least 3 characters long.',
+            'max_length': 'Username cannot exceed 150 characters.',
+        },
         widget=forms.TextInput(attrs={
             'class': 'form-control',
-            'placeholder': 'Enter username'
+            'placeholder': 'Enter username (3-150 characters)'
         })
     )
     role = forms.ChoiceField(
         label='Role',
         choices=ROLE_CHOICES,
         required=True,
+        error_messages={
+            'required': 'Please select a role.',
+            'invalid_choice': 'Please select a valid role.',
+        },
         widget=forms.Select(attrs={
             'class': 'form-control'
         })
@@ -450,11 +857,15 @@ class AddOrganizationMemberForm(forms.Form):
         if user:
             user = user.strip()
             if not user:
-                raise forms.ValidationError("Username cannot be empty.")
+                raise ValidationError("Username cannot be empty.")
             if ' ' in user:
-                raise forms.ValidationError("Username cannot contain spaces.")
+                raise ValidationError("Username cannot contain spaces.")
             if not user.replace('_', '').replace('-', '').replace('.', '').isalnum():
-                raise forms.ValidationError("Username can only contain letters, numbers, underscores, hyphens, and periods.")
+                raise ValidationError("Username can only contain letters, numbers, underscores, hyphens, and periods.")
+            # Check for reserved usernames
+            reserved_usernames = ['admin', 'root', 'system', 'api', 'www', 'mail', 'ftp', 'test', 'user', 'support', 'help', 'info', 'null', 'undefined']
+            if user.lower() in reserved_usernames:
+                raise ValidationError(f'The username "{user}" is reserved and cannot be used.')
         return user
 
 class EditOrganizationMemberForm(forms.Form):
@@ -468,6 +879,10 @@ class EditOrganizationMemberForm(forms.Form):
         label='Role',
         choices=ROLE_CHOICES,
         required=True,
+        error_messages={
+            'required': 'Please select a role.',
+            'invalid_choice': 'Please select a valid role.',
+        },
         widget=forms.Select(attrs={
             'class': 'form-control'
         })
@@ -477,50 +892,120 @@ class AddOrganizationServerForm(forms.Form):
     name = forms.CharField(
         label='Server Name',
         required=True,
+        min_length=3,
+        max_length=50,
+        error_messages={
+            'required': 'Server name is required.',
+            'min_length': 'Server name must be at least 3 characters long.',
+            'max_length': 'Server name cannot exceed 50 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter server name (3-50 characters)'
         })
     )
     display_name = forms.CharField(
         label='Display Name',
         required=True,
+        max_length=100,
+        error_messages={
+            'required': 'Display name is required.',
+            'max_length': 'Display name cannot exceed 100 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'Enter a friendly display name'
         })
     )
     host = forms.CharField(
         label='Host',
         required=True,
+        error_messages={
+            'required': 'Server host is required.',
+        },
+        help_text='IP address or domain name of the server',
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': '192.168.1.100 or server.example.com'
         })
     )
     port = forms.IntegerField(
         label='Port',
         required=True,
+        min_value=1,
+        max_value=65535,
+        initial=22,
+        error_messages={
+            'required': 'Port number is required.',
+            'invalid': 'Please enter a valid port number.',
+            'min_value': 'Port number must be between 1 and 65535.',
+            'max_value': 'Port number must be between 1 and 65535.',
+        },
         widget=forms.NumberInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': '22',
+            'min': 1,
+            'max': 65535
         })
     )
     username = forms.CharField(
         label='Username',
         required=True,
+        min_length=1,
+        max_length=32,
+        error_messages={
+            'required': 'Username is required.',
+            'min_length': 'Username cannot be empty.',
+            'max_length': 'Username cannot exceed 32 characters.',
+        },
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'root or ubuntu'
         })
     )
     architectures = forms.CharField(
         label='Architectures',
         required=True,
+        error_messages={
+            'required': 'At least one architecture must be specified.',
+        },
+        help_text='Comma-separated list of supported architectures',
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'x86_64, arm64'
         })
     )
     features = forms.CharField(
         label='Features',
         required=True,
+        error_messages={
+            'required': 'At least one feature must be specified.',
+        },
+        help_text='Comma-separated list of available features',
         widget=forms.TextInput(attrs={
-            'class': 'form-control'
+            'class': 'form-control',
+            'placeholder': 'docker, kubernetes'
         })
     )
+    
+    def clean_name(self):
+        name = self.cleaned_data.get('name')
+        if name:
+            if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+                raise ValidationError('Server name can only contain letters, numbers, hyphens, and underscores.')
+        return name
+    
+    def clean_host(self):
+        host = self.cleaned_data.get('host')
+        if host:
+            # Check for valid IP address or domain name
+            ip_pattern = r'^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$'
+            domain_pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
+            
+            if not (re.match(ip_pattern, host) or re.match(domain_pattern, host)):
+                raise ValidationError('Please enter a valid IP address or domain name.')
+                
+            if host.lower() in ['localhost', '127.0.0.1', '::1']:
+                raise ValidationError('Localhost addresses are not allowed for remote servers.')
+        return host
 

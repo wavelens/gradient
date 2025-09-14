@@ -17,10 +17,34 @@
 <div class="outer-form">
     <div class="form-container">
         <h2 class="form-header-label">{% trans 'New Server' %}</h2>
-        <form method="post">
+        <form method="post" id="server-form">
             {% csrf_token %}
             {% for field in form %}
-                {% if field.field.widget|default:"" == form.fields.remember_me.widget %}
+                {% if field.name == 'architectures' %}
+                    <div class="form-field">
+                        <label for="{{ field.id_for_label }}" {% if field.field.required %}class="required-label"{% endif %}>{% trans field.label %}</label>
+                        {{ field }}
+                        <div class="tag-input-container">
+                            <div class="tags-display" id="architectures-tags"></div>
+                            <input type="text" class="form-control tag-input" id="architectures-input" placeholder="Add architectures (e.g., x86_64, arm64)">
+                        </div>
+                        {% if field.errors %}
+                            <div class="error">{% trans field.errors %}</div>
+                        {% endif %}
+                    </div>
+                {% elif field.name == 'features' %}
+                    <div class="form-field">
+                        <label for="{{ field.id_for_label }}" {% if field.field.required %}class="required-label"{% endif %}>{% trans field.label %}</label>
+                        {{ field }}
+                        <div class="tag-input-container">
+                            <div class="tags-display" id="features-tags"></div>
+                            <input type="text" class="form-control tag-input" id="features-input" placeholder="Add features (e.g., nixos-test, benchmark, big-parallel, kvm)">
+                        </div>
+                        {% if field.errors %}
+                            <div class="error">{% trans field.errors %}</div>
+                        {% endif %}
+                    </div>
+                {% elif field.field.widget|default:"" == form.fields.remember_me.widget %}
                     <div class="form-check">
                         {{ field }}
                         <label for="{{ field.id_for_label }}" class="form-check-label">{% trans field.label %}</label>
@@ -39,7 +63,73 @@
         </form>
     </div>
 </div>
-<style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    function initTagInput(inputId, displayId, hiddenId) {
+        const input = document.getElementById(inputId);
+        const display = document.getElementById(displayId);
+        const hidden = document.getElementById(hiddenId);
+        let tags = [];
+        
+        function updateHiddenField() {
+            hidden.value = tags.join(',');
+        }
+        
+        function addTag(tagText) {
+            const trimmed = tagText.trim();
+            if (trimmed && !tags.includes(trimmed)) {
+                tags.push(trimmed);
+                renderTags();
+                updateHiddenField();
+            }
+        }
+        
+        function removeTag(tagToRemove) {
+            tags = tags.filter(tag => tag !== tagToRemove);
+            renderTags();
+            updateHiddenField();
+        }
+        
+        function renderTags() {
+            display.innerHTML = '';
+            tags.forEach(tag => {
+                const tagElement = document.createElement('span');
+                tagElement.className = 'tag';
+                tagElement.innerHTML = `${tag}`;
+                
+                const removeButton = document.createElement('button');
+                removeButton.type = 'button';
+                removeButton.className = 'tag-remove';
+                removeButton.innerHTML = '&times;';
+                removeButton.onclick = function() {
+                    removeTag(tag);
+                };
+                
+                tagElement.appendChild(removeButton);
+                display.appendChild(tagElement);
+            });
+        }
+        
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ',') {
+                e.preventDefault();
+                addTag(input.value);
+                input.value = '';
+            }
+        });
+        
+        input.addEventListener('blur', function() {
+            if (input.value.trim()) {
+                addTag(input.value);
+                input.value = '';
+            }
+        });
+        
+    }
     
-</style>
+    initTagInput('architectures-input', 'architectures-tags', 'id_architectures');
+    initTagInput('features-input', 'features-tags', 'id_features');
+});
+</script>
 {% endblock %}

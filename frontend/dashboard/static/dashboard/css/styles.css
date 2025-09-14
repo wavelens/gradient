@@ -74,16 +74,16 @@ h2 {
     color: white;
 }
 
-input[type="text"], input[type="password"], input[type="number"], input[type="email"] {
+input[type="text"], input[type="password"], input[type="number"], input[type="email"], textarea, input[type="url"] {
     padding: 5px;
     background-color: var(--tertiary);
     border: 1px solid rgb(118, 118, 118);
     color: var(--secondary);
     border-radius: 5px;
-    width: 18rem;
+    width: -webkit-fill-available !important;
 }
 
-input[type="text"]:focus-visible, input[type="password"]:focus-visible, input[type="email"]:focus-visible, .form-field select:focus-visible {
+input[type="text"]:focus-visible, input[type="password"]:focus-visible, input[type="email"]:focus-visible, .form-field select:focus-visible, textarea:focus-visible, input[type="url"]:focus-visible {
     outline: none;
     border: 1px solid #007BFF;
 }
@@ -143,17 +143,15 @@ input[type="text"]:focus-visible, input[type="password"]:focus-visible, input[ty
 .button-clear {
     background-color: transparent;
     color: var(--secondary);
-    border: none;
+    border: 1px solid rgb(118, 118, 118);
     border-radius: 5px;
     margin: 0px 15px;
     padding: 4px 8px;
 }
 
 .button-clear:hover {
-    border: 1px solid rgb(118, 118, 118);
-    padding: 4px 7px;
-    border-radius: 5px;
-    height: 31px;
+    border: 1px solid rgb(150, 150, 150);
+    background-color: rgba(118, 118, 118, 0.1);
 }
 
 .button-round {
@@ -808,7 +806,8 @@ tr:hover td{
 }
 
 .form-field input {
-    width: 97.5%;
+    /* width: 97.5%; */
+    width: -webkit-fill-available !important;
     font-size: 16px;
     border-radius: 5px;
     padding-block: 0;
@@ -1369,7 +1368,7 @@ tr:hover td{
 }
 
 .bordered-section {
-    background: var(--tertiary);
+    background: rgba(171, 176, 180, 0.1);
     border: 1px solid rgba(118, 118, 118, 0.3);
     border-radius: 8px;
     overflow: hidden;
@@ -1463,4 +1462,350 @@ tr:hover td{
 /* Utility classes for dashboard */
 .m-l-1rem {
     margin-left: 1rem;
+}
+
+/* SSH Key Settings */
+.ssh-key-container {
+    margin-top: 10px;
+}
+
+.ssh-key-display {
+    width: 100%;
+    min-height: 80px;
+    padding: 10px;
+    font-family: monospace;
+    font-size: 16px;
+    border: 1px solid rgb(118, 118, 118);
+    border-radius: 5px;
+    resize: vertical;
+    background-color: var(--tertiary);
+    color: var(--secondary);
+    margin-bottom: 10px;
+}
+
+.ssh-key-display:focus {
+    outline: none;
+    border: 1px solid #007BFF;
+    background-color: var(--tertiary);
+}
+
+.ssh-key-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.copy-button {
+    padding: 8px 16px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.copy-button:hover {
+    background-color: #0056b3;
+}
+
+.generate-button {
+    padding: 8px 16px;
+    background-color: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.generate-button:hover {
+    background-color: #c82333;
+}
+
+.no-key-container {
+    padding: 20px;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.ssh-key-info {
+    margin-top: 20px;
+    padding: 15px;
+    background-color: #e7f3ff;
+    border-left: 4px solid #007bff;
+    border-radius: 4px;
+}
+
+.ssh-key-info h4 {
+    margin-top: 0;
+    color: #0056b3;
+}
+
+.ssh-key-info ul {
+    margin-bottom: 0;
+    text-align: left;
+}
+
+/* Tag Input Styling */
+.tag-input-container {
+    border: 1px solid rgb(118, 118, 118);
+    border-radius: 5px;
+    padding: 10px;
+    min-height: 40px;
+    background-color: var(--tertiary);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    align-items: center;
+    width: 94.5%;
+}
+
+.tag-input-container:focus-within {
+    border: 1px solid #007BFF;
+}
+
+.tags-display {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.tag {
+    background-color: var(--secondary);
+    color: var(--primary);
+    padding: 4px 8px;
+    border-radius: 15px;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid rgba(118, 118, 118, 0.5);
+}
+
+.tag-remove {
+    background: none;
+    border: none;
+    color: var(--primary);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    line-height: 1;
+    padding: 0;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 3px;
+}
+
+.tag-remove:hover {
+    background-color: rgba(13, 17, 24, 0.2);
+}
+
+.tag-input {
+    border: none;
+    outline: none;
+    flex: 1;
+    min-width: 100px;
+    padding: 4px;
+    background-color: transparent;
+    color: var(--secondary);
+    font-size: 16px;
+}
+
+.tag-input::placeholder {
+    color: rgba(171, 176, 180, 0.6);
+}
+
+/* Registration Form Styles */
+.password-requirements {
+    margin-top: 8px;
+    padding: 0;
+    background: none;
+    border: none;
+    font-size: 13px;
+}
+
+.input-with-icon {
+    position: relative;
+    display: block;
+    width: 100%;
+}
+
+.input-with-icon input {
+    padding-right: 40px !important;
+    width: 100% !important;
+    box-sizing: border-box;
+}
+
+.field-status {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 10;
+    line-height: 1;
+    background: none !important;
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    outline: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.field-status .material-icons {
+    background: none !important;
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    outline: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.field-status.success {
+    color: #30c54c;
+}
+
+.field-status.error {
+    color: #fa5e55;
+}
+
+.field-status.loading {
+    color: #c5b03b;
+}
+
+.loader {
+    width: 16px;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: #c5b03b;
+    box-shadow: 0 0 0 0 #c7b54e;
+    animation: l1 1.5s infinite;
+    display: inline-block;
+}
+
+@keyframes l1 {
+    100% {box-shadow: 0 0 0 10px #0000}
+}
+
+.requirement {
+    display: none;
+    margin-bottom: 4px;
+    transition: all 0.2s ease;
+}
+
+.requirement.invalid {
+    display: flex;
+}
+
+.requirement:last-child {
+    margin-bottom: 0;
+}
+
+.req-text {
+    color: var(--secondary);
+    transition: color 0.2s ease;
+}
+
+.requirement.invalid .req-text {
+    color: #fa5e55;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.form-help-text {
+    color: var(--secondary);
+    font-size: 12px;
+    margin-top: 4px;
+    display: block;
+}
+
+.error {
+    color: #fa5e55;
+    font-size: 13px;
+    margin-top: 4px;
+    padding: 8px 12px;
+    background-color: rgba(250, 94, 85, 0.1);
+    border: 1px solid rgba(250, 94, 85, 0.3);
+    border-radius: 4px;
+}
+
+.alert {
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+}
+
+.alert-danger {
+    color: #fa5e55;
+    background-color: rgba(250, 94, 85, 0.1);
+    border-color: rgba(250, 94, 85, 0.3);
+}
+
+.form-control {
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.form-control:focus {
+    border-color: #80bdff;
+    outline: 0;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.submit-btn {
+    transition: all 0.15s ease-in-out;
+}
+
+.submit-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+}
+
+.password-strength {
+    height: 4px;
+    background-color: #e9ecef;
+    border-radius: 2px;
+    margin-top: 8px;
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+
+.password-strength-bar {
+    height: 100%;
+    width: 0%;
+    transition: all 0.3s ease;
+    border-radius: 2px;
+}
+
+.strength-weak {
+    background-color: #dc3545;
+}
+
+.strength-fair {
+    background-color: #ffc107;
+}
+
+.strength-good {
+    background-color: #fd7e14;
+}
+
+.strength-strong {
+    background-color: #28a745;
 }

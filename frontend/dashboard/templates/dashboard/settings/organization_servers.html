@@ -20,8 +20,9 @@
     {% if org %}
         <li><a class="settings-nav-link" href="{% url 'settingsOrganization' org %}"><span class="material-symbols-outlined m-r-5">apartment</span>{% trans 'Organization' %}</a></li>
         <li><a class="settings-nav-link" href="{% url 'organizationMembers' org %}"><span class="material-symbols-outlined m-r-5">group</span>{% trans 'Members' %}</a></li>
+        <li><a class="settings-nav-link active" href=""><span class="material-symbols-outlined m-r-5">dns</span>{% trans 'Servers' %}</a></li>
+        <li><a class="settings-nav-link" href="{% url 'organizationSSH' org %}"><span class="material-symbols-outlined m-r-5">key</span>{% trans 'SSH Key' %}</a></li>
     {% endif %}
-    <li><a class="settings-nav-link active" href=""><span class="material-symbols-outlined m-r-5">dns</span>{% trans 'Servers' %}</a></li>
 {% endblock %}
 
  {% block inhalt %}
@@ -35,13 +36,12 @@
     <!-- Add Server Button -->
     <div class="m-b-1rem">
         <button type="button" class="submit-btn" onclick="toggleAddServerForm()">
-            <span class="material-symbols-outlined m-r-5">add</span>
             {% trans 'Add Server' %}
         </button>
     </div>
 
     <!-- Add Server Form (Hidden by default) -->
-    <div class="add-member-section m-b-1rem" id="addServerForm" style="display: none;">
+    <div class="add-member-section" id="addServerForm" style="display: none;">
         <h3>{% trans 'Add New Server' %}</h3>
         {% if add_form.non_field_errors %}
             <div class="alert alert-danger">
@@ -61,7 +61,7 @@
                 </div>
             {% endfor %}
             <div class="d-flex">
-                <button type="submit" class="submit-btn m-r-1rem">{% trans 'Add Server' %}</button>
+                <button type="submit" class="submit-btn m-r-1rem" style="margin-bottom: 0;">{% trans 'Add Server' %}</button>
                 <button type="button" class="button-clear" onclick="toggleAddServerForm()">{% trans 'Cancel' %}</button>
             </div>
         </form>
@@ -229,11 +229,6 @@
                 }
             });
         });
-
-        // Show add form if there are errors
-        {% if add_form.errors %}
-            toggleAddServerForm();
-        {% endif %}
     });
 </script>
  {% endblock %}
