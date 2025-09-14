@@ -238,6 +238,9 @@ pub async fn run_cli() -> std::io::Result<()> {
             MainCommands::Server { cmd } => server::handle(cmd).await,
             MainCommands::Cache { cmd } => cache::handle(cmd).await,
         }
+    } else {
+        eprintln!("No subcommand provided");
+        exit(1);
     }
 
     exit(0);

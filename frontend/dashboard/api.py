@@ -42,13 +42,16 @@ def get_client(user, endpoint, request_type, body=None):
 
     if response.status_code == 200:
         return response.json()
-    elif response.status_code in [400, 401, 409]:
+    elif response.status_code in [400, 401, 404, 409, 500]:
         try:
             return response.json()
         except ValueError:
             return {"error": True, "message": response.text}
     else:
-        return None
+        # Log unexpected status codes for debugging
+        if settings.DEBUG:
+            print(f'Unexpected status code {response.status_code} for {url}: {response.text}')
+        return {"error": True, "message": f"Server returned status {response.status_code}: {response.text}"}
 
 def health(request):
     return get_client(request.user, "health", "GET")
