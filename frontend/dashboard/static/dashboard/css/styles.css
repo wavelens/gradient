@@ -74,7 +74,7 @@ h2 {
     color: white;
 }
 
-input[type="text"], input[type="password"], input[type="number"], input[type="email"], textarea {
+input[type="text"], input[type="password"], input[type="number"], input[type="email"], textarea, input[type="url"] {
     padding: 5px;
     background-color: var(--tertiary);
     border: 1px solid rgb(118, 118, 118);
@@ -83,7 +83,7 @@ input[type="text"], input[type="password"], input[type="number"], input[type="em
     width: -webkit-fill-available !important;
 }
 
-input[type="text"]:focus-visible, input[type="password"]:focus-visible, input[type="email"]:focus-visible, .form-field select:focus-visible {
+input[type="text"]:focus-visible, input[type="password"]:focus-visible, input[type="email"]:focus-visible, .form-field select:focus-visible, textarea:focus-visible, input[type="url"]:focus-visible {
     outline: none;
     border: 1px solid #007BFF;
 }
@@ -143,17 +143,15 @@ input[type="text"]:focus-visible, input[type="password"]:focus-visible, input[ty
 .button-clear {
     background-color: transparent;
     color: var(--secondary);
-    border: none;
+    border: 1px solid rgb(118, 118, 118);
     border-radius: 5px;
     margin: 0px 15px;
     padding: 4px 8px;
 }
 
 .button-clear:hover {
-    border: 1px solid rgb(118, 118, 118);
-    padding: 4px 7px;
-    border-radius: 5px;
-    height: 31px;
+    border: 1px solid rgb(150, 150, 150);
+    background-color: rgba(118, 118, 118, 0.1);
 }
 
 .button-round {
