@@ -74,13 +74,13 @@ h2 {
     color: white;
 }
 
-input[type="text"], input[type="password"], input[type="number"], input[type="email"] {
+input[type="text"], input[type="password"], input[type="number"], input[type="email"], textarea {
     padding: 5px;
     background-color: var(--tertiary);
     border: 1px solid rgb(118, 118, 118);
     color: var(--secondary);
     border-radius: 5px;
-    width: 18rem;
+    width: -webkit-fill-available !important;
 }
 
 input[type="text"]:focus-visible, input[type="password"]:focus-visible, input[type="email"]:focus-visible, .form-field select:focus-visible {

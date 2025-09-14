@@ -84,38 +84,6 @@
 
     <div class="dashboard-grid">
 
-        <!-- Cache Actions -->
-        <div class="dashboard-section bordered-section">
-            <div class="section-header">
-                <h2>{% trans 'Quick Actions' %}</h2>
-            </div>
-            <div class="section-content">
-                <div class="project-actions">
-                    {% if cache_data.status == 'active' %}
-                        <button type="button" class="submit-btn danger-btn m-b-1rem" onclick="toggleCache('{{ cache_name }}', false)">
-                            <span class="material-symbols-outlined">stop</span>
-                            {% trans 'Deactivate Cache' %}
-                        </button>
-                    {% else %}
-                        <button type="button" class="submit-btn m-b-1rem" onclick="toggleCache('{{ cache_name }}', true)">
-                            <span class="material-symbols-outlined">play_arrow</span>
-                            {% trans 'Activate Cache' %}
-                        </button>
-                    {% endif %}
-                    
-                    <button type="button" class="submit-btn secondary-btn m-b-1rem" onclick="clearCache('{{ cache_name }}')">
-                        <span class="material-symbols-outlined">delete_sweep</span>
-                        {% trans 'Clear Cache' %}
-                    </button>
-                    
-                    <button type="button" class="submit-btn secondary-btn m-b-1rem" onclick="refreshStats('{{ cache_name }}')">
-                        <span class="material-symbols-outlined">refresh</span>
-                        {% trans 'Refresh Stats' %}
-                    </button>
-                </div>
-            </div>
-        </div>
-
         <!-- Performance Metrics -->
         <div class="dashboard-section bordered-section">
             <div class="section-header">
@@ -166,50 +134,6 @@
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <!-- Recent Activity -->
-        <div class="dashboard-section bordered-section">
-            <div class="section-header">
-                <h2>{% trans 'Recent Activity' %}</h2>
-            </div>
-            <div class="section-content" id="recent-activity">
-                {% for activity in recent_activity %}
-                    <div class="workflow-item dashboard-item">
-                        <div class="full-width">
-                            <div class="item-header">
-                                <span class="material-symbols-outlined item-icon">
-                                    {% if activity.action == 'Cache Hit' %}
-                                        check_circle
-                                    {% elif activity.action == 'Cache Miss' %}
-                                        search_off
-                                    {% elif activity.action == 'Cache Eviction' %}
-                                        delete
-                                    {% elif activity.action == 'Cache Store' %}
-                                        save
-                                    {% else %}
-                                        hub
-                                    {% endif %}
-                                </span>
-                                <span class="workflow-title">{{ activity.action }}</span>
-                            </div>
-                            <p class="text-light">
-                                Key: <code>{{ activity.key }}</code>
-                                • {{ activity.timestamp }}
-                                {% if activity.response_time != 'N/A' %}
-                                    • {{ activity.response_time }}
-                                {% endif %}
-                            </p>
-                        </div>
-                    </div>
-                {% empty %}
-                    <div class="no-caches empty-state">
-                        <span class="material-symbols-outlined empty-state-icon">hub</span>
-                        <h3>{% trans 'No recent activity' %}</h3>
-                        <p>{% trans 'Cache activity will appear here when the cache is in use.' %}</p>
-                    </div>
-                {% endfor %}
             </div>
         </div>
 
