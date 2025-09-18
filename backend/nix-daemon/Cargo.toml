@@ -26,7 +26,7 @@ serde_with = "3.14"
 strum = { version = "0.27", features = ["derive"] }
 tap = "1.0"
 thiserror = "2.0"
-tokio = { version = "1.46", features = [
+tokio = { version = "1.47", features = [
     "rt",
     "macros",
     "parking_lot",

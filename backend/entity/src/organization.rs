@@ -24,6 +24,7 @@ pub struct Model {
     pub use_nix_store: bool,
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
+    pub managed: bool,
 }
 
 impl std::fmt::Debug for Model {

@@ -129,6 +129,7 @@ pub async fn post_keys(
         key: Set(generate_api_key()),
         last_used_at: Set(*NULL_TIME),
         created_at: Set(Utc::now().naive_utc()),
+        managed: Set(false),
     };
 
     let api_key = api_key.insert(&state.db).await?;

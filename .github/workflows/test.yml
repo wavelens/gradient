@@ -3,9 +3,6 @@ on:
   pull_request:
   push:
     branches: [ main ]
-  schedule:
-    # Run tests daily at 2 AM UTC
-    - cron: '0 2 * * *'
 
 jobs:
   tests:
@@ -14,7 +11,8 @@ jobs:
     strategy:
       matrix:
         test:
-          # - gradient-api
+          - gradient-state
+          - gradient-api
           - gradient-building
           # - gradient-frontend
           - gradient-mail
@@ -24,7 +22,7 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      
+
     - name: Install Nix
       uses: cachix/install-nix-action@v25
       with:
@@ -34,7 +32,7 @@ jobs:
           access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
           max-jobs = 2
           cores = 2
-    
+
     - name: Run test - ${{ matrix.test }}
       run: |
         nix build .#checks.x86_64-linux.${{ matrix.test }} --print-build-logs

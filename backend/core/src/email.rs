@@ -92,7 +92,10 @@ impl EmailService {
             .as_ref()
             .ok_or("SMTP transport not initialized")?;
 
-        let verification_url = format!("{}/api/v1/auth/verify-email?token={}", base_url, verification_token);
+        let verification_url = format!(
+            "{}/api/v1/auth/verify-email?token={}",
+            base_url, verification_token
+        );
 
         let email_body = format!(
             r#"

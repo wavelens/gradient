@@ -240,9 +240,7 @@ pub fn validate_display_name(display_name: &str) -> Result<(), String> {
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == ' ')
     {
-        return Err(
-            "Display name can only contain letters, numbers, and spaces".to_string(),
-        );
+        return Err("Display name can only contain letters, numbers, and spaces".to_string());
     }
 
     // Cannot start or end with spaces

@@ -66,6 +66,7 @@ pub struct Model {
     pub last_connection_at: NaiveDateTime,
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
+    pub managed: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

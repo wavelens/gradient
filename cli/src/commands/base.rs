@@ -74,6 +74,10 @@ enum MainCommands {
         #[arg(short, long)]
         filename: Option<String>,
     },
+    Generate {
+        #[command(subcommand)]
+        cmd: generate::Commands,
+    },
 }
 
 pub async fn run_cli() -> std::io::Result<()> {
@@ -237,6 +241,7 @@ pub async fn run_cli() -> std::io::Result<()> {
             MainCommands::Project { cmd } => project::handle(cmd).await,
             MainCommands::Server { cmd } => server::handle(cmd).await,
             MainCommands::Cache { cmd } => cache::handle(cmd).await,
+            MainCommands::Generate { cmd } => generate::handle(cmd).await,
         }
     } else {
         eprintln!("No subcommand provided");

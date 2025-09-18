@@ -2,7 +2,25 @@ openapi: 3.1.1
 info:
   title: Gradient API
   description: |-
-    Gradient is a web-based Nix-based Continuous Integration (CI) system.
+    Gradient is a web-based Nix-based Continuous Integration (CI) system that provides
+    infrastructure-as-code management for build environments.
+
+    ## Authentication
+    Gradient supports multiple authentication methods:
+    - **JWT Tokens**: Obtained via `/auth/basic/login` for session-based access
+    - **API Keys**: Generated via `/user/keys` with GRAD prefix for programmatic access
+    - **OAuth2/OIDC**: Enterprise authentication integration
+
+    ## Getting Started
+    1. Register a user: `POST /auth/basic/register`
+    2. Login: `POST /auth/basic/login`
+    3. Create organization: `PUT /orgs`
+    4. Add projects and servers to your organization
+    5. Start building with Nix!
+
+    ## State Management
+    Gradient supports declarative infrastructure management through Nix configuration,
+    allowing you to define users, organizations, projects, servers, and caches as code.
 
     Some useful links:
     - [The Gradient repository](https://github.com/wavelens/gradient)
@@ -11,12 +29,15 @@ info:
   license:
     name: AGPL-3.0
     url: https://www.gnu.org/licenses/agpl-3.0.en.html
-  version: 0.1.0
+  version: 0.3.0
 externalDocs:
   description: The Gradient Options-Search
   url: https://wavelens.github.io/gradient-search
 servers:
-  - url: http://127.0.0.1:8000/api/v1
+  - url: http://127.0.0.1:3000/api/v1
+    description: Local development server
+  - url: https://gradient.example.com/api/v1
+    description: Production server
 tags:
   - name: general
     description: general operations
@@ -25,19 +46,23 @@ tags:
   - name: user
     description: operations about logged-in user
   - name: orgs
-    description: create and modify organziations
+    description: create and modify organizations
   - name: projects
     description: create and modify projects
   - name: servers
-    description: create and modify servers
+    description: build server management
   - name: caches
-    description: create and modify caches
-  - name: evals
-    description: retrieve evaluations
+    description: Nix cache management
   - name: builds
-    description: retrieve builds
+    description: build operations and artifacts
+  - name: evals
+    description: evaluation operations
   - name: commits
-    description: retrieve commits
+    description: commit information
+security:
+  - token: []
+  - api_key: []
+  - oauth: []
 paths:
   /health:
     get:
@@ -1598,8 +1623,9 @@ components:
       type: oauth2
       flows:
         implicit:
-          authorizationUrl: https://127.0.0.1:8000/auth/oauth/authorize
+          authorizationUrl: https://127.0.0.1:3000/api/v1/auth/oauth/authorize
     api_key:
-      type: apiKey
-      name: API Key
-      in: header
+      type: http
+      scheme: bearer
+      bearerFormat: "GRAD{64-char-key}"
+      description: API Key with GRAD prefix generated from /user/keys endpoint

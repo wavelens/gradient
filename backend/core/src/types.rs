@@ -77,7 +77,11 @@ pub struct Cli {
     pub report_errors: bool,
     #[arg(long, env = "GRADIENT_EMAIL_ENABLED", default_value = "false")]
     pub email_enabled: bool,
-    #[arg(long, env = "GRADIENT_EMAIL_REQUIRE_VERIFICATION", default_value = "false")]
+    #[arg(
+        long,
+        env = "GRADIENT_EMAIL_REQUIRE_VERIFICATION",
+        default_value = "false"
+    )]
     pub email_require_verification: bool,
     #[arg(long, env = "GRADIENT_EMAIL_SMTP_HOST")]
     pub email_smtp_host: Option<String>,
@@ -91,6 +95,8 @@ pub struct Cli {
     pub email_from_address: Option<String>,
     #[arg(long, env = "GRADIENT_EMAIL_FROM_NAME", default_value = "Gradient")]
     pub email_from_name: String,
+    #[arg(long, env = "GRADIENT_STATE_FILE")]
+    pub state_file: Option<String>,
 }
 
 #[derive(Debug)]

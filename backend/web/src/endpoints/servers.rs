@@ -119,6 +119,7 @@ pub async fn put(
         last_connection_at: Set(*NULL_TIME),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
+        managed: Set(false),
     };
 
     let architectures = body

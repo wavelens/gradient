@@ -66,6 +66,7 @@
       gradient-server = pkgs.callPackage ./nix/packages/gradient-server.nix { };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
       gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix { };
+      gradient-deploy = pkgs.callPackage ./nix/packages/gradient-deploy.nix { };
       build-test = { depth ? 1, width ? 1, seed ? "42" }: import ./nix/packages/build-test.nix { inherit self pkgs depth width seed; };
       build-test-1 = self.packages.${system}.build-test { depth = 1; };
       build-test-2 = self.packages.${system}.build-test { depth = 2; };

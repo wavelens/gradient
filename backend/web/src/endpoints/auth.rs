@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::response::Response;
 use chrono::Utc;
 use core::consts::*;
-use core::email::{generate_verification_token, EmailService};
+use core::email::{EmailService, generate_verification_token};
 use core::input::{validate_display_name, validate_password, validate_username};
 use core::types::*;
 use email_address::EmailAddress;
@@ -81,16 +81,18 @@ pub async fn post_basic_register(
         return Err(WebError::already_exists("User"));
     }
 
-    let email_service = EmailService::new(&state.cli).await
-        .map_err(|e| WebError::InternalServerError(format!("Failed to initialize email service: {}", e)))?;
+    let email_service = EmailService::new(&state.cli).await.map_err(|e| {
+        WebError::InternalServerError(format!("Failed to initialize email service: {}", e))
+    })?;
 
-    let (email_verified, verification_token, verification_expires) = if state.cli.email_enabled && state.cli.email_require_verification {
-        let token = generate_verification_token();
-        let expires = Utc::now().naive_utc() + chrono::Duration::hours(24);
-        (false, Some(token), Some(expires))
-    } else {
-        (true, None, None)
-    };
+    let (email_verified, verification_token, verification_expires) =
+        if state.cli.email_enabled && state.cli.email_require_verification {
+            let token = generate_verification_token();
+            let expires = Utc::now().naive_utc() + chrono::Duration::hours(24);
+            (false, Some(token), Some(expires))
+        } else {
+            (true, None, None)
+        };
 
     let user = AUser {
         id: Set(Uuid::new_v4()),
@@ -103,23 +105,33 @@ pub async fn post_basic_register(
         email_verified: Set(email_verified),
         email_verification_token: Set(verification_token.clone()),
         email_verification_token_expires: Set(verification_expires),
+        managed: Set(false),
     };
 
     let user = user.insert(&state.db).await?;
 
-    if state.cli.email_enabled && state.cli.email_require_verification && verification_token.is_some() {
-        if let Err(e) = email_service.send_verification_email(
-            &body.email,
-            &body.name,
-            verification_token.as_ref().unwrap(),
-            &state.cli.serve_url,
-        ).await {
+    if state.cli.email_enabled
+        && state.cli.email_require_verification
+        && verification_token.is_some()
+    {
+        if let Err(e) = email_service
+            .send_verification_email(
+                &body.email,
+                &body.name,
+                verification_token.as_ref().unwrap(),
+                &state.cli.serve_url,
+            )
+            .await
+        {
             tracing::warn!("Failed to send verification email: {}", e);
         }
     }
 
     let message = if state.cli.email_enabled && state.cli.email_require_verification {
-        format!("User {} created. Please check your email to verify your account.", user.id)
+        format!(
+            "User {} created. Please check your email to verify your account.",
+            user.id
+        )
     } else {
         format!("User {} created successfully.", user.id)
     };
@@ -310,7 +322,9 @@ pub async fn get_verify_email(
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if !state.cli.email_enabled || !state.cli.email_require_verification {
-        return Err(WebError::BadRequest("Email verification is not enabled".to_string()));
+        return Err(WebError::BadRequest(
+            "Email verification is not enabled".to_string(),
+        ));
     }
 
     let token = query
@@ -325,7 +339,9 @@ pub async fn get_verify_email(
 
     if let Some(expires) = user.email_verification_token_expires {
         if Utc::now().naive_utc() > expires {
-            return Err(WebError::BadRequest("Verification token has expired".to_string()));
+            return Err(WebError::BadRequest(
+                "Verification token has expired".to_string(),
+            ));
         }
     }
 
@@ -354,7 +370,9 @@ pub async fn post_resend_verification(
     Json(body): Json<CheckUsernameRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if !state.cli.email_enabled || !state.cli.email_require_verification {
-        return Err(WebError::BadRequest("Email verification is not enabled".to_string()));
+        return Err(WebError::BadRequest(
+            "Email verification is not enabled".to_string(),
+        ));
     }
 
     let user = EUser::find()
@@ -364,11 +382,14 @@ pub async fn post_resend_verification(
         .ok_or_else(|| WebError::not_found("User"))?;
 
     if user.email_verified {
-        return Err(WebError::BadRequest("Email is already verified".to_string()));
+        return Err(WebError::BadRequest(
+            "Email is already verified".to_string(),
+        ));
     }
 
-    let email_service = EmailService::new(&state.cli).await
-        .map_err(|e| WebError::InternalServerError(format!("Failed to initialize email service: {}", e)))?;
+    let email_service = EmailService::new(&state.cli).await.map_err(|e| {
+        WebError::InternalServerError(format!("Failed to initialize email service: {}", e))
+    })?;
 
     let verification_token = generate_verification_token();
     let verification_expires = Utc::now().naive_utc() + chrono::Duration::hours(24);
@@ -379,13 +400,19 @@ pub async fn post_resend_verification(
 
     user_active.update(&state.db).await?;
 
-    if let Err(e) = email_service.send_verification_email(
-        &user.email,
-        &user.name,
-        &verification_token,
-        &state.cli.serve_url,
-    ).await {
-        return Err(WebError::InternalServerError(format!("Failed to send verification email: {}", e)));
+    if let Err(e) = email_service
+        .send_verification_email(
+            &user.email,
+            &user.name,
+            &verification_token,
+            &state.cli.serve_url,
+        )
+        .await
+    {
+        return Err(WebError::InternalServerError(format!(
+            "Failed to send verification email: {}",
+            e
+        )));
     }
 
     Ok(Json(BaseResponse {

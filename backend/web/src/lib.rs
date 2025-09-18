@@ -194,7 +194,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route("/auth/basic/register", post(auth::post_basic_register))
         .route("/auth/check-username", post(auth::post_check_username))
         .route("/auth/verify-email", get(auth::get_verify_email))
-        .route("/auth/resend-verification", post(auth::post_resend_verification))
+        .route(
+            "/auth/resend-verification",
+            post(auth::post_resend_verification),
+        )
         .route(
             "/auth/oauth/authorize",
             get(auth::get_oauth_authorize).post(auth::post_oauth_authorize),

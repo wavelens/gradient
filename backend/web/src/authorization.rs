@@ -434,6 +434,7 @@ async fn create_or_update_user(
                 email_verified: Set(true), // OIDC users are considered verified
                 email_verification_token: Set(None),
                 email_verification_token_expires: Set(None),
+                managed: Set(false),
             };
 
             let user = new_user

@@ -22,11 +22,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(false),
                     )
-                    .add_column(
-                        ColumnDef::new(User::EmailVerificationToken)
-                            .string()
-                            .null(),
-                    )
+                    .add_column(ColumnDef::new(User::EmailVerificationToken).string().null())
                     .add_column(
                         ColumnDef::new(User::EmailVerificationTokenExpires)
                             .timestamp()

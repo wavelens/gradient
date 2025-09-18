@@ -285,14 +285,14 @@ pub async fn pack_build_output(
     let input_data = tokio::fs::read(file_location_tmp.clone())
         .await
         .map_err(|e| format!("Failed to read input file: {}", e))?;
-    
+
     let compressed_data = zstd::bulk::compress(&input_data, 19)
         .map_err(|e| format!("Failed to compress data: {}", e))?;
-    
+
     tokio::fs::write(file_location.clone(), compressed_data)
         .await
         .map_err(|e| format!("Failed to write compressed file: {}", e))?;
-    
+
     tokio::fs::remove_file(file_location_tmp.clone())
         .await
         .map_err(|e| format!("Failed to remove temporary file: {}", e))?;

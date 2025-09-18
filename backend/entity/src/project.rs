@@ -28,6 +28,7 @@ pub struct Model {
     pub force_evaluation: bool,
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
+    pub managed: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -152,6 +152,7 @@ pub async fn put(
         force_evaluation: Set(false),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
+        managed: Set(false),
     };
 
     let project = project.insert(&state.db).await?;

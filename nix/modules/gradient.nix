@@ -6,8 +6,15 @@
 
 { lib, pkgs, config, ... }: let
   cfg = config.services.gradient;
+
+  stateJsonFile = pkgs.writeText "gradient-state.json" (builtins.toJSON cfg.state);
+  userPasswordFiles = map (user: "gradient_user_${user.username}_password:${user.password_file}") cfg.state.users;
+  orgPrivateKeyFiles = map (org: "gradient_org_${org.name}_private_key:${org.private_key_file}") cfg.state.organizations;
+  cacheSigningKeyFiles = map (cache: "gradient_cache_${cache.name}_signing_key:${cache.signing_key_file}") cfg.state.caches;
+  apiKeyFiles = map (api_key: "gradient_api_${api_key.name}_key:${api_key.key_file}") cfg.state.api_keys;
 in {
   imports = [
+    ./gradient-state.nix
     ./gradient-frontend.nix
   ];
 
@@ -100,23 +107,28 @@ in {
           description = "SMTP server hostname";
           type = lib.types.str;
         };
+
         smtpPort = lib.mkOption {
           description = "SMTP server port";
           type = lib.types.port;
           default = 587;
         };
+
         smtpUsername = lib.mkOption {
           description = "SMTP username";
           type = lib.types.str;
         };
+
         smtpPasswordFile = lib.mkOption {
           description = "File containing SMTP password";
           type = lib.types.str;
         };
+
         fromAddress = lib.mkOption {
           description = "Email address to send from";
           type = lib.types.str;
         };
+
         fromName = lib.mkOption {
           description = "Name to display in email from field";
           type = lib.types.str;
@@ -184,11 +196,12 @@ in {
           "gradient_database_url:${cfg.databaseUrlFile}"
           "gradient_crypt_secret:${cfg.cryptSecretFile}"
           "gradient_jwt_secret:${cfg.jwtSecretFile}"
+          "gradient_state:${stateJsonFile}"
         ] ++ lib.optional cfg.oidc.enable [
           "gradient_oidc_client_secret:${cfg.oidc.clientSecretFile}"
         ] ++ lib.optional cfg.email.enable [
           "gradient_email_smtp_password:${cfg.email.smtpPasswordFile}"
-        ];
+        ] ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles;
       };
 
       environment = {
@@ -211,7 +224,8 @@ in {
         GRADIENT_SERVE_CACHE = lib.boolToString cfg.serveCache;
         GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
         GRADIENT_LOG_LEVEL = cfg.settings.logLevel;
-        # Set RUST_LOG environment variable for enhanced logging
+        GRADIENT_STATE_FILE = "%d/gradient_state";
+        GRADIENT_CREDENTIALS_DIR = "%d";
         RUST_LOG = cfg.settings.logLevel;
       } // lib.optionalAttrs cfg.oidc.enable {
         GRADIENT_OIDC_CLIENT_ID = cfg.oidc.clientId;

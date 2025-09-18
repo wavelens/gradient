@@ -198,6 +198,7 @@ pub async fn put(
         signing_key: Set(signing_key),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
+        managed: Set(false),
     };
 
     let cache = cache.insert(&state.db).await?;

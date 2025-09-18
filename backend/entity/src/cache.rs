@@ -24,6 +24,7 @@ pub struct Model {
     pub signing_key: String,
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
+    pub managed: bool,
 }
 
 impl std::fmt::Debug for Model {

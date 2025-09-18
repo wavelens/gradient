@@ -124,6 +124,7 @@ pub async fn put(
         use_nix_store: Set(true),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
+        managed: Set(false),
     };
 
     let organization = organization.insert(&state.db).await?;

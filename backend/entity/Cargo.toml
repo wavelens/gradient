@@ -13,7 +13,7 @@ path = "src/lib.rs"
 [dependencies]
 chrono = "0.4"
 serde = { version = "1", features = ["derive"] }
-uuid = { version = "1.17", features = ["fast-rng", "macro-diagnostics", "v4"] }
+uuid = { version = "1.18", features = ["fast-rng", "macro-diagnostics", "v4"] }
 
 [dependencies.sea-orm]
 version = "1.1"
@@ -21,4 +21,4 @@ features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postg
 
 [dev-dependencies]
 tokio-test = "0.4"
-tokio = { version = "1.46", features = ["rt", "macros"] }
+tokio = { version = "1.47", features = ["rt", "macros"] }
