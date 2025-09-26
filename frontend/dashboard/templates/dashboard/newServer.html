@@ -26,7 +26,7 @@
                         {{ field }}
                         <div class="tag-input-container">
                             <div class="tags-display" id="architectures-tags"></div>
-                            <input type="text" class="form-control tag-input" id="architectures-input" placeholder="Add architectures (e.g., x86_64, arm64)">
+                            <input type="text" class="form-control tag-input" id="architectures-input">
                         </div>
                         {% if field.errors %}
                             <div class="error">{% trans field.errors %}</div>
@@ -38,7 +38,7 @@
                         {{ field }}
                         <div class="tag-input-container">
                             <div class="tags-display" id="features-tags"></div>
-                            <input type="text" class="form-control tag-input" id="features-input" placeholder="Add features (e.g., nixos-test, benchmark, big-parallel, kvm)">
+                            <input type="text" class="form-control tag-input" id="features-input">
                         </div>
                         {% if field.errors %}
                             <div class="error">{% trans field.errors %}</div>

@@ -27,8 +27,7 @@ class NewOrganizationForm(forms.Form):
             'max_length': 'Organization name cannot exceed 50 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter organization name (3-50 characters)'
+            'class': 'form-control'
         })
     )
     display_name = forms.CharField(
@@ -40,8 +39,7 @@ class NewOrganizationForm(forms.Form):
             'max_length': 'Display name cannot exceed 100 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter a friendly display name'
+            'class': 'form-control'
         })
     )
     description = forms.CharField(
@@ -52,10 +50,8 @@ class NewOrganizationForm(forms.Form):
             'required': 'Description is required.',
             'max_length': 'Description cannot exceed 500 characters.',
         },
-        widget=forms.Textarea(attrs={
-            'class': 'form-control',
-            'placeholder': 'Describe your organization (max 500 characters)',
-            'rows': 3
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
         })
     )
     
@@ -184,8 +180,7 @@ class NewProjectForm(forms.Form):
             'max_length': 'Project name cannot exceed 50 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter project name (3-50 characters)'
+            'class': 'form-control'
         })
     )
     display_name = forms.CharField(
@@ -197,8 +192,7 @@ class NewProjectForm(forms.Form):
             'max_length': 'Display name cannot exceed 100 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter a friendly display name'
+            'class': 'form-control'
         })
     )
     description = forms.CharField(
@@ -209,10 +203,8 @@ class NewProjectForm(forms.Form):
             'required': 'Description is required.',
             'max_length': 'Description cannot exceed 500 characters.',
         },
-        widget=forms.Textarea(attrs={
-            'class': 'form-control',
-            'placeholder': 'Describe your project (max 500 characters)',
-            'rows': 3
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
         })
     )
     repository = forms.URLField(
@@ -223,8 +215,7 @@ class NewProjectForm(forms.Form):
             'invalid': 'Please enter a valid repository URL (e.g., https://github.com/user/repo.git)',
         },
         widget=forms.URLInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'https://github.com/user/repository.git'
+            'class': 'form-control'
         })
     )
     evaluation_wildcard = forms.CharField(
@@ -235,8 +226,7 @@ class NewProjectForm(forms.Form):
         },
         help_text='Pattern to match evaluation files (e.g., **/*.test.js)',
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': '**/*.test.js'
+            'class': 'form-control'
         })
     )
     
@@ -288,8 +278,7 @@ class NewServerForm(forms.Form):
             'max_length': 'Server name cannot exceed 50 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter server name (3-50 characters)'
+            'class': 'form-control'
         })
     )
     host = forms.CharField(
@@ -300,8 +289,7 @@ class NewServerForm(forms.Form):
         },
         help_text='IP address or domain name of the server',
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': '192.168.1.100 or server.example.com'
+            'class': 'form-control'
         })
     )
     port = forms.IntegerField(
@@ -318,7 +306,6 @@ class NewServerForm(forms.Form):
         },
         widget=forms.NumberInput(attrs={
             'class': 'form-control',
-            'placeholder': '22',
             'min': 1,
             'max': 65535
         })
@@ -334,8 +321,7 @@ class NewServerForm(forms.Form):
             'max_length': 'Username cannot exceed 32 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'root or ubuntu'
+            'class': 'form-control'
         })
     )
     architectures = forms.CharField(
@@ -406,8 +392,7 @@ class NewCacheForm(forms.Form):
             'max_length': 'Cache name cannot exceed 50 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter cache name (3-50 characters)'
+            'class': 'form-control'
         })
     )
     display_name = forms.CharField(
@@ -419,8 +404,7 @@ class NewCacheForm(forms.Form):
             'max_length': 'Display name cannot exceed 100 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter a friendly display name'
+            'class': 'form-control'
         })
     )
     description = forms.CharField(
@@ -431,10 +415,8 @@ class NewCacheForm(forms.Form):
             'required': 'Description is required.',
             'max_length': 'Description cannot exceed 500 characters.',
         },
-        widget=forms.Textarea(attrs={
-            'class': 'form-control',
-            'placeholder': 'Describe your cache (max 500 characters)',
-            'rows': 3
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
         })
     )
     priority = forms.IntegerField(
@@ -452,7 +434,6 @@ class NewCacheForm(forms.Form):
         help_text='Higher numbers indicate higher priority (1-100)',
         widget=forms.NumberInput(attrs={
             'class': 'form-control',
-            'placeholder': '50',
             'min': 1,
             'max': 100
         })
@@ -488,8 +469,7 @@ class EditServerForm(forms.Form):
             'max_length': 'Server name cannot exceed 50 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter server name (3-50 characters)'
+            'class': 'form-control'
         })
     )
     host = forms.CharField(
@@ -500,8 +480,7 @@ class EditServerForm(forms.Form):
         },
         help_text='IP address or domain name of the server',
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': '192.168.1.100 or server.example.com'
+            'class': 'form-control'
         })
     )
     port = forms.IntegerField(
@@ -517,7 +496,6 @@ class EditServerForm(forms.Form):
         },
         widget=forms.NumberInput(attrs={
             'class': 'form-control',
-            'placeholder': '22',
             'min': 1,
             'max': 65535
         })
@@ -533,8 +511,7 @@ class EditServerForm(forms.Form):
             'max_length': 'Username cannot exceed 32 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'root or ubuntu'
+            'class': 'form-control'
         })
     )
     architectures = forms.CharField(
@@ -543,8 +520,7 @@ class EditServerForm(forms.Form):
             'required': 'At least one architecture must be specified.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'x86_64, arm64'
+            'class': 'form-control'
         }),
         label='Architectures'
     )
@@ -554,8 +530,7 @@ class EditServerForm(forms.Form):
             'required': 'At least one feature must be specified.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'docker, kubernetes'
+            'class': 'form-control'
         }),
         label='Features'
     )
@@ -572,8 +547,7 @@ class EditOrganizationForm(forms.Form):
             'max_length': 'Organization name cannot exceed 50 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter organization name (3-50 characters)'
+            'class': 'form-control'
         })
     )
     display_name = forms.CharField(
@@ -585,8 +559,7 @@ class EditOrganizationForm(forms.Form):
             'max_length': 'Display name cannot exceed 100 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter a friendly display name'
+            'class': 'form-control'
         })
     )
     description = forms.CharField(
@@ -597,10 +570,8 @@ class EditOrganizationForm(forms.Form):
             'required': 'Description is required.',
             'max_length': 'Description cannot exceed 500 characters.',
         },
-        widget=forms.Textarea(attrs={
-            'class': 'form-control',
-            'placeholder': 'Describe your organization (max 500 characters)',
-            'rows': 3
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
         })
     )
     
@@ -623,8 +594,7 @@ class EditProjectForm(forms.Form):
             'max_length': 'Project name cannot exceed 50 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter project name (3-50 characters)'
+            'class': 'form-control'
         })
     )
     display_name = forms.CharField(
@@ -636,8 +606,7 @@ class EditProjectForm(forms.Form):
             'max_length': 'Display name cannot exceed 100 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter a friendly display name'
+            'class': 'form-control'
         })
     )
     description = forms.CharField(
@@ -648,10 +617,8 @@ class EditProjectForm(forms.Form):
             'required': 'Description is required.',
             'max_length': 'Description cannot exceed 500 characters.',
         },
-        widget=forms.Textarea(attrs={
-            'class': 'form-control',
-            'placeholder': 'Describe your project (max 500 characters)',
-            'rows': 3
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
         })
     )
     repository = forms.URLField(
@@ -662,8 +629,7 @@ class EditProjectForm(forms.Form):
             'invalid': 'Please enter a valid repository URL (e.g., https://github.com/user/repo.git)',
         },
         widget=forms.URLInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'https://github.com/user/repository.git'
+            'class': 'form-control'
         })
     )
     evaluation_wildcard = forms.CharField(
@@ -674,8 +640,7 @@ class EditProjectForm(forms.Form):
         },
         help_text='Pattern to match evaluation files (e.g., **/*.test.js)',
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': '**/*.test.js'
+            'class': 'form-control'
         })
     )
     
@@ -698,8 +663,7 @@ class EditCacheForm(forms.Form):
             'max_length': 'Cache name cannot exceed 50 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter cache name (3-50 characters)'
+            'class': 'form-control'
         })
     )
     display_name = forms.CharField(
@@ -711,8 +675,7 @@ class EditCacheForm(forms.Form):
             'max_length': 'Display name cannot exceed 100 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter a friendly display name'
+            'class': 'form-control'
         })
     )
     description = forms.CharField(
@@ -723,10 +686,8 @@ class EditCacheForm(forms.Form):
             'required': 'Description is required.',
             'max_length': 'Description cannot exceed 500 characters.',
         },
-        widget=forms.Textarea(attrs={
-            'class': 'form-control',
-            'placeholder': 'Describe your cache (max 500 characters)',
-            'rows': 3
+        widget=forms.TextInput(attrs={
+            'class': 'form-control'
         })
     )
     priority = forms.IntegerField(
@@ -743,7 +704,6 @@ class EditCacheForm(forms.Form):
         help_text='Higher numbers indicate higher priority (1-100)',
         widget=forms.NumberInput(attrs={
             'class': 'form-control',
-            'placeholder': '50',
             'min': 1,
             'max': 100
         })
@@ -768,8 +728,7 @@ class EditUserForm(forms.Form):
             'max_length': 'Name cannot exceed 100 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter your full name'
+            'class': 'form-control'
         })
     )
     username = forms.CharField(
@@ -783,8 +742,7 @@ class EditUserForm(forms.Form):
             'max_length': 'Username cannot exceed 30 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter username (3-30 characters)'
+            'class': 'form-control'
         })
     )
     email = forms.EmailField(
@@ -795,8 +753,7 @@ class EditUserForm(forms.Form):
             'invalid': 'Please enter a valid email address.',
         },
         widget=forms.EmailInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter your email address'
+            'class': 'form-control'
         })
     )
     
@@ -835,8 +792,7 @@ class AddOrganizationMemberForm(forms.Form):
             'max_length': 'Username cannot exceed 150 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter username (3-150 characters)'
+            'class': 'form-control'
         })
     )
     role = forms.ChoiceField(
@@ -900,8 +856,7 @@ class AddOrganizationServerForm(forms.Form):
             'max_length': 'Server name cannot exceed 50 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter server name (3-50 characters)'
+            'class': 'form-control'
         })
     )
     display_name = forms.CharField(
@@ -913,8 +868,7 @@ class AddOrganizationServerForm(forms.Form):
             'max_length': 'Display name cannot exceed 100 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'Enter a friendly display name'
+            'class': 'form-control'
         })
     )
     host = forms.CharField(
@@ -925,8 +879,7 @@ class AddOrganizationServerForm(forms.Form):
         },
         help_text='IP address or domain name of the server',
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': '192.168.1.100 or server.example.com'
+            'class': 'form-control'
         })
     )
     port = forms.IntegerField(
@@ -943,7 +896,6 @@ class AddOrganizationServerForm(forms.Form):
         },
         widget=forms.NumberInput(attrs={
             'class': 'form-control',
-            'placeholder': '22',
             'min': 1,
             'max': 65535
         })
@@ -959,8 +911,7 @@ class AddOrganizationServerForm(forms.Form):
             'max_length': 'Username cannot exceed 32 characters.',
         },
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'root or ubuntu'
+            'class': 'form-control'
         })
     )
     architectures = forms.CharField(
@@ -971,8 +922,7 @@ class AddOrganizationServerForm(forms.Form):
         },
         help_text='Comma-separated list of supported architectures',
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'x86_64, arm64'
+            'class': 'form-control'
         })
     )
     features = forms.CharField(
@@ -983,8 +933,7 @@ class AddOrganizationServerForm(forms.Form):
         },
         help_text='Comma-separated list of available features',
         widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'placeholder': 'docker, kubernetes'
+            'class': 'form-control'
         })
     )
     
