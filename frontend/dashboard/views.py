@@ -365,7 +365,7 @@ def new_cache(request):
     else:
         form = NewCacheForm()
 
-    return render(request, "dashboard/NewCache.html", {'form': form})
+    return render(request, "dashboard/newCache.html", {'form': form})
 
 @login_required
 def cache_detail(request, cache):

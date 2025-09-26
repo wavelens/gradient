@@ -20,6 +20,7 @@ pub struct EvaluationResponse {
     pub previous: Option<String>,
     pub next: Option<String>,
     pub created_at: String,
+    pub error: Option<String>,
 }
 
 pub async fn get_evaluation(

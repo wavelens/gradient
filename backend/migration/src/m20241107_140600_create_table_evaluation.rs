@@ -31,6 +31,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Evaluation::Previous).uuid())
                     .col(ColumnDef::new(Evaluation::Next).uuid())
                     .col(ColumnDef::new(Evaluation::CreatedAt).date_time().not_null())
+                    .col(ColumnDef::new(Evaluation::Error).text())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-evaluation-project")
@@ -76,6 +77,7 @@ enum Evaluation {
     Previous,
     Next,
     CreatedAt,
+    Error,
 }
 
 #[derive(DeriveIden)]

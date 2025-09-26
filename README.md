@@ -21,6 +21,7 @@ Gradient is a web-based Nix-based Continuous Integration (CI) system.
 - **OAuth2**: support for OAuth2 for user authentication.
 - **Cache**: integrated nix store cache.
 - **Remote Builds**: support for building nix derviations without having nix installed locally.
+- **Deployment Module**: Support for easy Pull-Deployment.
 
 ## Installation
 
@@ -52,6 +53,8 @@ Extend your `flake.nix` with Gradient module:
       modules = [
         ./configuration.nix
         gradient.nixosModules.default
+        # for pull deployment use:
+        gradient.nixosModules.gradient-deploy
       ];
     };
   };
@@ -142,6 +145,27 @@ or
 nix run github:wavelens/gradient#gradient-cli
 ```
 
+## Pull Deployment
+Gradient supports pull deployment, which allows you to deploy your code to a server by pulling it from the Gradient server. This is useful for deploying NixOS configurations to systems that don't have much compute power or should run without disturbing the system.
+
+To use pull deployment, you need to enable the `gradient-deploy` module in your NixOS configuration. This module will set up a systemd service that will pull the latest code from the Gradient server and deploy it to your system daily at 04:00 am.
+
+```nix
+{
+  services.gradient-deploy = {
+    enable = true;
+    server = "https://gradient.example.com";
+    apiKeyFile = "/var/lib/gradient-deploy/api-key";
+    project = "organization/project";
+  };
+}
+```
+
+After enabling the module, you can trigger a update manually by running:
+
+```sh
+sudo gradient-update
+```
 
 ## Contributing
 

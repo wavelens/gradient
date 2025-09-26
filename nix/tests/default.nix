@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ inputs, pkgs, ... }:
+{ self, inputs, pkgs, ... }:
 let
   inherit (inputs) nixpkgs;
   inherit (nixpkgs) lib;
@@ -16,5 +16,5 @@ let
 in builtins.listToAttrs (map (test: ({
   name = builtins.replaceStrings [ "/" ] [ "-" ] test;
 } // (
-  import ./${test} { inherit pkgs; }
+  import ./${test} { inherit self pkgs; }
 ))) tests)

@@ -176,8 +176,12 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
 
         Err(e) => {
             error!(error = %e, "Failed to evaluate");
-            update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Failed)
-                .await;
+            update_evaluation_status_with_error(
+                Arc::clone(&state), 
+                evaluation, 
+                EvaluationStatus::Failed,
+                format!("{}", e)
+            ).await;
         }
     }
 }
@@ -483,6 +487,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                                 previous: None,
                                 next: None,
                                 created_at: Utc::now().naive_utc(),
+                                error: None,
                             },
                             commit_hash,
                         ))
@@ -557,7 +562,6 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         };
 
         let commit = acommit.insert(&state.db).await.unwrap();
-
         let new_evaluation = AEvaluation {
             id: Set(Uuid::new_v4()),
             project: Set(Some(project.id)),
@@ -568,6 +572,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             previous: Set(evaluation_id),
             next: Set(None),
             created_at: Set(Utc::now().naive_utc()),
+            error: Set(None),
         };
 
         let new_evaluation = new_evaluation.insert(&state.db).await.unwrap();
@@ -939,6 +944,25 @@ pub async fn update_evaluation_status(
 
     let mut active_evaluation: AEvaluation = evaluation.into_active_model();
     active_evaluation.status = Set(status);
+
+    active_evaluation.update(&state.db).await.unwrap()
+}
+
+pub async fn update_evaluation_status_with_error(
+    state: Arc<ServerState>,
+    evaluation: MEvaluation,
+    status: EvaluationStatus,
+    error_message: String,
+) -> MEvaluation {
+    if status == evaluation.status && evaluation.error.as_ref() == Some(&error_message) {
+        return evaluation;
+    }
+
+    debug!(evaluation_id = %evaluation.id, status = ?status, error = %error_message, "Updating evaluation status with error");
+
+    let mut active_evaluation: AEvaluation = evaluation.into_active_model();
+    active_evaluation.status = Set(status);
+    active_evaluation.error = Set(Some(error_message));
 
     active_evaluation.update(&state.db).await.unwrap()
 }

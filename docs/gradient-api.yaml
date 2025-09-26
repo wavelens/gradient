@@ -1399,7 +1399,7 @@ components:
         message:
           type: list
           description: Response Message containing all evaluation details
-          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "project": 9f7767ea-1757-48ba-93d1-5cda578b476c, "repository": "https://github.com/wavelens/gradient", "commit": "af7767ea-1757-48ba-93d1-5cda578b476d", "wildcard": "packages.*.gradient-cli", "status": "queued", "previous": Null, "next": Null, "created_at": "2021-10-10T10:00:00Z"}]
+          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "project": 9f7767ea-1757-48ba-93d1-5cda578b476c, "repository": "https://github.com/wavelens/gradient", "commit": "af7767ea-1757-48ba-93d1-5cda578b476d", "wildcard": "packages.*.gradient-cli", "status": "failed", "previous": Null, "next": Null, "created_at": "2021-10-10T10:00:00Z", "error": "Command failed with status: ExitStatus(unix_wait_status(256)), stderr: error: cannot write modified lock file of flake"}]
     BuildResponse:
       type: object
       properties:

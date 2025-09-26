@@ -1,0 +1,23 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 0,
+        "narHash": "[hash]",
+        "path": "[nixpkgs]",
+        "type": "path"
+      },
+      "original": {
+        "path": "[nixpkgs]",
+        "type": "path"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

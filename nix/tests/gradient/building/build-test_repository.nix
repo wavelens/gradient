@@ -9,7 +9,7 @@
     width = w;
   }}/data >> $out/previous_tests") (lib.range 1 previons_build_width));
 in builtins.derivation {
-  name = "build-test-1";
+  name = "build-test";
   system = "x86_64-linux";
   builder = "/bin/sh";
   args = [ "-c" ''

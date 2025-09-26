@@ -294,6 +294,7 @@ pub async fn post_direct_build(
         previous: Set(None),
         next: Set(None),
         created_at: Set(chrono::Utc::now().naive_utc()),
+        error: Set(None),
     };
     let evaluation = evaluation.insert(&state.db).await.map_err(|e| {
         WebError::InternalServerError(format!("Failed to create evaluation: {}", e))

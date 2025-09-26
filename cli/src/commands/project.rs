@@ -133,6 +133,9 @@ pub async fn handle(cmd: Commands) {
             println!("ID: {}", evaluation.message.id);
             println!("Status: {}", evaluation.message.status);
             println!("Commit: {}", evaluation.message.commit);
+            if let Some(error) = &evaluation.message.error {
+                println!("Error: {}", error);
+            }
             println!();
 
             let builds = evals::get_evaluation_builds(

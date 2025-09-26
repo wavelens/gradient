@@ -82,6 +82,8 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
     let mut all_builds: Vec<MBuild> = vec![];
     let mut all_dependencies: Vec<MBuildDependency> = vec![];
+    let mut failed_derivations: Vec<(String, String)> = vec![];
+    let total_derivations = all_derivations.len();
 
     for derivation_string in all_derivations {
         let path = format!("{}#{}", repository, derivation_string);
@@ -91,11 +93,13 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             match get_derivation_cmd(state.cli.binpath_nix.as_str(), &path).await {
                 Ok((d, r)) => (d, r),
                 Err(e) => {
+                    let error_msg = format!("{}", e);
                     warn!(
                         error = %e,
                         derivation = %derivation_string,
                         "Derivation failed, skipping broken package"
                     );
+                    failed_derivations.push((derivation_string.clone(), error_msg));
                     continue;
                 }
             };
@@ -143,6 +147,22 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         .await;
 
         debug!(derivation = %derivation, "Successfully processed package");
+    }
+
+    // If all derivations failed, return an error with details
+    if all_builds.is_empty() && !failed_derivations.is_empty() {
+        let error_summary = if failed_derivations.len() == total_derivations {
+            format!("All {} derivations failed during evaluation", total_derivations)
+        } else {
+            format!("{} out of {} derivations failed, no builds created", failed_derivations.len(), total_derivations)
+        };
+        
+        let detailed_errors: Vec<String> = failed_derivations.iter()
+            .map(|(deriv, error)| format!("- {}: {}", deriv, error))
+            .collect();
+        
+        let full_error = format!("{}:\n{}", error_summary, detailed_errors.join("\n"));
+        return Err(full_error);
     }
 
     Ok((all_builds, all_dependencies))

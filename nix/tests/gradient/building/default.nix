@@ -4,16 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ pkgs, ... }: {
+{ self, pkgs, ... }: {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     name = "gradient-building";
-    globalTimeout = 480;
+    globalTimeout = 960;
 
     defaults = {
       networking.firewall.enable = false;
-      virtualisation.writableStore = true;
       documentation.enable = false;
       nix.settings.substituters = lib.mkForce [ ];
+      virtualisation = {
+        cores = 8;
+        memorySize = 4096;
+        msize = 65536;
+        writableStore = true;
+      };
     };
 
     nodes = {
@@ -52,9 +57,7 @@
             '';
 
             settings = {
-              log_connections = true;
               logging_collector = true;
-              log_disconnections = true;
               log_destination = lib.mkForce "syslog";
             };
           };
@@ -79,14 +82,30 @@
         systemd.tmpfiles.rules = [
           "d /var/lib/git 0755 git git"
           "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
+          "L+ /var/lib/git/flake.lock 0755 git git - ${./flake_repository.lock}"
+          "L+ /var/lib/git/build-test.nix 0755 git git - ${./build-test_repository.nix}"
         ];
 
         users.users.root.openssh.authorizedKeys.keys = [
           "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPQhtH1+yyKLtn4FWkGkaLm1YOlqsJ5dYEw+BKKCeB0f microvm"
         ];
+
+        environment = {
+          variables.TEST_PKGS_1 = [
+            self.inputs.nixpkgs
+          ];
+
+          systemPackages = with pkgs; [
+            coreutils
+            stdenv
+            binutils
+            busybox
+          ];
+        };
       };
 
       builder = { config, pkgs, lib, ... }: {
+        environment.variables.TEST_PKGS_1 = [ self.inputs.nixpkgs ];
         users.users.builder = {
           isNormalUser = true;
           group = "users";
@@ -206,8 +225,20 @@
       # Initialize git repository
       server.succeed("${lib.getExe pkgs.git} init /var/lib/git/test")
       server.succeed("cp /var/lib/git/{,test/}flake.nix")
+      server.succeed("cp /var/lib/git/{,test/}flake.lock")
+      server.succeed("cp /var/lib/git/{,test/}build-test.nix")
+
+      server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
+      server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.lock")
+
+      # nixpkgs_hash = server.succeed("${lib.getExe pkgs.nix} hash path ${self.inputs.nixpkgs}").strip()
+      nixpkgs_hash = "sha256-hLEO2TPj55KcUFUU1vgtHE9UEIOjRcH/4QbmfHNF820="
+      server.succeed(f"sed -i 's#\\[hash\\]#{nixpkgs_hash}#g' /var/lib/git/test/flake.lock")
+
       server.succeed("chown git:git -R /var/lib/git/test")
       server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add flake.nix")
+      server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add flake.lock")
+      server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add build-test.nix")
       server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test commit -m 'Initial commit'")
 
       # Ensure git repository is available without authentication
@@ -234,7 +265,7 @@
 
       # Test project commands
       print("=== Testing Project Commands ===")
-      server.succeed("${lib.getExe pkgs.gradient-cli} project create --name testproject --display-name MyProject --description 'Just a test' --repository git://server/test --evaluation-wildcard packages.*.buildWait5Sec,packages.*.deployment")
+      server.succeed("${lib.getExe pkgs.gradient-cli} project create --name testproject --display-name MyProject --description 'Just a test' --repository git://server/test --evaluation-wildcard packages.*.default")
       print(server.succeed("${lib.getExe pkgs.gradient-cli} project list"))
       print(server.succeed("${lib.getExe pkgs.gradient-cli} project show"))
 
@@ -248,10 +279,15 @@
 
       # Wait for evaluation to complete and test cache functionality
       print("=== Testing Nix Cache Functionality ===")
-      builder.sleep(120)
+      builder.sleep(620)
 
       # Check if builds are cached properly
-      print(server.succeed("${lib.getExe pkgs.gradient-cli} project show"))
+      project_output = server.succeed("${lib.getExe pkgs.gradient-cli} project show")
+      print(project_output)
+
+      # Test should fail if "No builds." appears in output
+      if "No builds." in project_output:
+          raise Exception("Test failed: Evaluation shows 'No builds.' indicating failure")
 
       # Test organization user management
       print("=== Testing Organization User Management ===")

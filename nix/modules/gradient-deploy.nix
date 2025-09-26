@@ -5,10 +5,10 @@
  */
 
 { lib, pkgs, config, ... }: let
-  cfg = config.services.gradient-deploy;
+  cfg = config.system.gradient-deploy;
 in {
   options = {
-    services.gradient-deploy = {
+    system.gradient-deploy = {
       enable = lib.mkEnableOption "Gradient deployment service";
       deployFor = lib.mkOption {
         type = lib.types.str;
@@ -16,6 +16,13 @@ in {
         default = config.networking.hostName;
         defaultText = "config.networking.hostName";
         example = "my-server";
+      };
+
+      server = lib.mkOption {
+        type = lib.types.str;
+        description = "Address to listen on for incoming deployment requests";
+        default = "https://gradient.wavelens.io";
+        example = "https://gradient.example.com";
       };
 
       apiKeyFile = lib.mkOption {
@@ -29,22 +36,16 @@ in {
         example = "my-org/my-project";
       };
 
-      listenAddr = lib.mkOption {
-        type = lib.types.str;
-        description = "Address to listen on for incoming deployment requests";
-        default = "https://gradient.wavelens.io";
-        example = "https://gradient.example.com";
-      };
-
-      signedCommit = lib.mkOption {
-        type = lib.types.bool;
-        description = "Whether to require signed commits for deployments";
-        default = false;
-      };
+      # TODO:
+      # signedCommit = lib.mkOption {
+      #   type = lib.types.bool;
+      #   description = "Whether to require signed commits for deployments";
+      #   default = false;
+      # };
 
       dates = lib.mkOption {
         type = lib.types.str;
-        default = "04:40";
+        default = "04:00";
         example = "daily";
         description = ''
           How often or when upgrade occurs. For most desktop and server systems
@@ -70,6 +71,12 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    environment.systemPackages = let
+      triggerUpdate = pkgs.writeScriptBin "gradient-update" ''
+        systemctl start gradient-deploy.service
+      '';
+    in [ triggerUpdate ];
+
     services.systemd = {
       services.gradient-deploy = {
         description = "Gradient Deployment Service";
@@ -103,8 +110,8 @@ in {
         };
 
         script = ''
-          if ! curl --silent --fail --max-time 5 "${cfg.listenAddr}/api/v1/health"; then
-            echo "Error: Cannot reach ${cfg.listenAddr}/api/v1/health"
+          if ! curl --silent --fail --max-time 5 "${cfg.server}/api/v1/health"; then
+            echo "Error: Cannot reach ${cfg.server}/api/v1/health"
             exit 1
           fi
 
@@ -112,7 +119,7 @@ in {
 
           PROJECT_INFO=$(curl --silent --fail --max-time 10 \
             --header "Authorization: Bearer $API_KEY" \
-            "${cfg.listenAddr}/api/v1/projects/${cfg.project}"
+            "${cfg.server}/api/v1/projects/${cfg.project}"
             )
 
           if [ -z "$PROJECT_INFO" ]; then
@@ -128,7 +135,7 @@ in {
 
           EVAL_BUILDS=$(curl --silent --fail --max-time 10 \
             --header "Authorization: Bearer $API_KEY" \
-            "${cfg.listenAddr}/api/v1/evaluations/$PROJECT_LAST_EVAL/builds"
+            "${cfg.server}/api/v1/evaluations/$PROJECT_LAST_EVAL/builds"
             )
 
           if [ -z "$EVAL_BUILDS" ]; then
