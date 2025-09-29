@@ -151,6 +151,13 @@ def workflow(request, org):
 
     all_projects = all_projects['message']
 
+    # Check if organization has servers
+    servers_data = api.get_servers(request, org)
+    has_servers = False
+    if servers_data and not servers_data.get('error'):
+        servers_list = servers_data.get('message', [])
+        has_servers = len(servers_list) > 0
+
     for project in all_projects:
         project_details = api.get_projects_project(request, org, project['name'])
 
@@ -184,7 +191,8 @@ def workflow(request, org):
 
     context = {
         'org_id': org,
-        'details_blocks': details_blocks
+        'details_blocks': details_blocks,
+        'has_servers': has_servers
     }
 
     return render(request, "dashboard/overview.html", context)
@@ -780,8 +788,7 @@ def caches(request):
     return render(request, "dashboard/caches.html", context)
 
 @login_required
-def new_project(request):
-    org = request.GET.get("org")
+def new_project(request, org):
     all_orgs = api.get_orgs(request)
 
     if isinstance(all_orgs, type(None)) or all_orgs['error']:
@@ -789,11 +796,23 @@ def new_project(request):
 
     all_orgs = all_orgs['message']
 
-    org_choices = [ (o['name'], o['name']) for o in all_orgs ]
+    # Validate that the organization from URL exists and user has access
+    if not all_orgs:
+        return HttpResponse("No organizations available", status=403)
+    
+    org_names = [o['name'] for o in all_orgs]
+    
+    if not org:
+        return HttpResponse("Organization parameter required in URL", status=400)
+    
+    if org not in org_names:
+        return HttpResponse("Organization not found or access denied", status=403)
 
     if request.method == 'POST':
-        form = NewProjectForm(request.POST)
-        form.fields['organization'].choices = org_choices
+        # Create mutable copy of POST data and add organization
+        post_data = request.POST.copy()
+        post_data['organization'] = org
+        form = NewProjectForm(post_data)
         if form.is_valid():
             # TODO: ADD display_name
             res = api.put_projects(request, **form.cleaned_data)
@@ -806,8 +825,7 @@ def new_project(request):
             else:
                 return redirect('/')
     else:
-        form = NewProjectForm()
-        form.fields['organization'].choices = org_choices
+        form = NewProjectForm(initial={'organization': org})
     return render(request, "dashboard/newProject.html", {'form': form})
 
 @login_required
@@ -860,9 +878,99 @@ def delete_project(request, org, project):
         return redirect('settingsProject', org=org, project=project)
 
 @login_required
-def new_server(request):
-    org = request.GET.get("org")
-    form = NewServerForm()
+def new_server(request, org):
+    all_orgs = api.get_orgs(request)
+
+    if isinstance(all_orgs, type(None)) or all_orgs['error']:
+        return HttpResponse(status=500)
+
+    all_orgs = all_orgs['message']
+
+    # Validate that the organization from URL exists and user has access
+    if not all_orgs:
+        return HttpResponse("No organizations available", status=403)
+    
+    org_names = [o['name'] for o in all_orgs]
+    
+    if org not in org_names:
+        return HttpResponse("Organization not found or access denied", status=403)
+
+    if request.method == 'POST':
+        print(f"DEBUG: POST data: {request.POST}")
+        form = NewServerForm(request.POST)
+        print(f"DEBUG: Form created, is_valid: {form.is_valid()}")
+        print(f"DEBUG: Form errors: {form.errors}")
+        
+        if form.is_valid():
+            # Add organization to cleaned data
+            form.cleaned_data['organization'] = org
+            print(f"DEBUG: Cleaned data: {form.cleaned_data}")
+            
+            # Convert comma-separated strings to arrays
+            architectures = [arch.strip() for arch in form.cleaned_data['architectures'].split(',') if arch.strip()]
+            features = [feat.strip() for feat in form.cleaned_data['features'].split(',') if feat.strip()]
+            
+            # Map common architectures to API expected values
+            arch_mapping = {
+                'arm64': 'aarch64',  # Try aarch64 instead of arm64
+                'x86_64': 'x86_64',
+                'armv7': 'armv7',
+                'i386': 'i386',
+                'ppc64le': 'ppc64le',
+                's390x': 's390x'
+            }
+            
+            # Map architectures if needed
+            mapped_architectures = []
+            for arch in architectures:
+                if arch in arch_mapping:
+                    mapped_architectures.append(arch_mapping[arch])
+                else:
+                    mapped_architectures.append(arch)
+            
+            print(f"DEBUG: Original architectures: {architectures}")
+            print(f"DEBUG: Mapped architectures: {mapped_architectures}")
+            
+            # Use mapped architectures
+            architectures = mapped_architectures
+            
+            print(f"DEBUG: Architectures: {architectures}")
+            print(f"DEBUG: Features: {features}")
+            
+            # Map form fields to API parameters
+            server_data = {
+                'organization': form.cleaned_data['organization'],
+                'name': form.cleaned_data['server_name'],
+                'display_name': form.cleaned_data.get('display_name', form.cleaned_data['server_name']),
+                'host': form.cleaned_data['host'],
+                'port': form.cleaned_data['port'],
+                'username': form.cleaned_data['username'],
+                'architectures': architectures,
+                'features': features
+            }
+            print(f"DEBUG: Server data to send: {server_data}")
+            
+            res = api.put_servers(request, **server_data)
+            print(f"DEBUG: API response: {res}")
+            
+            if res is None:
+                print("DEBUG: API returned None")
+                form.add_error(None, "Der Server konnte nicht erstellt werden.")
+            elif 'error' in res and res['error'] != False:
+                error_msg = res.get('message', res['error'])
+                print(f"DEBUG: API returned error: {error_msg}")
+                form.add_error(None, f"Server konnte nicht erstellt werden: {error_msg}")
+            else:
+                print("DEBUG: Server created successfully, redirecting")
+                return redirect('workflow', org=org)
+        else:
+            # Add form errors to see what's failing
+            print(f"DEBUG: Form validation failed: {form.errors}")
+            form.add_error(None, f"Form validation failed: {form.errors}")
+    else:
+        form = NewServerForm(initial={'organization': org})
+        print(f"DEBUG: GET request, form created with initial organization: {org}")
+    
     return render(request, "dashboard/newServer.html", {'form': form})
 
 @login_required

@@ -24,8 +24,8 @@ urlpatterns = [
     path("organization/<str:org>/model/<str:evaluation_id>", model, name="model-eval"),
 
     path("new/organization", new_organization, name="new_organization"),
-    path("new/project", new_project, name="new_project"),
-    path("new/server", new_server, name="new_server"),
+    path("organization/<str:org>/new/project", new_project, name="new_project"),
+    path("organization/<str:org>/new/server", new_server, name="new_server"),
     path("new/cache", new_cache, name="new_cache"),
 
     path("", dashboard, name="dashboard"),

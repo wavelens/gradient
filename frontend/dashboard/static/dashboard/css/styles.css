@@ -1809,3 +1809,12 @@ tr:hover td{
 .strength-strong {
     background-color: #28a745;
 }
+
+.disabled {
+    background-color: #007bff5c;
+}
+
+.disabled:hover {
+    background-color: #007bff5c;
+    cursor: not-allowed;
+}

@@ -26,11 +26,20 @@
         </div>
     </div>
     
-    <!-- Add Server Button -->
+    <!-- Action Buttons -->
     <div class="m-b-1rem">
-        <a href="{% url 'new_server' %}" class="submit-btn">
+        <a href="{% url 'new_server' org_id %}" class="submit-btn m-r-1rem">
             {% trans 'Add Server' %}
         </a>
+        {% if has_servers %}
+            <a href="{% url 'new_project' org_id %}" class="submit-btn">
+                {% trans 'Add Project' %}
+            </a>
+        {% else %}
+            <a class="submit-btn disabled" disabled title="{% trans 'A server is required before adding projects' %}">
+                {% trans 'Add Project' %}
+            </a>
+        {% endif %}
     </div>
     
     <div class="m-b-1rem">
@@ -78,9 +87,16 @@
                 {% else %}
                     <h3>{% trans 'No projects found' %}</h3>
                     <p>{% trans 'Create your first project to get started.' %}</p>
-                    <a href="{% url 'new_project' %}" class="submit-btn empty-state-link">
-                        {% trans 'Create Project' %}
-                    </a>
+                    {% if has_servers %}
+                        <a href="{% url 'new_project' org_id %}" class="submit-btn empty-state-link">
+                            {% trans 'Create Project' %}
+                        </a>
+                    {% else %}
+                        <a class="submit-btn disabled" disabled title="{% trans 'A server is required before adding projects' %}" style="display: block;width: -webkit-fill-available;">
+                            {% trans 'Create Project' %}
+                        </a>
+                        <p class="text-light">{% trans 'Add a server first to create projects' %}</p>
+                    {% endif %}
                 {% endif %}
             </div>
         {% endfor %}

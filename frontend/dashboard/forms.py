@@ -157,16 +157,9 @@ class NewOrganizationForm(forms.Form):
     # )
 
 class NewProjectForm(forms.Form):
-    organization = forms.ChoiceField(
-        label='Organization',
-        required=True,
-        error_messages={
-            'required': 'Please select an organization.',
-            'invalid_choice': 'Please select a valid organization.'
-        },
-        widget=forms.Select(attrs={
-            'class': 'form-control'
-        })
+    organization = forms.CharField(
+        widget=forms.HiddenInput(),
+        required=True
     )
 
     name = forms.CharField(
@@ -257,15 +250,8 @@ class NewProjectForm(forms.Form):
 
 class NewServerForm(forms.Form):
     organization = forms.CharField(
-        label='Organization',
-        required=True,
-        error_messages={
-            'required': 'Organization is required.',
-        },
-        widget=forms.TextInput(attrs={
-            'class': 'form-control',
-            'readonly': True
-        })
+        widget=forms.HiddenInput(),
+        required=False
     )
     server_name = forms.CharField(
         label='Name',

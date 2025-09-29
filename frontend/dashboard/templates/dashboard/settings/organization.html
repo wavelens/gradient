@@ -52,7 +52,7 @@
                         <label for="{{ field.id_for_label }}" {% if field.field.required %}class="required-label"{% endif %}>{% trans field.label %}</label>
                         {{ field }}
                         {% if field.errors %}
-                            <div class="error">{% trans field.errors %}</div>
+                            <div class="error">{{ field.errors }}</div>
                         {% endif %}
                     </div>
                 {% endif %}

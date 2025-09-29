@@ -20,16 +20,18 @@
         <form method="post" id="server-form">
             {% csrf_token %}
             {% for field in form %}
-                {% if field.name == 'architectures' %}
+                {% if field.name == 'organization' %}
+                    {{ field }}
+                {% elif field.name == 'architectures' %}
                     <div class="form-field">
                         <label for="{{ field.id_for_label }}" {% if field.field.required %}class="required-label"{% endif %}>{% trans field.label %}</label>
                         {{ field }}
                         <div class="tag-input-container">
                             <div class="tags-display" id="architectures-tags"></div>
-                            <input type="text" class="form-control tag-input" id="architectures-input">
+                            <input type="text" class="form-control tag-input" id="architectures-input" placeholder="e.g. x86_64, arm64, armv7">
                         </div>
                         {% if field.errors %}
-                            <div class="error">{% trans field.errors %}</div>
+                            <div class="error">{{ field.errors }}</div>
                         {% endif %}
                     </div>
                 {% elif field.name == 'features' %}
@@ -38,10 +40,10 @@
                         {{ field }}
                         <div class="tag-input-container">
                             <div class="tags-display" id="features-tags"></div>
-                            <input type="text" class="form-control tag-input" id="features-input">
+                            <input type="text" class="form-control tag-input" id="features-input" placeholder="e.g. docker, build, eval, compute">
                         </div>
                         {% if field.errors %}
-                            <div class="error">{% trans field.errors %}</div>
+                            <div class="error">{{ field.errors }}</div>
                         {% endif %}
                     </div>
                 {% elif field.field.widget|default:"" == form.fields.remember_me.widget %}
@@ -54,7 +56,7 @@
                         <label for="{{ field.id_for_label }}" {% if field.field.required %}class="required-label"{% endif %}>{% trans field.label %}</label>
                         {{ field }}
                         {% if field.errors %}
-                            <div class="error">{% trans field.errors %}</div>
+                            <div class="error">{{ field.errors }}</div>
                         {% endif %}
                     </div>
                 {% endif %}
@@ -128,8 +130,8 @@ document.addEventListener('DOMContentLoaded', function() {
         
     }
     
-    initTagInput('architectures-input', 'architectures-tags', 'id_architectures');
-    initTagInput('features-input', 'features-tags', 'id_features');
+    initTagInput('architectures-input', 'architectures-tags', 'architectures_hidden');
+    initTagInput('features-input', 'features-tags', 'features_hidden');
 });
 </script>
 {% endblock %}

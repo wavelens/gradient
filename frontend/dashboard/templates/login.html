@@ -35,7 +35,7 @@
                         <label for="{{ field.id_for_label }}" class="required-label">{% trans field.label %}</label>
                         {{ field }}
                         {% if field.errors %}
-                            <div class="error">{% trans field.errors %}</div>
+                            <div class="error">{{ field.errors }}</div>
                         {% endif %}
                     </div>
                 {% endif %}
