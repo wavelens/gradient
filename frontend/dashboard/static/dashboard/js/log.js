@@ -25,6 +25,9 @@ async function checkBuildStatus() {
         const evaluation = data.message;
         updateBuildStatus(evaluation.status);
         
+        // Display evaluation error if it exists
+        displayEvaluationError(evaluation.error);
+        
         // Get builds for this evaluation
         await fetchBuilds();
         
@@ -84,6 +87,30 @@ function updateBuildStatus(status) {
       titleStatusIcon.className = 'loader';
       titleStatusIcon.textContent = '';
     }
+  }
+}
+
+function displayEvaluationError(error) {
+  const logContainer = document.querySelector(".details-content");
+  if (!logContainer) return;
+  
+  if (error) {
+    // Clear existing content and show error
+    logContainer.innerHTML = '';
+    
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'line';
+    errorDiv.style.cssText = 'color: #d32f2f; font-weight: bold; margin-bottom: 0.5rem;';
+    errorDiv.textContent = '❌ Evaluation Error:';
+    logContainer.appendChild(errorDiv);
+    
+    const errorContentDiv = document.createElement('div');
+    errorContentDiv.className = 'line';
+    errorContentDiv.style.cssText = 'color: #d32f2f; white-space: pre-wrap;';
+    errorContentDiv.textContent = error;
+    logContainer.appendChild(errorContentDiv);
+    
+    lastLogLength = 0; // Reset log counter since we cleared the container
   }
 }
 
@@ -186,6 +213,12 @@ async function updateLogs() {
 
 // Initialize the page
 async function initializePage() {
+  // Check if there's an initial evaluation error from the server
+  if (window.initialEvaluationError) {
+    displayEvaluationError(window.initialEvaluationError);
+    return; // Don't fetch builds/logs if there's an error
+  }
+  
   await fetchBuilds();
   await updateLogs();
 }

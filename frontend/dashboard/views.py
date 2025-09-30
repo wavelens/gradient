@@ -251,6 +251,7 @@ def log(request, org, evaluation_id=None):
         'builds' : len(builds),
         'success' : success,
         'api_url' : settings.GRADIENT_BASE_URL,
+        'evaluation_error' : evaluation.get('error', '') if evaluation.get('error') else None,
         # 'icon' : 'green-filter'
     }
 

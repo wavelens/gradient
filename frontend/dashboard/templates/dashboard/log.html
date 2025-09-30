@@ -116,6 +116,7 @@
 <script>
     const token = "{{ request.user.session }}";
     const url = "{{ api_url }}/api/evals/{{ evaluation_id }}/builds";
+    const initialEvaluationError = {% if evaluation_error %}"{{ evaluation_error|escapejs }}"{% else %}null{% endif %};
 </script>
 
 <script src="{% static 'dashboard/js/log.js' %}"></script>
