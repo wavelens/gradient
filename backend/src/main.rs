@@ -11,8 +11,13 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberI
 
 fn init_logging(log_level: &str, debug: bool) {
     // SQL logging is now controlled at the database connection level
-    let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
+    let env_filter = match EnvFilter::try_from_default_env() {
+        Ok(filter) => filter,
+        Err(e) => {
+            eprintln!("Warning: Invalid RUST_LOG environment variable ({}), using default log level: {}", e, log_level);
+            EnvFilter::new(log_level)
+        }
+    };
 
     tracing_subscriber::registry()
         .with(
