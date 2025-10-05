@@ -100,23 +100,58 @@ function displayEvaluationError(error) {
 
     const errorWrapper = document.createElement('div');
     errorWrapper.className = 'evaluation-error';
-    errorWrapper.style.cssText = 'padding: 1rem; margin: 1rem 0; border: 1px solid #d32f2f; border-radius: 5px; background-color: #ffebee;';
+    errorWrapper.style.cssText = `
+      padding: 1.25rem;
+      margin: 0;
+      border: 1px solid #ff4444;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #1a0e0e 0%, #2d1414 100%);
+      border-left: 4px solid #ff4444;
+      box-shadow: 0 4px 12px rgba(255, 68, 68, 0.15);
+    `;
 
     const errorTitle = document.createElement('div');
     errorTitle.className = 'line';
-    errorTitle.style.cssText = 'color: #d32f2f; font-weight: bold; margin-bottom: 0.5rem; display: flex; align-items: center;';
-    errorTitle.innerHTML = '<span style="margin-right: 0.5rem;">⚠️</span>Evaluation Error';
+    errorTitle.style.cssText = `
+      color: #ff6b6b;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      font-size: 1.1rem;
+      padding-left: 0;
+    `;
+    errorTitle.textContent = 'Evaluation Error';
     errorWrapper.appendChild(errorTitle);
 
     const errorContent = document.createElement('div');
     errorContent.className = 'line';
-    errorContent.style.cssText = 'color: #c62828; white-space: pre-wrap; font-family: monospace; background-color: #ffffff; padding: 0.75rem; border-radius: 3px; border: 1px solid #ffcdd2; overflow-x: auto;';
+    errorContent.style.cssText = `
+      color: #ffcccc;
+      white-space: pre-wrap;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+      background-color: var(--quaternary, #050708);
+      padding: 1rem;
+      border-radius: 6px;
+      border: 1px solid #3d1f1f;
+      overflow-x: auto;
+      line-height: 1.5;
+      font-size: 0.9rem;
+      padding-left: 1rem;
+    `;
     errorContent.textContent = error;
     errorWrapper.appendChild(errorContent);
 
     const errorHint = document.createElement('div');
     errorHint.className = 'line';
-    errorHint.style.cssText = 'color: #757575; font-size: 0.875rem; margin-top: 0.5rem; font-style: italic;';
+    errorHint.style.cssText = `
+      color: var(--secondary, #abb0b4);
+      font-size: 0.85rem;
+      margin-top: 1rem;
+      font-style: italic;
+      opacity: 0.8;
+      padding-left: 0;
+    `;
     errorHint.textContent = 'This error occurred during the evaluation phase. Please check your project configuration and try again.';
     errorWrapper.appendChild(errorHint);
 

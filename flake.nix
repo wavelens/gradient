@@ -66,7 +66,6 @@
       gradient-server = pkgs.callPackage ./nix/packages/gradient-server.nix { };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
       gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix { };
-      gradient-deploy = pkgs.callPackage ./nix/packages/gradient-deploy.nix { };
       gradient = gradient-cli;
       default = gradient-server;
     };

@@ -152,7 +152,7 @@ in {
 
         logLevel = lib.mkOption {
           description = "The log level for the application.";
-          type = lib.types.enum ["trace" "debug" "info" "warn" "error"];
+          type = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
           default = "info";
         };
       };
@@ -263,12 +263,12 @@ in {
             proxyWebsockets = true;
           };
 
-          "/api" = {
+          "/api/" = {
             proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
             proxyWebsockets = true;
           };
 
-          "/cache" = lib.mkIf cfg.serveCache {
+          "/cache/" = lib.mkIf cfg.serveCache {
             proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
             proxyWebsockets = true;
           };
