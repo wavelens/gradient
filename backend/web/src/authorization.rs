@@ -74,7 +74,7 @@ pub async fn authorize(
 
     let (bearer, token) = (header.next(), header.next());
 
-    if bearer != Some("Bearer") {
+    if bearer != Some("Bearer") || token.is_none() {
         return Err((
             StatusCode::FORBIDDEN,
             Json(BaseResponse {

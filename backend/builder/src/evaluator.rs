@@ -26,7 +26,7 @@ use tokio::process::Command;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
-use super::scheduler::update_evaluation_status;
+use super::scheduler::{update_evaluation_status, update_evaluation_status_with_error};
 use core::consts::FLAKE_START;
 
 #[instrument(skip(state, store), fields(evaluation_id = %evaluation.id))]
@@ -840,8 +840,12 @@ pub async fn evaluate_direct(
         }
         Err(e) => {
             error!(error = %e, "Direct evaluation failed");
-            update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Failed)
-                .await;
+            update_evaluation_status_with_error(
+                Arc::clone(&state),
+                evaluation,
+                EvaluationStatus::Failed,
+                format!("Direct evaluation failed: {}", e)
+            ).await;
 
             if let Err(cleanup_err) = tokio::fs::remove_dir_all(&temp_dir).await {
                 warn!(error = %cleanup_err, temp_dir = %temp_dir, "Failed to cleanup temp directory after evaluation failure");

@@ -1,10 +1,15 @@
+/*
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 let statsCheckInterval;
 let lastUpdateTime = 0;
 
 // Get variables from global scope
 const baseUrl = window.location.origin;
 const cacheName = window.location.pathname.split('/')[2];
-const token = window.token || '';
 
 async function checkCacheStatus() {
   try {
@@ -14,12 +19,12 @@ async function checkCacheStatus() {
       withCredentials: true,
       mode: "cors",
       headers: {
-        "Authorization": `Bearer ${token}`,
+        "Authorization": `Bearer ${window.token || ''}`,
         "Content-Type": "application/jsonstream",
         "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
       },
     });
-    
+
     if (response.ok) {
       const data = await response.json();
       if (!data.error) {

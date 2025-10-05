@@ -439,14 +439,27 @@ pub async fn get_cache_key(
         }
     };
 
+    let cache_key = match format_cache_key(
+        state.cli.crypt_secret_file.clone(),
+        cache,
+        state.cli.serve_url.clone(),
+        true,
+    ) {
+        Ok(key) => key,
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to generate cache key: {}", e),
+                }),
+            ));
+        }
+    };
+
     let res = BaseResponse {
         error: false,
-        message: format_cache_key(
-            state.cli.crypt_secret_file.clone(),
-            cache,
-            state.cli.serve_url.clone(),
-            true,
-        ),
+        message: cache_key,
     };
 
     Ok(Json(res))

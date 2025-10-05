@@ -79,7 +79,13 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
         return (false, vec![]);
     }
 
-    let remote_hash = hex_to_vec(output[0]).unwrap();
+    let remote_hash = match hex_to_vec(output[0]) {
+        Ok(hash) => hash,
+        Err(e) => {
+            error!(error = %e, "Failed to parse remote hash");
+            return (false, vec![]);
+        }
+    };
     let remote_hash_str = output[0];
     debug!(remote_hash = %remote_hash_str, "Retrieved remote hash");
 
@@ -288,21 +294,43 @@ pub fn decrypt_ssh_private_key(
     secret_file: String,
     organization: MOrganization,
 ) -> Result<(String, String), String> {
+    let secret_content = crate::input::load_secret_safe(&secret_file)?;
+
     let secret = general_purpose::STANDARD
-        .decode(load_secret(&secret_file))
-        .map_err(|_| "Failed to decode GRADIENT_CRYPT_SECRET".to_string())?;
+        .decode(&secret_content)
+        .map_err(|e| format!("Failed to decode GRADIENT_CRYPT_SECRET from file '{}': {}. Please check that the file contains valid base64-encoded data.", secret_file, e))?;
+
+    // Validate that the secret key has reasonable length for encryption
+    if secret.len() < 16 {
+        return Err(format!("GRADIENT_CRYPT_SECRET is too short ({} bytes). Encryption keys should be at least 16 bytes.", secret.len()));
+    }
 
     let encrypted_private_key = general_purpose::STANDARD
         .decode(organization.clone().private_key)
-        .unwrap();
+        .map_err(|e| format!("Failed to decode organization '{}' private key: {}. The private key in the database appears to be corrupted or not properly base64-encoded.", organization.name, e))?;
 
-    let decrypted_private_key = if let Some(p) = crypter::decrypt(secret, encrypted_private_key) {
-        p
+    let decrypted_private_key = if let Some(p) = crypter::decrypt(secret, encrypted_private_key.clone()) {
+        // Successfully decrypted using crypter
+        String::from_utf8(p)
+            .map_err(|e| format!("Failed to convert decrypted private key to UTF-8: {}", e))?
     } else {
-        return Err("Failed to decrypt private key".to_string());
+        // Decryption failed, try treating as plaintext base64 (temporary workaround)
+        tracing::warn!("Failed to decrypt private key for organization '{}', attempting to decode as plaintext base64", organization.name);
+        match String::from_utf8(encrypted_private_key) {
+            Ok(plaintext) => {
+                if plaintext.starts_with("-----BEGIN") {
+                    // This looks like a plain SSH private key
+                    tracing::warn!("Organization '{}' private key appears to be stored as plaintext base64", organization.name);
+                    plaintext
+                } else {
+                    return Err(format!("Failed to decrypt private key for organization '{}' and it doesn't appear to be plaintext. This usually indicates that the GRADIENT_CRYPT_SECRET from file '{}' does not match the key used to encrypt this organization's private key. Please verify the decryption key is correct.", organization.name, secret_file));
+                }
+            },
+            Err(_) => {
+                return Err(format!("Failed to decrypt private key for organization '{}' and failed to decode as plaintext. This usually indicates that the GRADIENT_CRYPT_SECRET from file '{}' does not match the key used to encrypt this organization's private key. Please verify the decryption key is correct.", organization.name, secret_file));
+            }
+        }
     };
-
-    let decrypted_private_key = String::from_utf8(decrypted_private_key).unwrap();
     let formatted_public_key = format_public_key(organization);
 
     Ok((decrypted_private_key, formatted_public_key))
@@ -330,13 +358,15 @@ pub fn generate_signing_key(secret_file: String) -> Result<String, String> {
 }
 
 pub fn decrypt_signing_key(secret_file: String, cache: MCache) -> Result<KeyPair, String> {
+    let secret_content = crate::input::load_secret_safe(&secret_file)?;
+
     let secret = general_purpose::STANDARD
-        .decode(load_secret(&secret_file))
-        .map_err(|_| "Failed to decode GRADIENT_CRYPT_SECRET".to_string())?;
+        .decode(&secret_content)
+        .map_err(|e| format!("Failed to decode GRADIENT_CRYPT_SECRET from file '{}': {}. Please check that the file contains valid base64-encoded data.", secret_file, e))?;
 
     let encrypted_private_key = general_purpose::STANDARD
         .decode(cache.clone().signing_key)
-        .unwrap();
+        .map_err(|e| format!("Failed to decode cache '{}' signing key: {}. The signing key in the cache appears to be corrupted or not properly base64-encoded.", cache.name, e))?;
 
     let decrypted_private_key = if let Some(p) = crypter::decrypt(secret, encrypted_private_key) {
         p
@@ -355,8 +385,8 @@ pub fn format_cache_key(
     cache: MCache,
     url: String,
     public_key: bool,
-) -> String {
-    let secret = decrypt_signing_key(secret_file, cache.clone()).unwrap();
+) -> Result<String, String> {
+    let secret = decrypt_signing_key(secret_file, cache.clone())?;
     let key: &[u8] = if public_key {
         secret.pk.as_ref()
     } else {
@@ -369,7 +399,7 @@ pub fn format_cache_key(
         .replace("http://", "")
         .replace(":", "-");
 
-    format!("{}-{}:{}", base_url, cache.name, public_key)
+    Ok(format!("{}-{}:{}", base_url, cache.name, public_key))
 }
 
 pub fn get_hash_from_url(url: String) -> Result<String, String> {

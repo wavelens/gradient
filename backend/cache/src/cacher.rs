@@ -175,12 +175,18 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
 
 pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_output: MBuildOutput) {
     let path = get_path_from_build_output(build_output.clone());
-    let secret_key = format_cache_key(
+    let secret_key = match format_cache_key(
         state.cli.crypt_secret_file.clone(),
         cache.clone(),
         state.cli.serve_url.clone(),
         false,
-    );
+    ) {
+        Ok(key) => key,
+        Err(e) => {
+            error!("Failed to format cache key: {}", e);
+            return;
+        }
+    };
 
     let key_file = write_key(secret_key.clone(), state.cli.base_path.clone()).unwrap();
 

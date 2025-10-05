@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 let statusCheckInterval;
 let lastUpdateTime = 0;
 
@@ -5,7 +11,6 @@ let lastUpdateTime = 0;
 const baseUrl = window.location.origin;
 const orgName = window.location.pathname.split('/')[2];
 const projectName = window.location.pathname.split('/')[4];
-const token = window.token || '';
 
 async function checkProjectStatus() {
   try {
@@ -15,7 +20,7 @@ async function checkProjectStatus() {
       withCredentials: true,
       mode: "cors",
       headers: {
-        "Authorization": `Bearer ${token}`,
+        "Authorization": `Bearer ${window.token || ''}`,
         "Content-Type": "application/jsonstream",
         "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
       },

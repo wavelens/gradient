@@ -159,6 +159,19 @@ pub fn load_secret(f: &str) -> String {
     s.trim().replace(char::from(25), "")
 }
 
+pub fn load_secret_safe(f: &str) -> Result<String, String> {
+    let s = std::fs::read_to_string(f)
+        .map_err(|e| format!("Failed to read secret file '{}': {}", f, e))?;
+
+    let cleaned = s.trim().replace(char::from(25), "");
+
+    if cleaned.is_empty() {
+        return Err(format!("Secret file '{}' is empty or contains only whitespace", f));
+    }
+
+    Ok(cleaned)
+}
+
 /// Validates password strength requirements
 /// Validates username format and content requirements
 pub fn validate_username(username: &str) -> Result<(), String> {

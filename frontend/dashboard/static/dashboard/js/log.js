@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2025 Wavelens UG <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
 let statusCheckInterval;
 let logCheckInterval;
 let buildCompleted = false;
@@ -7,34 +13,33 @@ let buildIds = [];
 // Get variables from global scope
 const baseUrl = window.location.origin;
 const evaluationId = window.location.pathname.split('/').pop();
-const token = window.token || '';
 
 async function checkBuildStatus() {
   try {
-    const response = await fetch(`${baseUrl}/api/v1/evals/${evaluationId}/status`, {
+    const response = await fetch(`${baseUrl}/api/v1/evals/${evaluationId}`, {
       method: "GET",
       credentials: "include",
       withCredentials: true,
       mode: "cors",
       headers: {
-        "Authorization": `Bearer ${token}`,
+        "Authorization": `Bearer ${window.token || ''}`,
         "Content-Type": "application/jsonstream",
         "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
       },
     });
-    
+
     if (response.ok) {
       const data = await response.json();
       if (!data.error) {
         const evaluation = data.message;
         updateBuildStatus(evaluation.status);
-        
+
         // Display evaluation error if it exists
         displayEvaluationError(evaluation.error);
-        
+
         // Get builds for this evaluation
         await fetchBuilds();
-        
+
         // Stop polling if build is completed
         if (evaluation.status === 'Completed' || evaluation.status === 'Failed' || evaluation.status === 'Aborted') {
           clearInterval(statusCheckInterval);
@@ -173,7 +178,7 @@ async function abortBuild() {
       withCredentials: true,
       mode: "cors",
       headers: {
-        "Authorization": `Bearer ${token}`,
+        "Authorization": `Bearer ${window.token || ''}`,
         "Content-Type": "application/jsonstream",
         "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
       }
@@ -205,7 +210,7 @@ async function fetchBuilds() {
       withCredentials: true,
       mode: "cors",
       headers: {
-        "Authorization": `Bearer ${token}`,
+        "Authorization": `Bearer ${window.token || ''}`,
         "Content-Type": "application/jsonstream",
         "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
       },
@@ -242,7 +247,7 @@ async function updateLogs() {
         withCredentials: true,
         mode: "cors",
         headers: {
-          "Authorization": `Bearer ${token}`,
+          "Authorization": `Bearer ${window.token || ''}`,
           "Content-Type": "application/jsonstream",
           "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
         },

@@ -94,8 +94,12 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
         Ok(s) => s,
         Err(e) => {
             error!(error = %e, "Failed to get local store");
-            update_evaluation_status(Arc::clone(&state), evaluation, EvaluationStatus::Failed)
-                .await;
+            update_evaluation_status_with_error(
+                Arc::clone(&state),
+                evaluation,
+                EvaluationStatus::Failed,
+                format!("Failed to get local store: {}", e)
+            ).await;
             return;
         }
     };
@@ -824,8 +828,22 @@ async fn reserve_available_server(
         .unwrap();
 
     if servers.is_empty() {
-        update_build_status_recursivly(state, build.clone(), BuildStatus::Aborted).await;
+        let build = update_build_status_recursivly(state.clone(), build.clone(), BuildStatus::Aborted).await;
         warn!(build_id = %build.id, "Aborted build - no servers found");
+
+        // Update evaluation with error message about no servers
+        let evaluation = EEvaluation::find_by_id(build.evaluation)
+            .one(&state.db)
+            .await
+            .unwrap()
+            .unwrap();
+
+        update_evaluation_status_with_error(
+            state,
+            evaluation,
+            EvaluationStatus::Aborted,
+            "No servers available to build this evaluation. Please ensure at least one server is configured and active for the required architecture.".to_string(),
+        ).await;
 
         return None;
     }

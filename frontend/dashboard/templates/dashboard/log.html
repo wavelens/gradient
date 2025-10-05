@@ -152,6 +152,9 @@
             line.setAttribute('data-line-number', lineCounter++);
         });
     });
+
+    // Set the authentication token for API calls
+    window.token = "{{ request.user.session }}";
 </script>
 
 {% endblock %}

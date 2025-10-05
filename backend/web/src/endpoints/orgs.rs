@@ -452,6 +452,12 @@ pub async fn post_organization_ssh(
             .await
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
+    if organization.managed {
+        return Err(WebError::Forbidden(
+            "Cannot regenerate SSH key for state-managed organization. This organization is managed by configuration and cannot have its SSH key modified through the API.".to_string(),
+        ));
+    }
+
     let (private_key, public_key) =
         generate_ssh_key(state.cli.crypt_secret_file.clone()).map_err(|e| {
             tracing::error!("Failed to generate SSH key: {}", e);
