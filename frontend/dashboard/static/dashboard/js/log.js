@@ -7,14 +7,18 @@ let buildIds = [];
 // Get variables from global scope
 const baseUrl = window.location.origin;
 const evaluationId = window.location.pathname.split('/').pop();
+const token = window.token || '';
 
 async function checkBuildStatus() {
   try {
     const response = await fetch(`${baseUrl}/api/evals/${evaluationId}/status`, {
       method: "GET",
       credentials: "include",
+      withCredentials: true,
+      mode: "cors",
       headers: {
-        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/jsonstream",
         "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
       },
     });
@@ -166,9 +170,12 @@ async function abortBuild() {
     const response = await fetch(`${baseUrl}/api/evals/${evaluationId}/abort`, {
       method: "POST",
       credentials: "include",
+      withCredentials: true,
+      mode: "cors",
       headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/jsonstream",
         "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
-        "Content-Type": "application/json",
       }
     });
     
@@ -195,8 +202,11 @@ async function fetchBuilds() {
     const response = await fetch(`${baseUrl}/api/evals/${evaluationId}/builds`, {
       method: "GET",
       credentials: "include",
+      withCredentials: true,
+      mode: "cors",
       headers: {
-        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/jsonstream",
         "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
       },
     });
@@ -229,8 +239,11 @@ async function updateLogs() {
       const response = await fetch(`${baseUrl}/api/builds/${buildId}`, {
         method: "GET",
         credentials: "include",
+        withCredentials: true,
+        mode: "cors",
         headers: {
-          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/jsonstream",
           "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
         },
       });

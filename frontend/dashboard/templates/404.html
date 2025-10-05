@@ -15,123 +15,25 @@
     <link rel="stylesheet" href="{% static 'dashboard/css/styles.css' %}">
     <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-    <style>
-        .error-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            padding: 2rem;
-            text-align: center;
-            background: var(--primary, #0d1118);
-        }
-
-        .error-content {
-            max-width: 600px;
-            background: var(--tertiary, #21262d);
-            border-radius: 12px;
-            padding: 3rem 2rem;
-            border: 1px solid #30363d;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-        }
-
-        .error-code {
-            font-size: 6rem;
-            font-weight: 700;
-            color: #ff6b6b;
-            margin: 0;
-            font-family: 'Space Mono', monospace;
-            text-shadow: 0 0 20px rgba(255, 107, 107, 0.3);
-        }
-
-        .error-title {
-            font-size: 1.8rem;
-            font-weight: 600;
-            color: white;
-            margin: 1rem 0;
-        }
-
-        .error-description {
-            font-size: 1.1rem;
-            color: var(--secondary, #abb0b4);
-            margin: 1.5rem 0;
-            line-height: 1.6;
-        }
-
-        .error-actions {
-            display: flex;
-            gap: 1rem;
-            justify-content: center;
-            flex-wrap: wrap;
-            margin-top: 2rem;
-        }
-
-        .btn {
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            text-decoration: none;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            border: none;
-            cursor: pointer;
-            font-family: inherit;
-        }
-
-        .btn-primary {
-            background: #238636;
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: #2ea043;
-            transform: translateY(-1px);
-        }
-
-        .btn-secondary {
-            background: transparent;
-            color: var(--secondary, #abb0b4);
-            border: 1px solid #30363d;
-        }
-
-        .btn-secondary:hover {
-            background: #30363d;
-            color: white;
-        }
-
-        .error-icon {
-            font-size: 1.2rem;
-        }
-
-        .logo {
-            margin-bottom: 2rem;
-            color: white;
-            font-size: 1.5rem;
-            font-weight: 700;
-            font-family: 'Space Mono', monospace;
-        }
-    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
 </head>
 <body>
-    <div class="error-container">
-        <div class="error-content">
-            <div class="logo">Gradient CI</div>
-            <h1 class="error-code">404</h1>
-            <h2 class="error-title">Page Not Found</h2>
-            <p class="error-description">
+    <div class="container" style="display: flex; align-items: center; justify-content: center; min-height: 100vh; text-align: center;">
+        <div class="empty-state" style="max-width: 600px;">
+            <span class="empty-state-icon material-symbols-outlined" style="font-size: 8rem; color: #ff6b6b;">error</span>
+            <h1 style="font-size: 4rem; margin: 1rem 0; color: #ff6b6b; font-family: 'Space Mono', monospace;">404</h1>
+            <h2 style="margin: 1rem 0;">Page Not Found</h2>
+            <p style="color: var(--secondary); margin: 1.5rem 0; line-height: 1.6;">
                 The page you're looking for doesn't exist or has been moved.
                 This might be a broken link or you may have entered an incorrect URL.
             </p>
-            <div class="error-actions">
-                <a href="/" class="btn btn-primary">
-                    <span class="material-icons error-icon">home</span>
+            <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-top: 2rem;">
+                <a href="/" class="submit-btn" style="width: auto; padding: 0.75rem 1.5rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none;">
+                    <span class="material-symbols-outlined">home</span>
                     Go Home
                 </a>
-                <button onclick="history.back()" class="btn btn-secondary">
-                    <span class="material-icons error-icon">arrow_back</span>
+                <button onclick="history.back()" class="button-clear" style="padding: 0.75rem 1.5rem; display: inline-flex; align-items: center; gap: 0.5rem;">
+                    <span class="material-symbols-outlined">arrow_back</span>
                     Go Back
                 </button>
             </div>

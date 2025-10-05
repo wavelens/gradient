@@ -15,147 +15,30 @@
     <link rel="stylesheet" href="{% static 'dashboard/css/styles.css' %}">
     <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-    <style>
-        .error-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            padding: 2rem;
-            text-align: center;
-            background: var(--primary, #0d1118);
-        }
-
-        .error-content {
-            max-width: 600px;
-            background: var(--tertiary, #21262d);
-            border-radius: 12px;
-            padding: 3rem 2rem;
-            border: 1px solid #30363d;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-        }
-
-        .error-code {
-            font-size: 6rem;
-            font-weight: 700;
-            color: #ffa500;
-            margin: 0;
-            font-family: 'Space Mono', monospace;
-            text-shadow: 0 0 20px rgba(255, 165, 0, 0.3);
-        }
-
-        .error-title {
-            font-size: 1.8rem;
-            font-weight: 600;
-            color: white;
-            margin: 1rem 0;
-        }
-
-        .error-description {
-            font-size: 1.1rem;
-            color: var(--secondary, #abb0b4);
-            margin: 1.5rem 0;
-            line-height: 1.6;
-        }
-
-        .error-actions {
-            display: flex;
-            gap: 1rem;
-            justify-content: center;
-            flex-wrap: wrap;
-            margin-top: 2rem;
-        }
-
-        .btn {
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            text-decoration: none;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            border: none;
-            cursor: pointer;
-            font-family: inherit;
-        }
-
-        .btn-primary {
-            background: #238636;
-            color: white;
-        }
-
-        .btn-primary:hover {
-            background: #2ea043;
-            transform: translateY(-1px);
-        }
-
-        .btn-secondary {
-            background: transparent;
-            color: var(--secondary, #abb0b4);
-            border: 1px solid #30363d;
-        }
-
-        .btn-secondary:hover {
-            background: #30363d;
-            color: white;
-        }
-
-        .error-icon {
-            font-size: 1.2rem;
-        }
-
-        .logo {
-            margin-bottom: 2rem;
-            color: white;
-            font-size: 1.5rem;
-            font-weight: 700;
-            font-family: 'Space Mono', monospace;
-        }
-
-        .error-details {
-            background: var(--quaternary, #050708);
-            border: 1px solid #30363d;
-            border-radius: 8px;
-            padding: 1rem;
-            margin: 1.5rem 0;
-            font-family: 'Space Mono', monospace;
-            font-size: 0.9rem;
-            color: #ff6b6b;
-            text-align: left;
-        }
-
-        .error-help {
-            font-size: 0.95rem;
-            color: var(--secondary, #abb0b4);
-            margin-top: 1.5rem;
-            font-style: italic;
-        }
-    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
 </head>
 <body>
-    <div class="error-container">
-        <div class="error-content">
-            <div class="logo">Gradient CI</div>
-            <h1 class="error-code">500</h1>
-            <h2 class="error-title">Internal Server Error</h2>
-            <p class="error-description">
+    <div class="container" style="display: flex; align-items: center; justify-content: center; min-height: 100vh; text-align: center;">
+        <div class="empty-state" style="max-width: 600px;">
+            <span class="empty-state-icon material-symbols-outlined" style="font-size: 8rem; color: #ffa500;">warning</span>
+            <h1 style="font-size: 4rem; margin: 1rem 0; color: #ffa500; font-family: 'Space Mono', monospace;">500</h1>
+            <h2 style="margin: 1rem 0;">Internal Server Error</h2>
+            <p style="color: var(--secondary); margin: 1.5rem 0; line-height: 1.6;">
                 Something went wrong on our end. Our team has been notified and is working to fix the issue.
             </p>
-            <div class="error-details">
+            <div style="background: var(--quaternary); border: 1px solid #30363d; border-radius: 5px; padding: 1rem; margin: 1.5rem 0; font-family: 'Space Mono', monospace; font-size: 0.9rem; color: #ffa500; text-align: left;">
                 The server encountered an unexpected condition that prevented it from fulfilling the request.
             </div>
-            <p class="error-help">
+            <p style="color: var(--secondary); margin-top: 1.5rem; font-style: italic; font-size: 0.95rem;">
                 If this problem persists, please contact our support team with details about what you were trying to do.
             </p>
-            <div class="error-actions">
-                <a href="/" class="btn btn-primary">
-                    <span class="material-icons error-icon">home</span>
+            <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-top: 2rem;">
+                <a href="/" class="submit-btn" style="width: auto; padding: 0.75rem 1.5rem; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none;">
+                    <span class="material-symbols-outlined">home</span>
                     Go Home
                 </a>
-                <button onclick="location.reload()" class="btn btn-secondary">
-                    <span class="material-icons error-icon">refresh</span>
+                <button onclick="location.reload()" class="button-clear" style="padding: 0.75rem 1.5rem; display: inline-flex; align-items: center; gap: 0.5rem;">
+                    <span class="material-symbols-outlined">refresh</span>
                     Try Again
                 </button>
             </div>

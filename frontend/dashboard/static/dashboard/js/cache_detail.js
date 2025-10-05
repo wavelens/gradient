@@ -4,14 +4,18 @@ let lastUpdateTime = 0;
 // Get variables from global scope
 const baseUrl = window.location.origin;
 const cacheName = window.location.pathname.split('/')[2];
+const token = window.token || '';
 
 async function checkCacheStatus() {
   try {
     const response = await fetch(`${baseUrl}/api/caches/${cacheName}/status`, {
       method: "GET",
       credentials: "include",
+      withCredentials: true,
+      mode: "cors",
       headers: {
-        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/jsonstream",
       },
     });
     

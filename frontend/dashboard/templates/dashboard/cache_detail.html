@@ -169,6 +169,11 @@
 {% csrf_token %}
 
 <script>
+    const token = "{{ request.user.session }}";
+    const baseUrl = window.location.origin;
+</script>
+
+<script>
 async function toggleCache(cacheName, activate) {
     try {
         const endpoint = activate ? 'activate' : 'deactivate';
@@ -176,8 +181,12 @@ async function toggleCache(cacheName, activate) {
         
         const response = await fetch(`/api/caches/${cacheName}/${endpoint}`, {
             method: method,
+            credentials: 'include',
+            withCredentials: true,
+            mode: 'cors',
             headers: {
-                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/jsonstream',
                 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
             }
         });
@@ -202,8 +211,12 @@ async function clearCache(cacheName) {
     try {
         const response = await fetch(`/api/caches/${cacheName}/clear`, {
             method: 'POST',
+            credentials: 'include',
+            withCredentials: true,
+            mode: 'cors',
             headers: {
-                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/jsonstream',
                 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
             }
         });
@@ -225,8 +238,12 @@ async function refreshStats(cacheName) {
     try {
         const response = await fetch(`/api/caches/${cacheName}/stats`, {
             method: 'GET',
+            credentials: 'include',
+            withCredentials: true,
+            mode: 'cors',
             headers: {
-                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/jsonstream',
                 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
             }
         });

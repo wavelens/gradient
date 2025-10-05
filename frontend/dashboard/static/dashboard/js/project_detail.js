@@ -5,14 +5,18 @@ let lastUpdateTime = 0;
 const baseUrl = window.location.origin;
 const orgName = window.location.pathname.split('/')[2];
 const projectName = window.location.pathname.split('/')[4];
+const token = window.token || '';
 
 async function checkProjectStatus() {
   try {
     const response = await fetch(`${baseUrl}/api/projects/${orgName}/${projectName}/status`, {
       method: "GET",
       credentials: "include",
+      withCredentials: true,
+      mode: "cors",
       headers: {
-        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/jsonstream",
       },
     });
     

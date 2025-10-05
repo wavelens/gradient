@@ -66,7 +66,7 @@
             </div>
             <div class="stat-content">
                 <h3>{{ running_evaluations_count|default:0 }}</h3>
-                <p>{% trans 'Running Runs' %}</p>
+                <p>{% trans 'Current Runs' %}</p>
             </div>
         </div>
     </div>
@@ -83,7 +83,6 @@
                     <button type="button" class="submit-btn" onclick="startEvaluation('{{ org }}', '{{ project }}')">
                         {% trans 'Start Evaluation' %}
                     </button>
-                    
                     {% if evaluations %}
                         {% for evaluation in evaluations %}
                             {% if evaluation.status == 'running' or evaluation.status == 'pending' %}
@@ -225,12 +224,21 @@
 {% csrf_token %}
 
 <script>
+    const token = "{{ request.user.session }}";
+    const baseUrl = window.location.origin;
+</script>
+
+<script>
 async function startEvaluation(org, project) {
     try {
         const response = await fetch(`/api/projects/${org}/${project}/evaluate`, {
             method: 'POST',
+            credentials: 'include',
+            withCredentials: true,
+            mode: 'cors',
             headers: {
-                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/jsonstream',
                 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
             }
         });
@@ -251,8 +259,12 @@ async function abortEvaluation(evaluationId) {
     try {
         const response = await fetch(`/api/evals/${evaluationId}/abort`, {
             method: 'POST',
+            credentials: 'include',
+            withCredentials: true,
+            mode: 'cors',
             headers: {
-                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/jsonstream',
                 'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
             }
         });
