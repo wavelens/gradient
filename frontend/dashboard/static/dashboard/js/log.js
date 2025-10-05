@@ -9,6 +9,7 @@ let logCheckInterval;
 let buildCompleted = false;
 let lastLogLength = 0;
 let buildIds = [];
+let scrollToBottomButton = null;
 
 // Get variables from global scope
 const baseUrl = window.location.origin;
@@ -40,11 +41,15 @@ async function checkBuildStatus() {
         // Get builds for this evaluation
         await fetchBuilds();
 
-        // Stop polling if build is completed
+        // Stop polling if build is completed, but fetch logs one final time
         if (evaluation.status === 'Completed' || evaluation.status === 'Failed' || evaluation.status === 'Aborted') {
           clearInterval(statusCheckInterval);
           clearInterval(logCheckInterval);
           buildCompleted = true;
+
+          // Fetch final logs when build is complete
+          await updateLogs();
+
           return evaluation.status;
         }
       }
@@ -271,20 +276,40 @@ async function updateLogs() {
 
   // Only update if we have new content
   if (allLogs.length > lastLogLength) {
+    // Remove loading message when first logs arrive
+    if (lastLogLength === 0) {
+      const loadingMessage = logContainer.querySelector('div[style*="color: #666"]');
+      if (loadingMessage) {
+        loadingMessage.remove();
+      }
+    }
+
+    // Check if user is near the bottom before adding content
+    const isNearBottom = (logContainer.scrollTop + logContainer.clientHeight) >= (logContainer.scrollHeight - 50);
+
     const newLines = allLogs.slice(lastLogLength);
     newLines.forEach(logEntry => {
       if (logEntry.content && logEntry.content.trim()) {
         const lineDiv = document.createElement('div');
         lineDiv.className = 'line';
         lineDiv.setAttribute('data-build-id', logEntry.buildId);
-        lineDiv.textContent = logEntry.content;
+
+        // Parse ANSI colors and convert to HTML
+        const parsedContent = parseAnsiColors(logEntry.content);
+        lineDiv.innerHTML = parsedContent;
+
         logContainer.appendChild(lineDiv);
       }
     });
     lastLogLength = allLogs.length;
 
-    // Auto-scroll to bottom for live updates
-    logContainer.scrollTop = logContainer.scrollHeight;
+    // Only auto-scroll if user was near the bottom (within 50px)
+    if (isNearBottom) {
+      logContainer.scrollTop = logContainer.scrollHeight;
+      hideScrollToBottomButton();
+    } else {
+      showScrollToBottomButton();
+    }
 
     // Update line numbers
     updateLineNumbers();
@@ -298,14 +323,155 @@ function updateLineNumbers() {
   });
 }
 
+function parseAnsiColors(text) {
+  // ANSI color codes mapping
+  const ansiColors = {
+    '30': 'color: #000000', // black
+    '31': 'color: #ff4444', // red
+    '32': 'color: #44ff44', // green
+    '33': 'color: #ffff44', // yellow
+    '34': 'color: #4444ff', // blue
+    '35': 'color: #ff44ff', // magenta
+    '36': 'color: #44ffff', // cyan
+    '37': 'color: #ffffff', // white
+    '90': 'color: #666666', // bright black (gray)
+    '91': 'color: #ff6666', // bright red
+    '92': 'color: #66ff66', // bright green
+    '93': 'color: #ffff66', // bright yellow
+    '94': 'color: #6666ff', // bright blue
+    '95': 'color: #ff66ff', // bright magenta
+    '96': 'color: #66ffff', // bright cyan
+    '97': 'color: #ffffff', // bright white
+  };
+
+  const ansiStyles = {
+    '1': 'font-weight: bold',
+    '3': 'font-style: italic',
+    '4': 'text-decoration: underline',
+    '22': 'font-weight: normal',
+    '23': 'font-style: normal',
+    '24': 'text-decoration: none',
+  };
+
+  // Replace ANSI escape sequences
+  let result = text;
+
+  // Handle reset sequences
+  result = result.replace(/\x1b\[0?m/g, '</span>');
+
+  // Handle style and color sequences
+  result = result.replace(/\x1b\[([0-9;]+)m/g, (match, codes) => {
+    const codeList = codes.split(';');
+    const styles = [];
+
+    codeList.forEach(code => {
+      if (ansiColors[code]) {
+        styles.push(ansiColors[code]);
+      }
+      if (ansiStyles[code]) {
+        styles.push(ansiStyles[code]);
+      }
+    });
+
+    if (styles.length > 0) {
+      return `<span style="${styles.join('; ')}">`;
+    }
+    return '';
+  });
+
+  // Clean up any remaining ANSI sequences that we didn't handle
+  result = result.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+
+  return result;
+}
+
+function createScrollToBottomButton() {
+  if (scrollToBottomButton) return;
+
+  scrollToBottomButton = document.createElement('button');
+  scrollToBottomButton.innerHTML = `
+    <span class="material-symbols-outlined">keyboard_arrow_down</span>
+    New logs
+  `;
+  scrollToBottomButton.className = 'scroll-to-bottom-btn';
+  scrollToBottomButton.style.cssText = `
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 24px;
+    padding: 0.75rem 1rem;
+    display: none;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
+    z-index: 1000;
+    transition: all 0.2s ease;
+  `;
+
+  scrollToBottomButton.addEventListener('click', () => {
+    const logContainer = document.querySelector(".details-content");
+    if (logContainer) {
+      logContainer.scrollTop = logContainer.scrollHeight;
+      hideScrollToBottomButton();
+    }
+  });
+
+  scrollToBottomButton.addEventListener('mouseenter', () => {
+    scrollToBottomButton.style.transform = 'translateY(-2px)';
+    scrollToBottomButton.style.boxShadow = '0 6px 16px rgba(0, 123, 255, 0.4)';
+  });
+
+  scrollToBottomButton.addEventListener('mouseleave', () => {
+    scrollToBottomButton.style.transform = 'translateY(0)';
+    scrollToBottomButton.style.boxShadow = '0 4px 12px rgba(0, 123, 255, 0.3)';
+  });
+
+  document.body.appendChild(scrollToBottomButton);
+}
+
+function showScrollToBottomButton() {
+  if (!scrollToBottomButton) createScrollToBottomButton();
+  scrollToBottomButton.style.display = 'flex';
+}
+
+function hideScrollToBottomButton() {
+  if (scrollToBottomButton) {
+    scrollToBottomButton.style.display = 'none';
+  }
+}
+
+function setupScrollListener() {
+  const logContainer = document.querySelector(".details-content");
+  if (!logContainer) return;
+
+  logContainer.addEventListener('scroll', () => {
+    const isNearBottom = (logContainer.scrollTop + logContainer.clientHeight) >= (logContainer.scrollHeight - 50);
+
+    if (isNearBottom) {
+      hideScrollToBottomButton();
+    } else if (lastLogLength > 0) { // Only show if there are logs
+      showScrollToBottomButton();
+    }
+  });
+}
+
 // Initialize the page
 async function initializePage() {
+  // Set up scroll listener for auto-scroll behavior
+  setupScrollListener();
+
   // Check if there's an initial evaluation error from the server
   if (window.initialEvaluationError) {
     displayEvaluationError(window.initialEvaluationError);
     return; // Don't fetch builds/logs if there's an error
   }
-  
+
   await fetchBuilds();
   await updateLogs();
 }
