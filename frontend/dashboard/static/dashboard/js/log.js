@@ -93,23 +93,35 @@ function updateBuildStatus(status) {
 function displayEvaluationError(error) {
   const logContainer = document.querySelector(".details-content");
   if (!logContainer) return;
-  
+
   if (error) {
     // Clear existing content and show error
     logContainer.innerHTML = '';
-    
-    const errorDiv = document.createElement('div');
-    errorDiv.className = 'line';
-    errorDiv.style.cssText = 'color: #d32f2f; font-weight: bold; margin-bottom: 0.5rem;';
-    errorDiv.textContent = '❌ Evaluation Error:';
-    logContainer.appendChild(errorDiv);
-    
-    const errorContentDiv = document.createElement('div');
-    errorContentDiv.className = 'line';
-    errorContentDiv.style.cssText = 'color: #d32f2f; white-space: pre-wrap;';
-    errorContentDiv.textContent = error;
-    logContainer.appendChild(errorContentDiv);
-    
+
+    const errorWrapper = document.createElement('div');
+    errorWrapper.className = 'evaluation-error';
+    errorWrapper.style.cssText = 'padding: 1rem; margin: 1rem 0; border: 1px solid #d32f2f; border-radius: 5px; background-color: #ffebee;';
+
+    const errorTitle = document.createElement('div');
+    errorTitle.className = 'line';
+    errorTitle.style.cssText = 'color: #d32f2f; font-weight: bold; margin-bottom: 0.5rem; display: flex; align-items: center;';
+    errorTitle.innerHTML = '<span style="margin-right: 0.5rem;">⚠️</span>Evaluation Error';
+    errorWrapper.appendChild(errorTitle);
+
+    const errorContent = document.createElement('div');
+    errorContent.className = 'line';
+    errorContent.style.cssText = 'color: #c62828; white-space: pre-wrap; font-family: monospace; background-color: #ffffff; padding: 0.75rem; border-radius: 3px; border: 1px solid #ffcdd2; overflow-x: auto;';
+    errorContent.textContent = error;
+    errorWrapper.appendChild(errorContent);
+
+    const errorHint = document.createElement('div');
+    errorHint.className = 'line';
+    errorHint.style.cssText = 'color: #757575; font-size: 0.875rem; margin-top: 0.5rem; font-style: italic;';
+    errorHint.textContent = 'This error occurred during the evaluation phase. Please check your project configuration and try again.';
+    errorWrapper.appendChild(errorHint);
+
+    logContainer.appendChild(errorWrapper);
+
     lastLogLength = 0; // Reset log counter since we cleared the container
   }
 }
@@ -169,9 +181,14 @@ async function fetchBuilds() {
 async function updateLogs() {
   const logContainer = document.querySelector(".details-content");
   if (!logContainer) return;
-  
+
+  // Skip log updates if evaluation error is being displayed
+  if (logContainer.querySelector('.evaluation-error')) {
+    return;
+  }
+
   let allLogs = [];
-  
+
   for (const buildId of buildIds) {
     try {
       const response = await fetch(`${baseUrl}/api/builds/${buildId}`, {
@@ -182,33 +199,50 @@ async function updateLogs() {
           "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
         },
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         if (!data.error && data.message.log) {
           const lines = data.message.log.split('\n');
-          allLogs = allLogs.concat(lines);
+          allLogs = allLogs.concat(lines.map(line => ({
+            content: line,
+            buildId: buildId,
+            timestamp: data.message.created_at || new Date().toISOString()
+          })));
         }
       }
     } catch (error) {
       console.error(`Error fetching build ${buildId}:`, error);
     }
   }
-  
+
   // Only update if we have new content
   if (allLogs.length > lastLogLength) {
     const newLines = allLogs.slice(lastLogLength);
-    newLines.forEach(line => {
-      if (line.trim()) {
+    newLines.forEach(logEntry => {
+      if (logEntry.content && logEntry.content.trim()) {
         const lineDiv = document.createElement('div');
         lineDiv.className = 'line';
-        lineDiv.textContent = line; // Use textContent to prevent XSS
+        lineDiv.setAttribute('data-build-id', logEntry.buildId);
+        lineDiv.textContent = logEntry.content;
         logContainer.appendChild(lineDiv);
       }
     });
     lastLogLength = allLogs.length;
+
+    // Auto-scroll to bottom for live updates
     logContainer.scrollTop = logContainer.scrollHeight;
+
+    // Update line numbers
+    updateLineNumbers();
   }
+}
+
+function updateLineNumbers() {
+  let lineCounter = 1;
+  document.querySelectorAll('.details-content .line').forEach(line => {
+    line.setAttribute('data-line-number', lineCounter++);
+  });
 }
 
 // Initialize the page

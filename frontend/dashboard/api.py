@@ -58,66 +58,18 @@ def health(request):
 
 
 def post_auth_basic_register(username, name, email, password):
-    """
-    Register a new user account.
-    
-    Args:
-        username: Username (3-50 chars, alphanumeric/_/-, no consecutive special chars, not reserved)
-        name: Full name of the user
-        email: Valid email address
-        password: Password (8-128 chars, must contain uppercase, lowercase, digit, and special char)
-    
-    Returns:
-        API response dict with 'error' and 'message' fields
-        On 400 error: Registration disabled, invalid username/email/password, or validation failure
-        On 409 error: User already exists
-    """
     return get_client(None, "auth/basic/register", "POST", body={'username': username, 'name': name, 'email': email, 'password': password})
 
 def post_auth_check_username(username):
-    """
-    Check if a username is available and valid for registration.
-    
-    Args:
-        username: Username to check (3-50 chars, alphanumeric/_/-, no consecutive special chars, not reserved)
-    
-    Returns:
-        API response dict with 'error' and 'message' fields
-        error=False: Username is available
-        error=True: Username is taken, reserved, or invalid
-    """
     return get_client(None, "auth/check-username", "POST", body={'username': username})
 
 def post_auth_basic_login(loginname, password):
     return get_client(None, "auth/basic/login", "POST", body={'loginname': loginname, 'password': password})
 
 def get_auth_verify_email(token):
-    """
-    Verify user email address using verification token.
-    
-    Args:
-        token: Email verification token sent to user's email
-    
-    Returns:
-        API response dict with 'error' and 'message' fields
-        On success: Email verified successfully
-        On 400 error: Email verification disabled, invalid or expired token
-    """
     return get_client(None, f"auth/verify-email?token={token}", "GET")
 
 def post_auth_resend_verification(username):
-    """
-    Resend email verification token to user.
-    
-    Args:
-        username: Username of the user to resend verification to
-    
-    Returns:
-        API response dict with 'error' and 'message' fields
-        On success: Verification email sent successfully
-        On 400 error: Email verification disabled, email already verified, or SMTP error
-        On 404 error: User not found
-    """
     return get_client(None, "auth/resend-verification", "POST", body={'username': username})
 
 def post_auth_oauth_authorize(code):
@@ -204,19 +156,6 @@ def post_projects_project_check_repository(request, organization, project):
     return get_client(request.user, f"projects/{organization}/{project}/check-repository", "POST")
 
 def post_projects_project_evaluate(request, organization, project):
-    """
-    Trigger/restart evaluation for a project.
-    
-    Args:
-        organization: Organization name
-        project: Project name
-    
-    Returns:
-        API response dict with 'error' and 'message' fields
-        On success: Evaluation triggered successfully
-        On 400 error: Evaluation already in progress
-        On 404 error: Project not found
-    """
     return get_client(request.user, f"projects/{organization}/{project}/evaluate", "POST")
 
 

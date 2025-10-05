@@ -95,16 +95,27 @@
             </div>
             <div class="p-1rem">
                 <div class="code-container monospace">
-                    {% for block in details_blocks %}
-                        <!-- <details class="details-item color-secondary"> -->
-                            <!-- <summary></summary> -->
-                            <div class="details-content color-secondary">
-                                {% for line in block.details %}
-                                    <div class="line">{{ line }}</div>
-                                {% endfor %}
-                            </div>
-                        <!-- </details> -->
-                    {% endfor %}
+                    {% if details_blocks %}
+                        {% for block in details_blocks %}
+                            <!-- <details class="details-item color-secondary"> -->
+                                <!-- <summary></summary> -->
+                                <div class="details-content color-secondary">
+                                    {% for line in block.details %}
+                                        <div class="line">{{ line }}</div>
+                                    {% endfor %}
+                                </div>
+                            <!-- </details> -->
+                        {% endfor %}
+                    {% else %}
+                        <!-- Empty log container for dynamic content -->
+                        <div class="details-content color-secondary">
+                            {% if not evaluation_error %}
+                                <div class="line" style="color: #666; font-style: italic;">
+                                    Loading build logs...
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -117,6 +128,9 @@
     const token = "{{ request.user.session }}";
     const url = "{{ api_url }}/api/evals/{{ evaluation_id }}/builds";
     const initialEvaluationError = {% if evaluation_error %}"{{ evaluation_error|escapejs }}"{% else %}null{% endif %};
+
+    // Make initial evaluation error available globally for log.js
+    window.initialEvaluationError = initialEvaluationError;
 </script>
 
 <script src="{% static 'dashboard/js/log.js' %}"></script>

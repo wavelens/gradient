@@ -30,8 +30,8 @@ urlpatterns = [
 
     path("", dashboard, name="dashboard"),
     path("organizations", home, name="home"),
-    path("cache", caches, name="caches"),
-    path("cache/<str:cache>", cache_detail, name="cacheDetail"),
+    path("caches", caches, name="caches"),
+    path("caches/<str:cache>", cache_detail, name="cacheDetail"),
 
     path("settings/server", edit_server, name="settingsServer"),
     path("organization/<str:org>/project/<str:project>/settings", edit_project, name="settingsProject"),
