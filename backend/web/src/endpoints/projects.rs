@@ -202,6 +202,11 @@ pub async fn patch_project(
     .await
     .ok_or_else(|| WebError::not_found("Project"))?;
 
+    // Prevent modification of state-managed projects
+    if project.managed {
+        return Err(WebError::Forbidden("Cannot modify state-managed project. This project is managed by configuration and cannot be edited through the API.".to_string()));
+    }
+
     let mut aproject: AProject = project.into();
 
     if let Some(name) = body.name {
@@ -277,6 +282,11 @@ pub async fn delete_project(
     )
     .await
     .ok_or_else(|| WebError::not_found("Project"))?;
+
+    // Prevent deletion of state-managed projects
+    if project.managed {
+        return Err(WebError::Forbidden("Cannot delete state-managed project. This project is managed by configuration and cannot be deleted through the API.".to_string()));
+    }
 
     let aproject: AProject = project.into();
     aproject.delete(&state.db).await?;

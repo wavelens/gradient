@@ -231,7 +231,7 @@
 <script>
 async function startEvaluation(org, project) {
     try {
-        const response = await fetch(`/api/projects/${org}/${project}/evaluate`, {
+        const response = await fetch(`/api/v1/projects/${org}/${project}/evaluate`, {
             method: 'POST',
             credentials: 'include',
             withCredentials: true,

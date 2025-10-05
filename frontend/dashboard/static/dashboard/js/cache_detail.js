@@ -8,7 +8,7 @@ const token = window.token || '';
 
 async function checkCacheStatus() {
   try {
-    const response = await fetch(`${baseUrl}/api/caches/${cacheName}/status`, {
+    const response = await fetch(`${baseUrl}/api/v1/caches/${cacheName}/status`, {
       method: "GET",
       credentials: "include",
       withCredentials: true,
@@ -16,6 +16,7 @@ async function checkCacheStatus() {
       headers: {
         "Authorization": `Bearer ${token}`,
         "Content-Type": "application/jsonstream",
+        "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
       },
     });
     

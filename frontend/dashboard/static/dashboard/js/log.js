@@ -11,7 +11,7 @@ const token = window.token || '';
 
 async function checkBuildStatus() {
   try {
-    const response = await fetch(`${baseUrl}/api/evals/${evaluationId}/status`, {
+    const response = await fetch(`${baseUrl}/api/v1/evals/${evaluationId}/status`, {
       method: "GET",
       credentials: "include",
       withCredentials: true,
@@ -167,7 +167,7 @@ function displayEvaluationError(error) {
 
 async function abortBuild() {
   try {
-    const response = await fetch(`${baseUrl}/api/evals/${evaluationId}/abort`, {
+    const response = await fetch(`${baseUrl}/api/v1/evals/${evaluationId}/abort`, {
       method: "POST",
       credentials: "include",
       withCredentials: true,
@@ -199,7 +199,7 @@ async function abortBuild() {
 
 async function fetchBuilds() {
   try {
-    const response = await fetch(`${baseUrl}/api/evals/${evaluationId}/builds`, {
+    const response = await fetch(`${baseUrl}/api/v1/evals/${evaluationId}/builds`, {
       method: "GET",
       credentials: "include",
       withCredentials: true,
@@ -236,7 +236,7 @@ async function updateLogs() {
 
   for (const buildId of buildIds) {
     try {
-      const response = await fetch(`${baseUrl}/api/builds/${buildId}`, {
+      const response = await fetch(`${baseUrl}/api/v1/builds/${buildId}`, {
         method: "GET",
         credentials: "include",
         withCredentials: true,

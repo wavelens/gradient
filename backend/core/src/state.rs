@@ -833,24 +833,113 @@ async fn apply_api_keys(
 }
 
 async fn apply_server_features(
-    _db: &DatabaseConnection,
-    _server_name: &str,
-    _features: &[String],
+    db: &DatabaseConnection,
+    server_name: &str,
+    features: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // TODO: Implement server features management
-    // This would involve managing the feature and server_feature junction table
-    tracing::debug!("Server features management not yet implemented");
+    use crate::types::*;
+    use sea_orm::*;
+
+    // Find the server by name
+    let server = EServer::find()
+        .filter(CServer::Name.eq(server_name))
+        .one(db)
+        .await?;
+
+    let Some(server) = server else {
+        return Err(format!("Server '{}' not found", server_name).into());
+    };
+
+    // Delete existing server features
+    EServerFeature::delete_many()
+        .filter(CServerFeature::Server.eq(server.id))
+        .exec(db)
+        .await?;
+
+    // Add new features
+    for feature_name in features {
+        // Find or create the feature
+        let feature = EFeature::find()
+            .filter(CFeature::Name.eq(feature_name))
+            .one(db)
+            .await?;
+
+        let feature = if let Some(feature) = feature {
+            feature
+        } else {
+            let afeature = AFeature {
+                id: Set(Uuid::new_v4()),
+                name: Set(feature_name.clone()),
+            };
+            afeature.insert(db).await?
+        };
+
+        // Create server-feature association
+        let aserver_feature = AServerFeature {
+            id: Set(Uuid::new_v4()),
+            server: Set(server.id),
+            feature: Set(feature.id),
+        };
+
+        aserver_feature.insert(db).await?;
+    }
+
+    tracing::debug!("Applied {} features to server '{}'", features.len(), server_name);
     Ok(())
 }
 
 async fn apply_server_architectures(
-    _db: &DatabaseConnection,
-    _server_name: &str,
-    _architectures: &[String],
+    db: &DatabaseConnection,
+    server_name: &str,
+    architectures: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // TODO: Implement server architectures management
-    // This would involve managing the server_architecture table
-    tracing::debug!("Server architectures management not yet implemented");
+    use crate::types::*;
+    use sea_orm::*;
+
+    // Find the server by name
+    let server = EServer::find()
+        .filter(CServer::Name.eq(server_name))
+        .one(db)
+        .await?;
+
+    let Some(server) = server else {
+        return Err(format!("Server '{}' not found", server_name).into());
+    };
+
+    // Delete existing server architectures
+    EServerArchitecture::delete_many()
+        .filter(CServerArchitecture::Server.eq(server.id))
+        .exec(db)
+        .await?;
+
+    // Parse and validate architectures
+    let parsed_architectures: Result<Vec<server::Architecture>, _> = architectures
+        .iter()
+        .map(|arch| arch.parse())
+        .collect();
+
+    let parsed_architectures = parsed_architectures
+        .map_err(|_| "Invalid architecture specified")?;
+
+    if parsed_architectures.is_empty() {
+        return Err("No valid architectures specified".into());
+    }
+
+    // Create server architecture associations
+    let server_architecture_models: Vec<AServerArchitecture> = parsed_architectures
+        .into_iter()
+        .map(|arch| AServerArchitecture {
+            id: Set(Uuid::new_v4()),
+            server: Set(server.id),
+            architecture: Set(arch),
+        })
+        .collect();
+
+    EServerArchitecture::insert_many(server_architecture_models)
+        .exec(db)
+        .await?;
+
+    tracing::debug!("Applied {} architectures to server '{}'", architectures.len(), server_name);
     Ok(())
 }
 

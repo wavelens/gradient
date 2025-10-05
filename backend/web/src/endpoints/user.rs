@@ -188,6 +188,11 @@ pub async fn patch_settings(
     Extension(user): Extension<MUser>,
     Json(body): Json<PatchUserSettingsRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    // Prevent modification of state-managed users
+    if user.managed {
+        return Err(WebError::Forbidden("Cannot modify state-managed user. This user is managed by configuration and cannot be edited through the API.".to_string()));
+    }
+
     let mut auser: AUser = user.into();
 
     if let Some(username) = body.username {

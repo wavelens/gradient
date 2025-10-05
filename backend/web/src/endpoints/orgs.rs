@@ -175,6 +175,11 @@ pub async fn patch_organization(
             .await
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
+    // Prevent modification of state-managed organizations
+    if organization.managed {
+        return Err(WebError::Forbidden("Cannot modify state-managed organization. This organization is managed by configuration and cannot be edited through the API.".to_string()));
+    }
+
     let mut aorganization: AOrganization = organization.into();
 
     if let Some(name) = body.name {
@@ -224,6 +229,11 @@ pub async fn delete_organization(
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
             .await
             .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    // Prevent deletion of state-managed organizations
+    if organization.managed {
+        return Err(WebError::Forbidden("Cannot delete state-managed organization. This organization is managed by configuration and cannot be deleted through the API.".to_string()));
+    }
 
     let aorganization: AOrganization = organization.into();
     aorganization.delete(&state.db).await?;

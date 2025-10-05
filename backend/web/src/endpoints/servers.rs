@@ -222,6 +222,17 @@ pub async fn patch_server(
         }
     };
 
+    // Prevent modification of state-managed servers
+    if server.managed {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(BaseResponse {
+                error: true,
+                message: "Cannot modify state-managed server. This server is managed by configuration and cannot be edited through the API.".to_string(),
+            }),
+        ));
+    }
+
     let mut aserver: AServer = server.into();
 
     if let Some(name) = body.name.clone() {
@@ -362,6 +373,17 @@ pub async fn delete_server(
         }
     };
 
+    // Prevent deletion of state-managed servers
+    if server.managed {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(BaseResponse {
+                error: true,
+                message: "Cannot delete state-managed server. This server is managed by configuration and cannot be deleted through the API.".to_string(),
+            }),
+        ));
+    }
+
     let server: AServer = server.into();
     server.delete(&state.db).await.unwrap();
 
@@ -397,6 +419,17 @@ pub async fn post_server_active(
             ));
         }
     };
+
+    // Prevent activation of state-managed servers
+    if server.managed {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(BaseResponse {
+                error: true,
+                message: "Cannot modify state-managed server activation. This server's active state is managed by configuration.".to_string(),
+            }),
+        ));
+    }
 
     let mut aserver: AServer = server.into();
     aserver.active = Set(true);
@@ -434,6 +467,17 @@ pub async fn delete_server_active(
             ));
         }
     };
+
+    // Prevent deactivation of state-managed servers
+    if server.managed {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(BaseResponse {
+                error: true,
+                message: "Cannot modify state-managed server activation. This server's active state is managed by configuration.".to_string(),
+            }),
+        ));
+    }
 
     let mut aserver: AServer = server.into();
     aserver.active = Set(false);

@@ -36,27 +36,16 @@ urlpatterns = [
     path("settings/server", edit_server, name="settingsServer"),
     path("organization/<str:org>/project/<str:project>/settings", edit_project, name="settingsProject"),
     path("organization/<str:org>/project/<str:project>/delete", delete_project, name="deleteProject"),
-    
-    # API endpoints
-    path("api/projects/<str:org>/<str:project>/evaluate", api_project_evaluate, name="api_project_evaluate"),
-    path("api/projects/<str:org>/<str:project>/status", api_project_status, name="api_project_status"),
-    path("api/evals/<str:evaluation_id>/abort", api_abort_evaluation, name="api_abort_evaluation"),
-    path("api/evals/<str:evaluation_id>/status", api_evaluation_status, name="api_evaluation_status"),
-    path("api/evals/<str:evaluation_id>/builds", api_evaluation_builds, name="api_evaluation_builds"),
-    path("api/builds/<str:build_id>", api_build_details, name="api_build_details"),
-    path("api/caches/<str:cache>/status", api_cache_status, name="api_cache_status"),
-    path("api/caches/<str:cache>/activate", api_cache_activate, name="api_cache_activate"),
-    path("api/caches/<str:cache>/deactivate", api_cache_deactivate, name="api_cache_deactivate"),
-    path("api/caches/<str:cache>/clear", api_cache_clear, name="api_cache_clear"),
-    
     path("organization/<str:org>/settings", edit_organization, name="settingsOrganization"),
     path("organization/<str:org>/delete", delete_organization, name="deleteOrganization"),
     path("organization/<str:org>/members", organization_members, name="organizationMembers"),
     path("organization/<str:org>/servers", organization_servers, name="organizationServers"),
     path("organization/<str:org>/ssh", organization_ssh, name="organizationSSH"),
     path("organization/<str:org>/ssh/generate", organization_ssh_generate, name="organizationSSHGenerate"),
+
     path("cache/<str:cache>/settings", edit_cache, name="settingsCache"),
     path("cache/<str:cache>/delete", delete_cache, name="deleteCache"),
+
     path("settings/profile", settingsProfile, name="settingsProfile"),
     path("settings/profile/delete", delete_user, name="deleteUser"),
 ]

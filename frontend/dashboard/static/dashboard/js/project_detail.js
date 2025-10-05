@@ -9,7 +9,7 @@ const token = window.token || '';
 
 async function checkProjectStatus() {
   try {
-    const response = await fetch(`${baseUrl}/api/projects/${orgName}/${projectName}/status`, {
+    const response = await fetch(`${baseUrl}/api/v1/projects/${orgName}/${projectName}/status`, {
       method: "GET",
       credentials: "include",
       withCredentials: true,
@@ -17,6 +17,7 @@ async function checkProjectStatus() {
       headers: {
         "Authorization": `Bearer ${token}`,
         "Content-Type": "application/jsonstream",
+        "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
       },
     });
     

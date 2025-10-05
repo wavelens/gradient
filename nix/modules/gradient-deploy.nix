@@ -21,7 +21,6 @@ in {
       server = lib.mkOption {
         type = lib.types.str;
         description = "Address to listen on for incoming deployment requests";
-        default = "https://gradient.wavelens.io";
         example = "https://gradient.example.com";
       };
 

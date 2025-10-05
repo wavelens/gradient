@@ -247,6 +247,17 @@ pub async fn patch_cache(
         }
     };
 
+    // Prevent modification of state-managed caches
+    if cache.managed {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(BaseResponse {
+                error: true,
+                message: "Cannot modify state-managed cache. This cache is managed by configuration and cannot be edited through the API.".to_string(),
+            }),
+        ));
+    }
+
     let mut acache: ACache = cache.into();
 
     if let Some(name) = body.name {
@@ -327,6 +338,17 @@ pub async fn delete_cache(
             ));
         }
     };
+
+    // Prevent deletion of state-managed caches
+    if cache.managed {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(BaseResponse {
+                error: true,
+                message: "Cannot delete state-managed cache. This cache is managed by configuration and cannot be deleted through the API.".to_string(),
+            }),
+        ));
+    }
 
     let acache: ACache = cache.into();
     acache.delete(&state.db).await.unwrap();
