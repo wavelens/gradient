@@ -26,6 +26,7 @@ in {
       package = lib.mkPackageOption pkgs "gradient-server" { };
       package_nix = lib.mkPackageOption pkgs "nix" { };
       package_git = lib.mkPackageOption pkgs "git" { };
+      package_ssh = lib.mkPackageOption pkgs "openssh" { };
       serveCache = lib.mkEnableOption "Serve cache";
       reportErrors = lib.mkEnableOption "Report errors to Sentry";
       domain = lib.mkOption {
@@ -171,6 +172,7 @@ in {
       path = [
         cfg.package_nix
         cfg.package_git
+        cfg.package_ssh
       ];
 
       serviceConfig = {
@@ -178,6 +180,7 @@ in {
         StateDirectory = "gradient";
         User = "gradient";
         Group = "gradient";
+        PrivateTmp = true;
         ProtectHome = true;
         ProtectHostname = true;
         ProtectKernelLogs = true;
@@ -217,6 +220,7 @@ in {
         GRADIENT_MAX_CONCURRENT_BUILDS = toString cfg.settings.maxConcurrentBuilds;
         GRADIENT_BINPATH_NIX = lib.getExe cfg.package_nix;
         GRADIENT_BINPATH_GIT = lib.getExe cfg.package_git;
+        GRADIENT_BINPATH_SSH = lib.getExe' cfg.package_ssh "ssh";
         GRADIENT_OIDC_ENABLED = lib.boolToString cfg.oidc.enable;
         GRADIENT_DISABLE_REGISTRATION = lib.boolToString cfg.settings.disableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";

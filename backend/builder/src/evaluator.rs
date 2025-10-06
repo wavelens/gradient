@@ -8,6 +8,7 @@ use chrono::Utc;
 use core::database::add_features;
 use core::executer::*;
 use core::input::{parse_evaluation_wildcard, repository_url_to_nix, vec_to_hex};
+use core::sources::prefetch_flake;
 use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
@@ -44,7 +45,6 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     .await;
 
     let organization_id = if let Some(project_id) = evaluation.project {
-        // Regular project-based evaluation
         EProject::find_by_id(project_id)
             .one(&state.db)
             .await
@@ -52,7 +52,6 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             .unwrap()
             .organization
     } else {
-        // Direct build - get organization from DirectBuild record
         EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
@@ -62,6 +61,12 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             .organization
     };
 
+    let organization = EOrganization::find_by_id(organization_id)
+        .one(&state.db)
+        .await
+        .unwrap()
+        .unwrap();
+
     let commit = ECommit::find_by_id(evaluation.commit)
         .one(&state.db)
         .await
@@ -70,6 +75,8 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
     let repository =
         repository_url_to_nix(&evaluation.repository, vec_to_hex(&commit.hash).as_str()).unwrap();
+
+    prefetch_flake(Arc::clone(&state), repository.clone(), organization).await?;
 
     let wildcards = parse_evaluation_wildcard(evaluation.wildcard.as_str())?;
     let all_derivations =
@@ -93,7 +100,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             match get_derivation_cmd(state.cli.binpath_nix.as_str(), &path).await {
                 Ok((d, r)) => (d, r),
                 Err(e) => {
-                    let error_msg = format!("{}", e);
+                    let error_msg = e.clone();
                     warn!(
                         error = %e,
                         derivation = %derivation_string,
@@ -149,18 +156,25 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         debug!(derivation = %derivation, "Successfully processed package");
     }
 
-    // If all derivations failed, return an error with details
     if all_builds.is_empty() && !failed_derivations.is_empty() {
         let error_summary = if failed_derivations.len() == total_derivations {
-            format!("All {} derivations failed during evaluation", total_derivations)
+            format!(
+                "All {} derivations failed during evaluation",
+                total_derivations
+            )
         } else {
-            format!("{} out of {} derivations failed, no builds created", failed_derivations.len(), total_derivations)
+            format!(
+                "{} out of {} derivations failed, no builds created",
+                failed_derivations.len(),
+                total_derivations
+            )
         };
-        
-        let detailed_errors: Vec<String> = failed_derivations.iter()
+
+        let detailed_errors: Vec<String> = failed_derivations
+            .iter()
             .map(|(deriv, error)| format!("- {}: {}", deriv, error))
             .collect();
-        
+
         let full_error = format!("{}:\n{}", error_summary, detailed_errors.join("\n"));
         return Err(full_error);
     }
@@ -844,8 +858,9 @@ pub async fn evaluate_direct(
                 Arc::clone(&state),
                 evaluation,
                 EvaluationStatus::Failed,
-                format!("Direct evaluation failed: {}", e)
-            ).await;
+                format!("Direct evaluation failed: {}", e),
+            )
+            .await;
 
             if let Err(cleanup_err) = tokio::fs::remove_dir_all(&temp_dir).await {
                 warn!(error = %cleanup_err, temp_dir = %temp_dir, "Failed to cleanup temp directory after evaluation failure");

@@ -28,7 +28,7 @@ Gradient is a web-based Nix-based Continuous Integration (CI) system.
 Add Cache for prebuilt Gradient packages (Optional):
 ```
 URL: https://gradient.wavelens.io/cache/main
-Public Key: gradient.wavelens.io-main:SPmc2Hd/plYDpxX+K1hEYJs+g6D3a9nUj0dDA4ow1vI=
+Public Key: gradient.wavelens.io-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 ```
 
 Extend your `flake.nix` with Gradient module:

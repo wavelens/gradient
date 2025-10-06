@@ -155,21 +155,19 @@ pub fn check_index_name(s: &str) -> Result<(), String> {
 }
 
 pub fn load_secret(f: &str) -> String {
-    let s = std::fs::read_to_string(f).unwrap_or_default();
-    s.trim().replace(char::from(25), "")
-}
-
-pub fn load_secret_safe(f: &str) -> Result<String, String> {
-    let s = std::fs::read_to_string(f)
-        .map_err(|e| format!("Failed to read secret file '{}': {}", f, e))?;
+    let s = std::fs::read_to_string(f).unwrap_or_else(|e| {
+        eprintln!("Failed to read secret file '{}': {}", f, e);
+        std::process::exit(1);
+    });
 
     let cleaned = s.trim().replace(char::from(25), "");
 
     if cleaned.is_empty() {
-        return Err(format!("Secret file '{}' is empty or contains only whitespace", f));
+        eprintln!("Secret file '{}' is empty or contains only whitespace", f);
+        std::process::exit(1);
     }
 
-    Ok(cleaned)
+    cleaned
 }
 
 /// Validates password strength requirements

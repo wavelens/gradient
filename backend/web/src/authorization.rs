@@ -35,7 +35,7 @@ pub struct OidcUser {
     pub sub: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Cliams {
     pub exp: usize,
     pub iat: usize,

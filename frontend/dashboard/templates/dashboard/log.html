@@ -60,7 +60,7 @@
             </div>
             <div class="m-r-2rem">
                 <div class="text-light m-b-05rem">{% trans 'Total duration' %}</div>
-                <div>{{ duration }}</div>
+                <div id="duration-display">{{ duration }}</div>
             </div>
             <div class="m-r-2rem">
                 <div class="text-light m-b-05rem">{% trans 'Builds' %}</div>
@@ -149,7 +149,10 @@
 
     document.querySelectorAll('.details-content').forEach(details => {
         details.querySelectorAll('.line').forEach(line => {
-            line.setAttribute('data-line-number', lineCounter++);
+            // Skip line numbering for evaluation errors
+            if (!line.closest('.evaluation-error')) {
+                line.setAttribute('data-line-number', lineCounter++);
+            }
         });
     });
 

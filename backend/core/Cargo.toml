@@ -19,10 +19,10 @@ clap = { version = "4.5", features = ["derive", "env"] }
 crypter = "0.2"
 entity = { path = "../entity" }
 futures = "0.3"
-git-url-parse = "0.4"
+git-url-parse = "0.6"
 migration = { path = "../migration" }
 rand = "0.9"
-rand_core = "0.6"
+rand_core = "0.9"
 sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
 sea-orm-migration = { version = "1.1", features = ["with-uuid", "with-chrono", "with-json", "sqlx-postgres", "sea-orm-cli", "runtime-tokio"] }
 serde = { version = "1", features = ["derive"] }
@@ -36,6 +36,7 @@ nix-daemon = { path = "../nix-daemon" }
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1-rustls-tls"] }
 hex = "0.4"
 password-auth = "1.0"
+tempfile = "3.23"
 
 [dev-dependencies]
 tokio-test = "0.4"

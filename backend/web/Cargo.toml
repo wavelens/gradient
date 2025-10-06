@@ -12,14 +12,14 @@ path = "src/lib.rs"
 
 [dependencies]
 axum = { version = "0.8", features = ["multipart"] }
-axum-streams = { version = "0.21", features = ["json"] }
+axum-streams = { version = "0.23", features = ["json"] }
 async-stream = "0.3"
 chrono = "0.4"
 core = { path = "../core" }
 builder = { path = "../builder" }
 entity = { path = "../entity" }
-git-url-parse = "0.4"
-jsonwebtoken = "9.3"
+git-url-parse = "0.6"
+jsonwebtoken = { version = "10.0", features = ["aws_lc_rs"] }
 password-auth = { version = "1.0.0", features = ["argon2"] }
 rand = "0.9"
 sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
@@ -42,5 +42,5 @@ tracing = "0.1"
 
 [dev-dependencies]
 tokio-test = "0.4"
-axum-test = "17.3"
+axum-test = "18.1"
 tower = "0.5"

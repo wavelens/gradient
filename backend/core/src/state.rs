@@ -5,7 +5,7 @@
  */
 
 use crate::consts::BASE_ROLE_ADMIN_ID;
-use crate::input::load_secret_safe;
+use crate::input::load_secret;
 use base64::{Engine, engine::general_purpose};
 use chrono::Utc;
 use entity::*;
@@ -16,8 +16,6 @@ use ssh_key::PrivateKey;
 use std::collections::HashMap;
 use std::fs;
 use uuid::Uuid;
-use rand_core::{OsRng, RngCore};
-use ed25519_compact::x25519;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateUser {
@@ -489,7 +487,8 @@ fn derive_public_key(private_key: &str) -> Result<String, String> {
     let private_key = PrivateKey::from_openssh(private_key)
         .map_err(|e| format!("Failed to parse private key: {}", e))?;
 
-    let public_key = private_key.public_key()
+    let public_key = private_key
+        .public_key()
         .to_openssh()
         .map_err(|e| format!("Failed to derive public key: {}", e))?;
 
@@ -502,46 +501,6 @@ fn derive_public_key(private_key: &str) -> Result<String, String> {
     };
 
     Ok(cleaned_key)
-}
-
-fn encrypt_private_key(private_key: &str, secret_file: &str) -> Result<String, String> {
-    tracing::debug!("Starting private key encryption for secret file: {}", secret_file);
-
-    // Load and decode secret
-    let secret_content = load_secret_safe(secret_file)?;
-    let secret = general_purpose::STANDARD
-        .decode(&secret_content)
-        .map_err(|e| format!("Failed to decode GRADIENT_CRYPT_SECRET from file '{}': {}. Please check that the file contains valid base64-encoded data.", secret_file, e))?;
-
-    tracing::debug!("Secret loaded and decoded, length: {} bytes", secret.len());
-
-    // Validate that the secret key has reasonable length for encryption
-    if secret.len() < 16 {
-        return Err(format!("GRADIENT_CRYPT_SECRET is too short ({} bytes). Encryption keys should be at least 16 bytes.", secret.len()));
-    }
-
-    // Validate maximum reasonable length to prevent issues
-    if secret.len() > 1024 {
-        return Err(format!("GRADIENT_CRYPT_SECRET is too long ({} bytes). Maximum supported length is 1024 bytes.", secret.len()));
-    }
-
-    tracing::debug!("About to call crypter::encrypt with secret length: {}, private key length: {}", secret.len(), private_key.len());
-
-    // Encrypt private key with additional error context
-    let encrypted_private_key = crypter::encrypt(secret, private_key)
-        .ok_or_else(|| {
-            tracing::error!("crypter::encrypt returned None - this usually indicates a low-level encryption failure");
-            "Failed to encrypt private key with crypter - the encryption operation returned no result".to_string()
-        })?;
-
-    tracing::debug!("Encryption successful, result length: {} bytes", encrypted_private_key.len());
-
-    // Encode encrypted key
-    let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_private_key);
-
-    tracing::debug!("Base64 encoding complete, final length: {} characters", encrypted_private_key.len());
-
-    Ok(encrypted_private_key)
 }
 
 async fn apply_organizations(
@@ -570,11 +529,14 @@ async fn apply_organizations(
         // Derive the actual public key from the private key
         let public_key = derive_public_key(private_key.trim())?;
 
-        // TODO: Temporarily disable encryption to avoid crypter library segfault
-        // Until we can fix the crypter library issue, store keys unencrypted
-        // This is a temporary workaround - encryption should be re-enabled once fixed
-        tracing::warn!("Storing SSH private key without encryption due to crypter library issues");
-        let encrypted_private_key = general_purpose::STANDARD.encode(private_key.trim().as_bytes());
+        // Encrypt private key using crypter library
+        let secret = general_purpose::STANDARD
+            .decode(load_secret(crypt_secret_file))
+            .map_err(|e| format!("Failed to decode GRADIENT_CRYPT_SECRET: {}", e))?;
+
+        let encrypted_bytes = crypter::encrypt(secret, private_key.trim())
+            .ok_or_else(|| "Failed to encrypt SSH private key".to_string())?;
+        let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_bytes);
 
         let created_by_id = user_map
             .get(&state_org.created_by)
@@ -957,7 +919,11 @@ async fn apply_server_features(
         aserver_feature.insert(db).await?;
     }
 
-    tracing::debug!("Applied {} features to server '{}'", features.len(), server_name);
+    tracing::debug!(
+        "Applied {} features to server '{}'",
+        features.len(),
+        server_name
+    );
     Ok(())
 }
 
@@ -986,13 +952,11 @@ async fn apply_server_architectures(
         .await?;
 
     // Parse and validate architectures
-    let parsed_architectures: Result<Vec<server::Architecture>, _> = architectures
-        .iter()
-        .map(|arch| arch.parse())
-        .collect();
+    let parsed_architectures: Result<Vec<server::Architecture>, _> =
+        architectures.iter().map(|arch| arch.parse()).collect();
 
-    let parsed_architectures = parsed_architectures
-        .map_err(|_| "Invalid architecture specified")?;
+    let parsed_architectures =
+        parsed_architectures.map_err(|_| "Invalid architecture specified")?;
 
     if parsed_architectures.is_empty() {
         return Err("No valid architectures specified".into());
@@ -1012,7 +976,11 @@ async fn apply_server_architectures(
         .exec(db)
         .await?;
 
-    tracing::debug!("Applied {} architectures to server '{}'", architectures.len(), server_name);
+    tracing::debug!(
+        "Applied {} architectures to server '{}'",
+        architectures.len(),
+        server_name
+    );
     Ok(())
 }
 

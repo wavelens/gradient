@@ -138,7 +138,7 @@
                         </a>
                     </div>
                 {% empty %}
-                    {% if id %}
+                    {% if id and evalu %}
                     <div class="workflow-item dashboard-item">
                         <a href="{% url 'log-eval' org id %}" class="full-width normal-hover blue-span">
                             <div class="item-header">
@@ -162,12 +162,12 @@
                                     <span class="material-symbols-outlined m-r-3">schedule</span>
                                     {% trans 'Pending' %}
                                 {% endif %}
-                                • {{ evalu.created_at|timesince }} ago
+                                {% if evalu.created_at %}• {{ evalu.created_at|timesince }} ago{% endif %}
                             </p>
                             <div class="item-meta">
                                 <span class="flex-c">
                                     <span class="material-symbols-outlined m-r-3">folder</span>
-                                    <span class="text-light-n-s">{{ builds|default:"0" }} builds</span>
+                                    <span class="text-light-n-s">{{ builds|length|default:"0" }} builds</span>
                                 </span>
                             </div>
                         </a>

@@ -7,12 +7,16 @@
 use base64::{Engine, engine::general_purpose};
 use ed25519_compact::KeyPair;
 use entity::evaluation::EvaluationStatus;
-use rand_core::OsRng;
 use sea_orm::EntityTrait;
-use ssh_key::{Algorithm, LineEnding, PrivateKey};
+use ssh_key::{
+    Algorithm, LineEnding, PrivateKey, private::Ed25519Keypair, private::Ed25519PrivateKey,
+    private::KeypairData, public::Ed25519PublicKey,
+};
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
+use tempfile::NamedTempFile;
 use tokio::process::Command;
 use tracing::{debug, error, info, instrument};
 
@@ -31,16 +35,14 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
             .unwrap();
 
         let (private_key, _public_key) =
-            decrypt_ssh_private_key(load_secret(&state.cli.crypt_secret_file), organization)
-                .unwrap();
+            decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization).unwrap();
 
-        let ssh_key_path = write_key(private_key, state.cli.base_path.clone()).unwrap();
+        let ssh_key_path = write_key(private_key).unwrap();
 
         let cmd = Command::new(state.cli.binpath_git.clone())
-            .arg("ls-remote")
             .arg("-c")
-            .arg("core.sshCommand")
-            .arg(format!("'ssh -i {}'", ssh_key_path))
+            .arg(format!("core.sshCommand={} -i {} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", state.cli.binpath_ssh, ssh_key_path))
+            .arg("ls-remote")
             .arg(&project.repository)
             .output()
             .await;
@@ -62,10 +64,20 @@ pub async fn check_project_updates(state: Arc<ServerState>, project: &MProject) 
         }
     };
 
-    let errmsg = String::from_utf8(cmd.stderr).unwrap();
-
-    if !errmsg.is_empty() {
-        error!(stderr = %errmsg, "Git ls-remote returned error");
+    if !cmd.status.success() {
+        let errmsg = String::from_utf8(cmd.stderr).unwrap();
+        if errmsg.contains("cannot run ssh: No such file or directory") {
+            error!(stderr = %errmsg, "SSH binary not found. Please ensure OpenSSH client is available in PATH or set GRADIENT_BINPATH_SSH");
+        } else if errmsg.contains("Permission denied")
+            || errmsg.contains("Host key verification failed")
+        {
+            error!(stderr = %errmsg, "SSH authentication failed. Please check SSH key configuration");
+        } else if errmsg.contains("Connection refused") || errmsg.contains("Network is unreachable")
+        {
+            error!(stderr = %errmsg, "SSH connection failed. Please check repository URL and network connectivity");
+        } else {
+            error!(stderr = %errmsg, "Git ls-remote command failed");
+        }
         return (false, vec![]);
     }
 
@@ -151,16 +163,15 @@ pub async fn get_commit_info(
             .unwrap();
 
         let (private_key, _public_key) =
-            decrypt_ssh_private_key(load_secret(&state.cli.crypt_secret_file), organization)
-                .unwrap();
+            decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization).unwrap();
 
-        let ssh_key_path = write_key(private_key, state.cli.base_path.clone()).unwrap();
+        let ssh_key_path = write_key(private_key).unwrap();
 
         let cmd = Command::new(state.cli.binpath_git.clone())
             .arg("clone")
             .arg("--bare")
             .arg("-c")
-            .arg(format!("core.sshCommand=ssh -i {}", ssh_key_path))
+            .arg(format!("core.sshCommand={} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", state.cli.binpath_ssh, ssh_key_path))
             .arg(&project.repository)
             .arg(&temp_dir)
             .output()
@@ -232,15 +243,18 @@ pub async fn get_commit_info(
     result
 }
 
-pub fn write_key(private_key: String, to_path: String) -> Result<String, String> {
-    let path = format!(
-        "{}/loaded-credentials_{}.key",
-        to_path,
-        uuid::Uuid::new_v4()
-    );
+pub fn write_key(private_key: String) -> Result<String, String> {
+    let mut temp_file = NamedTempFile::with_suffix(".key").map_err(|e| e.to_string())?;
 
-    fs::write(&path, private_key).map_err(|e| e.to_string())?;
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
+    fs::set_permissions(temp_file.path(), fs::Permissions::from_mode(0o600))
+        .map_err(|e| e.to_string())?;
+
+    temp_file
+        .write_all(private_key.as_bytes())
+        .map_err(|e| e.to_string())?;
+
+    let path = temp_file.path().to_string_lossy().to_string();
+    temp_file.keep().map_err(|e| e.to_string())?;
 
     Ok(path)
 }
@@ -250,41 +264,101 @@ pub fn clear_key(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[instrument(skip(state, organization), fields(repository = %repository))]
+pub async fn prefetch_flake(state: Arc<ServerState>, repository: String, organization: MOrganization) -> Result<(), String> {
+    debug!("Prefetching flake inputs for repository: {}", repository);
+
+    let (private_key, _public_key) =
+        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization).unwrap();
+
+    let ssh_key_path = write_key(private_key).unwrap();
+
+    let cmd = Command::new(state.cli.binpath_nix.clone())
+        .arg("flake")
+        .arg("archive")
+        .arg(&repository)
+        .env("GIT_SSH_COMMAND", format!("{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", state.cli.binpath_ssh, ssh_key_path))
+        .output()
+        .await;
+
+    clear_key(ssh_key_path).ok(); // Clean up SSH key
+
+    let cmd = match cmd {
+        Ok(output) => output,
+        Err(e) => {
+            error!(error = %e, "Failed to execute nix flake archive command");
+            return Err(format!("Failed to execute nix flake archive: {}", e));
+        }
+    };
+
+    if !cmd.status.success() {
+        let stderr = String::from_utf8_lossy(&cmd.stderr);
+        error!(stderr = %stderr, "Nix flake archive command failed");
+
+        if stderr.contains("command not found") || stderr.contains("No such file") {
+            return Err("Nix is not installed or not found in PATH. Please ensure Nix is available.".to_string());
+        } else if stderr.contains("Permission denied") || stderr.contains("authentication failed") {
+            return Err("SSH authentication failed for flake input. Please check SSH key configuration.".to_string());
+        } else if stderr.contains("Connection refused") || stderr.contains("Network is unreachable") {
+            return Err("Network connection failed while fetching flake inputs.".to_string());
+        } else {
+            return Err(format!("Nix flake archive failed: {}", stderr));
+        }
+    }
+
+    let stdout = String::from_utf8_lossy(&cmd.stdout);
+    debug!(stdout = %stdout, "Nix flake archive completed successfully");
+
+    Ok(())
+}
+
 pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), String> {
-    // Step 1: Load and decode secret
     let secret = general_purpose::STANDARD
         .decode(load_secret(&secret_file))
         .map_err(|e| format!("Failed to decode GRADIENT_CRYPT_SECRET: {}", e))?;
 
-    // Step 2: Generate private key
-    let mut csprng = OsRng;
-    let private_key = PrivateKey::random(&mut csprng, Algorithm::Ed25519)
-        .map_err(|e| format!("Failed to generate SSH private key: {}", e))?;
+    let keypair = KeyPair::generate();
 
-    // Step 3: Convert private key to OpenSSH format
+    let public_key_bytes: [u8; 32] = keypair
+        .pk
+        .as_slice()
+        .try_into()
+        .map_err(|_| "Invalid public key length")?;
+    let private_key_bytes: [u8; 32] = keypair
+        .sk
+        .as_slice()
+        .try_into()
+        .map_err(|_| "Invalid private key length")?;
+
+    let keypair_data = KeypairData::Ed25519(Ed25519Keypair {
+        public: Ed25519PublicKey::try_from(&public_key_bytes[..])
+            .map_err(|e| format!("Failed to create public key: {}", e))?,
+        private: Ed25519PrivateKey::from_bytes(&private_key_bytes),
+    });
+    let private_key = PrivateKey::new(keypair_data, "")
+        .map_err(|e| format!("Failed to create SSH private key: {}", e))?;
+
     let private_key_openssh = private_key
         .to_openssh(LineEnding::LF)
         .map_err(|e| format!("Failed to convert private key to OpenSSH format: {}", e))?
         .to_string();
 
-    // Step 4: Extract public key
-    let public_key_openssh = private_key
+    let public_key_parts = private_key
         .public_key()
         .to_openssh()
         .map_err(|e| format!("Failed to convert public key to OpenSSH format: {}", e))?
-        .to_string()
-        .split_whitespace()
-        .collect::<Vec<&str>>()[1]
         .to_string();
 
-    // Step 5: Format final public key with algorithm
-    let public_key_openssh = format!("{} {}", Algorithm::Ed25519.as_str(), public_key_openssh);
+    let public_key_data = public_key_parts
+        .split_whitespace()
+        .nth(1)
+        .ok_or("Invalid public key format")?;
 
-    // Step 6: Encrypt private key
-    let encrypted_private_key = crypter::encrypt(secret, &private_key_openssh)
-        .ok_or_else(|| "Failed to encrypt private key with crypter".to_string())?;
+    let public_key_openssh = format!("{} {}", Algorithm::Ed25519.as_str(), public_key_data);
 
-    // Step 7: Encode encrypted key
+    let encrypted_private_key =
+        crypter::encrypt(secret, &private_key_openssh).ok_or("Failed to encrypt private key")?;
+
     let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_private_key);
 
     Ok((encrypted_private_key, public_key_openssh))
@@ -294,44 +368,59 @@ pub fn decrypt_ssh_private_key(
     secret_file: String,
     organization: MOrganization,
 ) -> Result<(String, String), String> {
-    let secret_content = crate::input::load_secret_safe(&secret_file)?;
+    let secret_content = crate::input::load_secret(&secret_file);
 
     let secret = general_purpose::STANDARD
         .decode(&secret_content)
         .map_err(|e| format!("Failed to decode GRADIENT_CRYPT_SECRET from file '{}': {}. Please check that the file contains valid base64-encoded data.", secret_file, e))?;
 
-    // Validate that the secret key has reasonable length for encryption
     if secret.len() < 16 {
-        return Err(format!("GRADIENT_CRYPT_SECRET is too short ({} bytes). Encryption keys should be at least 16 bytes.", secret.len()));
+        return Err(format!(
+            "GRADIENT_CRYPT_SECRET is too short ({} bytes). Encryption keys should be at least 16 bytes.",
+            secret.len()
+        ));
     }
 
     let encrypted_private_key = general_purpose::STANDARD
         .decode(organization.clone().private_key)
         .map_err(|e| format!("Failed to decode organization '{}' private key: {}. The private key in the database appears to be corrupted or not properly base64-encoded.", organization.name, e))?;
 
-    let decrypted_private_key = if let Some(p) = crypter::decrypt(secret, encrypted_private_key.clone()) {
-        // Successfully decrypted using crypter
+    let decrypted_private_key = if let Some(p) =
+        crypter::decrypt(secret, encrypted_private_key.clone())
+    {
         String::from_utf8(p)
             .map_err(|e| format!("Failed to convert decrypted private key to UTF-8: {}", e))?
     } else {
-        // Decryption failed, try treating as plaintext base64 (temporary workaround)
-        tracing::warn!("Failed to decrypt private key for organization '{}', attempting to decode as plaintext base64", organization.name);
+        tracing::warn!(
+            "Failed to decrypt private key for organization '{}', attempting to decode as plaintext base64",
+            organization.name
+        );
         match String::from_utf8(encrypted_private_key) {
             Ok(plaintext) => {
                 if plaintext.starts_with("-----BEGIN") {
-                    // This looks like a plain SSH private key
-                    tracing::warn!("Organization '{}' private key appears to be stored as plaintext base64", organization.name);
+                    tracing::warn!(
+                        "Organization '{}' private key appears to be stored as plaintext base64",
+                        organization.name
+                    );
                     plaintext
                 } else {
-                    return Err(format!("Failed to decrypt private key for organization '{}' and it doesn't appear to be plaintext. This usually indicates that the GRADIENT_CRYPT_SECRET from file '{}' does not match the key used to encrypt this organization's private key. Please verify the decryption key is correct.", organization.name, secret_file));
+                    return Err(format!(
+                        "Failed to decrypt private key for organization '{}' and it doesn't appear to be plaintext. This usually indicates that the GRADIENT_CRYPT_SECRET from file '{}' does not match the key used to encrypt this organization's private key. Please verify the decryption key is correct.",
+                        organization.name, secret_file
+                    ));
                 }
-            },
+            }
             Err(_) => {
-                return Err(format!("Failed to decrypt private key for organization '{}' and failed to decode as plaintext. This usually indicates that the GRADIENT_CRYPT_SECRET from file '{}' does not match the key used to encrypt this organization's private key. Please verify the decryption key is correct.", organization.name, secret_file));
+                return Err(format!(
+                    "Failed to decrypt private key for organization '{}' and failed to decode as plaintext. This usually indicates that the GRADIENT_CRYPT_SECRET from file '{}' does not match the key used to encrypt this organization's private key. Please verify the decryption key is correct.",
+                    organization.name, secret_file
+                ));
             }
         }
     };
+
     let formatted_public_key = format_public_key(organization);
+    let decrypted_private_key = format!("{}\n", decrypted_private_key);
 
     Ok((decrypted_private_key, formatted_public_key))
 }
@@ -358,7 +447,7 @@ pub fn generate_signing_key(secret_file: String) -> Result<String, String> {
 }
 
 pub fn decrypt_signing_key(secret_file: String, cache: MCache) -> Result<KeyPair, String> {
-    let secret_content = crate::input::load_secret_safe(&secret_file)?;
+    let secret_content = crate::input::load_secret(&secret_file);
 
     let secret = general_purpose::STANDARD
         .decode(&secret_content)

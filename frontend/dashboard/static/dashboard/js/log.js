@@ -35,6 +35,9 @@ async function checkBuildStatus() {
         const evaluation = data.message;
         updateBuildStatus(evaluation.status);
 
+        // Update duration
+        updateDuration(evaluation.created_at, evaluation.status);
+
         // Display evaluation error if it exists
         displayEvaluationError(evaluation.error);
 
@@ -101,6 +104,35 @@ function updateBuildStatus(status) {
       titleStatusIcon.className = 'loader';
       titleStatusIcon.textContent = '';
     }
+  }
+}
+
+function updateDuration(createdAt, status) {
+  const durationDisplay = document.getElementById('duration-display');
+  if (!durationDisplay || !createdAt) return;
+
+  const startTime = new Date(createdAt);
+  const now = new Date();
+  const durationMs = now - startTime;
+
+  // Format duration as HH:MM:SS or MM:SS
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  let formattedDuration;
+  if (hours > 0) {
+    formattedDuration = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  } else {
+    formattedDuration = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  durationDisplay.textContent = formattedDuration;
+
+  // Stop updating duration for completed evaluations
+  if (status === 'Completed' || status === 'Failed' || status === 'Aborted') {
+    return;
   }
 }
 
@@ -319,7 +351,10 @@ async function updateLogs() {
 function updateLineNumbers() {
   let lineCounter = 1;
   document.querySelectorAll('.details-content .line').forEach(line => {
-    line.setAttribute('data-line-number', lineCounter++);
+    // Skip line numbering for evaluation errors
+    if (!line.closest('.evaluation-error')) {
+      line.setAttribute('data-line-number', lineCounter++);
+    }
   });
 }
 

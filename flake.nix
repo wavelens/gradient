@@ -84,6 +84,7 @@
         sea-orm-cli
         rustEnv
 
+        black
         boost
         gettext
         libsodium

@@ -128,9 +128,8 @@ fn test_format_public_key() {
 fn test_write_and_clear_key() {
     let test_key =
         "-----BEGIN OPENSSH PRIVATE KEY-----\ntest_key_content\n-----END OPENSSH PRIVATE KEY-----";
-    let base_path = "/tmp".to_string();
 
-    let key_path = write_key(test_key.to_string(), base_path).unwrap();
+    let key_path = write_key(test_key.to_string()).unwrap();
 
     // Verify file exists and has correct permissions
     assert!(std::path::Path::new(&key_path).exists());

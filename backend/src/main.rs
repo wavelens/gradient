@@ -14,7 +14,10 @@ fn init_logging(log_level: &str, debug: bool) {
     let env_filter = match EnvFilter::try_from_default_env() {
         Ok(filter) => filter,
         Err(e) => {
-            eprintln!("Warning: Invalid RUST_LOG environment variable ({}), using default log level: {}", e, log_level);
+            eprintln!(
+                "Warning: Invalid RUST_LOG environment variable ({}), using default log level: {}",
+                e, log_level
+            );
             EnvFilter::new(log_level)
         }
     };

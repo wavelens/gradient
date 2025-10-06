@@ -29,7 +29,9 @@ pub async fn init_state() -> Arc<ServerState> {
     let db = connect_db(&cli).await;
 
     // Load and apply state configuration if provided
-    if let Err(e) = load_and_apply_state(&db, cli.state_file.as_deref(), &cli.crypt_secret_file).await {
+    if let Err(e) =
+        load_and_apply_state(&db, cli.state_file.as_deref(), &cli.crypt_secret_file).await
+    {
         eprintln!("Failed to load state configuration: {}", e);
         std::process::exit(1);
     }

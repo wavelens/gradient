@@ -15,7 +15,7 @@ use core::sources::check_project_updates;
 use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
-use git_url_parse::normalize_url;
+use git_url_parse::GitUrl;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
@@ -111,7 +111,7 @@ pub async fn put(
         return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
     }
 
-    let repository_url = normalize_url(body.repository.clone().as_str())
+    let repository_url = GitUrl::parse_to_url(&body.repository)
         .map_err(|_| WebError::BadRequest("Invalid Repository URL".to_string()))?;
 
     let organization: MOrganization =
@@ -242,7 +242,7 @@ pub async fn patch_project(
     }
 
     if let Some(repository) = body.repository {
-        let repository_url = normalize_url(repository.as_str())
+        let repository_url = GitUrl::parse_to_url(&repository)
             .map_err(|_| WebError::BadRequest("Invalid Repository URL".to_string()))?;
 
         aproject.repository = Set(repository_url.to_string());

@@ -188,7 +188,7 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
         }
     };
 
-    let key_file = write_key(secret_key.clone(), state.cli.base_path.clone()).unwrap();
+    let key_file = write_key(secret_key.clone()).unwrap();
 
     let output = match Command::new(state.cli.binpath_nix.clone())
         .arg("store")
