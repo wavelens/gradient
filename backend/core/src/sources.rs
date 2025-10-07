@@ -265,7 +265,11 @@ pub fn clear_key(path: String) -> Result<(), String> {
 }
 
 #[instrument(skip(state, organization), fields(repository = %repository))]
-pub async fn prefetch_flake(state: Arc<ServerState>, repository: String, organization: MOrganization) -> Result<(), String> {
+pub async fn prefetch_flake(
+    state: Arc<ServerState>,
+    repository: String,
+    organization: MOrganization,
+) -> Result<(), String> {
     debug!("Prefetching flake inputs for repository: {}", repository);
 
     let (private_key, _public_key) =
@@ -296,10 +300,17 @@ pub async fn prefetch_flake(state: Arc<ServerState>, repository: String, organiz
         error!(stderr = %stderr, "Nix flake archive command failed");
 
         if stderr.contains("command not found") || stderr.contains("No such file") {
-            return Err("Nix is not installed or not found in PATH. Please ensure Nix is available.".to_string());
+            return Err(
+                "Nix is not installed or not found in PATH. Please ensure Nix is available."
+                    .to_string(),
+            );
         } else if stderr.contains("Permission denied") || stderr.contains("authentication failed") {
-            return Err("SSH authentication failed for flake input. Please check SSH key configuration.".to_string());
-        } else if stderr.contains("Connection refused") || stderr.contains("Network is unreachable") {
+            return Err(
+                "SSH authentication failed for flake input. Please check SSH key configuration."
+                    .to_string(),
+            );
+        } else if stderr.contains("Connection refused") || stderr.contains("Network is unreachable")
+        {
             return Err("Network connection failed while fetching flake inputs.".to_string());
         } else {
             return Err(format!("Nix flake archive failed: {}", stderr));

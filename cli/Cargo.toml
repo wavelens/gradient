@@ -1,6 +1,6 @@
 [package]
 name = "gradient-cli"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "AGPL-3.0"
 authors = ["Wavelens UG <info@wavelens.io>"]
@@ -22,8 +22,8 @@ strum = "0.27"
 strum_macros = "0.27"
 serde = { version = "1.0", features = ["derive"] }
 dirs = "6.0"
-toml = "0.8"
+toml = "0.9"
 tokio = { version = "1.47", features = ["macros", "process", "rt-multi-thread"] }
 serde_json = "1.0"
 connector = { path = "connector" }
-rand = "0.8"
+rand = "0.9"
