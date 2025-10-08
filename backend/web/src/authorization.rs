@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use anyhow::{Context, Result, bail};
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
@@ -84,7 +85,20 @@ pub async fn authorize(
         ));
     }
 
-    let token_data = match decode_jwt(state.clone(), token.unwrap().to_string()).await {
+    let token_str = match token {
+        Some(t) => t.to_string(),
+        None => {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Missing authorization token".to_string(),
+                }),
+            ));
+        }
+    };
+
+    let token_data = match decode_jwt(state.clone(), token_str).await {
         Ok(data) => data,
         Err(_) => {
             return Err((
@@ -100,8 +114,15 @@ pub async fn authorize(
     let current_user = match EUser::find_by_id(token_data.claims.id)
         .one(&state.db)
         .await
-        .unwrap()
-    {
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Database error".to_string(),
+                }),
+            )
+        })? {
         Some(user) => user,
         None => {
             return Err((
@@ -141,10 +162,10 @@ pub async fn decode_jwt(
 ) -> Result<TokenData<Cliams>, StatusCode> {
     let result = if jwt.starts_with("GRAD") {
         let api_key = EApi::find()
-            .filter(CApi::Key.eq(jwt.strip_prefix("GRAD").unwrap()))
+            .filter(CApi::Key.eq(jwt.strip_prefix("GRAD").ok_or(StatusCode::UNAUTHORIZED)?))
             .one(&state.db)
             .await
-            .unwrap();
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         let api_key = match api_key {
             Some(api_key) => api_key,
@@ -154,7 +175,10 @@ pub async fn decode_jwt(
         let mut aapi_key: AApi = api_key.clone().into();
 
         aapi_key.last_used_at = Set(Utc::now().naive_utc());
-        aapi_key.save(&state.db).await.unwrap();
+        aapi_key
+            .save(&state.db)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         TokenData {
             claims: Cliams {
@@ -178,14 +202,14 @@ pub async fn decode_jwt(
     Ok(result)
 }
 
-pub async fn update_last_login(
-    state: State<Arc<ServerState>>,
-    user: MUser,
-) -> Result<MUser, String> {
+pub async fn update_last_login(state: State<Arc<ServerState>>, user: MUser) -> Result<MUser> {
     let mut auser: AUser = user.into();
 
     auser.last_login_at = Set(Utc::now().naive_utc());
-    Ok(auser.update(&state.db).await.unwrap())
+    Ok(auser
+        .update(&state.db)
+        .await
+        .context("Failed to update user last login")?)
 }
 
 pub fn generate_api_key() -> String {
@@ -196,11 +220,11 @@ pub fn generate_api_key() -> String {
         .collect()
 }
 
-async fn get_oidc_metadata(discovery_url: &str) -> Result<serde_json::Value, String> {
+async fn get_oidc_metadata(discovery_url: &str) -> Result<serde_json::Value> {
     let http_client = reqwest::ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        .context("Failed to create HTTP client")?;
 
     let metadata = http_client
         .get(
@@ -215,36 +239,36 @@ async fn get_oidc_metadata(discovery_url: &str) -> Result<serde_json::Value, Str
         )
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch OIDC metadata: {}", e))?
+        .context("Failed to fetch OIDC metadata")?
         .json::<serde_json::Value>()
         .await
-        .map_err(|e| format!("Failed to parse OIDC metadata: {}", e))?;
+        .context("Failed to parse OIDC metadata")?;
 
     Ok(metadata)
 }
 
-pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<Url, String> {
+pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<Url> {
     if !state.cli.oidc_enabled {
-        return Err("OIDC is not enabled".to_string());
+        bail!("OIDC is not enabled");
     }
 
     let discovery_url = state
         .cli
         .oidc_discovery_url
         .as_ref()
-        .ok_or("OIDC discovery URL not configured")?;
+        .context("OIDC discovery URL not configured")?;
 
     let metadata = get_oidc_metadata(discovery_url).await?;
 
     let auth_endpoint = metadata["authorization_endpoint"]
         .as_str()
-        .ok_or("No authorization_endpoint in OIDC metadata")?;
+        .context("No authorization_endpoint in OIDC metadata")?;
 
     let client_id = state
         .cli
         .oidc_client_id
         .as_ref()
-        .ok_or("OIDC client ID not configured")?;
+        .context("OIDC client ID not configured")?;
 
     let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.cli.serve_url);
 
@@ -267,7 +291,7 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<Url, St
     }
 
     let auth_url = Url::parse_with_params(auth_endpoint, &params)
-        .map_err(|e| format!("Failed to build authorization URL: {}", e))?;
+        .context("Failed to build authorization URL")?;
 
     Ok(auth_url)
 }
@@ -275,42 +299,42 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<Url, St
 pub async fn oidc_login_verify(
     state: State<Arc<ServerState>>,
     authorization_code: String,
-) -> Result<MUser, String> {
+) -> Result<MUser> {
     if !state.cli.oidc_enabled {
-        return Err("OIDC is not enabled".to_string());
+        bail!("OIDC is not enabled");
     }
 
     let discovery_url = state
         .cli
         .oidc_discovery_url
         .as_ref()
-        .ok_or("OIDC discovery URL not configured")?;
+        .context("OIDC discovery URL not configured")?;
 
     let metadata = get_oidc_metadata(discovery_url).await?;
 
     let token_endpoint = metadata["token_endpoint"]
         .as_str()
-        .ok_or("No token_endpoint in OIDC metadata")?;
+        .context("No token_endpoint in OIDC metadata")?;
 
     let userinfo_endpoint = metadata["userinfo_endpoint"]
         .as_str()
-        .ok_or("No userinfo_endpoint in OIDC metadata")?;
+        .context("No userinfo_endpoint in OIDC metadata")?;
 
     let client_id = state
         .cli
         .oidc_client_id
         .as_ref()
-        .ok_or("OIDC client ID not configured")?;
+        .context("OIDC client ID not configured")?;
     let client_secret_file = state
         .cli
         .oidc_client_secret_file
         .as_ref()
-        .ok_or("OIDC client secret file not configured")?;
+        .context("OIDC client secret file not configured")?;
 
     let http_client = reqwest::ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
-        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        .context("Failed to create HTTP client")?;
 
     let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.cli.serve_url);
 
@@ -326,16 +350,16 @@ pub async fn oidc_login_verify(
         ])
         .send()
         .await
-        .map_err(|e| format!("Token exchange request failed: {}", e))?;
+        .context("Token exchange request failed")?;
 
     let token_data: serde_json::Value = token_response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse token response: {}", e))?;
+        .context("Failed to parse token response")?;
 
     let access_token = token_data["access_token"]
         .as_str()
-        .ok_or("No access token in response")?;
+        .context("No access token in response")?;
 
     // Get user info using access token
     let userinfo_response = http_client
@@ -343,12 +367,12 @@ pub async fn oidc_login_verify(
         .bearer_auth(access_token)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch user info: {}", e))?;
+        .context("Failed to fetch user info")?;
 
     let user_data: serde_json::Value = userinfo_response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse user info: {}", e))?;
+        .context("Failed to parse user info")?;
 
     let user_info = OidcUser {
         aud: user_data["aud"].as_str().unwrap_or_default().to_string(),
@@ -366,8 +390,8 @@ pub async fn oidc_login_verify(
 async fn create_or_update_user(
     state: State<Arc<ServerState>>,
     user_info: OidcUser,
-) -> Result<MUser, String> {
-    let user: Result<MUser, String> = match EUser::find()
+) -> Result<MUser> {
+    let user: Result<MUser> = match EUser::find()
         .filter(
             Condition::any()
                 .add(CUser::Email.eq(&user_info.email))
@@ -375,11 +399,11 @@ async fn create_or_update_user(
         )
         .one(&state.db)
         .await
-        .map_err(|e| format!("Database error: {}", e))?
+        .context("Database error while finding user")?
     {
         Some(mut user) => {
             if user.password.is_some() {
-                return Err("User already exists with password authentication".to_string());
+                bail!("User already exists with password authentication");
             }
 
             let mut updated = false;
@@ -390,7 +414,7 @@ async fn create_or_update_user(
                 user = auser
                     .update(&state.db)
                     .await
-                    .map_err(|e| format!("Failed to update user email: {}", e))?;
+                    .context("Failed to update user email")?;
                 updated = true;
             }
 
@@ -400,7 +424,7 @@ async fn create_or_update_user(
                 user = auser
                     .update(&state.db)
                     .await
-                    .map_err(|e| format!("Failed to update username: {}", e))?;
+                    .context("Failed to update username")?;
                 updated = true;
             }
 
@@ -410,14 +434,14 @@ async fn create_or_update_user(
                 user = auser
                     .update(&state.db)
                     .await
-                    .map_err(|e| format!("Failed to update user name: {}", e))?;
+                    .context("Failed to update user name")?;
                 updated = true;
             }
 
             if updated {
                 user = update_last_login(state.clone(), user)
                     .await
-                    .map_err(|_| "Failed to update user".to_string())?;
+                    .context("Failed to update user")?;
             }
 
             Ok(user)
@@ -440,7 +464,7 @@ async fn create_or_update_user(
             let user = new_user
                 .insert(&state.db)
                 .await
-                .map_err(|e| format!("Failed to create user: {}", e))?;
+                .context("Failed to create user")?;
 
             Ok(user)
         }

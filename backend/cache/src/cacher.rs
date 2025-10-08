@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use core::sources::{
     clear_key, format_cache_key, get_cache_nar_location, get_hash_from_path,
@@ -58,42 +59,80 @@ pub async fn cache_loop(state: Arc<ServerState>) {
 }
 
 pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOutput) {
-    let build = EBuild::find_by_id(build_output.build)
-        .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+    let build = match EBuild::find_by_id(build_output.build).one(&state.db).await {
+        Ok(Some(b)) => b,
+        Ok(None) => {
+            error!("Build not found: {}", build_output.build);
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to query build");
+            return;
+        }
+    };
 
-    let evaluation = EEvaluation::find_by_id(build.evaluation)
+    let evaluation = match EEvaluation::find_by_id(build.evaluation)
         .one(&state.db)
         .await
-        .unwrap()
-        .unwrap();
+    {
+        Ok(Some(e)) => e,
+        Ok(None) => {
+            error!("Evaluation not found: {}", build.evaluation);
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to query evaluation");
+            return;
+        }
+    };
 
     let organization_id = if let Some(project_id) = evaluation.project {
         // Regular project-based evaluation
-        let project = EProject::find_by_id(project_id)
-            .one(&state.db)
-            .await
-            .unwrap()
-            .unwrap();
+        let project = match EProject::find_by_id(project_id).one(&state.db).await {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                error!("Project not found: {}", project_id);
+                return;
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to query project");
+                return;
+            }
+        };
         project.organization
     } else {
         // Direct build - get organization from DirectBuild record
-        EDirectBuild::find()
+        match EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
             .await
-            .unwrap()
-            .unwrap()
-            .organization
+        {
+            Ok(Some(d)) => d.organization,
+            Ok(None) => {
+                error!("Direct build not found for evaluation: {}", evaluation.id);
+                return;
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to query direct build");
+                return;
+            }
+        }
     };
 
-    let organization = EOrganization::find_by_id(organization_id)
+    let organization = match EOrganization::find_by_id(organization_id)
         .one(&state.db)
         .await
-        .unwrap()
-        .unwrap();
+    {
+        Ok(Some(o)) => o,
+        Ok(None) => {
+            error!("Organization not found: {}", organization_id);
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to query organization");
+            return;
+        }
+    };
 
     let path = get_path_from_build_output(build_output.clone());
 
@@ -124,25 +163,43 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         return;
     }
 
-    let organization_caches = EOrganizationCache::find()
+    let organization_caches = match EOrganizationCache::find()
         .filter(COrganizationCache::Organization.eq(organization.id))
         .all(&state.db)
         .await
-        .unwrap();
+    {
+        Ok(caches) => caches,
+        Err(e) => {
+            error!(error = %e, "Failed to query organization caches");
+            return;
+        }
+    };
 
     for organization_cache in organization_caches {
-        let ocs = EOrganizationCache::find()
+        let ocs = match EOrganizationCache::find()
             .filter(COrganizationCache::Cache.eq(organization_cache.cache))
             .all(&state.db)
             .await
-            .unwrap();
+        {
+            Ok(caches) => caches,
+            Err(e) => {
+                error!(error = %e, "Failed to query cache organizations");
+                continue;
+            }
+        };
 
         for oc in ocs {
-            let cache = ECache::find_by_id(oc.cache)
-                .one(&state.db)
-                .await
-                .unwrap()
-                .unwrap();
+            let cache = match ECache::find_by_id(oc.cache).one(&state.db).await {
+                Ok(Some(c)) => c,
+                Ok(None) => {
+                    error!("Cache not found: {}", oc.cache);
+                    continue;
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed to query cache");
+                    continue;
+                }
+            };
 
             if cache.active {
                 sign_build_output(Arc::clone(&state), cache.clone(), build_output.clone()).await;
@@ -170,7 +227,10 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
     abuild_output.file_size = Set(Some(file_size as i64));
     abuild_output.is_cached = Set(true);
 
-    abuild_output.update(&state.db).await.unwrap();
+    if let Err(e) = abuild_output.update(&state.db).await {
+        error!(error = %e, "Failed to update build output cache status");
+        return;
+    }
 }
 
 pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_output: MBuildOutput) {
@@ -188,7 +248,13 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
         }
     };
 
-    let key_file = write_key(secret_key.clone()).unwrap();
+    let key_file = match write_key(secret_key.clone()) {
+        Ok(file) => file,
+        Err(e) => {
+            error!(error = %e, "Failed to write cache key file");
+            return;
+        }
+    };
 
     let output = match Command::new(state.cli.binpath_nix.clone())
         .arg("store")
@@ -212,7 +278,9 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
         return;
     }
 
-    clear_key(key_file).unwrap();
+    if let Err(e) = clear_key(key_file) {
+        error!(error = %e, "Failed to clear cache key file");
+    }
     let output = match Command::new(state.cli.binpath_nix.clone())
         .arg("path-info")
         .arg("--sigs")
@@ -237,7 +305,12 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
     let mut signature = String::new();
     for line in signatures.lines() {
         if line.contains(secret_key.split(':').collect::<Vec<&str>>()[0]) {
-            signature = line.split_whitespace().last().unwrap().to_string();
+            if let Some(last_part) = line.split_whitespace().last() {
+                signature = last_part.to_string();
+            } else {
+                error!("Failed to parse signature from line: {}", line);
+                continue;
+            }
             break;
         }
     }
@@ -250,81 +323,73 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    build_path_signature.insert(&state.db).await.unwrap();
+    if let Err(e) = build_path_signature.insert(&state.db).await {
+        error!(error = %e, "Failed to insert build output signature");
+    }
 }
 
 pub async fn pack_build_output(
     state: Arc<ServerState>,
     build_output: MBuildOutput,
-) -> Result<(String, u32), String> {
+) -> Result<(String, u32)> {
     let path = get_path_from_build_output(build_output);
 
-    let (path_hash, _path_package) = get_hash_from_path(path.clone()).unwrap();
+    let (path_hash, _path_package) =
+        get_hash_from_path(path.clone()).context("Failed to parse build output path")?;
     let file_location_tmp =
-        get_cache_nar_location(state.cli.base_path.clone(), path_hash.clone(), false);
+        get_cache_nar_location(state.cli.base_path.clone(), path_hash.clone(), false)
+            .context("Failed to get cache location for temp file")?;
     let file_location =
-        get_cache_nar_location(state.cli.base_path.clone(), path_hash.clone(), true);
+        get_cache_nar_location(state.cli.base_path.clone(), path_hash.clone(), true)
+            .context("Failed to get cache location")?;
 
-    let output = match Command::new(state.cli.binpath_nix.clone())
+    let output = Command::new(state.cli.binpath_nix.clone())
         .arg("nar")
         .arg("pack")
         .arg(path)
         .output()
         .await
-        .map_err(|e| e.to_string())
-    {
-        Ok(output) => output,
-        Err(e) => {
-            return Err(format!("Error while executing command: {}", e));
-        }
-    };
+        .context("Failed to execute nix nar pack command")?;
 
     if !output.status.success() {
-        return Err("Could not pack Path".to_string());
+        anyhow::bail!("Nix nar pack command failed");
     }
 
     tokio::fs::write(file_location_tmp.clone(), output.stdout)
         .await
-        .map_err(|e| e.to_string())
-        .unwrap();
+        .context("Failed to write temporary NAR file")?;
 
     let input_data = tokio::fs::read(file_location_tmp.clone())
         .await
-        .map_err(|e| format!("Failed to read input file: {}", e))?;
+        .context("Failed to read temporary NAR file")?;
 
-    let compressed_data = zstd::bulk::compress(&input_data, 19)
-        .map_err(|e| format!("Failed to compress data: {}", e))?;
+    let compressed_data =
+        zstd::bulk::compress(&input_data, 19).context("Failed to compress NAR data")?;
 
     tokio::fs::write(file_location.clone(), compressed_data)
         .await
-        .map_err(|e| format!("Failed to write compressed file: {}", e))?;
+        .context("Failed to write compressed NAR file")?;
 
     tokio::fs::remove_file(file_location_tmp.clone())
         .await
-        .map_err(|e| format!("Failed to remove temporary file: {}", e))?;
+        .context("Failed to remove temporary NAR file")?;
 
-    let output = match Command::new(state.cli.binpath_nix.clone())
+    let output = Command::new(state.cli.binpath_nix.clone())
         .arg("hash")
         .arg("file")
         .arg("--base32")
         .arg(file_location.clone())
         .output()
         .await
-        .map_err(|e| e.to_string())
-    {
-        Ok(output) => output,
-        Err(e) => {
-            return Err(format!("Error while executing command: {}", e));
-        }
-    };
+        .context("Failed to execute nix hash file command")?;
 
     if !output.status.success() {
-        return Err("Could not retrive hash of file".to_string());
+        bail!("Nix hash file command failed");
     }
 
     let file_hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-    let file_metadata = std::fs::metadata(file_location).unwrap();
+    let file_metadata = std::fs::metadata(file_location).context("Failed to get file metadata")?;
     let file_size = file_metadata.len() as u32;
 
     Ok((format!("sha256:{}", file_hash), file_size))
@@ -336,15 +401,15 @@ async fn get_next_build_output(state: Arc<ServerState>) -> Option<MBuildOutput> 
         .order_by_asc(CBuildOutput::CreatedAt)
         .one(&state.db)
         .await
-        .unwrap()
+        .unwrap_or_else(|e| {
+            error!(error = %e, "Failed to query next build output");
+            None
+        })
 }
 
-pub async fn invalidate_cache_for_path(
-    state: Arc<ServerState>,
-    path: String,
-) -> Result<(), String> {
+pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) -> Result<()> {
     let (hash, package) = get_hash_from_path(path.clone())
-        .map_err(|e| format!("Failed to parse path {}: {}", path, e))?;
+        .with_context(|| format!("Failed to parse path {}", path))?;
 
     // Find all build outputs for this path
     let build_outputs = EBuildOutput::find()
@@ -356,7 +421,7 @@ pub async fn invalidate_cache_for_path(
         )
         .all(&state.db)
         .await
-        .map_err(|e| format!("Database error: {}", e))?;
+        .context("Database error while finding build outputs")?;
 
     for build_output in build_outputs {
         // Mark as not cached
@@ -367,13 +432,14 @@ pub async fn invalidate_cache_for_path(
         abuild_output
             .update(&state.db)
             .await
-            .map_err(|e| format!("Failed to update build output: {}", e))?;
+            .context("Failed to update build output")?;
 
         // Remove cached files
-        let file_location = get_cache_nar_location(state.cli.base_path.clone(), hash.clone(), true);
+        let file_location = get_cache_nar_location(state.cli.base_path.clone(), hash.clone(), true)
+            .context("Failed to get cache NAR location")?;
         if std::fs::metadata(&file_location).is_ok() {
             std::fs::remove_file(&file_location)
-                .map_err(|e| format!("Failed to remove cached file {}: {}", file_location, e))?;
+                .with_context(|| format!("Failed to remove cached file {}", file_location))?;
         }
 
         // Remove signatures
@@ -381,14 +447,14 @@ pub async fn invalidate_cache_for_path(
             .filter(CBuildOutputSignature::BuildOutput.eq(build_output.id))
             .all(&state.db)
             .await
-            .map_err(|e| format!("Database error: {}", e))?;
+            .context("Failed to find build output signatures")?;
 
         for signature in signatures {
             let asignature = signature.into_active_model();
             asignature
                 .delete(&state.db)
                 .await
-                .map_err(|e| format!("Failed to delete signature: {}", e))?;
+                .context("Failed to delete signature")?;
         }
 
         info!(path = %path, "Invalidated cache for path");
@@ -397,7 +463,7 @@ pub async fn invalidate_cache_for_path(
     Ok(())
 }
 
-pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<(), String> {
+pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()> {
     let cache_dir = format!("{}/nars", state.cli.base_path);
 
     if !std::path::Path::new(&cache_dir).exists() {
@@ -407,18 +473,13 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<(),
     let mut orphaned_files = Vec::new();
 
     // Walk through cache directory
-    for entry in std::fs::read_dir(&cache_dir)
-        .map_err(|e| format!("Failed to read cache directory: {}", e))?
-    {
-        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+    for entry in std::fs::read_dir(&cache_dir).context("Failed to read cache directory")? {
+        let entry = entry.context("Failed to read directory entry")?;
         let path = entry.path();
 
         if path.is_dir() {
-            for subentry in std::fs::read_dir(&path)
-                .map_err(|e| format!("Failed to read subdirectory: {}", e))?
-            {
-                let subentry =
-                    subentry.map_err(|e| format!("Failed to read subdirectory entry: {}", e))?;
+            for subentry in std::fs::read_dir(&path).context("Failed to read subdirectory")? {
+                let subentry = subentry.context("Failed to read subdirectory entry")?;
                 let file_path = subentry.path();
 
                 if file_path.extension().and_then(|s| s.to_str()) == Some("zst") {
@@ -437,7 +498,7 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<(),
                                 )
                                 .one(&state.db)
                                 .await
-                                .map_err(|e| format!("Database error: {}", e))?
+                                .context("Failed to check if build output exists")?
                                 .is_some();
 
                             if !build_output_exists {

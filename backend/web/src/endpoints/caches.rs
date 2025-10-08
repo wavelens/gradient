@@ -125,8 +125,13 @@ async fn get_nar_by_hash(
         store_path: path,
         url: format!("nar/{}.nar.zst", hash),
         compression: "zstd".to_string(),
-        file_hash: build_output.file_hash.unwrap(),
-        file_size: build_output.file_size.unwrap() as u32,
+        file_hash: build_output
+            .file_hash
+            .ok_or_else(|| WebError::BadRequest("Missing file hash".to_string()))?,
+        file_size: build_output
+            .file_size
+            .ok_or_else(|| WebError::BadRequest("Missing file size".to_string()))?
+            as u32,
         nar_hash: format!("sha256:{}", nar_hash.trim()),
         nar_size: pathinfo.nar_size,
         references: pathinfo.references,
@@ -217,7 +222,7 @@ pub async fn get_cache(
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<MCache>>> {
     let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone())
-        .await
+        .await?
         .ok_or_else(|| WebError::not_found("Cache"))?;
 
     let res = BaseResponse {
@@ -235,13 +240,22 @@ pub async fn patch_cache(
     Json(body): Json<PatchCacheRequest>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
-        Some(c) => c,
-        None => {
+        Ok(Some(c)) => c,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
                     error: true,
                     message: "Cache not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
                 }),
             ));
         }
@@ -275,7 +289,15 @@ pub async fn patch_cache(
             .filter(CCache::Name.eq(name.clone()))
             .one(&state.db)
             .await
-            .unwrap();
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: format!("Database error: {}", e),
+                    }),
+                )
+            })?;
 
         if cache.is_some() {
             return Err((
@@ -311,7 +333,15 @@ pub async fn patch_cache(
         acache.priority = Set(priority);
     }
 
-    acache.update(&state.db).await.unwrap();
+    if let Err(e) = acache.update(&state.db).await {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(BaseResponse {
+                error: true,
+                message: format!("Failed to update cache: {}", e),
+            }),
+        ));
+    }
 
     let res = BaseResponse {
         error: false,
@@ -327,13 +357,22 @@ pub async fn delete_cache(
     Path(cache): Path<String>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
-        Some(c) => c,
-        None => {
+        Ok(Some(c)) => c,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
                     error: true,
                     message: "Cache not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
                 }),
             ));
         }
@@ -351,7 +390,15 @@ pub async fn delete_cache(
     }
 
     let acache: ACache = cache.into();
-    acache.delete(&state.db).await.unwrap();
+    if let Err(e) = acache.delete(&state.db).await {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(BaseResponse {
+                error: true,
+                message: format!("Failed to delete cache: {}", e),
+            }),
+        ));
+    }
 
     let res = BaseResponse {
         error: false,
@@ -367,8 +414,8 @@ pub async fn post_cache_active(
     Path(cache): Path<String>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
-        Some(c) => c,
-        None => {
+        Ok(Some(c)) => c,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
@@ -377,11 +424,28 @@ pub async fn post_cache_active(
                 }),
             ));
         }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
+                }),
+            ));
+        }
     };
 
     let mut acache: ACache = cache.into();
     acache.active = Set(true);
-    acache.update(&state.db).await.unwrap();
+    if let Err(e) = acache.update(&state.db).await {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(BaseResponse {
+                error: true,
+                message: format!("Failed to activate cache: {}", e),
+            }),
+        ));
+    }
 
     let res = BaseResponse {
         error: false,
@@ -397,8 +461,8 @@ pub async fn delete_cache_active(
     Path(cache): Path<String>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
-        Some(c) => c,
-        None => {
+        Ok(Some(c)) => c,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
@@ -407,11 +471,28 @@ pub async fn delete_cache_active(
                 }),
             ));
         }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
+                }),
+            ));
+        }
     };
 
     let mut acache: ACache = cache.into();
     acache.active = Set(false);
-    acache.update(&state.db).await.unwrap();
+    if let Err(e) = acache.update(&state.db).await {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(BaseResponse {
+                error: true,
+                message: format!("Failed to deactivate cache: {}", e),
+            }),
+        ));
+    }
 
     let res = BaseResponse {
         error: false,
@@ -427,13 +508,22 @@ pub async fn get_cache_key(
     Path(cache): Path<String>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
-        Some(c) => c,
-        None => {
+        Ok(Some(c)) => c,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
                     error: true,
                     message: "Cache not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
                 }),
             ));
         }
@@ -473,15 +563,23 @@ pub async fn nix_cache_info(
         .filter(CCache::Name.eq(cache))
         .one(&state.db)
         .await
-        .unwrap()
     {
-        Some(c) => c,
-        None => {
+        Ok(Some(c)) => c,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
                     error: true,
                     message: "Cache not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
                 }),
             ));
         }
@@ -503,14 +601,22 @@ pub async fn nix_cache_info(
         priority: cache.priority,
     };
 
-    Ok(Response::builder()
+    Response::builder()
         .status(StatusCode::OK)
         .header(
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/x-nix-cache-info"),
         )
         .body(res.to_nix_string())
-        .unwrap())
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to build response: {}", e),
+                }),
+            )
+        })
 }
 
 pub async fn path(
@@ -522,10 +628,10 @@ pub async fn path(
             StatusCode::BAD_REQUEST,
             Json(BaseResponse {
                 error: true,
-                message: e,
+                message: e.to_string(),
             }),
         )
-    });
+    })?;
 
     if !path.ends_with(".narinfo") {
         return Err((
@@ -541,15 +647,23 @@ pub async fn path(
         .filter(CCache::Name.eq(cache))
         .one(&state.db)
         .await
-        .unwrap()
     {
-        Some(c) => c,
-        None => {
+        Ok(Some(c)) => c,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
                     error: true,
                     message: "Cache not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
                 }),
             ));
         }
@@ -565,7 +679,7 @@ pub async fn path(
         ));
     }
 
-    let path_info = match get_nar_by_hash(Arc::clone(&state), cache, path_hash.unwrap()).await {
+    let path_info = match get_nar_by_hash(Arc::clone(&state), cache, path_hash).await {
         Ok(path_info) => path_info,
         Err(_) => {
             return Err((
@@ -578,14 +692,22 @@ pub async fn path(
         }
     };
 
-    Ok(Response::builder()
+    Response::builder()
         .status(StatusCode::OK)
         .header(
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/x-nix-narinfo"),
         )
         .body(path_info.to_nix_string())
-        .unwrap())
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to build response: {}", e),
+                }),
+            )
+        })
 }
 
 pub async fn nar(
@@ -597,10 +719,10 @@ pub async fn nar(
             StatusCode::BAD_REQUEST,
             Json(BaseResponse {
                 error: true,
-                message: e,
+                message: e.to_string(),
             }),
         )
-    });
+    })?;
 
     if !path.ends_with(".nar") && !path.contains(".nar.") {
         return Err((
@@ -616,15 +738,23 @@ pub async fn nar(
         .filter(CCache::Name.eq(cache))
         .one(&state.db)
         .await
-        .unwrap()
     {
-        Some(c) => c,
-        None => {
+        Ok(Some(c)) => c,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
                     error: true,
                     message: "Cache not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
                 }),
             ));
         }
@@ -640,7 +770,16 @@ pub async fn nar(
         ));
     }
 
-    let file_path = get_cache_nar_location(state.cli.base_path.clone(), path_hash.unwrap(), true);
+    let file_path =
+        get_cache_nar_location(state.cli.base_path.clone(), path_hash, true).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to get cache location: {}", e),
+                }),
+            )
+        })?;
 
     let file = tokio::fs::File::open(&file_path).await.map_err(|e| {
         (
@@ -655,12 +794,20 @@ pub async fn nar(
     let stream = ReaderStream::new(file);
     let body = Body::from_stream(stream);
 
-    Ok(Response::builder()
+    Response::builder()
         .status(StatusCode::OK)
         .header(
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/x-nix-nar"),
         )
         .body(body)
-        .unwrap())
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to build response: {}", e),
+                }),
+            )
+        })
 }

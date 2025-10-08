@@ -162,7 +162,11 @@ pub async fn post_build(
         }
 
         loop {
-            let build = EBuild::find_by_id(build_id).one(&state.db).await.unwrap().unwrap();
+            let build = match EBuild::find_by_id(build_id).one(&state.db).await {
+                Ok(Some(b)) => b,
+                Ok(None) => break,
+                Err(_) => break,
+            };
             if build.status != entity::build::BuildStatus::Building {
                 if first_response {
                     yield "".to_string();
@@ -218,7 +222,10 @@ pub async fn post_direct_build(
                     WebError::BadRequest(format!("Failed to read derivation: {}", e))
                 })?);
         } else if name.starts_with("file:") {
-            let filename = name.strip_prefix("file:").unwrap().to_string();
+            let filename = match name.strip_prefix("file:") {
+                Some(f) => f.to_string(),
+                None => return Err(WebError::BadRequest("Invalid file field name".to_string())),
+            };
             let data = field.bytes().await.map_err(|e| {
                 WebError::BadRequest(format!("Failed to read file {}: {}", filename, e))
             })?;
@@ -239,7 +246,7 @@ pub async fn post_direct_build(
     // Get organization
     let org =
         core::database::get_organization_by_name(Arc::clone(&state), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     // We'll create the DirectBuild record after the evaluation

@@ -153,7 +153,7 @@ pub async fn get_organization(
 ) -> WebResult<Json<BaseResponse<MOrganization>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let res = BaseResponse {
@@ -172,7 +172,7 @@ pub async fn patch_organization(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     // Prevent modification of state-managed organizations
@@ -227,7 +227,7 @@ pub async fn delete_organization(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     // Prevent deletion of state-managed organizations
@@ -253,7 +253,7 @@ pub async fn get_organization_users(
 ) -> WebResult<Json<BaseResponse<Vec<StringListItem>>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let organization_users = EOrganizationUser::find()
@@ -290,7 +290,7 @@ pub async fn post_organization_users(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let target_user = EUser::find()
@@ -349,7 +349,7 @@ pub async fn patch_organization_users(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let target_user = EUser::find()
@@ -394,7 +394,7 @@ pub async fn delete_organization_users(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let target_user = EUser::find()
@@ -431,7 +431,7 @@ pub async fn get_organization_ssh(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let res = BaseResponse {
@@ -449,7 +449,7 @@ pub async fn post_organization_ssh(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     if organization.managed {
@@ -485,7 +485,7 @@ pub async fn get_organization_subscribe(
 ) -> WebResult<Json<BaseResponse<ListResponse>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let organization_caches = EOrganizationCache::find()
@@ -516,11 +516,11 @@ pub async fn post_organization_subscribe_cache(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone())
-        .await
+        .await?
         .ok_or_else(|| WebError::not_found("Cache"))?;
 
     let organization_cache = EOrganizationCache::find()
@@ -561,11 +561,11 @@ pub async fn delete_organization_subscribe_cache(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone())
-        .await
+        .await?
         .ok_or_else(|| WebError::not_found("Cache"))?;
 
     let organization_cache = EOrganizationCache::find()

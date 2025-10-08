@@ -5,7 +5,7 @@
  */
 
 { lib, ... }: with lib; let
-  userType = types.submodule {
+  userType = types.submodule ({ config, ... }: {
     options = {
       username = mkOption {
         type = types.str;
@@ -14,6 +14,7 @@
 
       name = mkOption {
         type = types.str;
+        default = config.username;
         description = "Full name of the user";
       };
 
@@ -29,13 +30,13 @@
 
       email_verified = mkOption {
         type = types.bool;
-        default = false;
+        default = true;
         description = "Whether the user's email has been verified";
       };
     };
-  };
+  });
 
-  organizationType = types.submodule {
+  organizationType = types.submodule ({ config, ... }: {
     options = {
       name = mkOption {
         type = types.str;
@@ -44,11 +45,13 @@
 
       display_name = mkOption {
         type = types.str;
+        default = config.name;
         description = "Display name for the organization";
       };
 
       description = mkOption {
         type = types.str;
+        default = "";
         description = "Description of the organization";
       };
 
@@ -68,9 +71,9 @@
         description = "Username of the user who created this organization";
       };
     };
-  };
+  });
 
-  projectType = types.submodule {
+  projectType = types.submodule ({ config, ... }: {
     options = {
       name = mkOption {
         type = types.str;
@@ -84,11 +87,13 @@
 
       display_name = mkOption {
         type = types.str;
+        default = config.name;
         description = "Display name for the project";
       };
 
       description = mkOption {
         type = types.str;
+        default = "";
         description = "Description of the project";
       };
 
@@ -99,7 +104,7 @@
 
       evaluation_wildcard = mkOption {
         type = types.str;
-        default = "main";
+        default = "packages.x86_64-linux.*";
         description = "Branch or pattern for evaluations";
       };
 
@@ -120,10 +125,10 @@
         description = "Username of the user who created this project";
       };
     };
-  };
+  });
 
 
-  serverType = types.submodule {
+  serverType = types.submodule ({ config, ... }: {
     options = {
       name = mkOption {
         type = types.str;
@@ -132,6 +137,7 @@
 
       display_name = mkOption {
         type = types.str;
+        default = config.name;
         description = "Display name for the server";
       };
 
@@ -148,6 +154,7 @@
 
       host = mkOption {
         type = types.str;
+        default = "localhost";
         description = "Hostname or IP address of the server";
       };
 
@@ -179,9 +186,9 @@
         description = "Username of the user who created this server";
       };
     };
-  };
+  });
 
-  cacheType = types.submodule {
+  cacheType = types.submodule ({ config, ... }: {
     options = {
       name = mkOption {
         type = types.str;
@@ -190,11 +197,13 @@
 
       display_name = mkOption {
         type = types.str;
+        default = config.name;
         description = "Display name for the cache";
       };
 
       description = mkOption {
         type = types.str;
+        default = "";
         description = "Description of the cache";
       };
 
@@ -206,7 +215,7 @@
 
       priority = mkOption {
         type = types.int;
-        default = 100;
+        default = 10;
         description = "Priority of the cache (higher is more important)";
       };
 
@@ -226,7 +235,7 @@
         description = "Username of the user who created this cache";
       };
     };
-  };
+  });
 
   apiKeyType = types.submodule {
     options = {

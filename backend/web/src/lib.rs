@@ -27,14 +27,23 @@ use std::sync::Arc;
 pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     let server_url = format!("{}:{}", state.cli.ip.clone(), state.cli.port.clone());
     let cors_allow_origin = if state.cli.debug {
-        AllowOrigin::list(vec![
-            state.cli.serve_url.clone().try_into().unwrap(),
-            format!("http://{}:8000", state.cli.ip.clone(),)
-                .try_into()
-                .unwrap(),
-        ])
+        let serve_url = state.cli.serve_url.clone().try_into().map_err(|e| {
+            tracing::error!("Invalid serve URL: {}", e);
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid serve URL")
+        })?;
+        let debug_url = format!("http://{}:8000", state.cli.ip.clone())
+            .try_into()
+            .map_err(|e| {
+                tracing::error!("Invalid debug URL: {}", e);
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid debug URL")
+            })?;
+        AllowOrigin::list(vec![serve_url, debug_url])
     } else {
-        AllowOrigin::exact(state.cli.serve_url.clone().try_into().unwrap())
+        let serve_url = state.cli.serve_url.clone().try_into().map_err(|e| {
+            tracing::error!("Invalid serve URL: {}", e);
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid serve URL")
+        })?;
+        AllowOrigin::exact(serve_url)
     };
 
     let cors = CorsLayer::new()

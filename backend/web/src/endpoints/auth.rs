@@ -53,7 +53,7 @@ pub async fn post_basic_register(
     }
 
     if let Err(e) = validate_username(&body.username) {
-        return Err(WebError::invalid_username(e));
+        return Err(WebError::invalid_username(e.to_string()));
     }
 
     if let Err(e) = validate_display_name(&body.name) {
@@ -65,7 +65,7 @@ pub async fn post_basic_register(
     }
 
     if let Err(e) = validate_password(&body.password) {
-        return Err(WebError::invalid_password(e));
+        return Err(WebError::invalid_password(e.to_string()));
     }
 
     let existing_user = EUser::find()
@@ -114,16 +114,13 @@ pub async fn post_basic_register(
         && state.cli.email_require_verification
         && verification_token.is_some()
     {
-        if let Err(e) = email_service
-            .send_verification_email(
-                &body.email,
-                &body.name,
-                verification_token.as_ref().unwrap(),
-                &state.cli.serve_url,
-            )
-            .await
-        {
-            tracing::warn!("Failed to send verification email: {}", e);
+        if let Some(ref token) = verification_token {
+            if let Err(e) = email_service
+                .send_verification_email(&body.email, &body.name, token, &state.cli.serve_url)
+                .await
+            {
+                tracing::warn!("Failed to send verification email: {}", e);
+            }
         }
     }
 
@@ -241,11 +238,19 @@ pub async fn get_oidc_login(
         .await
         .map_err(|e| WebError::Unauthorized(e.to_string()))?;
 
-    Ok(Response::builder()
+    match Response::builder()
         .status(StatusCode::FOUND)
         .header("Location", authorize_url.to_string())
         .body(Body::empty())
-        .unwrap())
+    {
+        Ok(response) => Ok(response),
+        Err(e) => {
+            tracing::error!("Failed to build HTTP response: {}", e);
+            Err(WebError::InternalServerError(
+                "Failed to build redirect response".to_string(),
+            ))
+        }
+    }
 }
 
 pub async fn get_oidc_callback(
@@ -288,7 +293,7 @@ pub async fn post_check_username(
     if let Err(e) = validate_username(&body.username) {
         return Ok(Json(BaseResponse {
             error: true,
-            message: e,
+            message: e.to_string(),
         }));
     }
 

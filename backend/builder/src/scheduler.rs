@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use anyhow::Result;
 use chrono::Utc;
 use core::executer::*;
 use core::sources::*;
@@ -61,32 +62,121 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
 
     let (_project, organization) = if let Some(project_id) = evaluation.project {
         // Regular project-based evaluation
-        let project = EProject::find_by_id(project_id)
-            .one(&state.db)
-            .await
-            .unwrap()
-            .unwrap();
+        let project = match EProject::find_by_id(project_id).one(&state.db).await {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                error!("Project not found: {}", project_id);
+                update_evaluation_status_with_error(
+                    Arc::clone(&state),
+                    evaluation,
+                    EvaluationStatus::Failed,
+                    "Project not found".to_string(),
+                )
+                .await;
+                return;
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to query project");
+                update_evaluation_status_with_error(
+                    Arc::clone(&state),
+                    evaluation,
+                    EvaluationStatus::Failed,
+                    format!("Failed to query project: {}", e),
+                )
+                .await;
+                return;
+            }
+        };
 
-        let organization = EOrganization::find_by_id(project.organization)
+        let organization = match EOrganization::find_by_id(project.organization)
             .one(&state.db)
             .await
-            .unwrap()
-            .unwrap();
+        {
+            Ok(Some(o)) => o,
+            Ok(None) => {
+                error!("Organization not found: {}", project.organization);
+                update_evaluation_status_with_error(
+                    Arc::clone(&state),
+                    evaluation,
+                    EvaluationStatus::Failed,
+                    "Organization not found".to_string(),
+                )
+                .await;
+                return;
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to query organization");
+                update_evaluation_status_with_error(
+                    Arc::clone(&state),
+                    evaluation,
+                    EvaluationStatus::Failed,
+                    format!("Failed to query organization: {}", e),
+                )
+                .await;
+                return;
+            }
+        };
         (Some(project), organization)
     } else {
         // Direct build - get organization from DirectBuild record
-        let direct_build = EDirectBuild::find()
+        let direct_build = match EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
             .await
-            .unwrap()
-            .unwrap();
+        {
+            Ok(Some(d)) => d,
+            Ok(None) => {
+                error!("Direct build not found for evaluation: {}", evaluation.id);
+                update_evaluation_status_with_error(
+                    Arc::clone(&state),
+                    evaluation,
+                    EvaluationStatus::Failed,
+                    "Direct build not found".to_string(),
+                )
+                .await;
+                return;
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to query direct build");
+                update_evaluation_status_with_error(
+                    Arc::clone(&state),
+                    evaluation,
+                    EvaluationStatus::Failed,
+                    format!("Failed to query direct build: {}", e),
+                )
+                .await;
+                return;
+            }
+        };
 
-        let organization = EOrganization::find_by_id(direct_build.organization)
+        let organization = match EOrganization::find_by_id(direct_build.organization)
             .one(&state.db)
             .await
-            .unwrap()
-            .unwrap();
+        {
+            Ok(Some(o)) => o,
+            Ok(None) => {
+                error!("Organization not found: {}", direct_build.organization);
+                update_evaluation_status_with_error(
+                    Arc::clone(&state),
+                    evaluation,
+                    EvaluationStatus::Failed,
+                    "Organization not found".to_string(),
+                )
+                .await;
+                return;
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to query organization");
+                update_evaluation_status_with_error(
+                    Arc::clone(&state),
+                    evaluation,
+                    EvaluationStatus::Failed,
+                    format!("Failed to query organization: {}", e),
+                )
+                .await;
+                return;
+            }
+        };
         (None, organization)
     };
 
@@ -151,16 +241,33 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 return;
             }
 
-            EBuild::insert_many(active_builds)
-                .exec(&state.db)
-                .await
-                .unwrap();
+            if let Err(e) = EBuild::insert_many(active_builds).exec(&state.db).await {
+                error!(error = %e, "Failed to insert builds");
+                update_evaluation_status_with_error(
+                    Arc::clone(&state),
+                    evaluation,
+                    EvaluationStatus::Failed,
+                    format!("Failed to insert builds: {}", e),
+                )
+                .await;
+                return;
+            }
 
             if !active_dependencies.is_empty() {
-                EBuildDependency::insert_many(active_dependencies)
+                if let Err(e) = EBuildDependency::insert_many(active_dependencies)
                     .exec(&state.db)
                     .await
-                    .unwrap();
+                {
+                    error!(error = %e, "Failed to insert build dependencies");
+                    update_evaluation_status_with_error(
+                        Arc::clone(&state),
+                        evaluation,
+                        EvaluationStatus::Failed,
+                        format!("Failed to insert build dependencies: {}", e),
+                    )
+                    .await;
+                    return;
+                }
 
                 debug!(
                     count = dependencies.len(),
@@ -235,11 +342,20 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
 pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: MServer) {
     info!("Executing build");
 
-    let organization = EOrganization::find_by_id(server.organization)
+    let organization = match EOrganization::find_by_id(server.organization)
         .one(&state.db)
         .await
-        .unwrap()
-        .unwrap();
+    {
+        Ok(Some(org)) => org,
+        Ok(None) => {
+            error!("Organization not found: {}", server.organization);
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to query organization");
+            return;
+        }
+    };
 
     let mut local_daemon = match get_local_store(Some(organization.clone())).await {
         Ok(s) => s,
@@ -251,7 +367,13 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
     };
 
     let (private_key, public_key) =
-        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization).unwrap();
+        match decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization) {
+            Ok(keys) => keys,
+            Err(e) => {
+                error!(error = %e, "Failed to decrypt SSH private key");
+                return;
+            }
+        };
 
     let mut server_deamon = connect(
         server.clone(),
@@ -287,9 +409,14 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
     info!("Connected to server successfully");
 
     // Get all dependencies in topological order from the database
-    let dependencies = get_build_dependencies_sorted(Arc::clone(&state), &build)
-        .await
-        .unwrap();
+    let dependencies = match get_build_dependencies_sorted(Arc::clone(&state), &build).await {
+        Ok(deps) => deps,
+        Err(e) => {
+            error!(error = %e, "Failed to get build dependencies");
+            update_build_status(Arc::clone(&state), build.clone(), BuildStatus::Failed).await;
+            return;
+        }
+    };
 
     info!(
         dependency_count = dependencies.len(),
@@ -301,15 +428,18 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         }
     }
 
-    match local_daemon {
+    if let Err(e) = match local_daemon {
         LocalNixStore::UnixStream(ref mut store) => {
             copy_builds(dependencies.clone(), store, &mut server_daemon, false).await
         }
         LocalNixStore::CommandDuplex(ref mut store) => {
             copy_builds(dependencies.clone(), store, &mut server_daemon, false).await
         }
+    } {
+        error!(error = %e, "Failed to copy build dependencies");
+        update_build_status(Arc::clone(&state), build.clone(), BuildStatus::Failed).await;
+        return;
     }
-    .unwrap();
 
     let mut build_outputs: Vec<ABuildOutput> = vec![];
 
@@ -317,39 +447,65 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         Ok(results) => {
             let status = if results.1.values().all(|r| r.error_msg.is_empty()) {
                 for build_result in results.1.values() {
-                    let build_results = build_result
+                    let build_results: Result<Vec<String>, _> = build_result
                         .built_outputs
                         .clone()
                         .into_iter()
                         .map(|(_output, path)| {
-                            format!(
-                                "/nix/store/{}",
-                                serde_json::from_str::<BuildOutputPath>(&path)
-                                    .unwrap()
-                                    .out_path
-                            )
+                            serde_json::from_str::<BuildOutputPath>(&path)
+                                .map(|parsed| format!("/nix/store/{}", parsed.out_path))
+                                .map_err(|e| format!("Failed to parse build output path: {}", e))
                         })
-                        .collect::<Vec<_>>();
-                    match local_daemon {
+                        .collect();
+
+                    let build_results = match build_results {
+                        Ok(results) => results,
+                        Err(e) => {
+                            error!(error = %e, "Failed to parse build output paths");
+                            update_build_status(
+                                Arc::clone(&state),
+                                build.clone(),
+                                BuildStatus::Failed,
+                            )
+                            .await;
+                            return;
+                        }
+                    };
+                    if let Err(e) = match local_daemon {
                         LocalNixStore::UnixStream(ref mut store) => {
                             copy_builds(build_results, &mut server_daemon, store, true).await
                         }
                         LocalNixStore::CommandDuplex(ref mut store) => {
                             copy_builds(build_results, &mut server_daemon, store, true).await
                         }
+                    } {
+                        error!(error = %e, "Failed to copy build results");
+                        update_build_status(Arc::clone(&state), build.clone(), BuildStatus::Failed)
+                            .await;
+                        return;
                     }
-                    .unwrap();
 
                     for (build_output, build_output_path) in build_result.built_outputs.clone() {
                         let build_output_path =
-                            serde_json::from_str::<BuildOutputPath>(&build_output_path).unwrap();
+                            match serde_json::from_str::<BuildOutputPath>(&build_output_path) {
+                                Ok(path) => path,
+                                Err(e) => {
+                                    error!(error = %e, "Failed to parse build output path");
+                                    continue;
+                                }
+                            };
 
                         let (build_output_path_hash, build_output_path_package) =
-                            get_hash_from_path(format!(
+                            match get_hash_from_path(format!(
                                 "/nix/store/{}",
                                 build_output_path.out_path
-                            ))
-                            .unwrap();
+                            )) {
+                                Ok(path_info) => path_info,
+                                Err(e) => {
+                                    error!(error = %e, "Failed to get hash from path");
+                                    continue;
+                                }
+                            };
 
                         build_outputs.push(ABuildOutput {
                             id: Set(Uuid::new_v4()),
@@ -391,10 +547,12 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
     };
 
     if !build_outputs.is_empty() {
-        EBuildOutput::insert_many(build_outputs)
+        if let Err(e) = EBuildOutput::insert_many(build_outputs)
             .exec(&state.db)
             .await
-            .unwrap();
+        {
+            error!(error = %e, "Failed to insert build outputs");
+        }
     }
 }
 
@@ -403,7 +561,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         let threshold_time =
             Utc::now().naive_utc() - chrono::Duration::seconds(state.cli.evaluation_timeout);
 
-        let mut projects = EProject::find()
+        let mut projects = match EProject::find()
             .join(JoinType::InnerJoin, RProject::LastEvaluation.def())
             .filter(
                 Condition::all()
@@ -419,25 +577,37 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             .order_by_asc(CProject::LastCheckAt)
             .all(&state.db)
             .await
-            .unwrap();
+        {
+            Ok(projects) => projects,
+            Err(e) => {
+                error!(error = %e, "Failed to query projects for evaluation");
+                time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
 
-        projects.extend(
-            EProject::find()
-                .filter(
-                    Condition::all()
-                        .add(CProject::Active.eq(true))
-                        .add(CProject::LastCheckAt.lte(threshold_time))
-                        .add(CProject::LastEvaluation.is_null()),
-                )
-                .order_by_asc(CProject::LastCheckAt)
-                .all(&state.db)
-                .await
-                .unwrap(),
-        );
+        match EProject::find()
+            .filter(
+                Condition::all()
+                    .add(CProject::Active.eq(true))
+                    .add(CProject::LastCheckAt.lte(threshold_time))
+                    .add(CProject::LastEvaluation.is_null()),
+            )
+            .order_by_asc(CProject::LastCheckAt)
+            .all(&state.db)
+            .await
+        {
+            Ok(additional_projects) => projects.extend(additional_projects),
+            Err(e) => {
+                error!(error = %e, "Failed to query projects without evaluations");
+                time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
 
         let mut i_offset = 0;
         for (i, project) in projects.clone().iter().enumerate() {
-            let has_no_servers = EServer::find()
+            let has_no_servers = match EServer::find()
                 .filter(
                     Condition::all()
                         .add(CServer::Active.eq(true))
@@ -445,8 +615,13 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                 )
                 .one(&state.db)
                 .await
-                .unwrap()
-                .is_none();
+            {
+                Ok(server_opt) => server_opt.is_none(),
+                Err(e) => {
+                    error!(error = %e, "Failed to query servers for project organization");
+                    true // Assume no servers on error
+                }
+            };
 
             if has_no_servers {
                 projects.remove(i - i_offset);
@@ -460,7 +635,13 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                 async move {
                     //TODO: query last evaluation early and pass it to check_project_updates
                     let (has_update, commit_hash) =
-                        check_project_updates(Arc::clone(&intern_state), &p).await;
+                        match check_project_updates(Arc::clone(&intern_state), &p).await {
+                            Ok((update, hash)) => (update, hash),
+                            Err(e) => {
+                                error!(error = %e, "Failed to check project updates");
+                                return None;
+                            }
+                        };
 
                     if !has_update {
                         return None;
@@ -508,7 +689,14 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             continue;
         }
 
-        let (evaluation, commit_hash) = evaluations.first().unwrap();
+        let (evaluation, commit_hash) = match evaluations.first() {
+            Some(eval) => eval,
+            None => {
+                error!("No evaluations found despite non-empty evaluations list");
+                time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
 
         let project = if let Some(project_id) = evaluation.project {
             projects
@@ -567,7 +755,13 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             author_name: Set(author_display),
         };
 
-        let commit = acommit.insert(&state.db).await.unwrap();
+        let commit = match acommit.insert(&state.db).await {
+            Ok(c) => c,
+            Err(e) => {
+                error!(error = %e, "Failed to insert commit");
+                continue;
+            }
+        };
         let new_evaluation = AEvaluation {
             id: Set(Uuid::new_v4()),
             project: Set(Some(project.id)),
@@ -581,7 +775,13 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             error: Set(None),
         };
 
-        let new_evaluation = new_evaluation.insert(&state.db).await.unwrap();
+        let new_evaluation = match new_evaluation.insert(&state.db).await {
+            Ok(e) => e,
+            Err(e) => {
+                error!(error = %e, "Failed to insert evaluation");
+                continue;
+            }
+        };
         info!(evaluation_id = %new_evaluation.id, "Created new evaluation");
 
         let mut active_project: AProject = project.clone().into();
@@ -590,13 +790,17 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         active_project.last_evaluation = Set(Some(new_evaluation.id));
         active_project.force_evaluation = Set(false);
 
-        active_project.update(&state.db).await.unwrap();
+        if let Err(e) = active_project.update(&state.db).await {
+            error!(error = %e, "Failed to update project");
+        }
 
         if evaluation_id.is_some() {
             let mut active_evaluation: AEvaluation = evaluation.clone().into();
             active_evaluation.next = Set(Some(new_evaluation.id));
 
-            active_evaluation.update(&state.db).await.unwrap();
+            if let Err(e) = active_evaluation.update(&state.db).await {
+                error!(error = %e, "Failed to update evaluation");
+            }
         };
 
         return new_evaluation;
@@ -604,20 +808,33 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
 }
 
 async fn requeue_build(state: Arc<ServerState>, build: MBuild) -> MBuild {
-    let mut build: ABuild = EBuild::find_by_id(build.id)
-        .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap()
-        .into();
+    let build_entity = match EBuild::find_by_id(build.id).one(&state.db).await {
+        Ok(Some(b)) => b,
+        Ok(None) => {
+            error!(build_id = %build.id, "Build not found for requeueing");
+            return build;
+        }
+        Err(e) => {
+            error!(error = %e, build_id = %build.id, "Failed to query build for requeueing");
+            return build;
+        }
+    };
 
-    build.status = Set(BuildStatus::Queued);
-    build.server = Set(None);
-    build.updated_at = Set(Utc::now().naive_utc());
-    let build = build.update(&state.db).await.unwrap();
+    let mut active_build: ABuild = build_entity.into();
+    active_build.status = Set(BuildStatus::Queued);
+    active_build.server = Set(None);
+    active_build.updated_at = Set(Utc::now().naive_utc());
 
-    info!(build_id = %build.id, "Requeueing build");
-    build
+    match active_build.update(&state.db).await {
+        Ok(updated_build) => {
+            info!(build_id = %updated_build.id, "Requeueing build");
+            updated_build
+        }
+        Err(e) => {
+            error!(error = %e, build_id = %build.id, "Failed to update build for requeueing");
+            build
+        }
+    }
 }
 
 async fn get_next_build(state: Arc<ServerState>) -> MBuild {
@@ -637,29 +854,45 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
             "#,
         );
 
-        let builds = EBuild::find()
-            .from_raw_sql(builds_sql)
-            .all(&state.db)
-            .await
-            .unwrap();
+        let builds = match EBuild::find().from_raw_sql(builds_sql).all(&state.db).await {
+            Ok(builds) => builds,
+            Err(e) => {
+                error!(error = %e, "Failed to query queued builds");
+                time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
 
         debug!(build_count = builds.len(), "Found queued builds");
 
         for build in builds {
-            let evaluation = EEvaluation::find_by_id(build.evaluation)
+            let evaluation = match EEvaluation::find_by_id(build.evaluation)
                 .one(&state.db)
                 .await
-                .unwrap()
-                .unwrap();
+            {
+                Ok(Some(eval)) => eval,
+                Ok(None) => {
+                    error!(evaluation_id = %build.evaluation, "Evaluation not found for build");
+                    continue;
+                }
+                Err(e) => {
+                    error!(error = %e, evaluation_id = %build.evaluation, "Failed to query evaluation for build");
+                    continue;
+                }
+            };
 
             let project = if let Some(project_id) = evaluation.project {
-                Some(
-                    EProject::find_by_id(project_id)
-                        .one(&state.db)
-                        .await
-                        .unwrap()
-                        .unwrap(),
-                )
+                match EProject::find_by_id(project_id).one(&state.db).await {
+                    Ok(Some(p)) => Some(p),
+                    Ok(None) => {
+                        error!(project_id = %project_id, "Project not found for evaluation");
+                        continue;
+                    }
+                    Err(e) => {
+                        error!(error = %e, project_id = %project_id, "Failed to query project for evaluation");
+                        continue;
+                    }
+                }
             } else {
                 None
             };
@@ -668,16 +901,24 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                 project.organization
             } else {
                 // Direct build - get organization from DirectBuild record
-                EDirectBuild::find()
+                match EDirectBuild::find()
                     .filter(CDirectBuild::Evaluation.eq(evaluation.id))
                     .one(&state.db)
                     .await
-                    .unwrap()
-                    .unwrap()
-                    .organization
+                {
+                    Ok(Some(direct_build)) => direct_build.organization,
+                    Ok(None) => {
+                        error!(evaluation_id = %evaluation.id, "Direct build not found for evaluation");
+                        continue;
+                    }
+                    Err(e) => {
+                        error!(error = %e, evaluation_id = %evaluation.id, "Failed to query direct build for evaluation");
+                        continue;
+                    }
+                }
             };
 
-            let has_servers = EServer::find()
+            let has_servers = match EServer::find()
                 .filter(
                     Condition::all()
                         .add(CServer::Active.eq(true))
@@ -685,8 +926,13 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                 )
                 .one(&state.db)
                 .await
-                .unwrap()
-                .is_some();
+            {
+                Ok(server_opt) => server_opt.is_some(),
+                Err(e) => {
+                    error!(error = %e, "Failed to query servers for organization");
+                    false // Assume no servers on error
+                }
+            };
 
             if !has_servers {
                 // For direct builds, allow local execution instead of aborting
@@ -703,11 +949,17 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
             // Debug: Check what dependencies exist for this build
             if state.cli.debug {
                 // First, check raw dependency records
-                let raw_deps = EBuildDependency::find()
+                let raw_deps = match EBuildDependency::find()
                     .filter(CBuildDependency::Build.eq(build.id))
                     .all(&state.db)
                     .await
-                    .unwrap();
+                {
+                    Ok(deps) => deps,
+                    Err(e) => {
+                        error!(error = %e, build_id = %build.id, "Failed to query raw dependencies for debug");
+                        continue;
+                    }
+                };
 
                 debug!(
                     build_id = %build.id,
@@ -720,9 +972,13 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                     debug!(build = %dep.build, dependency = %dep.dependency, "Raw dependency");
                 }
 
-                let dependencies = get_build_dependencies(Arc::clone(&state), &build)
-                    .await
-                    .unwrap();
+                let dependencies = match get_build_dependencies(Arc::clone(&state), &build).await {
+                    Ok(deps) => deps,
+                    Err(_) => {
+                        error!(build_id = %build.id, "Failed to get dependencies for debug");
+                        continue;
+                    }
+                };
 
                 debug!(
                     build_id = %build.id,
@@ -766,38 +1022,66 @@ async fn reserve_available_server(
     state: Arc<ServerState>,
     build: &MBuild,
 ) -> Option<(MBuild, MServer)> {
-    let features = EBuildFeature::find()
+    let features = match EBuildFeature::find()
         .filter(CBuildFeature::Build.eq(build.id))
         .all(&state.db)
         .await
-        .unwrap()
-        .into_iter()
-        .map(|f| f.feature)
-        .collect::<Vec<Uuid>>();
+    {
+        Ok(features) => features
+            .into_iter()
+            .map(|f| f.feature)
+            .collect::<Vec<Uuid>>(),
+        Err(e) => {
+            error!(error = %e, build_id = %build.id, "Failed to query build features");
+            Vec::new()
+        }
+    };
 
-    let evaluation = EEvaluation::find_by_id(build.evaluation)
+    let evaluation = match EEvaluation::find_by_id(build.evaluation)
         .one(&state.db)
         .await
-        .unwrap()
-        .unwrap();
+    {
+        Ok(Some(eval)) => eval,
+        Ok(None) => {
+            error!(evaluation_id = %build.evaluation, "Evaluation not found for build reservation");
+            return None;
+        }
+        Err(e) => {
+            error!(error = %e, evaluation_id = %build.evaluation, "Failed to query evaluation for build reservation");
+            return None;
+        }
+    };
 
     let organization_id = if let Some(project_id) = evaluation.project {
         // Regular project-based evaluation
-        let project = EProject::find_by_id(project_id)
-            .one(&state.db)
-            .await
-            .unwrap()
-            .unwrap();
-        project.organization
+        match EProject::find_by_id(project_id).one(&state.db).await {
+            Ok(Some(project)) => project.organization,
+            Ok(None) => {
+                error!(project_id = %project_id, "Project not found for build reservation");
+                return None;
+            }
+            Err(e) => {
+                error!(error = %e, project_id = %project_id, "Failed to query project for build reservation");
+                return None;
+            }
+        }
     } else {
         // Direct build - get organization from DirectBuild record
-        EDirectBuild::find()
+        match EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
             .await
-            .unwrap()
-            .unwrap()
-            .organization
+        {
+            Ok(Some(direct_build)) => direct_build.organization,
+            Ok(None) => {
+                error!(evaluation_id = %evaluation.id, "Direct build not found for build reservation");
+                return None;
+            }
+            Err(e) => {
+                error!(error = %e, evaluation_id = %evaluation.id, "Failed to query direct build for build reservation");
+                return None;
+            }
+        }
     };
 
     let mut cond = Condition::all()
@@ -809,7 +1093,7 @@ async fn reserve_available_server(
         cond = cond.add(CServerFeature::Feature.eq(feature));
     }
 
-    let servers = EServer::find()
+    let servers = match EServer::find()
         .join_rev(
             JoinType::InnerJoin,
             EServerFeature::belongs_to(entity::server::Entity)
@@ -827,7 +1111,13 @@ async fn reserve_available_server(
         .filter(cond)
         .all(&state.db)
         .await
-        .unwrap();
+    {
+        Ok(servers) => servers,
+        Err(e) => {
+            error!(error = %e, "Failed to query servers for build reservation");
+            return None;
+        }
+    };
 
     if servers.is_empty() {
         let build =
@@ -836,11 +1126,20 @@ async fn reserve_available_server(
         warn!(build_id = %build.id, "Aborted build - no servers found");
 
         // Update evaluation with error message about no servers
-        let evaluation = EEvaluation::find_by_id(build.evaluation)
+        let evaluation = match EEvaluation::find_by_id(build.evaluation)
             .one(&state.db)
             .await
-            .unwrap()
-            .unwrap();
+        {
+            Ok(Some(eval)) => eval,
+            Ok(None) => {
+                error!(evaluation_id = %build.evaluation, "Evaluation not found for server error update");
+                return None;
+            }
+            Err(e) => {
+                error!(error = %e, evaluation_id = %build.evaluation, "Failed to query evaluation for server error update");
+                return None;
+            }
+        };
 
         update_evaluation_status_with_error(
             state,
@@ -853,26 +1152,40 @@ async fn reserve_available_server(
     }
 
     for s in servers {
-        let running_builds = EBuild::find()
+        let running_builds = match EBuild::find()
             .filter(CBuild::Server.eq(s.id))
             .filter(CBuild::Status.eq(BuildStatus::Building))
             .all(&state.db)
             .await
-            .unwrap();
+        {
+            Ok(builds) => builds,
+            Err(e) => {
+                error!(error = %e, server_id = %s.id, "Failed to query running builds for server");
+                continue;
+            }
+        };
 
         let mut abuild: ABuild = build.clone().into();
         if running_builds.is_empty() {
             abuild.server = Set(Some(s.id));
             abuild.status = Set(BuildStatus::Building);
             abuild.updated_at = Set(Utc::now().naive_utc());
-            let build = abuild.update(&state.db).await.unwrap();
 
-            debug!(build_id = %build.id, "Selected next build");
-
-            return Some((build, s));
+            match abuild.update(&state.db).await {
+                Ok(updated_build) => {
+                    debug!(build_id = %updated_build.id, "Selected next build");
+                    return Some((updated_build, s));
+                }
+                Err(e) => {
+                    error!(error = %e, build_id = %build.id, "Failed to update build for server reservation");
+                    continue;
+                }
+            }
         } else {
             abuild.updated_at = Set(Utc::now().naive_utc());
-            abuild.update(&state.db).await.unwrap();
+            if let Err(e) = abuild.update(&state.db).await {
+                error!(error = %e, build_id = %build.id, "Failed to update build timestamp");
+            }
         }
     }
 
@@ -896,12 +1209,18 @@ pub async fn update_build_status(
 
     debug!(build_id = %build.id, status = ?status, "Updating build status");
 
-    let mut active_build: ABuild = build.into_active_model();
+    let mut active_build: ABuild = build.clone().into_active_model();
 
     active_build.status = Set(status);
     active_build.updated_at = Set(Utc::now().naive_utc());
 
-    let build = active_build.update(&state.db).await.unwrap();
+    let build = match active_build.update(&state.db).await {
+        Ok(updated_build) => updated_build,
+        Err(e) => {
+            error!(error = %e, build_id = %build.id, "Failed to update build status");
+            return build;
+        }
+    };
 
     build
 }
@@ -912,14 +1231,17 @@ async fn update_build_status_recursivly(
     status: BuildStatus,
 ) -> MBuild {
     // TODO: more efficient, recursive till all dependencies are updated
-    let dependencies = EBuildDependency::find()
+    let dependencies = match EBuildDependency::find()
         .filter(CBuildDependency::Dependency.eq(build.id))
         .all(&state.db)
         .await
-        .unwrap()
-        .into_iter()
-        .map(|d| d.build)
-        .collect::<Vec<Uuid>>();
+    {
+        Ok(deps) => deps.into_iter().map(|d| d.build).collect::<Vec<Uuid>>(),
+        Err(e) => {
+            error!(error = %e, build_id = %build.id, "Failed to query build dependencies for recursive update");
+            return update_build_status(Arc::clone(&state), build, status).await;
+        }
+    };
 
     let mut condition = Condition::any();
 
@@ -936,12 +1258,18 @@ async fn update_build_status_recursivly(
         Condition::all().add(CBuild::Status.ne(status.clone()))
     };
 
-    let dependent_builds = EBuild::find()
+    let dependent_builds = match EBuild::find()
         .filter(condition)
         .filter(status_condition)
         .all(&state.db)
         .await
-        .unwrap();
+    {
+        Ok(builds) => builds,
+        Err(e) => {
+            error!(error = %e, "Failed to query dependent builds for recursive update");
+            return update_build_status(Arc::clone(&state), build, status).await;
+        }
+    };
 
     for dependent_build in dependent_builds {
         update_build_status(Arc::clone(&state), dependent_build, status.clone()).await;
@@ -964,10 +1292,16 @@ pub async fn update_evaluation_status(
 
     debug!(evaluation_id = %evaluation.id, status = ?status, "Updating evaluation status");
 
-    let mut active_evaluation: AEvaluation = evaluation.into_active_model();
+    let mut active_evaluation: AEvaluation = evaluation.clone().into_active_model();
     active_evaluation.status = Set(status);
 
-    active_evaluation.update(&state.db).await.unwrap()
+    match active_evaluation.update(&state.db).await {
+        Ok(updated_eval) => updated_eval,
+        Err(e) => {
+            error!(error = %e, evaluation_id = %evaluation.id, "Failed to update evaluation status");
+            evaluation
+        }
+    }
 }
 
 pub async fn update_evaluation_status_with_error(
@@ -982,11 +1316,17 @@ pub async fn update_evaluation_status_with_error(
 
     debug!(evaluation_id = %evaluation.id, status = ?status, error = %error_message, "Updating evaluation status with error");
 
-    let mut active_evaluation: AEvaluation = evaluation.into_active_model();
+    let mut active_evaluation: AEvaluation = evaluation.clone().into_active_model();
     active_evaluation.status = Set(status);
     active_evaluation.error = Set(Some(error_message));
 
-    active_evaluation.update(&state.db).await.unwrap()
+    match active_evaluation.update(&state.db).await {
+        Ok(updated_eval) => updated_eval,
+        Err(e) => {
+            error!(error = %e, evaluation_id = %evaluation.id, "Failed to update evaluation status with error");
+            evaluation
+        }
+    }
 }
 
 pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) {
@@ -994,7 +1334,7 @@ pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) 
         return;
     }
 
-    let builds = EBuild::find()
+    let builds = match EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation.id))
         .filter(
             Condition::any()
@@ -1004,7 +1344,13 @@ pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) 
         )
         .all(&state.db)
         .await
-        .unwrap();
+    {
+        Ok(builds) => builds,
+        Err(e) => {
+            error!(error = %e, evaluation_id = %evaluation.id, "Failed to query builds for evaluation abort");
+            return;
+        }
+    };
 
     for build in builds {
         update_build_status(Arc::clone(&state), build, BuildStatus::Aborted).await;
@@ -1014,17 +1360,29 @@ pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) 
 }
 
 async fn check_evaluation_status(state: Arc<ServerState>, evaluation_id: Uuid) {
-    let evaluation = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.db)
-        .await
-        .unwrap()
-        .unwrap();
+    let evaluation = match EEvaluation::find_by_id(evaluation_id).one(&state.db).await {
+        Ok(Some(eval)) => eval,
+        Ok(None) => {
+            error!(evaluation_id = %evaluation_id, "Evaluation not found for status check");
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, evaluation_id = %evaluation_id, "Failed to query evaluation for status check");
+            return;
+        }
+    };
 
-    let builds = EBuild::find()
+    let builds = match EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation_id))
         .all(&state.db)
         .await
-        .unwrap();
+    {
+        Ok(builds) => builds,
+        Err(e) => {
+            error!(error = %e, evaluation_id = %evaluation_id, "Failed to query builds for evaluation status check");
+            return;
+        }
+    };
 
     let statuses = builds
         .into_iter()
@@ -1048,14 +1406,20 @@ async fn get_build_dependencies(
     state: Arc<ServerState>,
     build: &MBuild,
 ) -> Result<Vec<MBuild>, String> {
-    let dependencies = EBuildDependency::find()
+    let dependencies = match EBuildDependency::find()
         .filter(CBuildDependency::Build.eq(build.id))
         .all(&state.db)
         .await
-        .unwrap()
-        .into_iter()
-        .map(|d| d.dependency)
-        .collect::<Vec<Uuid>>();
+    {
+        Ok(deps) => deps
+            .into_iter()
+            .map(|d| d.dependency)
+            .collect::<Vec<Uuid>>(),
+        Err(e) => {
+            error!(error = %e, build_id = %build.id, "Failed to query build dependencies");
+            return Err("Failed to query build dependencies".to_string());
+        }
+    };
 
     let mut condition = Condition::any();
 
@@ -1063,11 +1427,13 @@ async fn get_build_dependencies(
         condition = condition.add(CBuild::Id.eq(dependency));
     }
 
-    let builds = EBuild::find()
-        .filter(condition)
-        .all(&state.db)
-        .await
-        .unwrap();
+    let builds = match EBuild::find().filter(condition).all(&state.db).await {
+        Ok(builds) => builds,
+        Err(e) => {
+            error!(error = %e, "Failed to query builds for dependencies");
+            return Err("Failed to query builds for dependencies".to_string());
+        }
+    };
 
     Ok(builds)
 }
@@ -1077,9 +1443,13 @@ async fn get_build_dependencies_sorted(
     build: &MBuild,
 ) -> Result<Vec<String>, String> {
     // Get direct dependencies and add them first, then the main build
-    let bdependencies = get_build_dependencies(Arc::clone(&state), &build)
-        .await
-        .unwrap();
+    let bdependencies = match get_build_dependencies(Arc::clone(&state), &build).await {
+        Ok(deps) => deps,
+        Err(e) => {
+            error!(error = %e, build_id = %build.id, "Failed to get build dependencies for sorting");
+            return Err(e);
+        }
+    };
 
     let mut dependencies = Vec::new();
 

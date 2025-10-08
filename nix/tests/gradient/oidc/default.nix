@@ -175,8 +175,6 @@
       # Test that gradient-cli can handle OIDC authentication
       print("=== Testing CLI with OIDC ===")
 
-      # Note: In a real scenario, the CLI would need to handle the OIDC flow
-      # For testing purposes, we'll verify the endpoints are available
       server.succeed("${lib.getExe pkgs.curl} http://gradient.local/api/v1/auth/oidc/login -s --fail")
 
       print("=== OIDC Tests Completed Successfully ===")

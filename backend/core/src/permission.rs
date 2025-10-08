@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use anyhow::{Context, Result};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, IntoActiveModel,
     QueryFilter,
@@ -35,14 +36,18 @@ pub async fn set_permission(
     role: MRole,
     permission: Permission,
     value: bool,
-) {
+) -> Result<()> {
     if get_permission_bit(role.permission, permission) == value {
-        return;
+        return Ok(());
     }
 
     let mut arole = role.clone().into_active_model();
     arole.permission = Set(set_permission_bit(role.permission, permission, value));
-    arole.save(&state.db).await.unwrap();
+    arole
+        .save(&state.db)
+        .await
+        .context("Failed to save role permission")?;
+    Ok(())
 }
 
 pub async fn get_permission(
@@ -50,7 +55,7 @@ pub async fn get_permission(
     organization: MOrganization,
     user: MUser,
     permission: Permission,
-) -> bool {
+) -> Result<bool> {
     let organization_user = EOrganizationUser::find()
         .filter(
             Condition::all()
@@ -59,14 +64,14 @@ pub async fn get_permission(
         )
         .one(&state.db)
         .await
-        .unwrap()
-        .unwrap();
+        .context("Failed to query organization user")?
+        .ok_or_else(|| anyhow::anyhow!("User not found in organization"))?;
 
     let role = ERole::find_by_id(organization_user.role)
         .one(&state.db)
         .await
-        .unwrap()
-        .unwrap();
+        .context("Failed to query user role")?
+        .ok_or_else(|| anyhow::anyhow!("Role not found"))?;
 
-    get_permission_bit(role.permission, permission)
+    Ok(get_permission_bit(role.permission, permission))
 }

@@ -5,7 +5,7 @@
  */
 
 use clap::Subcommand;
-use rand::{Rng, distributions::Alphanumeric};
+use rand::{distributions::Alphanumeric, Rng};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {

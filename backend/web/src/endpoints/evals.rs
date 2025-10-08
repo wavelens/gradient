@@ -15,6 +15,7 @@ use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::error;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -265,14 +266,26 @@ pub async fn post_evaluation_builds(
     let stream = stream! {
         let mut last_logs: HashMap<Uuid, String> = HashMap::new();
 
-        let past_builds = EBuild::find()
+        let past_builds = match EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation.id))
             .all(&state.db)
             .await
-            .unwrap();
+        {
+            Ok(builds) => builds,
+            Err(e) => {
+                error!(error = %e, "Failed to query past builds");
+                return;
+            }
+        };
 
         for build in past_builds {
-            let name = build.derivation_path.split("-").next().unwrap();
+            let name = match build.derivation_path.split("-").next() {
+                Some(n) => n,
+                None => {
+                    error!("Invalid derivation path format: {}", build.derivation_path);
+                    continue;
+                }
+            };
             let name = build.derivation_path.replace(format!("{}-", name).as_str(), "").replace(".drv", "");
             let log = build.log.unwrap_or("".to_string());
             last_logs.insert(build.id, log.clone());
@@ -286,14 +299,19 @@ pub async fn post_evaluation_builds(
         }
 
         loop {
-            let builds = EBuild::find()
+            let builds = match EBuild::find()
                 .filter(condition.clone())
                 .all(&state.db)
-                .await
-                .unwrap();
+                .await {
+                Ok(b) => b,
+                Err(e) => {
+                    error!(error = %e, "Failed to query builds");
+                    break;
+                }
+            };
 
             if builds.is_empty() {
-                let all_builds = EBuild::find()
+                let all_builds = match EBuild::find()
                     .filter(
                         Condition::all()
                             .add(CBuild::Evaluation.eq(evaluation.id))
@@ -304,8 +322,13 @@ pub async fn post_evaluation_builds(
                             ),
                     )
                     .one(&state.db)
-                    .await
-                    .unwrap();
+                    .await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        error!(error = %e, "Failed to query all builds");
+                        break;
+                    }
+                };
 
                 if all_builds.is_none() {
                     yield "".to_string();
@@ -317,12 +340,21 @@ pub async fn post_evaluation_builds(
             }
 
             for build in builds {
-                let name = build.derivation_path.split("-").next().unwrap();
+                let name = match build.derivation_path.split("-").next() {
+                    Some(n) => n,
+                    None => {
+                        error!("Invalid derivation path format: {}", build.derivation_path);
+                        continue;
+                    }
+                };
                 let name = build.derivation_path.replace(format!("{}-", name).as_str(), "").replace(".drv", "");
                 let log = build.log.unwrap_or("".to_string());
 
                 if last_logs.contains_key(&build.id) {
-                    let last_log = last_logs.get(&build.id).unwrap();
+                    let last_log = match last_logs.get(&build.id) {
+                        Some(log) => log,
+                        None => continue, // This should not happen since we just checked contains_key
+                    };
                     let log_new = log.replace(last_log.as_str(), "");
 
                     if !log_new.is_empty() {

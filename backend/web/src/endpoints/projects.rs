@@ -73,7 +73,7 @@ pub async fn get(
     // TODO: Implement pagination
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let projects = EProject::find()
@@ -116,7 +116,7 @@ pub async fn put(
 
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let existing_project = EProject::find()
@@ -176,7 +176,7 @@ pub async fn get_project(
         organization.clone(),
         project.clone(),
     )
-    .await
+    .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
 
     let res = BaseResponse {
@@ -199,7 +199,7 @@ pub async fn patch_project(
         organization.clone(),
         project.clone(),
     )
-    .await
+    .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
 
     // Prevent modification of state-managed projects
@@ -280,7 +280,7 @@ pub async fn delete_project(
         organization.clone(),
         project.clone(),
     )
-    .await
+    .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
 
     // Prevent deletion of state-managed projects
@@ -310,7 +310,7 @@ pub async fn post_project_active(
         organization.clone(),
         project.clone(),
     )
-    .await
+    .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
 
     let mut aproject: AProject = project.into();
@@ -336,7 +336,7 @@ pub async fn delete_project_active(
         organization.clone(),
         project.clone(),
     )
-    .await
+    .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
 
     let mut aproject: AProject = project.into();
@@ -362,10 +362,12 @@ pub async fn post_project_check_repository(
         organization.clone(),
         project.clone(),
     )
-    .await
+    .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
 
-    let (_has_updates, remote_hash) = check_project_updates(Arc::clone(&state), &project).await;
+    let (_has_updates, remote_hash) = check_project_updates(Arc::clone(&state), &project)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     if !remote_hash.is_empty() {
         let res = BaseResponse {
@@ -392,7 +394,7 @@ pub async fn post_project_evaluate(
         organization.clone(),
         project.clone(),
     )
-    .await
+    .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
 
     if let Some(evaluation_id) = project.last_evaluation {
@@ -443,7 +445,7 @@ pub async fn get_project_details(
         organization.clone(),
         project.clone(),
     )
-    .await
+    .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
 
     // Get last 5 evaluations for this project

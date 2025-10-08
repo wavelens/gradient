@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use anyhow::{Context, Result};
 use chrono::Utc;
 use core::database::add_features;
 use core::executer::*;
@@ -35,7 +36,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     state: Arc<ServerState>,
     store: &mut DaemonStore<C>,
     evaluation: &MEvaluation,
-) -> Result<(Vec<MBuild>, Vec<MBuildDependency>), String> {
+) -> Result<(Vec<MBuild>, Vec<MBuildDependency>)> {
     info!("Starting evaluation");
     update_evaluation_status(
         Arc::clone(&state),
@@ -48,39 +49,44 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         EProject::find_by_id(project_id)
             .one(&state.db)
             .await
-            .unwrap()
-            .unwrap()
+            .context("Failed to query project")?
+            .ok_or_else(|| anyhow::anyhow!("Project not found"))?
             .organization
     } else {
         EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
             .await
-            .unwrap()
-            .unwrap()
+            .context("Failed to query direct build")?
+            .ok_or_else(|| anyhow::anyhow!("Direct build not found"))?
             .organization
     };
 
     let organization = EOrganization::find_by_id(organization_id)
         .one(&state.db)
         .await
-        .unwrap()
-        .unwrap();
+        .context("Failed to query organization")?
+        .ok_or_else(|| anyhow::anyhow!("Organization not found"))?;
 
     let commit = ECommit::find_by_id(evaluation.commit)
         .one(&state.db)
         .await
-        .unwrap()
-        .unwrap();
+        .context("Failed to query commit")?
+        .ok_or_else(|| anyhow::anyhow!("Commit not found"))?;
 
     let repository =
-        repository_url_to_nix(&evaluation.repository, vec_to_hex(&commit.hash).as_str()).unwrap();
+        repository_url_to_nix(&evaluation.repository, vec_to_hex(&commit.hash).as_str())
+            .context("Failed to convert repository URL to Nix format")?;
 
-    prefetch_flake(Arc::clone(&state), repository.clone(), organization).await?;
+    prefetch_flake(Arc::clone(&state), repository.clone(), organization)
+        .await
+        .context("Failed to prefetch flake")?;
 
-    let wildcards = parse_evaluation_wildcard(evaluation.wildcard.as_str())?;
-    let all_derivations =
-        get_flake_derivations(Arc::clone(&state), repository.clone(), wildcards).await?;
+    let wildcards = parse_evaluation_wildcard(evaluation.wildcard.as_str())
+        .context("Failed to parse evaluation wildcard")?;
+    let all_derivations = get_flake_derivations(Arc::clone(&state), repository.clone(), wildcards)
+        .await
+        .context("Failed to get flake derivations")?;
 
     if all_derivations.is_empty() {
         warn!("No derivations found for evaluation");
@@ -100,7 +106,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             match get_derivation_cmd(state.cli.binpath_nix.as_str(), &path).await {
                 Ok((d, r)) => (d, r),
                 Err(e) => {
-                    let error_msg = e.clone();
+                    let error_msg = e.to_string();
                     warn!(
                         error = %e,
                         derivation = %derivation_string,
@@ -116,13 +122,16 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         if missing.is_empty() {
             debug!(derivation = %derivation, "Skipping package - already in store");
 
-            add_existing_build(
+            if let Err(e) = add_existing_build(
                 Arc::clone(&state),
                 organization_id,
                 derivation.clone(),
                 evaluation.id,
             )
-            .await;
+            .await
+            {
+                error!(error = %e, "Failed to add existing build");
+            }
 
             continue;
         }
@@ -151,7 +160,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             build,
             store,
         )
-        .await;
+        .await?;
 
         debug!(derivation = %derivation, "Successfully processed package");
     }
@@ -176,7 +185,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             .collect();
 
         let full_error = format!("{}:\n{}", error_summary, detailed_errors.join("\n"));
-        return Err(full_error);
+        return Err(anyhow::anyhow!(full_error));
     }
 
     Ok((all_builds, all_dependencies))
@@ -190,7 +199,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     organization_id: Uuid,
     dependencies: Vec<String>,
     store: &mut DaemonStore<C>,
-) {
+) -> Result<()> {
     let mut dependencies = dependencies
         .clone()
         .into_iter()
@@ -205,11 +214,13 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             "Processing derivation"
         );
 
-        let path_info = get_derivation(dependency.clone(), store).await.unwrap();
+        let path_info = get_derivation(dependency.clone(), store)
+            .await
+            .context("Failed to get derivation info")?;
 
         let references = core::executer::get_missing_builds(path_info.references.clone(), store)
             .await
-            .unwrap();
+            .context("Failed to get missing builds")?;
 
         let already_exsists = find_builds(
             Arc::clone(&state),
@@ -218,7 +229,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             false,
         )
         .await
-        .unwrap();
+        .context("Failed to find existing builds")?;
 
         let mut references = references
             .clone()
@@ -237,17 +248,21 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
             if in_builds || in_dependencies {
                 let d_id = if in_builds {
-                    all_builds
-                        .iter()
-                        .find(|b| b.derivation_path == d_path)
-                        .unwrap()
-                        .id
+                    match all_builds.iter().find(|b| b.derivation_path == d_path) {
+                        Some(build) => build.id,
+                        None => {
+                            error!("Build not found for path: {}", d_path);
+                            return false;
+                        }
+                    }
                 } else {
-                    dependencies
-                        .iter()
-                        .find(|(path, _, _)| *path == d_path)
-                        .unwrap()
-                        .2
+                    match dependencies.iter().find(|(path, _, _)| *path == d_path) {
+                        Some((_, _, id)) => *id,
+                        None => {
+                            error!("Dependency not found for path: {}", d_path);
+                            return false;
+                        }
+                    }
                 };
 
                 let dep = MBuildDependency {
@@ -282,7 +297,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 .query_pathinfo(b.derivation_path.clone())
                 .result()
                 .await
-                .unwrap()
+                .context("Failed to query path info")?
                 .is_some()
             {
                 references.retain(|(d, _, _)| *d != b.derivation_path);
@@ -291,13 +306,19 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                     let mut abuild: ABuild = b.into();
                     abuild.status = Set(BuildStatus::Completed);
                     abuild.log = Set(None);
-                    abuild.save(&state.db).await.unwrap();
+                    abuild
+                        .save(&state.db)
+                        .await
+                        .context("Failed to save build status")?;
                 }
             } else {
                 let mut abuild: ABuild = b.into();
                 abuild.status = Set(BuildStatus::Queued);
                 abuild.log = Set(None);
-                abuild.save(&state.db).await.unwrap();
+                abuild
+                    .save(&state.db)
+                    .await
+                    .context("Failed to save build status")?;
             }
 
             all_dependencies.push(dep);
@@ -306,7 +327,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         let (system, features) =
             get_features_cmd(state.cli.binpath_nix.as_str(), dependency.as_str())
                 .await
-                .unwrap();
+                .context("Failed to get build features")?;
 
         let build = MBuild {
             id: build_id,
@@ -320,7 +341,9 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             updated_at: Utc::now().naive_utc(),
         };
 
-        add_features(Arc::clone(&state), features, Some(build_id), None).await;
+        if let Err(e) = add_features(Arc::clone(&state), features, Some(build_id), None).await {
+            error!(error = %e, "Failed to add features for build");
+        }
 
         if let Some(d_id) = dependency_id {
             let dep = MBuildDependency {
@@ -343,6 +366,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         all_builds.push(build);
         dependencies.extend(references);
     }
+    Ok(())
 }
 
 async fn find_builds(
@@ -350,7 +374,7 @@ async fn find_builds(
     organization_id: Uuid,
     build_paths: Vec<String>,
     successful: bool,
-) -> Result<Vec<MBuild>, String> {
+) -> Result<Vec<MBuild>> {
     let mut condition = Condition::any();
     for path in build_paths {
         condition = condition.add(CBuild::DerivationPath.eq(path.as_str()));
@@ -370,7 +394,7 @@ async fn find_builds(
         .filter(filter)
         .all(&state.db)
         .await
-        .map_err(|e| e.to_string())?;
+        .context("Failed to query builds")?;
 
     Ok(builds)
 }
@@ -378,51 +402,53 @@ async fn find_builds(
 pub async fn get_derivation_cmd(
     binpath_nix: &str,
     path: &str,
-) -> Result<(String, Vec<String>), String> {
+) -> anyhow::Result<(String, Vec<String>)> {
     let output = Command::new(binpath_nix)
         .arg("path-info")
         .arg("--json")
         .arg("--derivation")
         .arg(path)
         .output()
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
 
     if !output.status.success() {
-        return Err(format!(
+        anyhow::bail!(
             "Command \"nix path-info --derivation {}\" failed with status: {:?}, stderr: {}",
             path,
             output.status,
             String::from_utf8_lossy(&output.stderr)
-        ));
+        );
     }
 
     let json_output = String::from_utf8_lossy(&output.stdout);
-    let parsed_json: Value =
-        serde_json::from_str(&json_output).map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+    let parsed_json: Value = serde_json::from_str(&json_output).context("Failed to parse JSON")?;
 
     if !parsed_json.is_object() {
-        return Err("Expected JSON object but found another type".to_string());
+        anyhow::bail!("Expected JSON object but found another type");
     }
 
     let path = parsed_json
         .as_object()
-        .ok_or("Expected JSON object")?
+        .context("Expected JSON object")?
         .keys()
         .next()
-        .ok_or("Expected JSON object with Derivation Path")?
+        .context("Expected JSON object with Derivation Path")?
         .to_string();
 
     let input_paths = parsed_json[path.clone()]
         .as_object()
-        .ok_or("Expected JSON object with Derivation Path")?
+        .context("Expected JSON object with Derivation Path")?
         .get("references")
-        .ok_or("Expected JSON object with Derivation Path")?
+        .context("Expected JSON object with Derivation Path")?
         .as_array()
-        .ok_or("Expected JSON object with Derivation Path")?
+        .context("Expected JSON object with Derivation Path")?
         .iter()
-        .map(|v| v.as_str().unwrap().to_string())
-        .collect();
+        .map(|v| {
+            v.as_str()
+                .context("Expected string in JSON array")
+                .map(|s| s.to_string())
+        })
+        .collect::<anyhow::Result<Vec<String>>>()?;
 
     Ok((path, input_paths))
 }
@@ -430,47 +456,49 @@ pub async fn get_derivation_cmd(
 pub async fn get_features_cmd(
     binpath_nix: &str,
     path: &str,
-) -> Result<(entity::server::Architecture, Vec<String>), String> {
+) -> anyhow::Result<(entity::server::Architecture, Vec<String>)> {
     let output = Command::new(binpath_nix)
         .arg("derivation")
         .arg("show")
         .arg(path)
         .output()
         .await
-        .map_err(|e| e.to_string())?;
+        .context("Failed to execute nix derivation show command")?;
 
     if !output.status.success() {
-        return Err(format!(
+        anyhow::bail!(
             "Command \"nix derivation show {}\" failed with status: {:?}, stderr: {}",
             path,
             output.status,
             String::from_utf8_lossy(&output.stderr)
-        ));
+        );
     }
 
     let json_output = String::from_utf8_lossy(&output.stdout);
     let parsed_json: Value =
-        serde_json::from_str(&json_output).map_err(|e| format!("Failed to parse JSON: {:?}", e))?;
+        serde_json::from_str(&json_output).context("Failed to parse JSON output")?;
 
     if !parsed_json.is_object() {
-        return Err("Expected JSON object but found another type".to_string());
+        anyhow::bail!("Expected JSON object but found another type");
     }
 
     let parsed_json = parsed_json
         .as_object()
-        .ok_or("Expected JSON object")?
+        .ok_or_else(|| anyhow::anyhow!("Expected JSON object"))?
         .get(path)
-        .ok_or("Expected JSON object with path")?
+        .ok_or_else(|| anyhow::anyhow!("Expected JSON object with path"))?
         .as_object()
-        .ok_or("Expected JSON object with path")?
+        .ok_or_else(|| anyhow::anyhow!("Expected JSON object with path"))?
         .get("env")
-        .ok_or("Expected JSON object with env")?
+        .ok_or_else(|| anyhow::anyhow!("Expected JSON object with env"))?
         .as_object()
-        .ok_or("Expected JSON object with env")?;
+        .ok_or_else(|| anyhow::anyhow!("Expected JSON object with env"))?;
 
     let parsed_json = if let Some(new_json) = parsed_json.get("__json") {
-        let new_json = new_json.as_str().unwrap();
-        serde_json::from_str(new_json).map_err(|e| format!("Failed to parse JSON: {:?}", e))?
+        let new_json = new_json
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Expected string for __json field"))?;
+        serde_json::from_str(new_json).context("Failed to parse JSON")?
     } else {
         parsed_json.clone()
     };
@@ -480,19 +508,24 @@ pub async fn get_features_cmd(
             .as_array()
             .unwrap_or(&vec![])
             .iter()
-            .map(|v| v.as_str().unwrap().to_string())
-            .collect()
+            .map(|v| {
+                v.as_str()
+                    .ok_or("Expected string in JSON array")
+                    .map(|s| s.to_string())
+            })
+            .collect::<Result<Vec<String>, &str>>()
+            .map_err(|e| anyhow::anyhow!("Invalid system feature: {}", e))?
     } else {
         vec![]
     };
 
     let system: entity::server::Architecture = parsed_json
         .get("system")
-        .ok_or("Expected JSON object with system")?
+        .ok_or_else(|| anyhow::anyhow!("Expected JSON object with system"))?
         .as_str()
-        .unwrap()
+        .ok_or_else(|| anyhow::anyhow!("Expected string for system field"))?
         .try_into()
-        .unwrap();
+        .map_err(|e| anyhow::anyhow!("Invalid system architecture: {:?}", e))?;
 
     Ok((system, features))
 }
@@ -502,10 +535,10 @@ async fn add_existing_build(
     _organization_id: Uuid,
     derivation: String,
     evaluation_id: Uuid,
-) {
+) -> Result<()> {
     let (system, features) = get_features_cmd(state.cli.binpath_nix.as_str(), derivation.as_str())
         .await
-        .unwrap();
+        .context("Failed to execute nix command")?;
 
     let abuild = ABuild {
         id: Set(Uuid::new_v4()),
@@ -519,11 +552,18 @@ async fn add_existing_build(
         updated_at: Set(Utc::now().naive_utc()),
     };
 
-    let build = abuild.insert(&state.db).await.unwrap();
+    let build = abuild
+        .insert(&state.db)
+        .await
+        .context("Failed to insert build")?;
 
-    add_features(Arc::clone(&state), features, Some(build.id), None).await;
+    if let Err(e) = add_features(Arc::clone(&state), features, Some(build.id), None).await {
+        error!(error = %e, "Failed to add features for build");
+    }
 
-    let local_store = get_local_store(None).await.unwrap();
+    let local_store = get_local_store(None)
+        .await
+        .context("Failed to get local store")?;
     let outputs = match local_store {
         LocalNixStore::UnixStream(mut store) => {
             core::executer::get_build_outputs_from_derivation(derivation.clone(), &mut store).await
@@ -548,22 +588,27 @@ async fn add_existing_build(
                 created_at: Set(Utc::now().naive_utc()),
             };
 
-            abuild_output.insert(&state.db).await.unwrap();
+            abuild_output
+                .insert(&state.db)
+                .await
+                .context("Failed to insert build output")?;
         }
     }
+
+    Ok(())
 }
 
 async fn get_flake_derivations(
     state: Arc<ServerState>,
     repository: String,
     wildcards: Vec<&str>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>> {
     let mut all_derivations: HashSet<String> = HashSet::new();
     // let mut all_keys: HashMap<String, HashSet<String>> = HashMap::new(); add this line when
     // optimizing partial_derivations
     let mut partial_derivations: HashMap<String, HashSet<String>> = HashMap::new();
 
-    for w in wildcards.iter().map(|w| {
+    'outer: for w in wildcards.iter().map(|w| {
         format!("{}.#", w)
             .split(".")
             .map(|s| s.to_string())
@@ -612,17 +657,22 @@ async fn get_flake_derivations(
                     let mut current_key = Vec::new();
                     for (ik, mut k) in key.clone().into_iter().enumerate() {
                         let val = if ik == 0 {
-                            partial_derivations
-                                .get("#")
-                                .unwrap()
-                                .iter()
-                                .collect::<Vec<&String>>()
+                            if let Some(derivs) = partial_derivations.get("#") {
+                                derivs.iter().collect::<Vec<&String>>()
+                            } else {
+                                error!("Failed to get partial derivations for '#'");
+                                continue 'outer;
+                            }
                         } else if w[ik].contains("*") || w[ik].contains("#") {
-                            partial_derivations
-                                .get(&current_key.join("."))
-                                .unwrap()
-                                .iter()
-                                .collect::<Vec<&String>>()
+                            if let Some(derivs) = partial_derivations.get(&current_key.join(".")) {
+                                derivs.iter().collect::<Vec<&String>>()
+                            } else {
+                                error!(
+                                    "Failed to get partial derivations for key: {}",
+                                    current_key.join(".")
+                                );
+                                continue 'outer;
+                            }
                         } else {
                             vec![&w[ik]]
                         };
@@ -638,7 +688,12 @@ async fn get_flake_derivations(
                             k = 0;
                         }
 
-                        current_key.push(val.get(k).unwrap().as_str());
+                        if let Some(v) = val.get(k) {
+                            current_key.push(v.as_str());
+                        } else {
+                            error!("Failed to get value at index {} from derivations", k);
+                            continue 'outer;
+                        }
 
                         if ik == key.len() - 1 {
                             key[ik] += 1;
@@ -665,8 +720,9 @@ async fn get_flake_derivations(
                         .arg("--json")
                         .output()
                         .await
-                        .map_err(|e| e.to_string())?
-                        .json_to_vec()?;
+                        .context("Failed to execute nix eval command")?
+                        .json_to_vec()
+                        .context("Failed to parse JSON output")?;
 
                     if keys.contains(&"type".to_string()) && type_check {
                         let type_value = Command::new(state.cli.binpath_nix.clone())
@@ -675,8 +731,9 @@ async fn get_flake_derivations(
                             .arg("--json")
                             .output()
                             .await
-                            .map_err(|e| e.to_string())?
-                            .json_to_string()?;
+                            .context("Failed to execute nix eval command")?
+                            .json_to_string()
+                            .context("Failed to parse JSON output")?;
 
                         if type_value == "derivation" {
                             all_derivations.insert(current_key.clone());
@@ -717,58 +774,63 @@ async fn get_flake_derivations(
 }
 
 trait JsonOutput {
-    fn json_to_vec(&self) -> Result<Vec<String>, String>;
-    fn json_to_string(&self) -> Result<String, String>;
+    fn json_to_vec(&self) -> anyhow::Result<Vec<String>>;
+    fn json_to_string(&self) -> anyhow::Result<String>;
 }
 
 impl JsonOutput for Output {
-    fn json_to_vec(&self) -> Result<Vec<String>, String> {
+    fn json_to_vec(&self) -> anyhow::Result<Vec<String>> {
         if !self.status.success() {
-            return Err(format!(
+            anyhow::bail!(
                 "Command failed with status: {:?}, stderr: {}",
                 self.status,
                 String::from_utf8_lossy(&self.stderr)
-            ));
+            );
         }
 
         let json_output = String::from_utf8_lossy(&self.stdout);
         if json_output.trim().is_empty() {
-            return Err("Command returned empty output".to_string());
+            anyhow::bail!("Command returned empty output");
         }
 
         let parsed_json: Value = serde_json::from_str(&json_output)
-            .map_err(|e| format!("Failed to parse JSON: {:?}, output: '{}'", e, json_output))?;
+            .with_context(|| format!("Failed to parse JSON output: '{}'", json_output))?;
 
         let parsed_json = parsed_json
             .as_array()
-            .ok_or("Expected JSON array")?
+            .context("Expected JSON array")?
             .iter()
-            .map(|v| v.as_str().unwrap().to_string())
-            .collect();
+            .map(|v| {
+                v.as_str()
+                    .ok_or("Expected string in JSON array")
+                    .map(|s| s.to_string())
+            })
+            .collect::<Result<Vec<String>, &str>>()
+            .map_err(|e| anyhow::anyhow!("Expected string in JSON array: {}", e))?;
 
         Ok(parsed_json)
     }
 
-    fn json_to_string(&self) -> Result<String, String> {
+    fn json_to_string(&self) -> anyhow::Result<String> {
         if !self.status.success() {
-            return Err(format!(
+            anyhow::bail!(
                 "Command failed with status: {:?}, stderr: {}",
                 self.status,
                 String::from_utf8_lossy(&self.stderr)
-            ));
+            );
         }
 
         let json_output = String::from_utf8_lossy(&self.stdout);
         if json_output.trim().is_empty() {
-            return Err("Command returned empty output".to_string());
+            anyhow::bail!("Command returned empty output");
         }
 
         let parsed_json: Value = serde_json::from_str(&json_output)
-            .map_err(|e| format!("Failed to parse JSON: {:?}, output: '{}'", e, json_output))?;
+            .with_context(|| format!("Failed to parse JSON output: '{}'", json_output))?;
 
         let parsed_json = parsed_json
             .as_str()
-            .ok_or("Expected JSON string")?
+            .context("Expected JSON string")?
             .to_string();
 
         Ok(parsed_json)
@@ -779,14 +841,13 @@ pub async fn evaluate_direct(
     state: Arc<ServerState>,
     evaluation: MEvaluation,
     temp_dir: String,
-) -> Result<(), String> {
+) -> Result<()> {
     info!(evaluation_id = %evaluation.id, "Starting direct evaluation");
 
     // Get local store
-    let local_store = get_local_store(None).await.map_err(|e| {
-        error!(error = %e, "Failed to get local store for direct evaluation");
-        e
-    })?;
+    let local_store = get_local_store(None)
+        .await
+        .context("Failed to get local store for direct evaluation")?;
 
     // Create a modified evaluation with the temp directory as repository
     let mut direct_evaluation = evaluation.clone();
@@ -824,14 +885,14 @@ pub async fn evaluate_direct(
                 EBuild::insert_many(active_builds)
                     .exec(&state.db)
                     .await
-                    .map_err(|e| format!("Failed to insert builds: {}", e))?;
+                    .context("Failed to insert builds")?;
             }
 
             if !active_dependencies.is_empty() {
                 EBuildDependency::insert_many(active_dependencies)
                     .exec(&state.db)
                     .await
-                    .map_err(|e| format!("Failed to insert dependencies: {}", e))?;
+                    .context("Failed to insert dependencies")?;
             }
 
             for build in builds {

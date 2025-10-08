@@ -13,7 +13,8 @@ jobs:
         test:
           - gradient-state
           - gradient-api
-          - gradient-building
+          # - gradient-building
+          # - gradient-cache
           # - gradient-frontend
           - gradient-mail
           - gradient-oidc

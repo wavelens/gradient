@@ -197,7 +197,7 @@ pub async fn patch_settings(
 
     if let Some(username) = body.username {
         if let Err(e) = validate_username(&username) {
-            return Err(WebError::invalid_username(e));
+            return Err(WebError::invalid_username(e.to_string()));
         }
 
         let existing_user = EUser::find()

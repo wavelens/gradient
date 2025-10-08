@@ -801,6 +801,7 @@ dependencies = [
 name = "builder"
 version = "0.4.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "chrono",
  "core",
@@ -811,6 +812,7 @@ dependencies = [
  "sea-orm",
  "sentry",
  "serde_json",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-test",
  "tracing",
@@ -876,6 +878,7 @@ dependencies = [
 name = "cache"
 version = "0.4.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "chrono",
  "core",
@@ -885,6 +888,7 @@ dependencies = [
  "sea-orm",
  "sentry",
  "serde_json",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-test",
  "tracing",
@@ -1054,6 +1058,7 @@ dependencies = [
 name = "core"
 version = "0.4.0"
 dependencies = [
+ "anyhow",
  "async-ssh2-lite",
  "async-stream",
  "base64 0.22.1",
@@ -1078,6 +1083,7 @@ dependencies = [
  "serde_json",
  "ssh-key",
  "tempfile",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-test",
  "tracing",
@@ -5647,6 +5653,7 @@ dependencies = [
 name = "web"
 version = "0.4.0"
 dependencies = [
+ "anyhow",
  "async-stream",
  "axum",
  "axum-streams",
@@ -5669,6 +5676,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
+ "thiserror 2.0.17",
  "tokio",
  "tokio-test",
  "tokio-util",

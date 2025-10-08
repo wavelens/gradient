@@ -26,7 +26,13 @@ pub async fn init_state() -> Arc<ServerState> {
     println!("Starting Gradient Server on {}:{}", cli.ip, cli.port);
     println!("State file configured: {:?}", cli.state_file);
 
-    let db = connect_db(&cli).await;
+    let db = match connect_db(&cli).await {
+        Ok(db) => db,
+        Err(e) => {
+            eprintln!("Failed to connect to database: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     // Load and apply state configuration if provided
     if let Err(e) =

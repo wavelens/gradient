@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use anyhow::Error as AnyhowError;
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
@@ -24,6 +25,9 @@ pub enum WebError {
     Database(DbErr),
     Validation(String),
     Authentication(String),
+    InputValidation(core::input::InputError),
+    JsonParsing(JsonRejection),
+    Internal(AnyhowError),
 }
 
 impl fmt::Display for WebError {
@@ -36,9 +40,12 @@ impl fmt::Display for WebError {
             WebError::Conflict(msg) => write!(f, "Conflict: {}", msg),
             WebError::UnprocessableEntity(msg) => write!(f, "Unprocessable Entity: {}", msg),
             WebError::InternalServerError(msg) => write!(f, "Internal Server Error: {}", msg),
-            WebError::Database(err) => write!(f, "Database Error: {}", err),
-            WebError::Validation(msg) => write!(f, "Validation Error: {}", msg),
-            WebError::Authentication(msg) => write!(f, "Authentication Error: {}", msg),
+            WebError::Database(err) => write!(f, "Database error: {}", err),
+            WebError::Validation(msg) => write!(f, "Validation error: {}", msg),
+            WebError::Authentication(msg) => write!(f, "Authentication error: {}", msg),
+            WebError::InputValidation(err) => write!(f, "Input validation error: {}", err),
+            WebError::JsonParsing(err) => write!(f, "JSON parsing error: {}", err),
+            WebError::Internal(err) => write!(f, "Internal error: {}", err),
         }
     }
 }
@@ -47,8 +54,36 @@ impl std::error::Error for WebError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             WebError::Database(err) => Some(err),
+            WebError::InputValidation(err) => Some(err),
+            WebError::JsonParsing(err) => Some(err),
+            WebError::Internal(err) => Some(err.as_ref()),
             _ => None,
         }
+    }
+}
+
+// Manual From implementations to avoid naming conflicts with core crate
+impl From<DbErr> for WebError {
+    fn from(err: DbErr) -> Self {
+        WebError::Database(err)
+    }
+}
+
+impl From<core::input::InputError> for WebError {
+    fn from(err: core::input::InputError) -> Self {
+        WebError::InputValidation(err)
+    }
+}
+
+impl From<JsonRejection> for WebError {
+    fn from(err: JsonRejection) -> Self {
+        WebError::JsonParsing(err)
+    }
+}
+
+impl From<AnyhowError> for WebError {
+    fn from(err: AnyhowError) -> Self {
+        WebError::Internal(err)
     }
 }
 
@@ -71,6 +106,17 @@ impl IntoResponse for WebError {
             }
             WebError::Validation(msg) => (StatusCode::BAD_REQUEST, msg),
             WebError::Authentication(msg) => (StatusCode::UNAUTHORIZED, msg),
+            WebError::InputValidation(err) => (StatusCode::BAD_REQUEST, err.to_string()),
+            WebError::JsonParsing(err) => {
+                (StatusCode::BAD_REQUEST, format!("Invalid JSON: {}", err))
+            }
+            WebError::Internal(err) => {
+                tracing::error!("Internal error: {}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error".to_string(),
+                )
+            }
         };
 
         let body = Json(BaseResponse {
@@ -79,18 +125,6 @@ impl IntoResponse for WebError {
         });
 
         (status, body).into_response()
-    }
-}
-
-impl From<DbErr> for WebError {
-    fn from(err: DbErr) -> Self {
-        WebError::Database(err)
-    }
-}
-
-impl From<JsonRejection> for WebError {
-    fn from(rejection: JsonRejection) -> Self {
-        WebError::BadRequest(format!("Invalid JSON: {}", rejection))
     }
 }
 

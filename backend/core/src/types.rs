@@ -213,11 +213,10 @@ impl NixPathInfo {
             self.nar_size,
             self.references.join(" "),
             self.sig,
-            if self.ca.is_some() {
-                format!("\nCA: {}", self.ca.as_ref().unwrap())
-            } else {
-                "".to_string()
-            }
+            self.ca
+                .as_ref()
+                .map(|ca| format!("\nCA: {}", ca))
+                .unwrap_or_default()
         )
     }
 }

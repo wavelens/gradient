@@ -6,6 +6,7 @@
 
 use crate::consts::BASE_ROLE_ADMIN_ID;
 use crate::input::load_secret;
+use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
 use chrono::Utc;
 use entity::*;
@@ -110,7 +111,8 @@ pub struct StateConfiguration {
     pub api_keys: Vec<StateApiKey>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("Validation error in field '{field}': {message}")]
 pub struct ValidationError {
     pub field: String,
     pub message: String,
@@ -483,14 +485,14 @@ async fn apply_users(
     Ok(())
 }
 
-fn derive_public_key(private_key: &str) -> Result<String, String> {
-    let private_key = PrivateKey::from_openssh(private_key)
-        .map_err(|e| format!("Failed to parse private key: {}", e))?;
+fn derive_public_key(private_key: &str) -> Result<String> {
+    let private_key =
+        PrivateKey::from_openssh(private_key).context("Failed to parse private key")?;
 
     let public_key = private_key
         .public_key()
         .to_openssh()
-        .map_err(|e| format!("Failed to derive public key: {}", e))?;
+        .context("Failed to derive public key")?;
 
     // Remove default comment if present (only keep algorithm and key)
     let key_parts: Vec<&str> = public_key.split_whitespace().collect();

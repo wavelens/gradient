@@ -27,7 +27,7 @@
             text = "bob_password";
           };
 
-          "gradient/secrets/acme_ssh_key" = {
+          "gradient/secrets/corp_ssh_key" = {
             mode = "0600";
             user = "gradient";
             group = "gradient";
@@ -90,10 +90,10 @@
               ];
 
               organizations = [{
-                name = "acme-corp";
-                display_name = "ACME Corporation";
-                description = "Main development organization for ACME products";
-                private_key_file = "/etc/gradient/secrets/acme_ssh_key";
+                name = "corp";
+                display_name = "Corporation";
+                description = "Main development organization";
+                private_key_file = "/etc/gradient/secrets/corp_ssh_key";
                 use_nix_store = true;
                 created_by = "alice";
               }];
@@ -101,21 +101,21 @@
               projects = [
                 {
                   name = "web-app";
-                  organization = "acme-corp";
-                  display_name = "ACME Web Application";
-                  description = "Main web application for ACME services";
-                  repository = "https://github.com/acme-corp/web-app.git";
-                  evaluation_wildcard = "main";
+                  organization = "corp";
+                  display_name = "Web Application";
+                  description = "Main web application";
+                  repository = "https://github.com/corp/web-app.git";
+                  evaluation_wildcard = "package.x86_64-linux.*";
                   active = true;
                   force_evaluation = false;
                   created_by = "alice";
                 }
                 {
                   name = "mobile-app";
-                  organization = "acme-corp";
-                  display_name = "ACME Mobile App";
+                  organization = "corp";
+                  display_name = "Mobile App";
                   description = "Mobile application for iOS and Android";
-                  repository = "https://github.com/acme-corp/mobile-app.git";
+                  repository = "https://github.com/corp/mobile-app.git";
                   evaluation_wildcard = "main";
                   active = true;
                   force_evaluation = false;
@@ -127,25 +127,25 @@
                 {
                   name = "build-server-1";
                   display_name = "Build Server 1";
-                  organization = "acme-corp";
+                  organization = "corp";
                   active = true;
-                  host = "build1.internal.acme.com";
+                  host = "build1.internal.example.com";
                   port = 22;
                   username = "gradient";
                   architectures = [ "x86_64-linux" "aarch64-linux" ];
-                  features = [ "big-parallel" "docker" ];
+                  features = [ "big-parallel" "kvm" ];
                   created_by = "alice";
                 }
                 {
                   name = "mac-mini-farm";
                   display_name = "Mac Mini Build Farm";
-                  organization = "acme-corp";
+                  organization = "corp";
                   active = true;
-                  host = "macfarm.internal.acme.com";
+                  host = "macfarm.internal.example.com";
                   port = 22;
                   username = "builder";
                   architectures = [ "x86_64-darwin" "aarch64-darwin" ];
-                  features = [ "big-parallel" ];
+                  features = [ "big-parallel" "nixos-test" ];
                   created_by = "alice";
                 }
               ];
@@ -158,7 +158,7 @@
                   active = true;
                   priority = 100;
                   signing_key_file = "/etc/gradient/secrets/main_cache_key";
-                  organizations = [ "acme-corp" ];
+                  organizations = [ "corp" ];
                   created_by = "alice";
                 }
                 {
@@ -168,7 +168,7 @@
                   active = false;
                   priority = 50;
                   signing_key_file = "/etc/gradient/secrets/dev_cache_key";
-                  organizations = [ "acme-corp" ];
+                  organizations = [ "corp" ];
                   created_by = "alice";
                 }
               ];

@@ -5,6 +5,7 @@
  */
 
 use crate::types::{Cli, ServerState};
+use anyhow::{Context, Result, bail};
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
@@ -20,7 +21,7 @@ pub struct EmailService {
 }
 
 impl EmailService {
-    pub async fn new(cli: &Cli) -> Result<Self, String> {
+    pub async fn new(cli: &Cli) -> Result<Self> {
         if !cli.email_enabled {
             return Ok(Self {
                 transport: None,
@@ -33,33 +34,33 @@ impl EmailService {
         let smtp_host = cli
             .email_smtp_host
             .as_ref()
-            .ok_or("SMTP host is required when email is enabled")?;
+            .context("SMTP host is required when email is enabled")?;
 
         let smtp_username = cli
             .email_smtp_username
             .as_ref()
-            .ok_or("SMTP username is required when email is enabled")?;
+            .context("SMTP username is required when email is enabled")?;
 
         let smtp_password_file = cli
             .email_smtp_password_file
             .as_ref()
-            .ok_or("SMTP password file is required when email is enabled")?;
+            .context("SMTP password file is required when email is enabled")?;
 
         let from_address = cli
             .email_from_address
             .as_ref()
-            .ok_or("From address is required when email is enabled")?;
+            .context("From address is required when email is enabled")?;
 
         let smtp_password = fs::read_to_string(smtp_password_file)
             .await
-            .map_err(|e| format!("Failed to read SMTP password file: {}", e))?
+            .context("Failed to read SMTP password file")?
             .trim()
             .to_string();
 
         let credentials = Credentials::new(smtp_username.clone(), smtp_password);
 
         let transport = SmtpTransport::relay(smtp_host)
-            .map_err(|e| format!("Failed to create SMTP transport: {}", e))?
+            .context("Failed to create SMTP transport")?
             .credentials(credentials)
             .port(cli.email_smtp_port)
             .build();
@@ -82,15 +83,15 @@ impl EmailService {
         to_name: &str,
         verification_token: &str,
         base_url: &str,
-    ) -> Result<(), String> {
+    ) -> Result<()> {
         if !self.enabled {
-            return Err("Email service is not enabled".to_string());
+            bail!("Email service is not enabled");
         }
 
         let transport = self
             .transport
             .as_ref()
-            .ok_or("SMTP transport not initialized")?;
+            .context("SMTP transport not initialized")?;
 
         let verification_url = format!(
             "{}/api/v1/auth/verify-email?token={}",
@@ -146,19 +147,17 @@ impl EmailService {
             .from(
                 format!("{} <{}>", self.from_name, self.from_address)
                     .parse()
-                    .map_err(|e| format!("Invalid from address: {}", e))?,
+                    .context("Invalid from address")?,
             )
             .to(format!("{} <{}>", to_name, to_email)
                 .parse()
-                .map_err(|e| format!("Invalid to address: {}", e))?)
+                .context("Invalid to address")?)
             .subject("Verify your email address - Gradient")
             .header(ContentType::TEXT_HTML)
             .body(email_body)
-            .map_err(|e| format!("Failed to build email: {}", e))?;
+            .context("Failed to build email")?;
 
-        transport
-            .send(&email)
-            .map_err(|e| format!("Failed to send email: {}", e))?;
+        transport.send(&email).context("Failed to send email")?;
 
         info!("Verification email sent to {}", to_email);
         Ok(())
@@ -170,15 +169,15 @@ impl EmailService {
         to_name: &str,
         reset_token: &str,
         base_url: &str,
-    ) -> Result<(), String> {
+    ) -> Result<()> {
         if !self.enabled {
-            return Err("Email service is not enabled".to_string());
+            bail!("Email service is not enabled");
         }
 
         let transport = self
             .transport
             .as_ref()
-            .ok_or("SMTP transport not initialized")?;
+            .context("SMTP transport not initialized")?;
 
         let reset_url = format!("{}/reset-password?token={}", base_url, reset_token);
 
@@ -231,19 +230,17 @@ impl EmailService {
             .from(
                 format!("{} <{}>", self.from_name, self.from_address)
                     .parse()
-                    .map_err(|e| format!("Invalid from address: {}", e))?,
+                    .context("Invalid from address")?,
             )
             .to(format!("{} <{}>", to_name, to_email)
                 .parse()
-                .map_err(|e| format!("Invalid to address: {}", e))?)
+                .context("Invalid to address")?)
             .subject("Reset your password - Gradient")
             .header(ContentType::TEXT_HTML)
             .body(email_body)
-            .map_err(|e| format!("Failed to build email: {}", e))?;
+            .context("Failed to build email")?;
 
-        transport
-            .send(&email)
-            .map_err(|e| format!("Failed to send email: {}", e))?;
+        transport.send(&email).context("Failed to send email")?;
 
         info!("Password reset email sent to {}", to_email);
         Ok(())
@@ -255,6 +252,6 @@ pub fn generate_verification_token() -> String {
     hex::encode(token)
 }
 
-pub async fn create_email_service(state: Arc<ServerState>) -> Result<EmailService, String> {
+pub async fn create_email_service(state: Arc<ServerState>) -> Result<EmailService> {
     EmailService::new(&state.cli).await
 }

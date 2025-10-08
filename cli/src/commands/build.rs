@@ -6,7 +6,6 @@
 
 use crate::config::*;
 use crate::input::*;
-use clap::{Subcommand, arg};
 use connector::*;
 use std::collections::HashMap;
 use std::path::Path;
@@ -163,16 +162,14 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
         println!("Waiting for evaluation to create builds...");
     }
 
-    let mut build_ids = Vec::new();
     let mut max_retries = 30; // Wait up to 5 minutes (30 * 10 seconds)
 
     // First, wait for builds to be created
-    loop {
+    let build_ids: Vec<String> = loop {
         match builds::get_evaluation_builds(config.clone(), evaluation_id.clone()).await {
             Ok(response) => {
                 if !response.error && !response.message.is_empty() {
-                    build_ids = response.message.iter().map(|b| b.id.clone()).collect();
-                    break;
+                    break response.message.iter().map(|b| b.id.clone()).collect();
                 }
             }
             Err(_) => {}
@@ -187,7 +184,7 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
         }
 
         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-    }
+    };
 
     if !quiet {
         println!("Builds created. Streaming build logs...");

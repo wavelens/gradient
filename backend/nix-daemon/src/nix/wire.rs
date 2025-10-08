@@ -350,7 +350,16 @@ pub async fn write_string<W: AsyncWriteExt + Unpin, S: AsRef<str> + Debug>(
         )
     })?;
     let b = truncated.as_bytes();
-    write_u64(w, b.len().try_into().unwrap()).await?;
+    write_u64(
+        w,
+        b.len().try_into().map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("String length too large: {}", e),
+            )
+        })?,
+    )
+    .await?;
     if b.len() > 0 {
         w.write_all(b).await?;
         trace!(v = truncated, "->");
@@ -384,7 +393,16 @@ where
     I::Item: AsRef<str> + Send + Sync,
 {
     let si = si.into_iter();
-    write_u64(w, si.len().try_into().unwrap()).await?;
+    write_u64(
+        w,
+        si.len().try_into().map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("String collection length too large: {}", e),
+            )
+        })?,
+    )
+    .await?;
     for s in si {
         write_string(w, s.as_ref()).await?;
     }
@@ -916,9 +934,17 @@ pub async fn write_pathinfo<W: AsyncWriteExt + Unpin>(
     write_strings(w, &pi.references)
         .await
         .with_field("PathInfo.deriver")?;
-    write_u64(w, pi.registration_time.timestamp().try_into().unwrap())
-        .await
-        .with_field("PathInfo.registration_time")?;
+    write_u64(
+        w,
+        pi.registration_time.timestamp().try_into().map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Timestamp too large: {}", e),
+            )
+        })?,
+    )
+    .await
+    .with_field("PathInfo.registration_time")?;
     write_u64(w, pi.nar_size)
         .await
         .with_field("PathInfo.nar_size")?;

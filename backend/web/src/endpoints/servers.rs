@@ -51,7 +51,7 @@ pub async fn get(
     // TODO: Implement pagination
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let servers = EServer::find()
@@ -91,7 +91,7 @@ pub async fn put(
 
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await
+            .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let server = EServer::find()
@@ -176,13 +176,22 @@ pub async fn get_server(
     )
     .await
     {
-        Some(s) => s,
-        None => {
+        Ok(Some(s)) => s,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
                     error: true,
                     message: "Server not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
                 }),
             ));
         }
@@ -210,13 +219,22 @@ pub async fn patch_server(
     )
     .await
     {
-        Some(s) => s,
-        None => {
+        Ok(Some(s)) => s,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
                     error: true,
                     message: "Server not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
                 }),
             ));
         }
@@ -254,7 +272,15 @@ pub async fn patch_server(
             )
             .one(&state.db)
             .await
-            .unwrap();
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: format!("Database error: {}", e),
+                    }),
+                )
+            })?;
 
         if server.is_some() {
             return Err((
@@ -320,25 +346,57 @@ pub async fn patch_server(
             })
             .collect::<Vec<AServerArchitecture>>();
 
-        EServerArchitecture::insert_many(server_architecture)
+        if let Err(e) = EServerArchitecture::insert_many(server_architecture)
             .exec(&state.db)
             .await
-            .unwrap();
+        {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to insert server architectures: {}", e),
+                }),
+            ));
+        }
     }
 
     if let Some(features) = body.features.clone() {
-        let server_id = *aserver
-            .id
-            .clone()
-            .into_value()
-            .unwrap()
-            .as_ref_uuid()
-            .unwrap();
+        let server_id = match aserver.id.clone().into_value() {
+            Some(id) => match id.as_ref_uuid() {
+                Some(uuid) => *uuid,
+                None => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(BaseResponse {
+                            error: true,
+                            message: "Invalid server ID format".to_string(),
+                        }),
+                    ));
+                }
+            },
+            None => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Server ID not found".to_string(),
+                    }),
+                ));
+            }
+        };
 
         add_features(Arc::clone(&state), features, None, Some(server_id)).await;
     }
 
-    aserver.update(&state.db).await.unwrap();
+    if let Err(e) = aserver.update(&state.db).await {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(BaseResponse {
+                error: true,
+                message: format!("Failed to update server: {}", e),
+            }),
+        ));
+    }
 
     let res = BaseResponse {
         error: false,
@@ -361,13 +419,22 @@ pub async fn delete_server(
     )
     .await
     {
-        Some(s) => s,
-        None => {
+        Ok(Some(s)) => s,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
                     error: true,
                     message: "Server not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
                 }),
             ));
         }
@@ -385,7 +452,15 @@ pub async fn delete_server(
     }
 
     let server: AServer = server.into();
-    server.delete(&state.db).await.unwrap();
+    if let Err(e) = server.delete(&state.db).await {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(BaseResponse {
+                error: true,
+                message: format!("Failed to delete server: {}", e),
+            }),
+        ));
+    }
 
     let res = BaseResponse {
         error: false,
@@ -408,13 +483,22 @@ pub async fn post_server_active(
     )
     .await
     {
-        Some(s) => s,
-        None => {
+        Ok(Some(s)) => s,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
                     error: true,
                     message: "Server not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
                 }),
             ));
         }
@@ -433,7 +517,15 @@ pub async fn post_server_active(
 
     let mut aserver: AServer = server.into();
     aserver.active = Set(true);
-    aserver.update(&state.db).await.unwrap();
+    if let Err(e) = aserver.update(&state.db).await {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(BaseResponse {
+                error: true,
+                message: format!("Failed to enable server: {}", e),
+            }),
+        ));
+    }
 
     let res = BaseResponse {
         error: false,
@@ -456,13 +548,22 @@ pub async fn delete_server_active(
     )
     .await
     {
-        Some(s) => s,
-        None => {
+        Ok(Some(s)) => s,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
                     error: true,
                     message: "Server not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
                 }),
             ));
         }
@@ -481,7 +582,15 @@ pub async fn delete_server_active(
 
     let mut aserver: AServer = server.into();
     aserver.active = Set(false);
-    aserver.update(&state.db).await.unwrap();
+    if let Err(e) = aserver.update(&state.db).await {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(BaseResponse {
+                error: true,
+                message: format!("Failed to disable server: {}", e),
+            }),
+        ));
+    }
 
     let res = BaseResponse {
         error: false,
@@ -504,8 +613,8 @@ pub async fn post_server_check_connection(
     )
     .await
     {
-        Some(s) => s,
-        None => {
+        Ok(Some(s)) => s,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
@@ -514,10 +623,30 @@ pub async fn post_server_check_connection(
                 }),
             ));
         }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
+                }),
+            ));
+        }
     };
 
     let (private_key, public_key) =
-        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization.clone()).unwrap();
+        match decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization.clone()) {
+            Ok(keys) => keys,
+            Err(e) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: format!("Failed to decrypt SSH private key: {}", e),
+                    }),
+                ));
+            }
+        };
 
     match connect(server, None, public_key, private_key).await {
         Ok(_) => Ok(Json(BaseResponse {

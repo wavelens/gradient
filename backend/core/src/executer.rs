@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use anyhow::{Context, Result};
 use async_ssh2_lite::{AsyncSession, TokioTcpStream};
 use futures::Stream;
 use nix_daemon::nix::DaemonStore;
@@ -37,8 +38,8 @@ pub async fn connect(
     store_path: Option<String>,
     public_key: String,
     private_key: String,
-) -> Result<NixStore, Box<dyn std::error::Error + Send + Sync>> {
-    let server_addr = input::url_to_addr(server.host.as_str(), server.port).unwrap();
+) -> anyhow::Result<NixStore> {
+    let server_addr = input::url_to_addr(server.host.as_str(), server.port)?;
     let mut session = AsyncSession::<TokioTcpStream>::connect(server_addr, None).await?;
 
     init_session(
@@ -67,10 +68,11 @@ pub async fn init_session(
     username: &str,
     public_key: String,
     private_key: String,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    session.handshake().await.unwrap_or_else(|err| {
+) -> anyhow::Result<()> {
+    session.handshake().await.map_err(|err| {
         error!(error = ?err, "SSH handshake failed");
-    });
+        err
+    })?;
 
     session
         .userauth_pubkey_memory(
@@ -90,7 +92,7 @@ pub async fn execute_build(
     build: &MBuild,
     remote_store: &mut NixStore,
     state: Arc<ServerState>,
-) -> Result<(MBuild, HashMap<String, BuildResult>), Box<dyn std::error::Error + Send + Sync>> {
+) -> anyhow::Result<(MBuild, HashMap<String, BuildResult>)> {
     info!("Executing build");
 
     let paths = get_builds_path(vec![&build]);
@@ -127,7 +129,10 @@ pub async fn execute_build(
 
             let mut abuild: ABuild = build.clone().into();
             abuild.log = Set(Some(full_log));
-            build = abuild.update(&state.db).await.unwrap();
+            build = abuild
+                .update(&state.db)
+                .await
+                .context("Failed to update build log")?;
         }
     }
 
@@ -146,7 +151,7 @@ pub async fn copy_builds<
     from_store: &mut DaemonStore<A>,
     to_store: &mut DaemonStore<B>,
     local_is_receiver: bool,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<()> {
     for path in paths {
         info!(
             path = %path,
@@ -154,7 +159,12 @@ pub async fn copy_builds<
             "Copying build"
         );
 
-        if to_store.is_valid_path(path.clone()).result().await.unwrap() {
+        if to_store
+            .is_valid_path(path.clone())
+            .result()
+            .await
+            .context("Failed to check path validity in destination store")?
+        {
             continue;
         }
 
@@ -164,7 +174,7 @@ pub async fn copy_builds<
             .await
             .unwrap_or(false)
         {
-            return Err(format!("Path {} is not valid in source store", path).into());
+            anyhow::bail!("Path {} is not valid in source store", path);
         }
 
         let nar = from_store.nar_from_path(path.clone()).result().await?;
@@ -172,15 +182,20 @@ pub async fn copy_builds<
             .query_pathinfo(path.clone())
             .result()
             .await?
-            .unwrap();
+            .ok_or_else(|| anyhow::anyhow!("Path info not found for {}", path))?;
         to_store
             .add_to_store_nar(path.clone(), path_info, nar)
             .result()
             .await
-            .unwrap();
+            .context("Failed to add to store")?;
 
-        if !to_store.is_valid_path(path.clone()).result().await.unwrap() {
-            return Err(format!("Path {} is not valid in destination store", path).into());
+        if !to_store
+            .is_valid_path(path.clone())
+            .result()
+            .await
+            .context("Failed to check path validity in destination store")?
+        {
+            anyhow::bail!("Path {} is not valid in destination store", path);
         }
     }
 
@@ -190,7 +205,7 @@ pub async fn copy_builds<
 pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
     paths: Vec<String>,
     store: &mut DaemonStore<A>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>> {
     let mut output_paths: HashMap<String, String> = HashMap::new();
 
     for path in paths {
@@ -199,7 +214,7 @@ pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
                 .query_derivation_output_map(path.clone())
                 .result()
                 .await
-                .unwrap();
+                .context("Failed to query derivation output map")?;
 
             if let Some(out_path) = output_map.get("out") {
                 output_paths.insert(path, out_path.clone());
@@ -209,14 +224,11 @@ pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
         }
     }
 
-    let valid_paths = match store
+    let valid_paths = store
         .query_valid_paths(output_paths.values().clone(), true)
         .result()
         .await
-    {
-        Ok(v) => v,
-        Err(e) => return Err(e.to_string()),
-    };
+        .context("Failed to query valid paths")?;
 
     let missing = output_paths
         .into_iter()
@@ -232,30 +244,67 @@ pub fn get_buildlog_stream(
     build: MBuild,
     public_key: String,
     private_key: String,
-) -> Result<Pin<Box<dyn Stream<Item = BuildLogStreamResponse> + Send>>, String> {
+) -> anyhow::Result<Pin<Box<dyn Stream<Item = BuildLogStreamResponse> + Send>>> {
     let stream = async_stream::stream! {
-        let server_addr = input::url_to_addr(server.host.as_str(), server.port).unwrap();
-        let mut session = AsyncSession::<TokioTcpStream>::connect(server_addr, None).await.unwrap();
+        let server_addr = match input::url_to_addr(server.host.as_str(), server.port) {
+            Ok(addr) => addr,
+            Err(e) => {
+                tracing::error!("Failed to parse server address: {:?}", e);
+                return;
+            }
+        };
 
-        init_session(&mut session, server.username.as_str(), public_key, private_key).await.unwrap();
+        let mut session = match AsyncSession::<TokioTcpStream>::connect(server_addr, None).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("Failed to connect to server: {:?}", e);
+                return;
+            }
+        };
 
-        let mut channel = session.channel_session().await.unwrap();
+        if let Err(e) = init_session(&mut session, server.username.as_str(), public_key, private_key).await {
+            tracing::error!("Failed to initialize session: {:?}", e);
+            return;
+        }
+
+        let mut channel = match session.channel_session().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("Failed to create channel: {:?}", e);
+                return;
+            }
+        };
 
         let command = format!("watch -n 0.5 nix-store --read-log {}", build.derivation_path);
 
-        channel.exec(command.as_str()).await.unwrap();
+        if let Err(e) = channel.exec(command.as_str()).await {
+            tracing::error!("Failed to execute command: {:?}", e);
+            return;
+        }
 
         let mut buffer = [0; 1024];
         let mut log = String::new();
 
         loop {
-            let len = channel.read(&mut buffer).await.unwrap();
+            let len = match channel.read(&mut buffer).await {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::error!("Failed to read from channel: {:?}", e);
+                    break;
+                }
+            };
 
             if len == 0 {
                 break;
             }
 
-            log.push_str(std::str::from_utf8(&buffer[..len]).unwrap());
+            match std::str::from_utf8(&buffer[..len]) {
+                Ok(s) => log.push_str(s),
+                Err(e) => {
+                    tracing::error!("Failed to parse UTF-8: {:?}", e);
+                    continue;
+                }
+            }
 
             yield BuildLogStreamResponse {
                 build_id: build.id,
@@ -267,16 +316,16 @@ pub fn get_buildlog_stream(
     Ok(Box::pin(stream))
 }
 
-pub async fn get_local_store(organization: Option<MOrganization>) -> Result<LocalNixStore, String> {
-    if organization.is_none() || organization.clone().unwrap().use_nix_store {
+pub async fn get_local_store(organization: Option<MOrganization>) -> Result<LocalNixStore> {
+    if organization.as_ref().map_or(true, |org| org.use_nix_store) {
         let store = DaemonStore::builder()
             .init(
                 UnixStream::connect("/nix/var/nix/daemon-socket/socket")
                     .await
-                    .unwrap(),
+                    .context("Failed to connect to Nix daemon socket")?,
             )
             .await
-            .map_err(|_| "Failed to Connect to Local Nix Deamon".to_string())?;
+            .context("Failed to connect to local Nix daemon")?;
 
         // let nix_path_hashmap = HashMap::new();
         // nix_path_hashmap.insert(
@@ -290,7 +339,10 @@ pub async fn get_local_store(organization: Option<MOrganization>) -> Result<Loca
 
         Ok(LocalNixStore::UnixStream(store))
     } else {
-        let nix_store_dir = format!("/var/lib/gradient/store/{}", organization.unwrap().id);
+        let org = organization.ok_or_else(|| {
+            anyhow::anyhow!("Organization should be Some when not using nix store")
+        })?;
+        let nix_store_dir = format!("/var/lib/gradient/store/{}", org.id);
         let mut child = Command::new("nix-store")
             .arg("--eval-store")
             .arg(nix_store_dir.clone())
@@ -300,15 +352,27 @@ pub async fn get_local_store(organization: Option<MOrganization>) -> Result<Loca
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
-            .map_err(|_| "Failed to Connect to Local Nix Deamon".to_string())?;
+            .context("Failed to spawn nix-store process")?;
 
-        let stdin = child.stdin.take().expect("Failed to open stdin");
-        let stdout = child.stdout.take().expect("Failed to open stdout");
-        let _stderr = child.stderr.take().expect("Failed to open stderr");
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to open stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to open stdout"))?;
+        let _stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Failed to open stderr"))?;
 
         let duplex = CommandDuplex { stdin, stdout };
 
-        let store = DaemonStore::builder().init(duplex).await.unwrap();
+        let store = DaemonStore::builder()
+            .init(duplex)
+            .await
+            .context("Failed to initialize daemon store")?;
 
         Ok(LocalNixStore::CommandDuplex(store))
     }
@@ -324,40 +388,36 @@ pub fn get_builds_path(builds: Vec<&MBuild>) -> Vec<&str> {
 pub async fn get_derivation<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
     path: String,
     store: &mut DaemonStore<A>,
-) -> Result<PathInfo, String> {
+) -> Result<PathInfo> {
     Ok(store
         .query_pathinfo(path)
         .result()
         .await
-        .map_err(|e| e.to_string())?
-        .unwrap())
+        .context("Failed to query path info")?
+        .context("Path info not found")?)
 }
 
 pub async fn get_output_path<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
     path: String,
     store: &mut DaemonStore<A>,
-) -> Result<Vec<String>, String> {
-    match store
+) -> Result<Vec<String>> {
+    let output_map = store
         .query_derivation_output_map(path.clone())
         .result()
         .await
-        .map_err(|e| e.to_string())
-    {
-        Ok(output_map) => Ok(output_map.values().cloned().collect()),
-        Err(e) => Err(format!("Failed to get output path for {}: {}", path, e)),
-    }
+        .with_context(|| format!("Failed to get output path for {}", path))?;
+    Ok(output_map.values().cloned().collect())
 }
 
 pub async fn get_pathinfo<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
     path: String,
     store: &mut DaemonStore<A>,
-) -> Result<Option<nix_daemon::PathInfo>, String> {
+) -> Result<Option<nix_daemon::PathInfo>> {
     Ok(store
         .query_pathinfo(path)
         .result()
         .await
-        .map_err(|e| e.to_string())
-        .unwrap())
+        .context("Failed to query path info")?)
 }
 
 #[derive(Debug, Clone)]
@@ -371,12 +431,12 @@ pub struct BuildOutputInfo {
 pub async fn get_build_outputs_from_derivation<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
     derivation_path: String,
     store: &mut DaemonStore<A>,
-) -> Result<Vec<BuildOutputInfo>, String> {
+) -> Result<Vec<BuildOutputInfo>> {
     let output_map = store
         .query_derivation_output_map(derivation_path)
         .result()
         .await
-        .map_err(|e| e.to_string())?;
+        .context("Failed to query derivation output map")?;
 
     let mut outputs = Vec::new();
 
@@ -385,10 +445,10 @@ pub async fn get_build_outputs_from_derivation<A: AsyncReadExt + AsyncWriteExt +
             .query_pathinfo(output_path.clone())
             .result()
             .await
-            .map_err(|e| e.to_string())?
+            .context("Failed to query path info")?
         {
             let (hash, package) = get_hash_from_path(output_path.clone())
-                .map_err(|e| format!("Failed to parse path {}: {}", output_path, e))?;
+                .with_context(|| format!("Failed to parse path {}", output_path))?;
 
             outputs.push(BuildOutputInfo {
                 path: output_path,
