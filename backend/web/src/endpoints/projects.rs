@@ -111,7 +111,7 @@ pub async fn put(
         return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
     }
 
-    let repository_url = GitUrl::parse_to_url(&body.repository)
+    GitUrl::parse(&body.repository)
         .map_err(|_| WebError::BadRequest("Invalid Repository URL".to_string()))?;
 
     let organization: MOrganization =
@@ -145,7 +145,7 @@ pub async fn put(
         active: Set(true),
         display_name: Set(body.display_name.clone()),
         description: Set(body.description.clone()),
-        repository: Set(repository_url.to_string()),
+        repository: Set(body.repository.clone()),
         evaluation_wildcard: Set(body.evaluation_wildcard.clone()),
         last_evaluation: Set(None),
         last_check_at: Set(*NULL_TIME),
@@ -242,10 +242,10 @@ pub async fn patch_project(
     }
 
     if let Some(repository) = body.repository {
-        let repository_url = GitUrl::parse_to_url(&repository)
+        GitUrl::parse(&repository)
             .map_err(|_| WebError::BadRequest("Invalid Repository URL".to_string()))?;
 
-        aproject.repository = Set(repository_url.to_string());
+        aproject.repository = Set(repository.clone());
     }
 
     if let Some(evaluation_wildcard) = body.evaluation_wildcard {

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-fn init_logging(log_level: &str, debug: bool) {
+fn init_logging(log_level: &str) {
     // SQL logging is now controlled at the database connection level
     let env_filter = match EnvFilter::try_from_default_env() {
         Ok(filter) => filter,
@@ -26,9 +26,7 @@ fn init_logging(log_level: &str, debug: bool) {
         .with(
             fmt::layer()
                 .with_target(true)
-                .with_thread_ids(true)
-                .with_file(debug)
-                .with_line_number(debug),
+                .with_thread_ids(true),
         )
         .with(env_filter)
         .init();
@@ -39,13 +37,12 @@ pub async fn main() -> std::io::Result<()> {
     let state = init_state().await;
 
     // Initialize logging with the configured level
-    init_logging(&state.cli.log_level, state.cli.debug);
+    init_logging(&state.cli.log_level);
 
     info!(
         version = env!("CARGO_PKG_VERSION"),
         ip = %state.cli.ip,
         port = state.cli.port,
-        debug = state.cli.debug,
         log_level = %state.cli.log_level,
         "Starting Gradient server"
     );

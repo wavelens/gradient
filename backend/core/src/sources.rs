@@ -448,6 +448,7 @@ pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), SourceE
         .map_err(|_| SourceError::SshKeyGeneration)?;
     let private_key_bytes: [u8; 32] = keypair
         .sk
+        .seed()
         .as_slice()
         .try_into()
         .map_err(|_| SourceError::SshKeyGeneration)?;
@@ -690,3 +691,45 @@ pub fn get_cache_nar_location(
         if compressed { ".zst" } else { "" }
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+    use std::io::Write;
+
+    #[test]
+    fn test_generate_ssh_key() {
+        // Create a temporary secret file with valid base64 content
+        let mut secret_file = NamedTempFile::new().unwrap();
+        let secret_content = base64::engine::general_purpose::STANDARD.encode(b"this_is_a_test_secret_key_32chars");
+        secret_file.write_all(secret_content.as_bytes()).unwrap();
+        let secret_file_path = secret_file.path().to_string_lossy().to_string();
+
+        // Test key generation
+        let result = generate_ssh_key(secret_file_path);
+
+        match result {
+            Ok((private_key, public_key)) => {
+                // Verify the keys are not empty
+                assert!(!private_key.is_empty(), "Private key should not be empty");
+                assert!(!public_key.is_empty(), "Public key should not be empty");
+
+                // Verify public key format (should start with "ssh-ed25519")
+                assert!(public_key.starts_with("ssh-ed25519"), "Public key should start with 'ssh-ed25519'");
+
+                // Verify private key is base64 encoded (encrypted)
+                let _decoded = base64::engine::general_purpose::STANDARD.decode(&private_key)
+                    .expect("Private key should be valid base64");
+
+                println!("✓ SSH key generation test passed");
+                println!("  Private key length: {} characters", private_key.len());
+                println!("  Public key: {}", public_key);
+            }
+            Err(e) => {
+                panic!("SSH key generation failed: {}", e);
+            }
+        }
+    }
+}
+

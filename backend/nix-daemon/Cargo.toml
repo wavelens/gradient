@@ -4,17 +4,15 @@
 
 [package]
 name = "nix-daemon"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 license = "EUPL-1.2"
-authors = ["embr <git@liclac.eu>"]
+authors = ["embr <git@liclac.eu>", "Wavelens UG <info@wavelens.io>"]
 description = "A library for talking directly to the Nix Daemon"
 repository = "https://codeberg.org/gorgon/gorgon/src/branch/main/nix-daemon"
 documentation = "https://docs.rs/nix-daemon/"
 keywords = ["nix"]
 categories = ["api-bindings"]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 async-stream = "0.3"

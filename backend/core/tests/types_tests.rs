@@ -9,11 +9,11 @@
 extern crate core as gradient_core;
 use gradient_core::types::*;
 use sea_orm::{DatabaseBackend, MockDatabase};
-use uuid::Uuid;
 
 fn create_mock_cli() -> Cli {
     Cli {
         debug: false,
+        log_level: "info".to_string(),
         ip: "127.0.0.1".to_string(),
         port: 3000,
         serve_url: "http://127.0.0.1:8000".to_string(),
@@ -23,24 +23,30 @@ fn create_mock_cli() -> Cli {
         max_concurrent_builds: 1000,
         evaluation_timeout: 10,
         store_path: None,
+        state_file: None,
         base_path: ".".to_string(),
         disable_registration: false,
-        oauth_enabled: false,
-        oauth_required: false,
-        oauth_client_id: None,
-        oauth_client_secret_file: None,
-        oauth_auth_url: None,
-        oauth_token_url: None,
-        oauth_api_url: None,
-        oauth_scopes: None,
+        oidc_enabled: false,
+        oidc_required: false,
+        oidc_client_id: None,
+        oidc_client_secret_file: None,
+        oidc_scopes: None,
         oidc_discovery_url: None,
         crypt_secret_file: "test_secret".to_string(),
         jwt_secret_file: "test_jwt".to_string(),
         serve_cache: false,
         binpath_nix: "nix".to_string(),
         binpath_git: "git".to_string(),
-        binpath_zstd: "zstd".to_string(),
+        binpath_ssh: "ssh".to_string(),
         report_errors: false,
+        email_enabled: false,
+        email_require_verification: false,
+        email_smtp_host: None,
+        email_smtp_port: 587,
+        email_smtp_username: None,
+        email_smtp_password_file: None,
+        email_from_address: None,
+        email_from_name: "Gradient".to_string(),
     }
 }
 
@@ -61,7 +67,6 @@ fn test_server_state_creation() {
 
         assert_eq!(state.cli.port, 3000);
         assert_eq!(state.cli.ip, "127.0.0.1");
-        assert!(!state.cli.debug);
     });
 }
 

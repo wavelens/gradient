@@ -15,7 +15,7 @@ jobs:
           - gradient-api
           # - gradient-building
           # - gradient-cache
-          # - gradient-frontend
+          - gradient-frontend
           - gradient-mail
           - gradient-oidc
           - gradient-remote

@@ -1170,6 +1170,11 @@ def logout_view(request):
 
 
 def register(request):
+    # Check if registration should be blocked
+    if settings.GRADIENT_DISABLE_REGISTRATION or settings.GRADIENT_OIDC_REQUIRED:
+        # Registration is disabled or OIDC is required, show the disabled page
+        return render(request, "register.html", {"form": None})
+
     if request.method == "POST":
         form = RegisterForm(request.POST)
         if form.is_valid():

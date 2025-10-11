@@ -7,7 +7,6 @@
 //! Tests for input validation and parsing functions
 
 extern crate core as gradient_core;
-use git_url_parse::normalize_url;
 use gradient_core::input::*;
 
 #[test]
@@ -19,13 +18,13 @@ fn test_url_to_addr() {
     assert_eq!(addr.to_string(), "[::1]:8080");
 
     let addr = url_to_addr("127.0.0.1", 65536).unwrap_err();
-    assert_eq!(addr.to_string(), "port out of range 1-65535");
+    assert_eq!(addr.to_string(), "Port 65536 is out of range 1-65535");
 
     let addr = url_to_addr("127.0.0.1", 0).unwrap_err();
-    assert_eq!(addr.to_string(), "port out of range 1-65535");
+    assert_eq!(addr.to_string(), "Port 0 is out of range 1-65535");
 
     let addr = url_to_addr("127.0.0.1", -1).unwrap_err();
-    assert_eq!(addr.to_string(), "port out of range 1-65535");
+    assert_eq!(addr.to_string(), "Port -1 is out of range 1-65535");
 
     let addr = url_to_addr("::1", 8080).unwrap();
     assert_eq!(addr.to_string(), "[::1]:8080");
@@ -46,10 +45,10 @@ fn test_port_in_range() {
     assert_eq!(port, 65535);
 
     let port = port_in_range("65536").unwrap_err();
-    assert_eq!(port, "port not in range 1-65535");
+    assert_eq!(port.to_string(), "Port not in range 1-65535");
 
     let port = port_in_range("0").unwrap_err();
-    assert_eq!(port, "port not in range 1-65535");
+    assert_eq!(port.to_string(), "Port not in range 1-65535");
 }
 
 #[test]
@@ -58,16 +57,16 @@ fn test_greater_than_zero() {
     assert_eq!(num, 1);
 
     let num = greater_than_zero::<usize>("0").unwrap_err();
-    assert_eq!(num, "`0` is not larger than 0");
+    assert_eq!(num.to_string(), "`0` is not larger than 0");
 
     let num = greater_than_zero::<u32>("-1").unwrap_err();
-    assert_eq!(num, "`-1` is not a valid number");
+    assert_eq!(num.to_string(), "`-1` is not a valid number");
 
     let num = greater_than_zero::<i32>("-1").unwrap_err();
-    assert_eq!(num, "`-1` is not larger than 0");
+    assert_eq!(num.to_string(), "`-1` is not larger than 0");
 
     let num = greater_than_zero::<u32>("a").unwrap_err();
-    assert_eq!(num, "`a` is not a valid number");
+    assert_eq!(num.to_string(), "`a` is not a valid number");
 
     let num = greater_than_zero::<f32>("1.0").unwrap();
     assert_eq!(num, 1.0);
@@ -88,10 +87,10 @@ fn test_hex_to_vec() {
     );
 
     let vec = hex_to_vec("68656c6c6").unwrap_err();
-    assert_eq!(vec.to_string(), "invalid hex string");
+    assert_eq!(vec.to_string(), "Invalid hex string");
 
     let vec = hex_to_vec("68656c6c6g").unwrap_err();
-    assert_eq!(vec.to_string(), "invalid digit found in string");
+    assert_eq!(vec.to_string(), "Invalid hex string");
 }
 
 #[test]
@@ -112,27 +111,34 @@ fn test_hex_to_vec_conversion() {
 #[test]
 fn test_repository_url_to_nix() {
     let url = repository_url_to_nix(
-        normalize_url("git@github.com:Wavelens/Gradient.git")
-            .unwrap()
-            .as_str(),
+        "git@github.com:Wavelens/Gradient.git",
         "11c2f8505c234697ccabbc96e5b8a76daf0f31d3",
     )
     .unwrap();
     assert_eq!(
         url,
-        "git+ssh://git@github.com/Wavelens/Gradient.git?rev=11c2f8505c234697ccabbc96e5b8a76daf0f31d3"
+        "git@github.com:Wavelens/Gradient.git?rev=11c2f8505c234697ccabbc96e5b8a76daf0f31d3"
     );
 
     let url = repository_url_to_nix(
-        normalize_url("https://github.com/Wavelens/Gradient.git")
-            .unwrap()
-            .as_str(),
+        "https://github.com/Wavelens/Gradient.git",
         "11c2f8505c234697ccabbc96e5b8a76daf0f31d3",
     )
     .unwrap();
     assert_eq!(
         url,
         "git+https://github.com/Wavelens/Gradient.git?rev=11c2f8505c234697ccabbc96e5b8a76daf0f31d3"
+    );
+
+    // Test git:// URL handling
+    let url = repository_url_to_nix(
+        "git://server.example.com/repo.git",
+        "11c2f8505c234697ccabbc96e5b8a76daf0f31d3",
+    )
+    .unwrap();
+    assert_eq!(
+        url,
+        "git://server.example.com/repo.git?rev=11c2f8505c234697ccabbc96e5b8a76daf0f31d3"
     );
 }
 
@@ -159,25 +165,25 @@ fn test_check_index_name() {
     check_index_name("te-9st").unwrap();
 
     let name = check_index_name("Test").unwrap_err();
-    assert_eq!(name, "Name must be lowercase");
+    assert_eq!(name.to_string(), "Name must be lowercase");
 
     let name = check_index_name("test-").unwrap_err();
-    assert_eq!(name, "Name can only start and end with letters or numbers");
+    assert_eq!(name.to_string(), "Name can only start and end with letters or numbers");
 
     let name = check_index_name("test_").unwrap_err();
-    assert_eq!(name, "Name can only contain letters, numbers, and dashes");
+    assert_eq!(name.to_string(), "Name can only contain letters, numbers, and dashes");
 
     let name = check_index_name("test ").unwrap_err();
-    assert_eq!(name, "Name can only contain letters, numbers, and dashes");
+    assert_eq!(name.to_string(), "Name can only contain letters, numbers, and dashes");
 
     let name = check_index_name("test name").unwrap_err();
-    assert_eq!(name, "Name can only contain letters, numbers, and dashes");
+    assert_eq!(name.to_string(), "Name can only contain letters, numbers, and dashes");
 
     let name = check_index_name("test?name").unwrap_err();
-    assert_eq!(name, "Name can only contain letters, numbers, and dashes");
+    assert_eq!(name.to_string(), "Name can only contain letters, numbers, and dashes");
 
     let name = check_index_name("").unwrap_err();
-    assert_eq!(name, "Name cannot be empty");
+    assert_eq!(name.to_string(), "Name cannot be empty");
 }
 
 #[test]
@@ -248,21 +254,21 @@ fn test_validate_password_length_errors() {
     let result = validate_password("Abc1!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password must be at least 8 characters long"
     );
 
     let result = validate_password("Ab1!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password must be at least 8 characters long"
     );
 
     let result = validate_password("");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password must be at least 8 characters long"
     );
 
@@ -270,7 +276,7 @@ fn test_validate_password_length_errors() {
     let long_password = "Ab1!".repeat(33); // 132 characters
     let result = validate_password(&long_password);
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err(), "Password cannot exceed 128 characters");
+    assert_eq!(result.unwrap_err().to_string(), "Password cannot exceed 128 characters");
 
     // Exactly 128 characters should be valid
     let max_password = "Ab1!".repeat(32); // 128 characters
@@ -283,7 +289,7 @@ fn test_validate_password_complexity_errors() {
     let result = validate_password("lowercase123!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password must contain at least one uppercase letter"
     );
 
@@ -291,7 +297,7 @@ fn test_validate_password_complexity_errors() {
     let result = validate_password("UPPERCASE123!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password must contain at least one lowercase letter"
     );
 
@@ -299,7 +305,7 @@ fn test_validate_password_complexity_errors() {
     let result = validate_password("NoDigitsHere!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password must contain at least one digit"
     );
 
@@ -307,7 +313,7 @@ fn test_validate_password_complexity_errors() {
     let result = validate_password("NoSpecial123");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password must contain at least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)"
     );
 
@@ -315,7 +321,7 @@ fn test_validate_password_complexity_errors() {
     let result = validate_password("lowercase");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password must contain at least one uppercase letter"
     );
 }
@@ -326,28 +332,28 @@ fn test_validate_password_pattern_errors() {
     let result = validate_password("MyPassword123!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password cannot contain the word 'password'"
     );
 
     let result = validate_password("password123!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password cannot contain the word 'password'"
     );
 
     let result = validate_password("Password123!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password cannot contain the word 'password'"
     );
 
     let result = validate_password("MyPassWord123!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password cannot contain the word 'password'"
     );
 
@@ -355,21 +361,21 @@ fn test_validate_password_pattern_errors() {
     let result = validate_password("Testabcde123!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password cannot contain sequential characters (e.g., 'abcd', '1234')"
     );
 
     let result = validate_password("Test12345!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password cannot contain sequential characters (e.g., 'abcd', '1234')"
     );
 
     let result = validate_password("Testmnop123!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password cannot contain sequential characters (e.g., 'abcd', '1234')"
     );
 
@@ -377,21 +383,21 @@ fn test_validate_password_pattern_errors() {
     let result = validate_password("Testaaa123!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password cannot contain repeated characters (e.g., 'aaa', '111')"
     );
 
     let result = validate_password("Test111Pass!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password cannot contain repeated characters (e.g., 'aaa', '111')"
     );
 
     let result = validate_password("TestAAA123!");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password cannot contain repeated characters (e.g., 'aaa', '111')"
     );
 }
@@ -424,7 +430,7 @@ fn test_validate_password_edge_cases() {
     let result = validate_password("TestÜber123");
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.unwrap_err().to_string(),
         "Password must contain at least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)"
     );
 }

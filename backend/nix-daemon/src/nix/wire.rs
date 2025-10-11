@@ -131,7 +131,7 @@ impl<'r, R: AsyncReadExt + Unpin> FramedReader<'r, R> {
             let mut buf = ReadBuf::new(&mut stkbuf[self.header_read as usize..]);
             self.header_read += match self.r.as_mut().poll_read(cx, &mut buf) {
                 Poll::Pending => return Poll::Pending,
-                Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
                 Poll::Ready(Ok(())) => {
                     let n = buf.filled().len();
                     self.header = stkbuf;
@@ -158,7 +158,7 @@ impl<'r, R: AsyncReadExt + Unpin> AsyncRead for FramedReader<'r, R> {
         while !self.done && self.remaining() == 0 {
             match self.as_mut().read_header(cx) {
                 Poll::Ready(Ok(())) => trace!(len = self.remaining(), "Read header"),
-                ret @ _ => return ret,
+                ret => return ret,
             };
         }
 
@@ -173,7 +173,7 @@ impl<'r, R: AsyncReadExt + Unpin> AsyncRead for FramedReader<'r, R> {
         trace!(len_before, remaining, "Reading...");
         match std::pin::pin!(r).poll_read(cx, buf) {
             Poll::Ready(Ok(())) => {}
-            ret @ _ => return ret,
+            ret => return ret,
         }
 
         let read = buf.filled().len() - len_before;
@@ -207,21 +207,21 @@ pub async fn copy_to_framed<R: AsyncReadExt + Unpin, W: AsyncWriteExt + Unpin>(
 /// Read a u64 from the stream (little endian).
 #[instrument(skip(r), level = "trace")]
 pub async fn read_u64<R: AsyncReadExt + Unpin>(r: &mut R) -> std::io::Result<u64> {
-    Ok(r.read_u64_le().await.tap_ok(|v| trace!(v, "<-"))?)
+    r.read_u64_le().await.tap_ok(|v| trace!(v, "<-"))
 }
 /// Write a u64 from the stream (little endian).
 #[instrument(skip(w, v), level = "trace")]
 pub async fn write_u64<W: AsyncWriteExt + Unpin>(w: &mut W, v: u64) -> std::io::Result<()> {
-    Ok(w.write_u64_le(v.tap(|v| trace!(v, "->"))).await?)
+    w.write_u64_le(v.tap(|v| trace!(v, "->"))).await
 }
 
 /// Read a boolean from the stream, encoded as u64 (>0 is true).
 #[instrument(skip(r), level = "trace")]
 pub async fn read_bool<R: AsyncReadExt + Unpin>(r: &mut R) -> std::io::Result<bool> {
-    Ok(read_u64(r)
+    read_u64(r)
         .await
         .map(|v| v > 0)
-        .tap_ok(|v| trace!(v, "<-"))?)
+        .tap_ok(|v| trace!(v, "<-"))
 }
 /// Write a boolean to the stream, encoded as u64 (>0 is true).
 #[instrument(skip(w, v), level = "trace")]

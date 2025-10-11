@@ -16,6 +16,7 @@ pub mod wire;
 use crate::{
     BuildMode, ClientSettings, Error, PathInfo, Progress, Result, ResultExt, Stderr, Store,
 };
+use std::iter;
 use std::future::Future;
 use std::{collections::HashMap, fmt::Debug};
 use tokio::{
@@ -1445,9 +1446,8 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
                     } else {
                         0
                     };
-                    for _ in 0..padding_needed {
-                        nar_binary.push(0);
-                    }
+
+                    nar_binary.extend(iter::repeat(0).take(padding_needed));
                 }
 
                 wire::write_u64(&mut store.conn, nar_binary.len() as u64).await?;

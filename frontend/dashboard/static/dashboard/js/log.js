@@ -10,6 +10,8 @@ let buildCompleted = false;
 let lastLogLength = 0;
 let buildIds = [];
 let scrollToBottomButton = null;
+let buildsData = [];
+let currentBuildId = null;
 
 // Get variables from global scope
 const baseUrl = window.location.origin;
@@ -35,13 +37,16 @@ async function checkBuildStatus() {
         const evaluation = data.message;
         updateBuildStatus(evaluation.status);
 
-        // Update duration
-        updateDuration(evaluation.created_at, evaluation.status);
+        // Update duration - use updated_at for completed builds if available
+        const endTime = (evaluation.status === 'Completed' || evaluation.status === 'Failed' || evaluation.status === 'Aborted')
+          ? evaluation.updated_at || evaluation.created_at
+          : evaluation.created_at;
+        updateDuration(evaluation.created_at, evaluation.status, endTime);
 
         // Display evaluation error if it exists
         displayEvaluationError(evaluation.error);
 
-        // Get builds for this evaluation
+        // Get builds for this evaluation (this will also update the sidebar)
         await fetchBuilds();
 
         // Stop polling if build is completed, but fetch logs one final time
@@ -107,13 +112,54 @@ function updateBuildStatus(status) {
   }
 }
 
-function updateDuration(createdAt, status) {
+function updateDuration(createdAt, status, endTime = null) {
   const durationDisplay = document.getElementById('duration-display');
   if (!durationDisplay || !createdAt) return;
 
-  const startTime = new Date(createdAt);
-  const now = new Date();
-  const durationMs = now - startTime;
+  // Helper function to parse timestamps with timezone handling
+  function parseTimestamp(timestamp) {
+    if (!timestamp) return null;
+
+    if (timestamp.includes('T') && !timestamp.includes('Z') && !timestamp.includes('+')) {
+      // If it's an ISO string without timezone info, assume it's UTC
+      return new Date(timestamp + 'Z');
+    } else {
+      // Otherwise, parse as provided
+      return new Date(timestamp);
+    }
+  }
+
+  const startTime = parseTimestamp(createdAt);
+  if (!startTime) return;
+
+  let durationMs;
+  const isCompleted = status === 'Completed' || status === 'Failed' || status === 'Aborted';
+
+  if (isCompleted && endTime) {
+    // For completed builds, calculate duration from start to end
+    const completedTime = parseTimestamp(endTime);
+    if (completedTime) {
+      durationMs = completedTime.getTime() - startTime.getTime();
+    } else {
+      durationMs = new Date().getTime() - startTime.getTime();
+    }
+  } else {
+    // For running builds, calculate duration from start to now
+    durationMs = new Date().getTime() - startTime.getTime();
+  }
+
+  // Only show duration if it's positive (prevents negative durations from timezone issues)
+  if (durationMs < 0) {
+    console.warn('Negative duration detected, possible timezone issue:', {
+      createdAt,
+      endTime,
+      startTime: startTime.toISOString(),
+      now: new Date().toISOString(),
+      durationMs
+    });
+    durationDisplay.textContent = '0:00';
+    return;
+  }
 
   // Format duration as HH:MM:SS or MM:SS
   const totalSeconds = Math.floor(durationMs / 1000);
@@ -131,7 +177,7 @@ function updateDuration(createdAt, status) {
   durationDisplay.textContent = formattedDuration;
 
   // Stop updating duration for completed evaluations
-  if (status === 'Completed' || status === 'Failed' || status === 'Aborted') {
+  if (isCompleted) {
     return;
   }
 }
@@ -241,6 +287,7 @@ async function abortBuild() {
 
 async function fetchBuilds() {
   try {
+    console.log(`Fetching builds for evaluation ${evaluationId}`);
     const response = await fetch(`${baseUrl}/api/v1/evals/${evaluationId}/builds`, {
       method: "GET",
       credentials: "include",
@@ -252,28 +299,221 @@ async function fetchBuilds() {
         "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
       },
     });
-    
+
     if (response.ok) {
       const data = await response.json();
+      console.log('Builds response:', data);
       if (!data.error) {
+        buildsData = data.message;
         buildIds = data.message.map(build => build.id);
-        await updateLogs();
+        console.log(`Found ${buildIds.length} builds:`, buildIds);
+
+        // Update the builds sidebar
+        updateBuildsSidebar();
+
+        // Set "all" as current if none selected
+        if (!currentBuildId) {
+          currentBuildId = 'all';
+        }
+
+        // Don't call updateLogs here since it's handled in initializePage
+      } else {
+        console.error('Error in builds response:', data.error);
       }
+    } else {
+      console.error('Failed to fetch builds, status:', response.status);
     }
   } catch (error) {
     console.error("Error fetching builds:", error);
   }
 }
 
-async function updateLogs() {
-  const logContainer = document.querySelector(".details-content");
-  if (!logContainer) return;
+function updateBuildsSidebar() {
+  const buildsContainer = document.getElementById('builds-list');
+  if (!buildsContainer) return;
 
-  // Skip log updates if evaluation error is being displayed
-  if (logContainer.querySelector('.evaluation-error')) {
+  // Remove loading placeholder
+  const loadingItem = document.getElementById('loading-builds');
+  if (loadingItem) {
+    loadingItem.remove();
+  }
+
+  // Set up "All Builds" click handler if not already done
+  const allBuildsItem = document.getElementById('all-builds-item');
+  if (allBuildsItem && !allBuildsItem.hasAttribute('data-handler-added')) {
+    allBuildsItem.addEventListener('click', () => {
+      selectBuild('all');
+    });
+    allBuildsItem.setAttribute('data-handler-added', 'true');
+  }
+
+  if (buildsData.length === 0) {
+    // Keep the "All Builds" option but add a note
+    const noBuildsItem = document.createElement('div');
+    noBuildsItem.className = 'build-item loading';
+    noBuildsItem.innerHTML = `
+      <div class="loader-small"></div>
+      <span>No builds found</span>
+    `;
+    buildsContainer.appendChild(noBuildsItem);
     return;
   }
 
+  // Remove any existing build items (but keep the "All Builds" item)
+  const existingBuilds = buildsContainer.querySelectorAll('.build-item:not(#all-builds-item):not(#loading-builds)');
+  existingBuilds.forEach(item => item.remove());
+
+  // Add individual build items
+  buildsData.forEach((build, index) => {
+    const buildItem = createBuildItem(build, index);
+    buildsContainer.appendChild(buildItem);
+  });
+
+  // Update the "All Builds" summary
+  updateAllBuildsSummary();
+}
+
+function createBuildItem(build, index) {
+  const buildItem = document.createElement('div');
+  buildItem.className = `build-item ${currentBuildId === build.id ? 'active' : ''}`;
+  buildItem.setAttribute('data-build-id', build.id);
+
+  // Determine status class and icon (using Material Icons like the evaluation title)
+  let statusClass = 'pending';
+  let statusIconHtml = '';
+  let statusText = build.status || 'Pending';
+
+  switch (build.status?.toLowerCase()) {
+    case 'completed':
+    case 'success':
+      statusClass = 'completed';
+      statusIconHtml = '<span class="material-icons build-status-icon green">check_circle</span>';
+      statusText = 'Completed';
+      break;
+    case 'failed':
+    case 'error':
+      statusClass = 'failed';
+      statusIconHtml = '<span class="material-icons build-status-icon red">cancel</span>';
+      statusText = 'Failed';
+      break;
+    case 'running':
+    case 'building':
+      statusClass = 'running';
+      statusIconHtml = '<div class="loader build-status-icon"></div>';
+      statusText = 'Running';
+      break;
+    case 'queued':
+    case 'pending':
+    default:
+      statusClass = 'pending';
+      statusIconHtml = '<span class="material-icons build-status-icon pending-color">schedule</span>';
+      statusText = 'Queued';
+      break;
+  }
+
+  // Format build name - use evaluation target or fallback
+  const buildName = build.evaluation_target || build.name || `Build ${index + 1}`;
+
+  // Format duration if available
+  let duration = '';
+  if (build.created_at) {
+    const startTime = new Date(build.created_at);
+    const endTime = build.updated_at ? new Date(build.updated_at) : new Date();
+    const durationMs = endTime.getTime() - startTime.getTime();
+    const totalSeconds = Math.floor(durationMs / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    duration = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  buildItem.innerHTML = `
+    ${statusIconHtml}
+    <div class="build-info">
+      <div class="build-name" title="${buildName}">${buildName}</div>
+      <div class="build-details">
+        <span>${duration}</span>
+        <span class="build-status ${statusClass}">${statusText}</span>
+      </div>
+    </div>
+  `;
+
+  // Add click handler to switch builds
+  buildItem.addEventListener('click', () => {
+    selectBuild(build.id);
+  });
+
+  return buildItem;
+}
+
+function updateAllBuildsSummary() {
+  const allBuildsItem = document.getElementById('all-builds-item');
+  if (!allBuildsItem || buildsData.length === 0) return;
+
+  const total = buildsData.length;
+  const completed = buildsData.filter(b => b.status?.toLowerCase() === 'completed').length;
+  const failed = buildsData.filter(b => b.status?.toLowerCase() === 'failed').length;
+  const running = buildsData.filter(b =>
+    ['running', 'building'].includes(b.status?.toLowerCase())).length;
+
+  const summaryText = running > 0
+    ? `${running} running, ${completed} done`
+    : `${total} builds: ${completed} ✅ ${failed} ❌`;
+
+  const detailsSpan = allBuildsItem.querySelector('.build-details span');
+  if (detailsSpan) {
+    detailsSpan.textContent = summaryText;
+  }
+}
+
+function selectBuild(buildId) {
+  // Update current build
+  currentBuildId = buildId;
+
+  // Update active state in sidebar
+  document.querySelectorAll('.build-item').forEach(item => {
+    item.classList.remove('active');
+    if (item.getAttribute('data-build-id') === buildId) {
+      item.classList.add('active');
+    }
+  });
+
+  // Filter logs to show only this build
+  filterLogsByBuild(buildId);
+}
+
+function filterLogsByBuild(buildId) {
+  const logContainer = document.querySelector('.details-content');
+  if (!logContainer) return;
+
+  const allLogLines = logContainer.querySelectorAll('.line');
+
+  allLogLines.forEach(line => {
+    const lineBuildId = line.getAttribute('data-build-id');
+    if (buildId === 'all' || !lineBuildId || lineBuildId === buildId) {
+      line.style.display = '';
+    } else {
+      line.style.display = 'none';
+    }
+  });
+
+  // Scroll to bottom after filtering
+  logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+async function updateLogs() {
+  const logContainer = document.querySelector(".details-content");
+  if (!logContainer) {
+    console.warn('Log container not found');
+    return;
+  }
+
+  // Skip log updates if evaluation error is being displayed
+  if (logContainer.querySelector('.evaluation-error')) {
+    console.log('Skipping log update due to evaluation error');
+    return;
+  }
+
+  console.log(`Fetching logs for ${buildIds.length} builds:`, buildIds);
   let allLogs = [];
 
   for (const buildId of buildIds) {
@@ -294,22 +534,32 @@ async function updateLogs() {
         const data = await response.json();
         if (!data.error && data.message.log) {
           const lines = data.message.log.split('\n');
+          console.log(`Build ${buildId}: Found ${lines.length} log lines`);
           allLogs = allLogs.concat(lines.map(line => ({
             content: line,
             buildId: buildId,
             timestamp: data.message.created_at || new Date().toISOString()
           })));
+        } else {
+          console.log(`Build ${buildId}: No log data available`, data);
         }
+      } else {
+        console.error(`Build ${buildId}: Failed to fetch log, status:`, response.status);
       }
     } catch (error) {
       console.error(`Error fetching build ${buildId}:`, error);
     }
   }
 
-  // Only update if we have new content
-  if (allLogs.length > lastLogLength) {
+  console.log(`Total logs collected: ${allLogs.length}, lastLogLength: ${lastLogLength}`);
+
+  // Update if we have new content OR if this is the first load for completed builds
+  const isFirstLoad = lastLogLength === 0;
+  const hasNewContent = allLogs.length > lastLogLength;
+
+  if (hasNewContent || (isFirstLoad && allLogs.length > 0)) {
     // Remove loading message when first logs arrive
-    if (lastLogLength === 0) {
+    if (isFirstLoad) {
       const loadingMessage = logContainer.querySelector('div[style*="color: #666"]');
       if (loadingMessage) {
         loadingMessage.remove();
@@ -319,8 +569,10 @@ async function updateLogs() {
     // Check if user is near the bottom before adding content
     const isNearBottom = (logContainer.scrollTop + logContainer.clientHeight) >= (logContainer.scrollHeight - 50);
 
-    const newLines = allLogs.slice(lastLogLength);
-    newLines.forEach(logEntry => {
+    // For first load of completed builds, show all logs; otherwise show only new logs
+    const linesToShow = isFirstLoad ? allLogs : allLogs.slice(lastLogLength);
+
+    linesToShow.forEach(logEntry => {
       if (logEntry.content && logEntry.content.trim()) {
         const lineDiv = document.createElement('div');
         lineDiv.className = 'line';
@@ -335,8 +587,8 @@ async function updateLogs() {
     });
     lastLogLength = allLogs.length;
 
-    // Only auto-scroll if user was near the bottom (within 50px)
-    if (isNearBottom) {
+    // Only auto-scroll if user was near the bottom (within 50px) or if it's the first load
+    if (isNearBottom || isFirstLoad) {
       logContainer.scrollTop = logContainer.scrollHeight;
       hideScrollToBottomButton();
     } else {
@@ -507,7 +759,10 @@ async function initializePage() {
     return; // Don't fetch builds/logs if there's an error
   }
 
+  // Always fetch builds first
   await fetchBuilds();
+
+  // Always fetch logs initially, regardless of status
   await updateLogs();
 }
 
@@ -525,28 +780,36 @@ function shouldStartPolling() {
 }
 
 // Initialize page first
-initializePage();
+initializePage().then(() => {
+  // After initialization, check if we should start polling
+  if (shouldStartPolling()) {
+    console.log('Starting live polling for evaluation updates');
 
-// Only start polling if evaluation is in a running state
-if (shouldStartPolling()) {
-  console.log('Starting live polling for evaluation updates');
-  
-  // Start status polling
-  statusCheckInterval = setInterval(checkBuildStatus, 2000); // Check every 2 seconds
+    // Start status polling
+    statusCheckInterval = setInterval(checkBuildStatus, 2000); // Check every 2 seconds
 
-  // Start log polling for live updates
-  logCheckInterval = setInterval(updateLogs, 3000); // Check logs every 3 seconds
+    // Start log polling for live updates
+    logCheckInterval = setInterval(updateLogs, 3000); // Check logs every 3 seconds
 
-  // Auto-stop polling after 30 minutes to prevent endless polling
-  setTimeout(() => {
-    if (statusCheckInterval) {
-      clearInterval(statusCheckInterval);
-    }
-    if (logCheckInterval) {
-      clearInterval(logCheckInterval);
-    }
-    console.log('Auto-stopped polling after 30 minutes');
-  }, 30 * 60 * 1000);
-} else {
-  console.log('Evaluation is not running, live polling not started');
-}
+    // Auto-stop polling after 30 minutes to prevent endless polling
+    setTimeout(() => {
+      if (statusCheckInterval) {
+        clearInterval(statusCheckInterval);
+      }
+      if (logCheckInterval) {
+        clearInterval(logCheckInterval);
+      }
+      console.log('Auto-stopped polling after 30 minutes');
+    }, 30 * 60 * 1000);
+  } else {
+    console.log('Evaluation is completed, polling not needed');
+
+    // For completed evaluations, ensure we have the latest status and logs
+    checkBuildStatus().then(() => {
+      // Force a final log fetch for completed builds
+      if (buildIds.length > 0) {
+        updateLogs();
+      }
+    });
+  }
+});

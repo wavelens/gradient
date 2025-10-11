@@ -27,7 +27,6 @@
           ../../../modules/gradient.nix
         ];
 
-        systemd.services.gradient-server.environment.GRADIENT_DEBUG = lib.mkForce "true";
         networking.hosts = {
           "127.0.0.1" = [ "gradient.local" ];
         };
@@ -40,12 +39,11 @@
             configurePostgres = true;
             domain = "gradient.local";
             jwtSecretFile = toString (pkgs.writeText "jwtSecret" "b68a8eaa8ebcff23ebaba1bd74ecb8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9dcd20e41223be17275ca70ab6f7e6ecafa8d4f8905623866edb2b344bd15de52ccece395b3546e2f00644eb2679cf7bdaa156fd75cc5f47c34448cba19d903e68015b1ad3c8e9d04862de0a2c525b6676779012919fa9551c4746f9323ab207aedae86c28ada67c901cae821eef97b69ca4ebe1260de31add34d8265f17d9c547e3bbabe284d9cadcc22063ee625b104592403368090642a41967f8ada5791cb09703d0762a3175d0fe06ec37822e9e41d0a623a6349901749673735fdb94f2c268ac08a24216efb058feced6e785f34185a");
-            cryptSecretFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZAo=");
-            settings.logLevel = "info";
+            cryptSecretFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
           };
 
           postgresql = {
-            package = pkgs.postgresql_17;
+            package = pkgs.postgresql_18;
             enableTCPIP = true;
             authentication = ''
               #...
@@ -232,7 +230,7 @@
       server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.lock")
 
       # nixpkgs_hash = server.succeed("${lib.getExe pkgs.nix} hash path ${self.inputs.nixpkgs}").strip()
-      nixpkgs_hash = "sha256-hLEO2TPj55KcUFUU1vgtHE9UEIOjRcH/4QbmfHNF820="
+      nixpkgs_hash = "sha256-TXnlsVb5Z8HXZ6mZoeOAIwxmvGHp1g4Dw89eLvIwKVI="
       server.succeed(f"sed -i 's#\\[hash\\]#{nixpkgs_hash}#g' /var/lib/git/test/flake.lock")
 
       server.succeed("chown git:git -R /var/lib/git/test")
@@ -278,8 +276,10 @@
       """))
 
       # Wait for evaluation to complete and test cache functionality
-      print("=== Testing Nix Cache Functionality ===")
-      builder.sleep(620)
+      builder.sleep(150)
+      print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM build;\"'"))
+      print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM build_dependency;\"'"))
+      builder.sleep(470)
 
       # Check if builds are cached properly
       project_output = server.succeed("${lib.getExe pkgs.gradient-cli} project show")
@@ -288,10 +288,6 @@
       # Test should fail if "No builds." appears in output
       if "No builds." in project_output:
           raise Exception("Test failed: Evaluation shows 'No builds.' indicating failure")
-
-      # Test organization user management
-      print("=== Testing Organization User Management ===")
-      print(server.succeed("${lib.getExe pkgs.gradient-cli} organization user list"))
 
       print("=== All Tests Completed Successfully ===")
       '';

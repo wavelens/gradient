@@ -47,6 +47,28 @@
            {% endif %}
             <a>{% trans 'Build' %}</a>
         </div>
+
+        <!-- Builds Section -->
+        <div class="sidebar-section">
+            <p class="border-bottom space-normal no-side-padding"><a class="p-l-1rem d-webkit-box">{% trans 'Builds' %}</a></p>
+            <div id="builds-list" class="builds-container">
+                <!-- All Builds option -->
+                <div class="build-item active" data-build-id="all" id="all-builds-item">
+                    <span class="material-icons build-status-icon" style="color: #6b7280;">view_list</span>
+                    <div class="build-info">
+                        <div class="build-name">{% trans 'All Builds' %}</div>
+                        <div class="build-details">
+                            <span>{% trans 'Combined view' %}</span>
+                        </div>
+                    </div>
+                </div>
+                <!-- Loading placeholder -->
+                <div class="build-item loading" id="loading-builds">
+                    <div class="loader-small"></div>
+                    <span>{% trans 'Loading builds...' %}</span>
+                </div>
+            </div>
+        </div>
     </div>
     <div class="full-width">
         <div class="innerbody-top d-flex">
@@ -99,7 +121,7 @@
                         {% for block in details_blocks %}
                             <!-- <details class="details-item color-secondary"> -->
                                 <!-- <summary></summary> -->
-                                <div class="details-content color-secondary">
+                                <div class="details-content color-secondary log-content">
                                     {% for line in block.details %}
                                         <div class="line">{{ line }}</div>
                                     {% endfor %}
@@ -108,7 +130,7 @@
                         {% endfor %}
                     {% else %}
                         <!-- Empty log container for dynamic content -->
-                        <div class="details-content color-secondary">
+                        <div class="details-content color-secondary log-content">
                             {% if not evaluation_error %}
                                 <div class="line" style="color: #666; font-style: italic;">
                                     Loading build logs...
@@ -159,5 +181,165 @@
     // Set the authentication token for API calls
     window.token = "{{ request.user.session }}";
 </script>
+
+<style>
+.log-content {
+    padding-bottom: 4rem !important;
+    min-height: 200px;
+}
+
+.details-content {
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 1rem;
+    border: 1px solid var(--border-color, #e1e5e9);
+    border-radius: 8px;
+    background: var(--code-background, #0f1419);
+}
+
+/* Ensure scroll to bottom button doesn't overlap with content */
+.code-container {
+    position: relative;
+    margin-bottom: 2rem;
+}
+
+/* Builds sidebar styling */
+.sidebar-section {
+    margin-top: 1.5rem;
+}
+
+.builds-container {
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 0.5rem 0;
+}
+
+.build-item {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    margin: 0.25rem 0;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    border-left: 3px solid transparent;
+}
+
+.build-item:hover {
+    background-color: var(--hover-background, rgba(255, 255, 255, 0.05));
+}
+
+.build-item.active {
+    background-color: var(--active-background, rgba(59, 130, 246, 0.1));
+    border-left-color: var(--primary-color, #3b82f6);
+}
+
+.build-item.loading {
+    opacity: 0.7;
+    cursor: default;
+}
+
+.build-status-icon {
+    width: 16px;
+    height: 16px;
+    margin-right: 0.75rem;
+    flex-shrink: 0;
+    font-size: 16px !important;
+}
+
+.build-status-icon.green {
+    color: #22c55e;
+}
+
+.build-status-icon.red {
+    color: #ef4444;
+}
+
+.build-status-icon.pending-color {
+    color: #9ca3af;
+}
+
+/* Loader for running builds */
+.build-status-icon.loader {
+    border: 2px solid #e5e7eb;
+    border-top: 2px solid #3b82f6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.build-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.build-name {
+    font-weight: 500;
+    font-size: 0.875rem;
+    margin-bottom: 0.25rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.build-details {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #6b7280);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.build-status {
+    font-size: 0.75rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 12px;
+    font-weight: 500;
+}
+
+.build-status.completed {
+    background-color: rgba(34, 197, 94, 0.1);
+    color: #22c55e;
+}
+
+.build-status.failed {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+.build-status.running {
+    background-color: rgba(59, 130, 246, 0.1);
+    color: #3b82f6;
+}
+
+.build-status.pending {
+    background-color: rgba(156, 163, 175, 0.1);
+    color: #9ca3af;
+}
+
+.loader-small {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border-color, #e1e5e9);
+    border-top: 2px solid var(--primary-color, #3b82f6);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 0.75rem;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Hide builds section if no builds */
+.builds-container:empty::after {
+    content: "No builds found";
+    display: block;
+    padding: 1rem;
+    text-align: center;
+    color: var(--text-secondary, #6b7280);
+    font-style: italic;
+}
+</style>
 
 {% endblock %}

@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use super::consts::*;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum InputError {
     #[error("Port {port} is out of range {start}-{end}", port = .0, start = PORT_RANGE.start(), end = PORT_RANGE.end())]
     PortOutOfRange(i32),
@@ -103,7 +103,7 @@ pub fn url_to_addr(host: &str, port: i32) -> AnyhowResult<SocketAddr> {
     let url = uri
         .to_socket_addrs()?
         .next()
-        .ok_or_else(|| InputError::InvalidAddress(uri))?;
+        .ok_or(InputError::InvalidAddress(uri))?;
     Ok(url)
 }
 

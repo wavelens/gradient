@@ -14,7 +14,6 @@ use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use nix_daemon::nix::DaemonStore;
-use nix_daemon::{Progress, Store};
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, IntoActiveModel, JoinType, QuerySelect};
@@ -124,9 +123,9 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
             if let Err(e) = add_existing_build(
                 Arc::clone(&state),
-                organization_id,
                 derivation.clone(),
                 evaluation.id,
+                Uuid::new_v4(),
             )
             .await
             {
@@ -214,24 +213,21 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             "Processing derivation"
         );
 
-        let path_info = get_derivation(dependency.clone(), store)
+        let path_info = get_pathinfo(dependency.clone(), store)
             .await
-            .context("Failed to get derivation info")?;
+            .context("Failed to get derivation info")?
+            .context("Derivation not found in Nix store")?;
 
-        let references = core::executer::get_missing_builds(path_info.references.clone(), store)
-            .await
-            .context("Failed to get missing builds")?;
-
-        let already_exsists = find_builds(
+        let already_exists = find_builds(
             Arc::clone(&state),
             organization_id,
-            references.clone(),
+            path_info.references.clone(),
             false,
         )
         .await
         .context("Failed to find existing builds")?;
 
-        let mut references = references
+        let mut references = path_info.references
             .clone()
             .into_iter()
             .map(|d| (d, Some(build_id), Uuid::new_v4()))
@@ -243,7 +239,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             let d_path = d.0.clone();
 
             let in_builds = all_builds.iter().any(|b| b.derivation_path == d_path);
-            let in_exsists = already_exsists.iter().find(|b| b.derivation_path == d_path);
+            let in_exists = already_exists.iter().find(|b| b.derivation_path == d_path);
             let in_dependencies = dependencies.iter().any(|(path, _, _)| *path == d_path);
 
             if in_builds || in_dependencies {
@@ -276,8 +272,8 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 all_dependencies.push(dep);
 
                 false
-            } else if let Some(in_exsists) = in_exsists {
-                check_availablity.push(in_exsists.clone());
+            } else if let Some(in_exists) = in_exists {
+                check_availablity.push(in_exists.clone());
                 true
             } else {
                 true
@@ -293,15 +289,12 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
             debug!(build = %build_id, dependency = %b.id, "Creating dependency for existing build");
 
-            if store
-                .query_pathinfo(b.derivation_path.clone())
-                .result()
+            references.retain(|(d, _, _)| *d != b.derivation_path);
+            if get_missing_builds(vec![b.derivation_path.clone()], store)
                 .await
-                .context("Failed to query path info")?
-                .is_some()
+                .context("Failed to get missing builds")?
+                .is_empty()
             {
-                references.retain(|(d, _, _)| *d != b.derivation_path);
-
                 if b.status != BuildStatus::Completed {
                     let mut abuild: ABuild = b.into();
                     abuild.status = Set(BuildStatus::Completed);
@@ -324,26 +317,68 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             all_dependencies.push(dep);
         }
 
-        let (system, features) =
-            get_features_cmd(state.cli.binpath_nix.as_str(), dependency.as_str())
-                .await
-                .context("Failed to get build features")?;
+        let not_missing = get_missing_builds(vec![dependency.clone()], store)
+            .await
+            .context("Failed to get missing builds")?
+            .is_empty();
 
-        let build = MBuild {
-            id: build_id,
-            evaluation: evaluation.id,
-            derivation_path: dependency.clone(),
-            architecture: system,
-            status: BuildStatus::Created,
-            server: None,
-            log: None,
-            created_at: Utc::now().naive_utc(),
-            updated_at: Utc::now().naive_utc(),
+        if not_missing {
+            add_existing_build(
+                Arc::clone(&state),
+                dependency.clone(),
+                evaluation.id,
+                build_id,
+            ).await?;
+
+            debug!(
+                build_id = %build_id,
+                derivation_path = %dependency,
+                "Skipping package - already in store"
+            );
+        } else {
+            let (system, features) = get_features_cmd(state.cli.binpath_nix.as_str(), dependency.as_str())
+                    .await
+                    .with_context(|| format!("Failed to get build features for derivation: {}", dependency))?;
+
+            // TODO: add better derivation check
+            let build = if dependency.ends_with(".drv") {
+                MBuild {
+                    id: build_id,
+                    evaluation: evaluation.id,
+                    derivation_path: dependency.clone(),
+                    architecture: system,
+                    status: BuildStatus::Created,
+                    server: None,
+                    log: None,
+                    created_at: Utc::now().naive_utc(),
+                    updated_at: Utc::now().naive_utc(),
+                }
+            } else {
+                MBuild {
+                    id: build_id,
+                    evaluation: evaluation.id,
+                    derivation_path: dependency.clone(),
+                    architecture: system,
+                    status: BuildStatus::Completed,
+                    server: None,
+                    log: None,
+                    created_at: Utc::now().naive_utc(),
+                    updated_at: Utc::now().naive_utc(),
+                }
+            };
+
+            if let Err(e) = add_features(Arc::clone(&state), features, Some(build_id), None).await {
+                error!(error = %e, "Failed to add features for build");
+            }
+
+            debug!(
+                build_id = %build.id,
+                derivation_path = %build.derivation_path,
+                "Creating build"
+            );
+
+            all_builds.push(build);
         };
-
-        if let Err(e) = add_features(Arc::clone(&state), features, Some(build_id), None).await {
-            error!(error = %e, "Failed to add features for build");
-        }
 
         if let Some(d_id) = dependency_id {
             let dep = MBuildDependency {
@@ -357,13 +392,6 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             all_dependencies.push(dep);
         }
 
-        info!(
-            build_id = %build.id,
-            derivation_path = %build.derivation_path,
-            "Creating build"
-        );
-
-        all_builds.push(build);
         dependencies.extend(references);
     }
     Ok(())
@@ -457,6 +485,11 @@ pub async fn get_features_cmd(
     binpath_nix: &str,
     path: &str,
 ) -> anyhow::Result<(entity::server::Architecture, Vec<String>)> {
+    // TODO: better check for derivation
+    if !path.ends_with(".drv") {
+        return Ok((entity::server::Architecture::BUILTIN, vec![]));
+    }
+
     let output = Command::new(binpath_nix)
         .arg("derivation")
         .arg("show")
@@ -488,22 +521,24 @@ pub async fn get_features_cmd(
         .get(path)
         .ok_or_else(|| anyhow::anyhow!("Expected JSON object with path"))?
         .as_object()
-        .ok_or_else(|| anyhow::anyhow!("Expected JSON object with path"))?
+        .ok_or_else(|| anyhow::anyhow!("Expected JSON object with path"))?;
+
+    let parsed_json_env = parsed_json
         .get("env")
         .ok_or_else(|| anyhow::anyhow!("Expected JSON object with env"))?
         .as_object()
         .ok_or_else(|| anyhow::anyhow!("Expected JSON object with env"))?;
 
-    let parsed_json = if let Some(new_json) = parsed_json.get("__json") {
+    let parsed_json_env = if let Some(new_json) = parsed_json_env.get("__json") {
         let new_json = new_json
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Expected string for __json field"))?;
         serde_json::from_str(new_json).context("Failed to parse JSON")?
     } else {
-        parsed_json.clone()
+        parsed_json_env.clone()
     };
 
-    let features: Vec<String> = if let Some(pjson) = parsed_json.get("requiredSystemFeatures") {
+    let features: Vec<String> = if let Some(pjson) = parsed_json_env.get("requiredSystemFeatures") {
         pjson
             .as_array()
             .unwrap_or(&vec![])
@@ -532,16 +567,16 @@ pub async fn get_features_cmd(
 
 async fn add_existing_build(
     state: Arc<ServerState>,
-    _organization_id: Uuid,
     derivation: String,
     evaluation_id: Uuid,
-) -> Result<()> {
+    build_id: Uuid,
+) -> Result<MBuild> {
     let (system, features) = get_features_cmd(state.cli.binpath_nix.as_str(), derivation.as_str())
         .await
         .context("Failed to execute nix command")?;
 
     let abuild = ABuild {
-        id: Set(Uuid::new_v4()),
+        id: Set(build_id),
         evaluation: Set(evaluation_id),
         derivation_path: Set(derivation.clone()),
         architecture: Set(system),
@@ -595,7 +630,7 @@ async fn add_existing_build(
         }
     }
 
-    Ok(())
+    Ok(build)
 }
 
 async fn get_flake_derivations(

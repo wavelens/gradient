@@ -13,7 +13,7 @@ pub const PORT_RANGE: RangeInclusive<usize> = 1..=65535;
 
 pub static NULL_TIME: LazyLock<NaiveDateTime> = LazyLock::new(|| {
     DateTime::from_timestamp(0, 0)
-        .unwrap_or_else(|| DateTime::UNIX_EPOCH)
+        .unwrap_or(DateTime::UNIX_EPOCH)
         .naive_utc()
 });
 

@@ -135,6 +135,12 @@ in {
           type = lib.types.str;
           default = "Gradient";
         };
+
+        disableTls = lib.mkOption {
+          description = "Disable TLS for SMTP connections (useful for testing)";
+          type = lib.types.bool;
+          default = false;
+        };
       };
 
       settings = {
@@ -210,7 +216,6 @@ in {
       environment = {
         NIX_REMOTE = "daemon";
         XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
-        GRADIENT_DEBUG = "false";
         GRADIENT_IP = cfg.listenAddr;
         GRADIENT_PORT = toString cfg.port;
         GRADIENT_SERVE_URL = "https://${cfg.domain}";
@@ -246,6 +251,7 @@ in {
         GRADIENT_EMAIL_SMTP_PASSWORD_FILE = "%d/gradient_email_smtp_password";
         GRADIENT_EMAIL_FROM_ADDRESS = cfg.email.fromAddress;
         GRADIENT_EMAIL_FROM_NAME = cfg.email.fromName;
+        GRADIENT_EMAIL_DISABLE_TLS = lib.boolToString cfg.email.disableTls;
       };
     };
 

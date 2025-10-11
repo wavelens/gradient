@@ -143,7 +143,7 @@ pub async fn put(
         })
         .collect::<Vec<AServerArchitecture>>();
 
-    add_features(
+    let _ = add_features(
         Arc::clone(&state),
         body.features.clone(),
         None,
@@ -385,7 +385,7 @@ pub async fn patch_server(
             }
         };
 
-        add_features(Arc::clone(&state), features, None, Some(server_id)).await;
+        let _ = add_features(Arc::clone(&state), features, None, Some(server_id)).await;
     }
 
     if let Err(e) = aserver.update(&state.db).await {

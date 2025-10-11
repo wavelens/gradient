@@ -87,6 +87,15 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
         .await?;
 
     for evaluation in evaluations {
+        let mut aproject: AProject = EProject::find_by_id(evaluation.project.unwrap())
+            .one(db)
+            .await?
+            .unwrap()
+            .into();
+
+        aproject.force_evaluation = Set(true);
+        aproject.update(db).await?;
+
         let mut aevaluation: AEvaluation = evaluation.into();
         aevaluation.status = Set(EvaluationStatus::Aborted);
         aevaluation.update(db).await?;

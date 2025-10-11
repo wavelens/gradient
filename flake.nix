@@ -87,7 +87,7 @@
         openssl
         sqlite
         pythonEnv
-        postgresql_17
+        postgresql_18
         pgadmin4-desktopmode
         nixVersions.latest
         zstd
@@ -106,7 +106,7 @@
       GRADIENT_MAX_CONCURRENT_EVALUATIONS = 1;
       GRADIENT_MAX_CONCURRENT_BUILDS = 10;
       GRADIENT_STORE_PATH = "./testing/store";
-      GRADIENT_CRYPT_SECRET_FILE = pkgs.writeText "crypt_secret_file" "aW52YWxpZAo=";
+      GRADIENT_CRYPT_SECRET_FILE = pkgs.writeText "crypt_secret_file" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK";
       GRADIENT_JWT_SECRET_FILE = pkgs.writeText "jwt_secret_file" "8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9d";
       GRADIENT_SERVE_CACHE = "true";
       GRADIENT_REPORT_ERRORS = "false";

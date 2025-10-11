@@ -15,7 +15,6 @@ use tokio;
 
 fn create_mock_cli() -> Cli {
     Cli {
-        debug: false,
         ip: "127.0.0.1".to_string(),
         port: 3000,
         serve_url: "http://127.0.0.1:8000".to_string(),

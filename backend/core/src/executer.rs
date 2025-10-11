@@ -20,7 +20,7 @@ use tokio::{
     net::UnixStream,
     process::Command,
 };
-use tracing::{error, info, instrument};
+use tracing::{error, info, debug, instrument};
 use uuid::Uuid;
 
 use super::input;
@@ -153,7 +153,7 @@ pub async fn copy_builds<
     local_is_receiver: bool,
 ) -> Result<()> {
     for path in paths {
-        info!(
+        debug!(
             path = %path,
             destination = if local_is_receiver { "local" } else { "remote" },
             "Copying build"
@@ -183,11 +183,11 @@ pub async fn copy_builds<
             .result()
             .await?
             .ok_or_else(|| anyhow::anyhow!("Path info not found for {}", path))?;
+
         to_store
             .add_to_store_nar(path.clone(), path_info, nar)
             .result()
-            .await
-            .context("Failed to add to store")?;
+            .await?;
 
         if !to_store
             .is_valid_path(path.clone())
@@ -210,13 +210,11 @@ pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
 
     for path in paths {
         if path.ends_with(".drv") {
-            let output_map = store
-                .query_derivation_output_map(path.clone())
-                .result()
+            let output_map = get_output_path(path.clone(), store)
                 .await
-                .context("Failed to query derivation output map")?;
+                .with_context(|| format!("Failed to get output path for {}", path))?;
 
-            if let Some(out_path) = output_map.get("out") {
+            if let Some(out_path) = output_map {
                 output_paths.insert(path, out_path.clone());
             }
         } else {
@@ -237,6 +235,18 @@ pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
         .collect::<Vec<String>>();
 
     Ok(missing)
+}
+
+pub async fn get_output_path<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
+    path: String,
+    store: &mut DaemonStore<A>,
+) -> Result<Option<String>> {
+    let output_map = store
+        .query_derivation_output_map(path.clone())
+        .result()
+        .await
+        .with_context(|| format!("Failed to get output path for {}", path))?;
+    Ok(output_map.get("out").cloned())
 }
 
 pub fn get_buildlog_stream(
@@ -385,39 +395,15 @@ pub fn get_builds_path(builds: Vec<&MBuild>) -> Vec<&str> {
         .collect()
 }
 
-pub async fn get_derivation<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
-    path: String,
-    store: &mut DaemonStore<A>,
-) -> Result<PathInfo> {
-    Ok(store
-        .query_pathinfo(path)
-        .result()
-        .await
-        .context("Failed to query path info")?
-        .context("Path info not found")?)
-}
-
-pub async fn get_output_path<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
-    path: String,
-    store: &mut DaemonStore<A>,
-) -> Result<Vec<String>> {
-    let output_map = store
-        .query_derivation_output_map(path.clone())
-        .result()
-        .await
-        .with_context(|| format!("Failed to get output path for {}", path))?;
-    Ok(output_map.values().cloned().collect())
-}
-
 pub async fn get_pathinfo<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
     path: String,
     store: &mut DaemonStore<A>,
-) -> Result<Option<nix_daemon::PathInfo>> {
-    Ok(store
+) -> Result<Option<PathInfo>> {
+    store
         .query_pathinfo(path)
         .result()
         .await
-        .context("Failed to query path info")?)
+        .context("Failed to query path info")
 }
 
 #[derive(Debug, Clone)]

@@ -112,16 +112,12 @@ pub async fn post_basic_register(
 
     if state.cli.email_enabled
         && state.cli.email_require_verification
-        && verification_token.is_some()
+        && let Some(ref token) = verification_token
+        && let Err(e) = email_service
+            .send_verification_email(&body.email, &body.name, token, &state.cli.serve_url)
+            .await
     {
-        if let Some(ref token) = verification_token {
-            if let Err(e) = email_service
-                .send_verification_email(&body.email, &body.name, token, &state.cli.serve_url)
-                .await
-            {
-                tracing::warn!("Failed to send verification email: {}", e);
-            }
-        }
+        tracing::warn!("Failed to send verification email: {}", e);
     }
 
     let message = if state.cli.email_enabled && state.cli.email_require_verification {
@@ -157,12 +153,12 @@ pub async fn post_basic_login(
         )
         .one(&state.db)
         .await?
-        .ok_or_else(|| WebError::invalid_credentials())?;
+        .ok_or_else(WebError::invalid_credentials)?;
 
     let user_password = user
         .password
         .clone()
-        .ok_or_else(|| WebError::oauth_required())?;
+        .ok_or_else(WebError::oauth_required)?;
 
     verify_password(body.password, &user_password).map_err(|_| WebError::invalid_credentials())?;
 
@@ -191,7 +187,7 @@ pub async fn get_oauth_authorize(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let code = query
         .get("code")
-        .ok_or_else(|| WebError::invalid_oauth_code())?;
+        .ok_or_else(WebError::invalid_oauth_code)?;
 
     let user: MUser = oidc_login_verify(state.clone(), code.to_string())
         .await
@@ -259,7 +255,7 @@ pub async fn get_oidc_callback(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let code = query
         .get("code")
-        .ok_or_else(|| WebError::invalid_oauth_code())?;
+        .ok_or_else(WebError::invalid_oauth_code)?;
 
     let user: MUser = oidc_login_verify(state.clone(), code.to_string())
         .await
@@ -342,12 +338,12 @@ pub async fn get_verify_email(
         .await?
         .ok_or_else(|| WebError::BadRequest("Invalid verification token".to_string()))?;
 
-    if let Some(expires) = user.email_verification_token_expires {
-        if Utc::now().naive_utc() > expires {
-            return Err(WebError::BadRequest(
-                "Verification token has expired".to_string(),
-            ));
-        }
+    if let Some(expires) = user.email_verification_token_expires
+        && Utc::now().naive_utc() > expires
+    {
+        return Err(WebError::BadRequest(
+            "Verification token has expired".to_string(),
+        ));
     }
 
     if user.email_verified {

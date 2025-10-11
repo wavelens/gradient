@@ -63,7 +63,7 @@
     security.pam.services.sshd.allowNullPassword = true;
     services = {
       postgresql = {
-        package = pkgs.postgresql_17;
+        package = pkgs.postgresql_18;
         enableTCPIP = true;
         authentication = ''
           #...

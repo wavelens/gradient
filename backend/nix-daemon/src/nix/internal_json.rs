@@ -108,36 +108,36 @@ impl TryFrom<ActionResultRaw> for ActionResult {
         {
             raw.fields.into_iter().collect()
         }
-        type SRT = StderrResultType;
-        type ARD = ActionResultData;
+        type Srt = StderrResultType;
+        type Ard = ActionResultData;
         Ok(ActionResult {
             id: raw.id,
             data: match raw.type_ {
-                SRT::FileLinked => ARD::FileLinked(data(raw)?),
-                SRT::BuildLogLine => ARD::BuildLogLine(data(raw)?),
-                SRT::UntrustedPath => ARD::UntrustedPath,
-                SRT::CorruptedPath => ARD::CorruptedPath,
-                SRT::SetPhase => ARD::SetPhase(data(raw)?),
-                SRT::Progress => ARD::Progress(data(raw)?),
-                SRT::SetExpected => ARD::SetExpected(data(raw)?),
-                SRT::PostBuildLogLine => ARD::PostBuildLogLine(data(raw)?),
+                Srt::FileLinked => Ard::FileLinked(data(raw)?),
+                Srt::BuildLogLine => Ard::BuildLogLine(data(raw)?),
+                Srt::UntrustedPath => Ard::UntrustedPath,
+                Srt::CorruptedPath => Ard::CorruptedPath,
+                Srt::SetPhase => Ard::SetPhase(data(raw)?),
+                Srt::Progress => Ard::Progress(data(raw)?),
+                Srt::SetExpected => Ard::SetExpected(data(raw)?),
+                Srt::PostBuildLogLine => Ard::PostBuildLogLine(data(raw)?),
             },
         })
     }
 }
 impl From<ActionResult> for ActionResultRaw {
     fn from(result: ActionResult) -> ActionResultRaw {
-        type SRT = StderrResultType;
-        type ARD = ActionResultData;
+        type Srt = StderrResultType;
+        type Ard = ActionResultData;
         let (type_, fields) = match result.data {
-            ARD::FileLinked(v) => (SRT::FileLinked, v.into_iter().collect()),
-            ARD::BuildLogLine(v) => (SRT::BuildLogLine, v.into_iter().collect()),
-            ARD::UntrustedPath => (SRT::UntrustedPath, VecDeque::new()),
-            ARD::CorruptedPath => (SRT::CorruptedPath, VecDeque::new()),
-            ARD::SetPhase(v) => (SRT::SetPhase, v.into_iter().collect()),
-            ARD::Progress(v) => (SRT::Progress, v.into_iter().collect()),
-            ARD::SetExpected(v) => (SRT::SetExpected, v.into_iter().collect()),
-            ARD::PostBuildLogLine(v) => (SRT::PostBuildLogLine, v.into_iter().collect()),
+            Ard::FileLinked(v) => (Srt::FileLinked, v.into_iter().collect()),
+            Ard::BuildLogLine(v) => (Srt::BuildLogLine, v.into_iter().collect()),
+            Ard::UntrustedPath => (Srt::UntrustedPath, VecDeque::new()),
+            Ard::CorruptedPath => (Srt::CorruptedPath, VecDeque::new()),
+            Ard::SetPhase(v) => (Srt::SetPhase, v.into_iter().collect()),
+            Ard::Progress(v) => (Srt::Progress, v.into_iter().collect()),
+            Ard::SetExpected(v) => (Srt::SetExpected, v.into_iter().collect()),
+            Ard::PostBuildLogLine(v) => (Srt::PostBuildLogLine, v.into_iter().collect()),
         };
         ActionResultRaw {
             id: result.id,
@@ -151,7 +151,7 @@ fn take_field<T: TryFrom<StderrField, Error = StderrField>, I: Iterator<Item = S
     mut iter: I,
 ) -> Result<T, ResultFieldError> {
     iter.next()
-        .ok_or_else(|| ResultFieldError::FieldMissing)?
+        .ok_or(ResultFieldError::FieldMissing)?
         .try_into()
         .map_err(ResultFieldError::FieldType)
 }

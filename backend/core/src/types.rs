@@ -21,8 +21,6 @@ use uuid::Uuid;
 #[derive(Parser, Debug)]
 #[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient-server", author = "Wavelens", version, about, long_about = None)]
 pub struct Cli {
-    #[arg(long, env = "GRADIENT_DEBUG", default_value = "false")]
-    pub debug: bool,
     #[arg(long, env = "GRADIENT_LOG_LEVEL", default_value = "info")]
     pub log_level: String,
     #[arg(long, env = "GRADIENT_IP", default_value = "127.0.0.1")]
@@ -97,6 +95,8 @@ pub struct Cli {
     pub email_from_address: Option<String>,
     #[arg(long, env = "GRADIENT_EMAIL_FROM_NAME", default_value = "Gradient")]
     pub email_from_name: String,
+    #[arg(long, env = "GRADIENT_EMAIL_DISABLE_TLS", default_value = "false")]
+    pub email_disable_tls: bool,
     #[arg(long, env = "GRADIENT_STATE_FILE")]
     pub state_file: Option<String>,
 }

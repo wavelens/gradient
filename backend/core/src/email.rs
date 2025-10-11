@@ -59,11 +59,18 @@ impl EmailService {
 
         let credentials = Credentials::new(smtp_username.clone(), smtp_password);
 
-        let transport = SmtpTransport::relay(smtp_host)
-            .context("Failed to create SMTP transport")?
-            .credentials(credentials)
-            .port(cli.email_smtp_port)
-            .build();
+        let transport = if cli.email_disable_tls {
+            SmtpTransport::builder_dangerous(smtp_host)
+                .credentials(credentials)
+                .port(cli.email_smtp_port)
+                .build()
+        } else {
+            SmtpTransport::relay(smtp_host)
+                .context("Failed to create SMTP transport")?
+                .credentials(credentials)
+                .port(cli.email_smtp_port)
+                .build()
+        };
 
         Ok(Self {
             transport: Some(transport),

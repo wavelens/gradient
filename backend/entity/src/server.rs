@@ -13,12 +13,14 @@ use uuid::Uuid;
 #[sea_orm(rs_type = "i16", db_type = "Integer")]
 pub enum Architecture {
     #[sea_orm(num_value = 0)]
-    X86_64Linux,
+    BUILTIN,
     #[sea_orm(num_value = 1)]
-    Aarch64Linux,
+    X86_64Linux,
     #[sea_orm(num_value = 2)]
-    X86_64Darwin,
+    Aarch64Linux,
     #[sea_orm(num_value = 3)]
+    X86_64Darwin,
+    #[sea_orm(num_value = 4)]
     Aarch64Darwin,
 }
 
@@ -27,6 +29,7 @@ impl std::str::FromStr for Architecture {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
+            "builtin" => Ok(Architecture::BUILTIN),
             "x86_64-linux" => Ok(Architecture::X86_64Linux),
             "aarch64-linux" => Ok(Architecture::Aarch64Linux),
             "x86_64-darwin" => Ok(Architecture::X86_64Darwin),
@@ -41,6 +44,7 @@ impl std::convert::TryFrom<&str> for Architecture {
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         match s {
+            "builtin" => Ok(Architecture::BUILTIN),
             "x86_64-linux" => Ok(Architecture::X86_64Linux),
             "aarch64-linux" => Ok(Architecture::Aarch64Linux),
             "x86_64-darwin" => Ok(Architecture::X86_64Darwin),

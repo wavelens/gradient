@@ -5,7 +5,7 @@
  */
 
 { pkgs, stdenv, ... }: let
-  psql = pkgs.postgresql_17;
+  psql = pkgs.postgresql_18;
 in
 stdenv.mkDerivation {
   pname = "start-postgres";

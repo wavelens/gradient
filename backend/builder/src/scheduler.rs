@@ -11,6 +11,7 @@ use core::sources::*;
 use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
+use entity::server::Architecture;
 use futures::stream::{self, StreamExt};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -222,13 +223,12 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 "Created builds and dependencies"
             );
 
-            if state.cli.debug {
-                for build in &builds {
-                    debug!(build_id = %build.id, derivation_path = %build.derivation_path, "Created build");
-                }
-                for dep in &dependencies {
-                    debug!(build = %dep.build, dependency = %dep.dependency, "Created dependency");
-                }
+            for build in &builds {
+                debug!(build_id = %build.id, derivation_path = %build.derivation_path, "Created build");
+            }
+
+            for dep in &dependencies {
+                debug!(build = %dep.build, dependency = %dep.dependency, "Created dependency");
             }
 
             if active_builds.is_empty() {
@@ -408,8 +408,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
 
     info!("Connected to server successfully");
 
-    // Get all dependencies in topological order from the database
-    let dependencies = match get_build_dependencies_sorted(Arc::clone(&state), &build).await {
+    let dependencies = match get_build_dependencies_sorted(Arc::clone(&state), &mut local_daemon, &build).await {
         Ok(deps) => deps,
         Err(e) => {
             error!(error = %e, "Failed to get build dependencies");
@@ -422,10 +421,9 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         dependency_count = dependencies.len(),
         "Copying dependencies in order"
     );
-    if state.cli.debug {
-        for (i, dep) in dependencies.iter().enumerate() {
-            debug!(index = i, dependency = %dep, "Dependency order");
-        }
+
+    for (i, dep) in dependencies.iter().enumerate() {
+        debug!(index = i, dependency = %dep, "Dependency order");
     }
 
     if let Err(e) = match local_daemon {
@@ -946,69 +944,65 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                 }
             }
 
-            // Debug: Check what dependencies exist for this build
-            if state.cli.debug {
-                // First, check raw dependency records
-                let raw_deps = match EBuildDependency::find()
-                    .filter(CBuildDependency::Build.eq(build.id))
-                    .all(&state.db)
-                    .await
-                {
-                    Ok(deps) => deps,
-                    Err(e) => {
-                        error!(error = %e, build_id = %build.id, "Failed to query raw dependencies for debug");
-                        continue;
-                    }
-                };
+            let raw_deps = match EBuildDependency::find()
+                .filter(CBuildDependency::Build.eq(build.id))
+                .all(&state.db)
+                .await
+            {
+                Ok(deps) => deps,
+                Err(e) => {
+                    error!(error = %e, build_id = %build.id, "Failed to query raw dependencies for debug");
+                    continue;
+                }
+            };
 
+            debug!(
+                build_id = %build.id,
+                derivation_path = %build.derivation_path,
+                raw_dependency_count = raw_deps.len(),
+                "Raw dependency records"
+            );
+
+            for dep in &raw_deps {
+                debug!(build = %dep.build, dependency = %dep.dependency, "Raw dependency");
+            }
+
+            let dependencies = match get_build_dependencies(Arc::clone(&state), &build).await {
+                Ok(deps) => deps,
+                Err(_) => {
+                    error!(build_id = %build.id, "Failed to get dependencies for debug");
+                    continue;
+                }
+            };
+
+            debug!(
+                build_id = %build.id,
+                derivation_path = %build.derivation_path,
+                resolved_dependency_count = dependencies.len(),
+                "Resolved dependencies"
+            );
+
+            for dep in &dependencies {
                 debug!(
-                    build_id = %build.id,
-                    derivation_path = %build.derivation_path,
-                    raw_dependency_count = raw_deps.len(),
-                    "Raw dependency records"
+                    dependency_id = %dep.id,
+                    derivation_path = %dep.derivation_path,
+                    status = ?dep.status,
+                    "Dependency status"
                 );
+            }
 
-                for dep in &raw_deps {
-                    debug!(build = %dep.build, dependency = %dep.dependency, "Raw dependency");
-                }
-
-                let dependencies = match get_build_dependencies(Arc::clone(&state), &build).await {
-                    Ok(deps) => deps,
-                    Err(_) => {
-                        error!(build_id = %build.id, "Failed to get dependencies for debug");
-                        continue;
-                    }
-                };
-
+            if dependencies.is_empty() {
+                debug!("No dependencies found - build ready to execute");
+            } else {
+                let completed_deps = dependencies
+                    .iter()
+                    .filter(|d| d.status == BuildStatus::Completed)
+                    .count();
                 debug!(
-                    build_id = %build.id,
-                    derivation_path = %build.derivation_path,
-                    resolved_dependency_count = dependencies.len(),
-                    "Resolved dependencies"
+                    completed = completed_deps,
+                    total = dependencies.len(),
+                    "Dependency completion status"
                 );
-
-                for dep in &dependencies {
-                    debug!(
-                        dependency_id = %dep.id,
-                        derivation_path = %dep.derivation_path,
-                        status = ?dep.status,
-                        "Dependency status"
-                    );
-                }
-
-                if dependencies.is_empty() {
-                    debug!("No dependencies found - build ready to execute");
-                } else {
-                    let completed_deps = dependencies
-                        .iter()
-                        .filter(|d| d.status == BuildStatus::Completed)
-                        .count();
-                    debug!(
-                        completed = completed_deps,
-                        total = dependencies.len(),
-                        "Dependency completion status"
-                    );
-                }
             }
 
             return build;
@@ -1087,7 +1081,10 @@ async fn reserve_available_server(
     let mut cond = Condition::all()
         .add(CServer::Organization.eq(organization_id))
         .add(CServer::Active.eq(true))
-        .add(CServerArchitecture::Architecture.eq(build.architecture.clone()));
+        .add(Condition::any()
+            .add(CServerArchitecture::Architecture.eq(build.architecture.clone()))
+            .add(CServerArchitecture::Architecture.eq(Architecture::BUILTIN))
+        );
 
     for feature in features {
         cond = cond.add(CServerFeature::Feature.eq(feature));
@@ -1214,15 +1211,13 @@ pub async fn update_build_status(
     active_build.status = Set(status);
     active_build.updated_at = Set(Utc::now().naive_utc());
 
-    let build = match active_build.update(&state.db).await {
+    match active_build.update(&state.db).await {
         Ok(updated_build) => updated_build,
         Err(e) => {
             error!(error = %e, build_id = %build.id, "Failed to update build status");
-            return build;
+            build
         }
-    };
-
-    build
+    }
 }
 
 async fn update_build_status_recursivly(
@@ -1391,9 +1386,9 @@ async fn check_evaluation_status(state: Arc<ServerState>, evaluation_id: Uuid) {
 
     let status = if statuses.iter().all(|s| *s == BuildStatus::Completed) {
         EvaluationStatus::Completed
-    } else if statuses.iter().any(|s| *s == BuildStatus::Failed) {
+    } else if statuses.contains(&BuildStatus::Building) {
         EvaluationStatus::Failed
-    } else if statuses.iter().any(|s| *s == BuildStatus::Aborted) {
+    } else if statuses.contains(&BuildStatus::Aborted) {
         EvaluationStatus::Aborted
     } else {
         return;
@@ -1438,12 +1433,77 @@ async fn get_build_dependencies(
     Ok(builds)
 }
 
-async fn get_build_dependencies_sorted(
+async fn get_build_dependencies_recursive(
     state: Arc<ServerState>,
     build: &MBuild,
+) -> Result<Vec<MBuild>, String> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut visited = HashSet::new();
+    let mut temp_mark = HashSet::new();
+    let mut result = Vec::new();
+    let mut build_map = HashMap::new();
+
+    let mut to_visit = vec![build.clone()];
+    while let Some(current_build) = to_visit.pop() {
+        if build_map.contains_key(&current_build.id) {
+            continue;
+        }
+
+        let deps = get_build_dependencies(Arc::clone(&state), &current_build).await?;
+        build_map.insert(current_build.id, (current_build.clone(), deps.clone()));
+        to_visit.extend(deps);
+    }
+
+    fn visit(
+        build_id: uuid::Uuid,
+        visited: &mut HashSet<uuid::Uuid>,
+        temp_mark: &mut HashSet<uuid::Uuid>,
+        result: &mut Vec<MBuild>,
+        build_map: &HashMap<uuid::Uuid, (MBuild, Vec<MBuild>)>,
+    ) -> Result<(), String> {
+        if temp_mark.contains(&build_id) {
+            return Err("Circular dependency detected".to_string());
+        }
+
+        if visited.contains(&build_id) {
+            return Ok(());
+        }
+
+        temp_mark.insert(build_id);
+
+        if let Some((build, deps)) = build_map.get(&build_id) {
+            for dep in deps {
+                visit(dep.id, visited, temp_mark, result, build_map)?;
+            }
+            result.push(build.clone());
+        }
+
+        temp_mark.remove(&build_id);
+        visited.insert(build_id);
+        Ok(())
+    }
+
+    visit(build.id, &mut visited, &mut temp_mark, &mut result, &build_map)?;
+    result.retain(|b| b.id != build.id);
+
+    Ok(result)
+}
+
+async fn get_build_dependencies_sorted(
+    state: Arc<ServerState>,
+    local_store: &mut LocalNixStore,
+    build: &MBuild,
 ) -> Result<Vec<String>, String> {
-    // Get direct dependencies and add them first, then the main build
-    let bdependencies = match get_build_dependencies(Arc::clone(&state), &build).await {
+    let bdependencies_direct = match get_build_dependencies(Arc::clone(&state), build).await {
+        Ok(deps) => deps,
+        Err(e) => {
+            error!(error = %e, build_id = %build.id, "Failed to get build dependencies for sorting");
+            return Err(e);
+        }
+    };
+
+    let bdependencies = match get_build_dependencies_recursive(Arc::clone(&state), build).await {
         Ok(deps) => deps,
         Err(e) => {
             error!(error = %e, build_id = %build.id, "Failed to get build dependencies for sorting");
@@ -1452,14 +1512,28 @@ async fn get_build_dependencies_sorted(
     };
 
     let mut dependencies = Vec::new();
+    for dependency in &bdependencies_direct {
+        let output_map = match local_store {
+            LocalNixStore::UnixStream(store) => {
+                get_output_path(dependency.derivation_path.clone(), store).await
+            }
+            LocalNixStore::CommandDuplex(store) => {
+                get_output_path(dependency.derivation_path.clone(), store).await
+            }
+        }.map_err(|e| {
+            error!(error = %e, derivation_path = %dependency.derivation_path, "Failed to get output path for dependency");
+            "Failed to get output path for dependency".to_string()
+        })?;
 
-    // Add all dependency derivation paths first (these need to be copied before the main build)
+        if let Some(out_path) = output_map {
+            dependencies.push(out_path);
+        }
+    }
+
     for dependency in &bdependencies {
         dependencies.push(dependency.derivation_path.clone());
     }
 
-    // Add the main build's derivation path last
     dependencies.push(build.derivation_path.clone());
-
     Ok(dependencies)
 }
