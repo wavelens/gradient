@@ -162,6 +162,12 @@ in {
           type = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
           default = "info";
         };
+
+        deleteState = lib.mkOption {
+          description = "Delete all state (users, organizations, caches) if not manged anymore by state (instead of making editable by user in frontend).";
+          type = lib.types.bool;
+          default = true;
+        };
       };
     };
   };
@@ -233,6 +239,7 @@ in {
         GRADIENT_SERVE_CACHE = lib.boolToString cfg.serveCache;
         GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
         GRADIENT_LOG_LEVEL = cfg.settings.logLevel;
+        GRADIENT_DELETE_STATE = lib.boolToString cfg.settings.deleteState;
         GRADIENT_STATE_FILE = "%d/gradient_state";
         GRADIENT_CREDENTIALS_DIR = "%d";
         RUST_LOG = cfg.settings.logLevel;

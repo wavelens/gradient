@@ -23,6 +23,13 @@ pub struct MakeEvaluationRequest {
     pub method: String,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BuildItem {
+    pub id: Uuid,
+    pub name: String,
+    pub status: String,
+}
+
 pub async fn get_evaluation(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -34,7 +41,6 @@ pub async fn get_evaluation(
         .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
     let organization_id = if let Some(project_id) = evaluation.project {
-        // Regular project-based evaluation
         let project = EProject::find_by_id(project_id)
             .one(&state.db)
             .await?
@@ -48,7 +54,6 @@ pub async fn get_evaluation(
             })?;
         project.organization
     } else {
-        // Direct build - get organization from DirectBuild record
         EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
@@ -91,7 +96,6 @@ pub async fn post_evaluation(
         .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
     let organization_id = if let Some(project_id) = evaluation.project {
-        // Regular project-based evaluation
         let project = EProject::find_by_id(project_id)
             .one(&state.db)
             .await?
@@ -105,7 +109,6 @@ pub async fn post_evaluation(
             })?;
         project.organization
     } else {
-        // Direct build - get organization from DirectBuild record
         EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
@@ -144,14 +147,13 @@ pub async fn get_evaluation_builds(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(evaluation_id): Path<Uuid>,
-) -> WebResult<Json<BaseResponse<ListResponse>>> {
+) -> WebResult<Json<BaseResponse<Vec<BuildItem>>>> {
     let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&state.db)
         .await?
         .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
     let organization_id = if let Some(project_id) = evaluation.project {
-        // Regular project-based evaluation
         let project = EProject::find_by_id(project_id)
             .one(&state.db)
             .await?
@@ -165,7 +167,6 @@ pub async fn get_evaluation_builds(
             })?;
         project.organization
     } else {
-        // Direct build - get organization from DirectBuild record
         EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
@@ -194,11 +195,13 @@ pub async fn get_evaluation_builds(
         .all(&state.db)
         .await?;
 
-    let builds: ListResponse = builds
+    let builds: Vec<BuildItem> = builds
         .iter()
-        .map(|b| ListItem {
+        .filter(|b| b.derivation_path.ends_with(".drv"))
+        .map(|b| BuildItem {
             id: b.id,
             name: b.derivation_path.clone(),
+            status: format!("{:?}", b.status),
         })
         .collect();
 
@@ -221,7 +224,6 @@ pub async fn post_evaluation_builds(
         .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
     let organization_id = if let Some(project_id) = evaluation.project {
-        // Regular project-based evaluation
         let project = EProject::find_by_id(project_id)
             .one(&state.db)
             .await?
@@ -235,7 +237,6 @@ pub async fn post_evaluation_builds(
             })?;
         project.organization
     } else {
-        // Direct build - get organization from DirectBuild record
         EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)

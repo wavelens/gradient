@@ -99,6 +99,8 @@ pub struct Cli {
     pub email_disable_tls: bool,
     #[arg(long, env = "GRADIENT_STATE_FILE")]
     pub state_file: Option<String>,
+    #[arg(long, env = "GRADIENT_DELETE_STATE", default_value = "true")]
+    pub delete_state: bool,
 }
 
 #[derive(Debug)]

@@ -19,7 +19,7 @@ pub struct BuildResponse {
     pub derivation_path: String,
     pub architecture: String,
     pub server: Option<String>,
-    pub log: Option<String>,
+    pub output: std::collections::HashMap<String, String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -196,4 +196,45 @@ pub async fn get_evaluation_builds(
     .unwrap();
 
     Ok(parse_response(res).await)
+}
+
+pub async fn get_build_log(
+    config: RequestConfig,
+    build_id: String,
+) -> Result<BaseResponse<String>, String> {
+    let res = get_client(
+        config,
+        format!("builds/{}/log", build_id),
+        RequestType::GET,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
+
+pub async fn post_build_log(config: RequestConfig, build_id: String) -> Result<(), String> {
+    let mut stream = get_client(
+        config,
+        format!("builds/{}/log", build_id),
+        RequestType::POST,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap()
+    .json_nl_stream::<String>(1024000);
+
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(chunk) => print!("{}", chunk),
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+
+    Ok(())
 }

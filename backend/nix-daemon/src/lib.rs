@@ -385,8 +385,11 @@ pub struct BuildResult {
     pub is_non_deterministic: bool, // FIXME: Make Option<>.
     pub start_time: DateTime<Utc>,  // FIXME: Make Option<>.
     pub stop_time: DateTime<Utc>,   // FIXME: Make Option<>.
+    /// Cumulative CPU time used by this build, in seconds. Only present on Proto 1.37+.
+    pub cpu_user: Option<u64>,
+    pub cpu_system: Option<u64>,
     /// Map of (name, path). Only present on Proto 1.28+.
-    pub built_outputs: HashMap<String, String>,
+    pub built_outputs: HashMap<String, Realisation>, // FIXME: Make Option<>.
 }
 
 /// Output name for derivations.
@@ -400,6 +403,21 @@ pub type HashDigest = String;
 
 /// Content address method with algorithm.
 pub type ContentAddressMethodWithAlgo = String;
+
+/// Result of building a derivation, returned from [`Store::build_derivation()`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct Realisation {
+    /// The ID of the derivation that was realised.
+    pub id: String,
+    /// The path that was realised.
+    #[serde(rename = "outPath")]
+    pub out_path: StorePath,
+    /// The signatures associated with the realised path.
+    pub signatures: Vec<String>,
+    /// The dependent realisations.
+    #[serde(rename = "dependentRealisations")]
+    pub dependent_realisations: HashMap<String, StorePath>,
+}
 
 /// Output specification for a derivation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -427,6 +445,8 @@ pub struct BasicDerivation {
     pub args: Vec<String>,
     /// Environment variables for the build.
     pub env: HashMap<String, String>,
+    /// Optional structured attributes for advanced build configuration.
+    pub structured_attrs: Option<HashMap<String, String>>,
 }
 
 /// Passed to [`Store::set_options()`].

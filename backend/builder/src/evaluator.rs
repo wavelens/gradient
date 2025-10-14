@@ -86,7 +86,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
     let all_derivations = get_flake_derivations(Arc::clone(&state), repository.clone(), wildcards)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to get flake derivations: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to evaluate: {}", e))?;
 
     if all_derivations.is_empty() {
         warn!("No derivations found for evaluation");
@@ -560,7 +560,7 @@ pub async fn get_features_cmd(
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("Expected string for system field"))?
         .try_into()
-        .map_err(|e| anyhow::anyhow!("Invalid system architecture: {:?}", e))?;
+        .map_err(|e| anyhow::anyhow!("{} has invalid system architecture: {:?}", path, e))?;
 
     Ok((system, features))
 }
@@ -572,8 +572,7 @@ async fn add_existing_build(
     build_id: Uuid,
 ) -> Result<MBuild> {
     let (system, features) = get_features_cmd(state.cli.binpath_nix.as_str(), derivation.as_str())
-        .await
-        .context("Failed to execute nix command")?;
+        .await?;
 
     let abuild = ABuild {
         id: Set(build_id),
@@ -614,7 +613,7 @@ async fn add_existing_build(
             let abuild_output = ABuildOutput {
                 id: Set(Uuid::new_v4()),
                 build: Set(build.id),
-                name: Set("out".to_string()),
+                name: Set(output.name.clone()),
                 output: Set(output.path.clone()),
                 hash: Set(output.hash),
                 package: Set(output.package),
@@ -756,8 +755,7 @@ async fn get_flake_derivations(
                         .arg("builtins.attrNames")
                         .arg("--json")
                         .output()
-                        .await
-                        .context("Failed to execute nix eval command")?
+                        .await?
                         .json_to_vec()
                         .context("Failed to parse JSON output")?;
 
@@ -767,8 +765,7 @@ async fn get_flake_derivations(
                             .arg(format!("{}#{}.type", repository.clone(), current_key))
                             .arg("--json")
                             .output()
-                            .await
-                            .context("Failed to execute nix eval command")?
+                            .await?
                             .json_to_string()
                             .context("Failed to parse JSON output")?;
 

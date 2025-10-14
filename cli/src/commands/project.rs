@@ -7,6 +7,7 @@
 use crate::config::*;
 use crate::input::*;
 use clap::{Subcommand, arg};
+use colored::*;
 use connector::*;
 use std::process::exit;
 
@@ -161,7 +162,15 @@ pub async fn handle(cmd: Commands) {
 
             println!("===== Building =====");
             for build in builds.message.clone() {
-                println!("{}", build.name);
+                // Use status from evaluation builds response (no need for individual API calls)
+                let colored_name = match build.status.as_str() {
+                    "Completed" => build.name.green(),
+                    "Building" | "Running" => build.name.yellow(),
+                    "Queued" | "Pending" => build.name.white(),
+                    "Failed" | "Error" => build.name.red(),
+                    _ => build.name.normal(),
+                };
+                println!("{}", colored_name);
             }
             println!();
 

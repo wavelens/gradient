@@ -356,6 +356,7 @@ pub async fn load_and_apply_state(
     db: &DatabaseConnection,
     state_file_path: Option<&str>,
     crypt_secret_file: &str,
+    delete_state: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let Some(path) = state_file_path else {
         tracing::info!("No state file configured, skipping state management");
@@ -388,7 +389,7 @@ pub async fn load_and_apply_state(
 
     // TODO: Apply state to database
     // This will be implemented in the next step
-    apply_state_to_database(db, &config, crypt_secret_file).await?;
+    apply_state_to_database(db, &config, crypt_secret_file, delete_state).await?;
 
     Ok(())
 }
@@ -397,6 +398,7 @@ async fn apply_state_to_database(
     db: &DatabaseConnection,
     config: &StateConfiguration,
     crypt_secret_file: &str,
+    delete_state: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Applying state to database");
 
@@ -419,7 +421,7 @@ async fn apply_state_to_database(
     apply_api_keys(db, &config.api_keys).await?;
 
     // Unmark entities that are no longer in state
-    unmark_removed_entities(db, config).await?;
+    unmark_removed_entities(db, config, delete_state).await?;
 
     println!("State applied successfully");
     tracing::info!("State applied successfully");
@@ -1031,6 +1033,7 @@ async fn apply_server_architectures(
 async fn unmark_removed_entities(
     db: &DatabaseConnection,
     config: &StateConfiguration,
+    delete_state: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create sets of managed entity names from config
     let state_usernames: std::collections::HashSet<&String> =
@@ -1055,10 +1058,15 @@ async fn unmark_removed_entities(
     for user_model in managed_users {
         if !state_usernames.contains(&user_model.username) {
             let username = user_model.username.clone();
-            let mut user: user::ActiveModel = user_model.into();
-            user.managed = Set(false);
-            user.update(db).await?;
-            tracing::info!("Unmanaged user: {}", username);
+            if delete_state {
+                user::Entity::delete_by_id(user_model.id).exec(db).await?;
+                tracing::info!("Deleted user: {}", username);
+            } else {
+                let mut user: user::ActiveModel = user_model.into();
+                user.managed = Set(false);
+                user.update(db).await?;
+                tracing::info!("Unmanaged user: {}", username);
+            }
         }
     }
 
@@ -1071,10 +1079,15 @@ async fn unmark_removed_entities(
     for org_model in managed_orgs {
         if !state_org_names.contains(&org_model.name) {
             let org_name = org_model.name.clone();
-            let mut org: organization::ActiveModel = org_model.into();
-            org.managed = Set(false);
-            org.update(db).await?;
-            tracing::info!("Unmanaged organization: {}", org_name);
+            if delete_state {
+                organization::Entity::delete_by_id(org_model.id).exec(db).await?;
+                tracing::info!("Deleted organization: {}", org_name);
+            } else {
+                let mut org: organization::ActiveModel = org_model.into();
+                org.managed = Set(false);
+                org.update(db).await?;
+                tracing::info!("Unmanaged organization: {}", org_name);
+            }
         }
     }
 
@@ -1087,10 +1100,15 @@ async fn unmark_removed_entities(
     for project_model in managed_projects {
         if !state_project_names.contains(&project_model.name) {
             let project_name = project_model.name.clone();
-            let mut project: project::ActiveModel = project_model.into();
-            project.managed = Set(false);
-            project.update(db).await?;
-            tracing::info!("Unmanaged project: {}", project_name);
+            if delete_state {
+                project::Entity::delete_by_id(project_model.id).exec(db).await?;
+                tracing::info!("Deleted project: {}", project_name);
+            } else {
+                let mut project: project::ActiveModel = project_model.into();
+                project.managed = Set(false);
+                project.update(db).await?;
+                tracing::info!("Unmanaged project: {}", project_name);
+            }
         }
     }
 
@@ -1103,10 +1121,15 @@ async fn unmark_removed_entities(
     for server_model in managed_servers {
         if !state_server_names.contains(&server_model.name) {
             let server_name = server_model.name.clone();
-            let mut server: server::ActiveModel = server_model.into();
-            server.managed = Set(false);
-            server.update(db).await?;
-            tracing::info!("Unmanaged server: {}", server_name);
+            if delete_state {
+                server::Entity::delete_by_id(server_model.id).exec(db).await?;
+                tracing::info!("Deleted server: {}", server_name);
+            } else {
+                let mut server: server::ActiveModel = server_model.into();
+                server.managed = Set(false);
+                server.update(db).await?;
+                tracing::info!("Unmanaged server: {}", server_name);
+            }
         }
     }
 
@@ -1119,10 +1142,15 @@ async fn unmark_removed_entities(
     for cache_model in managed_caches {
         if !state_cache_names.contains(&cache_model.name) {
             let cache_name = cache_model.name.clone();
-            let mut cache: cache::ActiveModel = cache_model.into();
-            cache.managed = Set(false);
-            cache.update(db).await?;
-            tracing::info!("Unmanaged cache: {}", cache_name);
+            if delete_state {
+                cache::Entity::delete_by_id(cache_model.id).exec(db).await?;
+                tracing::info!("Deleted cache: {}", cache_name);
+            } else {
+                let mut cache: cache::ActiveModel = cache_model.into();
+                cache.managed = Set(false);
+                cache.update(db).await?;
+                tracing::info!("Unmanaged cache: {}", cache_name);
+            }
         }
     }
 
@@ -1135,10 +1163,15 @@ async fn unmark_removed_entities(
     for api_key_model in managed_api_keys {
         if !state_api_key_names.contains(&api_key_model.name) {
             let api_key_name = api_key_model.name.clone();
-            let mut api_key: api::ActiveModel = api_key_model.into();
-            api_key.managed = Set(false);
-            api_key.update(db).await?;
-            tracing::info!("Unmanaged API key: {}", api_key_name);
+            if delete_state {
+                api::Entity::delete_by_id(api_key_model.id).exec(db).await?;
+                tracing::info!("Deleted API key: {}", api_key_name);
+            } else {
+                let mut api_key: api::ActiveModel = api_key_model.into();
+                api_key.managed = Set(false);
+                api_key.update(db).await?;
+                tracing::info!("Unmanaged API key: {}", api_key_name);
+            }
         }
     }
 

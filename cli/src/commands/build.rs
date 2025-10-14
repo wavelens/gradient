@@ -13,9 +13,11 @@ use std::process::Command;
 use std::process::exit;
 
 pub async fn handle_build(derivation: String, organization: Option<String>, quiet: bool) {
-    let organization = organization.unwrap_or_else(|| {
+    let organization = organization.or_else(|| {
+        set_get_value(ConfigKey::SelectedOrganization, None, true)
+    }).unwrap_or_else(|| {
         if !quiet {
-            eprintln!("Organization must be set for build command.");
+            eprintln!("Organization must be set for build command. Use 'gradient organization select <name>' to set one.");
         }
         exit(1);
     });
