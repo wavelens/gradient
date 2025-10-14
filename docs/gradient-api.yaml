@@ -1408,9 +1408,58 @@ components:
           description: Wheather this is an error or not
           examples: [false]
         message:
-          type: list
+          type: object
           description: Response Message containing all build details
-          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "evaluation": 9f7767ea-1757-48ba-93d1-5cda578b476c, "status": "building", "derivation_path": "/nix/store/...", "architecture": "x86_64-linux", "server": af7767ea-1757-48ba-93d1-5cda578b476d, "log": "Running /bin/sh ...", "created_at": "2021-10-10T10:00:00Z", "updated_at": "2021-10-10T10:00:00Z"}]
+          properties:
+            id:
+              type: string
+              format: uuid
+              description: Build ID
+            evaluation:
+              type: string
+              format: uuid
+              description: Evaluation ID
+            status:
+              type: string
+              enum: [Created, Queued, Building, Completed, Failed, Aborted]
+              description: Build status
+            derivation_path:
+              type: string
+              description: Path to the Nix derivation
+            architecture:
+              type: string
+              description: Target architecture
+            server:
+              type: string
+              format: uuid
+              nullable: true
+              description: Server ID assigned to this build
+            output:
+              type: object
+              description: Build output paths by output name
+              additionalProperties:
+                type: string
+              example:
+                out: "/nix/store/abc123-package-name"
+            created_at:
+              type: string
+              format: date-time
+              description: Build creation timestamp
+            updated_at:
+              type: string
+              format: date-time
+              description: Build last update timestamp
+          example:
+            id: "8f7767ea-1757-48ba-93d1-5cda578b476b"
+            evaluation: "9f7767ea-1757-48ba-93d1-5cda578b476c"
+            status: "Completed"
+            derivation_path: "/nix/store/xyz789-derivation.drv"
+            architecture: "x86_64-linux"
+            server: "af7767ea-1757-48ba-93d1-5cda578b476d"
+            output:
+              out: "/nix/store/abc123-package-name"
+            created_at: "2021-10-10T10:00:00Z"
+            updated_at: "2021-10-10T10:05:00Z"
     CommitResponse:
       type: object
       properties:

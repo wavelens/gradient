@@ -83,9 +83,10 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
     let wildcards = parse_evaluation_wildcard(evaluation.wildcard.as_str())
         .context("Failed to parse evaluation wildcard")?;
+
     let all_derivations = get_flake_derivations(Arc::clone(&state), repository.clone(), wildcards)
         .await
-        .context("Failed to get flake derivations")?;
+        .map_err(|e| anyhow::anyhow!("Failed to get flake derivations: {}", e))?;
 
     if all_derivations.is_empty() {
         warn!("No derivations found for evaluation");
@@ -378,6 +379,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             );
 
             all_builds.push(build);
+            dependencies.extend(references);
         };
 
         if let Some(d_id) = dependency_id {
@@ -391,8 +393,6 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
             all_dependencies.push(dep);
         }
-
-        dependencies.extend(references);
     }
     Ok(())
 }
@@ -599,6 +599,7 @@ async fn add_existing_build(
     let local_store = get_local_store(None)
         .await
         .context("Failed to get local store")?;
+
     let outputs = match local_store {
         LocalNixStore::UnixStream(mut store) => {
             core::executer::get_build_outputs_from_derivation(derivation.clone(), &mut store).await
@@ -613,6 +614,7 @@ async fn add_existing_build(
             let abuild_output = ABuildOutput {
                 id: Set(Uuid::new_v4()),
                 build: Set(build.id),
+                name: Set("out".to_string()),
                 output: Set(output.path.clone()),
                 hash: Set(output.hash),
                 package: Set(output.package),

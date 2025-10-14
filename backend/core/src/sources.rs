@@ -118,7 +118,7 @@ pub async fn check_project_updates(
             .map_err(|e| SourceError::Database {
                 reason: e.to_string(),
             })?
-            .ok_or_else(|| SourceError::OrganizationNotFound {
+            .ok_or(SourceError::OrganizationNotFound {
                 id: project.organization,
             })?;
 
@@ -258,7 +258,7 @@ pub async fn get_commit_info(
             .map_err(|e| SourceError::Database {
                 reason: e.to_string(),
             })?
-            .ok_or_else(|| SourceError::OrganizationNotFound {
+            .ok_or(SourceError::OrganizationNotFound {
                 id: project.organization,
             })?;
 
@@ -571,7 +571,7 @@ pub fn generate_signing_key(secret_file: String) -> Result<String, SourceError> 
     Ok(encrypted_private_key)
 }
 
-pub fn decrypt_signing_key(secret_file: String, cache: MCache) -> Result<KeyPair, SourceError> {
+pub fn decrypt_signing_key(secret_file: String, cache: MCache) -> Result<String, SourceError> {
     let secret_content = crate::input::load_secret(&secret_file);
 
     let secret = general_purpose::STANDARD
@@ -594,39 +594,33 @@ pub fn decrypt_signing_key(secret_file: String, cache: MCache) -> Result<KeyPair
     let decrypted_private_key =
         crypter::decrypt(secret, encrypted_private_key).ok_or(SourceError::PrivateKeyDecryption)?;
 
-    let decrypted_private_key =
-        KeyPair::from_slice(&decrypted_private_key).map_err(|_| SourceError::KeyPairConversion)?;
+    // Convert decrypted bytes to string (signing key should be base64)
+    let decrypted_key_str = String::from_utf8(decrypted_private_key)
+        .map_err(|_| SourceError::KeyUtf8Conversion)?;
 
-    Ok(decrypted_private_key)
+    Ok(decrypted_key_str)
 }
 
 pub fn format_cache_key(
     secret_file: String,
     cache: MCache,
     url: String,
-    public_key: bool,
 ) -> Result<String, SourceError> {
-    let secret = decrypt_signing_key(secret_file, cache.clone())?;
-    let key: &[u8] = if public_key {
-        secret.pk.as_ref()
-    } else {
-        secret.sk.as_ref()
-    };
+    let decrypted_key = decrypt_signing_key(secret_file, cache.clone())?;
 
-    let public_key = general_purpose::STANDARD.encode(key);
     let base_url = url
         .replace("https://", "")
         .replace("http://", "")
         .replace(":", "-");
 
-    Ok(format!("{}-{}:{}", base_url, cache.name, public_key))
+    Ok(format!("{}-{}:{}", base_url, cache.name, decrypted_key.trim()))
 }
 
 pub fn get_hash_from_url(url: String) -> Result<String, SourceError> {
     let path_split = url.split('.').collect::<Vec<&str>>();
 
-    // Check if we have exactly 2 parts (hash.extension)
-    if path_split.len() != 2 {
+    // Check if we have exactly 2 or 3 parts (hash.extension[.compression])
+    if !(path_split.len() == 2 || path_split.len() == 3) {
         return Err(SourceError::InvalidPath);
     }
 
@@ -636,11 +630,11 @@ pub fn get_hash_from_url(url: String) -> Result<String, SourceError> {
     }
 
     // Check extension
-    if path_split[1] != "narinfo" && path_split[1] != "nar" {
+    if !((path_split[1] == "narinfo" && path_split.len() == 2) || path_split[1] == "nar") {
         return Err(SourceError::InvalidPath);
     }
 
-    // Check hash characters (base32)
+    // Check hash characters (base32) - exclude 'e', 'o', 't', 'u'
     if !path_split[0]
         .chars()
         .all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))

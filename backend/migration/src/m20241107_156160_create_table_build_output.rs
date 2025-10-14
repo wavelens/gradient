@@ -24,6 +24,7 @@ impl MigrationTrait for Migration {
                             .primary_key(),
                     )
                     .col(ColumnDef::new(BuildOutput::Build).uuid().not_null())
+                    .col(ColumnDef::new(BuildOutput::Name).string().not_null())
                     .col(ColumnDef::new(BuildOutput::Output).string().not_null())
                     .col(ColumnDef::new(BuildOutput::Hash).string().not_null())
                     .col(ColumnDef::new(BuildOutput::Package).string().not_null())
@@ -61,6 +62,7 @@ enum BuildOutput {
     Table,
     Id,
     Build,
+    Name,
     Output,
     Hash,
     Package,

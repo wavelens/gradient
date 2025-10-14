@@ -89,7 +89,7 @@
         ];
 
         environment = {
-          variables.TEST_PKGS_1 = [
+          variables.TEST_PKGS = [
             self.inputs.nixpkgs
           ];
 
@@ -103,7 +103,7 @@
       };
 
       builder = { config, pkgs, lib, ... }: {
-        environment.variables.TEST_PKGS_1 = [ self.inputs.nixpkgs ];
+        environment.variables.TEST_PKGS = [ self.inputs.nixpkgs ];
         users.users.builder = {
           isNormalUser = true;
           group = "users";
@@ -229,8 +229,7 @@
       server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
       server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.lock")
 
-      # nixpkgs_hash = server.succeed("${lib.getExe pkgs.nix} hash path ${self.inputs.nixpkgs}").strip()
-      nixpkgs_hash = "sha256-TXnlsVb5Z8HXZ6mZoeOAIwxmvGHp1g4Dw89eLvIwKVI="
+      nixpkgs_hash = server.succeed("${lib.getExe pkgs.nix} hash path ${self.inputs.nixpkgs}").strip()
       server.succeed(f"sed -i 's#\\[hash\\]#{nixpkgs_hash}#g' /var/lib/git/test/flake.lock")
 
       server.succeed("chown git:git -R /var/lib/git/test")
@@ -288,6 +287,9 @@
       # Test should fail if "No builds." appears in output
       if "No builds." in project_output:
           raise Exception("Test failed: Evaluation shows 'No builds.' indicating failure")
+
+      if not "Completed" in project_output:
+          raise Exception("Test failed: Evaluation did not complete successfully")
 
       print("=== All Tests Completed Successfully ===")
       '';

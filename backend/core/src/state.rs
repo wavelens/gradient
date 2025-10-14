@@ -141,7 +141,7 @@ fn default_architectures() -> Vec<String> {
 }
 
 fn default_priority() -> i32 {
-    100
+    10
 }
 
 impl StateConfiguration {
@@ -413,7 +413,7 @@ async fn apply_state_to_database(
     apply_servers(db, &config.servers, &config.users, &config.organizations).await?;
 
     // Apply caches (depends on users and organizations)
-    apply_caches(db, &config.caches, &config.users, &config.organizations).await?;
+    apply_caches(db, &config.caches, &config.users, &config.organizations, crypt_secret_file).await?;
 
     // Apply API keys (depends on users)
     apply_api_keys(db, &config.api_keys).await?;
@@ -747,8 +747,10 @@ async fn apply_caches(
     state_caches: &[StateCache],
     _state_users: &[StateUser],
     _state_orgs: &[StateOrganization],
+    crypt_secret_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let user_map = create_user_lookup(db).await?;
+    let org_map = create_org_lookup(db).await?;
 
     for state_cache in state_caches {
         // Read signing key from file using credentials directory
@@ -765,6 +767,19 @@ async fn apply_caches(
             )
         })?;
 
+        // Validate that the signing key is base64 encoded
+        general_purpose::STANDARD.decode(signing_key.trim())
+            .map_err(|e| format!("Signing key for cache '{}' is not a valid base64 encoded string: {}", state_cache.name, e))?;
+
+        // Encrypt signing key using crypter library
+        let secret = general_purpose::STANDARD
+            .decode(load_secret(crypt_secret_file))
+            .map_err(|e| format!("Failed to decode GRADIENT_CRYPT_SECRET: {}", e))?;
+
+        let encrypted_bytes = crypter::encrypt(secret, signing_key.trim())
+            .ok_or_else(|| format!("Failed to encrypt signing key for cache '{}'", state_cache.name))?;
+        let encrypted_signing_key = general_purpose::STANDARD.encode(&encrypted_bytes);
+
         let created_by_id = user_map
             .get(&state_cache.created_by)
             .ok_or_else(|| format!("User '{}' not found", state_cache.created_by))?;
@@ -776,34 +791,61 @@ async fn apply_caches(
 
         let now = Utc::now().naive_utc();
 
-        if let Some(existing) = existing_cache {
+        let cache_id = if let Some(existing) = existing_cache {
             // Update existing cache
-            let mut cache_model: cache::ActiveModel = existing.into();
+            let mut cache_model: cache::ActiveModel = existing.clone().into();
             cache_model.display_name = Set(state_cache.display_name.clone());
             cache_model.description = Set(state_cache.description.clone());
             cache_model.active = Set(state_cache.active);
             cache_model.priority = Set(state_cache.priority);
-            cache_model.signing_key = Set(signing_key.trim().to_string());
+            cache_model.signing_key = Set(encrypted_signing_key.clone());
             cache_model.created_by = Set(*created_by_id);
             cache_model.managed = Set(true);
             cache_model.update(db).await?;
             tracing::info!("Updated managed cache: {}", state_cache.name);
+            existing.id
         } else {
             // Create new cache
+            let cache_id = Uuid::new_v4();
             let cache_model = cache::ActiveModel {
-                id: Set(Uuid::new_v4()),
+                id: Set(cache_id),
                 name: Set(state_cache.name.clone()),
                 display_name: Set(state_cache.display_name.clone()),
                 description: Set(state_cache.description.clone()),
                 active: Set(state_cache.active),
                 priority: Set(state_cache.priority),
-                signing_key: Set(signing_key.trim().to_string()),
+                signing_key: Set(encrypted_signing_key),
                 created_by: Set(*created_by_id),
                 created_at: Set(now),
                 managed: Set(true),
             };
             cache_model.insert(db).await?;
             tracing::info!("Created managed cache: {}", state_cache.name);
+            cache_id
+        };
+
+        // Create organization_cache associations
+        for org_name in &state_cache.organizations {
+            let org_id = org_map
+                .get(org_name)
+                .ok_or_else(|| format!("Organization '{}' not found for cache '{}'", org_name, state_cache.name))?;
+
+            // Check if association already exists
+            let existing_association = organization_cache::Entity::find()
+                .filter(organization_cache::Column::Organization.eq(*org_id))
+                .filter(organization_cache::Column::Cache.eq(cache_id))
+                .one(db)
+                .await?;
+
+            if existing_association.is_none() {
+                let org_cache_model = organization_cache::ActiveModel {
+                    id: Set(Uuid::new_v4()),
+                    organization: Set(*org_id),
+                    cache: Set(cache_id),
+                };
+                org_cache_model.insert(db).await?;
+                tracing::info!("Created organization_cache association: {} -> {}", org_name, state_cache.name);
+            }
         }
     }
 

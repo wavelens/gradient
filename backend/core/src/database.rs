@@ -204,7 +204,7 @@ pub async fn get_organization_by_name(
     user_id: Uuid,
     name: String,
 ) -> Result<Option<MOrganization>> {
-    Ok(EOrganization::find()
+    EOrganization::find()
         .join_rev(
             JoinType::InnerJoin,
             EOrganizationUser::belongs_to(entity::organization::Entity)
@@ -219,7 +219,7 @@ pub async fn get_organization_by_name(
         )
         .one(&state.db)
         .await
-        .context("Failed to query organization")?)
+        .context("Failed to query organization")
 }
 
 pub async fn get_project_by_name(
@@ -263,7 +263,7 @@ pub async fn get_cache_by_name(
     user_id: Uuid,
     name: String,
 ) -> Result<Option<MCache>> {
-    Ok(ECache::find()
+    ECache::find()
         .filter(
             Condition::all()
                 .add(CCache::CreatedBy.eq(user_id))
@@ -271,5 +271,5 @@ pub async fn get_cache_by_name(
         )
         .one(&state.db)
         .await
-        .context("Failed to query cache")?)
+        .context("Failed to query cache")
 }

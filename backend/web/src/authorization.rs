@@ -206,10 +206,10 @@ pub async fn update_last_login(state: State<Arc<ServerState>>, user: MUser) -> R
     let mut auser: AUser = user.into();
 
     auser.last_login_at = Set(Utc::now().naive_utc());
-    Ok(auser
+    auser
         .update(&state.db)
         .await
-        .context("Failed to update user last login")?)
+        .context("Failed to update user last login")
 }
 
 pub fn generate_api_key() -> String {

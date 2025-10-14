@@ -117,27 +117,20 @@
             </div>
             <div class="p-1rem">
                 <div class="code-container monospace">
-                    {% if details_blocks %}
-                        {% for block in details_blocks %}
-                            <!-- <details class="details-item color-secondary"> -->
-                                <!-- <summary></summary> -->
-                                <div class="details-content color-secondary log-content">
-                                    {% for line in block.details %}
-                                        <div class="line">{{ line }}</div>
-                                    {% endfor %}
-                                </div>
-                            <!-- </details> -->
-                        {% endfor %}
-                    {% else %}
-                        <!-- Empty log container for dynamic content -->
-                        <div class="details-content color-secondary log-content">
-                            {% if not evaluation_error %}
-                                <div class="line" style="color: #666; font-style: italic;">
-                                    Loading build logs...
-                                </div>
-                            {% endif %}
-                        </div>
-                    {% endif %}
+                    <!-- Single log container for dynamic content -->
+                    <div class="details-content color-secondary log-content">
+                        {% if details_blocks %}
+                            {% for block in details_blocks %}
+                                {% for line in block.details %}
+                                    <div class="line">{{ line }}</div>
+                                {% endfor %}
+                            {% endfor %}
+                        {% elif not evaluation_error %}
+                            <div class="line" style="color: #666; font-style: italic;">
+                                Loading build logs...
+                            </div>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
         </div>
@@ -186,6 +179,7 @@
 .log-content {
     padding-bottom: 4rem !important;
     min-height: 200px;
+    margin-bottom: 2rem;
 }
 
 .details-content {

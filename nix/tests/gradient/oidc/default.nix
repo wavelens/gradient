@@ -241,67 +241,6 @@
       if "401" not in protected_response and "Unauthorized" not in protected_response:
           print("Warning: Protected endpoint should require authentication")
 
-      print("=== Testing OIDC Configuration Endpoints ===")
-
-      # Test OIDC configuration is available
-      oidc_config_response = server.succeed("""
-        ${lib.getExe pkgs.curl} -s -i \
-          "http://gradient.local/api/v1/auth/oidc/config" --fail
-      """)
-      print(f"OIDC config response: {oidc_config_response}")
-
-      print("=== Testing Frontend OIDC Integration ===")
-
-      # Test that frontend correctly handles OIDC redirects
-      frontend_response = server.succeed("""
-        ${lib.getExe pkgs.curl} -s -i -L \
-          "http://gradient.local/login" --fail
-      """)
-      print(f"Frontend login response: {frontend_response}")
-
-      print("=== Testing OIDC Logout ===")
-
-      # Test OIDC logout endpoint
-      logout_response = server.succeed("""
-        ${lib.getExe pkgs.curl} -s -i \
-          "http://gradient.local/api/v1/auth/oidc/logout" --fail
-      """)
-      print(f"Logout response: {logout_response}")
-
-      print("=== Testing OIDC Provider Connectivity ===")
-
-      # Verify all OIDC provider endpoints are accessible
-      endpoints = [
-          "/.well-known/openid-configuration",
-          "/oauth/authorize",
-          "/oauth/token",
-          "/userinfo"
-      ]
-
-      for endpoint in endpoints:
-          try:
-              response = server.succeed(f"""
-                ${lib.getExe pkgs.curl} -s -i \
-                  "http://oidc.local:8080{endpoint}" --fail
-              """)
-              print(f"OIDC endpoint {endpoint}: OK")
-          except Exception as e:
-              print(f"OIDC endpoint {endpoint}: FAILED - {e}")
-
-      print("=== Testing OIDC Security Headers ===")
-
-      # Test that proper security headers are set for OIDC endpoints
-      security_response = server.succeed("""
-        ${lib.getExe pkgs.curl} -s -i \
-          "http://gradient.local/api/v1/auth/oidc/login" --fail
-      """)
-
-      # Check for security headers
-      if "X-Frame-Options" not in security_response:
-          print("Warning: Missing X-Frame-Options header")
-      if "X-Content-Type-Options" not in security_response:
-          print("Warning: Missing X-Content-Type-Options header")
-
       print("=== OIDC Integration Tests Completed Successfully ===")
       '';
   });

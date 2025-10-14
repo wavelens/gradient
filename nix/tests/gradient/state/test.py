@@ -21,7 +21,7 @@ with subtest("check state-managed API keys work"):
     alice_token = "GRADa1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6A7B8C9D0E1F2G3"
 
     req = json.loads(machine.succeed("""
-        curl -XGET http://localhost:3000/api/v1/orgs -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'
+        curl -XGET http://gradient.local/api/v1/orgs -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'
     """.replace("alice_token", alice_token)))
 
     assert req.get("error") == False, f"API key authentication failed: {req.get('message')}"
@@ -29,24 +29,24 @@ with subtest("check state-managed API keys work"):
 
 with subtest("check state-managed organizations exist"):
     req = json.loads(machine.succeed("""
-        curl -XGET http://localhost:3000/api/v1/orgs -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'
+        curl -XGET http://gradient.local/api/v1/orgs -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'
     """.replace("alice_token", alice_token_to_use)))
 
     assert req.get("error") == False, f"Failed to get organizations: {req.get('message')}"
     orgs = req.get("message")
 
-    acme_org = None
+    corp_org = None
     for org in orgs:
-        if org.get("name") == "acme-corp":
-            acme_org = org
+        if org.get("name") == "corp":
+            corp_org = org
             break
 
-    assert acme_org is not None, "acme-corp organization should exist"
-    assert acme_org.get("name") == "acme-corp", f"Wrong organization name: {acme_org.get('name')}"
+    assert corp_org is not None, "corp organization should exist"
+    assert corp_org.get("name") == "corp", f"Wrong organization name: {corp_org.get('name')}"
 
 with subtest("check state-managed projects exist"):
     req = json.loads(machine.succeed("""
-        curl -XGET http://localhost:3000/api/v1/projects/acme-corp -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'
+        curl -XGET http://gradient.local/api/v1/projects/corp -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'
     """.replace("alice_token", alice_token_to_use)))
 
     assert req.get("error") == False, f"Failed to get projects: {req.get('message')}"
@@ -58,7 +58,7 @@ with subtest("check state-managed projects exist"):
 
 with subtest("check state-managed servers exist"):
     req = json.loads(machine.succeed("""
-        curl -XGET http://localhost:3000/api/v1/servers/acme-corp -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'
+        curl -XGET http://gradient.local/api/v1/servers/corp -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'
     """.replace("alice_token", alice_token_to_use)))
 
     assert req.get("error") == False, f"Failed to get servers: {req.get('message')}"
@@ -70,39 +70,40 @@ with subtest("check state-managed servers exist"):
 
 with subtest("check state-managed caches exist"):
     req = json.loads(machine.succeed("""
-        curl -XGET http://localhost:3000/api/v1/caches -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'
+        curl -XGET http://gradient.local/api/v1/caches -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'
     """.replace("alice_token", alice_token_to_use)))
 
     assert req.get("error") == False, f"Failed to get caches: {req.get('message')}"
     caches = req.get("message")
 
     cache_names = [c.get("name") for c in caches]
-    assert "main-cache" in cache_names, f"main-cache missing. Found: {cache_names}"
-    assert "dev-cache" in cache_names, f"dev-cache missing. Found: {cache_names}"
+    assert "main" in cache_names, f"main missing. Found: {cache_names}"
+    assert "dev" in cache_names, f"dev missing. Found: {cache_names}"
 
 with subtest("check managed entities are read-only"):
+    # Try to register with an existing state-managed username
     req = json.loads(machine.succeed("""
-        curl -XPOST http://localhost:3000/api/v1/auth/basic/register -H 'Content-Type: application/json' -d '{"username": "alice", "name": "Alice Modified", "email": "alice.modified@example.com", "password": "StrongSecret123!"}'
+        curl -XPOST http://gradient.local/api/v1/auth/basic/register -H 'Content-Type: application/json' -d '{"username": "alice", "name": "Alice Modified", "email": "alice.modified@example.com", "password": "StrongSecret123!"}'
     """))
 
-    assert req.get("error") == True, "Should not be able to register a state-managed user"
+    assert req.get("error") == True, "Should not be able to register with a state-managed username"
 
 with subtest("check non-managed users can still be created"):
     req = json.loads(machine.succeed("""
-        curl -XPOST http://localhost:3000/api/v1/auth/basic/register -H 'Content-Type: application/json' -d '{"username": "charlie", "name": "Charlie Brown", "email": "charlie@example.com", "password": "SecureAuth456$"}'
+        curl -XPOST http://gradient.local/api/v1/auth/basic/register -H 'Content-Type: application/json' -d '{"username": "charlie", "name": "Charlie Brown", "email": "charlie@example.com", "password": "SecureAuth456$"}'
     """))
 
     assert req.get("error") == False, f"Should be able to create non-managed user: {req.get('message')}"
 
     req = json.loads(machine.succeed("""
-        curl -XPOST http://localhost:3000/api/v1/auth/basic/login -H 'Content-Type: application/json' -d '{"loginname": "charlie", "password": "SecureAuth456$"}'
+        curl -XPOST http://gradient.local/api/v1/auth/basic/login -H 'Content-Type: application/json' -d '{"loginname": "charlie", "password": "SecureAuth456$"}'
     """))
 
     assert req.get("error") == False, f"Charlie login failed: {req.get('message')}"
 
 with subtest("check organization SSH keys work"):
     req = json.loads(machine.succeed("""
-        curl -XGET http://localhost:3000/api/v1/orgs/acme-corp/ssh -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'
+        curl -XGET http://gradient.local/api/v1/orgs/corp/ssh -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'
     """.replace("alice_token", alice_token_to_use)))
 
     assert req.get("error") == False, f"Failed to get SSH key: {req.get('message')}"

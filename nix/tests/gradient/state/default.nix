@@ -12,6 +12,10 @@
     nodes = {
       machine = { config, pkgs, lib, ... }: {
         imports = [ ../../../modules/gradient.nix ];
+
+        networking.hosts = {
+          "127.0.0.1" = [ "gradient.local" ];
+        };
         environment.etc = {
           "gradient/secrets/alice_password" = {
             mode = "0600";
@@ -46,14 +50,14 @@
             mode = "0600";
             user = "gradient";
             group = "gradient";
-            text = "cache-priv-key:AQN7Q0NCAgAAADIAGnOTVu8LQJdawFtL/3SBUo5OBrXo7tZHgH4LbAEwZNKZUBHv5MQAAABAFQYMSsB=";
+            text = "22yRW7p/hxuPRWJh9pcfGH0oXPk2MFUuG0wIA1rfq1BvDbvMqzMZS+er/BE8ucbxNSG5KZ8B0ELO4TJal8mZlw==";
           };
 
           "gradient/secrets/dev_cache_key" = {
             mode = "0600";
             user = "gradient";
             group = "gradient";
-            text = "cache-priv-key:BQN7Q0NCAgAAADIAGnOTVu8LQJdawFtL/3SBUo5OBrXo7tZHgH4LbAEwZNKZUBHv5MQAAABAFQYMSsB=";
+            text = "22yRW7p/hxuPRWJh9pcfGH0oXPk2MFUuG0wIA1rfq1BvDbvMqzMZS+er/BE8ucbxNSG5KZ8B0ELO4TJal8mZlw==";
           };
 
           "gradient/secrets/alice_api_key" = {
@@ -155,7 +159,7 @@
 
               caches = [
                 {
-                  name = "main-cache";
+                  name = "main";
                   display_name = "Main Binary Cache";
                   description = "Primary binary cache for all builds";
                   active = true;
@@ -165,7 +169,7 @@
                   created_by = "alice";
                 }
                 {
-                  name = "dev-cache";
+                  name = "dev";
                   display_name = "Development Cache";
                   description = "Cache for development builds";
                   active = false;

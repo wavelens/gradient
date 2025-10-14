@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use async_ssh2_lite::{AsyncSession, TokioTcpStream};
 use futures::Stream;
 use nix_daemon::nix::DaemonStore;
-use nix_daemon::{self, BuildMode, BuildResult, PathInfo, Progress, Store};
+use nix_daemon::{self, BasicDerivation, BuildMode, BuildResult, PathInfo, Progress, Store};
 use sea_orm::ActiveModelTrait;
 use sea_orm::ActiveValue::Set;
 use serde::Serialize;
@@ -20,7 +20,7 @@ use tokio::{
     net::UnixStream,
     process::Command,
 };
-use tracing::{error, info, debug, instrument};
+use tracing::{error, info, instrument};
 use uuid::Uuid;
 
 use super::input;
@@ -90,31 +90,23 @@ pub async fn init_session(
 #[instrument(skip(remote_store, state), fields(build_id = %build.id, derivation_path = %build.derivation_path))]
 pub async fn execute_build(
     build: &MBuild,
+    derivation: BasicDerivation,
     remote_store: &mut NixStore,
     state: Arc<ServerState>,
 ) -> anyhow::Result<(MBuild, HashMap<String, BuildResult>)> {
     info!("Executing build");
 
-    let paths = get_builds_path(vec![&build]);
+    let derivation_path = get_builds_path(vec![&build]).first().unwrap().to_string();
     let mut build = build.clone();
 
-    for path in paths.clone() {
-        remote_store.ensure_path(path).result().await?;
-    }
-
-    let paths = paths
-        .iter()
-        .map(|p| format!("{}!*", p).to_string())
-        .collect::<Vec<String>>();
-
-    let mut prog = remote_store.build_paths_with_results(paths, BuildMode::Normal);
+    let mut prog = remote_store.build_derivation(
+        derivation_path,
+        derivation,
+        BuildMode::Normal,
+    );
 
     while let Some(stderr) = prog.next().await? {
         if let nix_daemon::Stderr::Result(res) = stderr {
-            // if res.kind != nix_daemon::StderrResultType::BuildLogLine {
-            //     continue;
-            // }
-
             let log = res
                 .fields
                 .iter()
@@ -137,7 +129,11 @@ pub async fn execute_build(
     }
 
     match prog.result().await.map_err(|e| e.into()) {
-        Ok(results) => Ok((build, results)),
+        Ok(result) => {
+            let mut results = HashMap::new();
+            results.insert("out".to_string(), result);
+            Ok((build, results))
+        },
         Err(e) => Err(e),
     }
 }
@@ -153,7 +149,7 @@ pub async fn copy_builds<
     local_is_receiver: bool,
 ) -> Result<()> {
     for path in paths {
-        debug!(
+        info!(
             path = %path,
             destination = if local_is_receiver { "local" } else { "remote" },
             "Copying build"
@@ -244,8 +240,7 @@ pub async fn get_output_path<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
     let output_map = store
         .query_derivation_output_map(path.clone())
         .result()
-        .await
-        .with_context(|| format!("Failed to get output path for {}", path))?;
+        .await?;
     Ok(output_map.get("out").cloned())
 }
 
@@ -327,7 +322,7 @@ pub fn get_buildlog_stream(
 }
 
 pub async fn get_local_store(organization: Option<MOrganization>) -> Result<LocalNixStore> {
-    if organization.as_ref().map_or(true, |org| org.use_nix_store) {
+    if organization.as_ref().is_none_or(|org| org.use_nix_store) {
         let store = DaemonStore::builder()
             .init(
                 UnixStream::connect("/nix/var/nix/daemon-socket/socket")

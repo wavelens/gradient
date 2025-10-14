@@ -21,11 +21,24 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BuildWithOutputs {
+    pub id: Uuid,
+    pub evaluation: Uuid,
+    pub status: entity::build::BuildStatus,
+    pub derivation_path: String,
+    pub architecture: entity::server::Architecture,
+    pub server: Option<Uuid>,
+    pub output: HashMap<String, String>,
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime,
+}
+
 pub async fn get_build(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(build_id): Path<Uuid>,
-) -> WebResult<Json<BaseResponse<MBuild>>> {
+) -> WebResult<Json<BaseResponse<BuildWithOutputs>>> {
     let build = EBuild::find_by_id(build_id)
         .one(&state.db)
         .await?
@@ -44,7 +57,6 @@ pub async fn get_build(
         })?;
 
     let organization_id = if let Some(project_id) = evaluation.project {
-        // Regular project-based build
         let project = EProject::find_by_id(project_id)
             .one(&state.db)
             .await?
@@ -58,7 +70,6 @@ pub async fn get_build(
             })?;
         project.organization
     } else {
-        // Direct build - get organization from DirectBuild record
         EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
@@ -81,9 +92,31 @@ pub async fn get_build(
         return Err(WebError::not_found("Build"));
     }
 
+    let build_outputs = EBuildOutput::find()
+        .filter(CBuildOutput::Build.eq(build_id))
+        .all(&state.db)
+        .await?;
+
+    let mut outputs = HashMap::new();
+    for output in build_outputs {
+        outputs.insert(output.name, output.output);
+    }
+
+    let build_with_outputs = BuildWithOutputs {
+        id: build.id,
+        evaluation: build.evaluation,
+        status: build.status,
+        derivation_path: build.derivation_path,
+        architecture: build.architecture,
+        server: build.server,
+        output: outputs,
+        created_at: build.created_at,
+        updated_at: build.updated_at,
+    };
+
     let res = BaseResponse {
         error: false,
-        message: build,
+        message: build_with_outputs,
     };
 
     Ok(Json(res))
@@ -111,7 +144,6 @@ pub async fn post_build(
             WebError::InternalServerError("Build data inconsistency".to_string())
         })?;
     let organization_id = if let Some(project_id) = evaluation.project {
-        // Regular project-based build
         let project = EProject::find_by_id(project_id)
             .one(&state.db)
             .await?
@@ -125,7 +157,6 @@ pub async fn post_build(
             })?;
         project.organization
     } else {
-        // Direct build - get organization from DirectBuild record
         EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
@@ -149,9 +180,6 @@ pub async fn post_build(
     }
 
     // TODO: check if build is building
-
-    // watch build.log and stream it
-
     let stream = stream! {
         let mut last_log = build.log.unwrap_or("".to_string());
         let mut first_response: bool = true;

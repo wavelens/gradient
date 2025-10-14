@@ -15,6 +15,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
     pub build: Uuid,
+    pub name: String,
     pub output: String,
     pub hash: String,
     pub package: String,

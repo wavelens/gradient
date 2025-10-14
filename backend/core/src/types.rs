@@ -196,6 +196,8 @@ pub struct NixPathInfo {
     pub references: Vec<String>,
     #[serde(rename = "Sig")]
     pub sig: String,
+    #[serde(rename = "Deriver")]
+    pub deriver: Option<String>,
     #[serde(rename = "CA")]
     pub ca: Option<String>,
 }
@@ -203,7 +205,7 @@ pub struct NixPathInfo {
 impl NixPathInfo {
     pub fn to_nix_string(&self) -> String {
         format!(
-            "StorePath: {}\nURL: {}\nCompression: {}\nFileHash: {}\nFileSize: {}\nNarHash: {}\nNarSize: {}\nReferences: {}\nSig: {}{}",
+            "StorePath: {}\nURL: {}\nCompression: {}\nFileHash: {}\nFileSize: {}\nNarHash: {}\nNarSize: {}\nReferences: {}{}\nSig: {}{}\n",
             self.store_path,
             self.url,
             self.compression,
@@ -212,6 +214,10 @@ impl NixPathInfo {
             self.nar_hash,
             self.nar_size,
             self.references.join(" "),
+            self.deriver
+                .as_ref()
+                .map(|deriver| format!("\nDeriver: {}", deriver))
+                .unwrap_or_default(),
             self.sig,
             self.ca
                 .as_ref()

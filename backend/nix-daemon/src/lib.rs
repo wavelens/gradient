@@ -29,7 +29,7 @@ use chrono::{DateTime, Utc};
 use num_enum::{IntoPrimitive, TryFromPrimitive, TryFromPrimitiveError};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use std::{collections::HashMap, future::Future};
+use std::{collections::{HashMap, HashSet}, future::Future};
 use strum::{AsRefStr, IntoStaticStr};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
@@ -389,6 +389,46 @@ pub struct BuildResult {
     pub built_outputs: HashMap<String, String>,
 }
 
+/// Output name for derivations.
+pub type OutputName = String;
+
+/// Store path type.
+pub type StorePath = String;
+
+/// Hash digest type.
+pub type HashDigest = String;
+
+/// Content address method with algorithm.
+pub type ContentAddressMethodWithAlgo = String;
+
+/// Output specification for a derivation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivationOutput {
+    /// Path where the output should be stored (optional).
+    pub path: Option<StorePath>,
+    /// Content address method with algorithm (optional).
+    pub hash_algo: Option<ContentAddressMethodWithAlgo>,
+    /// Expected hash digest (optional).
+    pub hash: Option<HashDigest>,
+}
+
+/// Basic derivation structure for building.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BasicDerivation {
+    /// Map of output names to their specifications.
+    pub outputs: HashMap<OutputName, DerivationOutput>,
+    /// Set of input source paths.
+    pub input_srcs: HashSet<StorePath>,
+    /// Target platform for the build.
+    pub platform: String,
+    /// Builder program to execute.
+    pub builder: String,
+    /// Arguments to pass to the builder.
+    pub args: Vec<String>,
+    /// Environment variables for the build.
+    pub env: HashMap<String, String>,
+}
+
 /// Passed to [`Store::set_options()`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientSettings {
@@ -732,6 +772,14 @@ pub trait Store {
         Ps: IntoIterator + Send + Debug,
         Ps::IntoIter: ExactSizeIterator + Send,
         Ps::Item: AsRef<str> + Send + Sync;
+
+    /// Build a single derivation.
+    fn build_derivation<P: AsRef<str> + Send + Sync + Debug>(
+        &mut self,
+        drv_path: P,
+        drv: BasicDerivation,
+        build_mode: BuildMode,
+    ) -> impl Progress<T = BuildResult, Error = Self::Error>;
 
     /// Export a store path as NAR data (equivalent to C++ narFromPath).
     fn nar_from_path<P: AsRef<str> + Send + Sync + Debug>(

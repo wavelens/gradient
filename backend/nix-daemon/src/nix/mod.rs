@@ -14,7 +14,7 @@ pub mod internal_json;
 pub mod wire;
 
 use crate::{
-    BuildMode, ClientSettings, Error, PathInfo, Progress, Result, ResultExt, Stderr, Store,
+    BasicDerivation, BuildMode, BuildResult, ClientSettings, Error, PathInfo, Progress, Result, ResultExt, Stderr, Store,
 };
 use std::iter;
 use std::future::Future;
@@ -1482,6 +1482,67 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
             Returner,
         )
     }
+
+    #[instrument(skip(self, drv))]
+    fn build_derivation<P: AsRef<str> + Send + Sync + Debug>(
+        &mut self,
+        drv_path: P,
+        drv: BasicDerivation,
+        build_mode: BuildMode,
+    ) -> impl Progress<T = BuildResult, Error = Self::Error> {
+        struct Caller<P: AsRef<str> + Send + Sync + Debug> {
+            drv_path: P,
+            drv: BasicDerivation,
+            build_mode: BuildMode,
+        }
+        impl<P: AsRef<str> + Send + Sync + Debug> DaemonProgressCaller for Caller<P> {
+            async fn call<
+                E: From<Error> + From<std::io::Error> + Send + Sync,
+                C: AsyncReadExt + AsyncWriteExt + Unpin + Send,
+            >(
+                self,
+                store: &mut DaemonStore<C>,
+            ) -> Result<(), E> {
+                wire::write_op(&mut store.conn, wire::Op::BuildDerivation)
+                    .await
+                    .with_field("BuildDerivation.<op>")?;
+                wire::write_string(&mut store.conn, &self.drv_path)
+                    .await
+                    .with_field("BuildDerivation.drv_path")?;
+                wire::write_basic_derivation(&mut store.conn, &self.drv)
+                    .await
+                    .with_field("BuildDerivation.drv")?;
+                wire::write_build_mode(&mut store.conn, self.build_mode)
+                    .await
+                    .with_field("BuildDerivation.build_mode")?;
+                Ok(())
+            }
+        }
+
+        struct Returner;
+        impl DaemonProgressReturner for Returner {
+            type T = BuildResult;
+            async fn result<
+                E: From<Error> + From<std::io::Error> + Send + Sync,
+                C: AsyncReadExt + AsyncWriteExt + Unpin + Send,
+            >(
+                self,
+                store: &mut DaemonStore<C>,
+            ) -> Result<Self::T, E> {
+                wire::read_build_result(&mut store.conn, store.proto).await.map_err(E::from)
+            }
+        }
+
+        DaemonProgress::new(
+            self,
+            Caller {
+                drv_path,
+                drv,
+                build_mode,
+            },
+            Returner,
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -1927,6 +1988,22 @@ where
                             .await
                             .with_field("BuildPathsWithResults.results[].result")?;
                     }
+                }
+                Ok(wire::Op::BuildDerivation) => {
+                    let drv_path = wire::read_string(&mut self.r)
+                        .await
+                        .with_field("BuildDerivation.drv_path")?;
+                    let drv = wire::read_basic_derivation(&mut self.r)
+                        .await
+                        .with_field("BuildDerivation.drv")?;
+                    let build_mode = wire::read_build_mode(&mut self.r)
+                        .await
+                        .with_field("BuildDerivation.build_mode")?;
+
+                    let result = forward_stderr(&mut self.w, self.store.build_derivation(drv_path, drv, build_mode)).await?;
+                    wire::write_build_result(&mut self.w, &result, self.proto)
+                        .await
+                        .with_field("BuildDerivation.result")?;
                 }
                 Ok(v) => todo!("{:#?}", v),
 

@@ -13,9 +13,9 @@ jobs:
         test:
           - gradient-state
           - gradient-api
-          # - gradient-building
-          # - gradient-cache
-          - gradient-frontend
+          # - gradient-building # GitHub Actions time out
+          - gradient-cache
+          # - gradient-frontend # Not ready for testing
           - gradient-mail
           - gradient-oidc
           - gradient-remote

@@ -72,7 +72,7 @@ function updateBuildStatus(status) {
   const statusIcons = document.querySelectorAll('.status-icon');
   const statusTexts = document.querySelectorAll('.status-text');
   const abortButton = document.getElementById('abortButton');
-  
+
   statusIcons.forEach(icon => {
     icon.className = 'material-icons status-icon';
     if (status === 'Completed') {
@@ -85,17 +85,17 @@ function updateBuildStatus(status) {
       icon.className = 'loader status-icon';
     }
   });
-  
+
   statusTexts.forEach(text => {
     text.textContent = status;
   });
-  
+
   // Show/hide abort button based on status
   if (abortButton) {
     const showAbortButton = status === 'Building' || status === 'Evaluating' || status === 'Queued' || status === 'Running';
     abortButton.style.display = showAbortButton ? 'inline-block' : 'none';
   }
-  
+
   // Update page title status indicator
   const titleStatusIcon = document.querySelector('.webkit-middle .material-icons, .webkit-middle .loader');
   if (titleStatusIcon) {
@@ -108,6 +108,15 @@ function updateBuildStatus(status) {
     } else {
       titleStatusIcon.className = 'loader';
       titleStatusIcon.textContent = '';
+    }
+  }
+
+  // Clean up loading build items when evaluation fails
+  if (status === 'Failed' || status === 'Aborted') {
+    const buildsContainer = document.getElementById('builds-list');
+    if (buildsContainer) {
+      const loadingItems = buildsContainer.querySelectorAll('.build-item.loading');
+      loadingItems.forEach(item => item.remove());
     }
   }
 }
@@ -348,14 +357,28 @@ function updateBuildsSidebar() {
   }
 
   if (buildsData.length === 0) {
-    // Keep the "All Builds" option but add a note
-    const noBuildsItem = document.createElement('div');
-    noBuildsItem.className = 'build-item loading';
-    noBuildsItem.innerHTML = `
-      <div class="loader-small"></div>
-      <span>No builds found</span>
-    `;
-    buildsContainer.appendChild(noBuildsItem);
+    // Check if evaluation has failed - if so, don't show loading indicator
+    const statusElements = document.querySelectorAll('.status-text');
+    let evaluationFailed = false;
+    for (let element of statusElements) {
+      const status = element.textContent.toLowerCase();
+      if (status.includes('failed') || status.includes('aborted')) {
+        evaluationFailed = true;
+        break;
+      }
+    }
+
+    if (!evaluationFailed) {
+      // Only show loading indicator if evaluation is still running
+      const noBuildsItem = document.createElement('div');
+      noBuildsItem.className = 'build-item loading';
+      noBuildsItem.innerHTML = `
+        <div class="loader-small"></div>
+        <span>No builds found</span>
+      `;
+      buildsContainer.appendChild(noBuildsItem);
+    }
+    // If evaluation failed, don't show any additional items - just keep "All Builds"
     return;
   }
 
@@ -558,12 +581,9 @@ async function updateLogs() {
   const hasNewContent = allLogs.length > lastLogLength;
 
   if (hasNewContent || (isFirstLoad && allLogs.length > 0)) {
-    // Remove loading message when first logs arrive
+    // On first load, clear any existing content to prevent duplication
     if (isFirstLoad) {
-      const loadingMessage = logContainer.querySelector('div[style*="color: #666"]');
-      if (loadingMessage) {
-        loadingMessage.remove();
-      }
+      logContainer.innerHTML = '';
     }
 
     // Check if user is near the bottom before adding content

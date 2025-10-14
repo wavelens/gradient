@@ -76,7 +76,7 @@ in {
       '';
     in [ triggerUpdate ];
 
-    services.systemd = {
+    systemd = {
       services.gradient-deploy = {
         description = "Gradient Deployment Service";
         after = [ "network.target" ];
@@ -134,7 +134,7 @@ in {
 
           EVAL_BUILDS=$(curl --silent --fail --max-time 10 \
             --header "Authorization: Bearer $API_KEY" \
-            "${cfg.server}/api/v1/evaluations/$PROJECT_LAST_EVAL/builds"
+            "${cfg.server}/api/v1/evals/$PROJECT_LAST_EVAL/builds"
             )
 
           if [ -z "$EVAL_BUILDS" ]; then
@@ -142,7 +142,24 @@ in {
             exit 1
           fi
 
-          DEPLOYMENT_STORE_PATH=$(echo "$EVAL_BUILDS" | jq -r '.message[].name' | grep -E "^/nix/store/[a-z0-9]{32}-nixos-system-${cfg.deployFor}-[0-9]{2}\.[0-9]{2}(\.[0-9]{8}\.[a-f0-9]+)?$" | sort -V | tail -n1)
+          # Get build IDs and fetch output paths from individual build endpoints
+          BUILD_IDS=$(echo "$EVAL_BUILDS" | jq -r '.message[].id')
+          DEPLOYMENT_STORE_PATH=""
+
+          for BUILD_ID in $BUILD_IDS; do
+            BUILD_INFO=$(curl --silent --fail --max-time 10 \
+              --header "Authorization: Bearer $API_KEY" \
+              "${cfg.server}/api/v1/builds/$BUILD_ID"
+              )
+
+            if [ -n "$BUILD_INFO" ]; then
+              STORE_PATH=$(echo "$BUILD_INFO" | jq -r '.message.output.out')
+              if echo "$STORE_PATH" | grep -qE "^/nix/store/[a-z0-9]{32}-nixos-system-${cfg.deployFor}-[0-9]{2}\.[0-9]{2}(\.[0-9]{8}\.[a-f0-9]+)?$"; then
+                DEPLOYMENT_STORE_PATH="$STORE_PATH"
+                break
+              fi
+            fi
+          done
 
           if [ -z "$DEPLOYMENT_STORE_PATH" ]; then
             echo "No deployment found for project ${cfg.project} and server ${cfg.deployFor}"

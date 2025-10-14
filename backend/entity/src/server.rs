@@ -54,6 +54,19 @@ impl std::convert::TryFrom<&str> for Architecture {
     }
 }
 
+impl std::fmt::Display for Architecture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Architecture::BUILTIN => "builtin",
+            Architecture::X86_64Linux => "x86_64-linux",
+            Architecture::Aarch64Linux => "aarch64-linux",
+            Architecture::X86_64Darwin => "x86_64-darwin",
+            Architecture::Aarch64Darwin => "aarch64-darwin",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "server")]
 pub struct Model {

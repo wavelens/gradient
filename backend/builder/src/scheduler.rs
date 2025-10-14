@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
 use core::executer::*;
 use core::sources::*;
@@ -13,19 +13,149 @@ use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use entity::server::Architecture;
 use futures::stream::{self, StreamExt};
+use nix_daemon::{BasicDerivation, DerivationOutput};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, JoinType, QueryFilter,
     QueryOrder, QuerySelect, RelationTrait,
 };
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::process::Command;
 use tokio::task::JoinHandle;
 use tokio::time;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use super::evaluator::*;
+
+async fn parse_derivation_file(
+    binpath_nix: &str,
+    derivation_path: &str
+) -> anyhow::Result<(String, Vec<String>, HashMap<String, String>, HashSet<String>)> {
+    if !derivation_path.ends_with(".drv") {
+        return Ok((
+            "/bin/bash".to_string(),
+            vec![],
+            HashMap::new(),
+            HashSet::new(),
+        ));
+    }
+
+    let output = Command::new(binpath_nix)
+        .arg("derivation")
+        .arg("show")
+        .arg(derivation_path)
+        .output()
+        .await
+        .context("Failed to execute nix derivation show command")?;
+
+    if !output.status.success() {
+        anyhow::bail!(
+            "Command \"nix derivation show {}\" failed with status: {:?}, stderr: {}",
+            derivation_path,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let json_output = String::from_utf8_lossy(&output.stdout);
+    let parsed_json: serde_json::Value =
+        serde_json::from_str(&json_output).context("Failed to parse JSON output")?;
+
+    let derivation_data = parsed_json
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("Expected JSON object"))?
+        .get(derivation_path)
+        .ok_or_else(|| anyhow::anyhow!("Expected JSON object with path"))?
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("Expected JSON object with path"))?;
+
+    let builder = derivation_data
+        .get("builder")
+        .and_then(|v| v.as_str())
+        .unwrap_or("/bin/bash")
+        .to_string();
+
+    let args = derivation_data
+        .get("args")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let env = derivation_data
+        .get("env")
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            obj.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let input_srcs = derivation_data
+        .get("inputSrcs")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok((builder, args, env, input_srcs))
+}
+
+async fn create_basic_derivation(
+    build: &MBuild,
+    local_daemon: &mut LocalNixStore,
+    dependencies: Vec<String>,
+    state: Arc<ServerState>,
+) -> anyhow::Result<BasicDerivation> {
+    let out_path = match local_daemon {
+        LocalNixStore::UnixStream(store) => {
+            get_output_path(build.derivation_path.clone(), store).await?
+        }
+        LocalNixStore::CommandDuplex(store) => {
+            get_output_path(build.derivation_path.clone(), store).await?
+        }
+    };
+
+    let (builder, args, env, input_srcs) = parse_derivation_file(
+        state.cli.binpath_nix.as_str(),
+        &build.derivation_path,
+    )
+    .await
+    .context("Failed to parse derivation file")?;
+
+
+    // TODO: Handle multiple outputs
+    let outputs = HashMap::from([
+        ("out".to_string(), DerivationOutput {
+            path: out_path,
+            hash_algo: None,
+            hash: None,
+        })
+    ]);
+
+    let input_srcs: HashSet<String> = dependencies.into_iter().chain(input_srcs.into_iter()).collect();
+
+    Ok(BasicDerivation {
+        outputs,
+        input_srcs: input_srcs.into_iter().collect(),
+        platform: build.architecture.to_string(),
+        builder,
+        args,
+        env,
+    })
+}
 
 pub async fn schedule_evaluation_loop(state: Arc<ServerState>) {
     let _guard = if state.cli.report_errors {
@@ -62,7 +192,6 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
     info!("Reviewing evaluation");
 
     let (_project, organization) = if let Some(project_id) = evaluation.project {
-        // Regular project-based evaluation
         let project = match EProject::find_by_id(project_id).one(&state.db).await {
             Ok(Some(p)) => p,
             Ok(None) => {
@@ -119,7 +248,6 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
         };
         (Some(project), organization)
     } else {
-        // Direct build - get organization from DirectBuild record
         let direct_build = match EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
@@ -439,17 +567,24 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         return;
     }
 
+    let derivation = match create_basic_derivation(&build, &mut local_daemon, dependencies, Arc::clone(&state)).await {
+        Ok(derivation) => derivation,
+        Err(e) => {
+            error!(error = %e, "Failed to create basic derivation");
+            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Aborted).await;
+            return;
+        }
+    };
+
     let mut build_outputs: Vec<ABuildOutput> = vec![];
 
-    match execute_build(&build, &mut server_daemon, Arc::clone(&state)).await {
+    match execute_build(&build, derivation, &mut server_daemon, Arc::clone(&state)).await {
         Ok(results) => {
             let status = if results.1.values().all(|r| r.error_msg.is_empty()) {
                 for build_result in results.1.values() {
                     let build_results: Result<Vec<String>, _> = build_result
                         .built_outputs
-                        .clone()
-                        .into_iter()
-                        .map(|(_output, path)| {
+                        .clone().into_values().map(|path| {
                             serde_json::from_str::<BuildOutputPath>(&path)
                                 .map(|parsed| format!("/nix/store/{}", parsed.out_path))
                                 .map_err(|e| format!("Failed to parse build output path: {}", e))
@@ -508,6 +643,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                         build_outputs.push(ABuildOutput {
                             id: Set(Uuid::new_v4()),
                             build: Set(build.id),
+                            name: Set("out".to_string()),
                             output: Set(build_output),
                             hash: Set(build_output_path_hash),
                             package: Set(build_output_path_package),
@@ -544,14 +680,13 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         }
     };
 
-    if !build_outputs.is_empty() {
-        if let Err(e) = EBuildOutput::insert_many(build_outputs)
+    if !build_outputs.is_empty()
+        && let Err(e) = EBuildOutput::insert_many(build_outputs)
             .exec(&state.db)
             .await
         {
             error!(error = %e, "Failed to insert build outputs");
         }
-    }
 }
 
 async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
@@ -724,7 +859,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         };
 
         let (commit_message, author_email, author_name) =
-            match get_commit_info(Arc::clone(&state), &project, &commit_hash).await {
+            match get_commit_info(Arc::clone(&state), &project, commit_hash).await {
                 Ok((msg, email, name)) => (msg, email, name),
                 Err(e) => {
                     warn!(
@@ -1047,7 +1182,6 @@ async fn reserve_available_server(
     };
 
     let organization_id = if let Some(project_id) = evaluation.project {
-        // Regular project-based evaluation
         match EProject::find_by_id(project_id).one(&state.db).await {
             Ok(Some(project)) => project.organization,
             Ok(None) => {
@@ -1060,7 +1194,6 @@ async fn reserve_available_server(
             }
         }
     } else {
-        // Direct build - get organization from DirectBuild record
         match EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
@@ -1078,13 +1211,17 @@ async fn reserve_available_server(
         }
     };
 
-    let mut cond = Condition::all()
+    let cond = Condition::all()
         .add(CServer::Organization.eq(organization_id))
-        .add(CServer::Active.eq(true))
-        .add(Condition::any()
+        .add(CServer::Active.eq(true));
+
+    let mut cond = if build.architecture != Architecture::BUILTIN {
+        cond
             .add(CServerArchitecture::Architecture.eq(build.architecture.clone()))
-            .add(CServerArchitecture::Architecture.eq(Architecture::BUILTIN))
-        );
+    } else {
+        cond
+    };
+
 
     for feature in features {
         cond = cond.add(CServerFeature::Feature.eq(feature));
@@ -1433,77 +1570,12 @@ async fn get_build_dependencies(
     Ok(builds)
 }
 
-async fn get_build_dependencies_recursive(
-    state: Arc<ServerState>,
-    build: &MBuild,
-) -> Result<Vec<MBuild>, String> {
-    use std::collections::{HashMap, HashSet};
-
-    let mut visited = HashSet::new();
-    let mut temp_mark = HashSet::new();
-    let mut result = Vec::new();
-    let mut build_map = HashMap::new();
-
-    let mut to_visit = vec![build.clone()];
-    while let Some(current_build) = to_visit.pop() {
-        if build_map.contains_key(&current_build.id) {
-            continue;
-        }
-
-        let deps = get_build_dependencies(Arc::clone(&state), &current_build).await?;
-        build_map.insert(current_build.id, (current_build.clone(), deps.clone()));
-        to_visit.extend(deps);
-    }
-
-    fn visit(
-        build_id: uuid::Uuid,
-        visited: &mut HashSet<uuid::Uuid>,
-        temp_mark: &mut HashSet<uuid::Uuid>,
-        result: &mut Vec<MBuild>,
-        build_map: &HashMap<uuid::Uuid, (MBuild, Vec<MBuild>)>,
-    ) -> Result<(), String> {
-        if temp_mark.contains(&build_id) {
-            return Err("Circular dependency detected".to_string());
-        }
-
-        if visited.contains(&build_id) {
-            return Ok(());
-        }
-
-        temp_mark.insert(build_id);
-
-        if let Some((build, deps)) = build_map.get(&build_id) {
-            for dep in deps {
-                visit(dep.id, visited, temp_mark, result, build_map)?;
-            }
-            result.push(build.clone());
-        }
-
-        temp_mark.remove(&build_id);
-        visited.insert(build_id);
-        Ok(())
-    }
-
-    visit(build.id, &mut visited, &mut temp_mark, &mut result, &build_map)?;
-    result.retain(|b| b.id != build.id);
-
-    Ok(result)
-}
-
 async fn get_build_dependencies_sorted(
     state: Arc<ServerState>,
     local_store: &mut LocalNixStore,
     build: &MBuild,
 ) -> Result<Vec<String>, String> {
     let bdependencies_direct = match get_build_dependencies(Arc::clone(&state), build).await {
-        Ok(deps) => deps,
-        Err(e) => {
-            error!(error = %e, build_id = %build.id, "Failed to get build dependencies for sorting");
-            return Err(e);
-        }
-    };
-
-    let bdependencies = match get_build_dependencies_recursive(Arc::clone(&state), build).await {
         Ok(deps) => deps,
         Err(e) => {
             error!(error = %e, build_id = %build.id, "Failed to get build dependencies for sorting");
@@ -1530,10 +1602,5 @@ async fn get_build_dependencies_sorted(
         }
     }
 
-    for dependency in &bdependencies {
-        dependencies.push(dependency.derivation_path.clone());
-    }
-
-    dependencies.push(build.derivation_path.clone());
     Ok(dependencies)
 }

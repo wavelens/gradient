@@ -34,7 +34,7 @@ pub async fn cache_loop(state: Arc<ServerState>) {
 
     let mut interval = time::interval(Duration::from_secs(5));
     let mut cleanup_counter = 0;
-    const CLEANUP_INTERVAL: u32 = 720; // Run cleanup every hour (720 * 5 seconds)
+    const CLEANUP_INTERVAL: u32 = 720;
 
     loop {
         let build = get_next_build_output(Arc::clone(&state)).await;
@@ -87,7 +87,6 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
     };
 
     let organization_id = if let Some(project_id) = evaluation.project {
-        // Regular project-based evaluation
         let project = match EProject::find_by_id(project_id).one(&state.db).await {
             Ok(Some(p)) => p,
             Ok(None) => {
@@ -101,7 +100,6 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         };
         project.organization
     } else {
-        // Direct build - get organization from DirectBuild record
         match EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
@@ -136,7 +134,6 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
 
     let path = get_path_from_build_output(build_output.clone());
 
-    // Check if path exists in local Nix store before caching
     let local_store = core::executer::get_local_store(Some(organization.clone())).await;
     if let Ok(mut local_store) = local_store {
         let path_exists = match local_store {
@@ -229,7 +226,6 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
 
     if let Err(e) = abuild_output.update(&state.db).await {
         error!(error = %e, "Failed to update build output cache status");
-        return;
     }
 }
 
@@ -239,9 +235,11 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
         state.cli.crypt_secret_file.clone(),
         cache.clone(),
         state.cli.serve_url.clone(),
-        false,
     ) {
-        Ok(key) => key,
+        Ok(key) => {
+            debug!("Found secret key for cache '{}'", cache.name);
+            key
+        },
         Err(e) => {
             error!("Failed to format cache key: {}", e);
             return;
@@ -274,13 +272,23 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
     };
 
     if !output.status.success() {
-        error!("Could not sign path with nix store sign");
+        error!(
+            "Could not sign path with nix store sign. Exit code: {:?}, stderr: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        );
         return;
     }
+
+    debug!("Successfully signed path: {}", path);
 
     if let Err(e) = clear_key(key_file) {
         error!(error = %e, "Failed to clear cache key file");
     }
+
+    let nix_cmd = ["path-info", "--sigs", &path];
+    debug!("Running command: {} {}", state.cli.binpath_nix, nix_cmd.join(" "));
+
     let output = match Command::new(state.cli.binpath_nix.clone())
         .arg("path-info")
         .arg("--sigs")
@@ -291,28 +299,49 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
     {
         Ok(output) => output,
         Err(e) => {
-            error!(error = %e, "Error while executing nix store sign command");
+            error!(error = %e, "Error while executing nix path-info --sigs command");
             return;
         }
     };
 
     if !output.status.success() {
-        error!("Could not get path info with nix path-info");
+        error!(
+            "Could not get path info with nix path-info. Exit code: {:?}, stderr: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        );
         return;
     }
 
     let signatures = String::from_utf8_lossy(&output.stdout).to_string();
+    debug!("Signature output for cache '{}': {}", cache.name, signatures);
+
+    let cache_identifier = secret_key.split(':').next().unwrap_or(&cache.name);
+    debug!("Looking for cache identifier '{}' in signatures", cache_identifier);
+
     let mut signature = String::new();
     for line in signatures.lines() {
-        if line.contains(secret_key.split(':').collect::<Vec<&str>>()[0]) {
-            if let Some(last_part) = line.split_whitespace().last() {
-                signature = last_part.to_string();
+        debug!("Checking signature line: '{}'", line);
+        if let Some(sig_part) = line.split_whitespace().last() {
+            debug!("Found signature part: '{}'", sig_part);
+            if sig_part.starts_with(&format!("{}:", cache_identifier)) {
+                if let Some(actual_sig) = sig_part.split(':').nth(1) {
+                    signature = actual_sig.trim().to_string();
+                    debug!("Extracted signature: {}", signature);
+                    break;
+                }
             } else {
-                error!("Failed to parse signature from line: {}", line);
-                continue;
+                debug!("Signature part doesn't start with '{}:': {}", cache_identifier, sig_part);
             }
-            break;
         }
+    }
+
+    if signature.is_empty() {
+        error!("No signature found for cache '{}' in output. Lines checked:", cache.name);
+        for (i, line) in signatures.lines().enumerate() {
+            error!("  Line {}: {}", i + 1, line);
+        }
+        return;
     }
 
     let build_path_signature = ABuildOutputSignature {
@@ -325,6 +354,8 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
 
     if let Err(e) = build_path_signature.insert(&state.db).await {
         error!(error = %e, "Failed to insert build output signature");
+    } else {
+        debug!("Successfully inserted signature for build output {}", build_output.id);
     }
 }
 
@@ -411,7 +442,6 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
     let (hash, package) = get_hash_from_path(path.clone())
         .with_context(|| format!("Failed to parse path {}", path))?;
 
-    // Find all build outputs for this path
     let build_outputs = EBuildOutput::find()
         .filter(
             Condition::all()
@@ -424,7 +454,6 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
         .context("Database error while finding build outputs")?;
 
     for build_output in build_outputs {
-        // Mark as not cached
         let mut abuild_output = build_output.clone().into_active_model();
         abuild_output.is_cached = Set(false);
         abuild_output.file_hash = Set(None);
@@ -434,7 +463,6 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
             .await
             .context("Failed to update build output")?;
 
-        // Remove cached files
         let file_location = get_cache_nar_location(state.cli.base_path.clone(), hash.clone(), true)
             .context("Failed to get cache NAR location")?;
         if std::fs::metadata(&file_location).is_ok() {
@@ -442,7 +470,6 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
                 .with_context(|| format!("Failed to remove cached file {}", file_location))?;
         }
 
-        // Remove signatures
         let signatures = EBuildOutputSignature::find()
             .filter(CBuildOutputSignature::BuildOutput.eq(build_output.id))
             .all(&state.db)
@@ -472,7 +499,6 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
 
     let mut orphaned_files = Vec::new();
 
-    // Walk through cache directory
     for entry in std::fs::read_dir(&cache_dir).context("Failed to read cache directory")? {
         let entry = entry.context("Failed to read directory entry")?;
         let path = entry.path();
@@ -482,31 +508,28 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
                 let subentry = subentry.context("Failed to read subdirectory entry")?;
                 let file_path = subentry.path();
 
-                if file_path.extension().and_then(|s| s.to_str()) == Some("zst") {
-                    if let Some(file_name) = file_path.file_stem().and_then(|s| s.to_str()) {
-                        if let Some(hash_part) = file_name.strip_suffix(".nar") {
-                            let parent_dir =
-                                path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                            let full_hash = format!("{}{}", parent_dir, hash_part);
+                if file_path.extension().and_then(|s| s.to_str()) == Some("zst")
+                    && let Some(file_name) = file_path.file_stem().and_then(|s| s.to_str())
+                    && let Some(hash_part) = file_name.strip_suffix(".nar") {
+                        let parent_dir =
+                            path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                        let full_hash = format!("{}{}", parent_dir, hash_part);
 
-                            // Check if this hash exists in database
-                            let build_output_exists = EBuildOutput::find()
-                                .filter(
-                                    Condition::all()
-                                        .add(CBuildOutput::Hash.eq(full_hash.clone()))
-                                        .add(CBuildOutput::IsCached.eq(true)),
-                                )
-                                .one(&state.db)
-                                .await
-                                .context("Failed to check if build output exists")?
-                                .is_some();
+                        let build_output_exists = EBuildOutput::find()
+                            .filter(
+                                Condition::all()
+                                    .add(CBuildOutput::Hash.eq(full_hash.clone()))
+                                    .add(CBuildOutput::IsCached.eq(true)),
+                            )
+                            .one(&state.db)
+                            .await
+                            .context("Failed to check if build output exists")?
+                            .is_some();
 
-                            if !build_output_exists {
-                                orphaned_files.push(file_path);
-                            }
+                        if !build_output_exists {
+                            orphaned_files.push(file_path);
                         }
                     }
-                }
             }
         }
     }

@@ -121,6 +121,18 @@ async fn get_nar_by_hash(
 
     let nar_hash = String::from_utf8_lossy(&output.stdout).to_string();
 
+    let references = pathinfo.references
+        .into_iter()
+        .map(|s| s.strip_prefix("/nix/store/").unwrap_or(&s).to_string())
+        .collect();
+
+    let sig_url = state.cli.serve_url
+        .replace("https://", "")
+        .replace("http://", "")
+        .replace(":", "-");
+
+    let sig = format!("{}-{}:{}", sig_url, cache.name, build_output_signature.signature);
+
     Ok(NixPathInfo {
         store_path: path,
         url: format!("nar/{}.nar.zst", hash),
@@ -134,8 +146,9 @@ async fn get_nar_by_hash(
             as u32,
         nar_hash: format!("sha256:{}", nar_hash.trim()),
         nar_size: pathinfo.nar_size,
-        references: pathinfo.references,
-        sig: build_output_signature.signature,
+        references,
+        deriver: pathinfo.deriver,
+        sig,
         ca: pathinfo.ca,
     })
 }
@@ -533,7 +546,6 @@ pub async fn get_cache_key(
         state.cli.crypt_secret_file.clone(),
         cache,
         state.cli.serve_url.clone(),
-        true,
     ) {
         Ok(key) => key,
         Err(e) => {
@@ -724,7 +736,7 @@ pub async fn nar(
         )
     })?;
 
-    if !path.ends_with(".nar") && !path.contains(".nar.") {
+    if !(path.ends_with(".nar") || path.contains(".nar.")) {
         return Err((
             StatusCode::NOT_FOUND,
             Json(BaseResponse {

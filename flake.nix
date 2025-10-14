@@ -120,6 +120,7 @@
     };
 
     nixosModules = rec {
+      deploy = ./nix/modules/gradient-deploy.nix;
       gradient = { config, lib, ... }: {
         imports = [ ./nix/modules/gradient.nix ];
         nixpkgs.overlays = lib.mkIf config.services.gradient.enable [

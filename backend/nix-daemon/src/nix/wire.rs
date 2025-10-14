@@ -6,7 +6,7 @@
 //! Low-level helpers for the nix-daemon wire format.
 
 use crate::{
-    BuildMode, BuildResult, BuildResultStatus, ClientSettings, Error, NixError, PathInfo, Result,
+    BasicDerivation, BuildMode, BuildResult, BuildResultStatus, ClientSettings, DerivationOutput, Error, NixError, PathInfo, Result,
     ResultExt, Stderr, StderrField, StderrResult, StderrStartActivity, Verbosity, nix::Proto,
 };
 use async_stream::try_stream;
@@ -568,6 +568,160 @@ pub async fn write_build_result<W: AsyncWriteExt + Unpin>(
     }
 
     Ok(())
+}
+
+/// Write a derivation output to the stream.
+#[instrument(skip(w, output), level = "trace")]
+pub async fn write_derivation_output<W: AsyncWriteExt + Unpin>(
+    w: &mut W,
+    output: &DerivationOutput,
+) -> Result<()> {
+    // Write path (optional)
+    write_string(w, output.path.as_ref().map(|s| s.as_str()).unwrap_or(""))
+        .await
+        .with_field("DerivationOutput.path")?;
+
+    // Write hash algorithm (optional)
+    write_string(w, output.hash_algo.as_ref().map(|s| s.as_str()).unwrap_or(""))
+        .await
+        .with_field("DerivationOutput.hash_algo")?;
+
+    // Write hash (optional)
+    write_string(w, output.hash.as_ref().map(|s| s.as_str()).unwrap_or(""))
+        .await
+        .with_field("DerivationOutput.hash")?;
+
+    Ok(())
+}
+
+/// Write a basic derivation to the stream.
+#[instrument(skip(w, drv), level = "trace")]
+pub async fn write_basic_derivation<W: AsyncWriteExt + Unpin>(
+    w: &mut W,
+    drv: &BasicDerivation,
+) -> Result<()> {
+    // Write outputs map
+    write_u64(w, drv.outputs.len() as u64)
+        .await
+        .with_field("BasicDerivation.outputs.<count>")?;
+    for (name, output) in &drv.outputs {
+        write_string(w, name)
+            .await
+            .with_field("BasicDerivation.outputs[].name")?;
+        write_derivation_output(w, output)
+            .await
+            .with_field("BasicDerivation.outputs[].output")?;
+    }
+
+    // Write input sources set - convert HashSet to Vec for write_strings
+    let input_srcs_vec: Vec<_> = drv.input_srcs.iter().collect();
+    write_strings(w, input_srcs_vec)
+        .await
+        .with_field("BasicDerivation.input_srcs")?;
+
+    // Write platform
+    write_string(w, &drv.platform)
+        .await
+        .with_field("BasicDerivation.platform")?;
+
+    // Write builder
+    write_string(w, &drv.builder)
+        .await
+        .with_field("BasicDerivation.builder")?;
+
+    // Write args
+    write_strings(w, &drv.args)
+        .await
+        .with_field("BasicDerivation.args")?;
+
+    // Write environment variables map
+    write_u64(w, drv.env.len() as u64)
+        .await
+        .with_field("BasicDerivation.env.<count>")?;
+    for (key, value) in &drv.env {
+        write_string(w, key)
+            .await
+            .with_field("BasicDerivation.env[].key")?;
+        write_string(w, value)
+            .await
+            .with_field("BasicDerivation.env[].value")?;
+    }
+
+    Ok(())
+}
+
+/// Read a derivation output from the stream.
+#[instrument(skip(r), level = "trace")]
+pub async fn read_derivation_output<R: AsyncReadExt + Unpin>(
+    r: &mut R,
+) -> Result<DerivationOutput> {
+    let path_str = read_string(r).await.with_field("DerivationOutput.path")?;
+    let path = if path_str.is_empty() { None } else { Some(path_str) };
+
+    let hash_algo_str = read_string(r).await.with_field("DerivationOutput.hash_algo")?;
+    let hash_algo = if hash_algo_str.is_empty() { None } else { Some(hash_algo_str) };
+
+    let hash_str = read_string(r).await.with_field("DerivationOutput.hash")?;
+    let hash = if hash_str.is_empty() { None } else { Some(hash_str) };
+
+    Ok(DerivationOutput {
+        path,
+        hash_algo,
+        hash,
+    })
+}
+
+/// Read a basic derivation from the stream.
+#[instrument(skip(r), level = "trace")]
+pub async fn read_basic_derivation<R: AsyncReadExt + Unpin>(
+    r: &mut R,
+) -> Result<BasicDerivation> {
+    // Read outputs map
+    let outputs_count = read_u64(r).await.with_field("BasicDerivation.outputs.<count>")?;
+    let mut outputs = HashMap::new();
+    for _ in 0..outputs_count {
+        let name = read_string(r).await.with_field("BasicDerivation.outputs[].name")?;
+        let output = read_derivation_output(r).await.with_field("BasicDerivation.outputs[].output")?;
+        outputs.insert(name, output);
+    }
+
+    // Read input sources set
+    let input_srcs: std::collections::HashSet<String> = read_strings(r)
+        .collect::<Result<Vec<_>>>()
+        .await
+        .with_field("BasicDerivation.input_srcs")?
+        .into_iter()
+        .collect();
+
+    // Read platform
+    let platform = read_string(r).await.with_field("BasicDerivation.platform")?;
+
+    // Read builder
+    let builder = read_string(r).await.with_field("BasicDerivation.builder")?;
+
+    // Read args
+    let args = read_strings(r)
+        .collect::<Result<Vec<_>>>()
+        .await
+        .with_field("BasicDerivation.args")?;
+
+    // Read environment variables map
+    let env_count = read_u64(r).await.with_field("BasicDerivation.env.<count>")?;
+    let mut env = HashMap::new();
+    for _ in 0..env_count {
+        let key = read_string(r).await.with_field("BasicDerivation.env[].key")?;
+        let value = read_string(r).await.with_field("BasicDerivation.env[].value")?;
+        env.insert(key, value);
+    }
+
+    Ok(BasicDerivation {
+        outputs,
+        input_srcs,
+        platform,
+        builder,
+        args,
+        env,
+    })
 }
 
 #[derive(Debug, TryFromPrimitive, IntoPrimitive)]
