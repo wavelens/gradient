@@ -33,12 +33,13 @@ use super::evaluator::*;
 async fn parse_derivation_file(
     binpath_nix: &str,
     derivation_path: &str
-) -> anyhow::Result<(String, Vec<String>, HashMap<String, String>, HashSet<String>)> {
+) -> anyhow::Result<(String, Vec<String>, HashMap<String, String>, Option<HashMap<String, String>>, HashSet<String>)> {
     if !derivation_path.ends_with(".drv") {
         return Ok((
             "/bin/bash".to_string(),
             vec![],
             HashMap::new(),
+            None,
             HashSet::new(),
         ));
     }
@@ -52,17 +53,12 @@ async fn parse_derivation_file(
         .context("Failed to execute nix derivation show command")?;
 
     if !output.status.success() {
-        anyhow::bail!(
-            "Command \"nix derivation show {}\" failed with status: {:?}, stderr: {}",
-            derivation_path,
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-        );
+        anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr));
     }
 
     let json_output = String::from_utf8_lossy(&output.stdout);
     let parsed_json: serde_json::Value =
-        serde_json::from_str(&json_output).context("Failed to parse JSON output")?;
+        serde_json::from_str(&json_output).with_context(|| format!("Failed to parse JSON output from 'nix derivation show {}': '{}', stderr: '{}'", derivation_path, json_output, String::from_utf8_lossy(&output.stderr)))?;
 
     let derivation_data = parsed_json
         .as_object()
@@ -75,7 +71,7 @@ async fn parse_derivation_file(
     let builder = derivation_data
         .get("builder")
         .and_then(|v| v.as_str())
-        .unwrap_or("/bin/bash")
+        .unwrap_or_default()
         .to_string();
 
     let args = derivation_data
@@ -94,10 +90,23 @@ async fn parse_derivation_file(
         .and_then(|v| v.as_object())
         .map(|obj| {
             obj.iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .filter_map(|(k, v)| v.as_str().map(|s| (k, s)))
+                .map(|(k, s)| (
+                    k.to_string(),
+                    s.to_string()
+                ))
                 .collect()
         })
         .unwrap_or_default();
+
+    let structured_attrs = derivation_data
+        .get("structuredAttrs")
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            obj.iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                .collect()
+        });
 
     let input_srcs = derivation_data
         .get("inputSrcs")
@@ -110,7 +119,7 @@ async fn parse_derivation_file(
         })
         .unwrap_or_default();
 
-    Ok((builder, args, env, input_srcs))
+    Ok((builder, args, env, structured_attrs, input_srcs))
 }
 
 async fn create_basic_derivation(
@@ -119,31 +128,30 @@ async fn create_basic_derivation(
     dependencies: Vec<String>,
     state: Arc<ServerState>,
 ) -> anyhow::Result<BasicDerivation> {
-    let out_path = match local_daemon {
+    let out_paths = match local_daemon {
         LocalNixStore::UnixStream(store) => {
-            get_output_path(build.derivation_path.clone(), store).await?
+            get_output_paths(build.derivation_path.clone(), store).await?
         }
         LocalNixStore::CommandDuplex(store) => {
-            get_output_path(build.derivation_path.clone(), store).await?
+            get_output_paths(build.derivation_path.clone(), store).await?
         }
     };
 
-    let (builder, args, env, input_srcs) = parse_derivation_file(
+    let (builder, args, env, structured_attrs, input_srcs) = parse_derivation_file(
         state.cli.binpath_nix.as_str(),
         &build.derivation_path,
     )
     .await
     .context("Failed to parse derivation file")?;
 
-
-    // TODO: Handle multiple outputs
-    let outputs = HashMap::from([
-        ("out".to_string(), DerivationOutput {
-            path: out_path,
+    let mut outputs = HashMap::new();
+    for (name, path) in out_paths {
+        outputs.insert(name, DerivationOutput {
+            path: Some(path),
             hash_algo: None,
             hash: None,
-        })
-    ]);
+        });
+    }
 
     let input_srcs: HashSet<String> = dependencies.into_iter().chain(input_srcs.into_iter()).collect();
 
@@ -154,6 +162,7 @@ async fn create_basic_derivation(
         builder,
         args,
         env,
+        structured_attrs,
     })
 }
 
@@ -369,32 +378,40 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 return;
             }
 
-            if let Err(e) = EBuild::insert_many(active_builds).exec(&state.db).await {
-                error!(error = %e, "Failed to insert builds");
-                update_evaluation_status_with_error(
-                    Arc::clone(&state),
-                    evaluation,
-                    EvaluationStatus::Failed,
-                    format!("Failed to insert builds: {}", e),
-                )
-                .await;
-                return;
-            }
-
-            if !active_dependencies.is_empty() {
-                if let Err(e) = EBuildDependency::insert_many(active_dependencies)
-                    .exec(&state.db)
-                    .await
-                {
-                    error!(error = %e, "Failed to insert build dependencies");
+            // Insert builds in batches to avoid PostgreSQL parameter limits
+            const BUILD_BATCH_SIZE: usize = 1000;
+            for chunk in active_builds.chunks(BUILD_BATCH_SIZE) {
+                if let Err(e) = EBuild::insert_many(chunk.to_vec()).exec(&state.db).await {
+                    error!(error = %e, "Failed to insert builds");
                     update_evaluation_status_with_error(
                         Arc::clone(&state),
                         evaluation,
                         EvaluationStatus::Failed,
-                        format!("Failed to insert build dependencies: {}", e),
+                        format!("Failed to insert builds: {}", e),
                     )
                     .await;
                     return;
+                }
+            }
+
+            if !active_dependencies.is_empty() {
+                // Insert dependencies in batches to avoid PostgreSQL parameter limits
+                const BATCH_SIZE: usize = 1000;
+                for chunk in active_dependencies.chunks(BATCH_SIZE) {
+                    if let Err(e) = EBuildDependency::insert_many(chunk.to_vec())
+                        .exec(&state.db)
+                        .await
+                    {
+                        error!(error = %e, "Failed to insert build dependencies");
+                        update_evaluation_status_with_error(
+                            Arc::clone(&state),
+                            evaluation,
+                            EvaluationStatus::Failed,
+                            format!("Failed to insert build dependencies: {}", e),
+                        )
+                        .await;
+                        return;
+                    }
                 }
 
                 debug!(
@@ -579,97 +596,70 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
     let mut build_outputs: Vec<ABuildOutput> = vec![];
 
     match execute_build(&build, derivation, &mut server_daemon, Arc::clone(&state)).await {
-        Ok(results) => {
-            let status = if results.1.values().all(|r| r.error_msg.is_empty()) {
-                for build_result in results.1.values() {
-                    let build_results: Result<Vec<String>, _> = build_result
-                        .built_outputs
-                        .clone().into_values().map(|path| {
-                            serde_json::from_str::<BuildOutputPath>(&path)
-                                .map(|parsed| format!("/nix/store/{}", parsed.out_path))
-                                .map_err(|e| format!("Failed to parse build output path: {}", e))
-                        })
-                        .collect();
+        Ok((build_returned, result)) => {
+            build = build_returned;
+            let status = if result.error_msg.is_empty() {
+                let build_results = result.built_outputs;
+                let copy_results = build_results
+                    .values()
+                    .map(|realisation| format!("/nix/store/{}", realisation.out_path))
+                    .collect::<Vec<String>>();
 
-                    let build_results = match build_results {
-                        Ok(results) => results,
-                        Err(e) => {
-                            error!(error = %e, "Failed to parse build output paths");
-                            update_build_status(
-                                Arc::clone(&state),
-                                build.clone(),
-                                BuildStatus::Failed,
-                            )
-                            .await;
-                            return;
-                        }
-                    };
-                    if let Err(e) = match local_daemon {
-                        LocalNixStore::UnixStream(ref mut store) => {
-                            copy_builds(build_results, &mut server_daemon, store, true).await
-                        }
-                        LocalNixStore::CommandDuplex(ref mut store) => {
-                            copy_builds(build_results, &mut server_daemon, store, true).await
-                        }
-                    } {
-                        error!(error = %e, "Failed to copy build results");
-                        update_build_status(Arc::clone(&state), build.clone(), BuildStatus::Failed)
-                            .await;
-                        return;
+
+                if let Err(e) = match local_daemon {
+                    LocalNixStore::UnixStream(ref mut store) => {
+                        copy_builds(copy_results, &mut server_daemon, store, true).await
                     }
-
-                    for (build_output, build_output_path) in build_result.built_outputs.clone() {
-                        let build_output_path =
-                            match serde_json::from_str::<BuildOutputPath>(&build_output_path) {
-                                Ok(path) => path,
-                                Err(e) => {
-                                    error!(error = %e, "Failed to parse build output path");
-                                    continue;
-                                }
-                            };
-
-                        let (build_output_path_hash, build_output_path_package) =
-                            match get_hash_from_path(format!(
-                                "/nix/store/{}",
-                                build_output_path.out_path
-                            )) {
-                                Ok(path_info) => path_info,
-                                Err(e) => {
-                                    error!(error = %e, "Failed to get hash from path");
-                                    continue;
-                                }
-                            };
-
-                        build_outputs.push(ABuildOutput {
-                            id: Set(Uuid::new_v4()),
-                            build: Set(build.id),
-                            name: Set("out".to_string()),
-                            output: Set(build_output),
-                            hash: Set(build_output_path_hash),
-                            package: Set(build_output_path_package),
-                            file_hash: Set(None),
-                            file_size: Set(None),
-                            is_cached: Set(false),
-                            ca: Set(None),
-                            created_at: Set(Utc::now().naive_utc()),
-                        });
+                    LocalNixStore::CommandDuplex(ref mut store) => {
+                        copy_builds(copy_results, &mut server_daemon, store, true).await
                     }
+                } {
+                    error!(error = %e, "Failed to copy build results");
+                    update_build_status(Arc::clone(&state), build.clone(), BuildStatus::Failed)
+                        .await;
+                    return;
+                }
+
+                for (build_output_name, realisation) in build_results {
+                    let (build_output_hash, build_output_package) =
+                        match get_hash_from_path(format!("/nix/store/{}", realisation.out_path)) {
+                            Ok(path_info) => path_info,
+                            Err(e) => {
+                                error!(error = %e, "Failed to get hash from path");
+                                continue;
+                            }
+                        };
+
+                    build_outputs.push(ABuildOutput {
+                        id: Set(Uuid::new_v4()),
+                        build: Set(build.id),
+                        name: Set(build_output_name),
+                        output: Set(format!("/nix/store/{}", realisation.out_path)),
+                        hash: Set(build_output_hash),
+                        package: Set(build_output_package),
+                        file_hash: Set(None),
+                        file_size: Set(None),
+                        is_cached: Set(false),
+                        ca: Set(None),
+                        created_at: Set(Utc::now().naive_utc()),
+                    });
                 }
 
                 BuildStatus::Completed
             } else {
-                for (path, result) in results.1 {
-                    if !result.error_msg.is_empty() {
-                        error!(path = %path, error = %result.error_msg, "Build failed");
-                    }
+                if !result.error_msg.is_empty() {
+                    error!(path = %build.derivation_path, error = %result.error_msg, "Build failed");
                 }
 
                 BuildStatus::Failed
             };
 
-            build = results.0;
-
-            update_build_status(Arc::clone(&state), build.clone(), status).await;
+            let updated_build = if status == BuildStatus::Failed {
+                update_build_status_recursivly(Arc::clone(&state), build.clone(), status).await
+            } else {
+                update_build_status(Arc::clone(&state), build.clone(), status).await
+            };
+            info!(build_id = %updated_build.id, status = ?updated_build.status, "Build status updated after execution");
             check_evaluation_status(Arc::clone(&state), build.evaluation).await;
         }
 
@@ -680,13 +670,19 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         }
     };
 
-    if !build_outputs.is_empty()
-        && let Err(e) = EBuildOutput::insert_many(build_outputs)
-            .exec(&state.db)
-            .await
-        {
-            error!(error = %e, "Failed to insert build outputs");
+    if !build_outputs.is_empty() {
+        // Insert build outputs in batches to avoid PostgreSQL parameter limits
+        const OUTPUT_BATCH_SIZE: usize = 1000;
+        for chunk in build_outputs.chunks(OUTPUT_BATCH_SIZE) {
+            if let Err(e) = EBuildOutput::insert_many(chunk.to_vec())
+                .exec(&state.db)
+                .await
+            {
+                error!(error = %e, "Failed to insert build outputs");
+                break;
+            }
         }
+    }
 }
 
 async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
@@ -1362,51 +1358,69 @@ async fn update_build_status_recursivly(
     build: MBuild,
     status: BuildStatus,
 ) -> MBuild {
-    // TODO: more efficient, recursive till all dependencies are updated
-    let dependencies = match EBuildDependency::find()
-        .filter(CBuildDependency::Dependency.eq(build.id))
-        .all(&state.db)
-        .await
-    {
-        Ok(deps) => deps.into_iter().map(|d| d.build).collect::<Vec<Uuid>>(),
-        Err(e) => {
-            error!(error = %e, build_id = %build.id, "Failed to query build dependencies for recursive update");
-            return update_build_status(Arc::clone(&state), build, status).await;
+    use std::collections::{HashSet, VecDeque};
+
+    let mut queue = VecDeque::new();
+    let mut processed = HashSet::new();
+    queue.push_back(build.id);
+
+    while let Some(current_build_id) = queue.pop_front() {
+        if processed.contains(&current_build_id) {
+            continue;
         }
-    };
+        processed.insert(current_build_id);
 
-    let mut condition = Condition::any();
+        let dependencies = match EBuildDependency::find()
+            .filter(CBuildDependency::Dependency.eq(current_build_id))
+            .all(&state.db)
+            .await
+        {
+            Ok(deps) => deps.into_iter().map(|d| d.build).collect::<Vec<Uuid>>(),
+            Err(e) => {
+                error!(error = %e, build_id = %current_build_id, "Failed to query build dependencies for update");
+                continue;
+            }
+        };
 
-    for dependency in dependencies {
-        condition = condition.add(CBuild::Id.eq(dependency));
+        if dependencies.is_empty() {
+            continue;
+        }
+
+        let mut condition = Condition::any();
+        for dependency in &dependencies {
+            condition = condition.add(CBuild::Id.eq(*dependency));
+        }
+
+        let status_condition = if status == BuildStatus::Aborted || status == BuildStatus::Failed {
+            Condition::any()
+                .add(CBuild::Status.eq(BuildStatus::Created))
+                .add(CBuild::Status.eq(BuildStatus::Queued))
+                .add(CBuild::Status.eq(BuildStatus::Building))
+        } else {
+            Condition::all().add(CBuild::Status.ne(status.clone()))
+        };
+
+        let dependent_builds = match EBuild::find()
+            .filter(condition)
+            .filter(status_condition)
+            .all(&state.db)
+            .await
+        {
+            Ok(builds) => builds,
+            Err(e) => {
+                error!(error = %e, "Failed to query dependent builds for update");
+                continue;
+            }
+        };
+
+        // Update dependent builds and add them to the queue for further processing
+        for dependent_build in dependent_builds {
+            update_build_status(Arc::clone(&state), dependent_build.clone(), status.clone()).await;
+            queue.push_back(dependent_build.id);
+        }
     }
 
-    let status_condition = if status == BuildStatus::Aborted {
-        Condition::any()
-            .add(CBuild::Status.eq(BuildStatus::Created))
-            .add(CBuild::Status.eq(BuildStatus::Queued))
-            .add(CBuild::Status.eq(BuildStatus::Building))
-    } else {
-        Condition::all().add(CBuild::Status.ne(status.clone()))
-    };
-
-    let dependent_builds = match EBuild::find()
-        .filter(condition)
-        .filter(status_condition)
-        .all(&state.db)
-        .await
-    {
-        Ok(builds) => builds,
-        Err(e) => {
-            error!(error = %e, "Failed to query dependent builds for recursive update");
-            return update_build_status(Arc::clone(&state), build, status).await;
-        }
-    };
-
-    for dependent_build in dependent_builds {
-        update_build_status(Arc::clone(&state), dependent_build, status.clone()).await;
-    }
-
+    // Finally update the original build
     let build = update_build_status(Arc::clone(&state), build, status.clone()).await;
     check_evaluation_status(state, build.evaluation).await;
 
@@ -1527,6 +1541,8 @@ async fn check_evaluation_status(state: Arc<ServerState>, evaluation_id: Uuid) {
         EvaluationStatus::Failed
     } else if statuses.contains(&BuildStatus::Aborted) {
         EvaluationStatus::Aborted
+    } else if statuses.contains(&BuildStatus::Failed) {
+        EvaluationStatus::Failed
     } else {
         return;
     };
@@ -1575,7 +1591,7 @@ async fn get_build_dependencies_sorted(
     local_store: &mut LocalNixStore,
     build: &MBuild,
 ) -> Result<Vec<String>, String> {
-    let bdependencies_direct = match get_build_dependencies(Arc::clone(&state), build).await {
+    let bdependencies_direct: Vec<MBuild> = match get_build_dependencies(Arc::clone(&state), build).await {
         Ok(deps) => deps,
         Err(e) => {
             error!(error = %e, build_id = %build.id, "Failed to get build dependencies for sorting");
@@ -1583,24 +1599,42 @@ async fn get_build_dependencies_sorted(
         }
     };
 
-    let mut dependencies = Vec::new();
+    let mut dependencies = HashSet::new();
     for dependency in &bdependencies_direct {
-        let output_map = match local_store {
-            LocalNixStore::UnixStream(store) => {
-                get_output_path(dependency.derivation_path.clone(), store).await
-            }
-            LocalNixStore::CommandDuplex(store) => {
-                get_output_path(dependency.derivation_path.clone(), store).await
-            }
-        }.map_err(|e| {
-            error!(error = %e, derivation_path = %dependency.derivation_path, "Failed to get output path for dependency");
-            "Failed to get output path for dependency".to_string()
-        })?;
+        let output_map = if dependency.derivation_path.ends_with(".drv") {
+            // TODO: find better way to get correct dependencies
+            let mut deps = match local_store {
+                LocalNixStore::UnixStream(store) => {
+                    get_output_paths(dependency.derivation_path.clone(), store).await
+                }
+                LocalNixStore::CommandDuplex(store) => {
+                    get_output_paths(dependency.derivation_path.clone(), store).await
+                }
+            }.map_err(|e| {
+                error!(error = %e, derivation_path = %dependency.derivation_path, "Failed to get output path for dependency");
+                "Failed to get output path for dependency".to_string()
+            })?
+            .values().cloned().collect::<Vec<String>>();
 
-        if let Some(out_path) = output_map {
-            dependencies.push(out_path);
-        }
+            let missing = match local_store {
+                LocalNixStore::UnixStream(store) => {
+                    get_missing_builds(deps.clone(), store).await
+                } LocalNixStore::CommandDuplex(store) => {
+                    get_missing_builds(deps.clone(), store).await
+                }
+            }.map_err(|e| {
+                error!(error = %e, derivation_path = %dependency.derivation_path, "Failed to get missing builds for dependency");
+                "Failed to get missing builds for dependency".to_string()
+            })?;
+
+            deps.retain(|d| !missing.contains(d));
+            deps
+        } else {
+            vec![dependency.derivation_path.clone()]
+        };
+
+        dependencies.extend(output_map);
     }
 
-    Ok(dependencies)
+    Ok(dependencies.into_iter().collect())
 }

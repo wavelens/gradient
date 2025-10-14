@@ -94,9 +94,12 @@ in {
 
         path = with pkgs; [
           coreutils
+          curl
           gnutar
-          xz.bin
           gzip
+          jq
+          xz.bin
+        ] ++ [
           config.nix.package.out
         ];
 

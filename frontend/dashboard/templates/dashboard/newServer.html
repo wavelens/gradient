@@ -28,7 +28,7 @@
                         {{ field }}
                         <div class="tag-input-container">
                             <div class="tags-display" id="architectures-tags"></div>
-                            <input type="text" class="form-control tag-input" id="architectures-input" placeholder="e.g. x86_64, arm64, armv7">
+                            <input type="text" class="form-control tag-input" id="architectures-input" placeholder="e.g. x86_64-linux, aarch64-linux, x86_64-darwin">
                         </div>
                         {% if field.errors %}
                             <div class="error">{{ field.errors }}</div>
@@ -61,6 +61,18 @@
                     </div>
                 {% endif %}
             {% endfor %}
+
+            {% if ssh_public_key %}
+            <div class="form-field">
+                <label class="form-label">{% trans 'SSH Public Key' %}</label>
+                <div class="ssh-key-display">
+                    <code id="ssh-public-key">{{ ssh_public_key }}</code>
+                    <button type="button" class="copy-button" onclick="copyToClipboard('ssh-public-key')">{% trans 'Copy' %}</button>
+                </div>
+                <small class="form-text">{% trans 'Add this public key to your server'"'"'s ~/.ssh/authorized_keys file to allow Gradient to connect.' %}</small>
+            </div>
+            {% endif %}
+
             <button type="submit" class="submit-btn">{% trans 'Create' %}</button>
         </form>
     </div>
@@ -116,22 +128,66 @@ document.addEventListener('DOMContentLoaded', function() {
         input.addEventListener('keydown', function(e) {
             if (e.key === 'Enter' || e.key === ',') {
                 e.preventDefault();
-                addTag(input.value);
+                // Handle multiple tags separated by comma or space
+                const values = input.value.split(/[,\s]+/).filter(v => v.trim());
+                values.forEach(val => addTag(val.trim()));
                 input.value = '';
             }
         });
-        
+
         input.addEventListener('blur', function() {
             if (input.value.trim()) {
-                addTag(input.value);
+                // Handle multiple tags separated by comma or space
+                const values = input.value.split(/[,\s]+/).filter(v => v.trim());
+                values.forEach(val => addTag(val.trim()));
                 input.value = '';
             }
         });
         
     }
-    
+
     initTagInput('architectures-input', 'architectures-tags', 'architectures_hidden');
     initTagInput('features-input', 'features-tags', 'features_hidden');
 });
+
+function copyToClipboard(elementId) {
+    const element = document.getElementById(elementId);
+    const text = element.textContent;
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => {
+            showCopySuccess();
+        }).catch(() => {
+            fallbackCopyToClipboard(text);
+        });
+    } else {
+        fallbackCopyToClipboard(text);
+    }
+}
+
+function fallbackCopyToClipboard(text) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+        document.execCommand('copy');
+        showCopySuccess();
+    } catch (err) {
+        console.error('Failed to copy text: ', err);
+    }
+    document.body.removeChild(textarea);
+}
+
+function showCopySuccess() {
+    const button = event.target;
+    const originalText = button.textContent;
+    button.textContent = 'Copied!';
+    button.style.backgroundColor = '#28a745';
+    setTimeout(() => {
+        button.textContent = originalText;
+        button.style.backgroundColor = '';
+    }, 2000);
+}
 </script>
 {% endblock %}

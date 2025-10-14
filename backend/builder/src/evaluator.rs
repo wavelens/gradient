@@ -86,7 +86,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
     let all_derivations = get_flake_derivations(Arc::clone(&state), repository.clone(), wildcards)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to get flake derivations: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to evaluate: {}", e))?;
 
     if all_derivations.is_empty() {
         warn!("No derivations found for evaluation");
@@ -440,16 +440,11 @@ pub async fn get_derivation_cmd(
         .await?;
 
     if !output.status.success() {
-        anyhow::bail!(
-            "Command \"nix path-info --derivation {}\" failed with status: {:?}, stderr: {}",
-            path,
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-        );
+        anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr));
     }
 
     let json_output = String::from_utf8_lossy(&output.stdout);
-    let parsed_json: Value = serde_json::from_str(&json_output).context("Failed to parse JSON")?;
+    let parsed_json: Value = serde_json::from_str(&json_output).with_context(|| format!("Failed to parse JSON output from 'nix path-info --derivation {}': '{}', stderr: '{}'", path, json_output, String::from_utf8_lossy(&output.stderr)))?;
 
     if !parsed_json.is_object() {
         anyhow::bail!("Expected JSON object but found another type");
@@ -499,17 +494,12 @@ pub async fn get_features_cmd(
         .context("Failed to execute nix derivation show command")?;
 
     if !output.status.success() {
-        anyhow::bail!(
-            "Command \"nix derivation show {}\" failed with status: {:?}, stderr: {}",
-            path,
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-        );
+        anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr));
     }
 
     let json_output = String::from_utf8_lossy(&output.stdout);
     let parsed_json: Value =
-        serde_json::from_str(&json_output).context("Failed to parse JSON output")?;
+        serde_json::from_str(&json_output).with_context(|| format!("Failed to parse JSON output from 'nix derivation show {}': '{}', stderr: '{}'", path, json_output, String::from_utf8_lossy(&output.stderr)))?;
 
     if !parsed_json.is_object() {
         anyhow::bail!("Expected JSON object but found another type");
@@ -533,7 +523,7 @@ pub async fn get_features_cmd(
         let new_json = new_json
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Expected string for __json field"))?;
-        serde_json::from_str(new_json).context("Failed to parse JSON")?
+        serde_json::from_str(new_json).with_context(|| format!("Failed to parse nested JSON in __json field from 'nix derivation show {}': '{}'", path, new_json))?
     } else {
         parsed_json_env.clone()
     };
@@ -560,7 +550,7 @@ pub async fn get_features_cmd(
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("Expected string for system field"))?
         .try_into()
-        .map_err(|e| anyhow::anyhow!("Invalid system architecture: {:?}", e))?;
+        .map_err(|e| anyhow::anyhow!("{} has invalid system architecture: {:?}", path, e))?;
 
     Ok((system, features))
 }
@@ -572,8 +562,7 @@ async fn add_existing_build(
     build_id: Uuid,
 ) -> Result<MBuild> {
     let (system, features) = get_features_cmd(state.cli.binpath_nix.as_str(), derivation.as_str())
-        .await
-        .context("Failed to execute nix command")?;
+        .await?;
 
     let abuild = ABuild {
         id: Set(build_id),
@@ -614,7 +603,7 @@ async fn add_existing_build(
             let abuild_output = ABuildOutput {
                 id: Set(Uuid::new_v4()),
                 build: Set(build.id),
-                name: Set("out".to_string()),
+                name: Set(output.name.clone()),
                 output: Set(output.path.clone()),
                 hash: Set(output.hash),
                 package: Set(output.package),
@@ -749,28 +738,26 @@ async fn get_flake_derivations(
                         continue;
                     }
 
+                    let eval_target = format!("{}#{}", repository.clone(), current_key);
                     let keys = Command::new(state.cli.binpath_nix.clone())
                         .arg("eval")
-                        .arg(format!("{}#{}", repository.clone(), current_key))
+                        .arg(&eval_target)
                         .arg("--apply")
                         .arg("builtins.attrNames")
                         .arg("--json")
                         .output()
-                        .await
-                        .context("Failed to execute nix eval command")?
-                        .json_to_vec()
-                        .context("Failed to parse JSON output")?;
+                        .await?
+                        .json_to_vec()?;
 
                     if keys.contains(&"type".to_string()) && type_check {
+                        let type_eval_target = format!("{}#{}.type", repository.clone(), current_key);
                         let type_value = Command::new(state.cli.binpath_nix.clone())
                             .arg("eval")
-                            .arg(format!("{}#{}.type", repository.clone(), current_key))
+                            .arg(&type_eval_target)
                             .arg("--json")
                             .output()
-                            .await
-                            .context("Failed to execute nix eval command")?
-                            .json_to_string()
-                            .context("Failed to parse JSON output")?;
+                            .await?
+                            .json_to_string()?;
 
                         if type_value == "derivation" {
                             all_derivations.insert(current_key.clone());
@@ -786,6 +773,7 @@ async fn get_flake_derivations(
                                 && s.len() >= key_start.len() + key_end.len()
                         })
                         .cloned()
+                        .map(|s| format!("\"{}\"", s))
                         .collect::<Vec<String>>();
 
                     partial_derivations
@@ -818,12 +806,9 @@ trait JsonOutput {
 impl JsonOutput for Output {
     fn json_to_vec(&self) -> anyhow::Result<Vec<String>> {
         if !self.status.success() {
-            anyhow::bail!(
-                "Command failed with status: {:?}, stderr: {}",
-                self.status,
-                String::from_utf8_lossy(&self.stderr)
-            );
+            anyhow::bail!("{}", String::from_utf8_lossy(&self.stderr));
         }
+
 
         let json_output = String::from_utf8_lossy(&self.stdout);
         if json_output.trim().is_empty() {
@@ -831,7 +816,7 @@ impl JsonOutput for Output {
         }
 
         let parsed_json: Value = serde_json::from_str(&json_output)
-            .with_context(|| format!("Failed to parse JSON output: '{}'", json_output))?;
+            .with_context(|| format!("Failed to parse JSON output: '{}', stderr: '{}'", json_output, String::from_utf8_lossy(&self.stderr)))?;
 
         let parsed_json = parsed_json
             .as_array()
@@ -850,12 +835,9 @@ impl JsonOutput for Output {
 
     fn json_to_string(&self) -> anyhow::Result<String> {
         if !self.status.success() {
-            anyhow::bail!(
-                "Command failed with status: {:?}, stderr: {}",
-                self.status,
-                String::from_utf8_lossy(&self.stderr)
-            );
+            anyhow::bail!("{}", String::from_utf8_lossy(&self.stderr));
         }
+
 
         let json_output = String::from_utf8_lossy(&self.stdout);
         if json_output.trim().is_empty() {
@@ -863,7 +845,7 @@ impl JsonOutput for Output {
         }
 
         let parsed_json: Value = serde_json::from_str(&json_output)
-            .with_context(|| format!("Failed to parse JSON output: '{}'", json_output))?;
+            .with_context(|| format!("Failed to parse JSON output: '{}', stderr: '{}'", json_output, String::from_utf8_lossy(&self.stderr)))?;
 
         let parsed_json = parsed_json
             .as_str()
@@ -919,17 +901,25 @@ pub async fn evaluate_direct(
                 .collect::<Vec<ABuildDependency>>();
 
             if !active_builds.is_empty() {
-                EBuild::insert_many(active_builds)
-                    .exec(&state.db)
-                    .await
-                    .context("Failed to insert builds")?;
+                // Insert builds in batches to avoid PostgreSQL parameter limits
+                const BATCH_SIZE: usize = 1000;
+                for chunk in active_builds.chunks(BATCH_SIZE) {
+                    EBuild::insert_many(chunk.to_vec())
+                        .exec(&state.db)
+                        .await
+                        .context("Failed to insert builds")?;
+                }
             }
 
             if !active_dependencies.is_empty() {
-                EBuildDependency::insert_many(active_dependencies)
-                    .exec(&state.db)
-                    .await
-                    .context("Failed to insert dependencies")?;
+                // Insert dependencies in batches to avoid PostgreSQL parameter limits
+                const BATCH_SIZE: usize = 1000;
+                for chunk in active_dependencies.chunks(BATCH_SIZE) {
+                    EBuildDependency::insert_many(chunk.to_vec())
+                        .exec(&state.db)
+                        .await
+                        .context("Failed to insert dependencies")?;
+                }
             }
 
             for build in builds {

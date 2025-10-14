@@ -19,10 +19,17 @@
         {% endif %}
     </div>
     <nav role="navigation">
+        {% if project_id %}
+        <a class="nav-link flex-end" href="{% url 'projectDetail' org_id project_id %}">
+            <span class="material-symbols-outlined f-s-19px m-r-4">keyboard_command_key</span>
+            <span>{% trans 'Workflows' %}</span>
+        </a>
+        {% else %}
         <a class="nav-link flex-end" href="{% url 'workflow' org_id %}">
             <span class="material-symbols-outlined f-s-19px m-r-4">keyboard_command_key</span>
             <span>{% trans 'Workflows' %}</span>
         </a>
+        {% endif %}
 
         {% if evaluation_id %}
             <a class="nav-link flex-end" href="{% url 'log-eval' org_id evaluation_id %}"><span class="material-symbols-outlined f-s-19px m-r-4">vital_signs</span><span>{% trans 'Log' %}</span></a>

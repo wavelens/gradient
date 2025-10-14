@@ -7,7 +7,7 @@
 
 use crate::{
     BasicDerivation, BuildMode, BuildResult, BuildResultStatus, ClientSettings, DerivationOutput, Error, NixError, PathInfo, Result,
-    ResultExt, Stderr, StderrField, StderrResult, StderrStartActivity, Verbosity, nix::Proto,
+    ResultExt, Stderr, StderrField, StderrResult, StderrStartActivity, Verbosity, nix::Proto, Realisation, StorePath,
 };
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
@@ -495,6 +495,8 @@ pub async fn read_build_result<R: AsyncReadExt + Unpin>(
         is_non_deterministic: false,
         start_time: DateTime::default(),
         stop_time: DateTime::default(),
+        cpu_user: None,
+        cpu_system: None,
         built_outputs: HashMap::default(),
     };
 
@@ -516,10 +518,25 @@ pub async fn read_build_result<R: AsyncReadExt + Unpin>(
             let name = read_string(r)
                 .await
                 .with_field("BuildResult.built_outputs[].name")?;
-            let path = read_string(r)
+            let realisation_json = read_string(r)
                 .await
-                .with_field("BuildResult.built_outputs[].path")?;
-            br.built_outputs.insert(name, path);
+                .with_field("BuildResult.built_outputs[].realisation_json")?;
+
+            // Parse the JSON to extract the Realisation
+            let realisation = match serde_json::from_str::<Realisation>(&realisation_json) {
+                Ok(r) => r,
+                Err(e) => {
+                    // Fallback: treat as simple path string for backwards compatibility
+                    tracing::warn!("Failed to parse realisation JSON, treating as path: {}", e);
+                    Realisation {
+                        id: format!("{}!{}", name, name), // Basic ID format
+                        out_path: StorePath::from(realisation_json),
+                        signatures: vec![],
+                        dependent_realisations: HashMap::new(),
+                    }
+                }
+            };
+            br.built_outputs.insert(name, realisation);
         }
     }
 
@@ -557,13 +574,15 @@ pub async fn write_build_result<W: AsyncWriteExt + Unpin>(
         write_u64(w, result.built_outputs.len() as u64)
             .await
             .with_field("BuildResult.built_outputs.<count>")?;
-        for (name, path) in &result.built_outputs {
+        for (name, realisation) in &result.built_outputs {
             write_string(w, name)
                 .await
                 .with_field("BuildResult.built_outputs[].name")?;
-            write_string(w, path)
+            let realisation_json = serde_json::to_string(realisation)
+                .map_err(|e| Error::Invalid(format!("Failed to serialize realisation: {}", e)))?;
+            write_string(w, &realisation_json)
                 .await
-                .with_field("BuildResult.built_outputs[].path")?;
+                .with_field("BuildResult.built_outputs[].realisation_json")?;
         }
     }
 
@@ -647,8 +666,28 @@ pub async fn write_basic_derivation<W: AsyncWriteExt + Unpin>(
             .with_field("BasicDerivation.env[].value")?;
     }
 
+    // Write structured attributes map (optional)
+    if let Some(ref structured_attrs) = drv.structured_attrs {
+        write_u64(w, structured_attrs.len() as u64)
+            .await
+            .with_field("BasicDerivation.structured_attrs.<count>")?;
+        for (key, value) in structured_attrs {
+            write_string(w, key)
+                .await
+                .with_field("BasicDerivation.structured_attrs[].key")?;
+            write_string(w, value)
+                .await
+                .with_field("BasicDerivation.structured_attrs[].value")?;
+        }
+    } else {
+        write_u64(w, 0)
+            .await
+            .with_field("BasicDerivation.structured_attrs.<count>")?;
+    }
+
     Ok(())
 }
+
 
 /// Read a derivation output from the stream.
 #[instrument(skip(r), level = "trace")]
@@ -714,6 +753,20 @@ pub async fn read_basic_derivation<R: AsyncReadExt + Unpin>(
         env.insert(key, value);
     }
 
+    // Read structured attributes map (optional)
+    let structured_attrs_count = read_u64(r).await.with_field("BasicDerivation.structured_attrs.<count>")?;
+    let structured_attrs = if structured_attrs_count > 0 {
+        let mut attrs = HashMap::new();
+        for _ in 0..structured_attrs_count {
+            let key = read_string(r).await.with_field("BasicDerivation.structured_attrs[].key")?;
+            let value = read_string(r).await.with_field("BasicDerivation.structured_attrs[].value")?;
+            attrs.insert(key, value);
+        }
+        Some(attrs)
+    } else {
+        None
+    };
+
     Ok(BasicDerivation {
         outputs,
         input_srcs,
@@ -721,6 +774,7 @@ pub async fn read_basic_derivation<R: AsyncReadExt + Unpin>(
         builder,
         args,
         env,
+        structured_attrs,
     })
 }
 

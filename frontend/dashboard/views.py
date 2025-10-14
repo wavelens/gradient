@@ -246,17 +246,17 @@ def log(request, org, evaluation_id=None):
         "project_id": project["name"],
         "evaluation_id": evaluation_id,
         "details_blocks": details_blocks,
-        "built_version": "Build (x86_64-linux)",
+        "built_version": "All Builds",
         "status": evaluation["status"],
         "time": "0",
-        "duration": "1s",
+        "duration": "0:00",
         "id": evaluation["id"],
         "built_name": "Evaluation",
         "triggerArt": "schedule",
         "triggerTime": "0 months",
         "commit": "".join(hex(x)[2:] for x in commit["hash"][:4])[:-1],
         "branch": "main",
-        "builds": len(builds),
+        "builds": "0 | 0 | 0",
         "success": success,
         "api_url": settings.GRADIENT_BASE_URL,
         "evaluation_error": (
@@ -1061,29 +1061,7 @@ def new_server(request, org):
                 if feat.strip()
             ]
 
-            # Map common architectures to API expected values
-            arch_mapping = {
-                "arm64": "aarch64",  # Try aarch64 instead of arm64
-                "x86_64": "x86_64",
-                "armv7": "armv7",
-                "i386": "i386",
-                "ppc64le": "ppc64le",
-                "s390x": "s390x",
-            }
-
-            # Map architectures if needed
-            mapped_architectures = []
-            for arch in architectures:
-                if arch in arch_mapping:
-                    mapped_architectures.append(arch_mapping[arch])
-                else:
-                    mapped_architectures.append(arch)
-
-            print(f"DEBUG: Original architectures: {architectures}")
-            print(f"DEBUG: Mapped architectures: {mapped_architectures}")
-
-            # Use mapped architectures
-            architectures = mapped_architectures
+            # Architectures are now validated in the form to match the expected format
 
             print(f"DEBUG: Architectures: {architectures}")
             print(f"DEBUG: Features: {features}")
@@ -1092,9 +1070,7 @@ def new_server(request, org):
             server_data = {
                 "organization": form.cleaned_data["organization"],
                 "name": form.cleaned_data["server_name"],
-                "display_name": form.cleaned_data.get(
-                    "display_name", form.cleaned_data["server_name"]
-                ),
+                "display_name": form.cleaned_data["display_name"],
                 "host": form.cleaned_data["host"],
                 "port": form.cleaned_data["port"],
                 "username": form.cleaned_data["username"],
@@ -1126,7 +1102,17 @@ def new_server(request, org):
         form = NewServerForm(initial={"organization": org})
         print(f"DEBUG: GET request, form created with initial organization: {org}")
 
-    return render(request, "dashboard/newServer.html", {"form": form})
+    # Get SSH public key for the organization
+    ssh_key_response = api.get_orgs_organization_ssh(request, org)
+    ssh_public_key = None
+    if ssh_key_response and not ssh_key_response.get("error"):
+        ssh_public_key = ssh_key_response.get("message")
+
+    return render(request, "dashboard/newServer.html", {
+        "form": form,
+        "ssh_public_key": ssh_public_key,
+        "organization": org
+    })
 
 
 @login_required

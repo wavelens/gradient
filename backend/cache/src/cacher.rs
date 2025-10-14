@@ -320,7 +320,8 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
     debug!("Looking for cache identifier '{}' in signatures", cache_identifier);
 
     let mut signature = String::new();
-    for line in signatures.lines() {
+    for mut line in signatures.split(" ") {
+        line = line.trim();
         debug!("Checking signature line: '{}'", line);
         if let Some(sig_part) = line.split_whitespace().last() {
             debug!("Found signature part: '{}'", sig_part);
@@ -338,8 +339,8 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
 
     if signature.is_empty() {
         error!("No signature found for cache '{}' in output. Lines checked:", cache.name);
-        for (i, line) in signatures.lines().enumerate() {
-            error!("  Line {}: {}", i + 1, line);
+        for (i, line) in signatures.split(" ").enumerate() {
+            error!("  Line {}: {}", i + 1, line.trim());
         }
         return;
     }

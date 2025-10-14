@@ -1246,14 +1246,36 @@ paths:
       tags:
         - evals
       summary: Get list of builds
-      description: Get list of builds of the evaluation by id
+      description: Get list of builds of the evaluation by id with status information
       responses:
         '200':
           description: Successful
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListResponse'
+                type: object
+                properties:
+                  error:
+                    type: boolean
+                    description: Whether this is an error or not
+                    example: false
+                  message:
+                    type: array
+                    description: List of builds with status information
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          description: Build ID
+                        name:
+                          type: string
+                          description: Derivation path
+                        status:
+                          type: string
+                          enum: [Created, Queued, Building, Completed, Failed, Aborted]
+                          description: Build status
         '404':
           description: Evaluation not found
           content:
@@ -1296,17 +1318,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BasicResponse'
-    connect:
+  /builds/{build}/log:
+    get:
       tags:
         - builds
-      summary: Get log stream of build
-      description: Get the log stream of the build by id
+      summary: Get build logs
+      description: Get past logs for a specific build
+      parameters:
+        - name: build
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Build ID
       responses:
         '200':
-          description: Successful
+          description: Build logs retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: boolean
+                    example: false
+                  message:
+                    type: string
+                    description: Build log content
+        '404':
+          description: Build not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasicResponse'
+    post:
+      tags:
+        - builds
+      summary: Stream build logs
+      description: Stream live logs for a specific build
+      parameters:
+        - name: build
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Build ID
+      responses:
+        '200':
+          description: Log stream
           content:
             application/jsonstream:
-              $ref: '#/components/schemas/StreamResponse'
+              schema:
+                type: string
+                description: Streaming log content
         '404':
           description: Build not found
           content:

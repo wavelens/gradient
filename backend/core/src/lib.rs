@@ -36,7 +36,7 @@ pub async fn init_state() -> Arc<ServerState> {
 
     // Load and apply state configuration if provided
     if let Err(e) =
-        load_and_apply_state(&db, cli.state_file.as_deref(), &cli.crypt_secret_file).await
+        load_and_apply_state(&db, cli.state_file.as_deref(), &cli.crypt_secret_file, cli.delete_state).await
     {
         eprintln!("Failed to load state configuration: {}", e);
         std::process::exit(1);

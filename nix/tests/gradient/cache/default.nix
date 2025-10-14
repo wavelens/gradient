@@ -218,8 +218,6 @@
       server.succeed("${lib.getExe pkgs.gradient-cli} organization select org")
       server.succeed("${lib.getExe pkgs.gradient-cli} project select project")
 
-      server.succeed("${lib.getExe pkgs.gradient-cli} project evaluate")
-
       server.sleep(10)
       print(server.succeed("${lib.getExe pkgs.gradient-cli} project show"))
 

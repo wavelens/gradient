@@ -6,6 +6,7 @@ from django import forms
 from django.utils.translation import gettext_lazy as _
 from django.core.exceptions import ValidationError
 import re
+import ipaddress
 
 GEEKS_CHOICES = (
     ("1", "One"),
@@ -284,13 +285,23 @@ class NewServerForm(forms.Form):
         },
         widget=forms.TextInput(attrs={"class": "form-control"}),
     )
+    display_name = forms.CharField(
+        label="Display Name",
+        required=True,
+        max_length=100,
+        error_messages={
+            "required": "Display name is required.",
+            "max_length": "Display name cannot exceed 100 characters.",
+        },
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+    )
     host = forms.CharField(
         label="Host",
         required=True,
         error_messages={
             "required": "Server host is required.",
         },
-        help_text="IP address or domain name of the server",
+        help_text="IP address (IPv4 or IPv6) or domain name of the server",
         widget=forms.TextInput(attrs={"class": "form-control"}),
     )
     port = forms.IntegerField(
@@ -341,15 +352,29 @@ class NewServerForm(forms.Form):
     def clean_host(self):
         host = self.cleaned_data.get("host")
         if host:
-            # Check for valid IP address or domain name
-            ip_pattern = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"
-            domain_pattern = r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$"
+            # Check for valid IPv4, IPv6, or domain name
+            is_valid_ip = False
+            is_localhost = False
 
-            if not (re.match(ip_pattern, host) or re.match(domain_pattern, host)):
-                raise ValidationError("Please enter a valid IP address or domain name.")
+            # Try to parse as IP address (IPv4 or IPv6)
+            try:
+                ip = ipaddress.ip_address(host)
+                is_valid_ip = True
+                # Check for localhost/loopback addresses
+                if ip.is_loopback:
+                    is_localhost = True
+            except ValueError:
+                # Not an IP address, check if it's a valid domain name
+                domain_pattern = r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$"
+                if not re.match(domain_pattern, host):
+                    raise ValidationError("Please enter a valid IP address (IPv4 or IPv6) or domain name.")
+
+                # Check for localhost domain variations
+                if host.lower() == "localhost":
+                    is_localhost = True
 
             # Check for localhost variations
-            if host.lower() in ["localhost", "127.0.0.1", "::1"]:
+            if is_localhost:
                 raise ValidationError(
                     "Localhost addresses are not allowed for remote servers."
                 )
@@ -363,7 +388,7 @@ class NewServerForm(forms.Form):
             ]
             if not arch_list:
                 raise ValidationError("At least one architecture must be selected.")
-            valid_archs = ["x86_64", "arm64", "armv7", "i386", "ppc64le", "s390x"]
+            valid_archs = ["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
             invalid_archs = [arch for arch in arch_list if arch not in valid_archs]
             if invalid_archs:
                 raise ValidationError(
@@ -479,7 +504,7 @@ class EditServerForm(forms.Form):
         error_messages={
             "required": "Server host is required.",
         },
-        help_text="IP address or domain name of the server",
+        help_text="IP address (IPv4 or IPv6) or domain name of the server",
         widget=forms.TextInput(attrs={"class": "form-control"}),
     )
     port = forms.IntegerField(
@@ -525,6 +550,37 @@ class EditServerForm(forms.Form):
         widget=forms.TextInput(attrs={"class": "form-control"}),
         label="Features",
     )
+
+    def clean_host(self):
+        host = self.cleaned_data.get("host")
+        if host:
+            # Check for valid IPv4, IPv6, or domain name
+            is_valid_ip = False
+            is_localhost = False
+
+            # Try to parse as IP address (IPv4 or IPv6)
+            try:
+                ip = ipaddress.ip_address(host)
+                is_valid_ip = True
+                # Check for localhost/loopback addresses
+                if ip.is_loopback:
+                    is_localhost = True
+            except ValueError:
+                # Not an IP address, check if it's a valid domain name
+                domain_pattern = r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$"
+                if not re.match(domain_pattern, host):
+                    raise ValidationError("Please enter a valid IP address (IPv4 or IPv6) or domain name.")
+
+                # Check for localhost domain variations
+                if host.lower() == "localhost":
+                    is_localhost = True
+
+            # Check for localhost variations
+            if is_localhost:
+                raise ValidationError(
+                    "Localhost addresses are not allowed for remote servers."
+                )
+        return host
 
 
 class EditOrganizationForm(forms.Form):
@@ -912,7 +968,7 @@ class AddOrganizationServerForm(forms.Form):
         error_messages={
             "required": "Server host is required.",
         },
-        help_text="IP address or domain name of the server",
+        help_text="IP address (IPv4 or IPv6) or domain name of the server",
         widget=forms.TextInput(attrs={"class": "form-control"}),
     )
     port = forms.IntegerField(
@@ -974,14 +1030,29 @@ class AddOrganizationServerForm(forms.Form):
     def clean_host(self):
         host = self.cleaned_data.get("host")
         if host:
-            # Check for valid IP address or domain name
-            ip_pattern = r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$"
-            domain_pattern = r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$"
+            # Check for valid IPv4, IPv6, or domain name
+            is_valid_ip = False
+            is_localhost = False
 
-            if not (re.match(ip_pattern, host) or re.match(domain_pattern, host)):
-                raise ValidationError("Please enter a valid IP address or domain name.")
+            # Try to parse as IP address (IPv4 or IPv6)
+            try:
+                ip = ipaddress.ip_address(host)
+                is_valid_ip = True
+                # Check for localhost/loopback addresses
+                if ip.is_loopback:
+                    is_localhost = True
+            except ValueError:
+                # Not an IP address, check if it's a valid domain name
+                domain_pattern = r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$"
+                if not re.match(domain_pattern, host):
+                    raise ValidationError("Please enter a valid IP address (IPv4 or IPv6) or domain name.")
 
-            if host.lower() in ["localhost", "127.0.0.1", "::1"]:
+                # Check for localhost domain variations
+                if host.lower() == "localhost":
+                    is_localhost = True
+
+            # Check for localhost variations
+            if is_localhost:
                 raise ValidationError(
                     "Localhost addresses are not allowed for remote servers."
                 )

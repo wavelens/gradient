@@ -93,7 +93,7 @@ pub async fn execute_build(
     derivation: BasicDerivation,
     remote_store: &mut NixStore,
     state: Arc<ServerState>,
-) -> anyhow::Result<(MBuild, HashMap<String, BuildResult>)> {
+) -> anyhow::Result<(MBuild, BuildResult)> {
     info!("Executing build");
 
     let derivation_path = get_builds_path(vec![&build]).first().unwrap().to_string();
@@ -130,9 +130,7 @@ pub async fn execute_build(
 
     match prog.result().await.map_err(|e| e.into()) {
         Ok(result) => {
-            let mut results = HashMap::new();
-            results.insert("out".to_string(), result);
-            Ok((build, results))
+            Ok((build, result))
         },
         Err(e) => Err(e),
     }
@@ -168,7 +166,7 @@ pub async fn copy_builds<
             .is_valid_path(path.clone())
             .result()
             .await
-            .unwrap_or(false)
+            .context("Failed to check path validity in source store")?
         {
             anyhow::bail!("Path {} is not valid in source store", path);
         }
@@ -206,12 +204,13 @@ pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
 
     for path in paths {
         if path.ends_with(".drv") {
-            let output_map = get_output_path(path.clone(), store)
+            let output_map = get_output_paths(path.clone(), store)
                 .await
                 .with_context(|| format!("Failed to get output path for {}", path))?;
 
-            if let Some(out_path) = output_map {
-                output_paths.insert(path, out_path.clone());
+            // TODO: Handle multiple outputs properly
+            for out_path in output_map.values() {
+                output_paths.insert(path.clone(), out_path.clone());
             }
         } else {
             output_paths.insert(path.clone(), path);
@@ -233,15 +232,15 @@ pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
     Ok(missing)
 }
 
-pub async fn get_output_path<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
+pub async fn get_output_paths<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
     path: String,
     store: &mut DaemonStore<A>,
-) -> Result<Option<String>> {
+) -> Result<HashMap<String, String>> {
     let output_map = store
         .query_derivation_output_map(path.clone())
         .result()
         .await?;
-    Ok(output_map.get("out").cloned())
+    Ok(output_map)
 }
 
 pub fn get_buildlog_stream(
@@ -403,6 +402,7 @@ pub async fn get_pathinfo<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
 
 #[derive(Debug, Clone)]
 pub struct BuildOutputInfo {
+    pub name: String,
     pub path: String,
     pub hash: String,
     pub package: String,
@@ -421,7 +421,7 @@ pub async fn get_build_outputs_from_derivation<A: AsyncReadExt + AsyncWriteExt +
 
     let mut outputs = Vec::new();
 
-    for (_output_name, output_path) in output_map {
+    for (output_name, output_path) in output_map {
         if let Some(path_info) = store
             .query_pathinfo(output_path.clone())
             .result()
@@ -432,6 +432,7 @@ pub async fn get_build_outputs_from_derivation<A: AsyncReadExt + AsyncWriteExt +
                 .with_context(|| format!("Failed to parse path {}", output_path))?;
 
             outputs.push(BuildOutputInfo {
+                name: output_name,
                 path: output_path,
                 hash,
                 package,

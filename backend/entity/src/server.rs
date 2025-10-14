@@ -49,6 +49,8 @@ impl std::convert::TryFrom<&str> for Architecture {
             "aarch64-linux" => Ok(Architecture::Aarch64Linux),
             "x86_64-darwin" => Ok(Architecture::X86_64Darwin),
             "aarch64-darwin" => Ok(Architecture::Aarch64Darwin),
+            // TODO: architectures as needed in extra model
+            "i686-linux" => Ok(Architecture::X86_64Linux), // map i686 to x86_64
             _ => Err(format!("Unknown architecture: {}", s)),
         }
     }

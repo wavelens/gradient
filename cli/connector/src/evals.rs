@@ -9,6 +9,13 @@ use futures::stream::StreamExt;
 use reqwest_streams::JsonStreamResponse;
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BuildItem {
+    pub id: String,
+    pub name: String,
+    pub status: String,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EvaluationResponse {
     pub id: String,
@@ -62,7 +69,7 @@ pub async fn post_evaluation(
 pub async fn get_evaluation_builds(
     config: RequestConfig,
     evaluation_id: String,
-) -> Result<BaseResponse<ListResponse>, String> {
+) -> Result<BaseResponse<Vec<BuildItem>>, String> {
     let res = get_client(
         config,
         format!("evals/{}/builds", evaluation_id),

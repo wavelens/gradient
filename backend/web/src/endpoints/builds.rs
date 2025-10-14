@@ -122,7 +122,74 @@ pub async fn get_build(
     Ok(Json(res))
 }
 
-pub async fn post_build(
+pub async fn get_build_log(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(build_id): Path<Uuid>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let build = EBuild::find_by_id(build_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Build"))?;
+    
+    let evaluation = EEvaluation::find_by_id(build.evaluation)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| {
+            tracing::error!(
+                "Evaluation {} not found for build {}",
+                build.evaluation,
+                build_id
+            );
+            WebError::InternalServerError("Build data inconsistency".to_string())
+        })?;
+    
+    let organization_id = if let Some(project_id) = evaluation.project {
+        let project = EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                tracing::error!(
+                    "Project {} not found for evaluation {}",
+                    project_id,
+                    evaluation.id
+                );
+                WebError::InternalServerError("Evaluation data inconsistency".to_string())
+            })?;
+        project.organization
+    } else {
+        EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                tracing::error!("DirectBuild not found for evaluation {}", evaluation.id);
+                WebError::InternalServerError("Direct build data inconsistency".to_string())
+            })?
+            .organization
+    };
+
+    let organization = EOrganization::find_by_id(organization_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| {
+            tracing::error!("Organization {} not found", organization_id);
+            WebError::InternalServerError("Organization data inconsistency".to_string())
+        })?;
+    if organization.created_by != user.id {
+        return Err(WebError::not_found("Build"));
+    }
+
+    let log = build.log.unwrap_or_else(|| "".to_string());
+    let res = BaseResponse {
+        error: false,
+        message: log,
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn post_build_log(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(build_id): Path<Uuid>,

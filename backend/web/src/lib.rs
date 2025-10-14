@@ -144,7 +144,11 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route("/caches/{cache}/key", get(caches::get_cache_key))
         .route(
             "/builds/{build}",
-            get(builds::get_build).post(builds::post_build),
+            get(builds::get_build),
+        )
+        .route(
+            "/builds/{build}/log",
+            get(builds::get_build_log).post(builds::post_build_log)
         )
         .route(
             "/builds/{build}/downloads",
