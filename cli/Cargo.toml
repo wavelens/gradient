@@ -3,7 +3,7 @@ name = "gradient-cli"
 version = "0.4.0"
 edition = "2024"
 license = "AGPL-3.0"
-authors = ["Wavelens UG <info@wavelens.io>"]
+authors = ["Wavelens GmbH <info@wavelens.io>"]
 description = "CLI-Tool for Gradient"
 repository = "https://github.com/wavelens/gradient"
 

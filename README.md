@@ -181,4 +181,4 @@ The license notice follows the [REUSE guidelines](https://reuse.software/) to en
 
 ## Copyright
 
-Copyright (c) 2025, Wavelens UG
+Copyright (c) 2025, Wavelens GmbH
