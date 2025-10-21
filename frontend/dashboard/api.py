@@ -78,12 +78,12 @@ def post_auth_check_username(username):
     return get_client(None, "auth/check-username", "POST", body={"username": username})
 
 
-def post_auth_basic_login(loginname, password):
+def post_auth_basic_login(loginname, password, remember_me=False):
     return get_client(
         None,
         "auth/basic/login",
         "POST",
-        body={"loginname": loginname, "password": password},
+        body={"loginname": loginname, "password": password, "remember_me": remember_me},
     )
 
 

@@ -115,9 +115,10 @@ class LoginForm(forms.Form):
     def clean(self):
         username = self.cleaned_data.get("username")
         password = self.cleaned_data.get("password")
+        remember_me = self.cleaned_data.get("remember_me", False)
 
         if username is not None and password:
-            user_session = api.post_auth_basic_login(username, password)
+            user_session = api.post_auth_basic_login(username, password, remember_me)
             if user_session is None:
                 raise forms.ValidationError(
                     self.error_messages["network_error"],

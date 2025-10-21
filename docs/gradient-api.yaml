@@ -82,7 +82,11 @@ paths:
       tags:
         - auth
       summary: Login with Credentials
-      description: Login with Username / E-Mail and Password. Returns JWT-Token
+      description: |-
+        Login with Username / E-Mail and Password. Returns JWT-Token.
+
+        If `remember_me` is true, the JWT token will have an extended expiry time of 30 days.
+        If `remember_me` is false or omitted, the JWT token will expire in 24 hours.
       requestBody:
         content:
           application/json:
@@ -1593,6 +1597,11 @@ components:
           type: string
           format: password
           examples: [v3ry_s3cur3=p4ssw0rd]
+        remember_me:
+          type: boolean
+          description: Whether to extend session duration for persistent login
+          default: false
+          examples: [false, true]
     MakeUserRequest:
       type: object
       properties:

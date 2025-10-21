@@ -1128,6 +1128,15 @@ class UserLoginView(LoginView):
 
     def form_valid(self, form):
         login(self.request, form.get_user())
+
+        # Handle remember_me field for session expiry
+        if form.cleaned_data.get('remember_me'):
+            # Remember me checked: extend session for 30 days
+            self.request.session.set_expiry(60 * 60 * 24 * 30)  # 30 days in seconds
+        else:
+            # Remember me not checked: session expires when browser closes
+            self.request.session.set_expiry(0)
+
         # if not form.get_user().is_active:
         #     return render(
         #         self.request,
@@ -1141,7 +1150,6 @@ class UserLoginView(LoginView):
         #     return redirect(self.get_success_url())
         # self.request.session["allauth_2fa_user_id"] = form.get_user().pk
         return HttpResponseRedirect(self.get_success_url())
-        return self.render_to_response(self.get_context_data(form=form))
 
     def get(self, request, *args, **kwargs):
         if request.user.is_authenticated:

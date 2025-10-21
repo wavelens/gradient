@@ -296,19 +296,22 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 .context("Failed to get missing builds")?
                 .is_empty()
             {
+                let mut abuild: ABuild = b.clone().into();
                 if b.status != BuildStatus::Completed {
-                    let mut abuild: ABuild = b.into();
                     abuild.status = Set(BuildStatus::Completed);
                     abuild.log = Set(None);
-                    abuild
-                        .save(&state.db)
-                        .await
-                        .context("Failed to save build status")?;
                 }
+
+                abuild.evaluation = Set(evaluation.id);
+                abuild
+                    .save(&state.db)
+                    .await
+                    .context("Failed to save build status")?;
             } else {
                 let mut abuild: ABuild = b.into();
                 abuild.status = Set(BuildStatus::Queued);
                 abuild.log = Set(None);
+                abuild.evaluation = Set(evaluation.id);
                 abuild
                     .save(&state.db)
                     .await
@@ -862,17 +865,13 @@ pub async fn evaluate_direct(
     temp_dir: String,
 ) -> Result<()> {
     info!(evaluation_id = %evaluation.id, "Starting direct evaluation");
-
-    // Get local store
     let local_store = get_local_store(None)
         .await
         .context("Failed to get local store for direct evaluation")?;
 
-    // Create a modified evaluation with the temp directory as repository
     let mut direct_evaluation = evaluation.clone();
     direct_evaluation.repository = temp_dir.clone();
 
-    // Reuse the existing evaluate function with the modified evaluation
     let evaluation_result = match local_store {
         LocalNixStore::UnixStream(mut store) => {
             evaluate(Arc::clone(&state), &mut store, &direct_evaluation).await
@@ -890,7 +889,6 @@ pub async fn evaluate_direct(
                 "Direct evaluation completed successfully"
             );
 
-            // Insert builds and dependencies into database (reuse existing logic)
             let active_builds = builds
                 .iter()
                 .map(|b| b.clone().into_active_model())
@@ -901,7 +899,6 @@ pub async fn evaluate_direct(
                 .collect::<Vec<ABuildDependency>>();
 
             if !active_builds.is_empty() {
-                // Insert builds in batches to avoid PostgreSQL parameter limits
                 const BATCH_SIZE: usize = 1000;
                 for chunk in active_builds.chunks(BATCH_SIZE) {
                     EBuild::insert_many(chunk.to_vec())
@@ -912,7 +909,6 @@ pub async fn evaluate_direct(
             }
 
             if !active_dependencies.is_empty() {
-                // Insert dependencies in batches to avoid PostgreSQL parameter limits
                 const BATCH_SIZE: usize = 1000;
                 for chunk in active_dependencies.chunks(BATCH_SIZE) {
                     EBuildDependency::insert_many(chunk.to_vec())

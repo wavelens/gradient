@@ -29,6 +29,8 @@ use uuid::Uuid;
 pub struct MakeLoginRequest {
     pub loginname: String,
     pub password: String,
+    #[serde(default)]
+    pub remember_me: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -167,7 +169,7 @@ pub async fn post_basic_login(
     }
 
     let token =
-        encode_jwt(state.clone(), user.id).map_err(|_| WebError::failed_to_generate_token())?;
+        encode_jwt(state.clone(), user.id, body.remember_me).map_err(|_| WebError::failed_to_generate_token())?;
 
     update_last_login(state, user)
         .await
@@ -193,7 +195,7 @@ pub async fn get_oauth_authorize(
         .await
         .map_err(|e| WebError::InternalServerError(e.to_string()))?;
 
-    let token = encode_jwt(state, user.id).map_err(|_| WebError::failed_to_generate_token())?;
+    let token = encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
 
     let res = BaseResponse {
         error: false,
@@ -261,7 +263,7 @@ pub async fn get_oidc_callback(
         .await
         .map_err(|e| WebError::InternalServerError(e.to_string()))?;
 
-    let token = encode_jwt(state, user.id).map_err(|_| WebError::failed_to_generate_token())?;
+    let token = encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
 
     let res = BaseResponse {
         error: false,

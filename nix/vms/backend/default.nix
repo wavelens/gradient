@@ -55,8 +55,8 @@
       }
       {
         from = "host";
-        host.port = config.services.postgresql.port;
-        guest.port = config.services.postgresql.port;
+        host.port = config.services.postgresql.settings.port;
+        guest.port = config.services.postgresql.settings.port;
       }
     ];
 

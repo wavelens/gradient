@@ -378,7 +378,6 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 return;
             }
 
-            // Insert builds in batches to avoid PostgreSQL parameter limits
             const BUILD_BATCH_SIZE: usize = 1000;
             for chunk in active_builds.chunks(BUILD_BATCH_SIZE) {
                 if let Err(e) = EBuild::insert_many(chunk.to_vec()).exec(&state.db).await {
@@ -395,7 +394,6 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
             }
 
             if !active_dependencies.is_empty() {
-                // Insert dependencies in batches to avoid PostgreSQL parameter limits
                 const BATCH_SIZE: usize = 1000;
                 for chunk in active_dependencies.chunks(BATCH_SIZE) {
                     if let Err(e) = EBuildDependency::insert_many(chunk.to_vec())
