@@ -73,6 +73,7 @@ in {
         description = "The URL-file of the database to use.";
         type = lib.types.str;
         default = toString (pkgs.writeText "database_url" cfg.databaseUrl);
+        defaultText = "[database_url]";
         example = "/etc/gradient/database_url";
       };
 

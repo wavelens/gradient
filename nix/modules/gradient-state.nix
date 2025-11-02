@@ -15,6 +15,7 @@
       name = mkOption {
         type = types.str;
         default = config.username;
+        defaultText = "config.username";
         description = "Full name of the user";
       };
 
@@ -46,6 +47,7 @@
       display_name = mkOption {
         type = types.str;
         default = config.name;
+        defaultText = "config.name";
         description = "Display name for the organization";
       };
 
@@ -88,6 +90,7 @@
       display_name = mkOption {
         type = types.str;
         default = config.name;
+        defaultText = "config.name";
         description = "Display name for the project";
       };
 
@@ -138,6 +141,7 @@
       display_name = mkOption {
         type = types.str;
         default = config.name;
+        defaultText = "config.name";
         description = "Display name for the server";
       };
 
@@ -198,6 +202,7 @@
       display_name = mkOption {
         type = types.str;
         default = config.name;
+        defaultText = "config.name";
         description = "Display name for the cache";
       };
 

@@ -54,7 +54,7 @@ Extend your `flake.nix` with Gradient module:
         ./configuration.nix
         gradient.nixosModules.default
         # for pull deployment use:
-        gradient.nixosModules.gradient-deploy
+        gradient.nixosModules.deploy
       ];
     };
   };
