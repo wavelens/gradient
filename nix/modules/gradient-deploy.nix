@@ -14,7 +14,7 @@ in {
         type = lib.types.str;
         description = "Name of the deployment configuration to use";
         default = config.networking.hostName;
-        defaultText = "config.networking.hostName";
+        defaultText = lib.literalExpression "config.networking.hostName";
         example = "my-server";
       };
 
