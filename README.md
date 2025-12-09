@@ -179,6 +179,6 @@ The [GNU Affero General Public License v3.0 (AGPL-3.0)](./LICENSE) is a free sof
 
 The license notice follows the [REUSE guidelines](https://reuse.software/) to ensure clarity and consistency.
 
-## Copyright
+## Acknowledgements
 
-Copyright (c) 2025, Wavelens GmbH
+Developed by Wavelens GmbH. Support us by contributing.

@@ -40,8 +40,15 @@ in rustPlatform.buildRustPackage {
 
   NIX_INCLUDE_PATH = "${lib.getDev nix}/include";
 
+  postInstall = ''
+    installShellCompletion --cmd gradient \
+      --bash <($out/bin/gradient --generate-completions bash) \
+      --fish <($out/bin/gradient --generate-completions fish) \
+      --zsh <($out/bin/gradient --generate-completions zsh)
+  '';
+
   meta = {
-    description = "Gradient Server ";
+    description = "Gradient cli tool";
     homepage = "https://github.com/wavelens/gradient";
     license = lib.licenses.agpl3Only;
     platforms = lib.platforms.unix;

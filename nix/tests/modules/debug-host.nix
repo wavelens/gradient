@@ -1,4 +1,5 @@
-{ ...}: {
+{ ... }: {
+  interactive.virtualisation.graphics = false;
   security.pam.services.sshd.allowNullPassword = true;
   services.openssh = {
     enable = true;
