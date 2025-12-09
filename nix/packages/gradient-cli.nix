@@ -12,6 +12,7 @@
 , openssl
 , pkg-config
 , rustPlatform
+, stdenv
 }: let
   ignoredPaths = [ ".github" "target" ];
 in rustPlatform.buildRustPackage {
@@ -40,11 +41,11 @@ in rustPlatform.buildRustPackage {
 
   NIX_INCLUDE_PATH = "${lib.getDev nix}/include";
 
-  postInstall = ''
+  postInstall = lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
     installShellCompletion --cmd gradient \
-      --bash <($out/bin/gradient --generate-completions bash) \
-      --fish <($out/bin/gradient --generate-completions fish) \
-      --zsh <($out/bin/gradient --generate-completions zsh)
+      --bash <($out/bin/gradient completion bash) \
+      --fish <($out/bin/gradient completion fish) \
+      --zsh <($out/bin/gradient completion zsh)
   '';
 
   meta = {
