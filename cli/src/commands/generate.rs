@@ -5,7 +5,7 @@
  */
 
 use clap::Subcommand;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::{distr::Alphanumeric, Rng};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -31,7 +31,7 @@ pub async fn handle(cmd: Commands) {
 
 fn generate_api_key_pair() -> (String, String) {
     // Generate a 64-character alphanumeric key that matches the backend format
-    let private_key: String = rand::thread_rng()
+    let private_key: String = rand::rng()
         .sample_iter(&Alphanumeric)
         .take(64)
         .map(char::from)

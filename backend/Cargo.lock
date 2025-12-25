@@ -1126,9 +1126,9 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
 name = "crypter"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d1db9e679d64406725683c681f04a30491fdd9c5d7f81dc225cc11c58cc518a"
+checksum = "6f6e0ef22ff8986d94d98121fb504b8cb2b300ea0cd84d3527e3caf61b7f0f80"
 dependencies = [
  "aes-gcm-siv",
  "base64 0.22.1",

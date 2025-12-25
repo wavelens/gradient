@@ -538,7 +538,11 @@ async fn apply_organizations(
             .decode(load_secret(crypt_secret_file))
             .map_err(|e| format!("Failed to decode GRADIENT_CRYPT_SECRET: {}", e))?;
 
-        let encrypted_bytes = crypter::encrypt(secret, private_key.trim())
+        // crypter 0.3 requires exactly 32 bytes for AES-256
+        let secret_key: &[u8; 32] = secret.as_slice().try_into()
+            .map_err(|_| format!("GRADIENT_CRYPT_SECRET must be exactly 32 bytes (got {})", secret.len()))?;
+
+        let encrypted_bytes = crypter::encrypt(secret_key, private_key.trim())
             .ok_or_else(|| "Failed to encrypt SSH private key".to_string())?;
         let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_bytes);
 
@@ -778,7 +782,11 @@ async fn apply_caches(
             .decode(load_secret(crypt_secret_file))
             .map_err(|e| format!("Failed to decode GRADIENT_CRYPT_SECRET: {}", e))?;
 
-        let encrypted_bytes = crypter::encrypt(secret, signing_key.trim())
+        // crypter 0.3 requires exactly 32 bytes for AES-256
+        let secret_key: &[u8; 32] = secret.as_slice().try_into()
+            .map_err(|_| format!("GRADIENT_CRYPT_SECRET must be exactly 32 bytes (got {})", secret.len()))?;
+
+        let encrypted_bytes = crypter::encrypt(secret_key, signing_key.trim())
             .ok_or_else(|| format!("Failed to encrypt signing key for cache '{}'", state_cache.name))?;
         let encrypted_signing_key = general_purpose::STANDARD.encode(&encrypted_bytes);
 

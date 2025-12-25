@@ -349,7 +349,7 @@ async fn test_build() {
         use rand::Rng;
         let mut rng = rand::rng();
         (0..16)
-            .map(|_| rng.random_range(b'a'..=b'z') as char)
+            .map(|_| rng.gen_range(b'a'..=b'z') as char)
             .collect::<String>()
     };
 
