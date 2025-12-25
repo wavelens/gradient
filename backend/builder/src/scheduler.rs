@@ -33,13 +33,12 @@ use super::evaluator::*;
 async fn parse_derivation_file(
     binpath_nix: &str,
     derivation_path: &str
-) -> anyhow::Result<(String, Vec<String>, HashMap<String, String>, Option<HashMap<String, String>>, HashSet<String>)> {
+) -> anyhow::Result<(String, Vec<String>, HashMap<String, String>, HashSet<String>)> {
     if !derivation_path.ends_with(".drv") {
         return Ok((
             "/bin/bash".to_string(),
             vec![],
             HashMap::new(),
-            None,
             HashSet::new(),
         ));
     }
@@ -85,12 +84,14 @@ async fn parse_derivation_file(
         })
         .unwrap_or_default();
 
-    let env = derivation_data
+    let mut env: HashMap<String, String> = derivation_data
         .get("env")
         .and_then(|v| v.as_object())
         .map(|obj| {
             obj.iter()
                 .filter_map(|(k, v)| v.as_str().map(|s| (k, s)))
+                // SECURITY: Filter out __json - it must not be in env per Nix C++ code
+                .filter(|(k, _)| k.as_str() != "__json")
                 .map(|(k, s)| (
                     k.to_string(),
                     s.to_string()
@@ -99,14 +100,15 @@ async fn parse_derivation_file(
         })
         .unwrap_or_default();
 
-    let structured_attrs = derivation_data
-        .get("structuredAttrs")
-        .and_then(|v| v.as_object())
-        .map(|obj| {
-            obj.iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                .collect()
-        });
+    // Handle structured attributes: serialize to JSON and add as __json to env
+    // This matches Nix C++ behavior where structuredAttrs is merged into env during serialization
+    // ONLY add __json when we have legitimate structuredAttrs
+    if let Some(structured_attrs) = derivation_data.get("structuredAttrs") {
+        // Serialize structured attrs to JSON string and add to env as __json
+        let json_str = serde_json::to_string(structured_attrs)
+            .context("Failed to serialize structured attributes")?;
+        env.insert("__json".to_string(), json_str);
+    }
 
     let input_srcs = derivation_data
         .get("inputSrcs")
@@ -119,7 +121,7 @@ async fn parse_derivation_file(
         })
         .unwrap_or_default();
 
-    Ok((builder, args, env, structured_attrs, input_srcs))
+    Ok((builder, args, env, input_srcs))
 }
 
 async fn create_basic_derivation(
@@ -137,7 +139,7 @@ async fn create_basic_derivation(
         }
     };
 
-    let (builder, args, env, structured_attrs, input_srcs) = parse_derivation_file(
+    let (builder, args, env, input_srcs) = parse_derivation_file(
         state.cli.binpath_nix.as_str(),
         &build.derivation_path,
     )
@@ -161,8 +163,7 @@ async fn create_basic_derivation(
         platform: build.architecture.to_string(),
         builder,
         args,
-        env,
-        structured_attrs,
+        env,  // env now contains __json if structured attrs exist
     })
 }
 

@@ -60,6 +60,8 @@
                 <a class="full-width normal-hover blue-span" href="{% url 'projectDetail' org_id block.project %}">
                     <span class="workflow-title">{{ block.display_name }}</span><br><span class="text-light">{% trans block.description %}</span>
                 </a>
+                {% comment %}
+                Placeholder stats - commented out until real data is available from API
                 <div class="d-flex p-0">
                     <span class="flex-c m-r-1rem">
                         <span class="material-symbols-outlined m-r-3">
@@ -74,6 +76,7 @@
                         <span class="text-light-n-s">{{ block.id }}{{ block.id3 }}</span>
                     </span>
                 </div>
+                {% endcomment %}
             </div>
         {% empty %}
             <div class="no-caches empty-state">

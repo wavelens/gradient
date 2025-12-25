@@ -146,15 +146,34 @@ fn test_repository_url_to_nix() {
 fn test_check_repository_url_is_ssh() {
     use gradient_core::input::check_repository_url_is_ssh;
 
+    // git+ssh:// protocol
     assert!(check_repository_url_is_ssh(
         "git+ssh://git@github.com/user/repo.git"
     ));
+
+    // ssh:// protocol
+    assert!(check_repository_url_is_ssh(
+        "ssh://git@github.com/user/repo.git"
+    ));
+
+    // SCP-like syntax (most common format)
+    assert!(check_repository_url_is_ssh("git@github.com:user/repo.git"));
+    assert!(check_repository_url_is_ssh("git@gitlab.com:user/repo.git"));
+    assert!(check_repository_url_is_ssh(
+        "user@example.com:path/to/repo.git"
+    ));
+
+    // HTTPS/HTTP should not be detected as SSH
     assert!(!check_repository_url_is_ssh(
         "https://github.com/user/repo.git"
     ));
     assert!(!check_repository_url_is_ssh(
         "http://github.com/user/repo.git"
     ));
+
+    // Edge cases
+    assert!(!check_repository_url_is_ssh("https://user@github.com/repo.git")); // HTTPS with user
+    assert!(!check_repository_url_is_ssh("/local/path/to/repo.git")); // Local path
 }
 
 #[test]

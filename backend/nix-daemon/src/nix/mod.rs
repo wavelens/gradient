@@ -1509,7 +1509,7 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
                 wire::write_string(&mut store.conn, &self.drv_path)
                     .await
                     .with_field("BuildDerivation.drv_path")?;
-                wire::write_basic_derivation(&mut store.conn, &self.drv)
+                wire::write_basic_derivation(&mut store.conn, &self.drv, store.proto)
                     .await
                     .with_field("BuildDerivation.drv")?;
                 wire::write_build_mode(&mut store.conn, self.build_mode)

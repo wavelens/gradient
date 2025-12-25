@@ -170,7 +170,22 @@ pub fn repository_url_to_nix(url: &str, commit_hash: &str) -> Result<String, Inp
 }
 
 pub fn check_repository_url_is_ssh(url: &str) -> bool {
-    url.starts_with("git+ssh://")
+    // Check for explicit SSH protocols
+    if url.starts_with("git+ssh://") || url.starts_with("ssh://") {
+        return true;
+    }
+
+    // Check for SCP-like syntax: user@host:path
+    // This is the most common format for GitHub/GitLab (e.g., git@github.com:user/repo.git)
+    if let Some(at_pos) = url.find('@') {
+        if let Some(colon_pos) = url[at_pos..].find(':') {
+            // Ensure the colon is not part of a protocol (e.g., not in "https://")
+            let colon_abs_pos = at_pos + colon_pos;
+            return colon_abs_pos > at_pos && !url[..at_pos].contains("://");
+        }
+    }
+
+    false
 }
 
 pub fn parse_evaluation_wildcard(s: &str) -> Result<Vec<&str>, InputError> {

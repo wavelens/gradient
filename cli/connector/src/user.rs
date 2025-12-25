@@ -36,30 +36,30 @@ struct MakeApiKeyRequest {
 
 pub async fn get(config: RequestConfig) -> Result<BaseResponse<UserInfoResponse>, String> {
     let res = get_client(config, "user".to_string(), RequestType::GET, true)
-        .unwrap()
+        .map_err(|e| e.to_string())?
         .send()
         .await
-        .unwrap();
+        .map_err(|e| format!("Failed to connect to server: {}", e))?;
 
     Ok(parse_response(res).await)
 }
 
 pub async fn delete(config: RequestConfig) -> Result<BaseResponse<String>, String> {
     let res = get_client(config, "user".to_string(), RequestType::DELETE, true)
-        .unwrap()
+        .map_err(|e| e.to_string())?
         .send()
         .await
-        .unwrap();
+        .map_err(|e| format!("Failed to connect to server: {}", e))?;
 
     Ok(parse_response(res).await)
 }
 
 pub async fn get_keys(config: RequestConfig) -> Result<BaseResponse<ListResponse>, String> {
     let res = get_client(config, "user/keys".to_string(), RequestType::GET, true)
-        .unwrap()
+        .map_err(|e| e.to_string())?
         .send()
         .await
-        .unwrap();
+        .map_err(|e| format!("Failed to connect to server: {}", e))?;
 
     Ok(parse_response(res).await)
 }
@@ -68,11 +68,11 @@ pub async fn post_key(config: RequestConfig, name: String) -> Result<BaseRespons
     let req = MakeApiKeyRequest { name };
 
     let res = get_client(config, "user/keys".to_string(), RequestType::POST, true)
-        .unwrap()
+        .map_err(|e| e.to_string())?
         .json(&req)
         .send()
         .await
-        .unwrap();
+        .map_err(|e| format!("Failed to connect to server: {}", e))?;
 
     Ok(parse_response(res).await)
 }
@@ -84,11 +84,11 @@ pub async fn delete_key(
     let req = MakeApiKeyRequest { name };
 
     let res = get_client(config, "user/keys".to_string(), RequestType::DELETE, true)
-        .unwrap()
+        .map_err(|e| e.to_string())?
         .json(&req)
         .send()
         .await
-        .unwrap();
+        .map_err(|e| format!("Failed to connect to server: {}", e))?;
 
     Ok(parse_response(res).await)
 }
@@ -97,10 +97,10 @@ pub async fn get_settings(
     config: RequestConfig,
 ) -> Result<BaseResponse<GetUserSettingsResponse>, String> {
     let res = get_client(config, "user/settings".to_string(), RequestType::GET, true)
-        .unwrap()
+        .map_err(|e| e.to_string())?
         .send()
         .await
-        .unwrap();
+        .map_err(|e| format!("Failed to connect to server: {}", e))?;
 
     Ok(parse_response(res).await)
 }
@@ -123,11 +123,11 @@ pub async fn patch_settings(
         RequestType::PATCH,
         true,
     )
-    .unwrap()
+    .map_err(|e| e.to_string())?
     .json(&req)
     .send()
     .await
-    .unwrap();
+    .map_err(|e| format!("Failed to connect to server: {}", e))?;
 
     Ok(parse_response(res).await)
 }

@@ -33,10 +33,10 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     // Configure database connection options
     let mut opt = ConnectOptions::new(db_url);
 
-    // Only enable SQL logging at debug level
-    if cli.log_level == "debug" {
+    // Only enable SQL logging at trace level
+    if cli.log_level == "trace" {
         opt.sqlx_logging(true)
-            .sqlx_logging_level(LevelFilter::Debug);
+            .sqlx_logging_level(LevelFilter::Trace);
     } else {
         opt.sqlx_logging(false);
     }

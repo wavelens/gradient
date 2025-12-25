@@ -75,7 +75,7 @@ in {
         GRADIENT_API_URL = cfg.apiUrl;
         GRADIENT_SERVE_URL = "https://${gradientCfg.domain}";
         GRADIENT_BASE_PATH = gradientCfg.baseDir;
-        GRADIENT_OIDC_ENABLE = lib.boolToString gradientCfg.oidc.enable;
+        GRADIENT_OIDC_ENABLED = lib.boolToString gradientCfg.oidc.enable;
         GRADIENT_DISABLE_REGISTRATION = lib.boolToString gradientCfg.settings.disableRegistration;
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString gradientCfg.settings.maxConcurrentEvaluations;
         GRADIENT_MAX_CONCURRENT_BUILDS = toString gradientCfg.settings.maxConcurrentBuilds;

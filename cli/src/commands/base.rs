@@ -30,11 +30,14 @@ enum MainCommands {
         #[arg(value_enum)]
         shell: Shell,
     },
+    /// Get or set configuration values
     Config {
         key: String,
         value: Option<String>,
     },
+    /// Check server connection status
     Status,
+    /// Register a new user account
     Register {
         #[arg(short, long)]
         username: Option<String>,
@@ -43,28 +46,36 @@ enum MainCommands {
         #[arg(short, long)]
         email: Option<String>,
     },
+    /// Login to the server
     Login {
         #[arg(short, long)]
         username: Option<String>,
     },
+    /// Logout from the server
     Logout,
+    /// Display current user information
     Info,
+    /// Manage organizations
     Organization {
         #[command(subcommand)]
         cmd: organization::Commands,
     },
+    /// Manage projects
     Project {
         #[command(subcommand)]
         cmd: project::Commands,
     },
+    /// Manage build servers
     Server {
         #[command(subcommand)]
         cmd: server::Commands,
     },
+    /// Manage build caches
     Cache {
         #[command(subcommand)]
         cmd: cache::Commands,
     },
+    /// Build a derivation
     Build {
         derivation: String,
         #[arg(short, long)]
@@ -72,12 +83,14 @@ enum MainCommands {
         #[arg(short, long)]
         quiet: bool,
     },
+    /// Download build artifacts
     Download {
         #[arg(short, long)]
         build_id: Option<String>,
         #[arg(short, long)]
         filename: Option<String>,
     },
+    /// Generate project files
     Generate {
         #[command(subcommand)]
         cmd: generate::Commands,

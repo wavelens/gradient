@@ -618,6 +618,7 @@ pub async fn write_derivation_output<W: AsyncWriteExt + Unpin>(
 pub async fn write_basic_derivation<W: AsyncWriteExt + Unpin>(
     w: &mut W,
     drv: &BasicDerivation,
+    proto: Proto,
 ) -> Result<()> {
     // Write outputs map
     write_u64(w, drv.outputs.len() as u64)
@@ -666,24 +667,6 @@ pub async fn write_basic_derivation<W: AsyncWriteExt + Unpin>(
             .with_field("BasicDerivation.env[].value")?;
     }
 
-    // Write structured attributes map (optional)
-    if let Some(ref structured_attrs) = drv.structured_attrs {
-        write_u64(w, structured_attrs.len() as u64)
-            .await
-            .with_field("BasicDerivation.structured_attrs.<count>")?;
-        for (key, value) in structured_attrs {
-            write_string(w, key)
-                .await
-                .with_field("BasicDerivation.structured_attrs[].key")?;
-            write_string(w, value)
-                .await
-                .with_field("BasicDerivation.structured_attrs[].value")?;
-        }
-    } else {
-        write_u64(w, 0)
-            .await
-            .with_field("BasicDerivation.structured_attrs.<count>")?;
-    }
 
     Ok(())
 }
@@ -753,19 +736,10 @@ pub async fn read_basic_derivation<R: AsyncReadExt + Unpin>(
         env.insert(key, value);
     }
 
-    // Read structured attributes map (optional)
-    let structured_attrs_count = read_u64(r).await.with_field("BasicDerivation.structured_attrs.<count>")?;
-    let structured_attrs = if structured_attrs_count > 0 {
-        let mut attrs = HashMap::new();
-        for _ in 0..structured_attrs_count {
-            let key = read_string(r).await.with_field("BasicDerivation.structured_attrs[].key")?;
-            let value = read_string(r).await.with_field("BasicDerivation.structured_attrs[].value")?;
-            attrs.insert(key, value);
-        }
-        Some(attrs)
-    } else {
-        None
-    };
+    // Note: __json in env contains structured attrs if present.
+    // According to Nix C++ code, there is no separate structured_attrs section
+    // in the wire protocol - it's all in the env map.
+    // The __json key is allowed to remain in env as it's valid when sent by Nix daemon.
 
     Ok(BasicDerivation {
         outputs,
@@ -773,8 +747,7 @@ pub async fn read_basic_derivation<R: AsyncReadExt + Unpin>(
         platform,
         builder,
         args,
-        env,
-        structured_attrs,
+        env,  // env may contain __json with structured attrs
     })
 }
 

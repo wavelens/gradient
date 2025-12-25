@@ -44,11 +44,6 @@ pub struct PatchServerRequest {
     pub features: Option<Vec<String>>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct MakeBuildRequest {
-    pub log_streaming: bool,
-}
-
 pub async fn get(
     config: RequestConfig,
     organization: String,

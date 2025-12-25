@@ -274,6 +274,10 @@ def post_projects_project_evaluate(request, organization, project):
     )
 
 
+def get_projects_project_details(request, organization, project):
+    return get_client(request.user, f"projects/{organization}/{project}/details", "GET")
+
+
 def get_evals_evaluation(request, evaluation):
     return get_client(request.user, f"evals/{evaluation}", "GET")
 

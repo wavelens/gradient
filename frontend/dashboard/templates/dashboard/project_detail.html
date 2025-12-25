@@ -202,15 +202,23 @@
                         <p class="text-light">{{ project_data.description|default:"No description available"|truncatechars:80 }}</p>
                         <div class="item-meta">
                             {% if project_data.repository %}
-                                <span class="flex-c">
-                                    <span class="material-symbols-outlined m-r-3">code</span>
-                                    <span class="text-light-n-s">
-                                        <a href="{{ project_data.repository }}" target="_blank" rel="noopener noreferrer" class="external-link">
-                                            Repository
-                                            <span class="material-symbols-outlined">open_in_new</span>
-                                        </a>
+                                {% comment %}Only show repository link if it's HTTP/HTTPS (not SSH){% endcomment %}
+                                {% if project_data.repository|slice:":8" == "https://" or project_data.repository|slice:":7" == "http://" %}
+                                    <span class="flex-c">
+                                        <span class="material-symbols-outlined m-r-3">code</span>
+                                        <span class="text-light-n-s">
+                                            <a href="{{ project_data.repository }}" target="_blank" rel="noopener noreferrer" class="external-link">
+                                                Repository
+                                                <span class="material-symbols-outlined">open_in_new</span>
+                                            </a>
+                                        </span>
                                     </span>
-                                </span>
+                                {% else %}
+                                    <span class="flex-c">
+                                        <span class="material-symbols-outlined m-r-3">code</span>
+                                        <span class="text-light-n-s">{{ project_data.repository }}</span>
+                                    </span>
+                                {% endif %}
                             {% endif %}
                         </div>
                     </div>

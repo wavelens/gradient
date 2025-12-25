@@ -74,6 +74,8 @@
                         </span>
                         <span class="text-light-n-s">{{ block.status|title }}</span>
                     </span>
+                    {% comment %}
+                    Placeholder stats - commented out until real data is available from API
                     {% if block.size != 'N/A' %}
                     <span class="flex-c m-r-1rem">
                         <span class="material-symbols-outlined m-r-3">
@@ -90,6 +92,7 @@
                         <span class="text-light-n-s">Hit Rate: {{ block.hit_rate }}%</span>
                     </span>
                     {% endif %}
+                    {% endcomment %}
                 </div>
             </div>
         {% empty %}

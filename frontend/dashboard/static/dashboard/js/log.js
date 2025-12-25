@@ -22,6 +22,28 @@ let initialLogsFetched = false;
 const baseUrl = window.location.origin;
 const evaluationId = window.location.pathname.split('/').pop();
 
+// Function to format time ago
+function formatTimeAgo(dateString) {
+  if (!dateString) return 'never';
+
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffDays > 0) {
+    return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+  } else if (diffHours > 0) {
+    return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+  } else if (diffMins > 0) {
+    return `${diffMins} minute${diffMins > 1 ? 's' : ''} ago`;
+  } else {
+    return 'just now';
+  }
+}
+
 // Function to convert ANSI escape sequences to HTML
 function convertAnsiToHtml(text) {
   if (!text || typeof text !== 'string') return '';
@@ -76,6 +98,9 @@ async function checkBuildStatus() {
         const evaluation = data.message;
         currentEvaluation = evaluation; // Store for duration updates
         updateBuildStatus(evaluation.status);
+
+        // Update trigger time display
+        updateTriggerTime(evaluation.created_at);
 
         // Update duration - use updated_at for completed builds if available
         const endTime = (evaluation.status === 'Completed' || evaluation.status === 'Failed' || evaluation.status === 'Aborted')
@@ -256,6 +281,14 @@ function updateDuration(createdAt, status, endTime = null) {
   if (isCompleted) {
     return;
   }
+}
+
+function updateTriggerTime(createdAt) {
+  const triggerTimeDisplay = document.getElementById('trigger-time-display');
+  if (!triggerTimeDisplay || !createdAt) return;
+
+  const timeAgo = formatTimeAgo(createdAt);
+  triggerTimeDisplay.textContent = `Triggered via schedule ${timeAgo}`;
 }
 
 function displayEvaluationError(error) {
@@ -1163,6 +1196,9 @@ async function initializePage() {
     selectAllBuilds();
     return; // Don't fetch builds/logs if there's an error
   }
+
+  // Fetch initial evaluation data to get created_at time
+  await checkBuildStatus();
 
   // Always fetch builds first
   await fetchBuilds();

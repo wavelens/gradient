@@ -65,7 +65,7 @@
     <div class="full-width">
         <div class="innerbody-top d-flex">
             <div class="m-r-2rem">
-               <div class="text-light m-b-05rem">{% trans 'Triggered via' %} {{ triggerArt }} {{ triggerTime }} {% trans 'ago' %}</div>
+               <div class="text-light m-b-05rem"><span id="trigger-time-display">{% trans 'Triggered via' %} {{ triggerArt }}</span></div>
                <div><a class="normal-hover" href=""><img src="{{ request.user.image }}" class="icon-center border-radius-5"><span>{{ request.user.name }} </span></a> <span class="material-symbols-outlined icon-center f-s-21px">{% trans 'commit' %}</span> {{ commit }} <span class="branch">{{ branch }}</span></div>
             </div>
             <div class="m-r-2rem">
@@ -83,8 +83,8 @@
             {% if status == 'Building' or status == 'Evaluating' or status == 'Queued' %}
             <div class="abort-button-container">
                 <button id="abortButton" class="button-round red-button" onclick="abortBuild()">
-                    <span class="material-icons m-r-5">cancel</span>
-                    {% trans 'Abort Build' %}
+                    <span class="material-icons">cancel</span>
+                    <span>{% trans 'Abort Build' %}</span>
                 </button>
             </div>
             {% endif %}
@@ -93,7 +93,7 @@
             <div class="innerbody-header border-bottom">
                 <div>
                     <span>{% trans built_version %}</span><br>
-                    <span class="text-light">{{ status }} {{ time }} {% trans 'months ago in' %} {{ duration }}</span>
+                    <span class="text-light" id="build-time-display">{{ status }}</span>
                 </div>
                 <br>
                 <div class="flex-c">
@@ -342,7 +342,7 @@
 }
 
 .button-round {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     padding: 0.5rem 1rem;
@@ -351,7 +351,8 @@
     cursor: pointer;
     font-weight: 500;
     transition: background-color 0.2s ease;
-    line-height: 1;
+    line-height: 1.5;
+    gap: 0.25rem;
 }
 
 .red-button {
@@ -368,13 +369,10 @@
     transform: translateY(1px);
 }
 
-.m-r-5 {
-    margin-right: 0.25rem;
-}
-
 .button-round .material-icons {
-    vertical-align: middle;
+    font-size: 20px;
     line-height: 1;
+    margin: 0;
 }
 </style>
 

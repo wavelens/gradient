@@ -180,22 +180,23 @@ def workflow(request, org):
                 "id": project_details["last_evaluation"],
                 "id2": project_details["id"],
                 "description": project_details["description"],
-                "exec": 34,
-                "duration": "12m 11s",
-                "performance": "filter",
-                "latest_runs": "filter",
-                "latestRuns": {
-                    "1": "true",
-                    "2": "true",
-                    "3": "false",
-                    "4": "true",
-                    "5": "true",
-                },
-                "wfp": {
-                    "1": "true",
-                    "2": "false",
-                    "3": "nothing",
-                },
+                # Placeholder stats - commented out until real data is available
+                # "exec": 34,
+                # "duration": "12m 11s",
+                # "performance": "filter",
+                # "latest_runs": "filter",
+                # "latestRuns": {
+                #     "1": "true",
+                #     "2": "true",
+                #     "3": "false",
+                #     "4": "true",
+                #     "5": "true",
+                # },
+                # "wfp": {
+                #     "1": "true",
+                #     "2": "false",
+                #     "3": "nothing",
+                # },
             }
         )
 
@@ -410,61 +411,61 @@ def cache_detail(request, cache):
 
     cache_message = cache_data.get("message", {})
 
-    # Mock cache metrics data - replace with actual API call when available
-    cache_stats = {
-        "total_requests": 15420,
-        "cache_hits": 12336,
-        "cache_misses": 3084,
-        "hit_rate": round((12336 / 15420) * 100, 1) if 15420 > 0 else 0,
-        "storage_used": cache_message.get("size", "N/A"),
-        "uptime": "15 days",
-        "avg_response_time": "2.3ms",
-    }
+    # # Mock cache metrics data - replace with actual API call when available
+    # cache_stats = {
+    #     "total_requests": 15420,
+    #     "cache_hits": 12336,
+    #     "cache_misses": 3084,
+    #     "hit_rate": round((12336 / 15420) * 100, 1) if 15420 > 0 else 0,
+    #     "storage_used": cache_message.get("size", "N/A"),
+    #     "uptime": "15 days",
+    #     "avg_response_time": "2.3ms",
+    # }
 
-    # Mock recent activity data - replace with actual API call when available
-    recent_activity = [
-        {
-            "id": 1,
-            "action": "Cache Hit",
-            "key": "user:123:profile",
-            "timestamp": "2 minutes ago",
-            "response_time": "1.2ms",
-        },
-        {
-            "id": 2,
-            "action": "Cache Miss",
-            "key": "product:456:details",
-            "timestamp": "5 minutes ago",
-            "response_time": "45ms",
-        },
-        {
-            "id": 3,
-            "action": "Cache Eviction",
-            "key": "session:789:data",
-            "timestamp": "12 minutes ago",
-            "response_time": "N/A",
-        },
-        {
-            "id": 4,
-            "action": "Cache Hit",
-            "key": "config:app:settings",
-            "timestamp": "18 minutes ago",
-            "response_time": "0.8ms",
-        },
-        {
-            "id": 5,
-            "action": "Cache Store",
-            "key": "report:monthly:sales",
-            "timestamp": "25 minutes ago",
-            "response_time": "3.1ms",
-        },
-    ]
+    # # Mock recent activity data - replace with actual API call when available
+    # recent_activity = [
+    #     {
+    #         "id": 1,
+    #         "action": "Cache Hit",
+    #         "key": "user:123:profile",
+    #         "timestamp": "2 minutes ago",
+    #         "response_time": "1.2ms",
+    #     },
+    #     {
+    #         "id": 2,
+    #         "action": "Cache Miss",
+    #         "key": "product:456:details",
+    #         "timestamp": "5 minutes ago",
+    #         "response_time": "45ms",
+    #     },
+    #     {
+    #         "id": 3,
+    #         "action": "Cache Eviction",
+    #         "key": "session:789:data",
+    #         "timestamp": "12 minutes ago",
+    #         "response_time": "N/A",
+    #     },
+    #     {
+    #         "id": 4,
+    #         "action": "Cache Hit",
+    #         "key": "config:app:settings",
+    #         "timestamp": "18 minutes ago",
+    #         "response_time": "0.8ms",
+    #     },
+    #     {
+    #         "id": 5,
+    #         "action": "Cache Store",
+    #         "key": "report:monthly:sales",
+    #         "timestamp": "25 minutes ago",
+    #         "response_time": "3.1ms",
+    #     },
+    # ]
 
     context = {
         "cache_name": cache,
         "cache_data": cache_message,
-        "cache_stats": cache_stats,
-        "recent_activity": recent_activity,
+        # "cache_stats": cache_stats,
+        # "recent_activity": recent_activity,
     }
 
     return render(request, "dashboard/cache_detail.html", context)
@@ -1682,14 +1683,12 @@ def api_project_status(request, org, project):
     """API endpoint to get project status with live evaluation data."""
     if request.method == "GET":
         try:
-            project_data = api.get_projects_project(request, org, project)
-            if project_data is None or project_data.get("error"):
+            project_details = api.get_projects_project_details(request, org, project)
+            if project_details is None or project_details.get("error"):
                 return JsonResponse({"error": "Project not found"}, status=404)
 
-            project_info = project_data.get("message", {})
-
-            # Mock evaluations data - replace with actual API call when available
-            evaluations = []  # api.get_project_evaluations(request, org, project)
+            project_info = project_details.get("message", {})
+            evaluations = project_info.get("last_evaluations", [])
 
             # Calculate stats
             successful_count = sum(

@@ -126,7 +126,7 @@ function updateRecentEvaluations(evaluations) {
         <div class="item-meta">
           <span class="flex-c">
             <span class="material-symbols-outlined m-r-3">folder</span>
-            <span class="text-light-n-s">${evaluation.builds?.length || 0} builds</span>
+            <span class="text-light-n-s">${evaluation.total_builds || 0} builds</span>
           </span>
         </div>
       </a>

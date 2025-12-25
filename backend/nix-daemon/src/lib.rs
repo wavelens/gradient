@@ -320,12 +320,14 @@ impl From<TryFromPrimitiveError<Verbosity>> for Error {
     TryFromPrimitive,
     IntoPrimitive,
 )]
+
 #[repr(u64)]
 pub enum BuildMode {
     Normal,
     Repair,
     Check,
 }
+
 impl From<TryFromPrimitiveError<BuildMode>> for Error {
     fn from(value: TryFromPrimitiveError<BuildMode>) -> Self {
         Self::Invalid(format!("BuildMode({:x})", value.number))
@@ -444,9 +446,8 @@ pub struct BasicDerivation {
     /// Arguments to pass to the builder.
     pub args: Vec<String>,
     /// Environment variables for the build.
+    /// Note: structuredAttrs is handled as a __json in this env map
     pub env: HashMap<String, String>,
-    /// Optional structured attributes for advanced build configuration.
-    pub structured_attrs: Option<HashMap<String, String>>,
 }
 
 /// Passed to [`Store::set_options()`].
