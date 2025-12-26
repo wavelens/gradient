@@ -84,6 +84,7 @@ in {
         GRADIENT_REPORT_ERRORS = lib.boolToString gradientCfg.reportErrors;
       } // lib.optionalAttrs gradientCfg.oidc.enable {
         GRADIENT_OIDC_REQUIRED = lib.boolToString gradientCfg.oidc.required;
+        GRADIENT_OIDC_ICON_URL = lib.mkIf (gradientCfg.oidc.iconUrl != null) gradientCfg.oidc.iconUrl;
       } // lib.optionalAttrs gradientCfg.email.enable {
         GRADIENT_EMAIL_ENABLED = lib.boolToString gradientCfg.email.enable;
         GRADIENT_EMAIL_REQUIRE_VERIFICATION = lib.boolToString gradientCfg.email.requireVerification;

@@ -21,7 +21,7 @@ use thiserror::Error;
 use tokio::process::Command;
 use tracing::{debug, error, info, instrument};
 
-use super::input::{check_repository_url_is_ssh, hex_to_vec, load_secret, vec_to_hex};
+use super::input::{check_repository_url_is_ssh, hex_to_vec, vec_to_hex};
 use super::types::*;
 
 #[derive(Debug, Clone, Error)]
@@ -38,8 +38,6 @@ pub enum SourceError {
     InvalidSshKey,
     #[error("SSH key generation failed")]
     SshKeyGeneration,
-    #[error("Invalid base64 data")]
-    InvalidBase64,
     #[error("Git command failed: {0}")]
     GitCommand(String),
     #[error("Invalid URL format")]
@@ -56,16 +54,6 @@ pub enum SourceError {
     SigningKeyOperation,
     #[error("Cryptographic operation failed")]
     CryptographicOperation,
-    #[error("Failed to decode GRADIENT_CRYPT_SECRET from file '{file}': {reason}")]
-    SecretDecoding { file: String, reason: String },
-    #[error(
-        "GRADIENT_CRYPT_SECRET is too short ({length} bytes). Encryption keys should be at least 16 bytes"
-    )]
-    SecretTooShort { length: usize },
-    #[error(
-        "GRADIENT_CRYPT_SECRET has invalid length ({length} bytes). AES-256 requires exactly {expected} bytes"
-    )]
-    SecretInvalidLength { length: usize, expected: usize },
     #[error("Failed to decode organization '{org}' private key: {reason}")]
     OrganizationKeyDecoding { org: String, reason: String },
     #[error("Failed to convert decrypted private key to UTF-8")]
@@ -402,7 +390,7 @@ pub async fn prefetch_flake(
         .output()
         .await;
 
-    clear_key(ssh_key_path).ok(); // Clean up SSH key
+    clear_key(ssh_key_path).ok();
 
     let cmd = match cmd {
         Ok(output) => output,
@@ -439,15 +427,7 @@ pub async fn prefetch_flake(
 }
 
 pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), SourceError> {
-    let secret = general_purpose::STANDARD
-        .decode(load_secret(&secret_file))
-        .map_err(|_| SourceError::InvalidBase64)?;
-
-    // crypter 0.3 requires exactly 32 bytes for AES-256
-    let secret_key: &[u8; 32] = secret.as_slice().try_into().map_err(|_| SourceError::SecretInvalidLength {
-        length: secret.len(),
-        expected: 32,
-    })?;
+    let secret = crate::input::load_secret_bytes(&secret_file);
 
     let keypair = KeyPair::generate();
 
@@ -489,7 +469,7 @@ pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), SourceE
 
     let public_key_openssh = format!("{} {}", Algorithm::Ed25519.as_str(), public_key_data);
 
-    let encrypted_private_key = crypter::encrypt(secret_key, &private_key_openssh)
+    let encrypted_private_key = crypter::encrypt_with_password(&secret, &private_key_openssh)
         .ok_or(SourceError::CryptographicOperation)?;
 
     let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_private_key);
@@ -501,23 +481,7 @@ pub fn decrypt_ssh_private_key(
     secret_file: String,
     organization: MOrganization,
 ) -> Result<(String, String), SourceError> {
-    let secret_content = crate::input::load_secret(&secret_file);
-
-    let secret = general_purpose::STANDARD
-        .decode(&secret_content)
-        .map_err(|e| SourceError::SecretDecoding {
-            file: secret_file.clone(),
-            reason: format!(
-                "{}. Please check that the file contains valid base64-encoded data.",
-                e
-            ),
-        })?;
-
-    if secret.len() < 16 {
-        return Err(SourceError::SecretTooShort {
-            length: secret.len(),
-        });
-    }
+    let secret = crate::input::load_secret_bytes(&secret_file);
 
     let encrypted_private_key = general_purpose::STANDARD
         .decode(organization.clone().private_key)
@@ -526,14 +490,8 @@ pub fn decrypt_ssh_private_key(
             reason: format!("{}. The private key in the database appears to be corrupted or not properly base64-encoded.", e)
         })?;
 
-    // crypter 0.3 expects a reference to a 32-byte array for AES-256
-    let secret_key: &[u8; 32] = secret.as_slice().try_into().map_err(|_| SourceError::SecretInvalidLength {
-        length: secret.len(),
-        expected: 32,
-    })?;
-
     let decrypted_private_key = if let Some(p) =
-        crypter::decrypt(secret_key, encrypted_private_key.clone())
+        crypter::decrypt_with_password(&secret, encrypted_private_key.clone())
     {
         String::from_utf8(p).map_err(|_| SourceError::KeyUtf8Conversion)?
     } else {
@@ -574,19 +532,11 @@ pub fn format_public_key(organization: MOrganization) -> String {
 }
 
 pub fn generate_signing_key(secret_file: String) -> Result<String, SourceError> {
-    let secret = general_purpose::STANDARD
-        .decode(load_secret(&secret_file))
-        .map_err(|_| SourceError::InvalidBase64)?;
-
-    // crypter 0.3 requires exactly 32 bytes for AES-256
-    let secret_key: &[u8; 32] = secret.as_slice().try_into().map_err(|_| SourceError::SecretInvalidLength {
-        length: secret.len(),
-        expected: 32,
-    })?;
+    let secret = crate::input::load_secret_bytes(&secret_file);
 
     let private_key = KeyPair::generate();
     let encrypted_private_key =
-        crypter::encrypt(secret_key, *private_key).ok_or(SourceError::CryptographicOperation)?;
+        crypter::encrypt_with_password(&secret, *private_key).ok_or(SourceError::CryptographicOperation)?;
 
     let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_private_key);
 
@@ -594,17 +544,7 @@ pub fn generate_signing_key(secret_file: String) -> Result<String, SourceError> 
 }
 
 pub fn decrypt_signing_key(secret_file: String, cache: MCache) -> Result<String, SourceError> {
-    let secret_content = crate::input::load_secret(&secret_file);
-
-    let secret = general_purpose::STANDARD
-        .decode(&secret_content)
-        .map_err(|e| SourceError::SecretDecoding {
-            file: secret_file.clone(),
-            reason: format!(
-                "{}. Please check that the file contains valid base64-encoded data.",
-                e
-            ),
-        })?;
+    let secret = crate::input::load_secret_bytes(&secret_file);
 
     let encrypted_private_key = general_purpose::STANDARD
         .decode(cache.clone().signing_key)
@@ -613,14 +553,8 @@ pub fn decrypt_signing_key(secret_file: String, cache: MCache) -> Result<String,
             reason: format!("{}. The signing key in the cache appears to be corrupted or not properly base64-encoded.", e)
         })?;
 
-    // crypter 0.3 requires exactly 32 bytes for AES-256
-    let secret_key: &[u8; 32] = secret.as_slice().try_into().map_err(|_| SourceError::SecretInvalidLength {
-        length: secret.len(),
-        expected: 32,
-    })?;
-
     let decrypted_private_key =
-        crypter::decrypt(secret_key, encrypted_private_key).ok_or(SourceError::PrivateKeyDecryption)?;
+        crypter::decrypt_with_password(&secret, encrypted_private_key).ok_or(SourceError::PrivateKeyDecryption)?;
 
     // Convert decrypted bytes to string (signing key should be base64)
     let decrypted_key_str = String::from_utf8(decrypted_private_key)

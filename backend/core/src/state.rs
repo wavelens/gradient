@@ -5,7 +5,7 @@
  */
 
 use crate::consts::BASE_ROLE_ADMIN_ID;
-use crate::input::load_secret;
+use crate::input::load_secret_bytes;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
 use chrono::Utc;
@@ -534,15 +534,9 @@ async fn apply_organizations(
         let public_key = derive_public_key(private_key.trim())?;
 
         // Encrypt private key using crypter library
-        let secret = general_purpose::STANDARD
-            .decode(load_secret(crypt_secret_file))
-            .map_err(|e| format!("Failed to decode GRADIENT_CRYPT_SECRET: {}", e))?;
+        let secret = load_secret_bytes(crypt_secret_file);
 
-        // crypter 0.3 requires exactly 32 bytes for AES-256
-        let secret_key: &[u8; 32] = secret.as_slice().try_into()
-            .map_err(|_| format!("GRADIENT_CRYPT_SECRET must be exactly 32 bytes (got {})", secret.len()))?;
-
-        let encrypted_bytes = crypter::encrypt(secret_key, private_key.trim())
+        let encrypted_bytes = crypter::encrypt_with_password(&secret, private_key.trim())
             .ok_or_else(|| "Failed to encrypt SSH private key".to_string())?;
         let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_bytes);
 
@@ -778,15 +772,9 @@ async fn apply_caches(
             .map_err(|e| format!("Signing key for cache '{}' is not a valid base64 encoded string: {}", state_cache.name, e))?;
 
         // Encrypt signing key using crypter library
-        let secret = general_purpose::STANDARD
-            .decode(load_secret(crypt_secret_file))
-            .map_err(|e| format!("Failed to decode GRADIENT_CRYPT_SECRET: {}", e))?;
+        let secret = load_secret_bytes(crypt_secret_file);
 
-        // crypter 0.3 requires exactly 32 bytes for AES-256
-        let secret_key: &[u8; 32] = secret.as_slice().try_into()
-            .map_err(|_| format!("GRADIENT_CRYPT_SECRET must be exactly 32 bytes (got {})", secret.len()))?;
-
-        let encrypted_bytes = crypter::encrypt(secret_key, signing_key.trim())
+        let encrypted_bytes = crypter::encrypt_with_password(&secret, signing_key.trim())
             .ok_or_else(|| format!("Failed to encrypt signing key for cache '{}'", state_cache.name))?;
         let encrypted_signing_key = general_purpose::STANDARD.encode(&encrypted_bytes);
 

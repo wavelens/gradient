@@ -59,7 +59,7 @@ in {
       };
 
       cryptSecretFile = lib.mkOption {
-        description = "The base64-encoded secret key file.";
+        description = "The database encryption password file.";
         type = lib.types.str;
       };
 
@@ -99,6 +99,12 @@ in {
         discoveryUrl = lib.mkOption {
           description = "The discovery URL for OIDC.";
           type = lib.types.str;
+        };
+
+        iconUrl = lib.mkOption {
+          description = "The icon URL for OIDC provider.";
+          type = lib.types.nullOr lib.types.str;
+          default = null;
         };
       };
 

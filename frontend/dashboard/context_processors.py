@@ -13,5 +13,6 @@ def global_variables(request):
         "disable_registration": settings.GRADIENT_DISABLE_REGISTRATION,
         "oidc_enabled": settings.GRADIENT_OIDC_ENABLED,
         "oidc_required": settings.GRADIENT_OIDC_REQUIRED,
+        "oidc_icon_url": settings.GRADIENT_OIDC_ICON_URL,
         "api_base_url": settings.GRADIENT_BASE_URL,
     }

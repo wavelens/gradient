@@ -1131,6 +1131,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f6e0ef22ff8986d94d98121fb504b8cb2b300ea0cd84d3527e3caf61b7f0f80"
 dependencies = [
  "aes-gcm-siv",
+ "argon2",
  "base64 0.22.1",
  "sha2",
 ]

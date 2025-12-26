@@ -16,7 +16,7 @@ async-stream = "0.3"
 base64 = "0.22"
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive", "env"] }
-crypter = "0.3"
+crypter = { version = "0.3", features = ["argon"] }
 entity = { path = "../entity" }
 futures = "0.3"
 git-url-parse = "0.6"

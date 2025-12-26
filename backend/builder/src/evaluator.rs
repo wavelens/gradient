@@ -77,14 +77,14 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         repository_url_to_nix(&evaluation.repository, vec_to_hex(&commit.hash).as_str())
             .context("Failed to convert repository URL to Nix format")?;
 
-    prefetch_flake(Arc::clone(&state), repository.clone(), organization)
+    prefetch_flake(Arc::clone(&state), repository.clone(), organization.clone())
         .await
         .context("Failed to prefetch flake")?;
 
     let wildcards = parse_evaluation_wildcard(evaluation.wildcard.as_str())
         .context("Failed to parse evaluation wildcard")?;
 
-    let all_derivations = get_flake_derivations(Arc::clone(&state), repository.clone(), wildcards)
+    let all_derivations = get_flake_derivations(Arc::clone(&state), repository.clone(), wildcards, organization)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to evaluate: {}", e))?;
 
@@ -631,7 +631,19 @@ async fn get_flake_derivations(
     state: Arc<ServerState>,
     repository: String,
     wildcards: Vec<&str>,
+    organization: MOrganization,
 ) -> Result<Vec<String>> {
+    use core::sources::{decrypt_ssh_private_key, write_key, clear_key};
+
+    let (private_key, _public_key) =
+        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization)?;
+
+    let ssh_key_path = write_key(private_key)?;
+    let git_ssh_command = format!(
+        "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
+        state.cli.binpath_ssh, ssh_key_path
+    );
+
     let mut all_derivations: HashSet<String> = HashSet::new();
     // let mut all_keys: HashMap<String, HashSet<String>> = HashMap::new(); add this line when
     // optimizing partial_derivations
@@ -748,6 +760,7 @@ async fn get_flake_derivations(
                         .arg("--apply")
                         .arg("builtins.attrNames")
                         .arg("--json")
+                        .env("GIT_SSH_COMMAND", &git_ssh_command)
                         .output()
                         .await?
                         .json_to_vec()?;
@@ -758,6 +771,7 @@ async fn get_flake_derivations(
                             .arg("eval")
                             .arg(&type_eval_target)
                             .arg("--json")
+                            .env("GIT_SSH_COMMAND", &git_ssh_command)
                             .output()
                             .await?
                             .json_to_string()?;
@@ -797,6 +811,8 @@ async fn get_flake_derivations(
             }
         }
     }
+
+    clear_key(ssh_key_path).ok();
 
     Ok(all_derivations.into_iter().collect())
 }

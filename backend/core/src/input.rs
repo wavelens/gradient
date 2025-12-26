@@ -260,6 +260,41 @@ pub fn load_secret(f: &str) -> String {
     cleaned
 }
 
+/// Loads a secret from a file as bytes.
+/// Supports both plain text passwords and base64-encoded secrets for backwards compatibility.
+/// - First attempts to use the content as-is (plain text password)
+/// - Falls back to base64 decoding if the plain text is too short (< 16 bytes)
+pub fn load_secret_bytes(f: &str) -> Vec<u8> {
+    use base64::{Engine, engine::general_purpose};
+
+    let secret_str = load_secret(f);
+    let as_bytes = secret_str.as_bytes();
+
+    // If the plain text is long enough (>=16 bytes), use it directly
+    if as_bytes.len() >= 16 {
+        return as_bytes.to_vec();
+    }
+
+    // Otherwise, try to decode as base64 (for backwards compatibility)
+    match general_purpose::STANDARD.decode(&secret_str) {
+        Ok(decoded) if decoded.len() >= 16 => decoded,
+        Ok(decoded) => {
+            eprintln!(
+                "Secret file '{}' decoded from base64 but is too short ({} bytes). Secrets should be at least 16 bytes.",
+                f, decoded.len()
+            );
+            std::process::exit(1);
+        }
+        Err(_) => {
+            eprintln!(
+                "Secret file '{}' is too short ({} bytes). Secrets should be at least 16 bytes as plain text, or base64-encoded.",
+                f, as_bytes.len()
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Validates password strength requirements
 /// Validates username format and content requirements
 pub fn validate_username(username: &str) -> Result<(), InputError> {
