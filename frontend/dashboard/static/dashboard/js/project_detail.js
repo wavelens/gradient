@@ -8,13 +8,13 @@ let statusCheckInterval;
 let lastUpdateTime = 0;
 
 // Get variables from global scope
-const baseUrl = window.location.origin;
+window.baseUrl = window.baseUrl || window.location.origin;
 const orgName = window.location.pathname.split('/')[2];
 const projectName = window.location.pathname.split('/')[4];
 
 async function checkProjectStatus() {
   try {
-    const response = await fetch(`${baseUrl}/api/v1/projects/${orgName}/${projectName}/status`, {
+    const response = await fetch(`${window.baseUrl}/api/v1/projects/${orgName}/${projectName}/status`, {
       method: "GET",
       credentials: "include",
       withCredentials: true,

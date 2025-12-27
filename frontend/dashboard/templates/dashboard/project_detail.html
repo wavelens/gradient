@@ -233,7 +233,7 @@
 
 <script>
     const token = "{{ request.user.session }}";
-    const baseUrl = window.location.origin;
+    window.baseUrl = window.baseUrl || window.location.origin;
 </script>
 
 <script>

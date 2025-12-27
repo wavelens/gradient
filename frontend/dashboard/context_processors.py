@@ -15,4 +15,5 @@ def global_variables(request):
         "oidc_required": settings.GRADIENT_OIDC_REQUIRED,
         "oidc_icon_url": settings.GRADIENT_OIDC_ICON_URL,
         "api_base_url": settings.GRADIENT_BASE_URL,
+        "public_api_base_url": settings.GRADIENT_PUBLIC_API_URL,
     }

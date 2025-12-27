@@ -26,7 +26,7 @@
         {% if oidc_enabled %}
             <!-- SSO Login Button -->
             <div class="sso-login-section">
-                <a href="{{ api_base_url }}/auth/oidc/login" class="sso-btn">
+                <a href="{{ public_api_base_url }}/auth/oidc/login" class="sso-btn">
                     {% if oidc_icon_url %}
                         <img src="{{ oidc_icon_url }}" alt="SSO Provider" class="sso-icon" />
                     {% else %}

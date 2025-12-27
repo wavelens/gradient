@@ -165,9 +165,24 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Gradient Api
 
+# Internal API URL (for backend-to-backend communication)
 GRADIENT_BASE_URL = (
     f"{os.environ.get('GRADIENT_API_URL', 'http://127.0.0.1:3000')}/api/v1"
 )
+
+# Public API URL (for browser redirects, OIDC, etc.)
+# Falls back to GRADIENT_SERVE_URL if GRADIENT_PUBLIC_API_URL is not set
+GRADIENT_PUBLIC_API_URL = os.environ.get('GRADIENT_PUBLIC_API_URL')
+if not GRADIENT_PUBLIC_API_URL:
+    # Extract the public URL from GRADIENT_SERVE_URL and construct API URL
+    serve_url = os.environ.get("GRADIENT_SERVE_URL", "http://127.0.0.1:8000")
+    # Remove /frontend suffix if present and add /api/v1
+    if serve_url.endswith('/frontend'):
+        GRADIENT_PUBLIC_API_URL = serve_url[:-9] + '/api/v1'
+    else:
+        # Assume the serve URL is the base and API is at a different port or path
+        # Use GRADIENT_API_URL but replace the host with the public one
+        GRADIENT_PUBLIC_API_URL = f"{serve_url}/api/v1"
 GRADIENT_DISABLE_REGISTRATION = (
     os.environ.get("GRADIENT_DISABLE_REGISTRATION", "false") == "true"
 )

@@ -19,7 +19,7 @@ let streamingBuildId = null;
 let initialLogsFetched = false;
 
 // Get variables from global scope
-const baseUrl = window.location.origin;
+window.baseUrl = window.baseUrl || window.location.origin;
 const evaluationId = window.location.pathname.split('/').pop();
 
 // Function to format time ago
@@ -80,7 +80,7 @@ function convertAnsiToHtml(text) {
 
 async function checkBuildStatus() {
   try {
-    const response = await fetch(`${baseUrl}/api/v1/evals/${evaluationId}`, {
+    const response = await fetch(`${window.baseUrl}/api/v1/evals/${evaluationId}`, {
       method: "GET",
       credentials: "include",
       withCredentials: true,
@@ -364,7 +364,7 @@ function displayEvaluationError(error) {
 
 async function abortBuild() {
   try {
-    const response = await fetch(`${baseUrl}/api/v1/evals/${evaluationId}/abort`, {
+    const response = await fetch(`${window.baseUrl}/api/v1/evals/${evaluationId}/abort`, {
       method: "POST",
       credentials: "include",
       withCredentials: true,
@@ -397,8 +397,8 @@ async function abortBuild() {
 async function fetchBuilds() {
   try {
     console.log(`Fetching builds for evaluation ${evaluationId}`);
-    console.log('About to make request to:', `${baseUrl}/api/v1/evals/${evaluationId}/builds`);
-    const response = await fetch(`${baseUrl}/api/v1/evals/${evaluationId}/builds`, {
+    console.log('About to make request to:', `${window.baseUrl}/api/v1/evals/${evaluationId}/builds`);
+    const response = await fetch(`${window.baseUrl}/api/v1/evals/${evaluationId}/builds`, {
       method: "GET",
       credentials: "include",
       withCredentials: true,
@@ -790,7 +790,7 @@ async function fetchInitialLogs(targetBuildId) {
 
   try {
     // Always GET past logs first (BaseResponse)
-    const pastLogsResponse = await fetch(`${baseUrl}/api/v1/builds/${targetBuildId}/log`, {
+    const pastLogsResponse = await fetch(`${window.baseUrl}/api/v1/builds/${targetBuildId}/log`, {
       method: "GET",
       credentials: "include",
       withCredentials: true,
@@ -886,7 +886,7 @@ async function startLogStream(targetBuildId) {
   streamingBuildId = targetBuildId;
 
   try {
-    const streamResponse = await fetch(`${baseUrl}/api/v1/builds/${targetBuildId}/log`, {
+    const streamResponse = await fetch(`${window.baseUrl}/api/v1/builds/${targetBuildId}/log`, {
       method: "POST",
       credentials: "include",
       withCredentials: true,
@@ -1174,7 +1174,7 @@ function setupScrollListener() {
 // Initialize the page
 async function initializePage() {
   console.log('Initializing page...');
-  console.log('baseUrl:', baseUrl);
+  console.log('baseUrl:', window.baseUrl);
   console.log('evaluationId:', evaluationId);
   console.log('window.token:', window.token ? 'present' : 'missing');
 
@@ -1259,7 +1259,7 @@ async function updateAllBuildsLogs() {
 
   try {
     // Use post_evaluation_builds endpoint for aggregated log streaming
-    const response = await fetch(`${baseUrl}/api/v1/evals/${evaluationId}/builds`, {
+    const response = await fetch(`${window.baseUrl}/api/v1/evals/${evaluationId}/builds`, {
       method: "POST",
       credentials: "include",
       withCredentials: true,

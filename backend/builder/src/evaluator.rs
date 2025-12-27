@@ -24,7 +24,7 @@ use std::process::Output;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::Uuid;
 
 use super::scheduler::{update_evaluation_status, update_evaluation_status_with_error};
@@ -288,7 +288,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 dependency: b.id,
             };
 
-            debug!(build = %build_id, dependency = %b.id, "Creating dependency for existing build");
+            trace!(build = %build_id, dependency = %b.id, "Creating dependency for existing build");
 
             references.retain(|(d, _, _)| *d != b.derivation_path);
             if get_missing_builds(vec![b.derivation_path.clone()], store)
