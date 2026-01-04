@@ -113,10 +113,10 @@
     };
   }) // {
     overlays = {
-      gradient-server = final: prev: { inherit (self.packages.${final.system}) gradient-server; };
-      gradient-frontend = final: prev: { inherit (self.packages.${final.system}) gradient-frontend; };
-      gradient-cli = final: prev: { inherit (self.packages.${final.system}) gradient-cli; };
-      default = final: prev: { inherit (self.packages.${final.system}) gradient-server gradient-frontend gradient-cli; };
+      gradient-server = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-server; };
+      gradient-frontend = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-frontend; };
+      gradient-cli = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-cli; };
+      default = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-server gradient-frontend gradient-cli; };
     };
 
     nixosModules = rec {

@@ -364,7 +364,7 @@ function displayEvaluationError(error) {
 
 async function abortBuild() {
   try {
-    const response = await fetch(`${window.baseUrl}/api/v1/evals/${evaluationId}/abort`, {
+    const response = await fetch(`${window.baseUrl}/api/v1/evals/${evaluationId}`, {
       method: "POST",
       credentials: "include",
       withCredentials: true,
@@ -373,7 +373,8 @@ async function abortBuild() {
         "Authorization": `Bearer ${window.token || ''}`,
         "Content-Type": "application/json",
         "X-CSRFToken": document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
-      }
+      },
+      body: JSON.stringify({ method: "abort" })
     });
     
     if (response.ok) {
