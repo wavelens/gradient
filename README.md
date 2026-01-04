@@ -22,10 +22,11 @@ Gradient is a web-based Nix-based Continuous Integration (CI) system.
 - **Cache**: integrated nix store cache.
 - **Remote Builds**: support for building nix derviations without having nix installed locally.
 - **Deployment Module**: Support for easy Pull-Deployment.
+- **Actions Integration**: Stream logs directly into GitHub Actions and other CI systems (planned).
 
 ## Installation
 
-Add Cache for prebuilt Gradient packages (Optional):
+Add Cache for prebuilt Gradient packages (optional):
 ```
 URL: https://gradient.wavelens.io/cache/main
 Public Key: gradient.wavelens.io-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
