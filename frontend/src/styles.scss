@@ -1,0 +1,174 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use 'app/styles/variables' as *;
+
+// PrimeNG Imports
+// Note: PrimeNG 21+ requires separate theme package installation
+// For now, using custom dark theme only
+// @import 'primeng/resources/primeng.min.css';
+@import 'primeicons/primeicons.css';
+
+// Material Symbols font
+@font-face {
+  font-family: 'Material Symbols Outlined';
+  font-style: normal;
+  font-weight: 400;
+  src: url('/fonts/MaterialSymbolsOutlined.woff2') format('woff2');
+}
+
+// Space Mono font
+@font-face {
+  font-family: 'Space Mono';
+  src: url('/fonts/SpaceMono-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Space Mono';
+  src: url('/fonts/SpaceMono-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+}
+
+// PrimeNG Dark Theme Customization
+:root {
+  // Override PrimeNG CSS variables with Gradient's dark theme
+  --primary-color: #{$color-primary};
+  --surface-ground: #{$color-primary};
+  --surface-section: #{$color-tertiary};
+  --surface-card: #{$color-tertiary};
+  --surface-overlay: #{$color-quaternary};
+  --surface-border: #{$color-border};
+  --text-color: #{$text-primary};
+  --text-color-secondary: #{$text-secondary};
+  --content-padding: #{$spacing-md};
+  --inline-spacing: #{$spacing-sm};
+  --border-radius: #{$border-radius-md};
+  --surface-hover: #{$color-hover};
+  --focus-ring: 0 0 0 0.2rem rgba(255, 255, 255, 0.2);
+}
+
+// Global Styles
+html {
+  overflow-x: hidden;
+}
+
+body {
+  background-color: $color-primary;
+  color: $text-primary;
+  font-family: $font-family-base;
+  margin: 0;
+  padding: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+a {
+  color: $text-primary;
+  text-decoration: none;
+  padding: $spacing-sm;
+  transition: $transition-fast;
+
+  &:hover {
+    background-color: $color-hover;
+    border-radius: $border-radius-sm;
+  }
+}
+
+// Utility Classes
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: $spacing-md;
+}
+
+.text-light {
+  color: $text-light;
+}
+
+.text-secondary {
+  color: $text-secondary;
+}
+
+// Material Symbols icon class
+.material-symbols-outlined {
+  font-family: $font-family-icons;
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  display: inline-block;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: normal;
+  word-wrap: normal;
+  white-space: nowrap;
+  direction: ltr;
+}
+
+// PrimeNG Component Overrides
+.p-component {
+  font-family: $font-family-base;
+}
+
+.p-button {
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  color: $text-primary;
+
+  &:hover {
+    background: $color-hover;
+    border-color: $text-secondary;
+  }
+}
+
+.p-inputtext {
+  background: $color-quaternary;
+  border: 1px solid $color-border;
+  color: $text-primary;
+
+  &:focus {
+    border-color: $text-secondary;
+  }
+}
+
+.p-dialog {
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  color: $text-primary;
+
+  .p-dialog-header {
+    background: $color-quaternary;
+    border-bottom: 1px solid $color-border;
+  }
+}
+
+.p-table {
+  background: $color-tertiary;
+  color: $text-primary;
+
+  .p-datatable-thead > tr > th {
+    background: $color-quaternary;
+    border: 1px solid $color-border;
+    color: $text-primary;
+  }
+
+  .p-datatable-tbody > tr {
+    background: $color-tertiary;
+    color: $text-primary;
+
+    &:hover {
+      background: $color-hover;
+    }
+
+    > td {
+      border: 1px solid $color-border;
+    }
+  }
+}

@@ -1,0 +1,37 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<header class="main-header">
+  <div class="header-content">
+    <div class="header-logo">
+      <a routerLink="/">
+        <img src="/images/wavelens-LOGO.svg" alt="Gradient" />
+      </a>
+    </div>
+
+    <nav class="header-nav">
+      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">
+        Dashboard
+      </a>
+      <a routerLink="/organizations" routerLinkActive="active">
+        Organizations
+      </a>
+      <a routerLink="/caches" routerLinkActive="active">
+        Caches
+      </a>
+    </nav>
+
+    @if (authService.user(); as user) {
+      <div class="header-user">
+        <span class="user-name">{{ user.name }}</span>
+        <a routerLink="/settings/profile" class="user-link">Settings</a>
+        <button class="logout-btn" (click)="logout()">
+          <span class="material-symbols-outlined">logout</span>
+        </button>
+      </div>
+    }
+  </div>
+</header>

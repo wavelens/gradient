@@ -1,0 +1,91 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="auth-container">
+  <div class="auth-card">
+    <div class="auth-header">
+      <img src="/images/wavelens-LOGO.svg" alt="Gradient" class="auth-logo" />
+      <h1>Sign In</h1>
+      <p class="text-secondary">Welcome back to Gradient</p>
+    </div>
+
+    @if (errorMessage()) {
+      <div class="error-message">
+        <span class="material-symbols-outlined">error</span>
+        {{ errorMessage() }}
+      </div>
+    }
+
+    <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="auth-form">
+      <div class="form-group">
+        <label for="username">Username or Email</label>
+        <input
+          type="text"
+          id="username"
+          formControlName="username"
+          class="form-input"
+          placeholder="Enter your username or email"
+          autocomplete="username"
+        />
+        @if (loginForm.get('username')?.touched && loginForm.get('username')?.errors) {
+          <span class="field-error">Username or email is required</span>
+        }
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input
+          type="password"
+          id="password"
+          formControlName="password"
+          class="form-input"
+          placeholder="Enter your password"
+          autocomplete="current-password"
+        />
+        @if (loginForm.get('password')?.touched && loginForm.get('password')?.errors) {
+          <span class="field-error">Password is required</span>
+        }
+      </div>
+
+      <div class="form-group-checkbox">
+        <label>
+          <input type="checkbox" formControlName="rememberMe" />
+          <span>Remember me</span>
+        </label>
+      </div>
+
+      <button
+        type="submit"
+        class="btn-primary"
+        [disabled]="!loginForm.valid || loading()"
+      >
+        @if (loading()) {
+          <span>Signing in...</span>
+        } @else {
+          <span>Sign In</span>
+        }
+      </button>
+    </form>
+
+    @if (oidcEnabled) {
+      <div class="auth-divider">
+        <span>OR</span>
+      </div>
+
+      <button type="button" class="btn-secondary" (click)="loginWithOIDC()">
+        <span class="material-symbols-outlined">login</span>
+        Sign in with SSO
+      </button>
+    }
+
+    @if (!registrationDisabled) {
+      <div class="auth-footer">
+        Don't have an account?
+        <a routerLink="/account/register">Sign up</a>
+      </div>
+    }
+  </div>
+</div>

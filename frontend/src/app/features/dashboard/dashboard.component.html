@@ -1,0 +1,107 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <h1>Dashboard</h1>
+    <p class="text-secondary">Welcome back! Here's an overview of your Gradient workspace.</p>
+  </div>
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading dashboard..." />
+  } @else {
+    <!-- Stats Overview -->
+    <div class="dashboard-stats">
+      <app-stat-card
+        icon="corporate_fare"
+        [value]="organizations().length"
+        label="Organizations"
+      />
+      <app-stat-card
+        icon="inventory_2"
+        [value]="caches().length"
+        label="Caches"
+      />
+    </div>
+
+    <!-- Recent Organizations -->
+    <div class="dashboard-section">
+      <div class="section-header">
+        <h2>Organizations</h2>
+        <a routerLink="/organizations" class="view-all">View all →</a>
+      </div>
+
+      @if (organizations().length > 0) {
+        <div class="card-list">
+          @for (org of recentOrganizations; track org.id) {
+            <a [routerLink]="['/organization', org.name]" class="card">
+              <div class="card-icon">
+                <span class="material-symbols-outlined">corporate_fare</span>
+              </div>
+              <div class="card-content">
+                <h3>{{ org.display_name }}</h3>
+                <p class="text-secondary">{{ org.description || 'No description' }}</p>
+                @if (org.role) {
+                  <span class="badge">{{ org.role }}</span>
+                }
+              </div>
+              <div class="card-arrow">
+                <span class="material-symbols-outlined">arrow_forward</span>
+              </div>
+            </a>
+          }
+        </div>
+      } @else {
+        <app-empty-state
+          icon="corporate_fare"
+          title="No organizations yet"
+          message="Create your first organization to get started with Gradient"
+          actionLabel="Create Organization"
+          (actionClick)="$any(null)"
+        />
+      }
+    </div>
+
+    <!-- Recent Caches -->
+    <div class="dashboard-section">
+      <div class="section-header">
+        <h2>Caches</h2>
+        <a routerLink="/caches" class="view-all">View all →</a>
+      </div>
+
+      @if (caches().length > 0) {
+        <div class="card-list">
+          @for (cache of recentCaches; track cache.id) {
+            <a [routerLink]="['/caches', cache.name]" class="card">
+              <div class="card-icon">
+                <span class="material-symbols-outlined">inventory_2</span>
+              </div>
+              <div class="card-content">
+                <h3>{{ cache.display_name }}</h3>
+                <p class="text-secondary">{{ cache.description || 'No description' }}</p>
+                <div class="cache-status">
+                  <span class="status-badge" [class.active]="cache.active">
+                    {{ cache.active ? 'Active' : 'Inactive' }}
+                  </span>
+                  <span class="text-light">Priority: {{ cache.priority }}</span>
+                </div>
+              </div>
+              <div class="card-arrow">
+                <span class="material-symbols-outlined">arrow_forward</span>
+              </div>
+            </a>
+          }
+        </div>
+      } @else {
+        <app-empty-state
+          icon="inventory_2"
+          title="No caches yet"
+          message="Create a cache to store and share your Nix builds"
+        />
+      }
+    </div>
+  }
+</div>

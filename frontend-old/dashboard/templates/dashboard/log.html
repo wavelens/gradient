@@ -1,0 +1,385 @@
+<!--
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ -->
+
+{% extends 'dashboard/index.html' %}
+
+<head>
+    {% load static %}
+    {% load i18n %}
+</head>
+
+{% block title %}{% trans 'Log' %}{% endblock %}
+
+{% block content %}
+{% url 'settingsProject' org_id project_id as settings_url %}
+{% include "../individualHeader.html" with link_url=settings_url %}
+
+<div class="content-above">
+    <div><a href="{% url 'projectDetail' org_id project_id %}" class="flex-c p-r-1rem fit-content"><img class="center-image" src="{% static 'dashboard/icons/arrow_back.svg' %}"><span>{% trans 'Back' %}</span></a></div>
+    <h2 class="webkit-middle space-small" class="flex-c">
+        {% if success != 'waiting' %}
+            <div>
+                <span class="material-icons center-image f-s-28px {% if success == 'true' %}green{% else %}red{% endif %}">
+                    {% if success == 'true' %}check_circle{% else %}cancel{% endif %}
+                </span>
+        {% else %}
+            <div class="filter-container">
+                <div class="loader"></div>
+        {% endif %}
+            {{ built_name }}
+            <span class="color-light fw-normal"> #{{ id }}</span>
+            </div>
+    </h2>
+</div>
+
+
+<div class="outerbody">
+    <div class="content-left">
+        <p class="border-bottom space-normal no-side-padding"><span class="p-l-1rem d-webkit-box">{% trans 'Overview' %}</span></p>
+        <div class="build-item" id="build-tab">
+           {% if success != 'waiting' %}
+                <span class="material-icons build-status-icon {% if success == 'true' %}green{% else %}red{% endif %}">{% if success == 'true' %}check_circle{% else %}cancel{% endif %}</span>
+           {% else %}
+               <div class="loader build-status-icon"></div>
+           {% endif %}
+           <div class="build-info">
+               <div class="build-name">{% trans 'Build' %}</div>
+           </div>
+        </div>
+
+        <!-- Builds Section -->
+        <div class="sidebar-section">
+            <p class="border-bottom space-normal no-side-padding"><span class="p-l-1rem d-webkit-box">{% trans 'Builds' %}</span></p>
+            <div id="builds-list" class="builds-container">
+                <!-- Loading placeholder -->
+                <div class="build-item loading" id="loading-builds">
+                    <div class="loader-small"></div>
+                    <span>{% trans 'Loading builds...' %}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="full-width">
+        <div class="innerbody-top d-flex">
+            <div class="m-r-2rem">
+               <div class="text-light m-b-05rem"><span id="trigger-time-display">{% trans 'Triggered via' %} {{ triggerArt }}</span></div>
+               <div><a class="normal-hover" href=""><img src="{{ request.user.image }}" class="icon-center border-radius-5"><span>{{ request.user.name }} </span></a> <span class="material-symbols-outlined icon-center f-s-21px">{% trans 'commit' %}</span> {{ commit }} <span class="branch">{{ branch }}</span></div>
+            </div>
+            <div class="m-r-2rem">
+                <div class="text-light m-b-05rem">{% trans 'Status' %}</div>
+                <div class="status-text">{{ status }}</div>
+            </div>
+            <div class="m-r-2rem">
+                <div class="text-light m-b-05rem">{% trans 'Total duration' %}</div>
+                <div id="duration-display">{{ duration }}</div>
+            </div>
+            <div class="m-r-2rem">
+                <div class="text-light m-b-05rem">{% trans 'Builds' %}</div>
+                <div id="builds-display">{{ builds }}</div>
+            </div>
+            {% if status == 'Building' or status == 'Evaluating' or status == 'Queued' %}
+            <div class="abort-button-container">
+                <button id="abortButton" class="button-round red-button" onclick="abortBuild()">
+                    <span class="material-icons">cancel</span>
+                    <span>{% trans 'Abort Build' %}</span>
+                </button>
+            </div>
+            {% endif %}
+        </div>
+        <div class="innerbody">
+            <div class="innerbody-header border-bottom">
+                <div>
+                    <span>{% trans built_version %}</span><br>
+                    <span class="text-light" id="build-time-display">{{ status }}</span>
+                </div>
+                <br>
+                <div class="flex-c">
+                    {% if success != 'waiting' %}
+                        <span class="material-icons status-icon {% if success == 'true' %}green{% else %}red{% endif %}">
+                            {% if success == 'true' %}check_circle{% else %}cancel{% endif %}
+                        </span>
+                    {% else %}
+                        <div class="loader status-icon"></div>
+                    {% endif %}
+                    <span>{% trans 'Build' %}</span>
+                </div>
+            </div>
+            <div class="p-1rem">
+                <div class="code-container monospace">
+                    <!-- Single log container for dynamic content -->
+                    <div class="details-content color-secondary log-content">
+                        {% if details_blocks %}
+                            {% for block in details_blocks %}
+                                {% for line in block.details %}
+                                    <div class="line">{{ line }}</div>
+                                {% endfor %}
+                            {% endfor %}
+                        {% elif not evaluation_error %}
+                            <div class="line" style="color: #666; font-style: italic;">
+                                Loading build logs...
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% csrf_token %}
+
+<script>
+    const token = "{{ request.user.session }}";
+    const url = "{{ api_url }}/api/evals/{{ evaluation_id }}/builds";
+    const initialEvaluationError = {% if evaluation_error %}"{{ evaluation_error|escapejs }}"{% else %}null{% endif %};
+
+    // Make initial evaluation error available globally for log.js
+    window.initialEvaluationError = initialEvaluationError;
+</script>
+
+<script src="{% static 'dashboard/js/log.js' %}"></script>
+<script>
+    let lineCounter = 1;
+
+    // document.querySelectorAll('.details-item').forEach(details => {
+    //     // const summary = details.querySelector('summary');
+    //     // summary.setAttribute('data-line-number', lineCounter++);
+
+    //     const content = details.querySelector('.details-content');
+    //     content.querySelectorAll('.line').forEach(line => {
+    //         line.setAttribute('data-line-number', lineCounter++);
+    //     });
+    // });
+
+    document.querySelectorAll('.details-content').forEach(details => {
+        details.querySelectorAll('.line').forEach(line => {
+            // Skip line numbering for evaluation errors
+            if (!line.closest('.evaluation-error')) {
+                line.setAttribute('data-line-number', lineCounter++);
+            }
+        });
+    });
+
+    // Set the authentication token for API calls
+    window.token = "{{ request.user.session }}";
+</script>
+
+<style>
+.log-content {
+    padding-bottom: 4rem !important;
+    min-height: 200px;
+    margin-bottom: 2rem;
+}
+
+.details-content {
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 1rem;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+}
+
+/* Ensure scroll to bottom button doesn't overlap with content */
+.code-container {
+    position: relative;
+    margin-bottom: 2rem;
+}
+
+/* Builds sidebar styling */
+.sidebar-section {
+    margin-top: 1.5rem;
+}
+
+.builds-container {
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 0.5rem 0;
+}
+
+.build-item {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    margin: 0.25rem 0;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    border-left: 3px solid transparent;
+}
+
+.build-item:hover {
+    background-color: var(--hover-background, rgba(255, 255, 255, 0.05));
+}
+
+.build-item.active {
+    background-color: var(--active-background, rgba(59, 130, 246, 0.1));
+    border-left-color: var(--primary-color, #3b82f6);
+}
+
+.build-item.loading {
+    opacity: 0.7;
+    cursor: default;
+}
+
+.build-status-icon {
+    width: 16px;
+    height: 16px;
+    margin-right: 0.75rem !important;
+    flex-shrink: 0;
+    font-size: 16px !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.build-status-icon.green {
+    color: #22c55e;
+}
+
+.build-status-icon.red {
+    color: #ef4444;
+}
+
+.build-status-icon.pending-color {
+    color: #9ca3af;
+}
+
+/* Loader for running builds - uses global .loader class for consistent styling */
+.build-status-icon.loader {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+}
+
+.build-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+}
+
+.build-name {
+    font-weight: 500;
+    font-size: 0.875rem;
+    margin-bottom: 0.25rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.build-details {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #6b7280);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.build-status {
+    font-size: 0.75rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 12px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.build-status.completed {
+    background-color: rgba(34, 197, 94, 0.1);
+    color: #22c55e;
+}
+
+.build-status.failed {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+}
+
+.build-status.running {
+    background-color: rgba(59, 130, 246, 0.1);
+    color: #3b82f6;
+}
+
+.build-status.pending {
+    background-color: rgba(156, 163, 175, 0.1);
+    color: #9ca3af;
+}
+
+.loader-small {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border-color, #e1e5e9);
+    border-top: 2px solid var(--primary-color, #3b82f6);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 0.75rem;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Hide builds section if no builds */
+.builds-container:empty::after {
+    content: "No builds found";
+    display: block;
+    padding: 1rem;
+    text-align: center;
+    color: var(--text-secondary, #6b7280);
+    font-style: italic;
+}
+
+/* Abort button positioning */
+.abort-button-container {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+}
+
+.button-round {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+    line-height: 1.5;
+    gap: 0.25rem;
+}
+
+.red-button {
+    background-color: #dc2626;
+    color: white;
+}
+
+.red-button:hover {
+    background-color: #b91c1c;
+}
+
+.red-button:active {
+    background-color: #991b1b;
+    transform: translateY(1px);
+}
+
+.button-round .material-icons {
+    font-size: 20px;
+    line-height: 1;
+    margin: 0;
+}
+
+.button-round span:not(.material-icons) {
+    line-height: 1.5;
+    display: inline-flex;
+    align-items: center;
+}
+</style>
+
+{% endblock %}

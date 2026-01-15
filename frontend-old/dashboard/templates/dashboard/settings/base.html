@@ -1,0 +1,114 @@
+<!--
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ -->
+
+ {% extends 'dashboard/index.html' %}
+
+
+ <head>
+     {% load static %}
+     {% load i18n %}
+ </head>
+ 
+ {% block title %}{% block page_title %}{% trans 'Settings' %}{% endblock %}{% endblock %}
+
+{% block content %}
+ <div class="settings-container">
+   <h1 class="settings-title">{% block settings_title %}{% trans 'Settings' %}{% endblock %}</h1>
+ 
+   <div class="settings-layout">
+     <aside class="settings-sidebar">
+       <nav class="settings-nav">
+         <ul>
+          {% block navigation_items %}
+          {% endblock %}
+         </ul>
+       </nav>
+     </aside>
+ 
+     <main class="settings-content">
+       {% block inhalt %}
+       {% endblock %}
+     </main>
+   </div>
+ </div>
+
+<div id="deleteModal" class="modal modal-container">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3 id="modalTitle">Confirm Delete</h3>
+      <span class="close" id="closeModalBtn">&times;</span>
+    </div>
+    <div class="modal-body">
+      <p id="modalMessage">Are you sure you want to delete this item? This action cannot be undone.</p>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" id="cancelDeleteBtn">Cancel</button>
+      <button type="button" class="btn btn-danger" id="confirmDeleteBtn">Delete</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const modal = document.getElementById('deleteModal');
+  const closeBtn = document.getElementById('closeModalBtn');
+  const cancelBtn = document.getElementById('cancelDeleteBtn');
+  const confirmBtn = document.getElementById('confirmDeleteBtn');
+  
+  let currentFormToSubmit = null;
+  
+  // Handle delete button clicks
+  document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('delete-trigger')) {
+      e.preventDefault();
+      
+      const title = e.target.dataset.title || 'Confirm Delete';
+      const message = e.target.dataset.message || 'Are you sure you want to delete this item? This action cannot be undone.';
+      const formId = e.target.dataset.form;
+      
+      currentFormToSubmit = document.getElementById(formId);
+      
+      showDeleteModal(title, message);
+    }
+  });
+  
+  // Close modal event listeners
+  closeBtn.addEventListener('click', closeDeleteModal);
+  cancelBtn.addEventListener('click', closeDeleteModal);
+  
+  // Confirm delete
+  confirmBtn.addEventListener('click', function() {
+    if (currentFormToSubmit) {
+      currentFormToSubmit.submit();
+    }
+    closeDeleteModal();
+  });
+  
+  // Close modal when clicking outside
+  window.addEventListener('click', function(event) {
+    if (event.target === modal) {
+      closeDeleteModal();
+    }
+  });
+  
+  function showDeleteModal(title, message) {
+    document.getElementById('modalTitle').textContent = title;
+    document.getElementById('modalMessage').textContent = message;
+    modal.style.display = 'block';
+  }
+  
+  function closeDeleteModal() {
+    modal.style.display = 'none';
+    currentFormToSubmit = null;
+  }
+});
+</script>
+
+{% endblock %}
+ 
+ 
+ 

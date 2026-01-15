@@ -1,0 +1,105 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.main-header {
+  background-color: $color-quaternary;
+  border-bottom: 1px solid $color-border;
+  padding: $spacing-md $spacing-lg;
+  position: sticky;
+  top: 0;
+  z-index: $z-sticky;
+}
+
+.header-content {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: $spacing-xl;
+}
+
+.header-logo {
+  img {
+    height: 32px;
+    width: auto;
+  }
+
+  a {
+    padding: 0;
+    display: block;
+
+    &:hover {
+      background-color: transparent;
+    }
+  }
+}
+
+.header-nav {
+  display: flex;
+  gap: $spacing-sm;
+  flex: 1;
+
+  a {
+    padding: $spacing-sm $spacing-md;
+    color: $text-secondary;
+    transition: $transition-fast;
+    border-radius: $border-radius-sm;
+
+    &:hover {
+      color: $text-primary;
+      background-color: $color-hover;
+    }
+
+    &.active {
+      color: $text-primary;
+      background-color: $color-tertiary;
+    }
+  }
+}
+
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+
+  .user-name {
+    color: $text-primary;
+    font-weight: 500;
+  }
+
+  .user-link {
+    color: $text-secondary;
+    padding: $spacing-sm $spacing-md;
+
+    &:hover {
+      color: $text-primary;
+    }
+  }
+
+  .logout-btn {
+    background: none;
+    border: none;
+    color: $text-secondary;
+    cursor: pointer;
+    padding: $spacing-sm;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: $border-radius-sm;
+    transition: $transition-fast;
+
+    &:hover {
+      color: $text-primary;
+      background-color: $color-hover;
+    }
+
+    .material-symbols-outlined {
+      font-size: 20px;
+    }
+  }
+}

@@ -1,0 +1,216 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.auth-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-lg;
+}
+
+.auth-card {
+  background-color: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-lg;
+  padding: $spacing-xxl;
+  max-width: 450px;
+  width: 100%;
+}
+
+.auth-header {
+  text-align: center;
+  margin-bottom: $spacing-xl;
+
+  .auth-logo {
+    height: 48px;
+    margin-bottom: $spacing-lg;
+  }
+
+  h1 {
+    font-size: $font-size-xxl;
+    color: $text-primary;
+    margin: 0 0 $spacing-sm 0;
+  }
+
+  p {
+    margin: 0;
+    font-size: $font-size-md;
+  }
+}
+
+.error-message {
+  background-color: rgba($color-danger, 0.1);
+  border: 1px solid $color-danger;
+  border-radius: $border-radius-sm;
+  padding: $spacing-md;
+  margin-bottom: $spacing-lg;
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  color: $color-danger;
+  font-size: $font-size-sm;
+
+  .material-symbols-outlined {
+    font-size: 20px;
+  }
+}
+
+.auth-form {
+  margin-bottom: $spacing-lg;
+}
+
+.form-group {
+  margin-bottom: $spacing-lg;
+
+  label {
+    display: block;
+    margin-bottom: $spacing-sm;
+    color: $text-primary;
+    font-size: $font-size-sm;
+    font-weight: 500;
+  }
+
+  .form-input {
+    width: 100%;
+    padding: $spacing-md;
+    background-color: $color-quaternary;
+    border: 1px solid $color-border;
+    border-radius: $border-radius-sm;
+    color: $text-primary;
+    font-size: $font-size-md;
+    transition: $transition-fast;
+
+    &:focus {
+      outline: none;
+      border-color: $text-secondary;
+    }
+
+    &::placeholder {
+      color: $text-light;
+    }
+  }
+
+  .field-error {
+    display: block;
+    margin-top: $spacing-xs;
+    color: $color-danger;
+    font-size: $font-size-xs;
+  }
+}
+
+.form-group-checkbox {
+  margin-bottom: $spacing-lg;
+
+  label {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    cursor: pointer;
+    color: $text-secondary;
+    font-size: $font-size-sm;
+
+    input[type='checkbox'] {
+      cursor: pointer;
+    }
+  }
+}
+
+.btn-primary,
+.btn-secondary {
+  width: 100%;
+  padding: $spacing-md;
+  border-radius: $border-radius-sm;
+  font-size: $font-size-md;
+  font-weight: 500;
+  cursor: pointer;
+  transition: $transition-fast;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.btn-primary {
+  background-color: $text-primary;
+  color: $color-primary;
+  border: none;
+
+  &:hover:not(:disabled) {
+    background-color: $text-secondary;
+  }
+}
+
+.btn-secondary {
+  background-color: $color-quaternary;
+  border: 1px solid $color-border;
+  color: $text-primary;
+
+  &:hover {
+    background-color: $color-hover;
+    border-color: $text-secondary;
+  }
+
+  .material-symbols-outlined {
+    font-size: 20px;
+  }
+}
+
+.auth-divider {
+  text-align: center;
+  margin: $spacing-lg 0;
+  position: relative;
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    width: 40%;
+    height: 1px;
+    background-color: $color-border;
+  }
+
+  &::before {
+    left: 0;
+  }
+
+  &::after {
+    right: 0;
+  }
+
+  span {
+    background-color: $color-tertiary;
+    padding: 0 $spacing-md;
+    color: $text-secondary;
+    font-size: $font-size-sm;
+  }
+}
+
+.auth-footer {
+  text-align: center;
+  margin-top: $spacing-lg;
+  color: $text-secondary;
+  font-size: $font-size-sm;
+
+  a {
+    color: $text-primary;
+    padding: 0;
+    margin-left: $spacing-xs;
+
+    &:hover {
+      background-color: transparent;
+      text-decoration: underline;
+    }
+  }
+}
