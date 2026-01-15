@@ -1,0 +1,115 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1>Organizations</h1>
+      <p class="text-secondary">Manage your organizations and teams</p>
+    </div>
+    <button pButton label="Create Organization" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+  </div>
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading organizations..." />
+  } @else {
+    @if (organizations().length > 0) {
+      <div class="org-grid">
+        @for (org of organizations(); track org.id) {
+          <a [routerLink]="['/organization', org.name]" class="org-card">
+            <div class="org-icon">
+              <span class="material-symbols-outlined">corporate_fare</span>
+            </div>
+            <div class="org-content">
+              <h3>{{ org.display_name || org.name }}</h3>
+              <p class="text-secondary">{{ org.description || 'No description' }}</p>
+              @if (org.role) {
+                <span class="role-badge" [class.owner]="org.role === 'owner'">
+                  {{ org.role }}
+                </span>
+              }
+            </div>
+            <div class="org-arrow">
+              <span class="material-symbols-outlined">arrow_forward</span>
+            </div>
+          </a>
+        }
+      </div>
+    } @else {
+      <app-empty-state
+        icon="corporate_fare"
+        title="No organizations yet"
+        message="Create your first organization to get started with Gradient"
+        actionLabel="Create Organization"
+        (actionClick)="openCreateDialog()"
+      />
+    }
+  }
+</div>
+
+<!-- Create Organization Dialog -->
+<p-dialog
+  header="Create Organization"
+  [(visible)]="showCreateDialog"
+  [modal]="true"
+  [style]="{ width: '500px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <div class="dialog-content">
+    <div class="form-group">
+      <label for="name">Name *</label>
+      <input
+        pInputText
+        id="name"
+        [(ngModel)]="newOrg.name"
+        placeholder="organization-name"
+        class="w-full"
+      />
+      <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
+    </div>
+
+    <div class="form-group">
+      <label for="display_name">Display Name *</label>
+      <input
+        pInputText
+        id="display_name"
+        [(ngModel)]="newOrg.display_name"
+        placeholder="My Organization"
+        class="w-full"
+      />
+    </div>
+
+    <div class="form-group">
+      <label for="description">Description</label>
+      <textarea
+        pInputTextarea
+        id="description"
+        [(ngModel)]="newOrg.description"
+        placeholder="Describe your organization..."
+        rows="3"
+        class="w-full"
+      ></textarea>
+    </div>
+  </div>
+
+  <ng-template pTemplate="footer">
+    <button
+      pButton
+      label="Cancel"
+      severity="secondary"
+      (click)="showCreateDialog.set(false)"
+      [disabled]="creating()"
+    ></button>
+    <button
+      pButton
+      label="Create"
+      (click)="createOrganization()"
+      [disabled]="!newOrg.name || !newOrg.display_name || creating()"
+      [loading]="creating()"
+    ></button>
+  </ng-template>
+</p-dialog>

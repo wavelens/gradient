@@ -5,81 +5,48 @@
  */
 
 { lib
-, gettext
-, python3
-}: let
-  python = python3;
-  ignoredPaths = [ ".github" "target" ];
-in python.pkgs.buildPythonApplication rec {
+, buildNpmPackage
+, nodejs
+}:
+
+buildNpmPackage rec {
   pname = "gradient-frontend";
-  version = "0.4.0";
-  pyproject = false;
+  version = "0.5.0";
 
   src = lib.cleanSourceWith {
-    filter = name: type: !(type == "directory" && builtins.elem (baseNameOf name) ignoredPaths);
+    filter = name: type: !(type == "directory" && builtins.elem (baseNameOf name) [".github" "target" "node_modules" "dist" ".angular"]);
     src = lib.cleanSource ../../frontend;
   };
 
-  nativeBuildInputs = [
-    gettext
-  ];
+  npmDepsHash = lib.fakeHash;  # Run once to get the actual hash, then replace
 
-  dependencies = with python.pkgs; [
-    bleach
-    celery
-    channels
-    channels-redis
-    django
-    django-compression-middleware
-    django-debug-toolbar
-    django-parler
-    django-redis
-    django-rosetta
-    django-scheduler
-    gunicorn
-    mysqlclient
-    redis
-    requests
-    selenium
-    sentry-sdk
-    uritemplate
-    urllib3
-    whitenoise
-    xstatic-bootstrap
-    xstatic-jquery
-    xstatic-jquery-ui
-  ];
+  nativeBuildInputs = [ nodejs ];
 
-  postBuild = ''
-    ${python.pythonOnBuildForHost.interpreter} -OO -m compileall .
-    ${python.pythonOnBuildForHost.interpreter} manage.py collectstatic --clear --no-input
-    ${python.pythonOnBuildForHost.interpreter} manage.py compilemessages
+  # Skip npm audit during build
+  npmBuildScript = "build";
+
+  # Build configuration
+  buildPhase = ''
+    runHook preBuild
+
+    npm run build -- --configuration production
+
+    runHook postBuild
   '';
 
-  installPhase = let
-    pythonPath = python.pkgs.makePythonPath dependencies;
-  in ''
+  installPhase = ''
     runHook preInstall
 
-    mkdir -p $out/lib/gradient-frontend/static/dashboard
-    cp -r {dashboard,static,frontend,locale,manage.py} $out/lib/gradient-frontend
-    chmod +x $out/lib/gradient-frontend/manage.py
-
-    makeWrapper $out/lib/gradient-frontend/manage.py $out/bin/gradient-frontend \
-      --prefix PYTHONPATH : "${pythonPath}"
+    mkdir -p $out/share/gradient-frontend
+    cp -r dist/gradient-frontend/browser/* $out/share/gradient-frontend/
 
     runHook postInstall
   '';
-
-  passthru = {
-    inherit python;
-  };
 
   meta = {
     description = "Nix Continuous Integration System Frontend";
     homepage = "https://github.com/wavelens/gradient";
     license = lib.licenses.agpl3Only;
     platforms = lib.platforms.unix;
-    mainProgram = "gradient-frontend";
   };
 }

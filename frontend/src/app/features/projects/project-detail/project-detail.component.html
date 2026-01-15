@@ -1,0 +1,121 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  @if (loading()) {
+    <app-loading-spinner message="Loading project..." />
+  } @else if (project(); as proj) {
+    <!-- Project Header -->
+    <div class="page-header">
+      <div>
+        <div class="breadcrumb">
+          <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgName }}</a>
+          <span class="breadcrumb-separator">/</span>
+          <span class="breadcrumb-current">{{ proj.display_name }}</span>
+        </div>
+        <h1>{{ proj.display_name }}</h1>
+        <p class="text-secondary">{{ proj.description || 'No description' }}</p>
+        <div class="project-meta">
+          <span class="meta-item">
+            <span class="material-symbols-outlined">link</span>
+            {{ proj.repository }}
+          </span>
+          <span class="meta-item">
+            <span class="material-symbols-outlined">category</span>
+            {{ proj.evaluation_wildcard }}
+          </span>
+          <span class="status-badge" [class.active]="proj.active" [class.inactive]="!proj.active">
+            {{ proj.active ? 'Active' : 'Inactive' }}
+          </span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button
+          pButton
+          label="Start Evaluation"
+          icon="pi pi-play"
+          (click)="startEvaluation()"
+          [loading]="starting()"
+          [disabled]="starting()"
+        ></button>
+        <a
+          pButton
+          label="Settings"
+          icon="pi pi-cog"
+          severity="secondary"
+          [routerLink]="['/organization', orgName, 'project', projectName, 'settings']"
+        ></a>
+      </div>
+    </div>
+
+    <!-- Recent Evaluations -->
+    <div class="section">
+      <h2>Recent Evaluations</h2>
+      @if (proj.last_evaluations && proj.last_evaluations.length > 0) {
+        <div class="evaluations-list">
+          @for (evaluation of proj.last_evaluations; track evaluation.id) {
+            <div class="evaluation-card">
+              <div class="evaluation-status">
+                <span
+                  class="status-icon material-symbols-outlined"
+                  [class]="getStatusClass(evaluation.status)"
+                >
+                  {{ getStatusIcon(evaluation.status) }}
+                </span>
+              </div>
+              <div class="evaluation-content">
+                <div class="evaluation-header">
+                  <h3>
+                    <a [routerLink]="['/organization', orgName, 'log', evaluation.id]">
+                      Evaluation {{ evaluation.id.substring(0, 8) }}
+                    </a>
+                  </h3>
+                  <span class="status-badge" [class]="getStatusClass(evaluation.status)">
+                    {{ evaluation.status }}
+                  </span>
+                </div>
+                <div class="build-stats">
+                  <span class="build-stat">
+                    <span class="material-symbols-outlined">construction</span>
+                    {{ evaluation.total_builds }} builds
+                  </span>
+                  @if (evaluation.failed_builds > 0) {
+                    <span class="build-stat error">
+                      {{ evaluation.failed_builds }} failed
+                    </span>
+                  }
+                </div>
+              </div>
+              <div class="evaluation-actions">
+                <span class="evaluation-date text-secondary">
+                  {{ evaluation.created_at | date: 'MMM d, y HH:mm' }}
+                </span>
+                @if (isRunningStatus(evaluation.status)) {
+                  <button
+                    pButton
+                    label="Abort"
+                    icon="pi pi-times"
+                    severity="danger"
+                    size="small"
+                    (click)="abortEvaluation(evaluation.id)"
+                  ></button>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      } @else {
+        <app-empty-state
+          icon="assessment"
+          title="No evaluations yet"
+          message="Start your first evaluation to begin building"
+          actionLabel="Start Evaluation"
+          (actionClick)="startEvaluation()"
+        />
+      }
+    </div>
+  }
+</div>

@@ -1,0 +1,152 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.page-header {
+  margin-bottom: $spacing-xxl;
+
+  h1 {
+    font-size: $font-size-xxl;
+    margin: 0 0 $spacing-sm 0;
+  }
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $text-secondary;
+
+  .breadcrumb-link {
+    color: $text-secondary;
+    &:hover { color: $text-primary; }
+  }
+
+  .breadcrumb-separator { color: $text-light; }
+  .breadcrumb-current { color: $text-primary; }
+}
+
+.settings-section {
+  margin-bottom: $spacing-xxl;
+
+  h2 {
+    font-size: $font-size-xl;
+    margin: 0 0 $spacing-lg 0;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: $spacing-lg;
+
+    h2 { margin: 0; }
+  }
+}
+
+.settings-card {
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+  padding: $spacing-lg;
+}
+
+.form-group {
+  margin-bottom: $spacing-lg;
+
+  label {
+    display: block;
+    margin-bottom: $spacing-sm;
+    font-size: $font-size-sm;
+    font-weight: 500;
+  }
+
+  small {
+    display: block;
+    margin-top: $spacing-xs;
+    font-size: $font-size-xs;
+  }
+
+  &:last-child { margin-bottom: 0; }
+}
+
+.form-actions {
+  display: flex;
+  gap: $spacing-md;
+  margin-top: $spacing-lg;
+}
+
+.w-full { width: 100%; }
+
+.members-list {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.member-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md;
+  background: $color-quaternary;
+  border-radius: $border-radius-sm;
+
+  .member-info {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+
+    .material-symbols-outlined { font-size: 20px; color: $text-secondary; }
+
+    .member-username { font-weight: 500; }
+    .member-role { font-size: $font-size-sm; }
+  }
+}
+
+.ssh-key-area {
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+}
+
+.role-select {
+  width: 100%;
+  padding: $spacing-sm;
+  background: $color-quaternary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  color: $text-primary;
+  font-size: $font-size-md;
+
+  &:focus {
+    outline: none;
+    border-color: $text-secondary;
+  }
+}
+
+.danger-section {
+  h2 { color: $color-danger; }
+}
+
+.danger-card {
+  border-color: rgba($color-danger, 0.5);
+}
+
+.danger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  h3 { margin: 0 0 $spacing-xs 0; }
+  p { margin: 0; }
+}
+
+.dialog-content {
+  padding: $spacing-md 0;
+}

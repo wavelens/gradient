@@ -1,0 +1,75 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.page-header {
+  margin-bottom: $spacing-xxl;
+  h1 { font-size: $font-size-xxl; margin: 0 0 $spacing-sm 0; }
+}
+
+.message-banner {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  border-radius: $border-radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-lg;
+
+  .material-symbols-outlined { font-size: 20px; }
+
+  &.error {
+    background: rgba($color-danger, 0.1);
+    border: 1px solid rgba($color-danger, 0.5);
+    color: $color-danger;
+  }
+
+  &.success {
+    background: rgba($color-success, 0.1);
+    border: 1px solid rgba($color-success, 0.5);
+    color: $color-success;
+  }
+}
+
+.settings-section {
+  margin-bottom: $spacing-xxl;
+  h2 { font-size: $font-size-xl; margin: 0 0 $spacing-lg 0; }
+}
+
+.settings-card {
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+  padding: $spacing-lg;
+}
+
+.form-group {
+  margin-bottom: $spacing-lg;
+  label { display: block; margin-bottom: $spacing-sm; font-size: $font-size-sm; font-weight: 500; }
+  &:last-child { margin-bottom: 0; }
+}
+
+.form-actions { display: flex; gap: $spacing-md; margin-top: $spacing-lg; }
+
+.w-full { width: 100%; }
+
+.nav-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  h3 { margin: 0 0 $spacing-xs 0; }
+  p { margin: 0; }
+}
+
+.danger-section { h2 { color: $color-danger; } }
+.danger-card { border-color: rgba($color-danger, 0.5); }
+.danger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  h3 { margin: 0 0 $spacing-xs 0; }
+  p { margin: 0; }
+}

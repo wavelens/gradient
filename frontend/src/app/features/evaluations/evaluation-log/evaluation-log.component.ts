@@ -1,0 +1,383 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  inject,
+  signal,
+  computed,
+  ViewChild,
+  ElementRef,
+  ChangeDetectorRef,
+} from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
+import { interval, Subscription } from 'rxjs';
+import { switchMap } from 'rxjs/operators';
+import { EvaluationsService, BuildItem } from '@core/services/evaluations.service';
+import { Evaluation } from '@core/models';
+import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { ButtonModule } from 'primeng/button';
+import { environment } from '@environments/environment';
+
+@Component({
+  selector: 'app-evaluation-log',
+  standalone: true,
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonModule],
+  templateUrl: './evaluation-log.component.html',
+  styleUrl: './evaluation-log.component.scss',
+})
+export class EvaluationLogComponent implements OnInit, OnDestroy {
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
+  private evalService = inject(EvaluationsService);
+  private sanitizer = inject(DomSanitizer);
+  private cdr = inject(ChangeDetectorRef);
+
+  @ViewChild('logContainer') logContainerRef?: ElementRef<HTMLDivElement>;
+
+  loading = signal(true);
+  evaluation = signal<Evaluation | null>(null);
+  builds = signal<BuildItem[]>([]);
+  selectedBuildId = signal<string | null>(null);
+  logHtml = signal<SafeHtml>('');
+  logLoading = signal(false);
+  aborting = signal(false);
+  autoScroll = signal(true);
+  showScrollBtn = signal(false);
+  duration = signal('0:00');
+
+  orgName = '';
+  evaluationId = '';
+
+  completedBuilds = computed(() =>
+    this.builds().filter(b => b.status === 'Completed').length
+  );
+
+  selectedBuild = computed(() =>
+    this.builds().find(b => b.id === this.selectedBuildId()) ?? null
+  );
+
+  private pollSub?: Subscription;
+  private durationInterval?: ReturnType<typeof setInterval>;
+  private activeStreamReader?: ReadableStreamDefaultReader<Uint8Array>;
+  private streamingBuildId?: string;
+  private logLines: string[] = [];
+
+  ngOnInit(): void {
+    this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') || '';
+    if (!this.evaluationId) {
+      this.loading.set(false);
+      return;
+    }
+    this.loadEvaluation();
+  }
+
+  ngOnDestroy(): void {
+    this.stopPolling();
+    this.stopDurationTimer();
+    this.stopActiveStream();
+  }
+
+  loadEvaluation(): void {
+    this.loading.set(true);
+    this.evalService.getEvaluation(this.evaluationId).subscribe({
+      next: (evaluation) => {
+        this.evaluation.set(evaluation);
+        this.loading.set(false);
+        this.loadBuilds();
+        this.startDurationTimer(evaluation);
+        this.startPollingIfRunning(evaluation.status);
+      },
+      error: () => this.loading.set(false),
+    });
+  }
+
+  loadBuilds(): void {
+    this.evalService.getBuilds(this.evaluationId).subscribe({
+      next: (builds) => this.builds.set(builds),
+    });
+  }
+
+  startPollingIfRunning(status: string): void {
+    this.stopPolling();
+    const running = ['Queued', 'Evaluating', 'Building'];
+    if (!running.includes(status)) return;
+
+    this.pollSub = interval(5000)
+      .pipe(switchMap(() => this.evalService.getEvaluation(this.evaluationId)))
+      .subscribe({
+        next: (evaluation) => {
+          this.evaluation.set(evaluation);
+          this.loadBuilds();
+          if (!running.includes(evaluation.status)) {
+            this.stopPolling();
+            this.stopDurationTimer();
+            this.loadBuilds(); // final update
+          }
+        },
+      });
+  }
+
+  stopPolling(): void {
+    this.pollSub?.unsubscribe();
+    this.pollSub = undefined;
+  }
+
+  // ── Build selection & log loading ──────────────────────────────────────────
+
+  selectBuild(build: BuildItem): void {
+    if (this.selectedBuildId() === build.id) return;
+
+    this.stopActiveStream();
+    this.logLines = [];
+    this.logHtml.set('');
+    this.selectedBuildId.set(build.id);
+    this.autoScroll.set(true);
+    this.showScrollBtn.set(false);
+
+    this.logLoading.set(true);
+    this.fetchInitialLogs(build.id);
+  }
+
+  private async fetchInitialLogs(buildId: string): Promise<void> {
+    try {
+      const token = localStorage.getItem('jwt_token') || sessionStorage.getItem('jwt_token') || '';
+      const response = await fetch(`${environment.apiUrl}/builds/${buildId}/log`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (!data.error && data.message) {
+          const lines = this.parseLogContent(data.message as string);
+          this.logLines = lines;
+          this.renderLog();
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    this.logLoading.set(false);
+    this.scrollToBottomIfAuto();
+
+    // If this build is still running, start streaming
+    const build = this.builds().find(b => b.id === buildId);
+    const isBuilding = build && ['Queued', 'Building'].includes(build.status);
+    if (isBuilding) {
+      this.startLogStream(buildId);
+    }
+  }
+
+  private async startLogStream(buildId: string): Promise<void> {
+    if (this.streamingBuildId === buildId) return;
+    this.stopActiveStream();
+    this.streamingBuildId = buildId;
+
+    try {
+      const token = localStorage.getItem('jwt_token') || sessionStorage.getItem('jwt_token') || '';
+      const response = await fetch(`${environment.apiUrl}/builds/${buildId}/log`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/jsonstream',
+        },
+      });
+
+      if (!response.ok || !response.body) return;
+
+      this.activeStreamReader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await this.activeStreamReader.read();
+        if (done) break;
+
+        // Stop processing if another build was selected
+        if (this.selectedBuildId() !== buildId) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        if (chunk.trim()) {
+          const newLines = this.parseLogContent(chunk);
+          this.logLines.push(...newLines);
+          this.renderLog();
+          this.scrollToBottomIfAuto();
+        }
+      }
+    } catch {
+      // stream ended or aborted
+    } finally {
+      this.activeStreamReader = undefined;
+      this.streamingBuildId = undefined;
+    }
+  }
+
+  private stopActiveStream(): void {
+    try { this.activeStreamReader?.cancel(); } catch { /* ignore */ }
+    this.activeStreamReader = undefined;
+    this.streamingBuildId = undefined;
+  }
+
+  // ── Log parsing & rendering ─────────────────────────────────────────────────
+
+  private parseLogContent(raw: string): string[] {
+    return raw
+      .split('\n')
+      .filter(line => {
+        const t = line.trim();
+        return t && t !== '""' && t !== "''" && t !== '"' && t !== "'";
+      })
+      .flatMap(line => {
+        // strip surrounding JSON quotes
+        if (
+          line.length >= 2 &&
+          ((line.startsWith('"') && line.endsWith('"')) ||
+            (line.startsWith("'") && line.endsWith("'")))
+        ) {
+          line = line.slice(1, -1);
+        }
+        if (!line.trim()) return [];
+        // Handle \n escapes
+        return line
+          .replace(/\\n/g, '\n')
+          .replace(/\\t/g, '\t')
+          .split('\n');
+      })
+      .filter(l => l !== undefined) as string[];
+  }
+
+  private convertAnsiToHtml(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\u001b\[0m/g, '</span>')
+      .replace(/\u001b\[31;1m/g, '<span style="color:#ef4444;font-weight:bold">')
+      .replace(/\u001b\[31m/g, '<span style="color:#ef4444">')
+      .replace(/\u001b\[32m/g, '<span style="color:#22c55e">')
+      .replace(/\u001b\[33m/g, '<span style="color:#eab308">')
+      .replace(/\u001b\[34m/g, '<span style="color:#3b82f6">')
+      .replace(/\u001b\[35;1m/g, '<span style="color:#a855f7;font-weight:bold">')
+      .replace(/\u001b\[35m/g, '<span style="color:#a855f7">')
+      .replace(/\u001b\[36m/g, '<span style="color:#06b6d4">')
+      .replace(/\u001b\[37m/g, '<span style="color:#f8fafc">')
+      .replace(/\u001b\[1m/g, '<span style="font-weight:bold">')
+      .replace(/\u001b\[[0-9;]*m/g, '');
+  }
+
+  private renderLog(): void {
+    const html = this.logLines.map(l => this.convertAnsiToHtml(l)).join('\n');
+    this.logHtml.set(this.sanitizer.bypassSecurityTrustHtml(html));
+    this.cdr.detectChanges();
+  }
+
+  // ── Scroll management ───────────────────────────────────────────────────────
+
+  onLogScroll(event: Event): void {
+    const el = event.target as HTMLElement;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    this.autoScroll.set(atBottom);
+    this.showScrollBtn.set(!atBottom);
+  }
+
+  scrollToBottom(): void {
+    const el = this.logContainerRef?.nativeElement;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+      this.autoScroll.set(true);
+      this.showScrollBtn.set(false);
+    }
+  }
+
+  private scrollToBottomIfAuto(): void {
+    if (this.autoScroll()) {
+      setTimeout(() => this.scrollToBottom(), 0);
+    }
+  }
+
+  // ── Duration ─────────────────────────────────────────────────────────────────
+
+  private startDurationTimer(evaluation: Evaluation): void {
+    this.stopDurationTimer();
+    this.updateDuration(evaluation);
+
+    const running = ['Queued', 'Evaluating', 'Building'];
+    if (!running.includes(evaluation.status)) return;
+
+    this.durationInterval = setInterval(() => {
+      const ev = this.evaluation();
+      if (ev) this.updateDuration(ev);
+    }, 1000);
+  }
+
+  private stopDurationTimer(): void {
+    if (this.durationInterval !== undefined) {
+      clearInterval(this.durationInterval);
+      this.durationInterval = undefined;
+    }
+  }
+
+  private updateDuration(evaluation: Evaluation): void {
+    const ts = evaluation.created_at;
+    const start = new Date(
+      ts.includes('Z') || ts.includes('+') ? ts : ts + 'Z'
+    );
+    const ms = Math.max(0, new Date().getTime() - start.getTime());
+    const totalSecs = Math.floor(ms / 1000);
+    const h = Math.floor(totalSecs / 3600);
+    const m = Math.floor((totalSecs % 3600) / 60);
+    const s = totalSecs % 60;
+
+    this.duration.set(
+      h > 0
+        ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+        : `${m}:${String(s).padStart(2, '0')}`
+    );
+  }
+
+  // ── Abort ───────────────────────────────────────────────────────────────────
+
+  abortEvaluation(): void {
+    this.aborting.set(true);
+    this.evalService.abortEvaluation(this.evaluationId).subscribe({
+      next: () => {
+        this.aborting.set(false);
+        this.loadEvaluation();
+      },
+      error: () => this.aborting.set(false),
+    });
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+
+  buildDisplayName(path: string): string {
+    // Extract package name from /nix/store/hash-name.drv → name
+    return path.replace(/^.*-/, '').replace(/\.drv$/, '');
+  }
+
+  isRunning(): boolean {
+    const s = this.evaluation()?.status;
+    return s === 'Queued' || s === 'Evaluating' || s === 'Building';
+  }
+
+  navigateToEvaluation(id: string): void {
+    this.stopPolling();
+    this.stopDurationTimer();
+    this.stopActiveStream();
+    this.selectedBuildId.set(null);
+    this.logLines = [];
+    this.logHtml.set('');
+    this.evaluationId = id;
+    this.router.navigate(['/organization', this.orgName, 'log', id]);
+    this.loadEvaluation();
+  }
+}

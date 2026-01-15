@@ -1,0 +1,158 @@
+<!--
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ -->
+
+ {% extends 'dashboard/index.html' %}
+
+ <head>
+    {% load static %}
+    {% load i18n %}
+</head>
+
+{% block title %}{% trans 'Login' %}{% endblock %}
+
+{% block content %}
+<div class="outer-form">
+    <div class="form-container">
+        <h2 class="form-header-label">{% trans 'Login' %}</h2>
+        {% if form.non_field_errors %}
+            <div class="alert alert-danger">
+                {{ form.non_field_errors }}
+            </div>
+        {% endif %}
+
+        {% if oidc_enabled %}
+            <!-- SSO Login Button -->
+            <div class="sso-login-section">
+                <a href="{{ public_api_base_url }}/auth/oidc/login" class="sso-btn">
+                    {% if oidc_icon_url %}
+                        <img src="{{ oidc_icon_url }}" alt="SSO Provider" class="sso-icon" />
+                    {% else %}
+                        <!-- Generic OIDC/SSO icon -->
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="sso-icon-svg">
+                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+                            <path d="M12 7v5m0 0l3 3m-3-3l-3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    {% endif %}
+                    {% trans 'Continue with SSO' %}
+                </a>
+            </div>
+
+            {% if not oidc_required %}
+                <!-- Divider -->
+                <div class="login-divider">
+                    <span class="divider-text">{% trans 'or' %}</span>
+                </div>
+            {% endif %}
+        {% endif %}
+
+        {% if not oidc_required %}
+            <!-- Traditional Login Form -->
+            <form method="post">
+                {% csrf_token %}
+                {% for field in form %}
+                    {% if field.field.widget|default:"" == form.fields.remember_me.widget %}
+                        <div class="form-check">
+                            {{ field }}
+                            <label for="{{ field.id_for_label }}" class="form-check-label">{% trans field.label %}</label>
+                        </div>
+                    {% else %}
+                        <div class="form-field">
+                            <label for="{{ field.id_for_label }}" class="required-label">{% trans field.label %}</label>
+                            {{ field }}
+                            {% if field.errors %}
+                                <div class="error">{{ field.errors }}</div>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                {% endfor %}
+                <button type="submit" class="submit-btn">{% trans 'Login' %}</button>
+            </form>
+
+            {% if not disable_registration %}
+                <div class="register">{% trans "Don't have an account?" %}<a class="register blue-link" href="{% url 'register' %}?next=/account/login">{% trans 'Register' %}</a></div>
+            {% endif %}
+        {% endif %}
+    </div>
+</div>
+
+<style>
+.sso-login-section {
+    margin-bottom: 1.5rem;
+}
+
+.sso-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    width: 100%;
+    max-width: 100%;
+    padding: 0.75rem 1rem;
+    background: #fff;
+    border: 2px solid #e1e5e9;
+    border-radius: 8px;
+    color: #374151;
+    text-decoration: none;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sso-btn:hover {
+    background: #f9fafb;
+    border-color: #d1d5db;
+    text-decoration: none;
+    color: #374151;
+}
+
+.sso-btn:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    border-color: #3b82f6;
+}
+
+.sso-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    object-fit: contain;
+}
+
+.sso-icon-svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+    color: #374151;
+}
+
+.login-divider {
+    position: relative;
+    margin: 1.5rem 0;
+    text-align: center;
+}
+
+.login-divider::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: #e1e5e9;
+}
+
+.divider-text {
+    background: #fff;
+    color: #6b7280;
+    padding: 0 1rem;
+    font-size: 0.875rem;
+    position: relative;
+}
+</style>
+{% endblock %}

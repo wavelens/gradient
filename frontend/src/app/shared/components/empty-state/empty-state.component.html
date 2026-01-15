@@ -1,0 +1,20 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="empty-state">
+  <div class="empty-icon">
+    <span class="material-symbols-outlined">{{ icon() }}</span>
+  </div>
+  <h3 class="empty-title">{{ title() }}</h3>
+  @if (message()) {
+    <p class="empty-message">{{ message() }}</p>
+  }
+  @if (actionLabel()) {
+    <button class="empty-action" (click)="onActionClick()">
+      {{ actionLabel() }}
+    </button>
+  }
+</div>

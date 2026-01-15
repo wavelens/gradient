@@ -1,0 +1,272 @@
+<!--
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ -->
+
+{% extends 'dashboard/index.html' %}
+
+<head>
+    {% load static %}
+    {% load i18n %}
+</head>
+
+{% block title %}{{ cache_data.display_name }}{% endblock %}
+
+{% block content %}
+
+<header class="dashboard-header m-t--1rem">
+    <nav>
+        <a href="{% url 'caches' %}" class="nav-link">
+            <span class="material-symbols-outlined">hub</span>
+            {% trans 'Caches' %}
+        </a>
+        <a href="#" class="nav-link active">
+            <span class="material-symbols-outlined">clarify</span>
+            {% trans 'Details' %}
+        </a>
+        <a class="nav-link flex-end header-icon-right" href="{% url 'settingsCache' cache_name %}"><span class="material-symbols-outlined f-s-19px m-r-4">settings</span><span>{% trans 'Settings' %}</span></a>
+    </nav>
+</header>
+
+<div class="container">
+    <!-- Welcome Section -->
+    <div class="header m-b-1rem">
+        <div>
+            <h1>{{ cache_data.display_name }}</h1>
+            {% if cache_data.description %}
+                <p class="text-light">{{ cache_data.description }}</p>
+            {% else %}
+                <p class="text-light">{% trans 'Cache service for performance optimization' %}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Quick Stats -->
+    {% comment %}
+    Placeholder stats - commented out until real data is available from API
+    <div class="dashboard-stats m-b-2rem">
+        <div class="stat-card">
+            <div class="stat-icon">
+                <span class="material-symbols-outlined">trending_up</span>
+            </div>
+            <div class="stat-content">
+                <h3>{{ cache_stats.hit_rate }}%</h3>
+                <p>{% trans 'Hit Rate' %}</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">
+                <span class="material-symbols-outlined">storage</span>
+            </div>
+            <div class="stat-content">
+                <h3>{{ cache_stats.storage_used|default:"N/A" }}</h3>
+                <p>{% trans 'Storage Used' %}</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">
+                <span class="material-symbols-outlined">speed</span>
+            </div>
+            <div class="stat-content">
+                <h3>{{ cache_stats.avg_response_time }}</h3>
+                <p>{% trans 'Avg Response Time' %}</p>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">
+                <span class="material-symbols-outlined">schedule</span>
+            </div>
+            <div class="stat-content">
+                <h3>{{ cache_stats.uptime }}</h3>
+                <p>{% trans 'Uptime' %}</p>
+            </div>
+        </div>
+    </div>
+    {% endcomment %}
+
+    <div class="dashboard-grid">
+
+        <!-- Performance Metrics -->
+        {% comment %}
+        Placeholder performance metrics - commented out until real data is available from API
+        <div class="dashboard-section bordered-section">
+            <div class="section-header">
+                <h2>{% trans 'Performance Metrics' %}</h2>
+            </div>
+            <div class="section-content">
+                <div class="workflow-item dashboard-item">
+                    <div class="full-width">
+                        <div class="item-header">
+                            <span class="material-symbols-outlined item-icon">analytics</span>
+                            <span class="workflow-title">{% trans 'Request Statistics' %}</span>
+                        </div>
+                        <div class="item-meta">
+                            <span class="flex-c m-r-2rem">
+                                <span class="material-symbols-outlined m-r-3">check_circle</span>
+                                <span class="text-light-n-s">{{ cache_stats.cache_hits|floatformat:0 }} hits</span>
+                            </span>
+                            <span class="flex-c m-r-2rem">
+                                <span class="material-symbols-outlined m-r-3">cancel</span>
+                                <span class="text-light-n-s">{{ cache_stats.cache_misses|floatformat:0 }} misses</span>
+                            </span>
+                            <span class="flex-c">
+                                <span class="material-symbols-outlined m-r-3">query_stats</span>
+                                <span class="text-light-n-s">{{ cache_stats.total_requests|floatformat:0 }} total</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="workflow-item dashboard-item">
+                    <div class="full-width">
+                        <div class="item-header">
+                            <span class="material-symbols-outlined item-icon">priority_high</span>
+                            <span class="workflow-title">{% trans 'Cache Priority' %}</span>
+                        </div>
+                        <p class="text-light">Priority Level: {{ cache_data.priority|default:"Normal" }}</p>
+                        <div class="item-meta">
+                            <span class="flex-c">
+                                <span class="material-symbols-outlined m-r-3">
+                                    {% if cache_data.status == 'active' %}
+                                        check_circle
+                                    {% else %}
+                                        radio_button_unchecked
+                                    {% endif %}
+                                </span>
+                                <span class="text-light-n-s">Status: {{ cache_data.status|title|default:"Inactive" }}</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endcomment %}
+
+        <!-- Cache Information -->
+        <div class="dashboard-section bordered-section">
+            <div class="section-header">
+                <h2>{% trans 'Cache Information' %}</h2>
+            </div>
+            <div class="section-content">
+                <div class="workflow-item dashboard-item">
+                    <div class="full-width">
+                        <div class="item-header">
+                            <span class="material-symbols-outlined item-icon">info</span>
+                            <span class="workflow-title">{{ cache_data.name }}</span>
+                        </div>
+                        <p class="text-light">{{ cache_data.description|default:"No description available"|truncatechars:80 }}</p>
+                        <div class="item-meta">
+                            <span class="flex-c">
+                                <span class="material-symbols-outlined m-r-3">hub</span>
+                                <span class="text-light-n-s">
+                                    Cache System
+                                </span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+{% csrf_token %}
+
+<script>
+    const token = "{{ request.user.session }}";
+    window.baseUrl = window.baseUrl || window.location.origin;
+</script>
+
+<script>
+async function toggleCache(cacheName, activate) {
+    try {
+        const endpoint = activate ? 'activate' : 'deactivate';
+        const method = activate ? 'POST' : 'DELETE';
+        
+        const response = await fetch(`/api/caches/${cacheName}/${endpoint}`, {
+            method: method,
+            credentials: 'include',
+            withCredentials: true,
+            mode: 'cors',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/jsonstream',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            const error = await response.text();
+            alert(`Failed to ${activate ? 'activate' : 'deactivate'} cache: ` + error);
+        }
+    } catch (error) {
+        console.error(`Error ${activate ? 'activating' : 'deactivating'} cache:`, error);
+        alert(`Error ${activate ? 'activating' : 'deactivating'} cache: ` + error.message);
+    }
+}
+
+async function clearCache(cacheName) {
+    if (!confirm('{% trans "Are you sure you want to clear all cached data? This action cannot be undone." %}')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/caches/${cacheName}/clear`, {
+            method: 'POST',
+            credentials: 'include',
+            withCredentials: true,
+            mode: 'cors',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/jsonstream',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        });
+        
+        if (response.ok) {
+            alert('Cache cleared successfully');
+            location.reload();
+        } else {
+            const error = await response.text();
+            alert('Failed to clear cache: ' + error);
+        }
+    } catch (error) {
+        console.error('Error clearing cache:', error);
+        alert('Error clearing cache: ' + error.message);
+    }
+}
+
+async function refreshStats(cacheName) {
+    try {
+        const response = await fetch(`/api/caches/${cacheName}/stats`, {
+            method: 'GET',
+            credentials: 'include',
+            withCredentials: true,
+            mode: 'cors',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/jsonstream',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            }
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            const error = await response.text();
+            alert('Failed to refresh stats: ' + error);
+        }
+    } catch (error) {
+        console.error('Error refreshing stats:', error);
+        alert('Error refreshing stats: ' + error.message);
+    }
+}
+</script>
+
+<script src="{% static 'dashboard/js/cache_detail.js' %}"></script>
+
+{% endblock %}

@@ -1,0 +1,54 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.loading-spinner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-xl;
+}
+
+.spinner {
+  border: 3px solid $color-tertiary;
+  border-top: 3px solid $text-primary;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.loading-spinner[data-size='small'] .spinner {
+  width: 24px;
+  height: 24px;
+  border-width: 2px;
+}
+
+.loading-spinner[data-size='medium'] .spinner {
+  width: 40px;
+  height: 40px;
+}
+
+.loading-spinner[data-size='large'] .spinner {
+  width: 64px;
+  height: 64px;
+  border-width: 4px;
+}
+
+.loading-message {
+  margin-top: $spacing-md;
+  color: $text-secondary;
+  font-size: $font-size-sm;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}

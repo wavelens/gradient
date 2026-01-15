@@ -1,0 +1,43 @@
+<!--
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ -->
+
+{% load i18n %}
+{% load static %}
+
+{% if org_id %}
+<header class="m-t--1rem">
+    <div class="logo-container header-workflow">
+        <img src="{% static 'dashboard/images/pb2.png' %}"class="h-30 border-radius-5 vertical-align-bottom">
+
+        {% if project_id %}
+        <span><a class="header-link" href="{% url 'workflow' org_id %}">{{ org_id }}</a>/ <b>{{ project_id }}</b></span>
+        {% else %}
+        <span><b>{{ org_id }}</b></span>
+        {% endif %}
+    </div>
+    <nav role="navigation">
+        {% if project_id %}
+        <a class="nav-link flex-end" href="{% url 'projectDetail' org_id project_id %}">
+            <span class="material-symbols-outlined f-s-19px m-r-4">keyboard_command_key</span>
+            <span>{% trans 'Workflows' %}</span>
+        </a>
+        {% else %}
+        <a class="nav-link flex-end" href="{% url 'workflow' org_id %}">
+            <span class="material-symbols-outlined f-s-19px m-r-4">keyboard_command_key</span>
+            <span>{% trans 'Workflows' %}</span>
+        </a>
+        {% endif %}
+
+        {% if evaluation_id %}
+            <a class="nav-link flex-end" href="{% url 'log-eval' org_id evaluation_id %}"><span class="material-symbols-outlined f-s-19px m-r-4">vital_signs</span><span>{% trans 'Log' %}</span></a>
+            <a class="nav-link flex-end" href="{% url 'download-eval' org_id evaluation_id %}"><span class="material-symbols-outlined f-s-19px m-r-4">download</span><span>{% trans 'Download' %}</span></a>
+        {% endif %}
+        {% if link_url %}
+            <a class="nav-link flex-end header-icon-right" href="{{ link_url }}"><span class="material-symbols-outlined f-s-19px m-r-4">settings</span><span>{% trans 'Settings' %}</span></a>
+        {% endif %}
+    </nav>
+</header>
+{% endif %}

@@ -1,0 +1,42 @@
+<!--
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ -->
+
+ {% extends 'dashboard/index.html' %}
+
+ <head>
+    {% load static %}
+    {% load i18n %}
+</head>
+
+{% block title %}{% trans 'New Cache' %}{% endblock %}
+
+{% block content %}
+<div class="outer-form">
+    <div class="form-container">
+        <h2 class="form-header-label">{% trans 'New Cache' %}</h2>
+        <form method="post">
+            {% csrf_token %}
+            {% for field in form %}
+                {% if field.field.widget|default:"" == form.fields.remember_me.widget %}
+                    <div class="form-check">
+                        {{ field }}
+                        <label for="{{ field.id_for_label }}" class="form-check-label">{% trans field.label %}</label>
+                    </div>
+                {% else %}
+                    <div class="form-field">
+                        <label for="{{ field.id_for_label }}" {% if field.field.required %}class="required-label"{% endif %}>{% trans field.label %}</label>
+                        {{ field }}
+                        {% if field.errors %}
+                            <div class="error">{{ field.errors }}</div>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            {% endfor %}
+            <button type="submit" class="submit-btn">{% trans 'Create' %}</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
