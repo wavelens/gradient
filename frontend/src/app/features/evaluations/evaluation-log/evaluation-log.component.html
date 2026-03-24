@@ -1,0 +1,155 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+@if (loading()) {
+  <div class="full-loading">
+    <app-loading-spinner message="Loading evaluation..." />
+  </div>
+} @else if (!evaluation()) {
+  <div class="error-state">
+    <span class="material-symbols-outlined">error</span>
+    <h2>Evaluation not found</h2>
+  </div>
+} @else if (evaluation(); as eval) {
+  <div class="eval-layout">
+
+    <!-- ── Sidebar ──────────────────────────────────────────────── -->
+    <aside class="builds-sidebar">
+
+      <div class="sidebar-breadcrumb">
+        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgName }}</a>
+        <span class="breadcrumb-sep">/</span>
+        <span class="breadcrumb-cur">Evaluation</span>
+      </div>
+
+      <div class="overview-block">
+        <div class="eval-status-row">
+          <span class="eval-status-badge status-{{ eval.status.toLowerCase() }}">
+            <span class="dot"></span>
+            {{ eval.status }}
+          </span>
+          <span class="builds-count">{{ completedBuilds() }}/{{ builds().length }}</span>
+        </div>
+      </div>
+
+      <div class="builds-list-header">Builds</div>
+
+      @if (builds().length === 0) {
+        <div class="no-builds">No builds yet</div>
+      } @else {
+        <div class="builds-list">
+          @for (build of builds(); track build.id) {
+            <div
+              class="build-item status-{{ build.status.toLowerCase() }}"
+              [class.selected]="selectedBuildId() === build.id"
+              (click)="selectBuild(build)"
+              [title]="build.name"
+            >
+              <span class="build-dot status-{{ build.status.toLowerCase() }}"></span>
+              <span class="build-name">{{ buildDisplayName(build.name) }}</span>
+              <a
+                class="graph-link"
+                [routerLink]="['/organization', orgName, 'graph', build.id]"
+                [queryParams]="{ evalId: evaluationId }"
+                (click)="$event.stopPropagation()"
+                title="View dependency graph"
+              >
+                <span class="material-symbols-outlined">account_tree</span>
+              </a>
+            </div>
+          }
+        </div>
+      }
+    </aside>
+
+    <!-- ── Main ─────────────────────────────────────────────────── -->
+    <main class="log-main">
+
+      <!-- Info bar -->
+      <div class="info-bar">
+        <div class="info-bar-left">
+          <div class="info-metric">
+            <span class="status-badge status-{{ eval.status.toLowerCase() }}">{{ eval.status }}</span>
+          </div>
+          <div class="info-metric">
+            <span class="metric-label">Duration</span>
+            <span class="metric-value">{{ duration() }}</span>
+          </div>
+          <div class="info-metric">
+            <span class="metric-label">Triggered</span>
+            <span class="metric-value">{{ eval.created_at | date: 'MMM d, HH:mm' }}</span>
+          </div>
+          <div class="info-metric">
+            <span class="metric-label">Commit</span>
+            <code class="commit-hash">{{ (eval.commit || '').slice(0, 8) }}</code>
+          </div>
+          @if (eval.previous || eval.next) {
+            <div class="info-metric nav-btns">
+              @if (eval.previous) {
+                <button pButton icon="pi pi-arrow-left" severity="secondary" size="small" (click)="navigateToEvaluation(eval.previous!)"></button>
+              }
+              @if (eval.next) {
+                <button pButton icon="pi pi-arrow-right" severity="secondary" size="small" (click)="navigateToEvaluation(eval.next!)"></button>
+              }
+            </div>
+          }
+        </div>
+        <div class="info-bar-right">
+          @if (isRunning()) {
+            <button pButton label="Abort" icon="pi pi-times" severity="danger" size="small"
+              (click)="abortEvaluation()" [loading]="aborting()" [disabled]="aborting()"></button>
+          }
+        </div>
+      </div>
+
+      <!-- Error banner -->
+      @if (eval.error) {
+        <div class="error-banner">
+          <span class="material-symbols-outlined">error</span>
+          <div>
+            <strong>Evaluation failed</strong>
+            <pre class="error-text">{{ eval.error }}</pre>
+          </div>
+        </div>
+      }
+
+      <!-- Log area -->
+      <div class="log-area">
+        @if (!selectedBuildId()) {
+          <div class="select-build-hint">
+            <span class="material-symbols-outlined hint-icon">terminal</span>
+            <span class="hint-text">Select a build to view its log</span>
+          </div>
+        } @else if (logLoading()) {
+          <app-loading-spinner message="Loading log..." />
+        } @else {
+          <div class="log-container-wrapper">
+            <div class="log-build-header">
+              <code class="log-build-path">{{ selectedBuild()?.name }}</code>
+              <span class="status-badge status-{{ selectedBuild()?.status?.toLowerCase() }}">{{ selectedBuild()?.status }}</span>
+            </div>
+            <div class="log-container" #logContainer (scroll)="onLogScroll($event)">
+              @if (logHtml().toString()) {
+                <pre class="log-output" [innerHTML]="logHtml()"></pre>
+              } @else {
+                <div class="no-log-hint">
+                  <span class="material-symbols-outlined">article</span>
+                  <span>No log available</span>
+                </div>
+              }
+            </div>
+            @if (showScrollBtn()) {
+              <button class="scroll-btn" (click)="scrollToBottom()" title="Scroll to bottom">
+                <span class="material-symbols-outlined">keyboard_arrow_down</span>
+              </button>
+            }
+          </div>
+        }
+      </div>
+
+    </main>
+  </div>
+}

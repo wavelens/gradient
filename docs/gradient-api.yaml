@@ -2,1754 +2,2813 @@ openapi: 3.1.1
 info:
   title: Gradient API
   description: |-
-    Gradient is a web-based Nix-based Continuous Integration (CI) system that provides
-    infrastructure-as-code management for build environments.
+    Gradient is a Nix-based Continuous Integration system. It evaluates Nix flakes,
+    schedules derivation builds across remote machines, and exposes build artefacts
+    through an integrated binary cache.
 
     ## Authentication
-    Gradient supports multiple authentication methods:
-    - **JWT Tokens**: Obtained via `/auth/basic/login` for session-based access
-    - **API Keys**: Generated via `/user/keys` with GRAD prefix for programmatic access
-    - **OAuth2/OIDC**: Enterprise authentication integration
 
-    ## Getting Started
-    1. Register a user: `POST /auth/basic/register`
-    2. Login: `POST /auth/basic/login`
-    3. Create organization: `PUT /orgs`
-    4. Add projects and servers to your organization
-    5. Start building with Nix!
+    Most endpoints require a bearer token. Two token types are accepted:
+
+    | Type | Format | How to obtain |
+    |---|---|---|
+    | JWT | `Bearer <token>` | `POST /auth/basic/login` or OIDC flow |
+    | API Key | `Bearer GRAD<key>` | `POST /user/keys` |
+
+    Pass the token in the `Authorization` header:
+    ```
+    Authorization: Bearer eyJhbGci...
+    ```
+
+    ## Common Response Envelope
+
+    Every JSON response is wrapped in a standard envelope:
+    ```json
+    { "error": false, "message": <payload> }
+    ```
+    On errors `"error"` is `true` and `"message"` contains the error description.
+
+    ## Nix Binary Cache
+
+    The integrated Nix binary cache lives outside `/api/v1`. Configure Nix with:
+    ```
+    substituters = https://gradient.example.com/cache/mycache
+    trusted-public-keys = gradient.example.com-mycache:...
+    ```
+    The public key is returned by `GET /api/v1/caches/{cache}/key`.
 
     ## State Management
-    Gradient supports declarative infrastructure management through Nix configuration,
-    allowing you to define users, organizations, projects, servers, and caches as code.
 
-    Some useful links:
-    - [The Gradient repository](https://github.com/wavelens/gradient)
+    Objects whose `managed` field is `true` are controlled by the NixOS module
+    configuration and cannot be mutated through the API.
   contact:
     email: info@wavelens.io
   license:
-    name: AGPL-3.0
+    name: AGPL-3.0-only
     url: https://www.gnu.org/licenses/agpl-3.0.en.html
   version: 0.4.0
+
 externalDocs:
-  description: The Gradient Options-Search
-  url: https://wavelens.github.io/gradient-search
+  description: Gradient documentation
+  url: https://wavelens.github.io/gradient
+
 servers:
   - url: http://127.0.0.1:3000/api/v1
     description: Local development server
   - url: https://gradient.example.com/api/v1
     description: Production server
+
 tags:
   - name: general
-    description: general operations
+    description: Health check and server configuration
   - name: auth
-    description: authorization and registration
+    description: Authentication — login, register, OAuth/OIDC
   - name: user
-    description: operations about logged-in user
+    description: Current user profile, API keys, and settings
   - name: orgs
-    description: create and modify organizations
+    description: Organization management, members, SSH keys, cache subscriptions
   - name: projects
-    description: create and modify projects
-  - name: servers
-    description: build server management
-  - name: caches
-    description: Nix cache management
-  - name: builds
-    description: build operations and artifacts
+    description: Project management and evaluation triggers
   - name: evals
-    description: evaluation operations
+    description: Evaluation details, status, and log streaming
+  - name: builds
+    description: Build details, logs, artefact downloads, and dependency graph
+  - name: servers
+    description: Remote Nix build server management
+  - name: caches
+    description: Binary cache management
   - name: commits
-    description: commit information
+    description: Commit records
+  - name: nix-cache
+    description: Nix binary cache protocol endpoints (outside /api/v1)
+
 security:
-  - token: []
-  - api_key: []
-  - oauth: []
+  - bearerAuth: []
+
 paths:
+
+  # ── General ──────────────────────────────────────────────────────────────────
+
   /health:
     get:
-      tags:
-        - general
-      summary: Health Check
-      description: Check if the API is running
+      tags: [general]
+      summary: Health check
+      description: Returns `200 ALIVE` when the server is running. Does not require authentication.
+      security: []
+      operationId: getHealth
       responses:
         '200':
-          description: Successful
+          description: Server is alive
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "200 ALIVE"
+
+  /config:
+    get:
+      tags: [general]
+      summary: Server configuration
+      description: Returns feature flags for the frontend (OIDC enabled, registration disabled, email verification).
+      security: []
+      operationId: getConfig
+      responses:
+        '200':
+          description: Server configuration
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ServerConfig'
+              example:
+                error: false
+                message:
+                  oidc_enabled: false
+                  registration_disabled: false
+                  email_verification_enabled: false
+
+  # ── Auth ─────────────────────────────────────────────────────────────────────
+
+  /auth/basic/register:
+    post:
+      tags: [auth]
+      summary: Register a new user
+      description: |-
+        Creates a new user account. Fails if registration is disabled (OIDC-only mode)
+        or if the username/email is already taken. When email verification is enabled,
+        a verification email is sent and login is blocked until the address is confirmed.
+      security: []
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeUserRequest'
+            example:
+              username: alice
+              name: Alice Example
+              email: alice@example.com
+              password: "correct-horse-battery-staple"
+      responses:
+        '200':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "User 3fa85f64-5717-4562-b3fc-2c963f66afa6 created successfully."
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
   /auth/basic/login:
     post:
-      tags:
-        - auth
-      summary: Login with Credentials
+      tags: [auth]
+      summary: Login with username/password
       description: |-
-        Login with Username / E-Mail and Password. Returns JWT-Token.
-
-        If `remember_me` is true, the JWT token will have an extended expiry time of 30 days.
-        If `remember_me` is false or omitted, the JWT token will expire in 24 hours.
+        Validates credentials and returns a signed JWT. Pass the token as
+        `Authorization: Bearer <token>` on subsequent requests.
+        `loginname` accepts either the username or the email address.
+        Set `remember_me: true` for a long-lived token.
+      security: []
+      operationId: loginUser
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/MakeLoginRequest'
-        required: true
+            example:
+              loginname: alice
+              password: "correct-horse-battery-staple"
+              remember_me: false
       responses:
         '200':
-          description: Successful
+          description: JWT token
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
-          description: Please login via OAuth / Invalid Credentials
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /auth/basic/register:
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/check-username:
     post:
-      tags:
-        - auth
-      summary: Register a new User
-      description: Register a new User
+      tags: [auth]
+      summary: Check username availability
+      description: Returns `error: false` if the username is valid and not taken, `error: true` otherwise (non-2xx status is not used — always inspect the `error` field).
+      security: []
+      operationId: checkUsername
       requestBody:
+        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MakeUserRequest'
-        required: true
+              $ref: '#/components/schemas/CheckUsernameRequest'
       responses:
         '200':
-          description: Successful
+          description: Availability result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '400':
-          description: Registration is disabled / Invalid username / Invalid email / Invalid password
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '409':
-          description: User already exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /auth/oauth/authorize:
-    get:
-      tags:
-        - auth
-      summary: Redirect URL for OAuth2
-      description: This endpoint is the redirect Url for the OAuth provider
-      parameters:
-        - name: code
-          in: query
-          required: true
-          schema:
-            type: string
-    post:
-      tags:
-        - auth
-      summary: Login with OAuth2
-      description: Login with OAuth2. Returns JWT-Token
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '400':
-          description: OAuth login is disabled
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '401':
-          description: OAuth login failed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /auth/logout:
-    post:
-      tags:
-        - auth
-      summary: Logout
-      description: Invalidates the used token
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MakeUserRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
+              examples:
+                available:
+                  value: {error: false, message: "Username is available"}
+                taken:
+                  value: {error: true, message: "Username is already taken"}
+
   /auth/verify-email:
     get:
-      tags:
-        - auth
-      summary: Verify Email Address
-      description: Verify user email address using verification token
+      tags: [auth]
+      summary: Verify email address
+      description: Consumes the one-time token sent in the verification email. Only available when `email_verification_enabled` is true.
+      security: []
+      operationId: verifyEmail
       parameters:
         - name: token
           in: query
           required: true
           schema:
             type: string
-            description: Email verification token sent to user's email
+          description: One-time verification token from the email
       responses:
         '200':
-          description: Email verified successfully
+          description: Email verified
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
         '400':
-          description: Email verification disabled / Invalid or expired token
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
+          $ref: '#/components/responses/BadRequest'
+
   /auth/resend-verification:
     post:
-      tags:
-        - auth
-      summary: Resend Email Verification
-      description: Resend email verification token to user
+      tags: [auth]
+      summary: Resend verification email
+      description: Issues a fresh verification token and sends a new email. Only available when email verification is enabled.
+      security: []
+      operationId: resendVerification
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/CheckUsernameRequest'
-        required: true
       responses:
         '200':
-          description: Verification email sent successfully
+          description: Email sent
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
         '400':
-          description: Email verification disabled / Email already verified / SMTP error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
+          $ref: '#/components/responses/BadRequest'
         '404':
-          description: User not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /auth/check-username:
-    post:
-      tags:
-        - auth
-      summary: Check Username Availability
-      description: Check if a username is available and valid for registration
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CheckUsernameRequest'
-        required: true
+          $ref: '#/components/responses/NotFound'
+
+  /auth/oauth/authorize:
+    get:
+      tags: [auth]
+      summary: OAuth2 callback (GET)
+      description: Handles the authorization code returned by the OAuth2/OIDC provider. Exchanges the code for a JWT token.
+      security: []
+      operationId: oauthAuthorizeGet
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Authorization code from the OAuth2 provider
       responses:
         '200':
-          description: Username check result
+          description: JWT token
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [auth]
+      summary: Get OAuth2 authorization URL
+      description: Returns the authorization URL to redirect the user to for OIDC login. Requires OIDC to be enabled.
+      security: []
+      operationId: oauthAuthorizePost
+      responses:
+        '200':
+          description: Authorization URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "https://accounts.example.com/oauth2/auth?client_id=..."
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /auth/oidc/login:
+    get:
+      tags: [auth]
+      summary: OIDC login redirect
+      description: Redirects the browser to the OIDC provider's authorization endpoint (HTTP 302).
+      security: []
+      operationId: oidcLogin
+      responses:
+        '302':
+          description: Redirect to OIDC provider
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+
+  /auth/oidc/callback:
+    get:
+      tags: [auth]
+      summary: OIDC callback
+      description: |-
+        Handles the OIDC provider redirect. Exchanges the authorization code for a JWT
+        and redirects the browser to `/account/oidc-callback?token=<jwt>`.
+      security: []
+      operationId: oidcCallback
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to frontend with token
+          headers:
+            Location:
+              schema:
+                type: string
+                example: "/account/oidc-callback?token=eyJhbGci..."
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Logout
+      description: Invalidates the current session (no-op for stateless JWTs; present for API completeness).
+      operationId: logout
+      responses:
+        '200':
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "Logout Successfully"
+
+  # ── User ─────────────────────────────────────────────────────────────────────
+
   /user:
     get:
-      tags:
-        - user
-      summary: Get user info
-      description: Get basic information about logged-in user
+      tags: [user]
+      summary: Get current user
+      description: Returns the id, username, display name, and email of the authenticated user.
+      operationId: getUser
       responses:
         '200':
-          description: Successful
+          description: User info
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserInfoResponse'
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/UserInfoResponse'
+              example:
+                error: false
+                message:
+                  id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                  username: alice
+                  name: Alice Example
+                  email: alice@example.com
+        '401':
+          $ref: '#/components/responses/Unauthorized'
     delete:
-      tags:
-        - user
-      summary: Delete user
-      description: Delete logged-in user
+      tags: [user]
+      summary: Delete current user
+      description: Permanently deletes the authenticated user and all associated data.
+      operationId: deleteUser
       responses:
         '200':
-          description: Successful
+          description: User deleted
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /user/keys:
     get:
-      tags:
-        - user
-      summary: Get list of API Keys
-      description: Get list of API Keys of logged-in user
+      tags: [user]
+      summary: List API keys
+      description: Returns all API keys belonging to the authenticated user.
+      operationId: getUserKeys
       responses:
         '200':
-          description: Successful
+          description: List of API keys
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListResponse'
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
     post:
-      tags:
-        - user
-      summary: Create API Key
-      description: Create an API Key
+      tags: [user]
+      summary: Create API key
+      description: |-
+        Creates a new API key. The full key (prefixed with `GRAD`) is returned once —
+        it cannot be retrieved again. Use it as `Authorization: Bearer GRAD<key>`.
+      operationId: createUserKey
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/ApiKeyRequest'
-        required: true
       responses:
         '200':
-          description: Successful
+          description: New API key
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "GRADabcdef1234567890abcdef1234567890"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '409':
-          description: API-Key Name already exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
+          $ref: '#/components/responses/Conflict'
     delete:
-      tags:
-        - user
-      summary: Delete API Key
-      description: Delete an API Key
+      tags: [user]
+      summary: Delete API key
+      description: Deletes the API key with the given name.
+      operationId: deleteUserKey
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/ApiKeyRequest'
-        required: true
       responses:
         '200':
-          description: Successful
+          description: Key deleted
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '400':
-          description: API-Key not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /user/settings:
     get:
-      tags:
-        - user
+      tags: [user]
       summary: Get user settings
-      description: Get user settings
+      description: Returns the username, display name, and email of the current user.
+      operationId: getUserSettings
       responses:
         '200':
-          description: Successful
+          description: User settings
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GetUserSettingsResponse'
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/GetUserSettingsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
     patch:
-      tags:
-        - user
+      tags: [user]
       summary: Update user settings
-      description: Update user settings
+      description: |-
+        Updates one or more user profile fields. Only fields that are present in the
+        request body are changed. Managed users (created via NixOS config) cannot be
+        modified through the API.
+      operationId: patchUserSettings
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/PatchUserSettingsRequest'
-        required: true
       responses:
         '200':
-          description: Successful
+          description: Settings updated
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  # ── Organizations ─────────────────────────────────────────────────────────────
+
   /orgs:
     get:
-      tags:
-        - orgs
-      summary: Get list of organizations
-      description: Get list of organizations logged-in user owns
+      tags: [orgs]
+      summary: List organizations
+      description: Returns all organizations owned by the current user.
+      operationId: listOrgs
       responses:
         '200':
-          description: Successful
+          description: Organization list
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListResponse'
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
     put:
-      tags:
-        - orgs
+      tags: [orgs]
       summary: Create organization
-      description: Create new organization
+      description: Creates a new organization owned by the current user.
+      operationId: createOrg
       requestBody:
+        required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/MakeOrganizationRequest'
-        required: true
+            example:
+              name: my-org
+              display_name: My Organization
       responses:
         '200':
-          description: Successful
+          description: Organization UUID
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ListResponse'
-        '409':
-          description: Organization Name already exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /orgs/{organization}:
-    get:
-      tags:
-        - orgs
-      summary: Get organization info
-      description: Get details about the organization by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationResponse'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    patch:
-      tags:
-        - orgs
-      summary: Update organization
-      description: Update organization by name
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MakeOrganizationRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationResponse'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    delete:
-      tags:
-        - orgs
-      summary: Delete organization
-      description: Delete organization by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /orgs/{organization}/users:
-    get:
-      tags:
-        - orgs
-      summary: Get list of users
-      description: Get list of users of the organization by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListResponse'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    post:
-      tags:
-        - orgs
-      summary: Add user
-      description: Add user to the organization by name
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AddUserRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '409':
-          description: User already in organization
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-      patch:
-        tags:
-          - orgs
-        summary: Update user
-        description: Update user in the organization by name
-        requestBody:
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RemoveUserRequest'
-          required: true
-        responses:
-          '200':
-            description: Successful
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/BasicResponse'
-          '404':
-            description: Organization not found
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/BasicResponse'
-          '409':
-            description: User not in organization
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/BasicResponse'
-    delete:
-      tags:
-        - orgs
-      summary: Remove user
-      description: Remove user from the organization by name
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AddUserRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '409':
-          description: User not in organization
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /orgs/{organization}/ssh:
-    get:
-      tags:
-        - orgs
-      summary: Get organization SSH Public Key
-      description: Get the SSH Public Key of the organization by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationResponse'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    post:
-      tags:
-        - orgs
-      summary: Reset organization SSH Public Key
-      description: Reset the SSH Public Key of the organization by name. Returns new SSH Public Key
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrganizationResponse'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /orgs/{organization}/subscribe:
-    get:
-      tags:
-        - orgs
-      summary: Get list of caches
-      description: Get list of caches the organization is subscribed to by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListResponse'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /orgs/{organization}/subscribe/{cache}:
-    post:
-      tags:
-        - orgs
-      summary: Subscribe to Cache
-      description: Subscribe the organization to the cache by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Organization or Cache not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '409':
-          description: Organization already subscribed to Cache
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    delete:
-      tags:
-        - orgs
-      summary: Unsubscribe from Cache
-      description: Unsubscribe the organization from the cache by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Organization or Cache not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '409':
-          description: Organization not subscribed to Cache
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /projects/{organization}:
-    get:
-      tags:
-        - projects
-      summary: Get list of projects
-      description: Get list of projects of the organization by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListResponse'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    put:
-      tags:
-        - projects
-      summary: Create project
-      description: Create new project in the organization by name
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MakeProjectRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListResponse'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '409':
-          description: Project Name already exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /projects/{organization}/{project}:
-    get:
-      tags:
-        - projects
-      summary: Get project info
-      description: Get details about the project by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProjectResponse'
-        '404':
-          description: Project not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    patch:
-      tags:
-        - projects
-      summary: Update project
-      description: Update project by name
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MakeProjectRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProjectResponse'
-        '404':
-          description: Project not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    delete:
-      tags:
-        - projects
-      summary: Delete project
-      description: Delete project by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Project not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /projects/{organization}/{project}/active:
-    post:
-      tags:
-        - projects
-      summary: Enable Project
-      description: Enable the Project by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Project not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    delete:
-      tags:
-        - projects
-      summary: Disable Project
-      description: Disable the Project by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Project not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /projects/{organization}/{project}/check-repository:
-    post:
-      tags:
-        - projects
-      summary: Check Repository
-      description: Check if the Repository of the project is available by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Project not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /projects/{organization}/{project}/evaluate:
-    post:
-      tags:
-        - projects
-      summary: Evaluate Project
-      description: Evaluate the project by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
         '400':
-          description: Evaluation already in progress
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Project not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /servers/{organization}:
-    get:
-      tags:
-        - servers
-      summary: Get list of servers
-      description: Get list of servers of the organization by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListResponse'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    put:
-      tags:
-        - servers
-      summary: Create server
-      description: Create new server in the organization by name
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MakeServerRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListResponse'
-        '404':
-          description: Organization not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '409':
-          description: Server Name already exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /servers/{organization}/{server}:
+          $ref: '#/components/responses/Conflict'
+
+  /orgs/{organization}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
     get:
-      tags:
-        - servers
-      summary: Get server info
-      description: Get details about the server by name
+      tags: [orgs]
+      summary: Get organization
+      operationId: getOrg
       responses:
         '200':
-          description: Successful
+          description: Organization details
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ServerResponse'
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Organization'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
-          description: Server not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
+          $ref: '#/components/responses/NotFound'
     patch:
-      tags:
-        - servers
-      summary: Update server
-      description: Update server by name
+      tags: [orgs]
+      summary: Update organization
+      description: Updates one or more organization fields. Managed organizations cannot be edited via the API.
+      operationId: patchOrg
       requestBody:
+        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MakeServerRequest'
-        required: true
+              $ref: '#/components/schemas/PatchOrganizationRequest'
       responses:
         '200':
-          description: Successful
+          description: Updated
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ServerResponse'
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Server not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    delete:
-      tags:
-        - servers
-      summary: Delete server
-      description: Delete server by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Server not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /servers/{organization}/{server}/active:
-    post:
-      tags:
-        - servers
-      summary: Enable Server
-      description: Enable the Server by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Server not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    delete:
-      tags:
-        - servers
-      summary: Disable Server
-      description: Disable the Server by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Server not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /servers/{organization}/{server}/check-connection:
-    post:
-      tags:
-        - servers
-      summary: Check Connection
-      description: Check if the Connection to the Server is available by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Server not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '504':
-          description: Server not reachable
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /caches:
-    get:
-      tags:
-        - caches
-      summary: List caches
-      description: List all cache entries
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListResponse'
-    put:
-      tags:
-        - caches
-      summary: Create cache entry
-      description: Create a new cache entry
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MakeCacheRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
+          $ref: '#/components/responses/NotFound'
         '409':
-          description: Cache Name already exists
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /caches/{cache}:
-    get:
-      tags:
-        - caches
-      summary: Get cache info
-      description: Get details about the cache entry by id
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [orgs]
+      summary: Delete organization
+      description: Permanently deletes the organization and all its resources.
+      operationId: deleteOrg
       responses:
         '200':
-          description: Successful
+          description: Deleted
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CacheResponse'
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Cache entry not found
+          $ref: '#/components/responses/NotFound'
+
+  /orgs/{organization}/users:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+    get:
+      tags: [orgs]
+      summary: List organization members
+      operationId: listOrgUsers
+      responses:
+        '200':
+          description: Member list
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
-    patch:
-      tags:
-        - caches
-      summary: Update cache entry
-      description: Update cache entry by id
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/StringListItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [orgs]
+      summary: Add member
+      description: Adds a user to the organization by username.
+      operationId: addOrgUser
       requestBody:
+        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MakeCacheRequest'
+              $ref: '#/components/schemas/AddUserRequest'
+      responses:
+        '200':
+          description: Member added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    patch:
+      tags: [orgs]
+      summary: Update member role
+      description: Updates the role or permissions of an existing organization member.
+      operationId: patchOrgUser
+      requestBody:
         required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddUserRequest'
       responses:
         '200':
-          description: Successful
+          description: Updated
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
-          description: Cache entry not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
+          $ref: '#/components/responses/NotFound'
     delete:
-      tags:
-        - caches
-      summary: Delete cache entry
-      description: Delete cache entry by id
+      tags: [orgs]
+      summary: Remove member
+      description: Removes a user from the organization.
+      operationId: removeOrgUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemoveUserRequest'
       responses:
         '200':
-          description: Successful
+          description: Member removed
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
-          description: Cache entry not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /cache/{cache}/active:
-    post:
-      tags:
-        - caches
-      summary: Enable Cache
-      description: Enable the Cache by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Project not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    delete:
-      tags:
-        - caches
-      summary: Disable Cache
-      description: Disable the Cache by name
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-        '404':
-          description: Project not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /cache/{cache}/key:
+          $ref: '#/components/responses/NotFound'
+
+  /orgs/{organization}/ssh:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
     get:
-      tags:
-        - caches
-      summary: Get cache public key
-      description: Get the public key from cache
+      tags: [orgs]
+      summary: Get SSH public key
+      description: |-
+        Returns the SSH public key for the organization. This key must be added to
+        each remote build server's `authorized_keys` to allow Gradient to connect.
+      operationId: getOrgSsh
       responses:
         '200':
-          description: Successful
+          description: SSH public key
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [orgs]
+      summary: Regenerate SSH key pair
+      description: Generates a new Ed25519 key pair for the organization. The previous key will stop working on remote servers immediately.
+      operationId: postOrgSsh
+      responses:
+        '200':
+          description: New SSH public key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orgs/{organization}/subscribe:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+    get:
+      tags: [orgs]
+      summary: List cache subscriptions
+      description: Returns the binary caches this organization currently uses as substituters.
+      operationId: listOrgSubscriptions
+      responses:
+        '200':
+          description: Subscribed caches
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orgs/{organization}/subscribe/{cache}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/CacheSlug'
+    post:
+      tags: [orgs]
+      summary: Subscribe to cache
+      description: Adds a binary cache to the organization's list of substituters.
+      operationId: subscribeOrgToCache
+      responses:
+        '200':
+          description: Subscribed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [orgs]
+      summary: Unsubscribe from cache
+      description: Removes a binary cache from the organization's substituters.
+      operationId: unsubscribeOrgFromCache
+      responses:
+        '200':
+          description: Unsubscribed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Projects ─────────────────────────────────────────────────────────────────
+
+  /projects/{organization}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+    get:
+      tags: [projects]
+      summary: List projects
+      description: Returns all projects in the given organization.
+      operationId: listProjects
+      responses:
+        '200':
+          description: Project list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [projects]
+      summary: Create project
+      description: Creates a new project in the organization. `evaluation_wildcard` is a Nix attribute selector such as `packages.x86_64-linux` or `checks`.
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeProjectRequest'
+            example:
+              name: my-project
+              display_name: My Project
+              repository: "https://github.com/example/repo.git"
+              branch: main
+              evaluation_wildcard: "packages.x86_64-linux"
+      responses:
+        '200':
+          description: Project UUID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /projects/{organization}/{project}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    get:
+      tags: [projects]
+      summary: Get project
+      operationId: getProject
+      responses:
+        '200':
+          description: Project details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [projects]
+      summary: Update project
+      description: Updates one or more project fields.
+      operationId: patchProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchProjectRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [projects]
+      summary: Delete project
+      operationId: deleteProject
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/details:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    get:
+      tags: [projects]
+      summary: Get project details
+      description: Returns aggregated project data including the latest evaluation, recent evaluation history, and current entry points.
+      operationId: getProjectDetails
+      responses:
+        '200':
+          description: Project details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ProjectDetailsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/entry-points:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    get:
+      tags: [projects]
+      summary: List entry points
+      description: Returns the current root builds (entry points) for the project — the top-level derivations produced by the latest evaluation.
+      operationId: listProjectEntryPoints
+      responses:
+        '200':
+          description: Entry points
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/EntryPointSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/check-repository:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    post:
+      tags: [projects]
+      summary: Check repository accessibility
+      description: Tests whether Gradient can clone the project's repository using the organization's SSH key.
+      operationId: checkProjectRepository
+      responses:
+        '200':
+          description: Repository is accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/evaluate:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    post:
+      tags: [projects]
+      summary: Trigger evaluation
+      description: Queues a new evaluation for the project. Returns the new evaluation UUID.
+      operationId: triggerEvaluation
+      responses:
+        '200':
+          description: Evaluation UUID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/active:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    post:
+      tags: [projects]
+      summary: Enable project
+      description: Sets the project's active flag to true so it will be evaluated on new commits.
+      operationId: enableProject
+      responses:
+        '200':
+          description: Enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [projects]
+      summary: Disable project
+      description: Sets the project's active flag to false, pausing automatic evaluations.
+      operationId: disableProject
+      responses:
+        '200':
+          description: Disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Evaluations ──────────────────────────────────────────────────────────────
+
   /evals/{evaluation}:
+    parameters:
+      - $ref: '#/components/parameters/EvaluationId'
     get:
-      tags:
-        - evals
-      summary: Get evaluation info
-      description: Get details about the evaluation by id
+      tags: [evals]
+      summary: Get evaluation
+      description: Returns the evaluation record including status, commit, and timestamps.
+      operationId: getEvaluation
       responses:
         '200':
-          description: Successful
+          description: Evaluation
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EvaluationResponse'
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Evaluation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
-          description: Evaluation not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
+          $ref: '#/components/responses/NotFound'
     post:
-      tags:
-        - evals
-      summary: Abort evaluation
-      description: Abort the evaluation by id
+      tags: [evals]
+      summary: Evaluation action
+      description: |-
+        Performs an action on the evaluation. Currently the only supported action is
+        `"abort"`, which cancels all in-progress and queued builds.
+      operationId: postEvaluation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeEvaluationRequest'
+            example:
+              method: abort
       responses:
         '200':
-          description: Successful
+          description: Success
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BasicResponse'
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "Success"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
-          description: Evaluation not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
+          $ref: '#/components/responses/NotFound'
+
   /evals/{evaluation}/builds:
+    parameters:
+      - $ref: '#/components/parameters/EvaluationId'
     get:
-      tags:
-        - evals
-      summary: Get list of builds
-      description: Get list of builds of the evaluation by id with status information
+      tags: [evals]
+      summary: List evaluation builds
+      description: Returns all `.drv` builds associated with the evaluation, with their IDs, names, and statuses.
+      operationId: listEvaluationBuilds
       responses:
         '200':
-          description: Successful
+          description: Build list
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  error:
-                    type: boolean
-                    description: Whether this is an error or not
-                    example: false
-                  message:
-                    type: array
-                    description: List of builds with status information
-                    items:
-                      type: object
-                      properties:
-                        id:
-                          type: string
-                          format: uuid
-                          description: Build ID
-                        name:
-                          type: string
-                          description: Derivation path
-                        status:
-                          type: string
-                          enum: [Created, Queued, Building, Completed, Failed, Aborted]
-                          description: Build status
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/BuildItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
-          description: Evaluation not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-    connect:
-      tags:
-        - evals
-      summary: Get log stream of evaluation
-      description: Get the log stream of the evaluation by id
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/jsonstream:
-              $ref: '#/components/schemas/StreamResponse'
-        '404':
-          description: Evaluation not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /builds/{build}:
-    get:
-      tags:
-        - builds
-      summary: Get build info
-      description: Get details about the build by id
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BuildResponse'
-        '404':
-          description: Build not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /builds/{build}/log:
-    get:
-      tags:
-        - builds
-      summary: Get build logs
-      description: Get past logs for a specific build
-      parameters:
-        - name: build
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Build ID
-      responses:
-        '200':
-          description: Build logs retrieved successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: boolean
-                    example: false
-                  message:
-                    type: string
-                    description: Build log content
-        '404':
-          description: Build not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
+          $ref: '#/components/responses/NotFound'
     post:
-      tags:
-        - builds
-      summary: Stream build logs
-      description: Stream live logs for a specific build
-      parameters:
-        - name: build
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Build ID
+      tags: [evals]
+      summary: Stream evaluation logs
+      description: |-
+        Opens a streaming NDJSON response that emits log lines from all currently
+        building derivations. Each line is prefixed with the derivation name.
+        The stream terminates when all builds are no longer in the `Building` or
+        `Queued` state.
+      operationId: streamEvaluationLogs
       responses:
         '200':
-          description: Log stream
+          description: NDJSON log stream
           content:
-            application/jsonstream:
+            application/x-ndjson:
               schema:
                 type: string
-                description: Streaming log content
+                description: One log chunk per line, prefixed with `<name>> `
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
-          description: Build not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-  /commits/{commit}:
-    get:
-      tags:
-        - commits
-      summary: Get commit info
-      description: Get details about the commit by id
-      responses:
-        '200':
-          description: Successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CommitResponse'
-        '404':
-          description: Commit not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BasicResponse'
-components:
-  schemas:
-    BasicResponse:
-      type: object
-      properties:
-        error:
-          type: bool
-          description: Wheather this is an error or not
-          examples: [false]
-        message:
-          type: string
-          description: Response Message - usually uuid or token
-          examples: [important]
-    ListResponse:
-      type: object
-      properties:
-        error:
-          type: boolean
-          description: Wheather this is an error or not
-          examples: [false]
-        message:
-          type: list
-          description: Response Message containing a list of objects
-          examples: [[{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "name": MyObj}]]
-    OrganizationResponse:
-      type: object
-      properties:
-        error:
-          type: boolean
-          description: Wheather this is an error or not
-          examples: [false]
-        message:
-          type: list
-          description: Response Message containing all organization details
-          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "name": myorg, "display_name": MyOrg, "description": "My Test Org", "public_key": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDQ2 ...", "use_nix_store": true, "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
-    ProjectResponse:
-      type: object
-      properties:
-        error:
-          type: boolean
-          description: Wheather this is an error or not
-          examples: [false]
-        message:
-          type: list
-          description: Response Message containing all project details
-          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "organization": 9f7767ea-1757-48ba-93d1-5cda578b476c, "name": myproj, "active": true, "display_name": MyProj, "description": "My Test Proj", "repository": "https://github.com/wavelens/gradient", "evaluation_wildcard": "packages.*.gradient-cli", "last_evaluation": af7767ea-1757-48ba-93d1-5cda578b476d, "last_check_at": "2021-10-10T10:00:00Z", "force_evaluation": false, "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
-    ServerResponse:
-      type: object
-      properties:
-        error:
-          type: boolean
-          description: Wheather this is an error or not
-          examples: [false]
-        message:
-          type: list
-          description: Response Message containing all server details
-          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "organization": 9f7767ea-1757-48ba-93d1-5cda578b476c, "name": myserver, "active": true, "display_name": MyServer, "host": "127.0.0.1", "port": 22, "username": "builduser", "last_connection_at": "2021-10-10T10:00:00Z", "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
-    EvaluationResponse:
-      type: object
-      properties:
-        error:
-          type: boolean
-          description: Wheather this is an error or not
-          examples: [false]
-        message:
-          type: list
-          description: Response Message containing all evaluation details
-          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "project": 9f7767ea-1757-48ba-93d1-5cda578b476c, "repository": "https://github.com/wavelens/gradient", "commit": "af7767ea-1757-48ba-93d1-5cda578b476d", "wildcard": "packages.*.gradient-cli", "status": "failed", "previous": Null, "next": Null, "created_at": "2021-10-10T10:00:00Z", "error": "Command failed with status: ExitStatus(unix_wait_status(256)), stderr: error: cannot write modified lock file of flake"}]
-    BuildResponse:
-      type: object
-      properties:
-        error:
-          type: boolean
-          description: Wheather this is an error or not
-          examples: [false]
-        message:
-          type: object
-          description: Response Message containing all build details
-          properties:
-            id:
-              type: string
-              format: uuid
-              description: Build ID
-            evaluation:
-              type: string
-              format: uuid
-              description: Evaluation ID
-            status:
-              type: string
-              enum: [Created, Queued, Building, Completed, Failed, Aborted]
-              description: Build status
-            derivation_path:
-              type: string
-              description: Path to the Nix derivation
-            architecture:
-              type: string
-              description: Target architecture
-            server:
-              type: string
-              format: uuid
-              nullable: true
-              description: Server ID assigned to this build
-            output:
+          $ref: '#/components/responses/NotFound'
+
+  # ── Builds ───────────────────────────────────────────────────────────────────
+
+  /builds:
+    post:
+      tags: [builds]
+      summary: Submit direct build
+      description: |-
+        Submits a Nix derivation for building without a project. The request is a
+        `multipart/form-data` upload with the following fields:
+
+        | Field | Type | Description |
+        |---|---|---|
+        | `organization` | text | Organization slug |
+        | `derivation` | text | Nix attribute path or store path to build |
+        | `file:<name>` | file | One or more Nix expression files |
+
+        Returns the evaluation UUID that can be used to track progress.
+      operationId: submitDirectBuild
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
               type: object
-              description: Build output paths by output name
+              required: [organization, derivation]
+              properties:
+                organization:
+                  type: string
+                  description: Organization slug
+                derivation:
+                  type: string
+                  description: Nix derivation attribute path
               additionalProperties:
                 type: string
+                format: binary
+                description: Nix expression file (field name must start with `file:`)
+      responses:
+        '200':
+          description: Direct build started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
               example:
-                out: "/nix/store/abc123-package-name"
-            created_at:
-              type: string
-              format: date-time
-              description: Build creation timestamp
-            updated_at:
-              type: string
-              format: date-time
-              description: Build last update timestamp
+                error: false
+                message: "Direct build started with evaluation ID: 3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /builds/direct/recent:
+    get:
+      tags: [builds]
+      summary: List recent direct builds
+      description: Returns up to 20 most recent direct builds across all organizations owned by the current user.
+      operationId: getRecentDirectBuilds
+      responses:
+        '200':
+          description: Recent direct builds
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DirectBuildInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /builds/{build}:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+    get:
+      tags: [builds]
+      summary: Get build
+      description: Returns full build details including status, derivation path, architecture, assigned server, and output store paths.
+      operationId: getBuild
+      responses:
+        '200':
+          description: Build with outputs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/BuildWithOutputs'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /builds/{build}/log:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+    get:
+      tags: [builds]
+      summary: Get build log
+      description: Returns the complete build log as a single string. Empty string if no log is available yet.
+      operationId: getBuildLog
+      responses:
+        '200':
+          description: Build log
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [builds]
+      summary: Stream build log
+      description: |-
+        Opens a streaming NDJSON response that first emits the full existing log,
+        then incrementally streams new chunks as they arrive. The stream ends when
+        the build leaves the `Building` state.
+      operationId: streamBuildLog
+      responses:
+        '200':
+          description: NDJSON log stream
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /builds/{build}/graph:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+    get:
+      tags: [builds]
+      summary: Get dependency graph
+      description: |-
+        Returns the full transitive dependency graph rooted at the given build via BFS,
+        capped at 500 nodes. Each edge `source → target` means `source` must be built
+        before `target`.
+      operationId: getBuildGraph
+      responses:
+        '200':
+          description: Dependency graph
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/BuildGraph'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /builds/{build}/dependencies:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+    get:
+      tags: [builds]
+      summary: List direct dependencies
+      description: Returns only the immediate (one-hop) dependencies of the given build.
+      operationId: getBuildDependencies
+      responses:
+        '200':
+          description: Direct dependencies
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DependencyNode'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /builds/{build}/downloads:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+    get:
+      tags: [builds]
+      summary: List build artefacts
+      description: |-
+        Returns downloadable artefacts declared in the build's
+        `nix-support/hydra-build-products` file. Each entry has a file type,
+        filename, and Nix store path.
+      operationId: getBuildDownloads
+      responses:
+        '200':
+          description: Build artefacts
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/BuildProduct'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /builds/{build}/download/{filename}:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+      - name: filename
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Filename as returned by the `/downloads` endpoint
+    get:
+      tags: [builds]
+      summary: Download build artefact
+      description: Streams a build artefact file. The `Content-Type` and `Content-Disposition` headers are set based on the file extension.
+      operationId: downloadBuildArtefact
+      responses:
+        '200':
+          description: File contents
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Servers ──────────────────────────────────────────────────────────────────
+
+  /servers/{organization}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+    get:
+      tags: [servers]
+      summary: List servers
+      description: Returns all build servers registered in the organization.
+      operationId: listServers
+      responses:
+        '200':
+          description: Server list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [servers]
+      summary: Add server
+      description: Registers a new remote Nix build server with the organization.
+      operationId: createServer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeServerRequest'
+            example:
+              name: builder-1
+              display_name: Primary Builder
+              host: builder.example.com
+              port: 22
+              username: nix-ssh
+              architectures: [x86_64-linux]
+              features: [kvm, nixos-test]
+      responses:
+        '200':
+          description: Server UUID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /servers/{organization}/{server}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ServerSlug'
+    get:
+      tags: [servers]
+      summary: Get server
+      operationId: getServer
+      responses:
+        '200':
+          description: Server details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Server'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [servers]
+      summary: Update server
+      description: Updates one or more server fields. Managed servers cannot be edited via the API.
+      operationId: patchServer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchServerRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [servers]
+      summary: Delete server
+      description: Removes the server. Managed servers cannot be deleted via the API.
+      operationId: deleteServer
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /servers/{organization}/{server}/check-connection:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ServerSlug'
+    post:
+      tags: [servers]
+      summary: Test server connection
+      description: Attempts to open an SSH connection to the server using the organization's SSH key. Returns a 504 if the connection cannot be established within the timeout.
+      operationId: checkServerConnection
+      responses:
+        '200':
+          description: Connection successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "server connection established"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '504':
+          description: Connection timed out or failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+
+  /servers/{organization}/{server}/active:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ServerSlug'
+    post:
+      tags: [servers]
+      summary: Enable server
+      description: Sets the server's active flag to true so the scheduler will dispatch builds to it.
+      operationId: enableServer
+      responses:
+        '200':
+          description: Enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [servers]
+      summary: Disable server
+      description: Sets the server's active flag to false, preventing the scheduler from dispatching new builds.
+      operationId: disableServer
+      responses:
+        '200':
+          description: Disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Caches ───────────────────────────────────────────────────────────────────
+
+  /caches:
+    get:
+      tags: [caches]
+      summary: List caches
+      description: Returns all binary caches owned by the current user.
+      operationId: listCaches
+      responses:
+        '200':
+          description: Cache list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [caches]
+      summary: Create cache
+      description: Creates a new binary cache with an auto-generated signing key.
+      operationId: createCache
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakeCacheRequest'
+            example:
+              name: my-cache
+              display_name: My Cache
+              description: "Packages for my projects"
+              priority: 40
+      responses:
+        '200':
+          description: Cache UUID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /caches/{cache}:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [caches]
+      summary: Get cache
+      operationId: getCache
+      responses:
+        '200':
+          description: Cache details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Cache'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [caches]
+      summary: Update cache
+      description: Updates one or more cache fields. Managed caches cannot be edited via the API.
+      operationId: patchCache
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchCacheRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      tags: [caches]
+      summary: Delete cache
+      description: Deletes the cache. Managed caches cannot be deleted via the API.
+      operationId: deleteCache
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/active:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    post:
+      tags: [caches]
+      summary: Enable cache
+      operationId: enableCache
+      responses:
+        '200':
+          description: Enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [caches]
+      summary: Disable cache
+      operationId: disableCache
+      responses:
+        '200':
+          description: Disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/key:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [caches]
+      summary: Get cache public key
+      description: |-
+        Returns the Nix-format cache public key string, e.g.:
+        `gradient.example.com-mycache:abc123...`
+
+        Add this to `trusted-public-keys` in `nix.conf` or NixOS configuration.
+      operationId: getCacheKey
+      responses:
+        '200':
+          description: Cache public key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "gradient.example.com-mycache:AAAA..."
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Commits ──────────────────────────────────────────────────────────────────
+
+  /commits/{commit}:
+    parameters:
+      - name: commit
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Commit UUID
+    get:
+      tags: [commits]
+      summary: Get commit
+      description: Returns commit metadata (message, hash, author). Access control is not yet enforced — any authenticated user can fetch any commit.
+      operationId: getCommit
+      responses:
+        '200':
+          description: Commit
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Commit'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Nix Cache Protocol ───────────────────────────────────────────────────────
+  # These endpoints live outside /api/v1. The server URL for these is the root,
+  # e.g. https://gradient.example.com (no /api/v1 prefix).
+
+x-nix-cache-paths:
+  description: |-
+    The following Nix binary cache endpoints are served at the root of the server
+    (not under `/api/v1`). They implement the Nix binary cache protocol and are
+    used by `nix-store --realise`, `nixos-rebuild`, and other Nix clients.
+
+    | Endpoint | Description |
+    |---|---|
+    | `GET /cache/{cache}/nix-cache-info` | Cache metadata for Nix |
+    | `GET /cache/{cache}/{hash}.narinfo` | Path info for a store path |
+    | `GET /cache/{cache}/nar/{hash}.nar.zst` | Compressed NAR archive |
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |-
+        JWT obtained from `/auth/basic/login`, or an API key prefixed with `GRAD`
+        (e.g. `Bearer GRADabcdef...`).
+
+  parameters:
+    OrganizationSlug:
+      name: organization
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+        example: my-org
+      description: Organization name (slug)
+
+    ProjectSlug:
+      name: project
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+        example: my-project
+      description: Project name (slug)
+
+    ServerSlug:
+      name: server
+      in: path
+      required: true
+      schema:
+        type: string
+        example: builder-1
+      description: Server name (slug)
+
+    CacheSlug:
+      name: cache
+      in: path
+      required: true
+      schema:
+        type: string
+        example: my-cache
+      description: Cache name (slug)
+
+    EvaluationId:
+      name: evaluation
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Evaluation UUID
+
+    BuildId:
+      name: build
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Build UUID
+
+  responses:
+    BadRequest:
+      description: Bad request — invalid input
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StringResponse'
           example:
-            id: "8f7767ea-1757-48ba-93d1-5cda578b476b"
-            evaluation: "9f7767ea-1757-48ba-93d1-5cda578b476c"
-            status: "Completed"
-            derivation_path: "/nix/store/xyz789-derivation.drv"
-            architecture: "x86_64-linux"
-            server: "af7767ea-1757-48ba-93d1-5cda578b476d"
-            output:
-              out: "/nix/store/abc123-package-name"
-            created_at: "2021-10-10T10:00:00Z"
-            updated_at: "2021-10-10T10:05:00Z"
-    CommitResponse:
+            error: true
+            message: "Invalid Server Name"
+
+    Unauthorized:
+      description: Authentication required or credentials invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StringResponse'
+          example:
+            error: true
+            message: "Unauthorized"
+
+    Forbidden:
+      description: Action not permitted (e.g. managed resource)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StringResponse'
+          example:
+            error: true
+            message: "Cannot modify state-managed server."
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StringResponse'
+          example:
+            error: true
+            message: "Organization not found"
+
+    Conflict:
+      description: Resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StringResponse'
+          example:
+            error: true
+            message: "Server Name already exists"
+
+  schemas:
+
+    # ── Common wrappers ───────────────────────────────────────────────────────
+
+    BaseResponse:
       type: object
+      required: [error, message]
       properties:
         error:
           type: boolean
-          description: Wheather this is an error or not
-          examples: [false]
+          description: "`true` if an error occurred, `false` on success"
         message:
-          type: list
-          description: Response Message containing all commit details
-          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "commit": "4f84fd348f7d4c7d8f7d4c7d8f7d4c7d", "message": "My Commit Message"}]
-    CacheResponse:
+          description: Response payload — type varies by endpoint
+
+    StringResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            message:
+              type: string
+
+    ListItem:
       type: object
-      properties:
-        error:
-          type: boolean
-          description: Wheather this is an error or not
-          examples: [false]
-        message:
-          type: list
-          description: Response Message containing all cache details
-          examples: [{"id": 8f7767ea-1757-48ba-93d1-5cda578b476b, "name": mycache, "active": true, "display_name": MyCache, "description": "My Test Cache", "priority": 40, "created_by": "8f7767ea-1757-48ba-93d1-5cda578b476b", "created_at": "2021-10-10T10:00:00Z"}]
-    StreamResponse:
-      type: string
-      description: Stream of log messages
-      examples: ["Running /bin/sh ..."]
-    UserInfoResponse:
-      type: object
+      required: [id, name]
       properties:
         id:
           type: string
-          format: UUIDv4
-          examples: [8f7767ea-1757-48ba-93d1-5cda578b476b]
-        username:
-          type: string
-          examples: [testuser]
+          format: uuid
         name:
           type: string
-          examples: [Alex]
-        email:
-          type: string
-          format: email
-          examples: [alex@example.com]
-    GetUserSettingsResponse:
+
+    ListResponse:
+      type: array
+      items:
+        $ref: '#/components/schemas/ListItem'
+
+    StringListItem:
       type: object
+      required: [name]
       properties:
-        username:
-          type: string
-          examples: [testuser]
         name:
           type: string
-          examples: [TestUser]
-        email:
-          type: string
-          format: email
-          examples: ["alex@example.com"]
+
+    # ── Server config ─────────────────────────────────────────────────────────
+
+    ServerConfig:
+      type: object
+      required: [oidc_enabled, registration_disabled, email_verification_enabled]
+      properties:
+        oidc_enabled:
+          type: boolean
+          description: Whether OIDC/OAuth2 authentication is configured
+        registration_disabled:
+          type: boolean
+          description: Whether new user registration via basic auth is disabled
+        email_verification_enabled:
+          type: boolean
+          description: Whether email verification is required on registration
+
+    # ── Auth ─────────────────────────────────────────────────────────────────
+
     MakeLoginRequest:
       type: object
+      required: [loginname, password]
       properties:
         loginname:
           type: string
-          description: Username or E-Mail
-          examples: [testuser]
+          description: Username or email address
+          example: alice
         password:
           type: string
           format: password
-          examples: [v3ry_s3cur3=p4ssw0rd]
+          example: "correct-horse-battery-staple"
         remember_me:
           type: boolean
-          description: Whether to extend session duration for persistent login
           default: false
-          examples: [false, true]
+          description: Request a long-lived token
+
     MakeUserRequest:
       type: object
+      required: [username, name, email, password]
       properties:
         username:
           type: string
-          description: Username (3-50 chars, alphanumeric/_/-, no consecutive special chars, not reserved)
-          pattern: "^[a-zA-Z0-9]([a-zA-Z0-9_-])*[a-zA-Z0-9]$|^[a-zA-Z0-9]$"
-          minLength: 3
-          maxLength: 50
-          examples: [testuser]
+          pattern: '^[a-z0-9_-]{3,32}$'
+          example: alice
         name:
           type: string
-          description: Full name of the user
-          examples: [Alex]
+          example: Alice Example
         email:
           type: string
           format: email
-          description: Valid email address
-          examples: [alex@example.com]
+          example: alice@example.com
         password:
           type: string
           format: password
-          description: Password (8-128 chars, must contain uppercase, lowercase, digit, and special char)
           minLength: 8
-          maxLength: 128
-          examples: [v3ry_s3cur3=p4ssw0rd]
-    MakeOrganizationRequest:
+          example: "correct-horse-battery-staple"
+
+    CheckUsernameRequest:
       type: object
+      required: [username]
       properties:
-        name:
-          type: string
-          examples: [testorg]
-        display_name:
-          type: string
-          examples: [TestOrg]
-        description:
-          type: string
-          examples: ["My Test Org"]
-    MakeProjectRequest:
-      type: object
-      properties:
-        name:
-          type: string
-          examples: [testproj]
-        display_name:
-          type: string
-          examples: [TestProj]
-        description:
-          type: string
-          examples: ["My Test Proj"]
-        repository:
-          type: string
-          examples: ["https://github.com/wavelens/gradient"]
-        evaluation_wildcard:
-          type: string
-          examples: ["packages.*.gradient-cli"]
-    MakeServerRequest:
-      type: object
-      properties:
-        name:
-          type: string
-          examples: [testserver]
-        display_name:
-          type: string
-          examples: [TestServer]
-        host:
-          type: string
-          examples: ["127.0.0.1"]
-        port:
-          type: integer
-          examples: [22]
         username:
           type: string
-          examples: [builduser]
-        architectures:
-          type: list
-          examples: [[x86_64-linux]]
-        features:
-          type: list
-          examples: [[big-parallel]]
-    MakeCacheRequest:
+          example: alice
+
+    # ── User ─────────────────────────────────────────────────────────────────
+
+    UserInfoResponse:
       type: object
+      required: [id, username, name, email]
       properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
         name:
           type: string
-          examples: [testcache]
-        display_name:
+        email:
           type: string
-          examples: [TestCache]
-        description:
-          type: string
-          examples: ["My Test Cache"]
-        priority:
-          type: integer
-          examples: [10]
-    ApiKeyRequest:
+          format: email
+
+    GetUserSettingsResponse:
       type: object
+      required: [username, name, email]
       properties:
+        username:
+          type: string
         name:
           type: string
-          examples: [CLI-Key]
+        email:
+          type: string
+          format: email
+
     PatchUserSettingsRequest:
       type: object
       properties:
         username:
           type: string
-          examples: [testuser]
+          pattern: '^[a-z0-9_-]{3,32}$'
         name:
           type: string
-          examples: [TestUser]
         email:
           type: string
           format: email
-          examples: [alex@example.com]
+
+    ApiKeyRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Human-readable label for the API key
+          example: ci-runner
+
+    # ── Organizations ─────────────────────────────────────────────────────────
+
+    MakeOrganizationRequest:
+      type: object
+      required: [name, display_name]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+          description: Unique slug for the organization
+          example: my-org
+        display_name:
+          type: string
+          example: My Organization
+
+    PatchOrganizationRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+        display_name:
+          type: string
+
     AddUserRequest:
       type: object
-      properties:
-        user:
-          type: string
-          examples: [testuser]
-        role:
-          type: string
-          examples: [Admin]
-    RemoveUserRequest:
-      type: object
-      properties:
-        user:
-          type: string
-          examples: [testuser]
-    CheckUsernameRequest:
-      type: object
+      required: [username]
       properties:
         username:
           type: string
-          description: Username to check for availability and validity
-          examples: [testuser]
-  securitySchemes:
-    token:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-    oauth:
-      type: oauth2
-      flows:
-        implicit:
-          authorizationUrl: https://127.0.0.1:3000/api/v1/auth/oauth/authorize
-    api_key:
-      type: http
-      scheme: bearer
-      bearerFormat: "GRAD{64-char-key}"
-      description: API Key with GRAD prefix generated from /user/keys endpoint
+          example: bob
+
+    RemoveUserRequest:
+      type: object
+      required: [username]
+      properties:
+        username:
+          type: string
+          example: bob
+
+    Organization:
+      type: object
+      required: [id, name, display_name, created_by, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        display_name:
+          type: string
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Projects ──────────────────────────────────────────────────────────────
+
+    MakeProjectRequest:
+      type: object
+      required: [name, display_name, repository, evaluation_wildcard]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+          example: my-project
+        display_name:
+          type: string
+          example: My Project
+        repository:
+          type: string
+          description: Git repository URL (SSH or HTTPS)
+          example: "git@github.com:example/repo.git"
+        branch:
+          type: string
+          description: Git branch to track (defaults to default branch)
+          example: main
+        evaluation_wildcard:
+          type: string
+          description: Nix attribute path to evaluate (e.g. `packages.x86_64-linux` or `checks`)
+          example: "packages.x86_64-linux"
+
+    PatchProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        repository:
+          type: string
+        branch:
+          type: string
+        evaluation_wildcard:
+          type: string
+
+    Project:
+      type: object
+      required: [id, name, display_name, organization, repository, evaluation_wildcard, active, created_by, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        display_name:
+          type: string
+        organization:
+          type: string
+          format: uuid
+        repository:
+          type: string
+        branch:
+          type: string
+          nullable: true
+        evaluation_wildcard:
+          type: string
+        active:
+          type: boolean
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    EntryPointSummary:
+      type: object
+      required: [build_id, name]
+      properties:
+        build_id:
+          type: string
+          format: uuid
+          description: UUID of the root build
+        name:
+          type: string
+          description: Human-readable derivation name
+
+    EvaluationSummary:
+      type: object
+      required: [id, status, builds, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/EvaluationStatus'
+        builds:
+          type: integer
+          description: Total number of builds in this evaluation
+        created_at:
+          type: string
+          format: date-time
+
+    ProjectDetailsResponse:
+      type: object
+      required: [recent_evaluations, entry_points]
+      properties:
+        latest_evaluation:
+          allOf:
+            - $ref: '#/components/schemas/EvaluationSummary'
+          nullable: true
+        recent_evaluations:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvaluationSummary'
+        entry_points:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntryPointSummary'
+
+    # ── Evaluations ───────────────────────────────────────────────────────────
+
+    EvaluationStatus:
+      type: string
+      enum: [Queued, Evaluating, Building, Completed, Failed, Aborted]
+      description: |-
+        | Value | Meaning |
+        |---|---|
+        | `Queued` | Waiting to start |
+        | `Evaluating` | Running `nix eval` |
+        | `Building` | Builds are in progress |
+        | `Completed` | All builds finished successfully |
+        | `Failed` | At least one build failed |
+        | `Aborted` | Cancelled by user |
+
+    Evaluation:
+      type: object
+      required: [id, repository, commit, wildcard, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        project:
+          type: string
+          format: uuid
+          nullable: true
+          description: Associated project UUID, or null for direct builds
+        repository:
+          type: string
+          description: Repository path or URL that was evaluated
+        commit:
+          type: string
+          format: uuid
+          description: Commit record UUID
+        wildcard:
+          type: string
+          description: Nix attribute wildcard that was evaluated
+        status:
+          $ref: '#/components/schemas/EvaluationStatus'
+        previous:
+          type: string
+          format: uuid
+          nullable: true
+          description: Previous evaluation in the chain
+        next:
+          type: string
+          format: uuid
+          nullable: true
+          description: Next evaluation in the chain
+        error:
+          type: string
+          nullable: true
+          description: Error message if evaluation failed
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    MakeEvaluationRequest:
+      type: object
+      required: [method]
+      properties:
+        method:
+          type: string
+          enum: [abort]
+          description: Action to perform — currently only `abort` is supported
+
+    BuildItem:
+      type: object
+      required: [id, name, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Full derivation store path
+        status:
+          type: string
+          description: Build status string (e.g. `"Queued"`, `"Building"`, `"Succeeded"`)
+
+    # ── Builds ────────────────────────────────────────────────────────────────
+
+    BuildStatus:
+      type: string
+      enum: [Queued, Building, Succeeded, Failed, Cancelled]
+      description: Current state of a single build
+
+    Architecture:
+      type: string
+      enum:
+        - x86_64-linux
+        - aarch64-linux
+        - x86_64-darwin
+        - aarch64-darwin
+        - i686-linux
+        - riscv64-linux
+      description: Target system architecture
+
+    BuildWithOutputs:
+      type: object
+      required: [id, evaluation, status, derivation_path, architecture, output, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        evaluation:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/BuildStatus'
+        derivation_path:
+          type: string
+          description: Full Nix store path of the `.drv` file
+          example: "/nix/store/abc123-hello-2.12.1.drv"
+        architecture:
+          $ref: '#/components/schemas/Architecture'
+        server:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID of the server that ran this build, or null if not yet dispatched
+        output:
+          type: object
+          additionalProperties:
+            type: string
+          description: Map of output name → Nix store path (e.g. `{"out": "/nix/store/xyz-hello-2.12.1"}`)
+        created_at:
+          type: string
+          format: date-time
+          description: When the build was created (queued)
+        updated_at:
+          type: string
+          format: date-time
+          description: When the build status was last updated
+
+    DependencyNode:
+      type: object
+      required: [id, name, path, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Human-readable derivation name (hash-prefix stripped)
+          example: hello-2.12.1
+        path:
+          type: string
+          description: Full Nix store path of the `.drv`
+          example: "/nix/store/abc123-hello-2.12.1.drv"
+        status:
+          type: string
+          description: Build status string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    DependencyEdge:
+      type: object
+      required: [source, target]
+      properties:
+        source:
+          type: string
+          format: uuid
+          description: Dependency — must be built first
+        target:
+          type: string
+          format: uuid
+          description: Build that depends on `source`
+
+    BuildGraph:
+      type: object
+      required: [root, nodes, edges]
+      properties:
+        root:
+          type: string
+          format: uuid
+          description: UUID of the root build (the one requested)
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/DependencyNode'
+          description: All builds in the transitive graph (max 500)
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/DependencyEdge'
+          description: Dependency edges (`source` → `target` means source must be built before target)
+
+    BuildProduct:
+      type: object
+      required: [file_type, name, path]
+      properties:
+        file_type:
+          type: string
+          description: Product type from `hydra-build-products` (e.g. `iso`, `tarball`, `doc`)
+          example: iso
+        name:
+          type: string
+          description: Filename
+          example: nixos-24.11-x86_64-linux.iso
+        path:
+          type: string
+          description: Full Nix store path to the file
+          example: "/nix/store/xyz-nixos-iso/nixos-24.11-x86_64-linux.iso"
+
+    DirectBuildInfo:
+      type: object
+      required: [id, derivation, created_at, evaluation_id, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Direct build record UUID
+        derivation:
+          type: string
+          description: Nix derivation attribute path or store path that was submitted
+        created_at:
+          type: string
+          description: Creation timestamp (formatted as `YYYY-MM-DD HH:MM:SS`)
+        evaluation_id:
+          type: string
+          format: uuid
+          description: UUID of the evaluation spawned for this direct build
+        status:
+          type: string
+          description: Build status string
+
+    # ── Servers ───────────────────────────────────────────────────────────────
+
+    MakeServerRequest:
+      type: object
+      required: [name, display_name, host, port, username, architectures, features]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+          example: builder-1
+        display_name:
+          type: string
+          example: Primary Builder
+        host:
+          type: string
+          description: Hostname or IP address
+          example: builder.example.com
+        port:
+          type: integer
+          description: SSH port
+          default: 22
+          example: 22
+        username:
+          type: string
+          description: SSH username
+          example: nix-ssh
+        architectures:
+          type: array
+          items:
+            $ref: '#/components/schemas/Architecture'
+          minItems: 1
+          example: [x86_64-linux]
+        features:
+          type: array
+          items:
+            type: string
+          description: Nix build features (e.g. `kvm`, `nixos-test`, `big-parallel`)
+          example: [kvm, nixos-test]
+
+    PatchServerRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        host:
+          type: string
+        port:
+          type: integer
+        username:
+          type: string
+        architectures:
+          type: array
+          items:
+            $ref: '#/components/schemas/Architecture'
+        features:
+          type: array
+          items:
+            type: string
+
+    Server:
+      type: object
+      required: [id, name, display_name, organization, active, host, port, username, managed, created_by, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        display_name:
+          type: string
+        organization:
+          type: string
+          format: uuid
+        active:
+          type: boolean
+          description: Whether the scheduler will dispatch builds to this server
+        host:
+          type: string
+        port:
+          type: integer
+        username:
+          type: string
+        managed:
+          type: boolean
+          description: If true, this server is controlled by NixOS configuration
+        last_connection_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Caches ────────────────────────────────────────────────────────────────
+
+    MakeCacheRequest:
+      type: object
+      required: [name, display_name, description, priority]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+          example: my-cache
+        display_name:
+          type: string
+          example: My Cache
+        description:
+          type: string
+          example: "Packages for my projects"
+        priority:
+          type: integer
+          description: Nix substituter priority (lower number = higher priority; typical range 1–100)
+          default: 40
+          example: 40
+
+    PatchCacheRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        priority:
+          type: integer
+
+    Cache:
+      type: object
+      required: [id, name, display_name, description, priority, active, managed, created_by, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        display_name:
+          type: string
+        description:
+          type: string
+        priority:
+          type: integer
+        active:
+          type: boolean
+          description: Whether the cache is publicly accessible
+        managed:
+          type: boolean
+          description: If true, this cache is controlled by NixOS configuration
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Commits ───────────────────────────────────────────────────────────────
+
+    Commit:
+      type: object
+      required: [id, message, hash, author_name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        message:
+          type: string
+          description: Git commit message
+          example: "feat: add dark mode"
+        hash:
+          type: string
+          description: Git SHA-1 hash (hex-encoded)
+          example: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+        author:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID of the Gradient user who authored the commit (if known)
+        author_name:
+          type: string
+          description: Git author name
+          example: Alice Example

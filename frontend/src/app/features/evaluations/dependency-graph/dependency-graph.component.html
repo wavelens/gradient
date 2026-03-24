@@ -1,0 +1,96 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="graph-page">
+  @if (loading()) {
+    <div class="full-loading">
+      <app-loading-spinner message="Loading dependency graph…" />
+    </div>
+  } @else if (errorMsg()) {
+    <div class="error-state">
+      <span class="material-symbols-outlined">error</span>
+      <p>{{ errorMsg() }}</p>
+      <button pButton label="Go Back" severity="secondary" (click)="goBack()"></button>
+    </div>
+  } @else {
+
+    <!-- Header -->
+    <div class="graph-header">
+      <div class="header-left">
+        <button class="icon-btn" (click)="goBack()" title="Back">
+          <span class="material-symbols-outlined">arrow_back</span>
+        </button>
+        <div class="header-info">
+          <div class="header-title">
+            <span class="header-name">{{ rootName() }}</span>
+            <span class="status-badge" [ngClass]="statusClass(rootStatus())">{{ rootStatus() }}</span>
+          </div>
+          <div class="header-meta">
+            <span>{{ nodeCount() }} packages</span>
+            <span class="sep">·</span>
+            <span>{{ edgeCount() }} dependencies</span>
+            @if (!showLabels()) {
+              <span class="sep">·</span>
+              <span class="zoom-hint-inline">Zoom in for names</span>
+            }
+          </div>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <button class="ctrl-btn" (click)="zoomIn()" title="Zoom in">
+          <span class="material-symbols-outlined">add</span>
+        </button>
+        <button class="ctrl-btn" (click)="zoomOut()" title="Zoom out">
+          <span class="material-symbols-outlined">remove</span>
+        </button>
+        <button class="ctrl-btn" (click)="fitToScreen()" title="Fit to screen">
+          <span class="material-symbols-outlined">fit_screen</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Graph canvas -->
+    <svg #svgEl class="graph-svg"
+      (wheel)="onWheel($event)"
+      (mousedown)="onSvgMousedown($event)"
+      (mousemove)="onMousemove($event)"
+      (mouseup)="onMouseup()"
+      (mouseleave)="onMouseup()"
+    >
+      <defs>
+        <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#4b5563" />
+        </marker>
+      </defs>
+      <g #graphEl [attr.transform]="transform()"></g>
+    </svg>
+
+    <!-- Legend -->
+    <div class="legend">
+      <div class="legend-item"><span class="dot" style="background:#6b7280"></span>Created</div>
+      <div class="legend-item"><span class="dot" style="background:#eab308"></span>Queued</div>
+      <div class="legend-item"><span class="dot" style="background:#3b82f6"></span>Building</div>
+      <div class="legend-item"><span class="dot" style="background:#22c55e"></span>Completed</div>
+      <div class="legend-item"><span class="dot" style="background:#ef4444"></span>Failed</div>
+      <div class="legend-item"><span class="dot" style="background:#f97316"></span>Aborted</div>
+    </div>
+
+    <!-- Node tooltip -->
+    @if (hoveredNode()) {
+      <div class="node-tooltip"
+        [style.left.px]="tooltipX()"
+        [style.top.px]="tooltipY()">
+        <div class="tt-name">{{ hoveredNode()!.name }}</div>
+        <div class="tt-status" [ngClass]="statusClass(hoveredNode()!.status)">
+          {{ hoveredNode()!.status }}
+        </div>
+        <div class="tt-path">{{ hoveredNode()!.path }}</div>
+      </div>
+    }
+
+  }
+</div>

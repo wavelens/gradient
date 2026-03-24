@@ -1,0 +1,227 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: $spacing-xxl;
+
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
+    margin-bottom: $spacing-sm;
+    font-size: $font-size-sm;
+
+    .breadcrumb-link {
+      color: $text-secondary;
+      text-decoration: none;
+
+      &:hover {
+        color: $text-primary;
+      }
+    }
+
+    .breadcrumb-separator {
+      color: $text-light;
+    }
+
+    .breadcrumb-current {
+      color: $text-primary;
+    }
+  }
+
+  h1 {
+    font-size: $font-size-xxl;
+    color: $text-primary;
+    margin: 0 0 $spacing-sm 0;
+  }
+
+  p {
+    margin: 0 0 $spacing-md 0;
+    font-size: $font-size-md;
+  }
+
+  .cache-status {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+
+    .status-badge, .priority-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: $spacing-xs;
+      padding: $spacing-xs $spacing-sm;
+      border-radius: $border-radius-sm;
+      font-size: $font-size-xs;
+      font-weight: 500;
+      text-transform: uppercase;
+
+      .material-symbols-outlined {
+        font-size: 16px;
+      }
+    }
+
+    .status-badge {
+      &.active {
+        background-color: rgba($color-success, 0.1);
+        border: 1px solid $color-success;
+        color: $color-success;
+      }
+
+      &.inactive {
+        background-color: rgba($color-border, 0.1);
+        border: 1px solid $color-border;
+        color: $text-light;
+      }
+    }
+
+    .priority-badge {
+      background-color: rgba($color-info, 0.1);
+      border: 1px solid $color-info;
+      color: $color-info;
+    }
+  }
+
+  .header-actions {
+    display: flex;
+    gap: $spacing-md;
+  }
+}
+
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: $spacing-lg;
+  margin-bottom: $spacing-xxl;
+}
+
+.detail-card {
+  background-color: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+  padding: $spacing-lg;
+
+  h3 {
+    font-size: $font-size-lg;
+    color: $text-primary;
+    margin: 0 0 $spacing-md 0;
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
+
+    .material-symbols-outlined {
+      font-size: 20px;
+    }
+  }
+
+  .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: $spacing-sm 0;
+    border-bottom: 1px solid rgba($color-border, 0.3);
+
+    &:last-child {
+      border-bottom: none;
+    }
+
+    .detail-label {
+      color: $text-secondary;
+      font-size: $font-size-sm;
+    }
+
+    .detail-value {
+      color: $text-primary;
+      font-size: $font-size-sm;
+      display: flex;
+      align-items: center;
+      gap: $spacing-xs;
+
+      .status-indicator {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: $color-border;
+
+        &.active {
+          background-color: $color-success;
+        }
+      }
+    }
+  }
+
+  .description-text {
+    color: $text-secondary;
+    font-size: $font-size-sm;
+    line-height: 1.6;
+    margin: 0;
+  }
+}
+
+.section {
+  margin-bottom: $spacing-xxl;
+
+  h2 {
+    font-size: $font-size-xl;
+    color: $text-primary;
+    margin: 0 0 $spacing-lg 0;
+  }
+}
+
+.info-card {
+  background-color: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+  padding: $spacing-lg;
+
+  p {
+    color: $text-secondary;
+    font-size: $font-size-sm;
+    line-height: 1.6;
+    margin: 0 0 $spacing-md 0;
+    display: flex;
+    align-items: flex-start;
+    gap: $spacing-xs;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+
+    .material-symbols-outlined {
+      font-size: 16px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+  }
+
+  code {
+    background-color: $color-quaternary;
+    padding: 2px 6px;
+    border-radius: $border-radius-sm;
+    font-family: $font-family-mono;
+    font-size: $font-size-sm;
+    color: $text-primary;
+  }
+
+  .code-block {
+    background-color: $color-quaternary;
+    border: 1px solid $color-border;
+    border-radius: $border-radius-md;
+    padding: $spacing-md;
+    margin: $spacing-md 0;
+    overflow-x: auto;
+
+    code {
+      background-color: transparent;
+      padding: 0;
+      color: $text-primary;
+      font-size: $font-size-sm;
+    }
+  }
+}

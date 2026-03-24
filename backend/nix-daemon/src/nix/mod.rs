@@ -16,7 +16,6 @@ pub mod wire;
 use crate::{
     BasicDerivation, BuildMode, BuildResult, ClientSettings, Error, PathInfo, Progress, Result, ResultExt, Stderr, Store,
 };
-use std::iter;
 use std::future::Future;
 use std::{collections::HashMap, fmt::Debug};
 use tokio::{
@@ -144,7 +143,7 @@ where
     }
 
     async fn result(mut self) -> Result<Self::T> {
-        while let Some(_) = self.next().await? {}
+        while (self.next().await?).is_some() {}
         self.returner.result(self.store).await
     }
 }
@@ -288,7 +287,7 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin> DaemonStore<C> {
         }
 
         // Discard Stderr. There shouldn't be anything here anyway.
-        while let Some(_) = wire::read_stderr(&mut self.conn).await? {}
+        while (wire::read_stderr(&mut self.conn).await?).is_some() {}
         Ok(())
     }
 }
@@ -1447,7 +1446,7 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
                         0
                     };
 
-                    nar_binary.extend(iter::repeat(0).take(padding_needed));
+                    nar_binary.extend(std::iter::repeat_n(0, padding_needed));
                 }
 
                 wire::write_u64(&mut store.conn, nar_binary.len() as u64).await?;
@@ -1756,7 +1755,7 @@ where
                         let mut sink = tokio::io::sink();
                         tokio::io::copy(&mut source, &mut sink)
                             .await
-                            .map_err(|e| Error::IO(e))?;
+                            .map_err(Error::IO)?;
 
                         wire::write_string(&mut self.w, name)
                             .await

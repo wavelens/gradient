@@ -1,0 +1,167 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1>Caches</h1>
+      <p class="text-secondary">Manage your build caches</p>
+    </div>
+    <button pButton label="Create Cache" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+  </div>
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading caches..." />
+  } @else {
+    <!-- Active Caches -->
+    @if (activeCaches.length > 0) {
+      <div class="section">
+        <h2>Active Caches</h2>
+        <div class="cache-grid">
+          @for (cache of activeCaches; track cache.id) {
+            <a [routerLink]="['/caches', cache.name]" class="cache-card">
+              <div class="cache-icon">
+                <span class="material-symbols-outlined">storage</span>
+              </div>
+              <div class="cache-content">
+                <h3>{{ cache.display_name }}</h3>
+                <p class="text-secondary">{{ cache.description || 'No description' }}</p>
+                <div class="cache-meta">
+                  <span class="meta-item">
+                    <span class="material-symbols-outlined">sort</span>
+                    Priority: {{ cache.priority }}
+                  </span>
+                  <span class="status-badge active">Active</span>
+                </div>
+              </div>
+              <div class="cache-arrow">
+                <span class="material-symbols-outlined">arrow_forward</span>
+              </div>
+            </a>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- Inactive Caches -->
+    @if (inactiveCaches.length > 0) {
+      <div class="section">
+        <h2>Inactive Caches</h2>
+        <div class="cache-grid">
+          @for (cache of inactiveCaches; track cache.id) {
+            <a [routerLink]="['/caches', cache.name]" class="cache-card inactive">
+              <div class="cache-icon">
+                <span class="material-symbols-outlined">cloud_off</span>
+              </div>
+              <div class="cache-content">
+                <h3>{{ cache.display_name }}</h3>
+                <p class="text-secondary">{{ cache.description || 'No description' }}</p>
+                <div class="cache-meta">
+                  <span class="meta-item">
+                    <span class="material-symbols-outlined">sort</span>
+                    Priority: {{ cache.priority }}
+                  </span>
+                  <span class="status-badge inactive">Inactive</span>
+                </div>
+              </div>
+              <div class="cache-arrow">
+                <span class="material-symbols-outlined">arrow_forward</span>
+              </div>
+            </a>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- Empty State -->
+    @if (caches().length === 0) {
+      <app-empty-state
+        icon="storage"
+        title="No caches yet"
+        message="Create your first cache to store build artifacts"
+        actionLabel="Create Cache"
+        (actionClick)="openCreateDialog()"
+      />
+    }
+  }
+</div>
+
+<!-- Create Cache Dialog -->
+<p-dialog
+  header="Create Cache"
+  [(visible)]="showCreateDialog"
+  [modal]="true"
+  [style]="{ width: '500px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <div class="dialog-content">
+    <div class="form-group">
+      <label for="cache-name">Name *</label>
+      <input
+        pInputText
+        id="cache-name"
+        [(ngModel)]="newCache.name"
+        placeholder="cache-name"
+        class="w-full"
+      />
+      <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
+    </div>
+
+    <div class="form-group">
+      <label for="cache-display">Display Name *</label>
+      <input
+        pInputText
+        id="cache-display"
+        [(ngModel)]="newCache.display_name"
+        placeholder="My Cache"
+        class="w-full"
+      />
+    </div>
+
+    <div class="form-group">
+      <label for="cache-desc">Description</label>
+      <textarea
+        pInputTextarea
+        id="cache-desc"
+        [(ngModel)]="newCache.description"
+        placeholder="Describe your cache..."
+        rows="3"
+        class="w-full"
+      ></textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="cache-priority">Priority</label>
+      <p-inputNumber
+        inputId="cache-priority"
+        [(ngModel)]="newCache.priority"
+        [min]="0"
+        [max]="100"
+        [showButtons]="true"
+        styleClass="w-full"
+      />
+      <small class="text-secondary">Higher priority caches are used first (0-100)</small>
+    </div>
+  </div>
+
+  <ng-template pTemplate="footer">
+    <button
+      pButton
+      label="Cancel"
+      severity="secondary"
+      (click)="showCreateDialog.set(false)"
+      [disabled]="creating()"
+    ></button>
+    <button
+      pButton
+      label="Create"
+      (click)="createCache()"
+      [disabled]="!newCache.name || !newCache.display_name || creating()"
+      [loading]="creating()"
+    ></button>
+  </ng-template>
+</p-dialog>

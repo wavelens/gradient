@@ -339,7 +339,6 @@ start_all()
 
 # Wait for services to be ready
 machine.wait_for_unit("gradient-server.service")
-machine.wait_for_unit("gradient-frontend.service")
 machine.wait_for_unit("nginx.service")
 machine.wait_for_unit("postgresql.service")
 

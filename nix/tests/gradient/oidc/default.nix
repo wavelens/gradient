@@ -200,18 +200,18 @@
 
       print("=== Testing OIDC Callback Processing ===")
 
-      # Test callback with valid authorization code
+      # Test callback with valid authorization code — expect a 302 redirect to the frontend
       callback_response = server.succeed("""
-        ${lib.getExe pkgs.curl} -s -i -L \
+        ${lib.getExe pkgs.curl} -s -i \
           "http://gradient.local/api/v1/auth/oidc/callback?code=test-auth-code&state=test-state"
       """)
       print(f"Callback response: {callback_response}")
 
-      # Check that the callback didn't return an error
-      if "500 Internal Server Error" in callback_response:
-          raise Exception(f"OIDC callback failed with 500 error: {callback_response}")
-      if '"error":true' in callback_response:
-          raise Exception(f"OIDC callback returned error response: {callback_response}")
+      # Check that the callback returned a redirect to the frontend OIDC callback route
+      if "302" not in callback_response:
+          raise Exception(f"OIDC callback did not return 302 redirect: {callback_response}")
+      if "/account/oidc-callback?token=" not in callback_response:
+          raise Exception(f"OIDC callback redirect missing expected location: {callback_response}")
 
       # Test callback with invalid/missing code
       print("=== Testing OIDC Error Handling ===")

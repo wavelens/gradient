@@ -1,0 +1,12 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="loading-spinner" [attr.data-size]="size()">
+  <div class="spinner"></div>
+  @if (message()) {
+    <p class="loading-message">{{ message() }}</p>
+  }
+</div>

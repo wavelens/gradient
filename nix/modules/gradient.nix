@@ -283,8 +283,8 @@ in {
         enable = true;
         virtualHosts."${cfg.domain}".locations = {
           "/" = lib.mkIf cfg.frontend.enable {
-            proxyPass = "http://127.0.0.1:${toString config.services.gradient.frontend.port}";
-            proxyWebsockets = true;
+            root = "${cfg.frontend.package}/share/gradient-frontend";
+            tryFiles = "$uri $uri/ /index.html";
           };
 
           "/api/" = {

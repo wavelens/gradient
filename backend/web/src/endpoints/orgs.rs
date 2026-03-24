@@ -263,6 +263,15 @@ pub async fn get_organization_users(
         .all(&state.db)
         .await?;
 
+    let role_ids: Vec<Uuid> = organization_users.iter().map(|(ou, _)| ou.role).collect();
+    let role_map: std::collections::HashMap<Uuid, String> = ERole::find()
+        .filter(CRole::Id.is_in(role_ids))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|r| (r.id, r.name))
+        .collect();
+
     let organization_users: Vec<StringListItem> = organization_users
         .iter()
         .map(|(ou, user)| StringListItem {
@@ -270,7 +279,7 @@ pub async fn get_organization_users(
                 .as_ref()
                 .map(|u| u.username.clone())
                 .unwrap_or_else(|| ou.user.to_string()),
-            name: ou.role.to_string(),
+            name: role_map.get(&ou.role).cloned().unwrap_or_else(|| ou.role.to_string()),
         })
         .collect();
 

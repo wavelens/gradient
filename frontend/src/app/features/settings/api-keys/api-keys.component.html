@@ -1,0 +1,100 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a routerLink="/settings/profile" class="breadcrumb-link">Settings</a>
+        <span class="breadcrumb-separator">/</span>
+        <span class="breadcrumb-current">API Keys</span>
+      </div>
+      <h1>API Keys</h1>
+      <p class="text-secondary">Manage API keys for programmatic access</p>
+    </div>
+    <button pButton label="New API Key" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+  </div>
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading API keys..." />
+  } @else {
+    @if (keys().length === 0) {
+      <div class="empty-state">
+        <span class="material-symbols-outlined">key</span>
+        <h3>No API keys</h3>
+        <p class="text-secondary">Create an API key to access Gradient programmatically.</p>
+        <button pButton label="Create API Key" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+      </div>
+    } @else {
+      <div class="keys-list">
+        @for (key of keys(); track key.id) {
+          <div class="key-row">
+            <div class="key-info">
+              <span class="material-symbols-outlined">key</span>
+              <div>
+                <div class="key-name">{{ key.name }}</div>
+                <div class="key-id text-secondary">{{ key.id }}</div>
+              </div>
+            </div>
+            <button
+              pButton
+              label="Delete"
+              icon="pi pi-trash"
+              severity="danger"
+              (click)="deleteKey(key)"
+              [loading]="deletingId() === key.id"
+              [disabled]="deletingId() !== null"
+            ></button>
+          </div>
+        }
+      </div>
+    }
+  }
+</div>
+
+<!-- Create Key Dialog -->
+<p-dialog
+  header="Create API Key"
+  [(visible)]="showCreateDialog"
+  [modal]="true"
+  [style]="{ width: '400px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  @if (errorMessage()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ errorMessage() }}
+    </div>
+  }
+  <div class="form-group">
+    <label for="key-name">Key Name</label>
+    <input pInputText id="key-name" [(ngModel)]="newKeyName" placeholder="e.g. CI/CD Pipeline" class="w-full" />
+  </div>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="creating()"></button>
+    <button pButton label="Create" icon="pi pi-plus" (click)="createKey()" [loading]="creating()" [disabled]="creating() || !newKeyName.trim()"></button>
+  </ng-template>
+</p-dialog>
+
+<!-- Show Created Key Dialog -->
+<p-dialog
+  header="API Key Created"
+  [(visible)]="showKeyDialog"
+  [modal]="true"
+  [style]="{ width: '500px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <p>Your new API key has been created. Copy it now — it will not be shown again.</p>
+  <div class="key-display">
+    <code class="key-value">{{ createdKeyValue() }}</code>
+    <button pButton icon="pi pi-copy" severity="secondary" (click)="copyKey()" title="Copy to clipboard"></button>
+  </div>
+  <ng-template pTemplate="footer">
+    <button pButton label="Done" (click)="showKeyDialog.set(false)"></button>
+  </ng-template>
+</p-dialog>

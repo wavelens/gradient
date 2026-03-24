@@ -1,0 +1,242 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+@use 'sass:color';
+
+:host {
+  display: block;
+  height: calc(100vh - 65px);
+  overflow: hidden;
+}
+
+.graph-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: $color-primary;
+  overflow: hidden;
+  position: relative;
+  user-select: none;
+}
+
+.full-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: $spacing-md;
+  color: $text-secondary;
+
+  .material-symbols-outlined {
+    font-size: 3rem;
+    color: $color-danger;
+  }
+}
+
+// ── Header ────────────────────────────────────────────────────────────────────
+
+.graph-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-sm $spacing-lg;
+  background: $color-tertiary;
+  border-bottom: 1px solid $color-border;
+  flex-shrink: 0;
+  gap: $spacing-md;
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: $spacing-md;
+    min-width: 0;
+  }
+
+  .header-info {
+    min-width: 0;
+  }
+
+  .header-title {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+  }
+
+  .header-name {
+    font-size: $font-size-md;
+    font-weight: 600;
+    color: $text-primary;
+    font-family: $font-family-mono;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40vw;
+  }
+
+  .header-meta {
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
+    font-size: $font-size-xs;
+    color: $text-secondary;
+    margin-top: 2px;
+
+    .sep { opacity: 0.4; }
+    .zoom-hint-inline { color: $text-light; font-style: italic; }
+  }
+
+  .header-controls {
+    display: flex;
+    gap: $spacing-xs;
+    flex-shrink: 0;
+  }
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  color: $text-secondary;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: $border-radius-sm;
+  display: flex;
+  align-items: center;
+  transition: color $transition-fast, background $transition-fast;
+
+  .material-symbols-outlined { font-size: 1.25rem; }
+
+  &:hover {
+    color: $text-primary;
+    background: $color-hover;
+  }
+}
+
+.ctrl-btn {
+  background: $color-hover;
+  border: 1px solid $color-border;
+  color: $text-secondary;
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: $border-radius-sm;
+  display: flex;
+  align-items: center;
+  transition: color $transition-fast, background $transition-fast;
+
+  .material-symbols-outlined { font-size: 1rem; }
+
+  &:hover {
+    color: $text-primary;
+    background: color.adjust(#252d33, $lightness: -5%);
+  }
+}
+
+// Status badges (reused from project-detail patterns)
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: $font-size-xs;
+  font-weight: 500;
+
+  &.status-success { background: rgba(#22c55e, 0.15); color: #22c55e; }
+  &.status-danger  { background: rgba(#ef4444, 0.15); color: #ef4444; }
+  &.status-warning { background: rgba(#f97316, 0.15); color: #f97316; }
+  &.status-running { background: rgba(#3b82f6, 0.15); color: #3b82f6; }
+}
+
+// ── Graph SVG ─────────────────────────────────────────────────────────────────
+
+.graph-svg {
+  flex: 1;
+  width: 100%;
+  cursor: grab;
+  display: block;
+
+  &:active { cursor: grabbing; }
+}
+
+// ── Legend ────────────────────────────────────────────────────────────────────
+
+.legend {
+  position: absolute;
+  bottom: $spacing-lg;
+  left: $spacing-lg;
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-md;
+  background: rgba($color-tertiary, 0.92);
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+  padding: $spacing-xs $spacing-md;
+  backdrop-filter: blur(4px);
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
+    font-size: $font-size-xs;
+    color: $text-secondary;
+  }
+
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+}
+
+// ── Tooltip ───────────────────────────────────────────────────────────────────
+
+.node-tooltip {
+  position: fixed;
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+  padding: $spacing-sm $spacing-md;
+  pointer-events: none;
+  z-index: $z-tooltip;
+  max-width: 320px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+
+  .tt-name {
+    font-weight: 600;
+    color: $text-primary;
+    font-family: $font-family-mono;
+    font-size: $font-size-sm;
+    margin-bottom: 3px;
+  }
+
+  .tt-status {
+    font-size: $font-size-xs;
+    font-weight: 500;
+    margin-bottom: 4px;
+
+    &.status-success { color: #22c55e; }
+    &.status-danger  { color: #ef4444; }
+    &.status-warning { color: #f97316; }
+    &.status-running { color: #3b82f6; }
+  }
+
+  .tt-path {
+    font-size: $font-size-xs;
+    color: $text-light;
+    font-family: $font-family-mono;
+    word-break: break-all;
+    line-height: 1.4;
+  }
+}

@@ -1,0 +1,120 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  @if (loading()) {
+    <app-loading-spinner message="Loading project settings..." />
+  } @else if (project(); as proj) {
+    <div class="page-header">
+      <div>
+        <div class="breadcrumb">
+          <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgName }}</a>
+          <span class="breadcrumb-separator">/</span>
+          <a [routerLink]="['/organization', orgName, 'project', projectName]" class="breadcrumb-link">{{ proj.display_name }}</a>
+          <span class="breadcrumb-separator">/</span>
+          <span class="breadcrumb-current">Settings</span>
+        </div>
+        <h1>Project Settings</h1>
+      </div>
+    </div>
+
+    @if (errorMessage()) {
+      <div class="error-banner">
+        <span class="material-symbols-outlined">error</span>
+        {{ errorMessage() }}
+      </div>
+    }
+
+    <!-- General Settings -->
+    <div class="settings-section">
+      <h2>General</h2>
+      <div class="settings-card">
+        <div class="form-group">
+          <label for="proj-name">Name</label>
+          <input pInputText id="proj-name" [value]="proj.name" disabled class="w-full" />
+          <small class="text-secondary">Project name cannot be changed</small>
+        </div>
+
+        <div class="form-group">
+          <label for="proj-display">Display Name</label>
+          <input pInputText id="proj-display" [(ngModel)]="formData.display_name" class="w-full" />
+        </div>
+
+        <div class="form-group">
+          <label for="proj-desc">Description</label>
+          <textarea pInputTextarea id="proj-desc" [(ngModel)]="formData.description" rows="3" class="w-full"></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="proj-repo">Repository URL</label>
+          <input pInputText id="proj-repo" [(ngModel)]="formData.repository" class="w-full" />
+        </div>
+
+        <div class="form-group">
+          <label for="proj-wildcard">Evaluation Wildcard</label>
+          <input pInputText id="proj-wildcard" [(ngModel)]="formData.evaluation_wildcard" class="w-full" />
+          <small class="text-secondary">Pattern for selecting which outputs to evaluate</small>
+        </div>
+
+        <div class="form-actions">
+          <button pButton label="Save Changes" icon="pi pi-check" (click)="saveSettings()" [loading]="saving()" [disabled]="saving()"></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status -->
+    <div class="settings-section">
+      <h2>Status</h2>
+      <div class="settings-card">
+        <div class="status-row">
+          <div>
+            <h3>{{ proj.active ? 'Project is Active' : 'Project is Inactive' }}</h3>
+            <p class="text-secondary">{{ proj.active ? 'The project is currently evaluating and building.' : 'The project is paused and not evaluating.' }}</p>
+          </div>
+          <button
+            pButton
+            [label]="proj.active ? 'Deactivate' : 'Activate'"
+            [icon]="proj.active ? 'pi pi-pause' : 'pi pi-play'"
+            [severity]="proj.active ? 'warn' : 'success'"
+            (click)="toggleActive()"
+            [loading]="toggling()"
+            [disabled]="toggling()"
+          ></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Danger Zone -->
+    <div class="settings-section danger-section">
+      <h2>Danger Zone</h2>
+      <div class="settings-card danger-card">
+        <div class="danger-row">
+          <div>
+            <h3>Delete Project</h3>
+            <p class="text-secondary">Permanently delete this project and all its evaluations.</p>
+          </div>
+          <button pButton label="Delete Project" icon="pi pi-trash" severity="danger" (click)="showDeleteDialog.set(true)"></button>
+        </div>
+      </div>
+    </div>
+  }
+</div>
+
+<!-- Delete Confirmation Dialog -->
+<p-dialog
+  header="Delete Project"
+  [(visible)]="showDeleteDialog"
+  [modal]="true"
+  [style]="{ width: '400px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <p>Are you sure you want to delete <strong>{{ project()?.display_name }}</strong>? This action cannot be undone.</p>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
+    <button pButton label="Delete" severity="danger" (click)="deleteProject()" [loading]="deleting()" [disabled]="deleting()"></button>
+  </ng-template>
+</p-dialog>

@@ -13,6 +13,7 @@ pub mod build_output_signature;
 pub mod cache;
 pub mod commit;
 pub mod direct_build;
+pub mod entry_point;
 pub mod evaluation;
 pub mod feature;
 pub mod organization;

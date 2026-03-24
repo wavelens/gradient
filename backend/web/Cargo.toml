@@ -12,7 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 axum = { version = "0.8", features = ["multipart"] }
-axum-streams = { version = "0.24", features = ["json"] }
+axum-streams = { version = "0.25", features = ["json"] }
 async-stream = "0.3"
 chrono = "0.4"
 core = { path = "../core" }
@@ -31,7 +31,7 @@ serde_json = "1.0"
 oauth2 = "5.0"
 openidconnect = "4.0"
 url = "2.5"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json", "form"] }
 email_address = "0.2"
 tower-http = { version = "0.6.8", features = ["cors", "trace"] }
 http = "1.4"
@@ -44,5 +44,5 @@ thiserror = "2.0"
 
 [dev-dependencies]
 tokio-test = "0.4"
-axum-test = "18.4"
+axum-test = "19.1"
 tower = "0.5"

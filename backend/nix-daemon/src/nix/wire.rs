@@ -226,7 +226,7 @@ pub async fn read_bool<R: AsyncReadExt + Unpin>(r: &mut R) -> std::io::Result<bo
 /// Write a boolean to the stream, encoded as u64 (>0 is true).
 #[instrument(skip(w, v), level = "trace")]
 pub async fn write_bool<W: AsyncWriteExt + Unpin>(w: &mut W, v: bool) -> std::io::Result<()> {
-    Ok(write_u64(w, if v { 1 } else { 0 }.tap(|v| trace!(v, "->"))).await?)
+    write_u64(w, if v { 1 } else { 0 }.tap(|v| trace!(v, "->"))).await
 }
 
 /// Read a DateTime (CppNix: time_t) from the stream, encoded as a unix timestamp.
@@ -246,7 +246,7 @@ pub async fn write_datetime<W: AsyncWriteExt + Unpin>(w: &mut W, dt: DateTime<Ut
         dt.timestamp()
             .tap(|dt| trace!(?dt, "->"))
             .try_into()
-            .map_err(|err| Error::Invalid(format!("DateTime({}): {}", dt.to_string(), err)))?,
+            .map_err(|err| Error::Invalid(format!("DateTime({}): {}", dt, err)))?,
     )
     .await?)
 }
@@ -323,7 +323,7 @@ pub async fn write_build_result_status<W: AsyncWriteExt + Unpin>(
 #[instrument(skip(r), level = "trace")]
 pub async fn read_string<R: AsyncReadExt + Unpin>(r: &mut R) -> std::io::Result<String> {
     let len = read_u64(r).await? as usize;
-    let padded_len = len + if len % 8 > 0 { 8 - (len % 8) } else { 0 };
+    let padded_len = len + if !len.is_multiple_of(8) { 8 - (len % 8) } else { 0 };
     if padded_len <= 1024 {
         let mut buf = [0u8; 1024];
         r.read_exact(&mut buf[..padded_len]).await?;
@@ -343,7 +343,7 @@ pub async fn write_string<W: AsyncWriteExt + Unpin, S: AsRef<str> + Debug>(
     s: S,
 ) -> std::io::Result<()> {
     trace!(v=?s,"->");
-    let truncated = s.as_ref().split(|b| b == '\0').next().ok_or_else(|| {
+    let truncated = s.as_ref().split('\0').next().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::UnexpectedEof,
             Error::Invalid("slice::split() returned an empty iterator".to_string()),
@@ -360,7 +360,7 @@ pub async fn write_string<W: AsyncWriteExt + Unpin, S: AsRef<str> + Debug>(
         })?,
     )
     .await?;
-    if b.len() > 0 {
+    if !b.is_empty() {
         w.write_all(b).await?;
         trace!(v = truncated, "->");
         if b.len() % 8 > 0 {
@@ -596,17 +596,17 @@ pub async fn write_derivation_output<W: AsyncWriteExt + Unpin>(
     output: &DerivationOutput,
 ) -> Result<()> {
     // Write path (optional)
-    write_string(w, output.path.as_ref().map(|s| s.as_str()).unwrap_or(""))
+    write_string(w, output.path.as_deref().unwrap_or(""))
         .await
         .with_field("DerivationOutput.path")?;
 
     // Write hash algorithm (optional)
-    write_string(w, output.hash_algo.as_ref().map(|s| s.as_str()).unwrap_or(""))
+    write_string(w, output.hash_algo.as_deref().unwrap_or(""))
         .await
         .with_field("DerivationOutput.hash_algo")?;
 
     // Write hash (optional)
-    write_string(w, output.hash.as_ref().map(|s| s.as_str()).unwrap_or(""))
+    write_string(w, output.hash.as_deref().unwrap_or(""))
         .await
         .with_field("DerivationOutput.hash")?;
 
@@ -1106,7 +1106,7 @@ pub async fn write_pathinfo<W: AsyncWriteExt + Unpin>(
     proto: Proto,
     pi: &PathInfo,
 ) -> Result<()> {
-    write_string(w, pi.deriver.as_ref().map(|s| s.as_str()).unwrap_or(""))
+    write_string(w, pi.deriver.as_deref().unwrap_or(""))
         .await
         .with_field("PathInfo.deriver")?;
     write_string(w, pi.nar_hash.as_str())
@@ -1137,7 +1137,7 @@ pub async fn write_pathinfo<W: AsyncWriteExt + Unpin>(
         write_strings(w, &pi.signatures)
             .await
             .with_field("PathInfo.signatures")?;
-        write_string(w, &pi.ca.as_ref().map(|s| s.as_str()).unwrap_or(""))
+        write_string(w, pi.ca.as_deref().unwrap_or(""))
             .await
             .with_field("PathInfo.ca")?;
     }

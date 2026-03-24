@@ -35,7 +35,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     state: Arc<ServerState>,
     store: &mut DaemonStore<C>,
     evaluation: &MEvaluation,
-) -> Result<(Vec<MBuild>, Vec<MBuildDependency>)> {
+) -> Result<(Vec<MBuild>, Vec<MBuildDependency>, Vec<Uuid>)> {
     info!("Starting evaluation");
     update_evaluation_status(
         Arc::clone(&state),
@@ -90,11 +90,12 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
     if all_derivations.is_empty() {
         warn!("No derivations found for evaluation");
-        return Ok((vec![], vec![]));
+        return Ok((vec![], vec![], vec![]));
     }
 
     let mut all_builds: Vec<MBuild> = vec![];
     let mut all_dependencies: Vec<MBuildDependency> = vec![];
+    let mut entry_point_build_ids: Vec<Uuid> = vec![];
     let mut failed_derivations: Vec<(String, String)> = vec![];
     let total_derivations = all_derivations.len();
 
@@ -122,15 +123,17 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         if missing.is_empty() {
             debug!(derivation = %derivation, "Skipping package - already in store");
 
-            if let Err(e) = add_existing_build(
+            let build_id = Uuid::new_v4();
+            match add_existing_build(
                 Arc::clone(&state),
                 derivation.clone(),
                 evaluation.id,
-                Uuid::new_v4(),
+                build_id,
             )
             .await
             {
-                error!(error = %e, "Failed to add existing build");
+                Ok(build) => entry_point_build_ids.push(build.id),
+                Err(e) => error!(error = %e, "Failed to add existing build"),
             }
 
             continue;
@@ -140,17 +143,25 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
         let build = vec![derivation.clone()];
 
-        if already_exsists
-            || !find_builds(Arc::clone(&state), organization_id, build.clone(), true)
-                .await?
-                .is_empty()
-        {
+        if already_exsists {
+            if let Some(existing) = all_builds.iter().find(|b| b.derivation_path == derivation) {
+                entry_point_build_ids.push(existing.id);
+            }
+            debug!(derivation = %derivation, "Skipping package - already in current evaluation");
+            continue;
+        }
+
+        let existing_builds =
+            find_builds(Arc::clone(&state), organization_id, build.clone(), true).await?;
+        if let Some(existing) = existing_builds.first() {
+            entry_point_build_ids.push(existing.id);
             debug!(derivation = %derivation, "Skipping package - already exists");
             continue;
         }
 
         info!(derivation = %derivation, path = %path, "Creating build");
 
+        let entry_point_idx = all_builds.len();
         query_all_dependencies(
             Arc::clone(&state),
             &mut all_builds,
@@ -161,6 +172,11 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             store,
         )
         .await?;
+
+        // The root build is the first one pushed during this call
+        if let Some(root) = all_builds.get(entry_point_idx) {
+            entry_point_build_ids.push(root.id);
+        }
 
         debug!(derivation = %derivation, "Successfully processed package");
     }
@@ -188,7 +204,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         return Err(anyhow::anyhow!(full_error));
     }
 
-    Ok((all_builds, all_dependencies))
+    Ok((all_builds, all_dependencies, entry_point_build_ids))
 }
 
 async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
@@ -898,7 +914,7 @@ pub async fn evaluate_direct(
     };
 
     match evaluation_result {
-        Ok((builds, dependencies)) => {
+        Ok((builds, dependencies, _entry_point_build_ids)) => {
             info!(
                 build_count = builds.len(),
                 dependency_count = dependencies.len(),

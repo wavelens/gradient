@@ -254,7 +254,7 @@ pub async fn get_oidc_login(
 pub async fn get_oidc_callback(
     state: State<Arc<ServerState>>,
     Query(query): Query<HashMap<String, String>>,
-) -> WebResult<Json<BaseResponse<String>>> {
+) -> WebResult<Response> {
     let code = query
         .get("code")
         .ok_or_else(WebError::invalid_oauth_code)?;
@@ -265,12 +265,21 @@ pub async fn get_oidc_callback(
 
     let token = encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
 
-    let res = BaseResponse {
-        error: false,
-        message: token,
-    };
+    let redirect_url = format!("/account/oidc-callback?token={}", token);
 
-    Ok(Json(res))
+    match Response::builder()
+        .status(StatusCode::FOUND)
+        .header("Location", redirect_url)
+        .body(Body::empty())
+    {
+        Ok(response) => Ok(response),
+        Err(e) => {
+            tracing::error!("Failed to build HTTP response: {}", e);
+            Err(WebError::InternalServerError(
+                "Failed to build redirect response".to_string(),
+            ))
+        }
+    }
 }
 
 pub async fn post_logout(_state: State<Arc<ServerState>>) -> WebResult<Json<BaseResponse<String>>> {

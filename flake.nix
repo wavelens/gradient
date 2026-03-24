@@ -22,38 +22,6 @@
     rustEnv = with pkgs.rustPackages; [
       clippy
     ];
-
-    py = pkgs.python3.override {
-      packageOverrides = python-final: python-prev: {
-        django = python-final.django_4;
-      };
-    };
-
-    pythonEnv = py.withPackages (ps: with ps; [
-      bleach
-      celery
-      channels
-      channels-redis
-      django
-      django-compression-middleware
-      django-debug-toolbar
-      django-parler
-      django-redis
-      django-rosetta
-      django-scheduler
-      gunicorn
-      mysqlclient
-      redis
-      requests
-      selenium
-      sentry-sdk
-      uritemplate
-      urllib3
-      whitenoise
-      xstatic-bootstrap
-      xstatic-jquery
-      xstatic-jquery-ui
-    ]);
   in
   {
     checks = import ./nix/tests { inherit self inputs system pkgs; };
@@ -80,13 +48,12 @@
         sea-orm-cli
         rustEnv
 
-        black
-        boost
-        gettext
-        libsodium
+        http-server
+        nodejs
+        pnpm
+
         openssl
         sqlite
-        pythonEnv
         postgresql_18
         pgadmin4-desktopmode
         nixVersions.latest

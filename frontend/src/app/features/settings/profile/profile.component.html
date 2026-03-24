@@ -1,0 +1,99 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <h1>Profile Settings</h1>
+    <p class="text-secondary">Manage your personal information</p>
+  </div>
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading profile..." />
+  } @else {
+    @if (errorMessage()) {
+      <div class="message-banner error">
+        <span class="material-symbols-outlined">error</span>
+        {{ errorMessage() }}
+      </div>
+    }
+
+    @if (successMessage()) {
+      <div class="message-banner success">
+        <span class="material-symbols-outlined">check_circle</span>
+        {{ successMessage() }}
+      </div>
+    }
+
+    <!-- Profile Form -->
+    <div class="settings-section">
+      <h2>Personal Information</h2>
+      <div class="settings-card">
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input pInputText id="username" [(ngModel)]="formData.username" class="w-full" />
+        </div>
+
+        <div class="form-group">
+          <label for="name">Full Name</label>
+          <input pInputText id="name" [(ngModel)]="formData.name" class="w-full" />
+        </div>
+
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input pInputText id="email" type="email" [(ngModel)]="formData.email" class="w-full" />
+        </div>
+
+        <div class="form-actions">
+          <button pButton label="Save Changes" icon="pi pi-check" (click)="saveSettings()" [loading]="saving()" [disabled]="saving()"></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Navigation -->
+    <div class="settings-section">
+      <h2>Security</h2>
+      <div class="settings-card">
+        <div class="nav-row">
+          <div>
+            <h3>API Keys</h3>
+            <p class="text-secondary">Manage API keys for programmatic access</p>
+          </div>
+          <a pButton label="Manage API Keys" icon="pi pi-key" severity="secondary" routerLink="/settings/keys"></a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Danger Zone -->
+    <div class="settings-section danger-section">
+      <h2>Danger Zone</h2>
+      <div class="settings-card danger-card">
+        <div class="danger-row">
+          <div>
+            <h3>Delete Account</h3>
+            <p class="text-secondary">Permanently delete your account and all associated data.</p>
+          </div>
+          <button pButton label="Delete Account" icon="pi pi-trash" severity="danger" (click)="showDeleteDialog.set(true)"></button>
+        </div>
+      </div>
+    </div>
+  }
+</div>
+
+<!-- Delete Confirmation Dialog -->
+<p-dialog
+  header="Delete Account"
+  [(visible)]="showDeleteDialog"
+  [modal]="true"
+  [style]="{ width: '400px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <p>Are you sure you want to permanently delete your account? This action cannot be undone.</p>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
+    <button pButton label="Delete Account" severity="danger" (click)="deleteAccount()" [loading]="deleting()" [disabled]="deleting()"></button>
+  </ng-template>
+</p-dialog>

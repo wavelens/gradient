@@ -1,0 +1,144 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  @if (loading()) {
+    <app-loading-spinner message="Loading organization..." />
+  } @else if (organization(); as org) {
+    <div class="page-header">
+      <div>
+        <h1>{{ org.display_name }}</h1>
+        <p class="text-secondary">{{ org.description || 'No description' }}</p>
+      </div>
+      <div class="header-actions">
+        <button pButton label="Create Project" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+        <a pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/organization', orgName, 'settings']"></a>
+      </div>
+    </div>
+
+    <!-- Projects -->
+    @if (projects().length > 0) {
+      <div class="section">
+        <h2>Projects</h2>
+        <div class="project-grid">
+          @for (project of projects(); track project.id) {
+            <a [routerLink]="['/organization', orgName, 'project', project.name]" class="project-card">
+              <div class="project-icon">
+                <span class="material-symbols-outlined">folder</span>
+              </div>
+              <div class="project-content">
+                <h3>{{ project.display_name || project.name }}</h3>
+                <p class="text-secondary">{{ project.description || 'No description' }}</p>
+              </div>
+              <div class="project-arrow">
+                <span class="material-symbols-outlined">arrow_forward</span>
+              </div>
+            </a>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- Empty State -->
+    @if (projects().length === 0) {
+      <app-empty-state
+        icon="folder"
+        title="No projects yet"
+        message="Create your first project to start evaluating Nix builds"
+        actionLabel="Create Project"
+        (actionClick)="openCreateDialog()"
+      />
+    }
+  }
+</div>
+
+<!-- Create Project Dialog -->
+<p-dialog
+  header="Create Project"
+  [(visible)]="showCreateDialog"
+  [modal]="true"
+  [style]="{ width: '550px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <div class="dialog-content">
+    <div class="form-group">
+      <label for="proj-name">Name *</label>
+      <input
+        pInputText
+        id="proj-name"
+        [(ngModel)]="newProject.name"
+        placeholder="project-name"
+        class="w-full"
+      />
+      <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
+    </div>
+
+    <div class="form-group">
+      <label for="proj-display">Display Name *</label>
+      <input
+        pInputText
+        id="proj-display"
+        [(ngModel)]="newProject.display_name"
+        placeholder="My Project"
+        class="w-full"
+      />
+    </div>
+
+    <div class="form-group">
+      <label for="proj-desc">Description</label>
+      <textarea
+        pInputTextarea
+        id="proj-desc"
+        [(ngModel)]="newProject.description"
+        placeholder="Describe your project..."
+        rows="2"
+        class="w-full"
+      ></textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="proj-repo">Repository URL *</label>
+      <input
+        pInputText
+        id="proj-repo"
+        [(ngModel)]="newProject.repository"
+        placeholder="https://github.com/user/repo"
+        class="w-full"
+      />
+      <small class="text-secondary">Git repository URL to evaluate</small>
+    </div>
+
+    <div class="form-group">
+      <label for="proj-wildcard">Evaluation Wildcard</label>
+      <input
+        pInputText
+        id="proj-wildcard"
+        [(ngModel)]="newProject.evaluation_wildcard"
+        placeholder="**"
+        class="w-full"
+      />
+      <small class="text-secondary">Pattern for selecting which outputs to evaluate (default: **)</small>
+    </div>
+  </div>
+
+  <ng-template pTemplate="footer">
+    <button
+      pButton
+      label="Cancel"
+      severity="secondary"
+      (click)="showCreateDialog.set(false)"
+      [disabled]="creating()"
+    ></button>
+    <button
+      pButton
+      label="Create"
+      (click)="createProject()"
+      [disabled]="!newProject.name || !newProject.display_name || !newProject.repository || creating()"
+      [loading]="creating()"
+    ></button>
+  </ng-template>
+</p-dialog>
