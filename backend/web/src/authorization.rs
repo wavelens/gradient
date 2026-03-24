@@ -341,23 +341,24 @@ pub async fn oidc_login_verify(
         .context("Failed to create HTTP client")?;
 
     let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.cli.serve_url);
+    let client_secret = load_secret(client_secret_file);
 
     // Exchange authorization code for tokens
     let token_response = http_client
         .post(token_endpoint)
         .form(&[
             ("grant_type", "authorization_code"),
-            ("code", &authorization_code),
-            ("redirect_uri", &redirect_uri),
-            ("client_id", client_id),
-            ("client_secret", &load_secret(client_secret_file)),
+            ("code", authorization_code.as_str()),
+            ("redirect_uri", redirect_uri.as_str()),
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
         ])
         .send()
         .await
         .context("Token exchange request failed")?;
 
     let token_data: serde_json::Value = token_response
-        .json()
+        .json::<serde_json::Value>()
         .await
         .context("Failed to parse token response")?;
 
@@ -374,7 +375,7 @@ pub async fn oidc_login_verify(
         .context("Failed to fetch user info")?;
 
     let user_data: serde_json::Value = userinfo_response
-        .json()
+        .json::<serde_json::Value>()
         .await
         .context("Failed to parse user info")?;
 

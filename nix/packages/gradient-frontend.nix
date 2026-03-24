@@ -5,11 +5,12 @@
  */
 
 { lib
-, buildNpmPackage
+, stdenv
 , nodejs
+, pnpm
 }:
 
-buildNpmPackage rec {
+stdenv.mkDerivation rec {
   pname = "gradient-frontend";
   version = "0.5.0";
 
@@ -18,18 +19,20 @@ buildNpmPackage rec {
     src = lib.cleanSource ../../frontend;
   };
 
-  npmDepsHash = lib.fakeHash;  # Run once to get the actual hash, then replace
+  pnpmDeps = pnpm.fetchDeps {
+    inherit pname version src;
+    hash = lib.fakeHash;
+  };
 
-  nativeBuildInputs = [ nodejs ];
+  nativeBuildInputs = [
+    nodejs
+    pnpm.configHook
+  ];
 
-  # Skip npm audit during build
-  npmBuildScript = "build";
-
-  # Build configuration
   buildPhase = ''
     runHook preBuild
 
-    npm run build -- --configuration production
+    pnpm run build
 
     runHook postBuild
   '';

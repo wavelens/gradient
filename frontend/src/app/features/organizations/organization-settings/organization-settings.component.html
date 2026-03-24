@@ -85,20 +85,29 @@
                 <div class="member-row">
                   <div class="member-info">
                     <span class="material-symbols-outlined">person</span>
-                    <div>
-                      <div class="member-username">{{ member.id }}</div>
-                      <div class="member-role text-secondary">{{ member.name }}</div>
-                    </div>
+                    <div class="member-username">{{ member.id }}</div>
                   </div>
-                  <button
-                    pButton
-                    icon="pi pi-times"
-                    severity="danger"
-                    size="small"
-                    [loading]="removingMember() === member.id"
-                    [disabled]="removingMember() !== null"
-                    (click)="removeMember(member.id)"
-                  ></button>
+                  <div class="member-actions">
+                    <select
+                      class="role-select"
+                      [ngModel]="member.name"
+                      [disabled]="updatingRole() === member.id || removingMember() !== null"
+                      (ngModelChange)="updateMemberRole(member.id, $event)"
+                    >
+                      @for (role of roles; track role) {
+                        <option [value]="role">{{ role }}</option>
+                      }
+                    </select>
+                    <button
+                      pButton
+                      icon="pi pi-times"
+                      severity="danger"
+                      size="small"
+                      [loading]="removingMember() === member.id"
+                      [disabled]="removingMember() !== null || updatingRole() !== null"
+                      (click)="removeMember(member.id)"
+                    ></button>
+                  </div>
                 </div>
               }
             </div>
@@ -107,6 +116,20 @@
           }
         </div>
       }
+    </div>
+
+    <!-- Servers -->
+    <div class="settings-section">
+      <h2>Infrastructure</h2>
+      <div class="settings-card">
+        <div class="nav-row">
+          <div>
+            <h3>Servers</h3>
+            <p class="text-secondary">Manage build servers for this organization</p>
+          </div>
+          <a pButton label="Manage Servers" icon="pi pi-server" severity="secondary" [routerLink]="['/organization', orgName, 'servers']"></a>
+        </div>
+      </div>
     </div>
 
     <!-- SSH Key -->
@@ -130,15 +153,6 @@
             </div>
             <div class="form-actions">
               <button pButton label="Copy Key" icon="pi pi-copy" severity="secondary" (click)="copySSHKey()"></button>
-              <button
-                pButton
-                label="Regenerate Key"
-                icon="pi pi-refresh"
-                severity="warn"
-                (click)="generateSSHKey()"
-                [loading]="generatingSSH()"
-                [disabled]="generatingSSH()"
-              ></button>
             </div>
           } @else {
             <p class="text-secondary">No SSH key generated yet.</p>
@@ -159,6 +173,23 @@
     <div class="settings-section danger-section">
       <h2>Danger Zone</h2>
       <div class="settings-card danger-card">
+        @if (sshKey()) {
+          <div class="danger-row">
+            <div>
+              <h3>Regenerate SSH Key</h3>
+              <p class="text-secondary">Generate a new SSH key. The existing key will stop working immediately.</p>
+            </div>
+            <button
+              pButton
+              label="Regenerate Key"
+              icon="pi pi-refresh"
+              severity="danger"
+              (click)="showRegenerateKeyDialog.set(true)"
+              [disabled]="generatingSSH()"
+            ></button>
+          </div>
+          <p-divider />
+        }
         <div class="danger-row">
           <div>
             <h3>Delete Organization</h3>
@@ -209,6 +240,22 @@
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showAddMemberDialog.set(false)" [disabled]="addingMember()"></button>
     <button pButton label="Add" (click)="addMember()" [disabled]="!newMember.user || addingMember()" [loading]="addingMember()"></button>
+  </ng-template>
+</p-dialog>
+
+<!-- Regenerate SSH Key Confirmation Dialog -->
+<p-dialog
+  header="Regenerate SSH Key"
+  [(visible)]="showRegenerateKeyDialog"
+  [modal]="true"
+  [style]="{ width: '400px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <p>Are you sure you want to regenerate the SSH key? The existing key will stop working immediately and any repositories using it will lose access.</p>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showRegenerateKeyDialog.set(false)" [disabled]="generatingSSH()"></button>
+    <button pButton label="Regenerate" severity="danger" icon="pi pi-refresh" (click)="confirmRegenerateSSHKey()" [loading]="generatingSSH()" [disabled]="generatingSSH()"></button>
   </ng-template>
 </p-dialog>
 

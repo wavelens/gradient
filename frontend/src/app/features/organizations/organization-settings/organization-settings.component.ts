@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { DialogModule } from 'primeng/dialog';
+import { DividerModule } from 'primeng/divider';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
@@ -24,6 +25,7 @@ import { Organization } from '@core/models';
     RouterModule,
     FormsModule,
     DialogModule,
+    DividerModule,
     ButtonModule,
     InputTextModule,
     TextareaModule,
@@ -43,6 +45,7 @@ export class OrganizationSettingsComponent implements OnInit {
   membersLoading = signal(true);
   addingMember = signal(false);
   removingMember = signal<string | null>(null);
+  updatingRole = signal<string | null>(null);
   sshLoading = signal(true);
   generatingSSH = signal(false);
 
@@ -52,6 +55,7 @@ export class OrganizationSettingsComponent implements OnInit {
 
   showDeleteDialog = signal(false);
   showAddMemberDialog = signal(false);
+  showRegenerateKeyDialog = signal(false);
 
   orgName = '';
 
@@ -172,6 +176,21 @@ export class OrganizationSettingsComponent implements OnInit {
     });
   }
 
+  updateMemberRole(username: string, role: string): void {
+    this.updatingRole.set(username);
+    this.organizationsService.updateMemberRole(this.orgName, username, role).subscribe({
+      next: () => {
+        this.updatingRole.set(null);
+        this.loadMembers();
+      },
+      error: (error) => {
+        console.error('Failed to update member role:', error);
+        this.updatingRole.set(null);
+        this.loadMembers();
+      },
+    });
+  }
+
   removeMember(username: string): void {
     this.removingMember.set(username);
     this.organizationsService.removeMember(this.orgName, username).subscribe({
@@ -184,6 +203,11 @@ export class OrganizationSettingsComponent implements OnInit {
         this.removingMember.set(null);
       },
     });
+  }
+
+  confirmRegenerateSSHKey(): void {
+    this.showRegenerateKeyDialog.set(false);
+    this.generateSSHKey();
   }
 
   generateSSHKey(): void {

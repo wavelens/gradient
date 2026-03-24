@@ -147,6 +147,16 @@ export class AuthService {
   }
 
   /**
+   * Complete login with a token received from an external flow (e.g. OIDC callback)
+   */
+  loginWithToken(token: string): void {
+    this.tokenSignal.set(token);
+    sessionStorage.setItem('jwt_token', token);
+    localStorage.removeItem('jwt_token');
+    this.loadUser();
+  }
+
+  /**
    * Manually reload user data
    */
   reloadUser(): void {

@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { Project, ProjectDetail } from '@core/models';
+import { Project, ProjectDetail, EntryPointSummary } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class ProjectsService {
@@ -48,6 +48,10 @@ export class ProjectsService {
 
   deleteProject(organization: string, project: string): Observable<string> {
     return this.api.delete<string>(`projects/${organization}/${project}`);
+  }
+
+  getEntryPoints(organization: string, project: string): Observable<EntryPointSummary[]> {
+    return this.api.get<EntryPointSummary[]>(`projects/${organization}/${project}/entry-points`);
   }
 
   startEvaluation(organization: string, project: string): Observable<string> {

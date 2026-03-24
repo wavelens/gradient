@@ -9,6 +9,8 @@ import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
+import { ConfigService } from '@core/services/config.service';
+import { take } from 'rxjs';
 import { environment } from '@environments/environment';
 
 @Component({
@@ -22,19 +24,26 @@ export class LoginComponent {
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private router = inject(Router);
+  private config = inject(ConfigService);
 
   loginForm: FormGroup;
   errorMessage = signal<string | null>(null);
   loading = signal(false);
   showPassword = signal(false);
-  oidcEnabled = environment.oidcEnabled;
-  registrationDisabled = environment.registrationDisabled;
+  get oidcEnabled() { return this.config.oidcEnabled; }
+  get registrationDisabled() { return this.config.registrationDisabled; }
 
   constructor() {
     this.loginForm = this.fb.group({
       username: ['', [Validators.required]],
       password: ['', [Validators.required]],
       rememberMe: [false],
+    });
+
+    this.authService.initialized$.pipe(take(1)).subscribe(() => {
+      if (this.authService.isAuthenticated()) {
+        this.router.navigate(['/']);
+      }
     });
   }
 
@@ -59,7 +68,6 @@ export class LoginComponent {
   }
 
   loginWithOIDC(): void {
-    // Redirect to OIDC login endpoint
-    window.location.href = `${environment.apiUrl.replace('/api/v1', '')}/auth/oidc/login`;
+    window.location.href = `${environment.apiUrl}/auth/oidc/login`;
   }
 }

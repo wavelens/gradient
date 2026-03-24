@@ -18,6 +18,7 @@ export interface Server {
   user: string;
   architecture: Architecture;
   features: string[];
+  managed: boolean;
   created_by?: string;
   created_at?: string;
 }

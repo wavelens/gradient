@@ -35,6 +35,11 @@
     server.succeed("${lib.getExe pkgs.gradient-cli} organization create --name testorg --display-name MyOrganization --description 'My Test Organization'")
   '';
 
+  interactive = {
+    sshBackdoor.enable = true;
+    nodes.server.virtualisation.graphics = false;
+  };
+
   nodes.server = { config, pkgs, lib, ... }: {
     imports = [
       ../../modules/gradient.nix

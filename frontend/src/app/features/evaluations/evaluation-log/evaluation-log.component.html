@@ -50,6 +50,15 @@
             >
               <span class="build-dot status-{{ build.status.toLowerCase() }}"></span>
               <span class="build-name">{{ buildDisplayName(build.name) }}</span>
+              <a
+                class="graph-link"
+                [routerLink]="['/organization', orgName, 'graph', build.id]"
+                [queryParams]="{ evalId: evaluationId }"
+                (click)="$event.stopPropagation()"
+                title="View dependency graph"
+              >
+                <span class="material-symbols-outlined">account_tree</span>
+              </a>
             </div>
           }
         </div>
@@ -123,7 +132,14 @@
               <span class="status-badge status-{{ selectedBuild()?.status?.toLowerCase() }}">{{ selectedBuild()?.status }}</span>
             </div>
             <div class="log-container" #logContainer (scroll)="onLogScroll($event)">
-              <pre class="log-output" [innerHTML]="logHtml()"></pre>
+              @if (logHtml().toString()) {
+                <pre class="log-output" [innerHTML]="logHtml()"></pre>
+              } @else {
+                <div class="no-log-hint">
+                  <span class="material-symbols-outlined">article</span>
+                  <span>No log available</span>
+                </div>
+              }
             </div>
             @if (showScrollBtn()) {
               <button class="scroll-btn" (click)="scrollToBottom()" title="Scroll to bottom">

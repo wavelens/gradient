@@ -111,6 +111,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             get(projects::get_project_details),
         )
         .route(
+            "/projects/{organization}/{project}/entry-points",
+            get(projects::get_project_entry_points),
+        )
+        .route(
             "/projects/{organization}/{project}/check-repository",
             post(projects::post_project_check_repository),
         )
@@ -145,6 +149,14 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route(
             "/builds/{build}",
             get(builds::get_build),
+        )
+        .route(
+            "/builds/{build}/dependencies",
+            get(builds::get_build_dependencies),
+        )
+        .route(
+            "/builds/{build}/graph",
+            get(builds::get_build_graph),
         )
         .route(
             "/builds/{build}/log",
@@ -212,7 +224,8 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route("/auth/oidc/login", get(auth::get_oidc_login))
         .route("/auth/oidc/callback", get(auth::get_oidc_callback))
         .route("/auth/logout", post(auth::post_logout))
-        .route("/health", get(get_health));
+        .route("/health", get(get_health))
+        .route("/config", get(get_config));
 
     let app = Router::new()
         .nest("/api/v1", api)

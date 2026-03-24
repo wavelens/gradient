@@ -19,6 +19,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
     process::Command,
+    time::Instant,
 };
 use tracing::{error, info, instrument};
 use uuid::Uuid;
@@ -105,27 +106,55 @@ pub async fn execute_build(
         BuildMode::Normal,
     );
 
+    const FLUSH_INTERVAL_MS: u128 = 1000;
+    const FLUSH_THRESHOLD_BYTES: usize = 64 * 1024;
+
+    let mut pending = String::new();
+    let mut last_flush = Instant::now();
+
     while let Some(stderr) = prog.next().await? {
-        if let nix_daemon::Stderr::Result(res) = stderr {
-            let log = res
-                .fields
-                .iter()
-                .map(|l| l.as_string().unwrap_or(&"".to_string()).clone())
-                .filter(|l| !l.replace("/n", "").is_empty())
-                .collect::<Vec<String>>()
-                .join("");
+        let text = match &stderr {
+            nix_daemon::Stderr::Next(s) => Some(s.clone()),
+            nix_daemon::Stderr::Result(res)
+                if res.kind == nix_daemon::StderrResultType::BuildLogLine
+                    || res.kind == nix_daemon::StderrResultType::PostBuildLogLine =>
+            {
+                res.fields.first().and_then(|f| f.as_string()).cloned()
+            }
+            _ => None,
+        };
 
-            let full_log = format!("{}\n{}", build.log.as_ref().unwrap_or(&"".to_string()), log)
-                .trim()
-                .to_string();
+        if let Some(text) = text
+            && !text.is_empty()
+        {
+            pending.push_str(&text);
 
-            let mut abuild: ABuild = build.clone().into();
-            abuild.log = Set(Some(full_log));
-            build = abuild
-                .update(&state.db)
-                .await
-                .context("Failed to update build log")?;
+            let elapsed = last_flush.elapsed().as_millis();
+            if elapsed >= FLUSH_INTERVAL_MS || pending.len() >= FLUSH_THRESHOLD_BYTES {
+                let full_log =
+                    format!("{}{}", build.log.as_ref().unwrap_or(&"".to_string()), pending);
+                pending.clear();
+                last_flush = Instant::now();
+
+                let mut abuild: ABuild = build.clone().into();
+                abuild.log = Set(Some(full_log));
+                build = abuild
+                    .update(&state.db)
+                    .await
+                    .context("Failed to update build log")?;
+            }
         }
+    }
+
+    // Flush any remaining buffered log
+    if !pending.is_empty() {
+        let full_log = format!("{}{}", build.log.as_ref().unwrap_or(&"".to_string()), pending);
+        let mut abuild: ABuild = build.clone().into();
+        abuild.log = Set(Some(full_log));
+        build = abuild
+            .update(&state.db)
+            .await
+            .context("Failed to update build log")?;
     }
 
     match prog.result().await.map_err(|e| e.into()) {

@@ -22,6 +22,13 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/auth/register/register.component').then((m) => m.RegisterComponent),
       },
+      {
+        path: 'oidc-callback',
+        loadComponent: () =>
+          import('./features/auth/oidc-callback/oidc-callback.component').then(
+            (m) => m.OidcCallbackComponent
+          ),
+      },
     ],
   },
 
@@ -60,6 +67,15 @@ export const routes: Routes = [
           ),
       },
 
+      // Servers
+      {
+        path: 'organization/:org/servers',
+        loadComponent: () =>
+          import('./features/organizations/servers/servers.component').then(
+            (m) => m.ServersComponent
+          ),
+      },
+
       // Projects
       {
         path: 'organization/:org/project/:project',
@@ -73,6 +89,15 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/projects/project-settings/project-settings.component').then(
             (m) => m.ProjectSettingsComponent
+          ),
+      },
+
+      // Dependency graph
+      {
+        path: 'organization/:org/graph/:buildId',
+        loadComponent: () =>
+          import('./features/evaluations/dependency-graph/dependency-graph.component').then(
+            (m) => m.DependencyGraphComponent
           ),
       },
 

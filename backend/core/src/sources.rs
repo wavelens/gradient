@@ -639,6 +639,7 @@ pub fn get_cache_nar_location(
             reason: e.to_string(),
         }
     })?;
+
     Ok(format!(
         "{}/nars/{}/{}.nar{}",
         base_path,

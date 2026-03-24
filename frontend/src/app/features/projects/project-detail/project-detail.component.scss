@@ -159,6 +159,18 @@
     gap: $spacing-md;
     margin-bottom: $spacing-xs;
 
+    .graph-icon-link {
+      display: inline-flex;
+      align-items: center;
+      color: $text-light;
+      text-decoration: none;
+      padding: 2px 4px;
+      border-radius: $border-radius-sm;
+      transition: color $transition-fast, background $transition-fast;
+      .material-symbols-outlined { font-size: 1rem; }
+      &:hover { color: $text-primary; background: $color-hover; }
+    }
+
     h3 {
       font-size: $font-size-lg;
       color: $text-primary;
@@ -220,6 +232,15 @@
     }
   }
 
+  .derivation-path {
+    font-size: $font-size-xs;
+    font-family: monospace;
+    margin: $spacing-xs 0 0 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .build-stats {
     display: flex;
     align-items: center;
@@ -242,6 +263,10 @@
 
       &.error {
         color: $color-danger;
+      }
+
+      &.running {
+        color: $color-info;
       }
     }
   }

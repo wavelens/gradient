@@ -61,6 +61,11 @@
     server.succeed("${lib.getExe pkgs.gradient-cli} project create --name testproject --display-name MyProject --description 'Just a test' --repository git://server/test --evaluation-wildcard packages.*.buildWait5Sec,packages.*.deployment")
   '';
 
+    interactive = {
+      sshBackdoor.enable = true;
+      nodes.server.virtualisation.graphics = false;
+    };
+
   nodes.server = { config, pkgs, lib, ... }: {
     imports = [
       ../../modules/gradient.nix

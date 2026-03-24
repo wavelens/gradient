@@ -15,10 +15,11 @@ use core::types::*;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use tokio::time::Duration;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -257,26 +258,32 @@ pub async fn post_build_log(
         }
 
         loop {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+
             let build = match EBuild::find_by_id(build_id).one(&state.db).await {
                 Ok(Some(b)) => b,
                 Ok(None) => break,
                 Err(_) => break,
             };
+
+            let log = build.log.unwrap_or("".to_string());
+            let log_new = if last_log.is_empty() {
+                log.clone()
+            } else {
+                log[last_log.len()..].to_string()
+            };
+
+            if !log_new.is_empty() {
+                first_response = false;
+                last_log = log;
+                yield log_new;
+            }
+
             if build.status != entity::build::BuildStatus::Building {
                 if first_response {
                     yield "".to_string();
                 }
-
                 break;
-            }
-
-            first_response = false;
-
-            let log = build.log.unwrap_or("".to_string());
-            let log_new = log.replace(last_log.as_str(), "");
-            if !log_new.is_empty() {
-                last_log = log.clone();
-                yield log_new.clone();
             }
         }
     };
@@ -386,6 +393,7 @@ pub async fn post_direct_build(
         .map_err(|e| WebError::InternalServerError(format!("Failed to create commit: {}", e)))?;
 
     // Create evaluation record (without project for direct builds)
+    let now = chrono::Utc::now().naive_utc();
     let evaluation = AEvaluation {
         id: Set(Uuid::new_v4()),
         project: Set(None), // No project for direct builds
@@ -395,7 +403,8 @@ pub async fn post_direct_build(
         status: Set(entity::evaluation::EvaluationStatus::Queued),
         previous: Set(None),
         next: Set(None),
-        created_at: Set(chrono::Utc::now().naive_utc()),
+        created_at: Set(now),
+        updated_at: Set(now),
         error: Set(None),
     };
     let evaluation = evaluation.insert(&state.db).await.map_err(|e| {
@@ -823,4 +832,191 @@ pub async fn get_recent_direct_builds(
     };
 
     Ok(Json(res))
+}
+
+// ── Dependency graph helpers ──────────────────────────────────────────────────
+
+fn extract_drv_name(path: &str) -> String {
+    let filename = path.split('/').last().unwrap_or(path);
+    // Strip the nix store hash prefix (e.g. "abc123xyz-name.drv" → "name")
+    let without_hash = filename.splitn(2, '-').nth(1).unwrap_or(filename);
+    without_hash.trim_end_matches(".drv").to_string()
+}
+
+async fn authorize_build(
+    state: &Arc<ServerState>,
+    user: &MUser,
+    build_id: Uuid,
+) -> WebResult<()> {
+    let build = EBuild::find_by_id(build_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Build"))?;
+
+    let evaluation = EEvaluation::find_by_id(build.evaluation)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::InternalServerError("Build data inconsistency".to_string()))?;
+
+    let organization_id = if let Some(project_id) = evaluation.project {
+        EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                WebError::InternalServerError("Evaluation data inconsistency".to_string())
+            })?
+            .organization
+    } else {
+        EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                WebError::InternalServerError("Direct build data inconsistency".to_string())
+            })?
+            .organization
+    };
+
+    let organization = EOrganization::find_by_id(organization_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| {
+            WebError::InternalServerError("Organization data inconsistency".to_string())
+        })?;
+
+    if organization.created_by != user.id {
+        return Err(WebError::not_found("Build"));
+    }
+
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DependencyNode {
+    pub id: Uuid,
+    pub name: String,
+    pub path: String,
+    pub status: String,
+    pub created_at: chrono::NaiveDateTime,
+    pub updated_at: chrono::NaiveDateTime,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DependencyEdge {
+    pub source: Uuid,
+    pub target: Uuid,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BuildGraph {
+    pub root: Uuid,
+    pub nodes: Vec<DependencyNode>,
+    pub edges: Vec<DependencyEdge>,
+}
+
+/// GET /builds/{build}/dependencies — direct dependencies of a single build
+pub async fn get_build_dependencies(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(build_id): Path<Uuid>,
+) -> WebResult<Json<BaseResponse<Vec<DependencyNode>>>> {
+    authorize_build(&state, &user, build_id).await?;
+
+    let dep_rows = EBuildDependency::find()
+        .filter(CBuildDependency::Build.eq(build_id))
+        .all(&state.db)
+        .await?;
+
+    let dep_ids: Vec<Uuid> = dep_rows.iter().map(|d| d.dependency).collect();
+
+    let dep_builds = if dep_ids.is_empty() {
+        vec![]
+    } else {
+        EBuild::find()
+            .filter(CBuild::Id.is_in(dep_ids))
+            .all(&state.db)
+            .await?
+    };
+
+    let nodes: Vec<DependencyNode> = dep_builds
+        .iter()
+        .map(|b| DependencyNode {
+            id: b.id,
+            name: extract_drv_name(&b.derivation_path),
+            path: b.derivation_path.clone(),
+            status: format!("{:?}", b.status),
+            created_at: b.created_at,
+            updated_at: b.updated_at,
+        })
+        .collect();
+
+    Ok(Json(BaseResponse { error: false, message: nodes }))
+}
+
+/// GET /builds/{build}/graph — full transitive dependency graph rooted at a build
+pub async fn get_build_graph(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(build_id): Path<Uuid>,
+) -> WebResult<Json<BaseResponse<BuildGraph>>> {
+    authorize_build(&state, &user, build_id).await?;
+
+    let mut visited: HashSet<Uuid> = HashSet::new();
+    let mut nodes: Vec<DependencyNode> = Vec::new();
+    let mut edges: Vec<DependencyEdge> = Vec::new();
+    let mut queue: VecDeque<Vec<Uuid>> = VecDeque::new();
+
+    visited.insert(build_id);
+    queue.push_back(vec![build_id]);
+
+    while let Some(batch) = queue.pop_front() {
+        if nodes.len() >= 500 {
+            break;
+        }
+
+        // Fetch all builds in this batch
+        let builds = EBuild::find()
+            .filter(CBuild::Id.is_in(batch.clone()))
+            .all(&state.db)
+            .await?;
+
+        for build in builds {
+            nodes.push(DependencyNode {
+                id: build.id,
+                name: extract_drv_name(&build.derivation_path),
+                path: build.derivation_path.clone(),
+                status: format!("{:?}", build.status),
+                created_at: build.created_at,
+                updated_at: build.updated_at,
+            });
+        }
+
+        // Fetch all dependency edges for this batch
+        let dep_rows = EBuildDependency::find()
+            .filter(CBuildDependency::Build.is_in(batch))
+            .all(&state.db)
+            .await?;
+
+        let mut next_batch: Vec<Uuid> = Vec::new();
+        for dep in dep_rows {
+            // Edge: dependency → build (dep is built before build)
+            edges.push(DependencyEdge {
+                source: dep.dependency,
+                target: dep.build,
+            });
+            if !visited.contains(&dep.dependency) {
+                visited.insert(dep.dependency);
+                next_batch.push(dep.dependency);
+            }
+        }
+
+        if !next_batch.is_empty() {
+            queue.push_back(next_batch);
+        }
+    }
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: BuildGraph { root: build_id, nodes, edges },
+    }))
 }

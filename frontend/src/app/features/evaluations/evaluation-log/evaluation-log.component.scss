@@ -178,6 +178,26 @@
   .build-item.selected & { color: $text-primary; }
 }
 
+.graph-link {
+  display: none;
+  align-items: center;
+  color: $text-light;
+  text-decoration: none;
+  flex-shrink: 0;
+  padding: 2px;
+  border-radius: $border-radius-sm;
+  transition: color $transition-fast, background $transition-fast;
+
+  .material-symbols-outlined { font-size: 0.95rem; }
+
+  &:hover {
+    color: $text-primary;
+    background: $color-hover;
+  }
+}
+
+.build-item:hover .graph-link { display: flex; }
+
 // ── Right Main ────────────────────────────────────────────────────────────────
 
 .log-main {
@@ -307,6 +327,18 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.no-log-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  height: 100%;
+  color: $text-light;
+
+  .material-symbols-outlined { font-size: 32px; }
 }
 
 .select-build-hint {

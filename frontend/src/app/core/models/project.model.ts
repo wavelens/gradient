@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { BuildStatus, Architecture } from './build.model';
+
 export interface Project {
   id: string;
   organization: string;
@@ -25,6 +27,18 @@ export interface EvaluationSummary {
   status: EvaluationStatus;
   total_builds: number;
   failed_builds: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EntryPointSummary {
+  id: string;
+  build_id: string;
+  derivation_path: string;
+  build_status: BuildStatus;
+  architecture: Architecture;
+  evaluation_id: string;
+  evaluation_status: EvaluationStatus;
   created_at: string;
 }
 

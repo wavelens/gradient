@@ -16,7 +16,7 @@ import {
 } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
-import { environment } from '@environments/environment';
+import { ConfigService } from '@core/services/config.service';
 import { debounceTime, switchMap, map } from 'rxjs/operators';
 import { of } from 'rxjs';
 
@@ -31,6 +31,7 @@ export class RegisterComponent {
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private router = inject(Router);
+  private config = inject(ConfigService);
 
   registerForm: FormGroup;
   errorMessage = signal<string | null>(null);
@@ -128,7 +129,7 @@ export class RegisterComponent {
       this.authService.register({ username, name, email, password }).subscribe({
         next: () => {
           this.loading.set(false);
-          if (environment.emailVerificationEnabled) {
+          if (this.config.emailVerificationEnabled) {
             this.successMessage.set(
               'Registration successful! Please check your email to verify your account before signing in.'
             );

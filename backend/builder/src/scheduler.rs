@@ -345,7 +345,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
 
     match builds {
         Ok(builds) => {
-            let (builds, dependencies) = builds;
+            let (builds, dependencies, entry_point_build_ids) = builds;
             let active_builds = builds
                 .iter()
                 .map(|b| b.clone().into_active_model())
@@ -419,6 +419,32 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 );
             } else {
                 debug!("No dependencies to insert for evaluation");
+            }
+
+            if let Some(project_id) = evaluation.project {
+                let now = chrono::Utc::now().naive_utc();
+                let active_entry_points = entry_point_build_ids
+                    .iter()
+                    .map(|&build_id| AEntryPoint {
+                        id: sea_orm::ActiveValue::Set(Uuid::new_v4()),
+                        project: sea_orm::ActiveValue::Set(project_id),
+                        evaluation: sea_orm::ActiveValue::Set(evaluation.id),
+                        build: sea_orm::ActiveValue::Set(build_id),
+                        created_at: sea_orm::ActiveValue::Set(now),
+                    })
+                    .collect::<Vec<AEntryPoint>>();
+
+                if !active_entry_points.is_empty() {
+                    const BATCH_SIZE: usize = 1000;
+                    for chunk in active_entry_points.chunks(BATCH_SIZE) {
+                        if let Err(e) = EEntryPoint::insert_many(chunk.to_vec())
+                            .exec(&state.db)
+                            .await
+                        {
+                            error!(error = %e, "Failed to insert entry points");
+                        }
+                    }
+                }
             }
 
             for build in builds {
@@ -802,6 +828,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                                 previous: None,
                                 next: None,
                                 created_at: Utc::now().naive_utc(),
+                                updated_at: Utc::now().naive_utc(),
                                 error: None,
                             },
                             commit_hash,
@@ -890,6 +917,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                 continue;
             }
         };
+        let now = Utc::now().naive_utc();
         let new_evaluation = AEvaluation {
             id: Set(Uuid::new_v4()),
             project: Set(Some(project.id)),
@@ -899,7 +927,8 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             status: Set(EvaluationStatus::Queued),
             previous: Set(evaluation_id),
             next: Set(None),
-            created_at: Set(Utc::now().naive_utc()),
+            created_at: Set(now),
+            updated_at: Set(now),
             error: Set(None),
         };
 
@@ -1439,6 +1468,7 @@ pub async fn update_evaluation_status(
 
     let mut active_evaluation: AEvaluation = evaluation.clone().into_active_model();
     active_evaluation.status = Set(status);
+    active_evaluation.updated_at = Set(Utc::now().naive_utc());
 
     match active_evaluation.update(&state.db).await {
         Ok(updated_eval) => updated_eval,
@@ -1464,6 +1494,7 @@ pub async fn update_evaluation_status_with_error(
     let mut active_evaluation: AEvaluation = evaluation.clone().into_active_model();
     active_evaluation.status = Set(status);
     active_evaluation.error = Set(Some(error_message));
+    active_evaluation.updated_at = Set(Utc::now().naive_utc());
 
     match active_evaluation.update(&state.db).await {
         Ok(updated_eval) => updated_eval,

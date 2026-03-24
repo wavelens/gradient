@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/core';
+import { ApplicationConfig, APP_INITIALIZER, provideBrowserGlobalErrorListeners, inject } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { provideAnimations } from '@angular/platform-browser/animations';
@@ -14,6 +14,7 @@ import Aura from '@primeuix/themes/aura';
 import { routes } from './app.routes';
 import { authInterceptor } from '@core/interceptors/auth.interceptor';
 import { errorInterceptor } from '@core/interceptors/error.interceptor';
+import { ConfigService } from '@core/services/config.service';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -32,5 +33,13 @@ export const appConfig: ApplicationConfig = {
         }
       }
     }),
+    {
+      provide: APP_INITIALIZER,
+      useFactory: () => {
+        const configService = inject(ConfigService);
+        return () => configService.load();
+      },
+      multi: true,
+    },
   ]
 };

@@ -45,6 +45,7 @@
     align-items: center;
     justify-content: space-between;
     margin-bottom: $spacing-lg;
+    max-width: 640px;
 
     h2 { margin: 0; }
   }
@@ -55,6 +56,7 @@
   border: 1px solid $color-border;
   border-radius: $border-radius-md;
   padding: $spacing-lg;
+  max-width: 640px;
 }
 
 .form-group {
@@ -104,10 +106,23 @@
     gap: $spacing-md;
 
     .material-symbols-outlined { font-size: 20px; color: $text-secondary; }
-
     .member-username { font-weight: 500; }
-    .member-role { font-size: $font-size-sm; }
   }
+
+  .member-actions {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+  }
+}
+
+.nav-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  h3 { margin: 0 0 $spacing-xs 0; }
+  p { margin: 0; }
 }
 
 .ssh-key-area {
@@ -116,7 +131,7 @@
 }
 
 .role-select {
-  width: 100%;
+  width: auto;
   padding: $spacing-sm;
   background: $color-quaternary;
   border: 1px solid $color-border;

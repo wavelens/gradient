@@ -1,0 +1,31 @@
+site_name: Gradient
+site_description: Nix-based Continuous Integration System
+site_url: https://wavelens.github.io/gradient
+repo_url: https://github.com/wavelens/gradient
+repo_name: wavelens/gradient
+copyright: Copyright &copy; 2026 Wavelens GmbH
+
+theme:
+  name: readthedocs
+
+docs_dir: docs/src
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Configuration: configuration.md
+  - Usage:
+    - Web Interface: usage/web-interface.md
+    - CLI: usage/cli.md
+    - API: usage/api.md
+    - Pull Deployment: usage/pull-deployment.md
+  - Development:
+    - Architecture: development/architecture.md
+    - Internals: development/internals.md
+    - Contributing: development/contributing.md
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - fenced_code

@@ -136,7 +136,7 @@ pub fn greater_than_zero<
 }
 
 pub fn hex_to_vec(s: &str) -> Result<Vec<u8>, InputError> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err(InputError::InvalidHexString);
     }
 
@@ -177,12 +177,12 @@ pub fn check_repository_url_is_ssh(url: &str) -> bool {
 
     // Check for SCP-like syntax: user@host:path
     // This is the most common format for GitHub/GitLab (e.g., git@github.com:user/repo.git)
-    if let Some(at_pos) = url.find('@') {
-        if let Some(colon_pos) = url[at_pos..].find(':') {
-            // Ensure the colon is not part of a protocol (e.g., not in "https://")
-            let colon_abs_pos = at_pos + colon_pos;
-            return colon_abs_pos > at_pos && !url[..at_pos].contains("://");
-        }
+    if let Some(at_pos) = url.find('@')
+        && let Some(colon_pos) = url[at_pos..].find(':')
+    {
+        // Ensure the colon is not part of a protocol (e.g., not in "https://")
+        let colon_abs_pos = at_pos + colon_pos;
+        return colon_abs_pos > at_pos && !url[..at_pos].contains("://");
     }
 
     false
