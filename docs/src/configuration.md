@@ -66,7 +66,7 @@ services.gradient.oidc = {
 };
 ```
 
-Gradient uses PKCE and discovers all provider endpoints from `discoveryUrl/.well-known/openid-configuration`.
+Gradient uses PKCE and discovers all provider endpoints from `discoveryUrl/.well-known/openid-configuration` and callback url is at `https://$domain/api/auth/oidc/callback`. Set `required` to `true` to disable basic auth and require OIDC for all users.
 
 ## Email
 

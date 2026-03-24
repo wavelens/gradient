@@ -5,9 +5,11 @@
  */
 
 { lib
-, stdenv
+, fetchPnpmDeps
 , nodejs
 , pnpm
+, pnpmConfigHook
+, stdenv
 }:
 
 stdenv.mkDerivation rec {
@@ -19,14 +21,16 @@ stdenv.mkDerivation rec {
     src = lib.cleanSource ../../frontend;
   };
 
-  pnpmDeps = pnpm.fetchDeps {
+  pnpmDeps = fetchPnpmDeps {
     inherit pname version src;
-    hash = lib.fakeHash;
+    fetcherVersion = 3;
+    hash = "sha256-gAs2fymlqYFCP6Mi1jvnTDANF+mt+DKACA9Du+rZYcs=";
   };
 
   nativeBuildInputs = [
     nodejs
-    pnpm.configHook
+    pnpm
+    pnpmConfigHook
   ];
 
   buildPhase = ''

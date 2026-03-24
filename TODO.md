@@ -2,3 +2,5 @@
  - build error: wrong build mode
  - invalid auth attempts
  - "Queued" after pressing "Execute Project"
+
+ - Support public IP
