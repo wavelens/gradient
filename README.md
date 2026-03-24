@@ -1,7 +1,7 @@
 # Gradient
 
 [Options Search](https://wavelens.github.io/gradient-search)
-[Docs](https://wavelens.github.io/gradient-docs)
+[Docs](https://wavelens.github.io/gradient)
 [Demo Instance](https://gradient.wavelens.io/api/v1/health)
 [API Docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml)
 

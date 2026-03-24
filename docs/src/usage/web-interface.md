@@ -15,7 +15,7 @@ A project maps to a Git repository and defines which Nix packages to evaluate.
 **Creating a project:**
 
 1. Open the organization and click **New Project**.
-2. Set the **Repository URL** (SSH or HTTPS), **Branch**, and **Evaluation Wildcard** — a Nix attribute path such as `packages.x86_64-linux` or `checks`.
+2. Set the **Repository URL** (SSH or HTTPS), **Branch**, and **Evaluation Wildcard** — a Nix attribute path such as `packages.x86_64-linux.*` or `checks.*`.
 3. Save. If the repository is private, copy the organization's SSH public key from **Settings → SSH** and add it to the repository's deploy keys.
 
 **Project detail page** shows the current entry-point builds (one card per top-level derivation) and a recent evaluation history table.
@@ -30,17 +30,6 @@ The evaluation log page shows:
 - The combined build log with ANSI colour support
 
 Click **Abort** to cancel an in-progress evaluation.
-
-## Dependency Graph
-
-Click the graph icon on any build card to open the dependency graph. It shows the full transitive Nix dependency tree for that derivation.
-
-- Pan by dragging the background
-- Zoom with the scroll wheel or `+`/`−` buttons
-- Click **Fit** (⊡) to reset the view
-- Click a card to open its build log
-- Multi-level edges are routed outside the card columns to avoid crossing intermediate nodes
-- Live status colours update automatically while builds are running
 
 ## Settings
 

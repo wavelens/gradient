@@ -211,7 +211,8 @@ paths:
     post:
       tags: [auth]
       summary: Check username availability
-      description: Returns `error: false` if the username is valid and not taken, `error: true` otherwise (non-2xx status is not used — always inspect the `error` field).
+      description: |-
+        Returns `error: false` if the username is valid and not taken, `error: true` otherwise (non-2xx status is not used — always inspect the `error` field).
       security: []
       operationId: checkUsername
       requestBody:
@@ -2520,7 +2521,7 @@ components:
           type: object
           additionalProperties:
             type: string
-          description: Map of output name → Nix store path (e.g. `{"out": "/nix/store/xyz-hello-2.12.1"}`)
+          description: Map of output name → Nix store path
         created_at:
           type: string
           format: date-time
