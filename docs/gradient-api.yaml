@@ -2521,7 +2521,8 @@ components:
           type: object
           additionalProperties:
             type: string
-          description: Map of output name → Nix store path
+          description: |-
+            Map of output name → Nix store path (e.g. `{"out": "/nix/store/xyz-hello-2.12.1"}`)
         created_at:
           type: string
           format: date-time

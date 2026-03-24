@@ -16,6 +16,7 @@
 - **Remote Builds** — build Nix derivations on remote machines without a local Nix install
 - **Pull Deployment** — deploy NixOS configurations by pulling from the Gradient server
 - **Dependency Graph** — interactive visualization of Nix build dependency trees
+- **Actions Integration**: Stream logs directly into GitHub Actions and other CI systems (planned).
 
 ## Quick Links
 

@@ -12,7 +12,7 @@ Gradient is a web-based Nix-based Continuous Integration (CI) system.
 
 ## Features
 
-![Gradient](./docs/gradient.png)
+<!-- OLD Image: ![Gradient](./docs/gradient.png) -->
 
 - **Modern UI**: has a clean and intuitive user interface.
 - **Organizations**: multiple organizations, which work independently from each other (e.g. different servers, user access).
@@ -23,6 +23,7 @@ Gradient is a web-based Nix-based Continuous Integration (CI) system.
 - **Cache**: integrated nix store cache.
 - **Remote Builds**: support for building nix derviations without having nix installed locally.
 - **Deployment Module**: Support for easy Pull-Deployment.
+- **Dependency Graph** — interactive visualization of Nix build dependency trees
 - **Actions Integration**: Stream logs directly into GitHub Actions and other CI systems (planned).
 
 ## Installation

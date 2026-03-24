@@ -15,7 +15,7 @@ nav:
   - Installation: installation.md
   - Configuration: configuration.md
   - Usage:
-    - Web Interface: usage/web-interface.md
+    - Overview: usage/overview.md
     - CLI: usage/cli.md
     - API: usage/api.md
     - Pull Deployment: usage/pull-deployment.md
