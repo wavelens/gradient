@@ -40,7 +40,7 @@ jobs:
             cores = 2
 
       - name: Build docs
-        run: nix run nixpkgs#mkdocs -- mkdocs build --strict --site-dir _site
+        run: nix run nixpkgs#mkdocs -- build --strict --site-dir _site
 
       - name: Upload artifact
         if: github.ref == 'refs/heads/main'
