@@ -2,6 +2,7 @@
  - build error: wrong build mode
  - invalid auth attempts
 
+ - Add Member to Organization half broken
  - retry failed builds (retry)
  - Cache Page: how to use this cache not showing public key and real url
  - tabbing on menues wrong / Enter does not work

@@ -261,7 +261,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       .split('\n')
       .filter(line => {
         const t = line.trim();
-        return t && t !== '""' && t !== "''" && t !== '"' && t !== "'";
+        // Keep non-empty transport lines; discard sentinel '""' and bare empty lines
+        return t !== '' && t !== '""' && t !== "''";
       })
       .flatMap(line => {
         // Try JSON.parse first to correctly decode \u001b and other escape sequences
@@ -272,15 +273,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
             line = line.slice(1, -1);
           }
         }
-        if (!line.trim()) return [];
         // Handle remaining literal escape sequences (non-JSON streams)
         return line
           .replace(/\\u001b/g, '\u001b')
           .replace(/\\n/g, '\n')
           .replace(/\\t/g, '\t')
           .split('\n');
-      })
-      .filter(l => l !== undefined) as string[];
+      });
   }
 
   private readonly ansiColorMap: Record<string, string> = {

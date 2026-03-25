@@ -45,6 +45,18 @@ pub struct EvaluationResponse {
     pub error: Option<String>,
 }
 
+async fn user_is_org_member(state: &Arc<ServerState>, user_id: Uuid, organization_id: Uuid) -> Result<bool, WebError> {
+    Ok(EOrganizationUser::find()
+        .filter(
+            Condition::all()
+                .add(COrganizationUser::Organization.eq(organization_id))
+                .add(COrganizationUser::User.eq(user_id)),
+        )
+        .one(&state.db)
+        .await?
+        .is_some())
+}
+
 /// `/nix/store/hash-name-version.drv` → `name-version`
 fn drv_display_name(path: &str) -> String {
     let filename = path.rsplit('/').next().unwrap_or(path);
@@ -96,7 +108,7 @@ pub async fn get_evaluation(
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
-    if organization.created_by != user.id {
+    if !user_is_org_member(&state, user.id, organization.id).await? {
         return Err(WebError::not_found("Evaluation"));
     }
 
@@ -163,7 +175,7 @@ pub async fn post_evaluation(
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
-    if organization.created_by != user.id {
+    if !user_is_org_member(&state, user.id, organization.id).await? {
         return Err(WebError::not_found("Evaluation"));
     }
 
@@ -222,7 +234,7 @@ pub async fn get_evaluation_builds(
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
-    if organization.created_by != user.id {
+    if !user_is_org_member(&state, user.id, organization.id).await? {
         return Err(WebError::not_found("Evaluation"));
     }
 
@@ -292,7 +304,7 @@ pub async fn post_evaluation_builds(
         })?;
 
     // TODO: Check if user is in organization
-    if organization.created_by != user.id {
+    if !user_is_org_member(&state, user.id, organization.id).await? {
         return Err(WebError::not_found("Evaluation"));
     }
 
