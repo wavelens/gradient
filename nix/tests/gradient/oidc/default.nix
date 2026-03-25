@@ -53,11 +53,6 @@
             };
           };
 
-          nginx.virtualHosts."gradient.local" = {
-            enableACME = lib.mkForce false;
-            forceSSL = lib.mkForce false;
-          };
-
           postgresql = {
             package = pkgs.postgresql_18;
             enableTCPIP = true;
@@ -81,50 +76,57 @@
           # Mock OIDC provider using nginx
           nginx = {
             enable = true;
-            virtualHosts."oidc.local" = {
-              listen = [{ addr = "0.0.0.0"; port = 8080; }];
-              locations = {
-                "/.well-known/openid-configuration" = {
-                  return = "200 '${builtins.toJSON {
-                    issuer = "http://oidc.local:8080";
-                    authorization_endpoint = "http://oidc.local:8080/oauth/authorize";
-                    token_endpoint = "http://oidc.local:8080/oauth/token";
-                    userinfo_endpoint = "http://oidc.local:8080/userinfo";
-                    jwks_uri = "http://oidc.local:8080/.well-known/jwks.json";
-                    response_types_supported = ["code"];
-                    subject_types_supported = ["public"];
-                    id_token_signing_alg_values_supported = ["RS256"];
-                  }}'";
-                  extraConfig = "add_header Content-Type application/json;";
-                };
+            virtualHosts = {
+              "gradient.local" = {
+                enableACME = lib.mkForce false;
+                forceSSL = lib.mkForce false;
+              };
 
-                "/oauth/authorize" = {
-                  return = "302 http://gradient.local/api/v1/auth/oidc/callback?code=test-auth-code";
-                };
+              "oidc.local" = {
+                listen = [{ addr = "0.0.0.0"; port = 8080; }];
+                locations = {
+                  "/.well-known/openid-configuration" = {
+                    return = "200 '${builtins.toJSON {
+                      issuer = "http://oidc.local:8080";
+                      authorization_endpoint = "http://oidc.local:8080/oauth/authorize";
+                      token_endpoint = "http://oidc.local:8080/oauth/token";
+                      userinfo_endpoint = "http://oidc.local:8080/userinfo";
+                      jwks_uri = "http://oidc.local:8080/.well-known/jwks.json";
+                      response_types_supported = ["code"];
+                      subject_types_supported = ["public"];
+                      id_token_signing_alg_values_supported = ["RS256"];
+                    }}'";
+                    extraConfig = "add_header Content-Type application/json;";
+                  };
 
-                "/oauth/token" = {
-                  extraConfig = ''
-                    limit_except POST {
-                      deny all;
-                    }
-                    add_header Content-Type application/json always;
-                    return 200 '${builtins.toJSON {
-                      access_token = "test-access-token";
-                      token_type = "Bearer";
-                      expires_in = 3600;
-                      id_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJuYW1lIjoiVGVzdCBVc2VyIiwiZW1haWwiOiJ0ZXN0QGV4YW1wbGUuY29tIiwiaWF0IjoxNTE2MjM5MDIyfQ.test-signature";
-                    }}';
-                  '';
-                };
+                  "/oauth/authorize" = {
+                    return = "302 http://gradient.local/api/v1/auth/oidc/callback?code=test-auth-code";
+                  };
 
-                "/userinfo" = {
-                  return = "200 '${builtins.toJSON {
-                    sub = "test-user";
-                    name = "Test User";
-                    email = "test@example.com";
-                    preferred_username = "testuser";
-                  }}'";
-                  extraConfig = "add_header Content-Type application/json;";
+                  "/oauth/token" = {
+                    extraConfig = ''
+                      limit_except POST {
+                        deny all;
+                      }
+                      add_header Content-Type application/json always;
+                      return 200 '${builtins.toJSON {
+                        access_token = "test-access-token";
+                        token_type = "Bearer";
+                        expires_in = 3600;
+                        id_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJuYW1lIjoiVGVzdCBVc2VyIiwiZW1haWwiOiJ0ZXN0QGV4YW1wbGUuY29tIiwiaWF0IjoxNTE2MjM5MDIyfQ.test-signature";
+                      }}';
+                    '';
+                  };
+
+                  "/userinfo" = {
+                    return = "200 '${builtins.toJSON {
+                      sub = "test-user";
+                      name = "Test User";
+                      email = "test@example.com";
+                      preferred_username = "testuser";
+                    }}'";
+                    extraConfig = "add_header Content-Type application/json;";
+                  };
                 };
               };
             };
