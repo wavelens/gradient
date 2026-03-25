@@ -48,6 +48,28 @@
               <span class="badge" [class.badge-active]="server.active" [class.badge-inactive]="!server.active">
                 {{ server.active ? 'Active' : 'Inactive' }}
               </span>
+              @if (testResult()?.id === server.id) {
+                <span class="badge" [class.badge-active]="testResult()!.ok" [class.badge-inactive]="!testResult()!.ok">
+                  {{ testResult()!.message }}
+                </span>
+              }
+              <button
+                pButton
+                label="Test"
+                icon="pi pi-wifi"
+                severity="secondary"
+                [disabled]="testingId() !== null || deletingId() !== null"
+                [loading]="testingId() === server.id"
+                (click)="checkConnection(server)"
+              ></button>
+              <button
+                pButton
+                label="Edit"
+                icon="pi pi-pencil"
+                severity="secondary"
+                [disabled]="server.managed"
+                (click)="openEditDialog(server)"
+              ></button>
               <button
                 pButton
                 label="Delete"
@@ -64,6 +86,52 @@
     }
   }
 </div>
+
+<!-- Edit Server Dialog -->
+<p-dialog
+  header="Edit Server"
+  [(visible)]="showEditDialog"
+  [modal]="true"
+  [style]="{ width: '500px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  @if (errorMessage()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ errorMessage() }}
+    </div>
+  }
+  <div class="form-group">
+    <label for="edit-display-name">Display Name</label>
+    <input pInputText id="edit-display-name" [(ngModel)]="editForm.display_name" class="w-full" (keyup.enter)="saveEdit()" />
+  </div>
+  <div class="form-row">
+    <div class="form-group form-group-flex">
+      <label for="edit-host">Host</label>
+      <input pInputText id="edit-host" [(ngModel)]="editForm.host" class="w-full" (keyup.enter)="saveEdit()" />
+    </div>
+    <div class="form-group form-group-port">
+      <label for="edit-port">Port</label>
+      <p-inputnumber id="edit-port" [(ngModel)]="editForm.port" [min]="1" [max]="65535" class="w-full" />
+    </div>
+  </div>
+  <div class="form-group">
+    <label for="edit-user">SSH User</label>
+    <input pInputText id="edit-user" [(ngModel)]="editForm.username" class="w-full" (keyup.enter)="saveEdit()" />
+  </div>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="saving()"></button>
+    <button
+      pButton
+      label="Save"
+      icon="pi pi-check"
+      (click)="saveEdit()"
+      [loading]="saving()"
+      [disabled]="saving() || !editForm.host.trim()"
+    ></button>
+  </ng-template>
+</p-dialog>
 
 <!-- Add Server Dialog -->
 <p-dialog
@@ -82,16 +150,16 @@
   }
   <div class="form-group">
     <label for="server-name">Name</label>
-    <input pInputText id="server-name" [(ngModel)]="newServer.name" placeholder="e.g. build-server-01" class="w-full" />
+    <input pInputText id="server-name" [(ngModel)]="newServer.name" placeholder="e.g. build-server-01" class="w-full" (keyup.enter)="createServer()" />
   </div>
   <div class="form-group">
     <label for="server-display-name">Display Name</label>
-    <input pInputText id="server-display-name" [(ngModel)]="newServer.display_name" placeholder="Optional" class="w-full" />
+    <input pInputText id="server-display-name" [(ngModel)]="newServer.display_name" placeholder="Optional" class="w-full" (keyup.enter)="createServer()" />
   </div>
   <div class="form-row">
     <div class="form-group form-group-flex">
       <label for="server-host">Host</label>
-      <input pInputText id="server-host" [(ngModel)]="newServer.host" placeholder="192.168.1.100" class="w-full" />
+      <input pInputText id="server-host" [(ngModel)]="newServer.host" placeholder="192.168.1.100" class="w-full" (keyup.enter)="createServer()" />
     </div>
     <div class="form-group form-group-port">
       <label for="server-port">Port</label>
@@ -100,7 +168,7 @@
   </div>
   <div class="form-group">
     <label for="server-user">SSH User</label>
-    <input pInputText id="server-user" [(ngModel)]="newServer.username" placeholder="root" class="w-full" />
+    <input pInputText id="server-user" [(ngModel)]="newServer.username" placeholder="root" class="w-full" (keyup.enter)="createServer()" />
   </div>
   <div class="form-group">
     <label>Architectures</label>
@@ -119,7 +187,7 @@
   </div>
   <div class="form-group">
     <label for="server-features">Features <span class="text-secondary">(comma-separated, optional)</span></label>
-    <input pInputText id="server-features" [(ngModel)]="newServer.features" placeholder="e.g. big-parallel,kvm" class="w-full" />
+    <input pInputText id="server-features" [(ngModel)]="newServer.features" placeholder="e.g. big-parallel,kvm" class="w-full" (keyup.enter)="createServer()" />
   </div>
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="creating()"></button>

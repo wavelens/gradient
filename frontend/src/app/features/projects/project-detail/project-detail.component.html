@@ -97,7 +97,7 @@
               </div>
               <div class="evaluation-actions">
                 <span class="evaluation-date text-secondary">
-                  {{ ep.created_at | date: 'MMM d, y HH:mm' }}
+                  {{ ep.created_at + 'Z' | date: 'MMM d, y HH:mm' }}
                 </span>
                 <span class="status-badge" [class]="getStatusClass(ep.evaluation_status)">
                   {{ ep.evaluation_status }}
@@ -153,7 +153,7 @@
               </div>
               <div class="evaluation-actions">
                 <span class="evaluation-date text-secondary">
-                  {{ evaluation.created_at | date: 'MMM d, y HH:mm' }}
+                  {{ evaluation.created_at + 'Z' | date: 'MMM d, y HH:mm' }}
                 </span>
                 @if (isRunningStatus(evaluation.status)) {
                   <button

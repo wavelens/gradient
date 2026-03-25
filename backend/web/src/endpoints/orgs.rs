@@ -502,17 +502,16 @@ pub async fn get_organization_subscribe(
         .all(&state.db)
         .await?;
 
-    let organization_users: ListResponse = organization_caches
-        .iter()
-        .map(|ou| ListItem {
-            id: ou.cache,
-            name: ou.cache.to_string(),
-        })
-        .collect();
+    let mut subscribed: ListResponse = Vec::new();
+    for oc in organization_caches {
+        if let Ok(Some(cache)) = ECache::find_by_id(oc.cache).one(&state.db).await {
+            subscribed.push(ListItem { id: oc.cache, name: cache.name });
+        }
+    }
 
     let res = BaseResponse {
         error: false,
-        message: organization_users,
+        message: subscribed,
     };
 
     Ok(Json(res))

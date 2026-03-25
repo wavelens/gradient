@@ -100,9 +100,25 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     });
   }
 
+  private readonly buildStatusOrder: Record<string, number> = {
+    Completed: 0,
+    Aborted: 1,
+    Failed: 2,
+    Queued: 3,
+    Building: 4,
+  };
+
+  private sortBuilds(builds: BuildItem[]): BuildItem[] {
+    return [...builds].sort((a, b) => {
+      const oa = this.buildStatusOrder[a.status] ?? 99;
+      const ob = this.buildStatusOrder[b.status] ?? 99;
+      return oa - ob;
+    });
+  }
+
   loadBuilds(): void {
     this.evalService.getBuilds(this.evaluationId).subscribe({
-      next: (builds) => this.builds.set(builds),
+      next: (builds) => this.builds.set(this.sortBuilds(builds)),
     });
   }
 
@@ -359,9 +375,20 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
+  selectAdjacentBuild(index: number): void {
+    const list = this.builds();
+    if (index < 0 || index >= list.length) return;
+    this.selectBuild(list[index]);
+    setTimeout(() => {
+      const items = document.querySelectorAll<HTMLElement>('.build-item');
+      items[index]?.focus();
+    }, 0);
+  }
+
   buildDisplayName(path: string): string {
-    // Extract package name from /nix/store/hash-name.drv → name
-    return path.replace(/^.*-/, '').replace(/\.drv$/, '');
+    // /nix/store/hash-name-version.drv → name-version (strip hash prefix only)
+    const filename = path.split('/').pop() ?? path;
+    return filename.replace(/^[^-]+-/, '').replace(/\.drv$/, '');
   }
 
   isRunning(): boolean {

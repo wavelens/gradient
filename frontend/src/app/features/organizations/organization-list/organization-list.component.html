@@ -68,6 +68,7 @@
         [(ngModel)]="newOrg.name"
         placeholder="organization-name"
         class="w-full"
+        (keyup.enter)="createOrganization()"
       />
       <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
     </div>
@@ -80,6 +81,7 @@
         [(ngModel)]="newOrg.display_name"
         placeholder="My Organization"
         class="w-full"
+        (keyup.enter)="createOrganization()"
       />
     </div>
 

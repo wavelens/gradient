@@ -566,8 +566,9 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
 
   private calcDuration(node: LayoutNode): string {
     const isActive = ['Building', 'Queued', 'Created'].includes(node.status);
-    const startMs = new Date(node.created_at).getTime();
-    const endMs = isActive ? Date.now() : new Date(node.updated_at).getTime();
+    const toUtc = (s: string) => new Date(s.includes('Z') || s.includes('+') ? s : s + 'Z').getTime();
+    const startMs = toUtc(node.created_at);
+    const endMs = isActive ? Date.now() : toUtc(node.updated_at);
     const s = Math.floor((endMs - startMs) / 1000);
     if (isNaN(s) || s < 0) return '';
     if (s < 60) return `${s}s`;

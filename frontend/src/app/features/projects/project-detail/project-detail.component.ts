@@ -61,6 +61,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       next: (project) => {
         this.project.set(project);
         if (showLoading) this.loading.set(false);
+        this.onProjectDataLoaded();
       },
       error: (error) => {
         console.error('Failed to load project:', error);
@@ -81,7 +82,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     this.starting.set(true);
     this.projectsService.startEvaluation(this.orgName, this.projectName).subscribe({
       next: () => {
-        this.starting.set(false);
+        // Keep starting=true; polling will clear it once the evaluation appears
         this.loadProjectData(false);
       },
       error: (error) => {
@@ -107,10 +108,19 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       const proj = this.project();
       const hasRunningEvaluation = proj?.last_evaluations?.some(e => this.isRunningStatus(e.status)) ?? false;
       const hasRunningBuild = this.entryPoints().some(ep => this.isBuildRunning(ep.build_status));
-      if (hasRunningEvaluation || hasRunningBuild) {
+      if (hasRunningEvaluation || hasRunningBuild || this.starting()) {
         this.loadProjectData(false);
       }
     });
+  }
+
+  onProjectDataLoaded(): void {
+    if (this.starting()) {
+      const hasRunning = this.project()?.last_evaluations?.some(e => this.isRunningStatus(e.status)) ?? false;
+      if (hasRunning) {
+        this.starting.set(false);
+      }
+    }
   }
 
   stopPolling(): void {
@@ -148,10 +158,11 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   }
 
   getEvaluationDuration(evaluation: EvaluationSummary): string {
-    const start = new Date(evaluation.created_at).getTime();
+    const toUtc = (s: string) => new Date(s.includes('Z') || s.includes('+') ? s : s + 'Z').getTime();
+    const start = toUtc(evaluation.created_at);
     const end = this.isRunningStatus(evaluation.status)
       ? this.tick()
-      : new Date(evaluation.updated_at).getTime();
+      : toUtc(evaluation.updated_at);
     return this.formatDuration(end - start);
   }
 

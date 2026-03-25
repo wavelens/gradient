@@ -1,6 +1,16 @@
  - garbage collection and gcroots
  - build error: wrong build mode
  - invalid auth attempts
- - "Queued" after pressing "Execute Project"
 
- - Support public IP
+ - retry failed builds (retry)
+ - tabbing on menues wrong / Enter does not work
+ - Builds should appear increamentally on log page.
+ - Add Non-SSH server as default
+ - fields not grayed out when in declarative state configuration (and user can still edit them)
+ - Save build log in Storage not Database
+ - Wrong OIDC as log in journal error
+ - Add Chache priority should be max 255 and be read if wrong value
+ - Cache page shows active but it is set not active
+ - At least one memeber in org or chache / add transfer ownership functionality
+ - Hover Effect on Dashboard for non clickable Elements
+ - Add Footer: AGPL License and link to github and wavelens

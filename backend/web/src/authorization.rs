@@ -14,7 +14,6 @@ use chrono::{Duration, Utc};
 use core::input::load_secret;
 use core::types::*;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation, decode, encode};
-use oauth2::PkceCodeChallenge;
 use rand::Rng;
 use rand::distr::Alphanumeric;
 use sea_orm::{
@@ -276,16 +275,10 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<Url> {
 
     let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.cli.serve_url);
 
-    let (pkce_challenge, _pkce_verifier) = PkceCodeChallenge::new_random_sha256();
-    let state_param = uuid::Uuid::new_v4().to_string();
-
     let mut params = vec![
         ("response_type", "code"),
         ("client_id", client_id),
         ("redirect_uri", &redirect_uri),
-        ("code_challenge", pkce_challenge.as_str()),
-        ("code_challenge_method", "S256"),
-        ("state", &state_param),
     ];
 
     if let Some(scopes) = &state.cli.oidc_scopes {

@@ -1,0 +1,97 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgName }}</a>
+        <span class="breadcrumb-separator">/</span>
+        <a [routerLink]="['/organization', orgName, 'settings']" class="breadcrumb-link">Settings</a>
+        <span class="breadcrumb-separator">/</span>
+        <span class="breadcrumb-current">Cache Subscriptions</span>
+      </div>
+      <h1>Cache Subscriptions</h1>
+      <p class="text-secondary">Nix binary caches this organization pushes builds to</p>
+    </div>
+    <button pButton label="Subscribe to Cache" icon="pi pi-plus" (click)="openSubscribeDialog()"></button>
+  </div>
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading cache subscriptions..." />
+  } @else {
+    @if (caches().length === 0) {
+      <div class="empty-state">
+        <span class="material-symbols-outlined">storage</span>
+        <h3>No cache subscriptions</h3>
+        <p class="text-secondary">Subscribe to a Nix binary cache to have builds pushed there automatically.</p>
+        <button pButton label="Subscribe to Cache" icon="pi pi-plus" (click)="openSubscribeDialog()"></button>
+      </div>
+    } @else {
+      <div class="caches-list">
+        @for (cache of caches(); track cache.id) {
+          <div class="cache-row">
+            <div class="cache-info">
+              <span class="material-symbols-outlined">storage</span>
+              <div class="cache-name">{{ cache.name }}</div>
+            </div>
+            <div class="cache-actions">
+              <button
+                pButton
+                label="Unsubscribe"
+                icon="pi pi-times"
+                severity="danger"
+                [loading]="unsubscribingId() === cache.id"
+                [disabled]="unsubscribingId() !== null"
+                (click)="unsubscribeCache(cache)"
+              ></button>
+            </div>
+          </div>
+        }
+      </div>
+    }
+  }
+</div>
+
+<!-- Subscribe Dialog -->
+<p-dialog
+  header="Subscribe to Cache"
+  [(visible)]="showSubscribeDialog"
+  [modal]="true"
+  [style]="{ width: '440px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  @if (errorMessage()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ errorMessage() }}
+    </div>
+  }
+  <div class="form-group">
+    <label for="cache-name">Cache Name</label>
+    <input
+      pInputText
+      id="cache-name"
+      [(ngModel)]="newCacheName"
+      placeholder="e.g. my-cache"
+      class="w-full"
+      (keyup.enter)="subscribeCache()"
+    />
+    <small class="text-secondary">The name of the binary cache you own.</small>
+  </div>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showSubscribeDialog.set(false)" [disabled]="subscribing()"></button>
+    <button
+      pButton
+      label="Subscribe"
+      icon="pi pi-check"
+      (click)="subscribeCache()"
+      [loading]="subscribing()"
+      [disabled]="subscribing() || !newCacheName.trim()"
+    ></button>
+  </ng-template>
+</p-dialog>

@@ -76,6 +76,15 @@ export const routes: Routes = [
           ),
       },
 
+      // Cache Subscriptions
+      {
+        path: 'organization/:org/caches',
+        loadComponent: () =>
+          import('./features/organizations/cache-subscriptions/cache-subscriptions.component').then(
+            (m) => m.CacheSubscriptionsComponent
+          ),
+      },
+
       // Projects
       {
         path: 'organization/:org/project/:project',

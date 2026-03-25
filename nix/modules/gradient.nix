@@ -20,7 +20,7 @@ in {
 
   options = {
     services.gradient = {
-      enable = lib.mkEnableOption "Enable Gradient";
+      enable = lib.mkEnableOption "Gradient";
       configureNginx = lib.mkEnableOption "Configure Nginx";
       configurePostgres = lib.mkEnableOption "Configure Postgres";
       package = lib.mkPackageOption pkgs "gradient-server" { };
@@ -281,20 +281,24 @@ in {
     services = {
       nginx = lib.mkIf cfg.configureNginx {
         enable = true;
-        virtualHosts."${cfg.domain}".locations = {
-          "/" = lib.mkIf cfg.frontend.enable {
-            root = "${cfg.frontend.package}/share/gradient-frontend";
-            tryFiles = "$uri $uri/ /index.html";
-          };
+        virtualHosts."${cfg.domain}" = {
+          enableACME = true;
+          forceSSL = true;
+          locations = {
+            "/" = lib.mkIf cfg.frontend.enable {
+              root = "${cfg.frontend.package}/share/gradient-frontend";
+              tryFiles = "$uri $uri/ /index.html";
+            };
 
-          "/api/" = {
-            proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
-            proxyWebsockets = true;
-          };
+            "/api/" = {
+              proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
+              proxyWebsockets = true;
+            };
 
-          "/cache/" = lib.mkIf cfg.serveCache {
-            proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
-            proxyWebsockets = true;
+            "/cache/" = lib.mkIf cfg.serveCache {
+              proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
+              proxyWebsockets = true;
+            };
           };
         };
       };

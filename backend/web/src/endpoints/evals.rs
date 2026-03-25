@@ -30,17 +30,39 @@ pub struct BuildItem {
     pub status: String,
 }
 
+#[derive(Serialize, Debug)]
+pub struct EvaluationResponse {
+    pub id: Uuid,
+    pub project: Option<Uuid>,
+    pub project_name: Option<String>,
+    pub repository: String,
+    pub commit: Uuid,
+    pub wildcard: String,
+    pub status: entity::evaluation::EvaluationStatus,
+    pub previous: Option<Uuid>,
+    pub next: Option<Uuid>,
+    pub created_at: chrono::NaiveDateTime,
+    pub error: Option<String>,
+}
+
+/// `/nix/store/hash-name-version.drv` → `name-version`
+fn drv_display_name(path: &str) -> String {
+    let filename = path.rsplit('/').next().unwrap_or(path);
+    let after_hash = filename.splitn(2, '-').nth(1).unwrap_or(filename);
+    after_hash.strip_suffix(".drv").unwrap_or(after_hash).to_string()
+}
+
 pub async fn get_evaluation(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(evaluation_id): Path<Uuid>,
-) -> WebResult<Json<BaseResponse<MEvaluation>>> {
+) -> WebResult<Json<BaseResponse<EvaluationResponse>>> {
     let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&state.db)
         .await?
         .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
-    let organization_id = if let Some(project_id) = evaluation.project {
+    let (organization_id, project_name) = if let Some(project_id) = evaluation.project {
         let project = EProject::find_by_id(project_id)
             .one(&state.db)
             .await?
@@ -52,9 +74,10 @@ pub async fn get_evaluation(
                 );
                 WebError::InternalServerError("Evaluation data inconsistency".to_string())
             })?;
-        project.organization
+        let name = project.name.clone();
+        (project.organization, Some(name))
     } else {
-        EDirectBuild::find()
+        let org_id = EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
             .await?
@@ -62,7 +85,8 @@ pub async fn get_evaluation(
                 tracing::error!("DirectBuild not found for evaluation {}", evaluation_id);
                 WebError::InternalServerError("Direct build data inconsistency".to_string())
             })?
-            .organization
+            .organization;
+        (org_id, None)
     };
     let organization = EOrganization::find_by_id(organization_id)
         .one(&state.db)
@@ -78,7 +102,19 @@ pub async fn get_evaluation(
 
     let res = BaseResponse {
         error: false,
-        message: evaluation,
+        message: EvaluationResponse {
+            id: evaluation.id,
+            project: evaluation.project,
+            project_name,
+            repository: evaluation.repository,
+            commit: evaluation.commit,
+            wildcard: evaluation.wildcard,
+            status: evaluation.status,
+            previous: evaluation.previous,
+            next: evaluation.next,
+            created_at: evaluation.created_at,
+            error: evaluation.error,
+        },
     };
 
     Ok(Json(res))
@@ -280,14 +316,7 @@ pub async fn post_evaluation_builds(
         };
 
         for build in past_builds {
-            let name = match build.derivation_path.split("-").next() {
-                Some(n) => n,
-                None => {
-                    error!("Invalid derivation path format: {}", build.derivation_path);
-                    continue;
-                }
-            };
-            let name = build.derivation_path.replace(format!("{}-", name).as_str(), "").replace(".drv", "");
+            let name = drv_display_name(&build.derivation_path);
             let log = build.log.unwrap_or("".to_string());
             last_logs.insert(build.id, log.clone());
 
@@ -341,14 +370,7 @@ pub async fn post_evaluation_builds(
             }
 
             for build in builds {
-                let name = match build.derivation_path.split("-").next() {
-                    Some(n) => n,
-                    None => {
-                        error!("Invalid derivation path format: {}", build.derivation_path);
-                        continue;
-                    }
-                };
-                let name = build.derivation_path.replace(format!("{}-", name).as_str(), "").replace(".drv", "");
+                let name = drv_display_name(&build.derivation_path);
                 let log = build.log.unwrap_or("".to_string());
 
                 if last_logs.contains_key(&build.id) {

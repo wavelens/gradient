@@ -36,4 +36,17 @@ export class ServersService {
   deleteServer(org: string, server: string): Observable<string> {
     return this.api.delete<string>(`servers/${org}/${server}`);
   }
+
+  patchServer(org: string, server: string, data: {
+    display_name?: string;
+    host?: string;
+    port?: number;
+    username?: string;
+  }): Observable<string> {
+    return this.api.patch<string>(`servers/${org}/${server}`, data);
+  }
+
+  checkConnection(org: string, server: string): Observable<string> {
+    return this.api.post<string>(`servers/${org}/${server}/check-connection`, {});
+  }
 }

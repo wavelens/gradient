@@ -97,7 +97,8 @@
   &.status-queued    { background: rgba($color-warning, 0.15); color: $color-warning; .dot { background: $color-warning; } }
   &.status-evaluating, &.status-building { background: rgba($color-info, 0.15); color: $color-info; .dot { background: $color-info; } }
   &.status-completed { background: rgba($color-success, 0.15); color: $color-success; .dot { background: $color-success; } }
-  &.status-failed, &.status-aborted { background: rgba($color-danger, 0.15); color: $color-danger; .dot { background: $color-danger; } }
+  &.status-failed  { background: rgba($color-danger, 0.15); color: $color-danger; .dot { background: $color-danger; } }
+  &.status-aborted { background: rgba($color-secondary, 0.15); color: $color-secondary; .dot { background: $color-secondary; } }
 }
 
 .builds-count {
@@ -149,7 +150,8 @@
     &.status-completed              { border-left-color: $color-success; }
     &.status-building               { border-left-color: $color-info; }
     &.status-queued                 { border-left-color: $color-warning; }
-    &.status-failed, &.status-aborted { border-left-color: $color-danger; }
+    &.status-failed  { border-left-color: $color-danger; }
+    &.status-aborted { border-left-color: $color-secondary; }
   }
 }
 
@@ -162,7 +164,8 @@
   &.status-queued                 { background: $color-warning; }
   &.status-building               { background: $color-info; }
   &.status-completed              { background: $color-success; }
-  &.status-failed, &.status-aborted { background: $color-danger; }
+  &.status-failed  { background: $color-danger; }
+  &.status-aborted { background: $color-secondary; }
 }
 
 .build-name {
@@ -293,7 +296,8 @@
   &.status-queued    { background: rgba($color-warning, 0.15); color: $color-warning; }
   &.status-evaluating, &.status-building { background: rgba($color-info, 0.15); color: $color-info; }
   &.status-completed { background: rgba($color-success, 0.15); color: $color-success; }
-  &.status-failed, &.status-aborted { background: rgba($color-danger, 0.15); color: $color-danger; }
+  &.status-failed  { background: rgba($color-danger, 0.15); color: $color-danger; }
+  &.status-aborted { background: rgba($color-secondary, 0.15); color: $color-secondary; }
 }
 
 // ── Error banner ──────────────────────────────────────────────────────────────
@@ -339,6 +343,38 @@
   color: $text-light;
 
   .material-symbols-outlined { font-size: 32px; }
+}
+
+.evaluating-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  height: 100%;
+  color: $text-secondary;
+
+  .evaluating-icon {
+    font-size: 56px;
+    color: $color-info;
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+
+  .evaluating-title {
+    font-size: $font-size-lg;
+    font-weight: 600;
+    color: $text-primary;
+  }
+
+  .evaluating-sub {
+    font-size: $font-size-sm;
+    color: $text-light;
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
 }
 
 .select-build-hint {

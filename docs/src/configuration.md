@@ -57,7 +57,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 ```nix
 services.gradient.oidc = {
   enable           = true;
-  required         = false;   # set true to disable basic auth
+  required         = false;   # set true to disable username/password login and require OIDC for all users
   clientId         = "gradient";
   clientSecretFile = "/run/secrets/gradient-oidc-secret";
   discoveryUrl     = "https://auth.example.com";
@@ -66,7 +66,7 @@ services.gradient.oidc = {
 };
 ```
 
-Gradient uses PKCE and discovers all provider endpoints from `discoveryUrl/.well-known/openid-configuration` and callback url is at `https://$domain/api/auth/oidc/callback`. Set `required` to `true` to disable basic auth and require OIDC for all users.
+Gradient uses PKCE and discovers all provider endpoints from `discoveryUrl/.well-known/openid-configuration` and callback url is at `https://$domain/api/v1/auth/oidc/callback`. Set `required` to `true` to disable basic auth and require OIDC for all users.
 
 ## Email
 

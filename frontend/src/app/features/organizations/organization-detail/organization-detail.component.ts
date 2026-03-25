@@ -54,7 +54,7 @@ export class OrganizationDetailComponent implements OnInit {
     display_name: '',
     description: '',
     repository: '',
-    evaluation_wildcard: '**',
+    evaluation_wildcard: 'packages.x86_64-linux.*',
   };
 
   ngOnInit(): void {
@@ -87,7 +87,7 @@ export class OrganizationDetailComponent implements OnInit {
       display_name: '',
       description: '',
       repository: '',
-      evaluation_wildcard: '**',
+      evaluation_wildcard: 'packages.x86_64-linux.*',
     };
     this.showCreateDialog.set(true);
   }

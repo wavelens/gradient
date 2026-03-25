@@ -345,6 +345,12 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
 
     match builds {
         Ok(builds) => {
+            // Re-fetch to check if aborted while evaluate() was running
+            match EEvaluation::find_by_id(evaluation.id).one(&state.db).await {
+                Ok(Some(current)) if current.status == EvaluationStatus::Aborted => return,
+                _ => {}
+            }
+
             let (builds, dependencies, entry_point_build_ids) = builds;
             let active_builds = builds
                 .iter()
@@ -577,6 +583,12 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
     };
 
     info!("Connected to server successfully");
+
+    let mut aserver: AServer = server.clone().into();
+    aserver.last_connection_at = Set(Utc::now().naive_utc());
+    if let Err(e) = aserver.update(&state.db).await {
+        warn!(error = %e, "Failed to update server last_connection_at");
+    }
 
     let dependencies = match get_build_dependencies_sorted(Arc::clone(&state), &mut local_daemon, &build).await {
         Ok(deps) => deps,

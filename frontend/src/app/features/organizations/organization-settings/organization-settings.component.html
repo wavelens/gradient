@@ -118,7 +118,7 @@
       }
     </div>
 
-    <!-- Servers -->
+    <!-- Infrastructure -->
     <div class="settings-section">
       <h2>Infrastructure</h2>
       <div class="settings-card">
@@ -128,6 +128,14 @@
             <p class="text-secondary">Manage build servers for this organization</p>
           </div>
           <a pButton label="Manage Servers" icon="pi pi-server" severity="secondary" [routerLink]="['/organization', orgName, 'servers']"></a>
+        </div>
+        <p-divider />
+        <div class="nav-row">
+          <div>
+            <h3>Cache Subscriptions</h3>
+            <p class="text-secondary">Nix binary caches this organization pushes builds to</p>
+          </div>
+          <a pButton label="Manage Caches" icon="pi pi-database" severity="secondary" [routerLink]="['/organization', orgName, 'caches']"></a>
         </div>
       </div>
     </div>
@@ -226,6 +234,7 @@
         [(ngModel)]="newMember.user"
         placeholder="Enter user's full name"
         class="w-full"
+        (keyup.enter)="addMember()"
       />
     </div>
     <div class="form-group">

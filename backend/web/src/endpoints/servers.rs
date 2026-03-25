@@ -648,11 +648,19 @@ pub async fn post_server_check_connection(
             }
         };
 
+    let server_id = server.id;
     match connect(server, None, public_key, private_key).await {
-        Ok(_) => Ok(Json(BaseResponse {
-            error: false,
-            message: "server connection established".to_string(),
-        })),
+        Ok(_) => {
+            if let Ok(Some(s)) = EServer::find_by_id(server_id).one(&state.db).await {
+                let mut aserver: AServer = s.into();
+                aserver.last_connection_at = Set(Utc::now().naive_utc());
+                let _ = aserver.update(&state.db).await;
+            }
+            Ok(Json(BaseResponse {
+                error: false,
+                message: "server connection established".to_string(),
+            }))
+        }
         Err(e) => Err((
             StatusCode::GATEWAY_TIMEOUT,
             Json(BaseResponse {

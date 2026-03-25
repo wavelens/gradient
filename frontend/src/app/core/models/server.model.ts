@@ -12,12 +12,10 @@ export interface Server {
   name: string;
   active: boolean;
   display_name: string;
-  description: string;
   host: string;
   port: number;
-  user: string;
-  architecture: Architecture;
-  features: string[];
+  username: string;
+  last_connection_at?: string;
   managed: boolean;
   created_by?: string;
   created_at?: string;

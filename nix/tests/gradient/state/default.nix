@@ -188,6 +188,11 @@
             };
           };
 
+          nginx.virtualHosts."gradient.local" = {
+            enableACME = lib.mkForce false;
+            forceSSL = lib.mkForce false;
+          };
+
           postgresql = {
             enable = true;
             package = pkgs.postgresql_18;

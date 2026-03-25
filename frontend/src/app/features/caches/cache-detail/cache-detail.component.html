@@ -44,51 +44,6 @@
       </div>
     </div>
 
-    <!-- Cache Details -->
-    <div class="details-grid">
-      <div class="detail-card">
-        <h3>
-          <span class="material-symbols-outlined">info</span>
-          Cache Information
-        </h3>
-        <div class="detail-row">
-          <span class="detail-label">Name</span>
-          <span class="detail-value">{{ c.name }}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">Display Name</span>
-          <span class="detail-value">{{ c.display_name }}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">Priority</span>
-          <span class="detail-value">{{ c.priority }}</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">Status</span>
-          <span class="detail-value">
-            <span class="status-indicator" [class.active]="c.active"></span>
-            {{ c.active ? 'Active' : 'Inactive' }}
-          </span>
-        </div>
-        @if (c.created_at) {
-          <div class="detail-row">
-            <span class="detail-label">Created</span>
-            <span class="detail-value">{{ c.created_at | date: 'medium' }}</span>
-          </div>
-        }
-      </div>
-
-      <div class="detail-card">
-        <h3>
-          <span class="material-symbols-outlined">description</span>
-          Description
-        </h3>
-        <p class="description-text">
-          {{ c.description || 'No description provided' }}
-        </p>
-      </div>
-    </div>
-
     <!-- Usage Information -->
     <div class="section">
       <h2>How to Use This Cache</h2>

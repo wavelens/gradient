@@ -42,7 +42,13 @@ export class ServersComponent implements OnInit {
 
   loading = signal(true);
   creating = signal(false);
+  saving = signal(false);
   deletingId = signal<string | null>(null);
+  testingId = signal<string | null>(null);
+  testResult = signal<{ id: string; ok: boolean; message: string } | null>(null);
+  showEditDialog = signal(false);
+  editServer: Server | null = null;
+  editForm = { display_name: '', host: '', port: 22, username: '' };
 
   orgName = '';
   servers = signal<Server[]>([]);
@@ -132,6 +138,51 @@ export class ServersComponent implements OnInit {
       error: (error) => {
         this.errorMessage.set(error.message || 'Failed to create server.');
         this.creating.set(false);
+      },
+    });
+  }
+
+  openEditDialog(server: Server): void {
+    this.editServer = server;
+    this.editForm = {
+      display_name: server.display_name || server.name,
+      host: server.host,
+      port: server.port,
+      username: server.username,
+    };
+    this.errorMessage.set(null);
+    this.showEditDialog.set(true);
+  }
+
+  saveEdit(): void {
+    if (!this.editServer || !this.editForm.host) return;
+    this.saving.set(true);
+    this.errorMessage.set(null);
+    this.serversService.patchServer(this.orgName, this.editServer.name, this.editForm).subscribe({
+      next: () => {
+        this.saving.set(false);
+        this.showEditDialog.set(false);
+        this.loadServers();
+      },
+      error: (error) => {
+        this.errorMessage.set(error.message || 'Failed to save changes.');
+        this.saving.set(false);
+      },
+    });
+  }
+
+  checkConnection(server: Server): void {
+    this.testingId.set(server.id);
+    this.testResult.set(null);
+    this.serversService.checkConnection(this.orgName, server.name).subscribe({
+      next: () => {
+        this.testResult.set({ id: server.id, ok: true, message: 'Connection successful' });
+        this.testingId.set(null);
+        this.loadServers();
+      },
+      error: (error) => {
+        this.testResult.set({ id: server.id, ok: false, message: error.message || 'Connection failed' });
+        this.testingId.set(null);
       },
     });
   }

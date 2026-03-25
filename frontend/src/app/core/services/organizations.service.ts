@@ -68,4 +68,16 @@ export class OrganizationsService {
   generateSSHKey(org: string): Observable<string> {
     return this.api.post<string>(`orgs/${org}/ssh`);
   }
+
+  getSubscribedCaches(org: string): Observable<{ id: string; name: string }[]> {
+    return this.api.get<{ id: string; name: string }[]>(`orgs/${org}/subscribe`);
+  }
+
+  subscribeCache(org: string, cache: string): Observable<string> {
+    return this.api.post<string>(`orgs/${org}/subscribe/${cache}`, {});
+  }
+
+  unsubscribeCache(org: string, cache: string): Observable<string> {
+    return this.api.delete<string>(`orgs/${org}/subscribe/${cache}`);
+  }
 }

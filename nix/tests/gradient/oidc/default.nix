@@ -53,6 +53,11 @@
             };
           };
 
+          nginx.virtualHosts."gradient.local" = {
+            enableACME = lib.mkForce false;
+            forceSSL = lib.mkForce false;
+          };
+
           postgresql = {
             package = pkgs.postgresql_18;
             enableTCPIP = true;
@@ -94,7 +99,7 @@
                 };
 
                 "/oauth/authorize" = {
-                  return = "302 http://gradient.local/api/v1/auth/oidc/callback?code=test-auth-code&state=$arg_state";
+                  return = "302 http://gradient.local/api/v1/auth/oidc/callback?code=test-auth-code";
                 };
 
                 "/oauth/token" = {
@@ -203,7 +208,7 @@
       # Test callback with valid authorization code — expect a 302 redirect to the frontend
       callback_response = server.succeed("""
         ${lib.getExe pkgs.curl} -s -i \
-          "http://gradient.local/api/v1/auth/oidc/callback?code=test-auth-code&state=test-state"
+          "http://gradient.local/api/v1/auth/oidc/callback?code=test-auth-code"
       """)
       print(f"Callback response: {callback_response}")
 
@@ -213,20 +218,13 @@
       if "/account/oidc-callback?token=" not in callback_response:
           raise Exception(f"OIDC callback redirect missing expected location: {callback_response}")
 
-      # Test callback with invalid/missing code
+      # Test callback with missing code
       print("=== Testing OIDC Error Handling ===")
       error_response = server.succeed("""
         ${lib.getExe pkgs.curl} -s -i \
-          "http://gradient.local/api/v1/auth/oidc/callback?error=access_denied&state=test-state" || true
+          "http://gradient.local/api/v1/auth/oidc/callback?error=access_denied" || true
       """)
       print(f"Error callback response: {error_response}")
-
-      # Test callback with missing state parameter
-      missing_state_response = server.succeed("""
-        ${lib.getExe pkgs.curl} -s -i \
-          "http://gradient.local/api/v1/auth/oidc/callback?code=test-auth-code" || true
-      """)
-      print(f"Missing state response: {missing_state_response}")
 
       print("=== Testing OIDC Token Validation ===")
 
