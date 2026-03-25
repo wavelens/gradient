@@ -3,6 +3,7 @@
  - invalid auth attempts
 
  - retry failed builds (retry)
+ - Cache Page: how to use this cache not showing public key and real url
  - tabbing on menues wrong / Enter does not work
  - Builds should appear increamentally on log page.
  - Add Non-SSH server as default

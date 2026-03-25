@@ -140,7 +140,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     switch (status) {
       case 'Completed': return 'status-success';
       case 'Failed': return 'status-danger';
-      case 'Aborted': return 'status-warning';
+      case 'Aborted': return 'status-secondary';
       case 'Queued': case 'Building': return 'status-running';
       default: return '';
     }
@@ -197,7 +197,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     switch (status) {
       case 'Completed': return 'status-success';
       case 'Failed': return 'status-danger';
-      case 'Aborted': return 'status-warning';
+      case 'Aborted': return 'status-secondary';
       case 'Queued': case 'Evaluating': case 'Building': return 'status-running';
       default: return '';
     }

@@ -96,6 +96,11 @@ a {
   font-family: $font-family-base;
 }
 
+// PrimeNG button loading spinner animation (theme CSS is not imported)
+.p-button-loading-icon {
+  animation: fa-spin 2s infinite linear;
+}
+
 .p-button {
   background: $color-tertiary;
   border: 1px solid $color-border;

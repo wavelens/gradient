@@ -23,12 +23,30 @@ in {
       enable = lib.mkEnableOption "Gradient";
       configureNginx = lib.mkEnableOption "Configure Nginx";
       configurePostgres = lib.mkEnableOption "Configure Postgres";
-      package = lib.mkPackageOption pkgs "gradient-server" { };
-      package_nix = lib.mkPackageOption pkgs "nix" { };
-      package_git = lib.mkPackageOption pkgs "git" { };
-      package_ssh = lib.mkPackageOption pkgs "openssh" { };
       serveCache = lib.mkEnableOption "Serve cache";
       reportErrors = lib.mkEnableOption "Report errors to Sentry";
+      package = lib.mkPackageOption pkgs "gradient-server" { };
+      package_nix = lib.mkOption {
+        default = config.nix.package;
+        defaultText = "config.nix.package";
+        type = lib.types.package;
+        description = "The nix package to use";
+      };
+
+      package_git = lib.mkOption {
+        default = config.programs.git.package;
+        defaultText = "config.programs.git.package";
+        type = lib.types.package;
+        description = "The git package to use";
+      };
+
+      package_ssh = lib.mkOption {
+        default = config.programs.ssh.package;
+        defaultText = "config.programs.ssh.package";
+        type = lib.types.package;
+        description = "The openssh package to use";
+      };
+
       domain = lib.mkOption {
         description = "The domain under which Gradient runs.";
         type = lib.types.str;

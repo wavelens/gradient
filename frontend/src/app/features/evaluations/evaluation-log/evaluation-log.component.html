@@ -97,16 +97,14 @@
             <span class="metric-label">Commit</span>
             <code class="commit-hash">{{ (eval.commit || '').slice(0, 8) }}</code>
           </div>
-          @if (eval.previous || eval.next) {
-            <div class="info-metric nav-btns">
-              @if (eval.previous) {
-                <button pButton icon="pi pi-arrow-left" severity="secondary" size="small" (click)="navigateToEvaluation(eval.previous!)"></button>
-              }
-              @if (eval.next) {
-                <button pButton icon="pi pi-arrow-right" severity="secondary" size="small" (click)="navigateToEvaluation(eval.next!)"></button>
-              }
-            </div>
-          }
+          <div class="info-metric nav-btns">
+            <button pButton icon="pi pi-arrow-left" severity="secondary" size="small"
+              [disabled]="!eval.previous"
+              (click)="eval.previous && navigateToEvaluation(eval.previous)"></button>
+            <button pButton icon="pi pi-arrow-right" severity="secondary" size="small"
+              [disabled]="!eval.next"
+              (click)="eval.next && navigateToEvaluation(eval.next)"></button>
+          </div>
         </div>
         <div class="info-bar-right">
           @if (isRunning()) {

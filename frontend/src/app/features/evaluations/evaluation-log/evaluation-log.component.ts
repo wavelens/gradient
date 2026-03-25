@@ -55,6 +55,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   orgName = '';
   evaluationId = '';
+  private initialBuildId: string | null = null;
 
   completedBuilds = computed(() =>
     this.builds().filter(b => b.status === 'Completed').length
@@ -73,6 +74,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') || '';
+    this.initialBuildId = this.route.snapshot.queryParamMap.get('build');
     if (!this.evaluationId) {
       this.loading.set(false);
       return;
@@ -101,11 +103,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   private readonly buildStatusOrder: Record<string, number> = {
-    Completed: 0,
-    Aborted: 1,
+    Building: 0,
+    Queued: 1,
     Failed: 2,
-    Queued: 3,
-    Building: 4,
+    Aborted: 3,
+    Completed: 4,
   };
 
   private sortBuilds(builds: BuildItem[]): BuildItem[] {
@@ -118,7 +120,16 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   loadBuilds(): void {
     this.evalService.getBuilds(this.evaluationId).subscribe({
-      next: (builds) => this.builds.set(this.sortBuilds(builds)),
+      next: (builds) => {
+        this.builds.set(this.sortBuilds(builds));
+        if (this.initialBuildId) {
+          const target = builds.find(b => b.id === this.initialBuildId);
+          if (target) {
+            this.initialBuildId = null;
+            this.selectBuild(target);
+          }
+        }
+      },
     });
   }
 
@@ -253,17 +264,18 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         return t && t !== '""' && t !== "''" && t !== '"' && t !== "'";
       })
       .flatMap(line => {
-        // strip surrounding JSON quotes
-        if (
-          line.length >= 2 &&
-          ((line.startsWith('"') && line.endsWith('"')) ||
-            (line.startsWith("'") && line.endsWith("'")))
-        ) {
-          line = line.slice(1, -1);
+        // Try JSON.parse first to correctly decode \u001b and other escape sequences
+        if (line.length >= 2 && line.startsWith('"') && line.endsWith('"')) {
+          try {
+            line = JSON.parse(line) as string;
+          } catch {
+            line = line.slice(1, -1);
+          }
         }
         if (!line.trim()) return [];
-        // Handle \n escapes
+        // Handle remaining literal escape sequences (non-JSON streams)
         return line
+          .replace(/\\u001b/g, '\u001b')
           .replace(/\\n/g, '\n')
           .replace(/\\t/g, '\t')
           .split('\n');
@@ -271,23 +283,51 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       .filter(l => l !== undefined) as string[];
   }
 
+  private readonly ansiColorMap: Record<string, string> = {
+    // Reset / close
+    '0':    '</span>', '39': '</span>', '49': '</span>',
+    '22': '</span>', '23': '</span>', '24': '</span>',
+    // Styles
+    '1': '<span style="font-weight:bold">',
+    '2': '<span style="opacity:0.6">',
+    '3': '<span style="font-style:italic">',
+    // Standard foreground (30-37)
+    '30': '<span style="color:#374151">',
+    '31': '<span style="color:#ef4444">',
+    '32': '<span style="color:#22c55e">',
+    '33': '<span style="color:#eab308">',
+    '34': '<span style="color:#3b82f6">',
+    '35': '<span style="color:#a855f7">',
+    '36': '<span style="color:#06b6d4">',
+    '37': '<span style="color:#d1d5db">',
+    // Bright foreground (90-97)
+    '90': '<span style="color:#6b7280">',
+    '91': '<span style="color:#f87171">',
+    '92': '<span style="color:#4ade80">',
+    '93': '<span style="color:#fbbf24">',
+    '94': '<span style="color:#60a5fa">',
+    '95': '<span style="color:#c084fc">',
+    '96': '<span style="color:#22d3ee">',
+    '97': '<span style="color:#f9fafb">',
+    // Combined bold+color (common nix patterns)
+    '1;31': '<span style="color:#ef4444;font-weight:bold">',
+    '1;32': '<span style="color:#22c55e;font-weight:bold">',
+    '1;33': '<span style="color:#eab308;font-weight:bold">',
+    '1;34': '<span style="color:#3b82f6;font-weight:bold">',
+    '1;35': '<span style="color:#a855f7;font-weight:bold">',
+    '1;36': '<span style="color:#06b6d4;font-weight:bold">',
+    '31;1': '<span style="color:#ef4444;font-weight:bold">',
+    '35;1': '<span style="color:#a855f7;font-weight:bold">',
+  };
+
   private convertAnsiToHtml(text: string): string {
-    return text
+    const escaped = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/\u001b\[0m/g, '</span>')
-      .replace(/\u001b\[31;1m/g, '<span style="color:#ef4444;font-weight:bold">')
-      .replace(/\u001b\[31m/g, '<span style="color:#ef4444">')
-      .replace(/\u001b\[32m/g, '<span style="color:#22c55e">')
-      .replace(/\u001b\[33m/g, '<span style="color:#eab308">')
-      .replace(/\u001b\[34m/g, '<span style="color:#3b82f6">')
-      .replace(/\u001b\[35;1m/g, '<span style="color:#a855f7;font-weight:bold">')
-      .replace(/\u001b\[35m/g, '<span style="color:#a855f7">')
-      .replace(/\u001b\[36m/g, '<span style="color:#06b6d4">')
-      .replace(/\u001b\[37m/g, '<span style="color:#f8fafc">')
-      .replace(/\u001b\[1m/g, '<span style="font-weight:bold">')
-      .replace(/\u001b\[[0-9;]*m/g, '');
+      .replace(/>/g, '&gt;');
+    return escaped.replace(/\u001b\[([0-9;]*)m/g, (_, code: string) => {
+      return this.ansiColorMap[code] ?? '';
+    });
   }
 
   private renderLog(): void {
