@@ -40,7 +40,7 @@
     "@angular/build": "^21.2.3",
     "@angular/cli": "^21.2.3",
     "@angular/compiler-cli": "^21.2.5",
-    "jsdom": "^27.4.0",
+    "jsdom": "^29.0.1",
     "typescript": "~5.9.3",
     "vitest": "^4.1.1"
   }
