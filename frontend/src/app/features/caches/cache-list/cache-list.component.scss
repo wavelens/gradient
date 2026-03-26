@@ -145,7 +145,33 @@
         border: 1px solid $color-border;
         color: $text-light;
       }
+
+      &.public-badge {
+        background-color: rgba($color-info, 0.1);
+        border: 1px solid $color-info;
+        color: $color-info;
+      }
     }
+  }
+}
+
+.discover-header {
+  margin-bottom: $spacing-md;
+}
+
+.visibility-select {
+  background: $color-quaternary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  color: $text-primary;
+  font-size: $font-size-md;
+  padding: $spacing-sm $spacing-md;
+  cursor: pointer;
+  width: 100%;
+
+  &:focus {
+    outline: none;
+    border-color: $text-secondary;
   }
 }
 
@@ -188,4 +214,28 @@
 
 .w-full {
   width: 100%;
+}
+
+input[type="number"] {
+  background: $color-quaternary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  color: $text-primary;
+  font-size: $font-size-md;
+  padding: $spacing-sm $spacing-md;
+  width: 100%;
+  box-sizing: border-box;
+
+  &:focus {
+    outline: none;
+    border-color: $text-secondary;
+  }
+
+  &.input-invalid {
+    border-color: $color-danger;
+  }
+}
+
+.text-danger {
+  color: $color-danger;
 }

@@ -23,11 +23,7 @@ fn init_logging(log_level: &str) {
     };
 
     tracing_subscriber::registry()
-        .with(
-            fmt::layer()
-                .with_target(true)
-                .with_thread_ids(true),
-        )
+        .with(fmt::layer().with_target(true).with_thread_ids(true))
         .with(env_filter)
         .init();
 }

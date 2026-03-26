@@ -46,10 +46,15 @@ export class OrganizationListComponent implements OnInit {
     name: '',
     display_name: '',
     description: '',
+    public: false,
   };
+
+  publicOrgs = signal<Organization[]>([]);
+  publicLoading = signal(false);
 
   ngOnInit(): void {
     this.loadOrganizations();
+    this.loadPublicOrganizations();
   }
 
   loadOrganizations(): void {
@@ -66,11 +71,23 @@ export class OrganizationListComponent implements OnInit {
     });
   }
 
+  loadPublicOrganizations(): void {
+    this.publicLoading.set(true);
+    this.organizationsService.getPublicOrganizations().subscribe({
+      next: (orgs) => {
+        this.publicOrgs.set(orgs);
+        this.publicLoading.set(false);
+      },
+      error: () => this.publicLoading.set(false),
+    });
+  }
+
   openCreateDialog(): void {
     this.newOrg = {
       name: '',
       display_name: '',
       description: '',
+      public: false,
     };
     this.showCreateDialog.set(true);
   }

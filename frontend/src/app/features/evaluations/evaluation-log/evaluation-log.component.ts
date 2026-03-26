@@ -184,8 +184,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
       if (response.ok) {
         const data = await response.json();
-        if (!data.error && data.message) {
-          const lines = this.parseLogContent(data.message as string);
+        if (!data.error && typeof data.message === 'string' && data.message !== '') {
+          // data.message is already a decoded JS string — split directly to preserve blank lines
+          const lines = (data.message as string).split('\n');
+          // Trim a single trailing empty string produced by a final newline
+          if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
           this.logLines = lines;
           this.renderLog();
         }

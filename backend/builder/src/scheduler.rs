@@ -32,8 +32,13 @@ use super::evaluator::*;
 
 async fn parse_derivation_file(
     binpath_nix: &str,
-    derivation_path: &str
-) -> anyhow::Result<(String, Vec<String>, HashMap<String, String>, HashSet<String>)> {
+    derivation_path: &str,
+) -> anyhow::Result<(
+    String,
+    Vec<String>,
+    HashMap<String, String>,
+    HashSet<String>,
+)> {
     if !derivation_path.ends_with(".drv") {
         return Ok((
             "/bin/bash".to_string(),
@@ -56,8 +61,14 @@ async fn parse_derivation_file(
     }
 
     let json_output = String::from_utf8_lossy(&output.stdout);
-    let parsed_json: serde_json::Value =
-        serde_json::from_str(&json_output).with_context(|| format!("Failed to parse JSON output from 'nix derivation show {}': '{}', stderr: '{}'", derivation_path, json_output, String::from_utf8_lossy(&output.stderr)))?;
+    let parsed_json: serde_json::Value = serde_json::from_str(&json_output).with_context(|| {
+        format!(
+            "Failed to parse JSON output from 'nix derivation show {}': '{}', stderr: '{}'",
+            derivation_path,
+            json_output,
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })?;
 
     let derivation_data = parsed_json
         .as_object()
@@ -92,10 +103,7 @@ async fn parse_derivation_file(
                 .filter_map(|(k, v)| v.as_str().map(|s| (k, s)))
                 // SECURITY: Filter out __json - it must not be in env per Nix C++ code
                 .filter(|(k, _)| k.as_str() != "__json")
-                .map(|(k, s)| (
-                    k.to_string(),
-                    s.to_string()
-                ))
+                .map(|(k, s)| (k.to_string(), s.to_string()))
                 .collect()
         })
         .unwrap_or_default();
@@ -139,23 +147,27 @@ async fn create_basic_derivation(
         }
     };
 
-    let (builder, args, env, input_srcs) = parse_derivation_file(
-        state.cli.binpath_nix.as_str(),
-        &build.derivation_path,
-    )
-    .await
-    .context("Failed to parse derivation file")?;
+    let (builder, args, env, input_srcs) =
+        parse_derivation_file(state.cli.binpath_nix.as_str(), &build.derivation_path)
+            .await
+            .context("Failed to parse derivation file")?;
 
     let mut outputs = HashMap::new();
     for (name, path) in out_paths {
-        outputs.insert(name, DerivationOutput {
-            path: Some(path),
-            hash_algo: None,
-            hash: None,
-        });
+        outputs.insert(
+            name,
+            DerivationOutput {
+                path: Some(path),
+                hash_algo: None,
+                hash: None,
+            },
+        );
     }
 
-    let input_srcs: HashSet<String> = dependencies.into_iter().chain(input_srcs.into_iter()).collect();
+    let input_srcs: HashSet<String> = dependencies
+        .into_iter()
+        .chain(input_srcs.into_iter())
+        .collect();
 
     Ok(BasicDerivation {
         outputs,
@@ -163,7 +175,7 @@ async fn create_basic_derivation(
         platform: build.architecture.to_string(),
         builder,
         args,
-        env,  // env now contains __json if structured attrs exist
+        env, // env now contains __json if structured attrs exist
     })
 }
 
@@ -590,14 +602,15 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         warn!(error = %e, "Failed to update server last_connection_at");
     }
 
-    let dependencies = match get_build_dependencies_sorted(Arc::clone(&state), &mut local_daemon, &build).await {
-        Ok(deps) => deps,
-        Err(e) => {
-            error!(error = %e, "Failed to get build dependencies");
-            update_build_status(Arc::clone(&state), build.clone(), BuildStatus::Failed).await;
-            return;
-        }
-    };
+    let dependencies =
+        match get_build_dependencies_sorted(Arc::clone(&state), &mut local_daemon, &build).await {
+            Ok(deps) => deps,
+            Err(e) => {
+                error!(error = %e, "Failed to get build dependencies");
+                update_build_status(Arc::clone(&state), build.clone(), BuildStatus::Failed).await;
+                return;
+            }
+        };
 
     info!(
         dependency_count = dependencies.len(),
@@ -621,14 +634,22 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         return;
     }
 
-    let derivation = match create_basic_derivation(&build, &mut local_daemon, dependencies, Arc::clone(&state)).await {
-        Ok(derivation) => derivation,
-        Err(e) => {
-            error!(error = %e, "Failed to create basic derivation");
-            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Aborted).await;
-            return;
-        }
-    };
+    let derivation =
+        match create_basic_derivation(&build, &mut local_daemon, dependencies, Arc::clone(&state))
+            .await
+        {
+            Ok(derivation) => derivation,
+            Err(e) => {
+                error!(error = %e, "Failed to create basic derivation");
+                update_build_status_recursivly(
+                    Arc::clone(&state),
+                    build.clone(),
+                    BuildStatus::Aborted,
+                )
+                .await;
+                return;
+            }
+        };
 
     let mut build_outputs: Vec<ABuildOutput> = vec![];
 
@@ -641,7 +662,6 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                     .values()
                     .map(|realisation| format!("/nix/store/{}", realisation.out_path))
                     .collect::<Vec<String>>();
-
 
                 if let Err(e) = match local_daemon {
                     LocalNixStore::UnixStream(ref mut store) => {
@@ -1252,12 +1272,10 @@ async fn reserve_available_server(
         .add(CServer::Active.eq(true));
 
     let mut cond = if build.architecture != Architecture::BUILTIN {
-        cond
-            .add(CServerArchitecture::Architecture.eq(build.architecture.clone()))
+        cond.add(CServerArchitecture::Architecture.eq(build.architecture.clone()))
     } else {
         cond
     };
-
 
     for feature in features {
         cond = cond.add(CServerFeature::Feature.eq(feature));
@@ -1453,14 +1471,25 @@ async fn update_build_status_recursivly(
             }
         };
 
-        // Update dependent builds and add them to the queue for further processing
+        // Update dependent builds and add them to the queue for further processing.
+        // Dependents of a failed build are aborted (they didn't fail themselves).
+        let propagated_status = if status == BuildStatus::Failed {
+            BuildStatus::Aborted
+        } else {
+            status.clone()
+        };
         for dependent_build in dependent_builds {
-            update_build_status(Arc::clone(&state), dependent_build.clone(), status.clone()).await;
+            update_build_status(
+                Arc::clone(&state),
+                dependent_build.clone(),
+                propagated_status.clone(),
+            )
+            .await;
             queue.push_back(dependent_build.id);
         }
     }
 
-    // Finally update the original build
+    // Finally update the original build with the actual status.
     let build = update_build_status(Arc::clone(&state), build, status.clone()).await;
     check_evaluation_status(state, build.evaluation).await;
 
@@ -1633,7 +1662,9 @@ async fn get_build_dependencies_sorted(
     local_store: &mut LocalNixStore,
     build: &MBuild,
 ) -> Result<Vec<String>, String> {
-    let bdependencies_direct: Vec<MBuild> = match get_build_dependencies(Arc::clone(&state), build).await {
+    let bdependencies_direct: Vec<MBuild> = match get_build_dependencies(Arc::clone(&state), build)
+        .await
+    {
         Ok(deps) => deps,
         Err(e) => {
             error!(error = %e, build_id = %build.id, "Failed to get build dependencies for sorting");

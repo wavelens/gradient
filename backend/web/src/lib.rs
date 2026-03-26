@@ -70,11 +70,16 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
 
     let api = Router::new()
         .route("/orgs", get(orgs::get).put(orgs::put))
+        .route("/orgs/public", get(orgs::get_public_organizations))
         .route(
             "/orgs/{organization}",
             get(orgs::get_organization)
                 .patch(orgs::patch_organization)
                 .delete(orgs::delete_organization),
+        )
+        .route(
+            "/orgs/{organization}/public",
+            post(orgs::post_organization_public).delete(orgs::delete_organization_public),
         )
         .route(
             "/orgs/{organization}/users",
@@ -135,6 +140,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             get(evals::get_evaluation_builds).post(evals::post_evaluation_builds),
         )
         .route("/caches", get(caches::get).put(caches::put))
+        .route("/caches/public", get(caches::get_public_caches))
         .route(
             "/caches/{cache}",
             get(caches::get_cache)
@@ -145,22 +151,20 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/caches/{cache}/active",
             post(caches::post_cache_active).delete(caches::delete_cache_active),
         )
-        .route("/caches/{cache}/key", get(caches::get_cache_key))
         .route(
-            "/builds/{build}",
-            get(builds::get_build),
+            "/caches/{cache}/public",
+            post(caches::post_cache_public).delete(caches::delete_cache_public),
         )
+        .route("/caches/{cache}/key", get(caches::get_cache_key))
+        .route("/builds/{build}", get(builds::get_build))
         .route(
             "/builds/{build}/dependencies",
             get(builds::get_build_dependencies),
         )
-        .route(
-            "/builds/{build}/graph",
-            get(builds::get_build_graph),
-        )
+        .route("/builds/{build}/graph", get(builds::get_build_graph))
         .route(
             "/builds/{build}/log",
-            get(builds::get_build_log).post(builds::post_build_log)
+            get(builds::get_build_log).post(builds::post_build_log),
         )
         .route(
             "/builds/{build}/downloads",

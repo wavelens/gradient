@@ -80,6 +80,7 @@
         border: 1px solid $color-border;
         color: $text-light;
       }
+
     }
 
     .priority-badge {
@@ -209,19 +210,67 @@
     color: $text-primary;
   }
 
+  .usage-row {
+    margin-bottom: $spacing-lg;
+
+    &:last-child { margin-bottom: 0; }
+
+    .usage-label {
+      display: block;
+      font-size: $font-size-sm;
+      font-weight: 500;
+      color: $text-secondary;
+      margin-bottom: $spacing-xs;
+    }
+  }
+
   .code-block {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
     background-color: $color-quaternary;
     border: 1px solid $color-border;
     border-radius: $border-radius-md;
-    padding: $spacing-md;
-    margin: $spacing-md 0;
+    padding: $spacing-sm $spacing-md;
     overflow-x: auto;
 
+    &.multiline {
+      align-items: flex-start;
+
+      pre {
+        flex: 1;
+        margin: 0;
+        font-family: $font-family-mono;
+        font-size: $font-size-sm;
+        color: $text-primary;
+        white-space: pre;
+      }
+    }
+
     code {
+      flex: 1;
       background-color: transparent;
       padding: 0;
       color: $text-primary;
       font-size: $font-size-sm;
+      word-break: break-all;
+    }
+
+    .copy-btn {
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: $text-light;
+      padding: 2px;
+      display: flex;
+      align-items: center;
+      border-radius: $border-radius-sm;
+      transition: color $transition-fast;
+
+      &:hover { color: $text-primary; }
+
+      .material-symbols-outlined { font-size: 16px; }
     }
   }
 }

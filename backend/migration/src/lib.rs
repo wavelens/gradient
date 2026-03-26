@@ -31,6 +31,8 @@ mod m20250707_000000_add_email_verification_to_user;
 mod m20250917_000000_add_managed_field_to_entities;
 mod m20260323_000000_create_table_entry_point;
 mod m20260323_000001_add_updated_at_to_evaluation;
+mod m20260326_000000_add_public_to_organization;
+mod m20260326_000001_add_public_to_cache;
 
 pub struct Migrator;
 
@@ -63,6 +65,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20250917_000000_add_managed_field_to_entities::Migration),
             Box::new(m20260323_000000_create_table_entry_point::Migration),
             Box::new(m20260323_000001_add_updated_at_to_evaluation::Migration),
+            Box::new(m20260326_000000_add_public_to_organization::Migration),
+            Box::new(m20260326_000001_add_public_to_cache::Migration),
         ]
     }
 }

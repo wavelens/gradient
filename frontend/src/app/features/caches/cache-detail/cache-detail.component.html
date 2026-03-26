@@ -41,6 +41,7 @@
           [loading]="toggling()"
           [disabled]="toggling()"
         ></button>
+        <a pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></a>
       </div>
     </div>
 
@@ -48,18 +49,42 @@
     <div class="section">
       <h2>How to Use This Cache</h2>
       <div class="info-card">
-        <p>
-          Configure your Nix settings to use this cache as a substituter.
-          Add the following to your <code>nix.conf</code> or use the command-line options:
-        </p>
-        <div class="code-block">
-          <code>nix build --extra-substituters https://cache.example.com/{{ c.name }}</code>
+        <p>Add the following to your <code>/etc/nix/nix.conf</code> or NixOS configuration:</p>
+
+        <div class="usage-row">
+          <span class="usage-label">Substituter URL</span>
+          <div class="code-block">
+            <code>{{ cacheUrl }}</code>
+            <button class="copy-btn" (click)="copy(cacheUrl, 'url')" [title]="copied() === 'url' ? 'Copied!' : 'Copy'">
+              <span class="material-symbols-outlined">{{ copied() === 'url' ? 'check' : 'content_copy' }}</span>
+            </button>
+          </div>
         </div>
-        <p class="text-secondary">
-          <span class="material-symbols-outlined">info</span>
-          Make sure to configure the cache's public key for signature verification.
-        </p>
+
+        @if (publicKey()) {
+          <div class="usage-row">
+            <span class="usage-label">Trusted Public Key</span>
+            <div class="code-block">
+              <code>{{ publicKey() }}</code>
+              <button class="copy-btn" (click)="copy(publicKey()!, 'key')" [title]="copied() === 'key' ? 'Copied!' : 'Copy'">
+                <span class="material-symbols-outlined">{{ copied() === 'key' ? 'check' : 'content_copy' }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="usage-row">
+            <span class="usage-label">nix.conf snippet</span>
+            <div class="code-block multiline">
+              <pre>substituters = {{ cacheUrl }}
+trusted-public-keys = {{ publicKey() }}</pre>
+              <button class="copy-btn" (click)="copy('substituters = ' + cacheUrl + '\ntrusted-public-keys = ' + publicKey()!, 'conf')" [title]="copied() === 'conf' ? 'Copied!' : 'Copy'">
+                <span class="material-symbols-outlined">{{ copied() === 'conf' ? 'check' : 'content_copy' }}</span>
+              </button>
+            </div>
+          </div>
+        }
       </div>
     </div>
+
   }
 </div>

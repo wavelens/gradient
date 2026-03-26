@@ -20,6 +20,8 @@ export interface Project {
   force_evaluation: boolean;
   created_by?: string;
   created_at?: string;
+  managed: boolean;
+  can_edit: boolean;
 }
 
 export interface EvaluationSummary {

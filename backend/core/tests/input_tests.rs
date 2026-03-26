@@ -172,7 +172,9 @@ fn test_check_repository_url_is_ssh() {
     ));
 
     // Edge cases
-    assert!(!check_repository_url_is_ssh("https://user@github.com/repo.git")); // HTTPS with user
+    assert!(!check_repository_url_is_ssh(
+        "https://user@github.com/repo.git"
+    )); // HTTPS with user
     assert!(!check_repository_url_is_ssh("/local/path/to/repo.git")); // Local path
 }
 
@@ -187,19 +189,34 @@ fn test_check_index_name() {
     assert_eq!(name.to_string(), "Name must be lowercase");
 
     let name = check_index_name("test-").unwrap_err();
-    assert_eq!(name.to_string(), "Name can only start and end with letters or numbers");
+    assert_eq!(
+        name.to_string(),
+        "Name can only start and end with letters or numbers"
+    );
 
     let name = check_index_name("test_").unwrap_err();
-    assert_eq!(name.to_string(), "Name can only contain letters, numbers, and dashes");
+    assert_eq!(
+        name.to_string(),
+        "Name can only contain letters, numbers, and dashes"
+    );
 
     let name = check_index_name("test ").unwrap_err();
-    assert_eq!(name.to_string(), "Name can only contain letters, numbers, and dashes");
+    assert_eq!(
+        name.to_string(),
+        "Name can only contain letters, numbers, and dashes"
+    );
 
     let name = check_index_name("test name").unwrap_err();
-    assert_eq!(name.to_string(), "Name can only contain letters, numbers, and dashes");
+    assert_eq!(
+        name.to_string(),
+        "Name can only contain letters, numbers, and dashes"
+    );
 
     let name = check_index_name("test?name").unwrap_err();
-    assert_eq!(name.to_string(), "Name can only contain letters, numbers, and dashes");
+    assert_eq!(
+        name.to_string(),
+        "Name can only contain letters, numbers, and dashes"
+    );
 
     let name = check_index_name("").unwrap_err();
     assert_eq!(name.to_string(), "Name cannot be empty");
@@ -295,7 +312,10 @@ fn test_validate_password_length_errors() {
     let long_password = "Ab1!".repeat(33); // 132 characters
     let result = validate_password(&long_password);
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err().to_string(), "Password cannot exceed 128 characters");
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "Password cannot exceed 128 characters"
+    );
 
     // Exactly 128 characters should be valid
     let max_password = "Ab1!".repeat(32); // 128 characters

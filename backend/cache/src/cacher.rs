@@ -239,7 +239,7 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
         Ok(key) => {
             debug!("Found secret key for cache '{}'", cache.name);
             key
-        },
+        }
         Err(e) => {
             error!("Failed to format cache key: {}", e);
             return;
@@ -287,7 +287,11 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
     }
 
     let nix_cmd = ["path-info", "--sigs", &path];
-    debug!("Running command: {} {}", state.cli.binpath_nix, nix_cmd.join(" "));
+    debug!(
+        "Running command: {} {}",
+        state.cli.binpath_nix,
+        nix_cmd.join(" ")
+    );
 
     let output = match Command::new(state.cli.binpath_nix.clone())
         .arg("path-info")
@@ -314,10 +318,16 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
     }
 
     let signatures = String::from_utf8_lossy(&output.stdout).to_string();
-    debug!("Signature output for cache '{}': {}", cache.name, signatures);
+    debug!(
+        "Signature output for cache '{}': {}",
+        cache.name, signatures
+    );
 
     let cache_identifier = secret_key.split(':').next().unwrap_or(&cache.name);
-    debug!("Looking for cache identifier '{}' in signatures", cache_identifier);
+    debug!(
+        "Looking for cache identifier '{}' in signatures",
+        cache_identifier
+    );
 
     let mut signature = String::new();
     for mut line in signatures.split(" ") {
@@ -332,13 +342,19 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
                     break;
                 }
             } else {
-                debug!("Signature part doesn't start with '{}:': {}", cache_identifier, sig_part);
+                debug!(
+                    "Signature part doesn't start with '{}:': {}",
+                    cache_identifier, sig_part
+                );
             }
         }
     }
 
     if signature.is_empty() {
-        error!("No signature found for cache '{}' in output. Lines checked:", cache.name);
+        error!(
+            "No signature found for cache '{}' in output. Lines checked:",
+            cache.name
+        );
         for (i, line) in signatures.split(" ").enumerate() {
             error!("  Line {}: {}", i + 1, line.trim());
         }
@@ -356,7 +372,10 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
     if let Err(e) = build_path_signature.insert(&state.db).await {
         error!(error = %e, "Failed to insert build output signature");
     } else {
-        debug!("Successfully inserted signature for build output {}", build_output.id);
+        debug!(
+            "Successfully inserted signature for build output {}",
+            build_output.id
+        );
     }
 }
 
@@ -511,26 +530,26 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
 
                 if file_path.extension().and_then(|s| s.to_str()) == Some("zst")
                     && let Some(file_name) = file_path.file_stem().and_then(|s| s.to_str())
-                    && let Some(hash_part) = file_name.strip_suffix(".nar") {
-                        let parent_dir =
-                            path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                        let full_hash = format!("{}{}", parent_dir, hash_part);
+                    && let Some(hash_part) = file_name.strip_suffix(".nar")
+                {
+                    let parent_dir = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                    let full_hash = format!("{}{}", parent_dir, hash_part);
 
-                        let build_output_exists = EBuildOutput::find()
-                            .filter(
-                                Condition::all()
-                                    .add(CBuildOutput::Hash.eq(full_hash.clone()))
-                                    .add(CBuildOutput::IsCached.eq(true)),
-                            )
-                            .one(&state.db)
-                            .await
-                            .context("Failed to check if build output exists")?
-                            .is_some();
+                    let build_output_exists = EBuildOutput::find()
+                        .filter(
+                            Condition::all()
+                                .add(CBuildOutput::Hash.eq(full_hash.clone()))
+                                .add(CBuildOutput::IsCached.eq(true)),
+                        )
+                        .one(&state.db)
+                        .await
+                        .context("Failed to check if build output exists")?
+                        .is_some();
 
-                        if !build_output_exists {
-                            orphaned_files.push(file_path);
-                        }
+                    if !build_output_exists {
+                        orphaned_files.push(file_path);
                     }
+                }
             }
         }
     }

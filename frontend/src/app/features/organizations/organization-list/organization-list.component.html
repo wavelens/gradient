@@ -48,6 +48,31 @@
       />
     }
   }
+
+  @if (publicLoading()) {
+    <app-loading-spinner message="Loading public organizations..." />
+  } @else if (publicOrgs().length > 0) {
+    <div class="section-header discover-header">
+      <h2>Discover Public Organizations</h2>
+    </div>
+    <div class="org-grid">
+      @for (org of publicOrgs(); track org.id) {
+        <a [routerLink]="['/organization', org.name]" class="org-card">
+          <div class="org-icon">
+            <span class="material-symbols-outlined">public</span>
+          </div>
+          <div class="org-content">
+            <h3>{{ org.display_name || org.name }}</h3>
+            <p class="text-secondary">{{ org.description || 'No description' }}</p>
+            <span class="role-badge public-badge">Public</span>
+          </div>
+          <div class="org-arrow">
+            <span class="material-symbols-outlined">arrow_forward</span>
+          </div>
+        </a>
+      }
+    </div>
+  }
 </div>
 
 <!-- Create Organization Dialog -->
@@ -95,6 +120,15 @@
         rows="3"
         class="w-full"
       ></textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="visibility">Visibility</label>
+      <select id="visibility" [(ngModel)]="newOrg.public" class="role-select w-full">
+        <option [ngValue]="false">Private</option>
+        <option [ngValue]="true">Public</option>
+      </select>
+      <small class="text-secondary">Public organizations are visible to all users</small>
     </div>
   </div>
 

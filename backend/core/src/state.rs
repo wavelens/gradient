@@ -34,6 +34,7 @@ pub struct StateOrganization {
     pub display_name: String,
     pub description: String,
     pub private_key_file: String,
+    pub public: bool,
     #[serde(default = "default_true")]
     pub use_nix_store: bool,
     pub created_by: String,
@@ -85,6 +86,7 @@ pub struct StateCache {
     pub signing_key_file: String,
     #[serde(default)]
     pub organizations: Vec<String>,
+    pub public: bool,
     pub created_by: String,
 }
 
@@ -415,7 +417,14 @@ async fn apply_state_to_database(
     apply_servers(db, &config.servers, &config.users, &config.organizations).await?;
 
     // Apply caches (depends on users and organizations)
-    apply_caches(db, &config.caches, &config.users, &config.organizations, crypt_secret_file).await?;
+    apply_caches(
+        db,
+        &config.caches,
+        &config.users,
+        &config.organizations,
+        crypt_secret_file,
+    )
+    .await?;
 
     // Apply API keys (depends on users)
     apply_api_keys(db, &config.api_keys).await?;
@@ -561,6 +570,7 @@ async fn apply_organizations(
             org.private_key = Set(encrypted_private_key.clone());
             org.use_nix_store = Set(state_org.use_nix_store);
             org.created_by = Set(*created_by_id);
+            org.public = Set(state_org.public);
             org.managed = Set(true);
             org.update(db).await?;
             tracing::info!("Updated managed organization: {}", state_org.name);
@@ -576,6 +586,7 @@ async fn apply_organizations(
                 public_key: Set(public_key),
                 private_key: Set(encrypted_private_key),
                 use_nix_store: Set(state_org.use_nix_store),
+                public: Set(state_org.public),
                 created_by: Set(*created_by_id),
                 created_at: Set(now),
                 managed: Set(true),
@@ -768,14 +779,25 @@ async fn apply_caches(
         })?;
 
         // Validate that the signing key is base64 encoded
-        general_purpose::STANDARD.decode(signing_key.trim())
-            .map_err(|e| format!("Signing key for cache '{}' is not a valid base64 encoded string: {}", state_cache.name, e))?;
+        general_purpose::STANDARD
+            .decode(signing_key.trim())
+            .map_err(|e| {
+                format!(
+                    "Signing key for cache '{}' is not a valid base64 encoded string: {}",
+                    state_cache.name, e
+                )
+            })?;
 
         // Encrypt signing key using crypter library
         let secret = load_secret_bytes(crypt_secret_file);
 
         let encrypted_bytes = crypter::encrypt_with_password(&secret, signing_key.trim())
-            .ok_or_else(|| format!("Failed to encrypt signing key for cache '{}'", state_cache.name))?;
+            .ok_or_else(|| {
+                format!(
+                    "Failed to encrypt signing key for cache '{}'",
+                    state_cache.name
+                )
+            })?;
         let encrypted_signing_key = general_purpose::STANDARD.encode(&encrypted_bytes);
 
         let created_by_id = user_map
@@ -798,6 +820,7 @@ async fn apply_caches(
             cache_model.priority = Set(state_cache.priority);
             cache_model.signing_key = Set(encrypted_signing_key.clone());
             cache_model.created_by = Set(*created_by_id);
+            cache_model.public = Set(state_cache.public);
             cache_model.managed = Set(true);
             cache_model.update(db).await?;
             tracing::info!("Updated managed cache: {}", state_cache.name);
@@ -813,6 +836,7 @@ async fn apply_caches(
                 active: Set(state_cache.active),
                 priority: Set(state_cache.priority),
                 signing_key: Set(encrypted_signing_key),
+                public: Set(state_cache.public),
                 created_by: Set(*created_by_id),
                 created_at: Set(now),
                 managed: Set(true),
@@ -824,9 +848,12 @@ async fn apply_caches(
 
         // Create organization_cache associations
         for org_name in &state_cache.organizations {
-            let org_id = org_map
-                .get(org_name)
-                .ok_or_else(|| format!("Organization '{}' not found for cache '{}'", org_name, state_cache.name))?;
+            let org_id = org_map.get(org_name).ok_or_else(|| {
+                format!(
+                    "Organization '{}' not found for cache '{}'",
+                    org_name, state_cache.name
+                )
+            })?;
 
             // Check if association already exists
             let existing_association = organization_cache::Entity::find()
@@ -842,7 +869,11 @@ async fn apply_caches(
                     cache: Set(cache_id),
                 };
                 org_cache_model.insert(db).await?;
-                tracing::info!("Created organization_cache association: {} -> {}", org_name, state_cache.name);
+                tracing::info!(
+                    "Created organization_cache association: {} -> {}",
+                    org_name,
+                    state_cache.name
+                );
             }
         }
     }
@@ -1076,7 +1107,9 @@ async fn unmark_removed_entities(
         if !state_org_names.contains(&org_model.name) {
             let org_name = org_model.name.clone();
             if delete_state {
-                organization::Entity::delete_by_id(org_model.id).exec(db).await?;
+                organization::Entity::delete_by_id(org_model.id)
+                    .exec(db)
+                    .await?;
                 tracing::info!("Deleted organization: {}", org_name);
             } else {
                 let mut org: organization::ActiveModel = org_model.into();
@@ -1097,7 +1130,9 @@ async fn unmark_removed_entities(
         if !state_project_names.contains(&project_model.name) {
             let project_name = project_model.name.clone();
             if delete_state {
-                project::Entity::delete_by_id(project_model.id).exec(db).await?;
+                project::Entity::delete_by_id(project_model.id)
+                    .exec(db)
+                    .await?;
                 tracing::info!("Deleted project: {}", project_name);
             } else {
                 let mut project: project::ActiveModel = project_model.into();
@@ -1118,7 +1153,9 @@ async fn unmark_removed_entities(
         if !state_server_names.contains(&server_model.name) {
             let server_name = server_model.name.clone();
             if delete_state {
-                server::Entity::delete_by_id(server_model.id).exec(db).await?;
+                server::Entity::delete_by_id(server_model.id)
+                    .exec(db)
+                    .await?;
                 tracing::info!("Deleted server: {}", server_name);
             } else {
                 let mut server: server::ActiveModel = server_model.into();

@@ -17,7 +17,12 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(EntryPoint::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(EntryPoint::Id).uuid().not_null().primary_key())
+                    .col(
+                        ColumnDef::new(EntryPoint::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
                     .col(ColumnDef::new(EntryPoint::Project).uuid().not_null())
                     .col(ColumnDef::new(EntryPoint::Evaluation).uuid().not_null())
                     .col(ColumnDef::new(EntryPoint::Build).uuid().not_null())

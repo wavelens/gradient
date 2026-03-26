@@ -8,9 +8,9 @@
 
 extern crate core as gradient_core_lib;
 use base64::Engine;
+use gradient_core_lib::consts::NULL_TIME;
 use gradient_core_lib::sources::*;
 use gradient_core_lib::types::*;
-use gradient_core_lib::consts::NULL_TIME;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 
@@ -38,7 +38,8 @@ fn create_mock_organization() -> MOrganization {
     use tempfile::NamedTempFile;
 
     let mut secret_file = NamedTempFile::new().unwrap();
-    let secret_content = base64::engine::general_purpose::STANDARD.encode("test_secret_key_content_32chars");
+    let secret_content =
+        base64::engine::general_purpose::STANDARD.encode("test_secret_key_content_32chars");
     secret_file.write_all(secret_content.as_bytes()).unwrap();
     let secret_file_path = secret_file.path().to_string_lossy().to_string();
 
@@ -111,8 +112,10 @@ fn test_get_cache_nar_location() {
     let base_path = "/tmp/test_cache".to_string();
     let hash = "abc123def456789012345678901234567890abcd".to_string();
 
-    let compressed_location = get_cache_nar_location(base_path.clone(), hash.clone(), true).unwrap();
-    let uncompressed_location = get_cache_nar_location(base_path.clone(), hash.clone(), false).unwrap();
+    let compressed_location =
+        get_cache_nar_location(base_path.clone(), hash.clone(), true).unwrap();
+    let uncompressed_location =
+        get_cache_nar_location(base_path.clone(), hash.clone(), false).unwrap();
 
     assert!(compressed_location.ends_with(".nar.zst"));
     assert!(uncompressed_location.ends_with(".nar"));

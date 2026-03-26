@@ -6,8 +6,9 @@
 //! Low-level helpers for the nix-daemon wire format.
 
 use crate::{
-    BasicDerivation, BuildMode, BuildResult, BuildResultStatus, ClientSettings, DerivationOutput, Error, NixError, PathInfo, Result,
-    ResultExt, Stderr, StderrField, StderrResult, StderrStartActivity, Verbosity, nix::Proto, Realisation, StorePath,
+    BasicDerivation, BuildMode, BuildResult, BuildResultStatus, ClientSettings, DerivationOutput,
+    Error, NixError, PathInfo, Realisation, Result, ResultExt, Stderr, StderrField, StderrResult,
+    StderrStartActivity, StorePath, Verbosity, nix::Proto,
 };
 use async_stream::try_stream;
 use chrono::{DateTime, Utc};
@@ -218,10 +219,7 @@ pub async fn write_u64<W: AsyncWriteExt + Unpin>(w: &mut W, v: u64) -> std::io::
 /// Read a boolean from the stream, encoded as u64 (>0 is true).
 #[instrument(skip(r), level = "trace")]
 pub async fn read_bool<R: AsyncReadExt + Unpin>(r: &mut R) -> std::io::Result<bool> {
-    read_u64(r)
-        .await
-        .map(|v| v > 0)
-        .tap_ok(|v| trace!(v, "<-"))
+    read_u64(r).await.map(|v| v > 0).tap_ok(|v| trace!(v, "<-"))
 }
 /// Write a boolean to the stream, encoded as u64 (>0 is true).
 #[instrument(skip(w, v), level = "trace")]
@@ -323,7 +321,12 @@ pub async fn write_build_result_status<W: AsyncWriteExt + Unpin>(
 #[instrument(skip(r), level = "trace")]
 pub async fn read_string<R: AsyncReadExt + Unpin>(r: &mut R) -> std::io::Result<String> {
     let len = read_u64(r).await? as usize;
-    let padded_len = len + if !len.is_multiple_of(8) { 8 - (len % 8) } else { 0 };
+    let padded_len = len
+        + if !len.is_multiple_of(8) {
+            8 - (len % 8)
+        } else {
+            0
+        };
     if padded_len <= 1024 {
         let mut buf = [0u8; 1024];
         r.read_exact(&mut buf[..padded_len]).await?;
@@ -667,10 +670,8 @@ pub async fn write_basic_derivation<W: AsyncWriteExt + Unpin>(
             .with_field("BasicDerivation.env[].value")?;
     }
 
-
     Ok(())
 }
-
 
 /// Read a derivation output from the stream.
 #[instrument(skip(r), level = "trace")]
@@ -678,13 +679,27 @@ pub async fn read_derivation_output<R: AsyncReadExt + Unpin>(
     r: &mut R,
 ) -> Result<DerivationOutput> {
     let path_str = read_string(r).await.with_field("DerivationOutput.path")?;
-    let path = if path_str.is_empty() { None } else { Some(path_str) };
+    let path = if path_str.is_empty() {
+        None
+    } else {
+        Some(path_str)
+    };
 
-    let hash_algo_str = read_string(r).await.with_field("DerivationOutput.hash_algo")?;
-    let hash_algo = if hash_algo_str.is_empty() { None } else { Some(hash_algo_str) };
+    let hash_algo_str = read_string(r)
+        .await
+        .with_field("DerivationOutput.hash_algo")?;
+    let hash_algo = if hash_algo_str.is_empty() {
+        None
+    } else {
+        Some(hash_algo_str)
+    };
 
     let hash_str = read_string(r).await.with_field("DerivationOutput.hash")?;
-    let hash = if hash_str.is_empty() { None } else { Some(hash_str) };
+    let hash = if hash_str.is_empty() {
+        None
+    } else {
+        Some(hash_str)
+    };
 
     Ok(DerivationOutput {
         path,
@@ -695,15 +710,19 @@ pub async fn read_derivation_output<R: AsyncReadExt + Unpin>(
 
 /// Read a basic derivation from the stream.
 #[instrument(skip(r), level = "trace")]
-pub async fn read_basic_derivation<R: AsyncReadExt + Unpin>(
-    r: &mut R,
-) -> Result<BasicDerivation> {
+pub async fn read_basic_derivation<R: AsyncReadExt + Unpin>(r: &mut R) -> Result<BasicDerivation> {
     // Read outputs map
-    let outputs_count = read_u64(r).await.with_field("BasicDerivation.outputs.<count>")?;
+    let outputs_count = read_u64(r)
+        .await
+        .with_field("BasicDerivation.outputs.<count>")?;
     let mut outputs = HashMap::new();
     for _ in 0..outputs_count {
-        let name = read_string(r).await.with_field("BasicDerivation.outputs[].name")?;
-        let output = read_derivation_output(r).await.with_field("BasicDerivation.outputs[].output")?;
+        let name = read_string(r)
+            .await
+            .with_field("BasicDerivation.outputs[].name")?;
+        let output = read_derivation_output(r)
+            .await
+            .with_field("BasicDerivation.outputs[].output")?;
         outputs.insert(name, output);
     }
 
@@ -716,7 +735,9 @@ pub async fn read_basic_derivation<R: AsyncReadExt + Unpin>(
         .collect();
 
     // Read platform
-    let platform = read_string(r).await.with_field("BasicDerivation.platform")?;
+    let platform = read_string(r)
+        .await
+        .with_field("BasicDerivation.platform")?;
 
     // Read builder
     let builder = read_string(r).await.with_field("BasicDerivation.builder")?;
@@ -728,11 +749,17 @@ pub async fn read_basic_derivation<R: AsyncReadExt + Unpin>(
         .with_field("BasicDerivation.args")?;
 
     // Read environment variables map
-    let env_count = read_u64(r).await.with_field("BasicDerivation.env.<count>")?;
+    let env_count = read_u64(r)
+        .await
+        .with_field("BasicDerivation.env.<count>")?;
     let mut env = HashMap::new();
     for _ in 0..env_count {
-        let key = read_string(r).await.with_field("BasicDerivation.env[].key")?;
-        let value = read_string(r).await.with_field("BasicDerivation.env[].value")?;
+        let key = read_string(r)
+            .await
+            .with_field("BasicDerivation.env[].key")?;
+        let value = read_string(r)
+            .await
+            .with_field("BasicDerivation.env[].value")?;
         env.insert(key, value);
     }
 
@@ -747,7 +774,7 @@ pub async fn read_basic_derivation<R: AsyncReadExt + Unpin>(
         platform,
         builder,
         args,
-        env,  // env may contain __json with structured attrs
+        env, // env may contain __json with structured attrs
     })
 }
 

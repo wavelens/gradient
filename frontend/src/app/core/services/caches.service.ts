@@ -21,13 +21,26 @@ export class CachesService {
     return this.api.get<Cache>(`caches/${cache}`);
   }
 
+  getPublicCaches(): Observable<Cache[]> {
+    return this.api.get<Cache[]>('caches/public');
+  }
+
   createCache(data: {
     name: string;
     display_name: string;
     description: string;
     priority: number;
+    public?: boolean;
   }): Observable<Cache> {
     return this.api.put<Cache>('caches', data);
+  }
+
+  setCachePublic(cache: string): Observable<string> {
+    return this.api.post<string>(`caches/${cache}/public`);
+  }
+
+  setCachePrivate(cache: string): Observable<string> {
+    return this.api.delete<string>(`caches/${cache}/public`);
   }
 
   updateCache(cache: string, data: Partial<Cache>): Observable<Cache> {
@@ -36,6 +49,10 @@ export class CachesService {
 
   deleteCache(cache: string): Observable<void> {
     return this.api.delete<void>(`caches/${cache}`);
+  }
+
+  getCacheKey(cache: string): Observable<string> {
+    return this.api.get<string>(`caches/${cache}/key`);
   }
 
   activateCache(cache: string): Observable<void> {

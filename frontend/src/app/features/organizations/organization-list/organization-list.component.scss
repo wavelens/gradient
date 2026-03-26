@@ -120,6 +120,38 @@
   }
 }
 
+.discover-header {
+  margin-top: $spacing-xxl;
+  margin-bottom: $spacing-lg;
+
+  h2 {
+    font-size: $font-size-xl;
+    color: $text-primary;
+    margin: 0;
+  }
+}
+
+.role-badge.public-badge {
+  background-color: rgba($color-success, 0.1);
+  border-color: $color-success;
+  color: $color-success;
+}
+
+.role-select {
+  background: $color-quaternary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  color: $text-primary;
+  font-size: $font-size-md;
+  padding: $spacing-sm $spacing-md;
+  cursor: pointer;
+
+  &:focus {
+    outline: none;
+    border-color: $text-secondary;
+  }
+}
+
 // Dialog styles
 .dialog-content {
   padding: $spacing-md 0;

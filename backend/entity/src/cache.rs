@@ -22,6 +22,7 @@ pub struct Model {
     pub active: bool,
     pub priority: i32,
     pub signing_key: String,
+    pub public: bool,
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
     pub managed: bool,
@@ -37,6 +38,7 @@ impl std::fmt::Debug for Model {
             .field("active", &self.active)
             .field("priority", &self.priority)
             .field("signing_key", &"[redacted]")
+            .field("public", &self.public)
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)
             .finish()

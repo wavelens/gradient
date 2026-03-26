@@ -84,9 +84,14 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     let wildcards = parse_evaluation_wildcard(evaluation.wildcard.as_str())
         .context("Failed to parse evaluation wildcard")?;
 
-    let all_derivations = get_flake_derivations(Arc::clone(&state), repository.clone(), wildcards, organization)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to evaluate: {}", e))?;
+    let all_derivations = get_flake_derivations(
+        Arc::clone(&state),
+        repository.clone(),
+        wildcards,
+        organization,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to evaluate: {}", e))?;
 
     if all_derivations.is_empty() {
         warn!("No derivations found for evaluation");
@@ -244,7 +249,8 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         .await
         .context("Failed to find existing builds")?;
 
-        let mut references = path_info.references
+        let mut references = path_info
+            .references
             .clone()
             .into_iter()
             .map(|d| (d, Some(build_id), Uuid::new_v4()))
@@ -348,7 +354,8 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 dependency.clone(),
                 evaluation.id,
                 build_id,
-            ).await?;
+            )
+            .await?;
 
             debug!(
                 build_id = %build_id,
@@ -356,9 +363,15 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 "Skipping package - already in store"
             );
         } else {
-            let (system, features) = get_features_cmd(state.cli.binpath_nix.as_str(), dependency.as_str())
+            let (system, features) =
+                get_features_cmd(state.cli.binpath_nix.as_str(), dependency.as_str())
                     .await
-                    .with_context(|| format!("Failed to get build features for derivation: {}", dependency))?;
+                    .with_context(|| {
+                        format!(
+                            "Failed to get build features for derivation: {}",
+                            dependency
+                        )
+                    })?;
 
             // TODO: add better derivation check
             let build = if dependency.ends_with(".drv") {
@@ -463,7 +476,14 @@ pub async fn get_derivation_cmd(
     }
 
     let json_output = String::from_utf8_lossy(&output.stdout);
-    let parsed_json: Value = serde_json::from_str(&json_output).with_context(|| format!("Failed to parse JSON output from 'nix path-info --derivation {}': '{}', stderr: '{}'", path, json_output, String::from_utf8_lossy(&output.stderr)))?;
+    let parsed_json: Value = serde_json::from_str(&json_output).with_context(|| {
+        format!(
+            "Failed to parse JSON output from 'nix path-info --derivation {}': '{}', stderr: '{}'",
+            path,
+            json_output,
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })?;
 
     if !parsed_json.is_object() {
         anyhow::bail!("Expected JSON object but found another type");
@@ -517,8 +537,14 @@ pub async fn get_features_cmd(
     }
 
     let json_output = String::from_utf8_lossy(&output.stdout);
-    let parsed_json: Value =
-        serde_json::from_str(&json_output).with_context(|| format!("Failed to parse JSON output from 'nix derivation show {}': '{}', stderr: '{}'", path, json_output, String::from_utf8_lossy(&output.stderr)))?;
+    let parsed_json: Value = serde_json::from_str(&json_output).with_context(|| {
+        format!(
+            "Failed to parse JSON output from 'nix derivation show {}': '{}', stderr: '{}'",
+            path,
+            json_output,
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })?;
 
     if !parsed_json.is_object() {
         anyhow::bail!("Expected JSON object but found another type");
@@ -542,7 +568,12 @@ pub async fn get_features_cmd(
         let new_json = new_json
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Expected string for __json field"))?;
-        serde_json::from_str(new_json).with_context(|| format!("Failed to parse nested JSON in __json field from 'nix derivation show {}': '{}'", path, new_json))?
+        serde_json::from_str(new_json).with_context(|| {
+            format!(
+                "Failed to parse nested JSON in __json field from 'nix derivation show {}': '{}'",
+                path, new_json
+            )
+        })?
     } else {
         parsed_json_env.clone()
     };
@@ -580,8 +611,8 @@ async fn add_existing_build(
     evaluation_id: Uuid,
     build_id: Uuid,
 ) -> Result<MBuild> {
-    let (system, features) = get_features_cmd(state.cli.binpath_nix.as_str(), derivation.as_str())
-        .await?;
+    let (system, features) =
+        get_features_cmd(state.cli.binpath_nix.as_str(), derivation.as_str()).await?;
 
     let abuild = ABuild {
         id: Set(build_id),
@@ -649,7 +680,7 @@ async fn get_flake_derivations(
     wildcards: Vec<&str>,
     organization: MOrganization,
 ) -> Result<Vec<String>> {
-    use core::sources::{decrypt_ssh_private_key, write_key, clear_key};
+    use core::sources::{clear_key, decrypt_ssh_private_key, write_key};
 
     let (private_key, _public_key) =
         decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization)?;
@@ -782,7 +813,8 @@ async fn get_flake_derivations(
                         .json_to_vec()?;
 
                     if keys.contains(&"type".to_string()) && type_check {
-                        let type_eval_target = format!("{}#{}.type", repository.clone(), current_key);
+                        let type_eval_target =
+                            format!("{}#{}.type", repository.clone(), current_key);
                         let type_value = Command::new(state.cli.binpath_nix.clone())
                             .arg("eval")
                             .arg(&type_eval_target)
@@ -844,14 +876,18 @@ impl JsonOutput for Output {
             anyhow::bail!("{}", String::from_utf8_lossy(&self.stderr));
         }
 
-
         let json_output = String::from_utf8_lossy(&self.stdout);
         if json_output.trim().is_empty() {
             anyhow::bail!("Command returned empty output");
         }
 
-        let parsed_json: Value = serde_json::from_str(&json_output)
-            .with_context(|| format!("Failed to parse JSON output: '{}', stderr: '{}'", json_output, String::from_utf8_lossy(&self.stderr)))?;
+        let parsed_json: Value = serde_json::from_str(&json_output).with_context(|| {
+            format!(
+                "Failed to parse JSON output: '{}', stderr: '{}'",
+                json_output,
+                String::from_utf8_lossy(&self.stderr)
+            )
+        })?;
 
         let parsed_json = parsed_json
             .as_array()
@@ -873,14 +909,18 @@ impl JsonOutput for Output {
             anyhow::bail!("{}", String::from_utf8_lossy(&self.stderr));
         }
 
-
         let json_output = String::from_utf8_lossy(&self.stdout);
         if json_output.trim().is_empty() {
             anyhow::bail!("Command returned empty output");
         }
 
-        let parsed_json: Value = serde_json::from_str(&json_output)
-            .with_context(|| format!("Failed to parse JSON output: '{}', stderr: '{}'", json_output, String::from_utf8_lossy(&self.stderr)))?;
+        let parsed_json: Value = serde_json::from_str(&json_output).with_context(|| {
+            format!(
+                "Failed to parse JSON output: '{}', stderr: '{}'",
+                json_output,
+                String::from_utf8_lossy(&self.stderr)
+            )
+        })?;
 
         let parsed_json = parsed_json
             .as_str()

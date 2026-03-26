@@ -22,6 +22,18 @@ export class OrganizationsService {
     return this.api.get<Organization[]>('orgs');
   }
 
+  getPublicOrganizations(): Observable<Organization[]> {
+    return this.api.get<Organization[]>('orgs/public');
+  }
+
+  setPublic(name: string): Observable<string> {
+    return this.api.post<string>(`orgs/${name}/public`);
+  }
+
+  setPrivate(name: string): Observable<string> {
+    return this.api.delete<string>(`orgs/${name}/public`);
+  }
+
   getOrganization(name: string): Observable<Organization> {
     return this.api.get<Organization>(`orgs/${name}`);
   }
@@ -30,6 +42,7 @@ export class OrganizationsService {
     name: string;
     display_name: string;
     description: string;
+    public?: boolean;
   }): Observable<string> {
     return this.api.put<string>('orgs', data);
   }

@@ -33,11 +33,15 @@ export class CacheDetailComponent implements OnInit {
   loading = signal(true);
   cache = signal<Cache | null>(null);
   toggling = signal(false);
+  publicKey = signal<string | null>(null);
+  copied = signal<string | null>(null);
 
   cacheName = '';
+  cacheUrl = '';
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
+    this.cacheUrl = `${window.location.origin}/cache/${this.cacheName}`;
     this.loadCache();
   }
 
@@ -47,11 +51,22 @@ export class CacheDetailComponent implements OnInit {
       next: (cache) => {
         this.cache.set(cache);
         this.loading.set(false);
+        this.cachesService.getCacheKey(this.cacheName).subscribe({
+          next: (key) => this.publicKey.set(key),
+          error: () => this.publicKey.set(null),
+        });
       },
       error: (error) => {
         console.error('Failed to load cache:', error);
         this.loading.set(false);
       },
+    });
+  }
+
+  copy(text: string, label: string): void {
+    navigator.clipboard.writeText(text).then(() => {
+      this.copied.set(label);
+      setTimeout(() => this.copied.set(null), 2000);
     });
   }
 

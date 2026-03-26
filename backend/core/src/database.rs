@@ -222,6 +222,17 @@ pub async fn get_organization_by_name(
         .context("Failed to query organization")
 }
 
+pub async fn get_any_organization_by_name(
+    state: Arc<ServerState>,
+    name: String,
+) -> Result<Option<MOrganization>> {
+    EOrganization::find()
+        .filter(COrganization::Name.eq(name))
+        .one(&state.db)
+        .await
+        .context("Failed to query organization")
+}
+
 pub async fn get_project_by_name(
     state: Arc<ServerState>,
     user_id: Uuid,
@@ -269,6 +280,17 @@ pub async fn get_cache_by_name(
                 .add(CCache::CreatedBy.eq(user_id))
                 .add(CCache::Name.eq(name)),
         )
+        .one(&state.db)
+        .await
+        .context("Failed to query cache")
+}
+
+pub async fn get_any_cache_by_name(
+    state: Arc<ServerState>,
+    name: String,
+) -> Result<Option<MCache>> {
+    ECache::find()
+        .filter(CCache::Name.eq(name))
         .one(&state.db)
         .await
         .context("Failed to query cache")

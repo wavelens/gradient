@@ -141,6 +141,13 @@ export const routes: Routes = [
             (m) => m.CacheDetailComponent
           ),
       },
+      {
+        path: 'caches/:cache/settings',
+        loadComponent: () =>
+          import('./features/caches/cache-settings/cache-settings.component').then(
+            (m) => m.CacheSettingsComponent
+          ),
+      },
 
       // Settings
       {

@@ -157,10 +157,7 @@ pub async fn post_basic_login(
         .await?
         .ok_or_else(WebError::invalid_credentials)?;
 
-    let user_password = user
-        .password
-        .clone()
-        .ok_or_else(WebError::oauth_required)?;
+    let user_password = user.password.clone().ok_or_else(WebError::oauth_required)?;
 
     verify_password(body.password, &user_password).map_err(|_| WebError::invalid_credentials())?;
 
@@ -168,8 +165,8 @@ pub async fn post_basic_login(
         return Err(WebError::BadRequest("Email not verified. Please check your email and verify your account before logging in.".to_string()));
     }
 
-    let token =
-        encode_jwt(state.clone(), user.id, body.remember_me).map_err(|_| WebError::failed_to_generate_token())?;
+    let token = encode_jwt(state.clone(), user.id, body.remember_me)
+        .map_err(|_| WebError::failed_to_generate_token())?;
 
     update_last_login(state, user)
         .await
@@ -187,15 +184,14 @@ pub async fn get_oauth_authorize(
     state: State<Arc<ServerState>>,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let code = query
-        .get("code")
-        .ok_or_else(WebError::invalid_oauth_code)?;
+    let code = query.get("code").ok_or_else(WebError::invalid_oauth_code)?;
 
     let user: MUser = oidc_login_verify(state.clone(), code.to_string())
         .await
         .map_err(|e| WebError::InternalServerError(e.to_string()))?;
 
-    let token = encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
+    let token =
+        encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
 
     let res = BaseResponse {
         error: false,
@@ -255,15 +251,14 @@ pub async fn get_oidc_callback(
     state: State<Arc<ServerState>>,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
-    let code = query
-        .get("code")
-        .ok_or_else(WebError::invalid_oauth_code)?;
+    let code = query.get("code").ok_or_else(WebError::invalid_oauth_code)?;
 
     let user: MUser = oidc_login_verify(state.clone(), code.to_string())
         .await
         .map_err(|e| WebError::InternalServerError(e.to_string()))?;
 
-    let token = encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
+    let token =
+        encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
 
     let redirect_url = format!("/account/oidc-callback?token={}", token);
 

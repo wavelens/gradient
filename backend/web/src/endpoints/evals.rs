@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use async_stream::stream;
 use axum::extract::{Path, State};
@@ -45,23 +46,14 @@ pub struct EvaluationResponse {
     pub error: Option<String>,
 }
 
-async fn user_is_org_member(state: &Arc<ServerState>, user_id: Uuid, organization_id: Uuid) -> Result<bool, WebError> {
-    Ok(EOrganizationUser::find()
-        .filter(
-            Condition::all()
-                .add(COrganizationUser::Organization.eq(organization_id))
-                .add(COrganizationUser::User.eq(user_id)),
-        )
-        .one(&state.db)
-        .await?
-        .is_some())
-}
-
 /// `/nix/store/hash-name-version.drv` → `name-version`
 fn drv_display_name(path: &str) -> String {
     let filename = path.rsplit('/').next().unwrap_or(path);
     let after_hash = filename.splitn(2, '-').nth(1).unwrap_or(filename);
-    after_hash.strip_suffix(".drv").unwrap_or(after_hash).to_string()
+    after_hash
+        .strip_suffix(".drv")
+        .unwrap_or(after_hash)
+        .to_string()
 }
 
 pub async fn get_evaluation(

@@ -14,7 +14,8 @@ pub mod internal_json;
 pub mod wire;
 
 use crate::{
-    BasicDerivation, BuildMode, BuildResult, ClientSettings, Error, PathInfo, Progress, Result, ResultExt, Stderr, Store,
+    BasicDerivation, BuildMode, BuildResult, ClientSettings, Error, PathInfo, Progress, Result,
+    ResultExt, Stderr, Store,
 };
 use std::future::Future;
 use std::{collections::HashMap, fmt::Debug};
@@ -1528,7 +1529,9 @@ impl<C: AsyncReadExt + AsyncWriteExt + Unpin + Send> Store for DaemonStore<C> {
                 self,
                 store: &mut DaemonStore<C>,
             ) -> Result<Self::T, E> {
-                wire::read_build_result(&mut store.conn, store.proto).await.map_err(E::from)
+                wire::read_build_result(&mut store.conn, store.proto)
+                    .await
+                    .map_err(E::from)
             }
         }
 
@@ -1999,7 +2002,11 @@ where
                         .await
                         .with_field("BuildDerivation.build_mode")?;
 
-                    let result = forward_stderr(&mut self.w, self.store.build_derivation(drv_path, drv, build_mode)).await?;
+                    let result = forward_stderr(
+                        &mut self.w,
+                        self.store.build_derivation(drv_path, drv, build_mode),
+                    )
+                    .await?;
                     wire::write_build_result(&mut self.w, &result, self.proto)
                         .await
                         .with_field("BuildDerivation.result")?;

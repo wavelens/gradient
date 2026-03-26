@@ -26,6 +26,45 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct ProjectResponse {
+    pub id: Uuid,
+    pub organization: Uuid,
+    pub name: String,
+    pub active: bool,
+    pub display_name: String,
+    pub description: String,
+    pub repository: String,
+    pub evaluation_wildcard: String,
+    pub last_evaluation: Option<Uuid>,
+    pub force_evaluation: bool,
+    pub created_by: Uuid,
+    pub created_at: chrono::NaiveDateTime,
+    pub managed: bool,
+    pub can_edit: bool,
+}
+
+/// Returns true if the user has Admin or Write role in the organization.
+async fn user_can_edit(
+    state: &Arc<ServerState>,
+    user_id: Uuid,
+    organization_id: Uuid,
+) -> Result<bool, WebError> {
+    let org_user = EOrganizationUser::find()
+        .filter(
+            Condition::all()
+                .add(COrganizationUser::Organization.eq(organization_id))
+                .add(COrganizationUser::User.eq(user_id)),
+        )
+        .one(&state.db)
+        .await?;
+
+    Ok(match org_user {
+        Some(ou) => ou.role == BASE_ROLE_ADMIN_ID || ou.role == BASE_ROLE_WRITE_ID,
+        None => false,
+    })
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct MakeProjectRequest {
     pub name: String,
     pub display_name: String,
@@ -182,8 +221,8 @@ pub async fn get_project(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
-) -> WebResult<Json<BaseResponse<MProject>>> {
-    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
+) -> WebResult<Json<BaseResponse<ProjectResponse>>> {
+    let (organization, project): (MOrganization, MProject) = get_project_by_name(
         state.0.clone(),
         user.id,
         organization.clone(),
@@ -192,9 +231,26 @@ pub async fn get_project(
     .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
 
+    let can_edit = user_can_edit(&state, user.id, organization.id).await?;
+
     let res = BaseResponse {
         error: false,
-        message: project,
+        message: ProjectResponse {
+            id: project.id,
+            organization: project.organization,
+            name: project.name,
+            active: project.active,
+            display_name: project.display_name,
+            description: project.description,
+            repository: project.repository,
+            evaluation_wildcard: project.evaluation_wildcard,
+            last_evaluation: project.last_evaluation,
+            force_evaluation: project.force_evaluation,
+            created_by: project.created_by,
+            created_at: project.created_at,
+            managed: project.managed,
+            can_edit,
+        },
     };
 
     Ok(Json(res))
@@ -214,6 +270,12 @@ pub async fn patch_project(
     )
     .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
+
+    if !user_can_edit(&state, user.id, organization.id).await? {
+        return Err(WebError::Forbidden(
+            "You do not have permission to modify this project.".to_string(),
+        ));
+    }
 
     // Prevent modification of state-managed projects
     if project.managed {
@@ -287,7 +349,7 @@ pub async fn delete_project(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
+    let (organization, project): (MOrganization, MProject) = get_project_by_name(
         state.0.clone(),
         user.id,
         organization.clone(),
@@ -295,6 +357,12 @@ pub async fn delete_project(
     )
     .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
+
+    if !user_can_edit(&state, user.id, organization.id).await? {
+        return Err(WebError::Forbidden(
+            "You do not have permission to delete this project.".to_string(),
+        ));
+    }
 
     // Prevent deletion of state-managed projects
     if project.managed {

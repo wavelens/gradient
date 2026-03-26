@@ -11,7 +11,6 @@ import { FormsModule } from '@angular/forms';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
-import { InputNumberModule } from 'primeng/inputnumber';
 import { TextareaModule } from 'primeng/textarea';
 import { CachesService } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
@@ -28,7 +27,6 @@ import { Cache } from '@core/models';
     DialogModule,
     ButtonModule,
     InputTextModule,
-    InputNumberModule,
     TextareaModule,
     LoadingSpinnerComponent,
     EmptyStateComponent,
@@ -49,10 +47,20 @@ export class CacheListComponent implements OnInit {
     display_name: '',
     description: '',
     priority: 50,
+    public: false,
   };
+
+  publicCaches = signal<Cache[]>([]);
+  publicLoading = signal(false);
+
+  get priorityInvalid(): boolean {
+    const p = this.newCache.priority;
+    return p === null || p === undefined || isNaN(Number(p)) || p < 0 || p > 255;
+  }
 
   ngOnInit(): void {
     this.loadCaches();
+    this.loadPublicCaches();
   }
 
   loadCaches(): void {
@@ -69,12 +77,24 @@ export class CacheListComponent implements OnInit {
     });
   }
 
+  loadPublicCaches(): void {
+    this.publicLoading.set(true);
+    this.cachesService.getPublicCaches().subscribe({
+      next: (caches) => {
+        this.publicCaches.set(caches);
+        this.publicLoading.set(false);
+      },
+      error: () => this.publicLoading.set(false),
+    });
+  }
+
   openCreateDialog(): void {
     this.newCache = {
       name: '',
       display_name: '',
       description: '',
       priority: 50,
+      public: false,
     };
     this.showCreateDialog.set(true);
   }

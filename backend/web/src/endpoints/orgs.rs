@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::Utc;
 use core::consts::BASE_ROLE_ADMIN_ID;
-use core::database::{get_cache_by_name, get_organization_by_name};
+use core::database::{get_any_organization_by_name, get_cache_by_name, get_organization_by_name};
 use core::input::{check_index_name, validate_display_name};
 use core::sources::{format_public_key, generate_ssh_key};
 use core::types::*;
@@ -33,6 +34,7 @@ pub struct MakeOrganizationRequest {
     pub name: String,
     pub display_name: String,
     pub description: String,
+    pub public: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -122,6 +124,7 @@ pub async fn put(
         public_key: Set(public_key),
         private_key: Set(private_key),
         use_nix_store: Set(true),
+        public: Set(body.public.unwrap_or(false)),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
         managed: Set(false),
@@ -146,15 +149,37 @@ pub async fn put(
     Ok(Json(res))
 }
 
+pub async fn get_public_organizations(
+    state: State<Arc<ServerState>>,
+    Extension(_user): Extension<MUser>,
+) -> WebResult<Json<BaseResponse<Vec<MOrganization>>>> {
+    let organizations = EOrganization::find()
+        .filter(COrganization::Public.eq(true))
+        .all(&state.db)
+        .await?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: organizations,
+    }))
+}
+
 pub async fn get_organization(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<MOrganization>>> {
     let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
+        get_any_organization_by_name(state.0.clone(), organization.clone())
             .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if !organization.public {
+        let is_member = user_is_org_member(&state.0, user.id, organization.id).await?;
+        if !is_member {
+            return Err(WebError::not_found("Organization"));
+        }
+    }
 
     let res = BaseResponse {
         error: false,
@@ -252,9 +277,16 @@ pub async fn get_organization_users(
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<StringListItem>>>> {
     let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
+        get_any_organization_by_name(state.0.clone(), organization.clone())
             .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if !organization.public {
+        let is_member = user_is_org_member(&state.0, user.id, organization.id).await?;
+        if !is_member {
+            return Err(WebError::not_found("Organization"));
+        }
+    }
 
     let organization_users = EOrganizationUser::find()
         .join(JoinType::InnerJoin, ROrganizationUser::User.def())
@@ -279,7 +311,10 @@ pub async fn get_organization_users(
                 .as_ref()
                 .map(|u| u.username.clone())
                 .unwrap_or_else(|| ou.user.to_string()),
-            name: role_map.get(&ou.role).cloned().unwrap_or_else(|| ou.role.to_string()),
+            name: role_map
+                .get(&ou.role)
+                .cloned()
+                .unwrap_or_else(|| ou.role.to_string()),
         })
         .collect();
 
@@ -303,7 +338,7 @@ pub async fn post_organization_users(
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let target_user = EUser::find()
-        .filter(CUser::Name.eq(body.user.clone()))
+        .filter(CUser::Username.eq(body.user.clone()))
         .one(&state.db)
         .await?
         .ok_or_else(|| WebError::not_found("User"))?;
@@ -362,7 +397,7 @@ pub async fn patch_organization_users(
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let target_user = EUser::find()
-        .filter(CUser::Name.eq(body.user.clone()))
+        .filter(CUser::Username.eq(body.user.clone()))
         .one(&state.db)
         .await?
         .ok_or_else(|| WebError::not_found("User"))?;
@@ -407,7 +442,7 @@ pub async fn delete_organization_users(
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     let target_user = EUser::find()
-        .filter(CUser::Name.eq(body.user.clone()))
+        .filter(CUser::Username.eq(body.user.clone()))
         .one(&state.db)
         .await?
         .ok_or_else(|| WebError::not_found("User"))?;
@@ -487,6 +522,58 @@ pub async fn post_organization_ssh(
     Ok(Json(res))
 }
 
+pub async fn post_organization_public(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(organization): Path<String>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let organization: MOrganization =
+        get_organization_by_name(state.0.clone(), user.id, organization.clone())
+            .await?
+            .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if organization.managed {
+        return Err(WebError::Forbidden(
+            "Cannot modify state-managed organization.".to_string(),
+        ));
+    }
+
+    let mut aorganization: AOrganization = organization.into();
+    aorganization.public = Set(true);
+    aorganization.update(&state.db).await?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: "Organization is now public".to_string(),
+    }))
+}
+
+pub async fn delete_organization_public(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(organization): Path<String>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let organization: MOrganization =
+        get_organization_by_name(state.0.clone(), user.id, organization.clone())
+            .await?
+            .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if organization.managed {
+        return Err(WebError::Forbidden(
+            "Cannot modify state-managed organization.".to_string(),
+        ));
+    }
+
+    let mut aorganization: AOrganization = organization.into();
+    aorganization.public = Set(false);
+    aorganization.update(&state.db).await?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: "Organization is now private".to_string(),
+    }))
+}
+
 pub async fn get_organization_subscribe(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -505,7 +592,10 @@ pub async fn get_organization_subscribe(
     let mut subscribed: ListResponse = Vec::new();
     for oc in organization_caches {
         if let Ok(Some(cache)) = ECache::find_by_id(oc.cache).one(&state.db).await {
-            subscribed.push(ListItem { id: oc.cache, name: cache.name });
+            subscribed.push(ListItem {
+                id: oc.cache,
+                name: cache.name,
+            });
         }
     }
 

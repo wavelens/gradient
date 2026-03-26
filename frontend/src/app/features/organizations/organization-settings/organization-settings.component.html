@@ -56,6 +56,15 @@
           ></textarea>
         </div>
 
+        <div class="form-group">
+          <label for="visibility">Visibility</label>
+          <select id="visibility" [(ngModel)]="formData.public" class="role-select">
+            <option [ngValue]="false">Private</option>
+            <option [ngValue]="true">Public</option>
+          </select>
+          <small class="text-secondary">Public organizations are visible and readable by all users</small>
+        </div>
+
         <div class="form-actions">
           <button
             pButton
@@ -226,13 +235,19 @@
   [resizable]="false"
 >
   <div class="dialog-content">
+    @if (memberError()) {
+      <div class="dialog-error">
+        <span class="material-symbols-outlined">error</span>
+        {{ memberError() }}
+      </div>
+    }
     <div class="form-group">
-      <label for="member-name">User Full Name</label>
+      <label for="member-name">Username</label>
       <input
         pInputText
         id="member-name"
         [(ngModel)]="newMember.user"
-        placeholder="Enter user's full name"
+        placeholder="Enter username"
         class="w-full"
         (keyup.enter)="addMember()"
       />

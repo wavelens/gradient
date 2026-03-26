@@ -56,12 +56,14 @@ export class OrganizationSettingsComponent implements OnInit {
   showDeleteDialog = signal(false);
   showAddMemberDialog = signal(false);
   showRegenerateKeyDialog = signal(false);
+  memberError = signal<string | null>(null);
 
   orgName = '';
 
   formData = {
     display_name: '',
     description: '',
+    public: false,
   };
 
   newMember = {
@@ -86,6 +88,7 @@ export class OrganizationSettingsComponent implements OnInit {
         this.formData = {
           display_name: org.display_name,
           description: org.description,
+          public: org.public,
         };
         this.loading.set(false);
       },
@@ -126,13 +129,26 @@ export class OrganizationSettingsComponent implements OnInit {
 
   saveSettings(): void {
     this.saving.set(true);
+    const visibilityCall = this.formData.public
+      ? this.organizationsService.setPublic(this.orgName)
+      : this.organizationsService.setPrivate(this.orgName);
+
     this.organizationsService.updateOrganization(this.orgName, {
       display_name: this.formData.display_name,
       description: this.formData.description,
     }).subscribe({
       next: () => {
-        this.saving.set(false);
-        this.loadOrganization();
+        visibilityCall.subscribe({
+          next: () => {
+            this.saving.set(false);
+            this.loadOrganization();
+          },
+          error: (error) => {
+            console.error('Failed to update visibility:', error);
+            this.saving.set(false);
+            this.loadOrganization();
+          },
+        });
       },
       error: (error) => {
         console.error('Failed to save settings:', error);
@@ -157,20 +173,22 @@ export class OrganizationSettingsComponent implements OnInit {
 
   openAddMemberDialog(): void {
     this.newMember = { user: '', role: 'Admin' };
+    this.memberError.set(null);
     this.showAddMemberDialog.set(true);
   }
 
   addMember(): void {
     if (!this.newMember.user) return;
     this.addingMember.set(true);
+    this.memberError.set(null);
     this.organizationsService.addMember(this.orgName, this.newMember.user, this.newMember.role).subscribe({
       next: () => {
         this.addingMember.set(false);
         this.showAddMemberDialog.set(false);
         this.loadMembers();
       },
-      error: (error) => {
-        console.error('Failed to add member:', error);
+      error: (err) => {
+        this.memberError.set(err?.error?.message || err?.message || 'Failed to add member.');
         this.addingMember.set(false);
       },
     });

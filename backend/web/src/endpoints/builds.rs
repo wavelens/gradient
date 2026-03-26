@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use async_stream::stream;
 use axum::extract::{Multipart, Path, State};
@@ -89,7 +90,7 @@ pub async fn get_build(
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
-    if organization.created_by != user.id {
+    if !user_is_org_member(&state, user.id, organization.id).await? {
         return Err(WebError::not_found("Build"));
     }
 
@@ -132,7 +133,7 @@ pub async fn get_build_log(
         .one(&state.db)
         .await?
         .ok_or_else(|| WebError::not_found("Build"))?;
-    
+
     let evaluation = EEvaluation::find_by_id(build.evaluation)
         .one(&state.db)
         .await?
@@ -144,7 +145,7 @@ pub async fn get_build_log(
             );
             WebError::InternalServerError("Build data inconsistency".to_string())
         })?;
-    
+
     let organization_id = if let Some(project_id) = evaluation.project {
         let project = EProject::find_by_id(project_id)
             .one(&state.db)
@@ -177,7 +178,7 @@ pub async fn get_build_log(
             tracing::error!("Organization {} not found", organization_id);
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
-    if organization.created_by != user.id {
+    if !user_is_org_member(&state, user.id, organization.id).await? {
         return Err(WebError::not_found("Build"));
     }
 
@@ -243,7 +244,7 @@ pub async fn post_build_log(
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
-    if organization.created_by != user.id {
+    if !user_is_org_member(&state, user.id, organization.id).await? {
         return Err(WebError::not_found("Build"));
     }
 
@@ -501,7 +502,7 @@ pub async fn get_build_downloads(
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
-    if organization.created_by != user.id {
+    if !user_is_org_member(&state, user.id, organization.id).await? {
         return Err(WebError::not_found("Build"));
     }
 
@@ -629,7 +630,7 @@ pub async fn get_build_download(
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
-    if organization.created_by != user.id {
+    if !user_is_org_member(&state, user.id, organization.id).await? {
         return Err(WebError::not_found("Build"));
     }
 
@@ -843,11 +844,7 @@ fn extract_drv_name(path: &str) -> String {
     without_hash.trim_end_matches(".drv").to_string()
 }
 
-async fn authorize_build(
-    state: &Arc<ServerState>,
-    user: &MUser,
-    build_id: Uuid,
-) -> WebResult<()> {
+async fn authorize_build(state: &Arc<ServerState>, user: &MUser, build_id: Uuid) -> WebResult<()> {
     let build = EBuild::find_by_id(build_id)
         .one(&state.db)
         .await?
@@ -884,7 +881,7 @@ async fn authorize_build(
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
-    if organization.created_by != user.id {
+    if !user_is_org_member(state, user.id, organization.id).await? {
         return Err(WebError::not_found("Build"));
     }
 
@@ -950,7 +947,10 @@ pub async fn get_build_dependencies(
         })
         .collect();
 
-    Ok(Json(BaseResponse { error: false, message: nodes }))
+    Ok(Json(BaseResponse {
+        error: false,
+        message: nodes,
+    }))
 }
 
 /// GET /builds/{build}/graph — full transitive dependency graph rooted at a build
@@ -1017,6 +1017,10 @@ pub async fn get_build_graph(
 
     Ok(Json(BaseResponse {
         error: false,
-        message: BuildGraph { root: build_id, nodes, edges },
+        message: BuildGraph {
+            root: build_id,
+            nodes,
+            edges,
+        },
     }))
 }

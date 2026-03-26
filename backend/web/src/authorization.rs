@@ -138,7 +138,11 @@ pub async fn authorize(
     Ok(next.run(req).await)
 }
 
-pub fn encode_jwt(state: State<Arc<ServerState>>, id: Uuid, remember_me: bool) -> Result<String, StatusCode> {
+pub fn encode_jwt(
+    state: State<Arc<ServerState>>,
+    id: Uuid,
+    remember_me: bool,
+) -> Result<String, StatusCode> {
     let now = Utc::now();
     let expire: chrono::TimeDelta = if remember_me {
         Duration::days(30) // 30 days for remember me

@@ -68,6 +68,12 @@
         description = "Whether to use Nix store for this organization";
       };
 
+      public = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Whether the organization is public (visible to all users)";
+      };
+
       created_by = mkOption {
         type = types.str;
         description = "Username of the user who created this organization";
@@ -233,6 +239,12 @@
         type = types.listOf types.str;
         default = [ ];
         description = "List of organization names that can use this cache";
+      };
+
+      public = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Whether the cache is public (available to all organizations)";
       };
 
       created_by = mkOption {

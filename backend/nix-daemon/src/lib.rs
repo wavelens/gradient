@@ -29,7 +29,10 @@ use chrono::{DateTime, Utc};
 use num_enum::{IntoPrimitive, TryFromPrimitive, TryFromPrimitiveError};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-use std::{collections::{HashMap, HashSet}, future::Future};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+};
 use strum::{AsRefStr, IntoStaticStr};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
@@ -320,7 +323,6 @@ impl From<TryFromPrimitiveError<Verbosity>> for Error {
     TryFromPrimitive,
     IntoPrimitive,
 )]
-
 #[repr(u64)]
 pub enum BuildMode {
     Normal,

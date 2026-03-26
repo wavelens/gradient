@@ -1,0 +1,137 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  @if (loading()) {
+    <app-loading-spinner message="Loading cache settings..." />
+  } @else if (cache(); as c) {
+    <div class="page-header">
+      <div>
+        <div class="breadcrumb">
+          <a routerLink="/caches" class="breadcrumb-link">Caches</a>
+          <span class="breadcrumb-separator">/</span>
+          <a [routerLink]="['/caches', cacheName]" class="breadcrumb-link">{{ c.display_name }}</a>
+          <span class="breadcrumb-separator">/</span>
+          <span class="breadcrumb-current">Settings</span>
+        </div>
+        <h1>Cache Settings</h1>
+      </div>
+    </div>
+
+    <!-- General -->
+    <div class="settings-section">
+      <h2>General</h2>
+      <div class="settings-card">
+        <div class="form-group">
+          <label for="cache-name">Name</label>
+          <input
+            pInputText
+            id="cache-name"
+            [value]="c.name"
+            disabled
+            class="w-full"
+          />
+          <small class="text-secondary">Cache name cannot be changed</small>
+        </div>
+
+        <div class="form-group">
+          <label for="display-name">Display Name</label>
+          <input
+            pInputText
+            id="display-name"
+            [(ngModel)]="formData.display_name"
+            class="w-full"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="description">Description</label>
+          <textarea
+            pInputTextarea
+            id="description"
+            [(ngModel)]="formData.description"
+            rows="3"
+            class="w-full"
+          ></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="priority">Priority</label>
+          <input
+            type="number"
+            id="priority"
+            [(ngModel)]="formData.priority"
+            [class.input-invalid]="priorityInvalid"
+            class="w-full"
+            min="0"
+            max="255"
+          />
+          @if (priorityInvalid) {
+            <small class="text-danger">Priority must be between 0 and 255</small>
+          } @else {
+            <small class="text-secondary">Higher priority caches are used first (0–255)</small>
+          }
+        </div>
+
+        <div class="form-group">
+          <label for="visibility">Visibility</label>
+          <select id="visibility" [(ngModel)]="formData.public" class="role-select w-full">
+            <option [ngValue]="false">Private</option>
+            <option [ngValue]="true">Public</option>
+          </select>
+          <small class="text-secondary">Public caches are visible and readable by all users</small>
+        </div>
+
+        <div class="form-actions">
+          <button
+            pButton
+            label="Save Changes"
+            icon="pi pi-check"
+            (click)="saveSettings()"
+            [loading]="saving()"
+            [disabled]="saving() || priorityInvalid"
+          ></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Danger Zone -->
+    <div class="settings-section danger-section">
+      <h2>Danger Zone</h2>
+      <div class="settings-card danger-card">
+        <div class="danger-row">
+          <div>
+            <h3>Delete Cache</h3>
+            <p class="text-secondary">Permanently delete this cache and all its stored artifacts.</p>
+          </div>
+          <button
+            pButton
+            label="Delete Cache"
+            icon="pi pi-trash"
+            severity="danger"
+            (click)="showDeleteDialog.set(true)"
+          ></button>
+        </div>
+      </div>
+    </div>
+  }
+</div>
+
+<!-- Delete Confirmation Dialog -->
+<p-dialog
+  header="Delete Cache"
+  [(visible)]="showDeleteDialog"
+  [modal]="true"
+  [style]="{ width: '400px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <p>Are you sure you want to delete <strong>{{ cache()?.display_name }}</strong>? This action cannot be undone.</p>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
+    <button pButton label="Delete" severity="danger" (click)="deleteCache()" [loading]="deleting()" [disabled]="deleting()"></button>
+  </ng-template>
+</p-dialog>

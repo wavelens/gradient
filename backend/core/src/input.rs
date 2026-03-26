@@ -281,14 +281,16 @@ pub fn load_secret_bytes(f: &str) -> Vec<u8> {
         Ok(decoded) => {
             eprintln!(
                 "Secret file '{}' decoded from base64 but is too short ({} bytes). Secrets should be at least 16 bytes.",
-                f, decoded.len()
+                f,
+                decoded.len()
             );
             std::process::exit(1);
         }
         Err(_) => {
             eprintln!(
                 "Secret file '{}' is too short ({} bytes). Secrets should be at least 16 bytes as plain text, or base64-encoded.",
-                f, as_bytes.len()
+                f,
+                as_bytes.len()
             );
             std::process::exit(1);
         }

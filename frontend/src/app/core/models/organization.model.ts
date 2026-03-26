@@ -11,6 +11,7 @@ export interface Organization {
   description: string;
   public_key?: string;
   use_nix_store: boolean;
+  public: boolean;
   created_by?: string;
   created_at?: string;
   role?: 'owner' | 'member';

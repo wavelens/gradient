@@ -87,6 +87,38 @@
       />
     }
   }
+
+  <!-- Public Caches -->
+  @if (publicLoading()) {
+    <app-loading-spinner message="Loading public caches..." />
+  } @else if (publicCaches().length > 0) {
+    <div class="section">
+      <h2 class="discover-header">Discover Public Caches</h2>
+      <div class="cache-grid">
+        @for (cache of publicCaches(); track cache.id) {
+          <a [routerLink]="['/caches', cache.name]" class="cache-card">
+            <div class="cache-icon">
+              <span class="material-symbols-outlined">public</span>
+            </div>
+            <div class="cache-content">
+              <h3>{{ cache.display_name }}</h3>
+              <p class="text-secondary">{{ cache.description || 'No description' }}</p>
+              <div class="cache-meta">
+                <span class="meta-item">
+                  <span class="material-symbols-outlined">sort</span>
+                  Priority: {{ cache.priority }}
+                </span>
+                <span class="status-badge public-badge">Public</span>
+              </div>
+            </div>
+            <div class="cache-arrow">
+              <span class="material-symbols-outlined">arrow_forward</span>
+            </div>
+          </a>
+        }
+      </div>
+    </div>
+  }
 </div>
 
 <!-- Create Cache Dialog -->
@@ -136,15 +168,29 @@
 
     <div class="form-group">
       <label for="cache-priority">Priority</label>
-      <p-inputNumber
-        inputId="cache-priority"
+      <input
+        type="number"
+        id="cache-priority"
         [(ngModel)]="newCache.priority"
-        [min]="0"
-        [max]="100"
-        [showButtons]="true"
-        styleClass="w-full"
+        [class.input-invalid]="priorityInvalid"
+        class="w-full"
+        min="0"
+        max="255"
       />
-      <small class="text-secondary">Higher priority caches are used first (0-100)</small>
+      @if (priorityInvalid) {
+        <small class="text-danger">Priority must be between 0 and 255</small>
+      } @else {
+        <small class="text-secondary">Higher priority caches are used first (0-255)</small>
+      }
+    </div>
+
+    <div class="form-group">
+      <label for="cache-visibility">Visibility</label>
+      <select id="cache-visibility" [(ngModel)]="newCache.public" class="visibility-select w-full">
+        <option [ngValue]="false">Private</option>
+        <option [ngValue]="true">Public</option>
+      </select>
+      <small class="text-secondary">Public caches are visible and readable by all users</small>
     </div>
   </div>
 
@@ -160,7 +206,7 @@
       pButton
       label="Create"
       (click)="createCache()"
-      [disabled]="!newCache.name || !newCache.display_name || creating()"
+      [disabled]="!newCache.name || !newCache.display_name || priorityInvalid || creating()"
       [loading]="creating()"
     ></button>
   </ng-template>

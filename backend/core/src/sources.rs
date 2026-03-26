@@ -535,8 +535,8 @@ pub fn generate_signing_key(secret_file: String) -> Result<String, SourceError> 
     let secret = crate::input::load_secret_bytes(&secret_file);
 
     let private_key = KeyPair::generate();
-    let encrypted_private_key =
-        crypter::encrypt_with_password(&secret, *private_key).ok_or(SourceError::CryptographicOperation)?;
+    let encrypted_private_key = crypter::encrypt_with_password(&secret, *private_key)
+        .ok_or(SourceError::CryptographicOperation)?;
 
     let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_private_key);
 
@@ -553,12 +553,12 @@ pub fn decrypt_signing_key(secret_file: String, cache: MCache) -> Result<String,
             reason: format!("{}. The signing key in the cache appears to be corrupted or not properly base64-encoded.", e)
         })?;
 
-    let decrypted_private_key =
-        crypter::decrypt_with_password(&secret, encrypted_private_key).ok_or(SourceError::PrivateKeyDecryption)?;
+    let decrypted_private_key = crypter::decrypt_with_password(&secret, encrypted_private_key)
+        .ok_or(SourceError::PrivateKeyDecryption)?;
 
     // Convert decrypted bytes to string (signing key should be base64)
-    let decrypted_key_str = String::from_utf8(decrypted_private_key)
-        .map_err(|_| SourceError::KeyUtf8Conversion)?;
+    let decrypted_key_str =
+        String::from_utf8(decrypted_private_key).map_err(|_| SourceError::KeyUtf8Conversion)?;
 
     Ok(decrypted_key_str)
 }
@@ -575,7 +575,12 @@ pub fn format_cache_key(
         .replace("http://", "")
         .replace(":", "-");
 
-    Ok(format!("{}-{}:{}", base_url, cache.name, decrypted_key.trim()))
+    Ok(format!(
+        "{}-{}:{}",
+        base_url,
+        cache.name,
+        decrypted_key.trim()
+    ))
 }
 
 pub fn get_hash_from_url(url: String) -> Result<String, SourceError> {
@@ -652,14 +657,15 @@ pub fn get_cache_nar_location(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_generate_ssh_key() {
         // Create a temporary secret file with valid base64 content
         let mut secret_file = NamedTempFile::new().unwrap();
-        let secret_content = base64::engine::general_purpose::STANDARD.encode(b"this_is_a_test_secret_key_32chars");
+        let secret_content =
+            base64::engine::general_purpose::STANDARD.encode(b"this_is_a_test_secret_key_32chars");
         secret_file.write_all(secret_content.as_bytes()).unwrap();
         let secret_file_path = secret_file.path().to_string_lossy().to_string();
 
@@ -673,10 +679,14 @@ mod tests {
                 assert!(!public_key.is_empty(), "Public key should not be empty");
 
                 // Verify public key format (should start with "ssh-ed25519")
-                assert!(public_key.starts_with("ssh-ed25519"), "Public key should start with 'ssh-ed25519'");
+                assert!(
+                    public_key.starts_with("ssh-ed25519"),
+                    "Public key should start with 'ssh-ed25519'"
+                );
 
                 // Verify private key is base64 encoded (encrypted)
-                let _decoded = base64::engine::general_purpose::STANDARD.decode(&private_key)
+                let _decoded = base64::engine::general_purpose::STANDARD
+                    .decode(&private_key)
                     .expect("Private key should be valid base64");
 
                 println!("✓ SSH key generation test passed");
@@ -689,4 +699,3 @@ mod tests {
         }
     }
 }
-

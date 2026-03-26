@@ -11,7 +11,7 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
 use axum::{Extension, Json};
 use chrono::Utc;
-use core::database::get_cache_by_name;
+use core::database::{get_any_cache_by_name, get_cache_by_name};
 use core::executer::{get_local_store, get_pathinfo};
 use core::input::{check_index_name, validate_display_name};
 use core::sources::{
@@ -33,6 +33,7 @@ pub struct MakeCacheRequest {
     pub display_name: String,
     pub description: String,
     pub priority: i32,
+    pub public: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -121,17 +122,23 @@ async fn get_nar_by_hash(
 
     let nar_hash = String::from_utf8_lossy(&output.stdout).to_string();
 
-    let references = pathinfo.references
+    let references = pathinfo
+        .references
         .into_iter()
         .map(|s| s.strip_prefix("/nix/store/").unwrap_or(&s).to_string())
         .collect();
 
-    let sig_url = state.cli.serve_url
+    let sig_url = state
+        .cli
+        .serve_url
         .replace("https://", "")
         .replace("http://", "")
         .replace(":", "-");
 
-    let sig = format!("{}-{}:{}", sig_url, cache.name, build_output_signature.signature);
+    let sig = format!(
+        "{}-{}:{}",
+        sig_url, cache.name, build_output_signature.signature
+    );
 
     Ok(NixPathInfo {
         store_path: path,
@@ -156,20 +163,12 @@ async fn get_nar_by_hash(
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-) -> WebResult<Json<BaseResponse<ListResponse>>> {
+) -> WebResult<Json<BaseResponse<Vec<MCache>>>> {
     // TODO: Implement pagination
     let caches = ECache::find()
         .filter(CCache::CreatedBy.eq(user.id))
         .all(&state.db)
         .await?;
-
-    let caches: ListResponse = caches
-        .iter()
-        .map(|c| ListItem {
-            id: c.id,
-            name: c.name.clone(),
-        })
-        .collect();
 
     let res = BaseResponse {
         error: false,
@@ -214,6 +213,7 @@ pub async fn put(
         description: Set(body.description.clone()),
         priority: Set(body.priority),
         signing_key: Set(signing_key),
+        public: Set(body.public.unwrap_or(false)),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
         managed: Set(false),
@@ -229,14 +229,33 @@ pub async fn put(
     Ok(Json(res))
 }
 
+pub async fn get_public_caches(
+    state: State<Arc<ServerState>>,
+    Extension(_user): Extension<MUser>,
+) -> WebResult<Json<BaseResponse<Vec<MCache>>>> {
+    let caches = ECache::find()
+        .filter(CCache::Public.eq(true))
+        .all(&state.db)
+        .await?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: caches,
+    }))
+}
+
 pub async fn get_cache(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<MCache>>> {
-    let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone())
+    let cache: MCache = get_any_cache_by_name(state.0.clone(), cache.clone())
         .await?
         .ok_or_else(|| WebError::not_found("Cache"))?;
+
+    if !cache.public && cache.created_by != user.id {
+        return Err(WebError::not_found("Cache"));
+    }
 
     let res = BaseResponse {
         error: false,
@@ -515,12 +534,62 @@ pub async fn delete_cache_active(
     Ok(Json(res))
 }
 
+pub async fn post_cache_public(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(cache): Path<String>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone())
+        .await?
+        .ok_or_else(|| WebError::not_found("Cache"))?;
+
+    if cache.managed {
+        return Err(WebError::Forbidden(
+            "Cannot modify state-managed cache.".to_string(),
+        ));
+    }
+
+    let mut acache: ACache = cache.into();
+    acache.public = Set(true);
+    acache.update(&state.db).await?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: "Cache is now public".to_string(),
+    }))
+}
+
+pub async fn delete_cache_public(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(cache): Path<String>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone())
+        .await?
+        .ok_or_else(|| WebError::not_found("Cache"))?;
+
+    if cache.managed {
+        return Err(WebError::Forbidden(
+            "Cannot modify state-managed cache.".to_string(),
+        ));
+    }
+
+    let mut acache: ACache = cache.into();
+    acache.public = Set(false);
+    acache.update(&state.db).await?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: "Cache is now private".to_string(),
+    }))
+}
+
 pub async fn get_cache_key(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
+    let cache: MCache = match get_any_cache_by_name(state.0.clone(), cache.clone()).await {
         Ok(Some(c)) => c,
         Ok(None) => {
             return Err((
@@ -541,6 +610,16 @@ pub async fn get_cache_key(
             ));
         }
     };
+
+    if !cache.public && cache.created_by != user.id {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(BaseResponse {
+                error: true,
+                message: "Cache not found".to_string(),
+            }),
+        ));
+    }
 
     let cache_key = match format_cache_key(
         state.cli.crypt_secret_file.clone(),

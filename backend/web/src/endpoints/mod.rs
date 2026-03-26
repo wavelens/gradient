@@ -17,8 +17,27 @@ pub mod user;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Json, State};
 use core::types::{BaseResponse, ServerState};
+use core::types::{COrganizationUser, EOrganizationUser};
+use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::Serialize;
 use std::sync::Arc;
+use uuid::Uuid;
+
+pub async fn user_is_org_member(
+    state: &Arc<ServerState>,
+    user_id: Uuid,
+    organization_id: Uuid,
+) -> Result<bool, WebError> {
+    Ok(EOrganizationUser::find()
+        .filter(
+            Condition::all()
+                .add(COrganizationUser::Organization.eq(organization_id))
+                .add(COrganizationUser::User.eq(user_id)),
+        )
+        .one(&state.db)
+        .await?
+        .is_some())
+}
 
 pub async fn handle_404() -> WebError {
     WebError::NotFound("Not Found".to_string())
@@ -48,7 +67,8 @@ pub async fn get_config(
         message: ServerConfig {
             oidc_enabled: state.cli.oidc_enabled,
             registration_disabled: state.cli.disable_registration || state.cli.oidc_required,
-            email_verification_enabled: state.cli.email_enabled && state.cli.email_require_verification,
+            email_verification_enabled: state.cli.email_enabled
+                && state.cli.email_require_verification,
         },
     };
 

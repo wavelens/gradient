@@ -100,11 +100,7 @@ pub async fn execute_build(
     let derivation_path = get_builds_path(vec![&build]).first().unwrap().to_string();
     let mut build = build.clone();
 
-    let mut prog = remote_store.build_derivation(
-        derivation_path,
-        derivation,
-        BuildMode::Normal,
-    );
+    let mut prog = remote_store.build_derivation(derivation_path, derivation, BuildMode::Normal);
 
     const FLUSH_INTERVAL_MS: u128 = 1000;
     const FLUSH_THRESHOLD_BYTES: usize = 64 * 1024;
@@ -131,8 +127,11 @@ pub async fn execute_build(
 
             let elapsed = last_flush.elapsed().as_millis();
             if elapsed >= FLUSH_INTERVAL_MS || pending.len() >= FLUSH_THRESHOLD_BYTES {
-                let full_log =
-                    format!("{}{}", build.log.as_ref().unwrap_or(&"".to_string()), pending);
+                let full_log = format!(
+                    "{}{}",
+                    build.log.as_ref().unwrap_or(&"".to_string()),
+                    pending
+                );
                 pending.clear();
                 last_flush = Instant::now();
 
@@ -148,7 +147,11 @@ pub async fn execute_build(
 
     // Flush any remaining buffered log
     if !pending.is_empty() {
-        let full_log = format!("{}{}", build.log.as_ref().unwrap_or(&"".to_string()), pending);
+        let full_log = format!(
+            "{}{}",
+            build.log.as_ref().unwrap_or(&"".to_string()),
+            pending
+        );
         let mut abuild: ABuild = build.clone().into();
         abuild.log = Set(Some(full_log));
         build = abuild
@@ -158,9 +161,7 @@ pub async fn execute_build(
     }
 
     match prog.result().await.map_err(|e| e.into()) {
-        Ok(result) => {
-            Ok((build, result))
-        },
+        Ok(result) => Ok((build, result)),
         Err(e) => Err(e),
     }
 }
