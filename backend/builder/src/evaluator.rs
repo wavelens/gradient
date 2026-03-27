@@ -231,6 +231,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
     let mut pending: Vec<(String, Uuid)> = Vec::new();
     let mut pending_paths: HashSet<String> = HashSet::new();
+    let mut reused_build_ids: HashSet<Uuid> = HashSet::new();
 
     while let Some((dependency, dependency_id, build_id)) = dependencies.pop() {
         debug!(
@@ -306,20 +307,22 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         });
 
         for b in check_availablity {
-            let dep = MBuildDependency {
-                id: Uuid::new_v4(),
-                build: build_id,
-                dependency: b.id,
-            };
-
-            trace!(build = %build_id, dependency = %b.id, "Creating dependency for existing build");
-
             references.retain(|(d, _, _)| *d != b.derivation_path);
+
             if get_missing_builds(vec![b.derivation_path.clone()], store)
                 .await
                 .context("Failed to get missing builds")?
                 .is_empty()
             {
+                // Already in nix store — mark Completed and reuse as-is
+                let dep = MBuildDependency {
+                    id: Uuid::new_v4(),
+                    build: build_id,
+                    dependency: b.id,
+                };
+
+                trace!(build = %build_id, dependency = %b.id, "Reusing existing build (in store)");
+
                 let mut abuild: ABuild = b.clone().into();
                 if b.status != BuildStatus::Completed {
                     abuild.status = Set(BuildStatus::Completed);
@@ -331,18 +334,37 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                     .save(&state.db)
                     .await
                     .context("Failed to save build status")?;
+
+                all_dependencies.push(dep);
             } else {
-                let mut abuild: ABuild = b.into();
+                // Not in nix store — needs to be rebuilt.
+                // Delete stale dependency records so scheduling is not blocked by old state,
+                // then re-add to the BFS queue so sub-dependencies are re-traversed.
+                EBuildDependency::delete_many()
+                    .filter(CBuildDependency::Build.eq(b.id))
+                    .exec(&state.db)
+                    .await
+                    .context("Failed to delete stale build dependencies")?;
+
+                let mut abuild: ABuild = b.clone().into();
                 abuild.status = Set(BuildStatus::Queued);
                 abuild.log = Set(None);
                 abuild.evaluation = Set(evaluation.id);
                 abuild
                     .save(&state.db)
                     .await
-                    .context("Failed to save build status")?;
-            }
+                    .context("Failed to reset build to queued")?;
 
-            all_dependencies.push(dep);
+                reused_build_ids.insert(b.id);
+
+                // Re-add to BFS with the existing build ID so sub-dependencies are
+                // processed and correct dependency records are created.
+                // The parent dep {build_id → b.id} will be emitted via the dependency_id
+                // mechanism at the end of the BFS iteration for b.derivation_path.
+                references.push((b.derivation_path.clone(), Some(build_id), b.id));
+
+                trace!(build = %build_id, dependency = %b.id, "Re-queuing non-completed build for dependency traversal");
+            }
         }
 
         let not_missing = get_missing_builds(vec![dependency.clone()], store)
@@ -405,6 +427,11 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         let (build_id, path, system, features) = handle
             .await
             .context("get_features_cmd task panicked")??;
+
+        if reused_build_ids.contains(&build_id) {
+            // Already updated in DB during BFS — skip re-insertion
+            continue;
+        }
 
         if let Err(e) = add_features(Arc::clone(&state), features, Some(build_id), None).await {
             error!(error = %e, "Failed to add features for build");
