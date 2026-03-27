@@ -345,6 +345,43 @@
   .material-symbols-outlined { font-size: 32px; }
 }
 
+.metric-sep {
+  font-size: $font-size-xs;
+  color: $text-light;
+  margin: 0 2px;
+}
+
+.queue-waiting {
+  color: $color-warning;
+}
+
+.queued-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  height: 100%;
+  color: $text-secondary;
+
+  .queued-icon {
+    font-size: 56px;
+    color: $color-warning;
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  .queued-title {
+    font-size: $font-size-lg;
+    font-weight: 600;
+    color: $text-primary;
+  }
+
+  .queued-sub {
+    font-size: $font-size-sm;
+    color: $text-light;
+  }
+}
+
 .evaluating-hint {
   display: flex;
   flex-direction: column;

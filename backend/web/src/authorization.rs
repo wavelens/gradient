@@ -33,6 +33,7 @@ pub struct OidcUser {
     pub iss: String,
     pub name: String,
     pub sub: String,
+    pub preferred_username: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -384,6 +385,7 @@ pub async fn oidc_login_verify(
         iss: user_data["iss"].as_str().unwrap_or_default().to_string(),
         name: user_data["name"].as_str().unwrap_or_default().to_string(),
         sub: user_data["sub"].as_str().unwrap_or_default().to_string(),
+        preferred_username: user_data["preferred_username"].as_str().map(str::to_string),
     };
 
     create_or_update_user(state, user_info).await
@@ -393,11 +395,16 @@ async fn create_or_update_user(
     state: State<Arc<ServerState>>,
     user_info: OidcUser,
 ) -> Result<MUser> {
+    let login_name = user_info
+        .preferred_username
+        .clone()
+        .unwrap_or_else(|| user_info.sub.clone());
+
     let user: Result<MUser> = match EUser::find()
         .filter(
             Condition::any()
                 .add(CUser::Email.eq(&user_info.email))
-                .add(CUser::Username.eq(&user_info.sub)),
+                .add(CUser::Username.eq(&login_name)),
         )
         .one(&state.db)
         .await
@@ -420,9 +427,9 @@ async fn create_or_update_user(
                 updated = true;
             }
 
-            if user.username != user_info.sub {
+            if user.username != login_name {
                 let mut auser: AUser = user.into();
-                auser.username = Set(user_info.sub.clone());
+                auser.username = Set(login_name.clone());
                 user = auser
                     .update(&state.db)
                     .await
@@ -451,7 +458,7 @@ async fn create_or_update_user(
         None => {
             let new_user = AUser {
                 id: Set(Uuid::new_v4()),
-                username: Set(user_info.sub.clone()),
+                username: Set(login_name),
                 name: Set(user_info.name.clone()),
                 email: Set(user_info.email.clone()),
                 password: Set(None),

@@ -40,8 +40,7 @@ export class AuthService {
    * Initialize authentication state from stored token
    */
   private initializeAuth(): void {
-    const storedToken =
-      localStorage.getItem('jwt_token') || sessionStorage.getItem('jwt_token');
+    const storedToken = localStorage.getItem('jwt_token');
 
     if (storedToken) {
       this.tokenSignal.set(storedToken);
@@ -66,16 +65,7 @@ export class AuthService {
       .pipe(
         tap((token) => {
           this.tokenSignal.set(token);
-
-          // Store token in appropriate storage
-          if (rememberMe) {
-            localStorage.setItem('jwt_token', token);
-            sessionStorage.removeItem('jwt_token');
-          } else {
-            sessionStorage.setItem('jwt_token', token);
-            localStorage.removeItem('jwt_token');
-          }
-
+          localStorage.setItem('jwt_token', token);
           this.loadUser();
         }),
         finalize(() => this.loadingSignal.set(false))
@@ -114,7 +104,6 @@ export class AuthService {
         this.userSignal.set(null);
         this.tokenSignal.set(null);
         localStorage.removeItem('jwt_token');
-        sessionStorage.removeItem('jwt_token');
         this.router.navigate(['/account/login']);
       })
     );
@@ -133,7 +122,6 @@ export class AuthService {
         this.userSignal.set(null);
         this.tokenSignal.set(null);
         localStorage.removeItem('jwt_token');
-        sessionStorage.removeItem('jwt_token');
         onComplete?.();
       },
     });
@@ -151,8 +139,7 @@ export class AuthService {
    */
   loginWithToken(token: string): void {
     this.tokenSignal.set(token);
-    sessionStorage.setItem('jwt_token', token);
-    localStorage.removeItem('jwt_token');
+    localStorage.setItem('jwt_token', token);
     this.loadUser();
   }
 

@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { Subject } from 'rxjs';
+import { debounceTime, switchMap } from 'rxjs/operators';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
@@ -34,13 +36,15 @@ import { Organization } from '@core/models';
   templateUrl: './organization-list.component.html',
   styleUrl: './organization-list.component.scss',
 })
-export class OrganizationListComponent implements OnInit {
+export class OrganizationListComponent implements OnInit, OnDestroy {
   private organizationsService = inject(OrganizationsService);
+  private nameCheck$ = new Subject<string>();
 
   loading = signal(true);
   organizations = signal<Organization[]>([]);
   showCreateDialog = signal(false);
   creating = signal(false);
+  nameCheckState = signal<'idle' | 'checking' | 'available' | 'taken'>('idle');
 
   newOrg = {
     name: '',
@@ -55,6 +59,19 @@ export class OrganizationListComponent implements OnInit {
   ngOnInit(): void {
     this.loadOrganizations();
     this.loadPublicOrganizations();
+    this.nameCheck$.pipe(
+      debounceTime(400),
+      switchMap((name) => {
+        if (!name) { this.nameCheckState.set('idle'); return []; }
+        return this.organizationsService.checkOrgNameAvailable(name);
+      }),
+    ).subscribe((available) => {
+      this.nameCheckState.set(available ? 'available' : 'taken');
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.nameCheck$.complete();
   }
 
   loadOrganizations(): void {
@@ -83,13 +100,14 @@ export class OrganizationListComponent implements OnInit {
   }
 
   openCreateDialog(): void {
-    this.newOrg = {
-      name: '',
-      display_name: '',
-      description: '',
-      public: false,
-    };
+    this.newOrg = { name: '', display_name: '', description: '', public: false };
+    this.nameCheckState.set('idle');
     this.showCreateDialog.set(true);
+  }
+
+  onOrgNameChange(name: string): void {
+    this.nameCheckState.set(name ? 'checking' : 'idle');
+    this.nameCheck$.next(name);
   }
 
   createOrganization(): void {

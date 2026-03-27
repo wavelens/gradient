@@ -18,7 +18,6 @@ pub struct ProjectResponse {
     pub repository: String,
     pub evaluation_wildcard: String,
     pub last_evaluation: Option<String>,
-    pub last_check_at: String,
     pub force_evaluation: bool,
     pub created_by: String,
     pub created_at: String,

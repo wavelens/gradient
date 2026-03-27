@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { forkJoin } from 'rxjs';
+import { Subject, forkJoin } from 'rxjs';
+import { debounceTime, switchMap } from 'rxjs/operators';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
@@ -36,16 +37,18 @@ import { Organization, Project } from '@core/models';
   templateUrl: './organization-detail.component.html',
   styleUrl: './organization-detail.component.scss',
 })
-export class OrganizationDetailComponent implements OnInit {
+export class OrganizationDetailComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   private organizationsService = inject(OrganizationsService);
   private projectsService = inject(ProjectsService);
+  private nameCheck$ = new Subject<string>();
 
   loading = signal(true);
   organization = signal<Organization | null>(null);
   projects = signal<Project[]>([]);
   showCreateDialog = signal(false);
   creating = signal(false);
+  nameCheckState = signal<'idle' | 'checking' | 'available' | 'taken'>('idle');
 
   orgName = '';
 
@@ -60,6 +63,19 @@ export class OrganizationDetailComponent implements OnInit {
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.loadOrganizationData();
+    this.nameCheck$.pipe(
+      debounceTime(400),
+      switchMap((name) => {
+        if (!name) { this.nameCheckState.set('idle'); return []; }
+        return this.projectsService.checkProjectNameAvailable(this.orgName, name);
+      }),
+    ).subscribe((available) => {
+      this.nameCheckState.set(available ? 'available' : 'taken');
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.nameCheck$.complete();
   }
 
   loadOrganizationData(): void {
@@ -82,14 +98,14 @@ export class OrganizationDetailComponent implements OnInit {
   }
 
   openCreateDialog(): void {
-    this.newProject = {
-      name: '',
-      display_name: '',
-      description: '',
-      repository: '',
-      evaluation_wildcard: 'packages.x86_64-linux.*',
-    };
+    this.newProject = { name: '', display_name: '', description: '', repository: '', evaluation_wildcard: 'packages.x86_64-linux.*' };
+    this.nameCheckState.set('idle');
     this.showCreateDialog.set(true);
+  }
+
+  onProjectNameChange(name: string): void {
+    this.nameCheckState.set(name ? 'checking' : 'idle');
+    this.nameCheck$.next(name);
   }
 
   createProject(): void {

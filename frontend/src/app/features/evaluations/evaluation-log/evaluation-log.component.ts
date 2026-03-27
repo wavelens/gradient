@@ -61,6 +61,14 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.builds().filter(b => b.status === 'Completed').length
   );
 
+  queuedCount = computed(() =>
+    this.builds().filter(b => b.status === 'Queued').length
+  );
+
+  buildingCount = computed(() =>
+    this.builds().filter(b => b.status === 'Building').length
+  );
+
   selectedBuild = computed(() =>
     this.builds().find(b => b.id === this.selectedBuildId()) ?? null
   );
@@ -121,7 +129,18 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   loadBuilds(): void {
     this.evalService.getBuilds(this.evaluationId).subscribe({
       next: (builds) => {
+        const prevSelected = this.selectedBuild();
         this.builds.set(this.sortBuilds(builds));
+
+        // Auto-reload logs when the selected build transitions from Queued → Building
+        const newSelected = this.selectedBuild();
+        if (prevSelected?.status === 'Queued' && newSelected?.status === 'Building') {
+          this.logLines = [];
+          this.logHtml.set('');
+          this.logLoading.set(true);
+          this.fetchInitialLogs(newSelected.id);
+        }
+
         if (this.initialBuildId) {
           const target = builds.find(b => b.id === this.initialBuildId);
           if (target) {

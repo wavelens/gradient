@@ -13,7 +13,9 @@ import { DividerModule } from 'primeng/divider';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
+import { AutoCompleteModule } from 'primeng/autocomplete';
 import { OrganizationsService, OrgMember } from '@core/services/organizations.service';
+import { UserService } from '@core/services/user.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { Organization } from '@core/models';
 
@@ -29,6 +31,7 @@ import { Organization } from '@core/models';
     ButtonModule,
     InputTextModule,
     TextareaModule,
+    AutoCompleteModule,
     LoadingSpinnerComponent,
   ],
   templateUrl: './organization-settings.component.html',
@@ -38,6 +41,7 @@ export class OrganizationSettingsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private organizationsService = inject(OrganizationsService);
+  private userService = inject(UserService);
 
   loading = signal(true);
   saving = signal(false);
@@ -57,6 +61,7 @@ export class OrganizationSettingsComponent implements OnInit {
   showAddMemberDialog = signal(false);
   showRegenerateKeyDialog = signal(false);
   memberError = signal<string | null>(null);
+  userSuggestions = signal<string[]>([]);
 
   orgName = '';
 
@@ -168,6 +173,17 @@ export class OrganizationSettingsComponent implements OnInit {
         this.deleting.set(false);
         this.showDeleteDialog.set(false);
       },
+    });
+  }
+
+  onUserSearch(event: { query: string }): void {
+    if (!event.query.trim()) {
+      this.userSuggestions.set([]);
+      return;
+    }
+    this.userService.searchUsers(event.query).subscribe({
+      next: (users) => this.userSuggestions.set(users.map((u) => u.username)),
+      error: () => this.userSuggestions.set([]),
     });
   }
 

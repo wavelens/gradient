@@ -133,14 +133,28 @@
   <div class="dialog-content">
     <div class="form-group">
       <label for="cache-name">Name *</label>
-      <input
-        pInputText
-        id="cache-name"
-        [(ngModel)]="newCache.name"
-        placeholder="cache-name"
-        class="w-full"
-      />
-      <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
+      <div class="name-input-wrapper">
+        <input
+          pInputText
+          id="cache-name"
+          [(ngModel)]="newCache.name"
+          placeholder="cache-name"
+          class="w-full"
+          (ngModelChange)="onCacheNameChange($event)"
+        />
+        @if (nameCheckState() === 'checking') {
+          <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
+        } @else if (nameCheckState() === 'available') {
+          <span class="name-check-icon available"><span class="material-symbols-outlined">check</span></span>
+        } @else if (nameCheckState() === 'taken') {
+          <span class="name-check-icon taken"><span class="material-symbols-outlined">close</span></span>
+        }
+      </div>
+      @if (nameCheckState() === 'taken') {
+        <small class="text-danger">This name is already taken.</small>
+      } @else {
+        <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
+      }
     </div>
 
     <div class="form-group">
@@ -206,7 +220,7 @@
       pButton
       label="Create"
       (click)="createCache()"
-      [disabled]="!newCache.name || !newCache.display_name || priorityInvalid || creating()"
+      [disabled]="!newCache.name || !newCache.display_name || priorityInvalid || nameCheckState() === 'taken' || nameCheckState() === 'checking' || creating()"
       [loading]="creating()"
     ></button>
   </ng-template>

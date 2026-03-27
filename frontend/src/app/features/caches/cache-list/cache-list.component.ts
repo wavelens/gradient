@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { Subject } from 'rxjs';
+import { debounceTime, switchMap } from 'rxjs/operators';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
@@ -34,13 +36,15 @@ import { Cache } from '@core/models';
   templateUrl: './cache-list.component.html',
   styleUrl: './cache-list.component.scss',
 })
-export class CacheListComponent implements OnInit {
+export class CacheListComponent implements OnInit, OnDestroy {
   private cachesService = inject(CachesService);
+  private nameCheck$ = new Subject<string>();
 
   loading = signal(true);
   caches = signal<Cache[]>([]);
   showCreateDialog = signal(false);
   creating = signal(false);
+  nameCheckState = signal<'idle' | 'checking' | 'available' | 'taken'>('idle');
 
   newCache = {
     name: '',
@@ -61,6 +65,19 @@ export class CacheListComponent implements OnInit {
   ngOnInit(): void {
     this.loadCaches();
     this.loadPublicCaches();
+    this.nameCheck$.pipe(
+      debounceTime(400),
+      switchMap((name) => {
+        if (!name) { this.nameCheckState.set('idle'); return []; }
+        return this.cachesService.checkCacheNameAvailable(name);
+      }),
+    ).subscribe((available) => {
+      this.nameCheckState.set(available ? 'available' : 'taken');
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.nameCheck$.complete();
   }
 
   loadCaches(): void {
@@ -89,14 +106,14 @@ export class CacheListComponent implements OnInit {
   }
 
   openCreateDialog(): void {
-    this.newCache = {
-      name: '',
-      display_name: '',
-      description: '',
-      priority: 50,
-      public: false,
-    };
+    this.newCache = { name: '', display_name: '', description: '', priority: 50, public: false };
+    this.nameCheckState.set('idle');
     this.showCreateDialog.set(true);
+  }
+
+  onCacheNameChange(name: string): void {
+    this.nameCheckState.set(name ? 'checking' : 'idle');
+    this.nameCheck$.next(name);
   }
 
   createCache(): void {

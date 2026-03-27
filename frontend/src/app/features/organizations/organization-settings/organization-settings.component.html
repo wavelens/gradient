@@ -243,12 +243,14 @@
     }
     <div class="form-group">
       <label for="member-name">Username</label>
-      <input
-        pInputText
+      <p-autoComplete
         id="member-name"
         [(ngModel)]="newMember.user"
+        [suggestions]="userSuggestions()"
+        (completeMethod)="onUserSearch($event)"
         placeholder="Enter username"
-        class="w-full"
+        styleClass="w-full"
+        [forceSelection]="false"
         (keyup.enter)="addMember()"
       />
     </div>

@@ -104,6 +104,22 @@
       <div class="settings-card danger-card">
         <div class="danger-row">
           <div>
+            <h3>{{ c.active ? 'Deactivate Cache' : 'Activate Cache' }}</h3>
+            <p class="text-secondary">{{ c.active ? 'Stop serving this cache to Nix clients.' : 'Start serving this cache to Nix clients.' }}</p>
+          </div>
+          <button
+            pButton
+            [label]="c.active ? 'Deactivate' : 'Activate'"
+            [icon]="c.active ? 'pi pi-times' : 'pi pi-check'"
+            [severity]="c.active ? 'danger' : 'success'"
+            (click)="toggleActive()"
+            [loading]="toggling()"
+            [disabled]="toggling()"
+          ></button>
+        </div>
+        <p-divider />
+        <div class="danger-row">
+          <div>
             <h3>Delete Cache</h3>
             <p class="text-secondary">Permanently delete this cache and all its stored artifacts.</p>
           </div>

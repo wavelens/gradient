@@ -89,6 +89,20 @@
             <span class="metric-label">Duration</span>
             <span class="metric-value">{{ duration() }}</span>
           </div>
+          @if (eval.status === 'Building' && (buildingCount() > 0 || queuedCount() > 0)) {
+            <div class="info-metric">
+              <span class="metric-label">Queue</span>
+              @if (buildingCount() > 0) {
+                <span class="metric-value">{{ buildingCount() }} building</span>
+              }
+              @if (queuedCount() > 0) {
+                @if (buildingCount() > 0) {
+                  <span class="metric-sep">·</span>
+                }
+                <span class="metric-value queue-waiting">{{ queuedCount() }} waiting</span>
+              }
+            </div>
+          }
           <div class="info-metric">
             <span class="metric-label">Triggered</span>
             <span class="metric-value">{{ eval.created_at + 'Z' | date: 'MMM d, HH:mm' }}</span>
@@ -133,6 +147,12 @@
             <span class="evaluating-title">Evaluating</span>
             <span class="evaluating-sub">Discovering builds from the Nix flake&hellip;</span>
           </div>
+        } @else if (eval.status === 'Queued') {
+          <div class="queued-hint">
+            <span class="material-symbols-outlined queued-icon">hourglass_empty</span>
+            <span class="queued-title">Waiting in Queue</span>
+            <span class="queued-sub">The evaluation will start when a slot becomes available&hellip;</span>
+          </div>
         } @else if (!selectedBuildId()) {
           <div class="select-build-hint">
             <span class="material-symbols-outlined hint-icon">terminal</span>
@@ -140,6 +160,12 @@
           </div>
         } @else if (logLoading()) {
           <app-loading-spinner message="Loading log..." />
+        } @else if (selectedBuild()?.status === 'Queued') {
+          <div class="queued-hint">
+            <span class="material-symbols-outlined queued-icon">schedule</span>
+            <span class="queued-title">Build Queued</span>
+            <span class="queued-sub">This build is waiting to start. Logs will appear once it begins.</span>
+          </div>
         } @else {
           <div class="log-container-wrapper">
             <div class="log-build-header">

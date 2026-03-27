@@ -105,6 +105,39 @@
       <div class="settings-section danger-section">
         <h2>Danger Zone</h2>
         <div class="settings-card danger-card">
+            <div class="danger-row">
+            <div>
+              <h3>Transfer Ownership</h3>
+              <p class="text-secondary">Transfer this project to another organization member.</p>
+            </div>
+            <div class="transfer-controls">
+              <p-autoComplete
+                [(ngModel)]="transferUsername"
+                [suggestions]="transferUserSuggestions()"
+                (completeMethod)="onTransferUserSearch($event)"
+                placeholder="Username"
+                styleClass="transfer-input"
+                [forceSelection]="false"
+                [disabled]="transferring()"
+              />
+              <button
+                pButton
+                label="Transfer"
+                icon="pi pi-send"
+                severity="warn"
+                (click)="transferOwnership()"
+                [loading]="transferring()"
+                [disabled]="transferring() || !transferUsername.trim()"
+              ></button>
+            </div>
+          </div>
+          @if (transferError()) {
+            <div class="danger-feedback danger-feedback--error">{{ transferError() }}</div>
+          }
+          @if (transferSuccess()) {
+            <div class="danger-feedback danger-feedback--success">Ownership transferred successfully.</div>
+          }
+          <div class="danger-divider"></div>
           <div class="danger-row">
             <div>
               <h3>Delete Project</h3>

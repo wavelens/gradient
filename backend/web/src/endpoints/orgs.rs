@@ -6,8 +6,9 @@
 
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
+use std::collections::HashMap;
 use chrono::Utc;
 use core::consts::BASE_ROLE_ADMIN_ID;
 use core::database::{get_any_organization_by_name, get_cache_by_name, get_organization_by_name};
@@ -53,6 +54,22 @@ pub struct AddUserRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RemoveUserRequest {
     pub user: String,
+}
+
+pub async fn get_org_name_available(
+    state: State<Arc<ServerState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> WebResult<Json<BaseResponse<bool>>> {
+    let name = params.get("name").cloned().unwrap_or_default();
+    let exists = EOrganization::find()
+        .filter(COrganization::Name.eq(name.as_str()))
+        .one(&state.db)
+        .await?
+        .is_some();
+    Ok(Json(BaseResponse {
+        error: false,
+        message: !exists,
+    }))
 }
 
 pub async fn get(

@@ -6,7 +6,8 @@
 
 use crate::error::{WebError, WebResult};
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
+use std::collections::HashMap;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
 use axum::{Extension, Json};
@@ -158,6 +159,22 @@ async fn get_nar_by_hash(
         sig,
         ca: pathinfo.ca,
     })
+}
+
+pub async fn get_cache_name_available(
+    state: State<Arc<ServerState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> WebResult<Json<BaseResponse<bool>>> {
+    let name = params.get("name").cloned().unwrap_or_default();
+    let exists = ECache::find()
+        .filter(CCache::Name.eq(name.as_str()))
+        .one(&state.db)
+        .await?
+        .is_some();
+    Ok(Json(BaseResponse {
+        error: false,
+        message: !exists,
+    }))
 }
 
 pub async fn get(

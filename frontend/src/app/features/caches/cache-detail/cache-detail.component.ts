@@ -32,8 +32,8 @@ export class CacheDetailComponent implements OnInit {
 
   loading = signal(true);
   cache = signal<Cache | null>(null);
-  toggling = signal(false);
   publicKey = signal<string | null>(null);
+  keyLoading = signal(false);
   copied = signal<string | null>(null);
 
   cacheName = '';
@@ -51,9 +51,10 @@ export class CacheDetailComponent implements OnInit {
       next: (cache) => {
         this.cache.set(cache);
         this.loading.set(false);
+        this.keyLoading.set(true);
         this.cachesService.getCacheKey(this.cacheName).subscribe({
-          next: (key) => this.publicKey.set(key),
-          error: () => this.publicKey.set(null),
+          next: (key) => { this.publicKey.set(key); this.keyLoading.set(false); },
+          error: () => { this.publicKey.set(null); this.keyLoading.set(false); },
         });
       },
       error: (error) => {
@@ -70,24 +71,5 @@ export class CacheDetailComponent implements OnInit {
     });
   }
 
-  toggleActive(): void {
-    const currentCache = this.cache();
-    if (!currentCache) return;
 
-    this.toggling.set(true);
-    const action = currentCache.active
-      ? this.cachesService.deactivateCache(this.cacheName)
-      : this.cachesService.activateCache(this.cacheName);
-
-    action.subscribe({
-      next: () => {
-        this.toggling.set(false);
-        this.loadCache();
-      },
-      error: (error) => {
-        console.error('Failed to toggle cache status:', error);
-        this.toggling.set(false);
-      },
-    });
-  }
 }

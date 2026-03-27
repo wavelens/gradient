@@ -3,13 +3,15 @@
  - invalid auth attempts
 
  - Artifacts downloadable
- - Queueing Status (how long have I to wait till my derivation is build)
+ - missing redirect after login
+ - stayed logged in on multiple tabs
+ - graph node should enter when release mouse button is not dragging
+ - logging in without authorization
  - retry failed builds (retry)
  - Builds should appear increamentally on log page.
  - Add Non-SSH server as default
  - Save build log in Storage not Database
  - Wrong OIDC as log in journal error
- - At least one memeber in org or chache / add transfer ownership functionality
  - Base Servers (for all orgs)
  - Hover Effect on Dashboard for non clickable Elements
  - Add Footer: AGPL License and link to github and wavelens and version

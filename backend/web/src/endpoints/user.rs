@@ -6,15 +6,16 @@
 
 use crate::authorization::generate_api_key;
 use crate::error::{WebError, WebResult};
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::{Extension, Json};
 use chrono::Utc;
 use core::consts::*;
 use core::input::{validate_display_name, validate_username};
 use core::types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter, QuerySelect};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -43,6 +44,40 @@ pub struct GetUserSettingsResponse {
     pub username: String,
     pub name: String,
     pub email: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct UserSearchResult {
+    pub id: String,
+    pub username: String,
+    pub name: String,
+}
+
+pub async fn get_search(
+    state: State<Arc<ServerState>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> WebResult<Json<BaseResponse<Vec<UserSearchResult>>>> {
+    let q = params.get("q").cloned().unwrap_or_default();
+
+    let users = EUser::find()
+        .filter(CUser::Username.contains(q.as_str()))
+        .limit(10)
+        .all(&state.db)
+        .await?;
+
+    let results = users
+        .into_iter()
+        .map(|u| UserSearchResult {
+            id: u.id.to_string(),
+            username: u.username,
+            name: u.name,
+        })
+        .collect();
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: results,
+    }))
 }
 
 pub async fn get(

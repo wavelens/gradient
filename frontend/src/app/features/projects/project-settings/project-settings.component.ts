@@ -13,6 +13,8 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { ProjectsService } from '@core/services/projects.service';
+import { UserService } from '@core/services/user.service';
+import { AutoCompleteModule } from 'primeng/autocomplete';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { Project } from '@core/models';
 
@@ -27,6 +29,7 @@ import { Project } from '@core/models';
     ButtonModule,
     InputTextModule,
     TextareaModule,
+    AutoCompleteModule,
     LoadingSpinnerComponent,
   ],
   templateUrl: './project-settings.component.html',
@@ -36,15 +39,21 @@ export class ProjectSettingsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private projectsService = inject(ProjectsService);
+  private userService = inject(UserService);
 
   loading = signal(true);
   saving = signal(false);
   deleting = signal(false);
   toggling = signal(false);
+  transferring = signal(false);
 
   project = signal<Project | null>(null);
   showDeleteDialog = signal(false);
   errorMessage = signal<string | null>(null);
+  transferUsername = '';
+  transferError = signal<string | null>(null);
+  transferSuccess = signal(false);
+  transferUserSuggestions = signal<string[]>([]);
 
   orgName = '';
   projectName = '';
@@ -114,6 +123,36 @@ export class ProjectSettingsComponent implements OnInit {
       error: (error) => {
         console.error('Failed to toggle project status:', error);
         this.toggling.set(false);
+      },
+    });
+  }
+
+  onTransferUserSearch(event: { query: string }): void {
+    if (!event.query.trim()) {
+      this.transferUserSuggestions.set([]);
+      return;
+    }
+    this.userService.searchUsers(event.query).subscribe({
+      next: (users) => this.transferUserSuggestions.set(users.map((u) => u.username)),
+      error: () => this.transferUserSuggestions.set([]),
+    });
+  }
+
+  transferOwnership(): void {
+    if (!this.transferUsername.trim()) return;
+    this.transferring.set(true);
+    this.transferError.set(null);
+    this.transferSuccess.set(false);
+    this.projectsService.transferOwnership(this.orgName, this.projectName, this.transferUsername.trim()).subscribe({
+      next: () => {
+        this.transferring.set(false);
+        this.transferSuccess.set(true);
+        this.transferUsername = '';
+        this.loadProject();
+      },
+      error: (error) => {
+        this.transferError.set(error.message || 'Failed to transfer ownership.');
+        this.transferring.set(false);
       },
     });
   }

@@ -106,7 +106,6 @@ pub async fn handle(cmd: Commands) {
                 project.message.evaluation_wildcard
             );
             println!("Organization ID: {}", project.message.organization);
-            println!("Last Check At: {}", project.message.last_check_at);
             println!();
 
             if project.message.last_evaluation.is_none() {

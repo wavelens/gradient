@@ -82,6 +82,10 @@ export class OrganizationsService {
     return this.api.post<string>(`orgs/${org}/ssh`);
   }
 
+  checkOrgNameAvailable(name: string): Observable<boolean> {
+    return this.api.get<boolean>(`orgs/available?name=${encodeURIComponent(name)}`);
+  }
+
   getSubscribedCaches(org: string): Observable<{ id: string; name: string }[]> {
     return this.api.get<{ id: string; name: string }[]>(`orgs/${org}/subscribe`);
   }

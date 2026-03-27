@@ -13,6 +13,10 @@ import { Cache } from '@core/models';
 export class CachesService {
   private api = inject(ApiService);
 
+  checkCacheNameAvailable(name: string): Observable<boolean> {
+    return this.api.get<boolean>(`caches/available?name=${encodeURIComponent(name)}`);
+  }
+
   getCaches(): Observable<Cache[]> {
     return this.api.get<Cache[]>('caches');
   }

@@ -49,7 +49,7 @@ pub struct EvaluationResponse {
 /// `/nix/store/hash-name-version.drv` → `name-version`
 fn drv_display_name(path: &str) -> String {
     let filename = path.rsplit('/').next().unwrap_or(path);
-    let after_hash = filename.splitn(2, '-').nth(1).unwrap_or(filename);
+    let after_hash = filename.split_once('-').map(|x| x.1).unwrap_or(filename);
     after_hash
         .strip_suffix(".drv")
         .unwrap_or(after_hash)

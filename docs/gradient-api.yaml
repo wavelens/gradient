@@ -548,6 +548,50 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
+  /user/search:
+    get:
+      tags: [user]
+      summary: Search users by username
+      description: Returns up to 10 users whose username contains the given query string. Used for autocomplete in member and ownership dialogs.
+      operationId: searchUsers
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Username prefix/substring to search for
+      responses:
+        '200':
+          description: Matching users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                              format: uuid
+                            username:
+                              type: string
+                            name:
+                              type: string
+              example:
+                error: false
+                message:
+                  - id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                    username: alice
+                    name: Alice Example
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   # ── Organizations ─────────────────────────────────────────────────────────────
 
   /orgs:
@@ -600,6 +644,37 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '409':
           $ref: '#/components/responses/Conflict'
+
+  /orgs/available:
+    get:
+      tags: [orgs]
+      summary: Check organization name availability
+      description: Returns `true` if no organization with the given name exists, `false` if it is already taken.
+      operationId: checkOrgNameAvailable
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Organization name to check
+      responses:
+        '200':
+          description: Availability result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: boolean
+              example:
+                error: false
+                message: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /orgs/{organization}:
     parameters:
@@ -1708,6 +1783,41 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /projects/{organization}/available:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+    get:
+      tags: [projects]
+      summary: Check project name availability
+      description: Returns `true` if no project with the given name exists in the organization, `false` if it is already taken.
+      operationId: checkProjectNameAvailable
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Project name to check
+      responses:
+        '200':
+          description: Availability result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: boolean
+              example:
+                error: false
+                message: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Caches ───────────────────────────────────────────────────────────────────
 
   /caches:
@@ -1762,6 +1872,37 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '409':
           $ref: '#/components/responses/Conflict'
+
+  /caches/available:
+    get:
+      tags: [caches]
+      summary: Check cache name availability
+      description: Returns `true` if no cache with the given name exists, `false` if it is already taken.
+      operationId: checkCacheNameAvailable
+      parameters:
+        - name: name
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Cache name to check
+      responses:
+        '200':
+          description: Availability result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: boolean
+              example:
+                error: false
+                message: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
 
   /caches/{cache}:
     parameters:

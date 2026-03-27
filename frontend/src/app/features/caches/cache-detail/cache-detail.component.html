@@ -32,15 +32,6 @@
         </div>
       </div>
       <div class="header-actions">
-        <button
-          pButton
-          [label]="c.active ? 'Deactivate' : 'Activate'"
-          [icon]="c.active ? 'pi pi-times' : 'pi pi-check'"
-          [severity]="c.active ? 'danger' : 'success'"
-          (click)="toggleActive()"
-          [loading]="toggling()"
-          [disabled]="toggling()"
-        ></button>
         <a pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></a>
       </div>
     </div>
@@ -61,28 +52,39 @@
           </div>
         </div>
 
-        @if (publicKey()) {
-          <div class="usage-row">
-            <span class="usage-label">Trusted Public Key</span>
-            <div class="code-block">
+        <div class="usage-row">
+          <span class="usage-label">Trusted Public Key</span>
+          <div class="code-block">
+            @if (keyLoading()) {
+              <code class="text-secondary">Loading...</code>
+            } @else if (publicKey()) {
               <code>{{ publicKey() }}</code>
               <button class="copy-btn" (click)="copy(publicKey()!, 'key')" [title]="copied() === 'key' ? 'Copied!' : 'Copy'">
                 <span class="material-symbols-outlined">{{ copied() === 'key' ? 'check' : 'content_copy' }}</span>
               </button>
-            </div>
+            } @else {
+              <code class="text-secondary">Not available</code>
+            }
           </div>
+        </div>
 
-          <div class="usage-row">
-            <span class="usage-label">nix.conf snippet</span>
-            <div class="code-block multiline">
+        <div class="usage-row">
+          <span class="usage-label">nix.conf snippet</span>
+          <div class="code-block multiline">
+            @if (keyLoading()) {
+              <pre class="text-secondary">Loading...</pre>
+            } @else if (publicKey()) {
               <pre>substituters = {{ cacheUrl }}
 trusted-public-keys = {{ publicKey() }}</pre>
               <button class="copy-btn" (click)="copy('substituters = ' + cacheUrl + '\ntrusted-public-keys = ' + publicKey()!, 'conf')" [title]="copied() === 'conf' ? 'Copied!' : 'Copy'">
                 <span class="material-symbols-outlined">{{ copied() === 'conf' ? 'check' : 'content_copy' }}</span>
               </button>
-            </div>
+            } @else {
+              <pre class="text-secondary">substituters = {{ cacheUrl }}
+trusted-public-keys = &lt;unavailable&gt;</pre>
+            }
           </div>
-        }
+        </div>
       </div>
     </div>
 

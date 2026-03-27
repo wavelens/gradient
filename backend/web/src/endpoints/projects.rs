@@ -5,7 +5,8 @@
  */
 
 use crate::error::{WebError, WebResult};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
+use std::collections::HashMap;
 use axum::{Extension, Json};
 use chrono::Utc;
 use core::consts::*;
@@ -83,6 +84,11 @@ pub struct PatchProjectRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct TransferOwnershipRequest {
+    pub user: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct EntryPointSummary {
     pub id: Uuid,
     pub build_id: Uuid,
@@ -115,6 +121,27 @@ pub struct ProjectDetailsResponse {
     pub active: bool,
     pub created_at: chrono::NaiveDateTime,
     pub last_evaluations: Vec<EvaluationSummary>,
+}
+
+pub async fn get_project_name_available(
+    state: State<Arc<ServerState>>,
+    Path(organization): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> WebResult<Json<BaseResponse<bool>>> {
+    let name = params.get("name").cloned().unwrap_or_default();
+    let org = get_organization_by_name(state.0.clone(), organization)
+        .await?
+        .ok_or_else(|| WebError::not_found("Organization"))?;
+    let exists = EProject::find()
+        .filter(CProject::Name.eq(name.as_str()))
+        .filter(CProject::Organization.eq(org.id))
+        .one(&state.db)
+        .await?
+        .is_some();
+    Ok(Json(BaseResponse {
+        error: false,
+        message: !exists,
+    }))
 }
 
 pub async fn get(
@@ -510,6 +537,71 @@ pub async fn post_project_evaluate(
     let res = BaseResponse {
         error: false,
         message: "Evaluation started".to_string(),
+    };
+
+    Ok(Json(res))
+}
+
+pub async fn post_project_transfer(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, project)): Path<(String, String)>,
+    Json(body): Json<TransferOwnershipRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (organization, project): (MOrganization, MProject) = get_project_by_name(
+        state.0.clone(),
+        user.id,
+        organization.clone(),
+        project.clone(),
+    )
+    .await?
+    .ok_or_else(|| WebError::not_found("Project"))?;
+
+    // Only admins of the org or the current owner may transfer ownership
+    let is_admin = user_can_edit(&state, user.id, organization.id).await?;
+    let is_owner = project.created_by == user.id;
+    if !is_admin && !is_owner {
+        return Err(WebError::Forbidden(
+            "Only the project owner or an organization admin can transfer ownership.".to_string(),
+        ));
+    }
+
+    if project.managed {
+        return Err(WebError::Forbidden(
+            "Cannot transfer ownership of a state-managed project.".to_string(),
+        ));
+    }
+
+    let new_owner = EUser::find()
+        .filter(CUser::Username.eq(body.user.clone()))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("User"))?;
+
+    // New owner must be a member of the organization
+    let is_member = EOrganizationUser::find()
+        .filter(
+            Condition::all()
+                .add(COrganizationUser::Organization.eq(organization.id))
+                .add(COrganizationUser::User.eq(new_owner.id)),
+        )
+        .one(&state.db)
+        .await?
+        .is_some();
+
+    if !is_member {
+        return Err(WebError::BadRequest(
+            "The new owner must be a member of the organization.".to_string(),
+        ));
+    }
+
+    let mut aproject: AProject = project.into();
+    aproject.created_by = Set(new_owner.id);
+    aproject.update(&state.db).await?;
+
+    let res = BaseResponse {
+        error: false,
+        message: "Ownership transferred".to_string(),
     };
 
     Ok(Json(res))

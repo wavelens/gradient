@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { DialogModule } from 'primeng/dialog';
+import { DividerModule } from 'primeng/divider';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
@@ -24,6 +25,7 @@ import { Cache } from '@core/models';
     RouterModule,
     FormsModule,
     DialogModule,
+    DividerModule,
     ButtonModule,
     InputTextModule,
     TextareaModule,
@@ -39,6 +41,7 @@ export class CacheSettingsComponent implements OnInit {
 
   loading = signal(true);
   saving = signal(false);
+  toggling = signal(false);
   deleting = signal(false);
 
   cache = signal<Cache | null>(null);
@@ -112,6 +115,27 @@ export class CacheSettingsComponent implements OnInit {
       error: (error) => {
         console.error('Failed to save settings:', error);
         this.saving.set(false);
+      },
+    });
+  }
+
+  toggleActive(): void {
+    const currentCache = this.cache();
+    if (!currentCache) return;
+
+    this.toggling.set(true);
+    const action = currentCache.active
+      ? this.cachesService.deactivateCache(this.cacheName)
+      : this.cachesService.activateCache(this.cacheName);
+
+    action.subscribe({
+      next: () => {
+        this.toggling.set(false);
+        this.loadCache();
+      },
+      error: (error) => {
+        console.error('Failed to toggle cache status:', error);
+        this.toggling.set(false);
       },
     });
   }

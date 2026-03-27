@@ -36,4 +36,8 @@ export class UserService {
   deleteApiKey(name: string): Observable<string> {
     return this.api.delete<string>('user/keys', { name });
   }
+
+  searchUsers(query: string): Observable<{ id: string; username: string; name: string }[]> {
+    return this.api.get<{ id: string; username: string; name: string }[]>(`user/search?q=${encodeURIComponent(query)}`);
+  }
 }

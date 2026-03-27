@@ -838,9 +838,9 @@ pub async fn get_recent_direct_builds(
 // ── Dependency graph helpers ──────────────────────────────────────────────────
 
 fn extract_drv_name(path: &str) -> String {
-    let filename = path.split('/').last().unwrap_or(path);
+    let filename = path.split('/').next_back().unwrap_or(path);
     // Strip the nix store hash prefix (e.g. "abc123xyz-name.drv" → "name")
-    let without_hash = filename.splitn(2, '-').nth(1).unwrap_or(filename);
+    let without_hash = filename.split_once('-').map(|x| x.1).unwrap_or(filename);
     without_hash.trim_end_matches(".drv").to_string()
 }
 

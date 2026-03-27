@@ -11,7 +11,9 @@ import { FormsModule } from '@angular/forms';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
+import { AutoCompleteModule } from 'primeng/autocomplete';
 import { OrganizationsService } from '@core/services/organizations.service';
+import { CachesService } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 
 @Component({
@@ -24,6 +26,7 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
     DialogModule,
     ButtonModule,
     InputTextModule,
+    AutoCompleteModule,
     LoadingSpinnerComponent,
   ],
   templateUrl: './cache-subscriptions.component.html',
@@ -32,6 +35,7 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
 export class CacheSubscriptionsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private orgsService = inject(OrganizationsService);
+  private cachesService = inject(CachesService);
 
   loading = signal(true);
   subscribing = signal(false);
@@ -42,6 +46,8 @@ export class CacheSubscriptionsComponent implements OnInit {
   orgName = '';
   caches = signal<{ id: string; name: string }[]>([]);
   newCacheName = '';
+  cacheSuggestions = signal<string[]>([]);
+  private availableCacheNames: string[] = [];
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
@@ -62,7 +68,39 @@ export class CacheSubscriptionsComponent implements OnInit {
   openSubscribeDialog(): void {
     this.newCacheName = '';
     this.errorMessage.set(null);
+    this.cacheSuggestions.set([]);
     this.showSubscribeDialog.set(true);
+    this.loadAvailableCaches();
+  }
+
+  private loadAvailableCaches(): void {
+    const subscribedNames = new Set(this.caches().map((c) => c.name));
+    this.cachesService.getCaches().subscribe({
+      next: (own) => {
+        this.cachesService.getPublicCaches().subscribe({
+          next: (pub) => {
+            const all = [...own, ...pub];
+            const seen = new Set<string>();
+            this.availableCacheNames = all
+              .filter((c) => !subscribedNames.has(c.name) && !seen.has(c.name) && seen.add(c.name))
+              .map((c) => c.name);
+          },
+          error: () => {
+            this.availableCacheNames = own
+              .filter((c) => !subscribedNames.has(c.name))
+              .map((c) => c.name);
+          },
+        });
+      },
+      error: () => {},
+    });
+  }
+
+  onCacheSearch(event: { query: string }): void {
+    const q = event.query.toLowerCase();
+    this.cacheSuggestions.set(
+      this.availableCacheNames.filter((name) => name.toLowerCase().includes(q))
+    );
   }
 
   subscribeCache(): void {

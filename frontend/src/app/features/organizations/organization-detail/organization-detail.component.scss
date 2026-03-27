@@ -173,6 +173,28 @@
   }
 }
 
-.w-full {
-  width: 100%;
+.w-full { width: 100%; }
+
+.text-danger { color: $color-danger; }
+
+.name-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+
+  input { flex: 1; padding-right: 2rem; }
+}
+
+.name-check-icon {
+  position: absolute;
+  right: $spacing-sm;
+  display: flex;
+  align-items: center;
+  color: $text-secondary;
+
+  .material-symbols-outlined { font-size: 18px; }
+  i { font-size: 14px; }
+
+  &.available { color: $color-success; }
+  &.taken { color: $color-danger; }
 }

@@ -13,6 +13,10 @@ import { Project, ProjectDetail, EntryPointSummary } from '@core/models';
 export class ProjectsService {
   private api = inject(ApiService);
 
+  checkProjectNameAvailable(organization: string, name: string): Observable<boolean> {
+    return this.api.get<boolean>(`projects/${organization}/available?name=${encodeURIComponent(name)}`);
+  }
+
   getProjects(organization: string): Observable<Project[]> {
     return this.api.get<Project[]>(`projects/${organization}`);
   }
@@ -60,6 +64,10 @@ export class ProjectsService {
 
   abortEvaluation(organization: string, project: string, evaluationId: string): Observable<string> {
     return this.api.post<string>(`evals/${evaluationId}`, { method: 'abort' });
+  }
+
+  transferOwnership(organization: string, project: string, username: string): Observable<string> {
+    return this.api.post<string>(`projects/${organization}/${project}/transfer`, { user: username });
   }
 
   activateProject(organization: string, project: string): Observable<string> {

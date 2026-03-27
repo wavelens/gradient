@@ -13,6 +13,7 @@ use core::sources::prefetch_flake;
 use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
+use entity::server::Architecture;
 use nix_daemon::nix::DaemonStore;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
@@ -24,6 +25,7 @@ use std::process::Output;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::Uuid;
 
@@ -227,6 +229,9 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         .map(|d| (d, None, Uuid::new_v4()))
         .collect::<Vec<(String, Option<Uuid>, Uuid)>>();
 
+    let mut pending: Vec<(String, Uuid)> = Vec::new();
+    let mut pending_paths: HashSet<String> = HashSet::new();
+
     while let Some((dependency, dependency_id, build_id)) = dependencies.pop() {
         debug!(
             derivation = %dependency,
@@ -261,19 +266,16 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         references.retain(|d| {
             let d_path = d.0.clone();
 
-            let in_builds = all_builds.iter().any(|b| b.derivation_path == d_path);
+            let in_builds = all_builds.iter().any(|b| b.derivation_path == d_path)
+                || pending_paths.contains(&d_path);
             let in_exists = already_exists.iter().find(|b| b.derivation_path == d_path);
             let in_dependencies = dependencies.iter().any(|(path, _, _)| *path == d_path);
 
             if in_builds || in_dependencies {
-                let d_id = if in_builds {
-                    match all_builds.iter().find(|b| b.derivation_path == d_path) {
-                        Some(build) => build.id,
-                        None => {
-                            error!("Build not found for path: {}", d_path);
-                            return false;
-                        }
-                    }
+                let d_id = if let Some(b) = all_builds.iter().find(|b| b.derivation_path == d_path) {
+                    b.id
+                } else if let Some((_, id)) = pending.iter().find(|(p, _)| *p == d_path) {
+                    *id
                 } else {
                     match dependencies.iter().find(|(path, _, _)| *path == d_path) {
                         Some((_, _, id)) => *id,
@@ -363,54 +365,8 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 "Skipping package - already in store"
             );
         } else {
-            let (system, features) =
-                get_features_cmd(state.cli.binpath_nix.as_str(), dependency.as_str())
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "Failed to get build features for derivation: {}",
-                            dependency
-                        )
-                    })?;
-
-            // TODO: add better derivation check
-            let build = if dependency.ends_with(".drv") {
-                MBuild {
-                    id: build_id,
-                    evaluation: evaluation.id,
-                    derivation_path: dependency.clone(),
-                    architecture: system,
-                    status: BuildStatus::Created,
-                    server: None,
-                    log: None,
-                    created_at: Utc::now().naive_utc(),
-                    updated_at: Utc::now().naive_utc(),
-                }
-            } else {
-                MBuild {
-                    id: build_id,
-                    evaluation: evaluation.id,
-                    derivation_path: dependency.clone(),
-                    architecture: system,
-                    status: BuildStatus::Completed,
-                    server: None,
-                    log: None,
-                    created_at: Utc::now().naive_utc(),
-                    updated_at: Utc::now().naive_utc(),
-                }
-            };
-
-            if let Err(e) = add_features(Arc::clone(&state), features, Some(build_id), None).await {
-                error!(error = %e, "Failed to add features for build");
-            }
-
-            debug!(
-                build_id = %build.id,
-                derivation_path = %build.derivation_path,
-                "Creating build"
-            );
-
-            all_builds.push(build);
+            pending.push((dependency.clone(), build_id));
+            pending_paths.insert(dependency.clone());
             dependencies.extend(references);
         };
 
@@ -426,6 +382,70 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             all_dependencies.push(dep);
         }
     }
+
+    type FeaturesResult = Result<(Uuid, String, Architecture, Vec<String>)>;
+    let handles: Vec<JoinHandle<FeaturesResult>> = pending
+        .iter()
+        .map(|(path, build_id)| {
+            let binpath = state.cli.binpath_nix.clone();
+            let p = path.clone();
+            let id = *build_id;
+            tokio::task::spawn(async move {
+                let (arch, features) = get_features_cmd(binpath.as_str(), p.as_str())
+                    .await
+                    .with_context(|| {
+                        format!("Failed to get build features for derivation: {}", p)
+                    })?;
+                Ok((id, p, arch, features))
+            })
+        })
+        .collect();
+
+    for handle in handles {
+        let (build_id, path, system, features) = handle
+            .await
+            .context("get_features_cmd task panicked")??;
+
+        if let Err(e) = add_features(Arc::clone(&state), features, Some(build_id), None).await {
+            error!(error = %e, "Failed to add features for build");
+        }
+
+        // TODO: add better derivation check
+        let build = if path.ends_with(".drv") {
+            MBuild {
+                id: build_id,
+                evaluation: evaluation.id,
+                derivation_path: path,
+                architecture: system,
+                status: BuildStatus::Created,
+                server: None,
+                log: None,
+                created_at: Utc::now().naive_utc(),
+                updated_at: Utc::now().naive_utc(),
+            }
+        } else {
+            MBuild {
+                id: build_id,
+                evaluation: evaluation.id,
+                derivation_path: path,
+                architecture: system,
+                status: BuildStatus::Completed,
+                server: None,
+                log: None,
+                created_at: Utc::now().naive_utc(),
+                updated_at: Utc::now().naive_utc(),
+            }
+        };
+
+        debug!(
+            build_id = %build.id,
+            derivation_path = %build.derivation_path,
+            "Creating build"
+        );
+
+        all_builds.push(build);
+    }
+
     Ok(())
 }
 
@@ -518,10 +538,10 @@ pub async fn get_derivation_cmd(
 pub async fn get_features_cmd(
     binpath_nix: &str,
     path: &str,
-) -> anyhow::Result<(entity::server::Architecture, Vec<String>)> {
+) -> anyhow::Result<(Architecture, Vec<String>)> {
     // TODO: better check for derivation
     if !path.ends_with(".drv") {
-        return Ok((entity::server::Architecture::BUILTIN, vec![]));
+        return Ok((Architecture::BUILTIN, vec![]));
     }
 
     let output = Command::new(binpath_nix)
@@ -594,7 +614,7 @@ pub async fn get_features_cmd(
         vec![]
     };
 
-    let system: entity::server::Architecture = parsed_json
+    let system: Architecture = parsed_json
         .get("system")
         .ok_or_else(|| anyhow::anyhow!("Expected JSON object with system"))?
         .as_str()

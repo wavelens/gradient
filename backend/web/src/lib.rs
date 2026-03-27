@@ -70,6 +70,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
 
     let api = Router::new()
         .route("/orgs", get(orgs::get).put(orgs::put))
+        .route("/orgs/available", get(orgs::get_org_name_available))
         .route("/orgs/public", get(orgs::get_public_organizations))
         .route(
             "/orgs/{organization}",
@@ -106,6 +107,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             get(projects::get).put(projects::put),
         )
         .route(
+            "/projects/{organization}/available",
+            get(projects::get_project_name_available),
+        )
+        .route(
             "/projects/{organization}/{project}",
             get(projects::get_project)
                 .patch(projects::patch_project)
@@ -118,6 +123,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route(
             "/projects/{organization}/{project}/entry-points",
             get(projects::get_project_entry_points),
+        )
+        .route(
+            "/projects/{organization}/{project}/transfer",
+            post(projects::post_project_transfer),
         )
         .route(
             "/projects/{organization}/{project}/check-repository",
@@ -140,6 +149,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             get(evals::get_evaluation_builds).post(evals::post_evaluation_builds),
         )
         .route("/caches", get(caches::get).put(caches::put))
+        .route("/caches/available", get(caches::get_cache_name_available))
         .route("/caches/public", get(caches::get_public_caches))
         .route(
             "/caches/{cache}",
@@ -180,6 +190,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             get(builds::get_recent_direct_builds),
         )
         .route("/user", get(user::get).delete(user::delete))
+        .route("/user/search", get(user::get_search))
         .route(
             "/user/keys",
             get(user::get_keys)

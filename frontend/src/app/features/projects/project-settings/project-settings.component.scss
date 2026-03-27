@@ -94,3 +94,25 @@
   h3 { margin: 0 0 $spacing-xs 0; }
   p { margin: 0; }
 }
+
+.transfer-controls {
+  display: flex;
+  gap: $spacing-sm;
+  align-items: center;
+  flex-shrink: 0;
+
+  .transfer-input { width: 180px; }
+}
+
+.danger-divider {
+  border-top: 1px solid rgba($color-danger, 0.2);
+  margin: $spacing-lg 0;
+}
+
+.danger-feedback {
+  margin-top: $spacing-sm;
+  font-size: $font-size-sm;
+
+  &--error { color: $color-danger; }
+  &--success { color: $color-success; }
+}

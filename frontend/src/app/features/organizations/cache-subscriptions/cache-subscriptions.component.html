@@ -73,12 +73,14 @@
   }
   <div class="form-group">
     <label for="cache-name">Cache Name</label>
-    <input
-      pInputText
+    <p-autoComplete
       id="cache-name"
       [(ngModel)]="newCacheName"
+      [suggestions]="cacheSuggestions()"
+      (completeMethod)="onCacheSearch($event)"
       placeholder="e.g. my-cache"
-      class="w-full"
+      styleClass="w-full"
+      [forceSelection]="false"
       (keyup.enter)="subscribeCache()"
     />
     <small class="text-secondary">The name of the binary cache you own.</small>
