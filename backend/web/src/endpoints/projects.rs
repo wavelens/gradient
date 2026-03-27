@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use axum::{Extension, Json};
 use chrono::Utc;
 use core::consts::*;
-use core::database::{get_organization_by_name, get_project_by_name};
+use core::database::{get_any_organization_by_name, get_organization_by_name, get_project_by_name};
 use core::input::{check_index_name, valid_evaluation_wildcard, validate_display_name, vec_to_hex};
 use core::sources::check_project_updates;
 use core::types::*;
@@ -129,7 +129,7 @@ pub async fn get_project_name_available(
     Query(params): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
-    let org = get_organization_by_name(state.0.clone(), organization)
+    let org = get_any_organization_by_name(state.0.clone(), organization)
         .await?
         .ok_or_else(|| WebError::not_found("Organization"))?;
     let exists = EProject::find()
