@@ -4,17 +4,17 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="page">
-  <div class="page-header">
-    <div class="breadcrumb">
-      <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgName }}</a>
-      <span class="breadcrumb-sep">/</span>
-      <span class="breadcrumb-cur">Artefacts</span>
-      <span class="breadcrumb-sep">/</span>
-      <code class="breadcrumb-id">{{ buildShortId() }}</code>
-    </div>
-    <h1>Build Artefacts</h1>
+<div class="page-header">
+  <button class="icon-btn" (click)="goBack()" title="Back">
+    <span class="material-symbols-outlined">arrow_back</span>
+  </button>
+  <div class="header-info">
+    <span class="header-title">Build Artefacts</span>
+    <span class="header-id">{{ buildShortId() }}</span>
   </div>
+</div>
+
+<div class="page">
 
   @if (loading()) {
     <app-loading-spinner message="Loading artefacts..." />

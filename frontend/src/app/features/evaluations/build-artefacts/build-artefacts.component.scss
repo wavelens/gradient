@@ -6,44 +6,61 @@
 
 @use '../../../styles/variables' as *;
 
+// ── Page header (matches graph page style) ───────────────────────────────────
+
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  padding: $spacing-sm $spacing-lg;
+  background: $color-tertiary;
+  border-bottom: 1px solid $color-border;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  color: $text-secondary;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: $border-radius-sm;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: color $transition-fast, background $transition-fast;
+
+  .material-symbols-outlined { font-size: 1.25rem; }
+
+  &:hover {
+    color: $text-primary;
+    background: $color-hover;
+  }
+}
+
+.header-info {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
+.header-title {
+  font-size: $font-size-md;
+  font-weight: 600;
+  color: $text-primary;
+}
+
+.header-id {
+  font-size: $font-size-xs;
+  font-family: monospace;
+  color: $text-light;
+}
+
+// ── Content ───────────────────────────────────────────────────────────────────
+
 .page {
   max-width: 780px;
   margin: 0 auto;
   padding: $spacing-xl $spacing-lg;
-}
-
-.page-header {
-  margin-bottom: $spacing-xl;
-}
-
-.breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: $spacing-xs;
-  font-size: $font-size-xs;
-  color: $text-light;
-  margin-bottom: $spacing-sm;
-
-  .breadcrumb-link {
-    color: $text-secondary;
-    text-decoration: none;
-    &:hover { color: $text-primary; }
-  }
-
-  .breadcrumb-sep { color: $text-light; }
-  .breadcrumb-cur { color: $text-secondary; }
-  .breadcrumb-id {
-    font-family: monospace;
-    color: $text-secondary;
-    font-size: $font-size-xs;
-  }
-}
-
-h1 {
-  font-size: $font-size-xl;
-  font-weight: 600;
-  color: $text-primary;
-  margin: 0;
 }
 
 // ── Empty state ───────────────────────────────────────────────────────────────

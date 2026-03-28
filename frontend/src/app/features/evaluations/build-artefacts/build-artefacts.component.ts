@@ -6,7 +6,7 @@
 
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { EvaluationsService, BuildProduct } from '@core/services/evaluations.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { environment } from '@environments/environment';
@@ -20,6 +20,7 @@ import { environment } from '@environments/environment';
 })
 export class BuildArtefactsComponent implements OnInit {
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
   private evalService = inject(EvaluationsService);
 
   loading = signal(true);
@@ -28,10 +29,14 @@ export class BuildArtefactsComponent implements OnInit {
 
   orgName = '';
   buildId = '';
+  private projectName = '';
+  private evalId = '';
 
   ngOnInit(): void {
-    this.orgName = this.route.snapshot.paramMap.get('org') || '';
-    this.buildId = this.route.snapshot.paramMap.get('buildId') || '';
+    this.orgName     = this.route.snapshot.paramMap.get('org') || '';
+    this.buildId     = this.route.snapshot.paramMap.get('buildId') || '';
+    this.projectName = this.route.snapshot.queryParamMap.get('project') || '';
+    this.evalId      = this.route.snapshot.queryParamMap.get('evalId') || '';
     this.loadArtefacts();
   }
 
@@ -66,6 +71,12 @@ export class BuildArtefactsComponent implements OnInit {
     } finally {
       this.downloading.set(null);
     }
+  }
+
+  goBack(): void {
+    if (this.projectName) this.router.navigate(['/organization', this.orgName, 'project', this.projectName]);
+    else if (this.evalId) this.router.navigate(['/organization', this.orgName, 'log', this.evalId]);
+    else this.router.navigate(['/organization', this.orgName]);
   }
 
   buildShortId(): string {

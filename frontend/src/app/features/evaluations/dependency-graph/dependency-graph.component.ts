@@ -606,8 +606,10 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   }
 
   goBack(): void {
-    const evalId = this.route.snapshot.queryParamMap.get('evalId');
-    if (evalId) this.router.navigate(['/organization', this.orgName, 'log', evalId]);
+    const project = this.route.snapshot.queryParamMap.get('project');
+    const evalId  = this.route.snapshot.queryParamMap.get('evalId');
+    if (project) this.router.navigate(['/organization', this.orgName, 'project', project]);
+    else if (evalId) this.router.navigate(['/organization', this.orgName, 'log', evalId]);
     else this.router.navigate(['/organization', this.orgName]);
   }
 }

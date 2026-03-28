@@ -62,8 +62,10 @@
               <span class="build-dot status-{{ build.status.toLowerCase() }}"></span>
               <span class="build-name">{{ buildDisplayName(build.name) }}</span>
               <a
-                class="graph-link"
-                [routerLink]="['/organization', orgName, 'artefacts', build.id]"
+                class="build-dl-link"
+                [class.disabled]="build.status !== 'Completed'"
+                [routerLink]="build.status === 'Completed' ? ['/organization', orgName, 'artefacts', build.id] : null"
+                [queryParams]="{ evalId: evaluationId }"
                 (click)="$event.stopPropagation()"
                 title="View build artefacts"
               >

@@ -77,8 +77,17 @@
                     {{ ep.build_status }}
                   </span>
                   <a
+                    [class.graph-icon-link]="true"
+                    [class.disabled]="ep.build_status !== 'Completed'"
+                    [routerLink]="ep.build_status === 'Completed' ? ['/organization', orgName, 'artefacts', ep.build_id] : null"
+                    [queryParams]="{ project: projectName }"
+                    title="View build artefacts"
+                  >
+                    <span class="material-symbols-outlined">download</span>
+                  </a>
+                  <a
                     [routerLink]="['/organization', orgName, 'graph', ep.build_id]"
-                    [queryParams]="{ evalId: ep.evaluation_id }"
+                    [queryParams]="{ evalId: ep.evaluation_id, project: projectName }"
                     class="graph-icon-link"
                     title="View dependency graph"
                   >
