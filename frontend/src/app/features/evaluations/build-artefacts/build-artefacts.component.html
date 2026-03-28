@@ -1,0 +1,50 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="page">
+  <div class="page-header">
+    <div class="breadcrumb">
+      <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgName }}</a>
+      <span class="breadcrumb-sep">/</span>
+      <span class="breadcrumb-cur">Artefacts</span>
+      <span class="breadcrumb-sep">/</span>
+      <code class="breadcrumb-id">{{ buildShortId() }}</code>
+    </div>
+    <h1>Build Artefacts</h1>
+  </div>
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading artefacts..." />
+  } @else if (artefacts().length === 0) {
+    <div class="empty-state">
+      <span class="material-symbols-outlined">inventory_2</span>
+      <p>No artefacts available for this build.</p>
+      <span class="empty-hint">Artefacts are produced via <code>hydra-build-products</code> in the build output.</span>
+    </div>
+  } @else {
+    <div class="artefacts-list">
+      @for (artefact of artefacts(); track artefact.name) {
+        <div class="artefact-row">
+          <span class="file-type-badge">{{ fileTypeLabel(artefact.file_type) }}</span>
+          <span class="artefact-name">{{ artefact.name }}</span>
+          <button
+            class="download-btn"
+            (click)="download(artefact)"
+            [disabled]="downloading() !== null"
+            [title]="'Download ' + artefact.name"
+          >
+            @if (downloading() === artefact.name) {
+              <span class="material-symbols-outlined spin">progress_activity</span>
+            } @else {
+              <span class="material-symbols-outlined">download</span>
+            }
+            <span>Download</span>
+          </button>
+        </div>
+      }
+    </div>
+  }
+</div>

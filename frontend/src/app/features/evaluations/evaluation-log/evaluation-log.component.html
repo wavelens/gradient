@@ -63,6 +63,14 @@
               <span class="build-name">{{ buildDisplayName(build.name) }}</span>
               <a
                 class="graph-link"
+                [routerLink]="['/organization', orgName, 'artefacts', build.id]"
+                (click)="$event.stopPropagation()"
+                title="View build artefacts"
+              >
+                <span class="material-symbols-outlined">download</span>
+              </a>
+              <a
+                class="graph-link"
                 [routerLink]="['/organization', orgName, 'graph', build.id]"
                 [queryParams]="{ evalId: evaluationId }"
                 (click)="$event.stopPropagation()"

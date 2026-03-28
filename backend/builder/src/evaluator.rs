@@ -337,27 +337,49 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
                 all_dependencies.push(dep);
             } else {
-                // Not in nix store — needs to be rebuilt.
-                // Dependencies (build_dependency records) are unchanged since the derivation
-                // inputs are the same. Re-add to the BFS queue so any non-completed
-                // sub-dependencies are also reset to Queued recursively.
-                let mut abuild: ABuild = b.clone().into();
-                abuild.status = Set(BuildStatus::Queued);
-                abuild.log = Set(None);
-                abuild.evaluation = Set(evaluation.id);
+                // Not in nix store — clone the failed/aborted build as a fresh record so
+                // its history is preserved. Sub-dependencies are re-traversed under the
+                // new ID via the BFS queue.
+                let new_build_id = Uuid::new_v4();
+                let now = Utc::now().naive_utc();
+                let abuild = ABuild {
+                    id: Set(new_build_id),
+                    evaluation: Set(evaluation.id),
+                    derivation_path: Set(b.derivation_path.clone()),
+                    architecture: Set(b.architecture.clone()),
+                    status: Set(BuildStatus::Queued),
+                    server: Set(None),
+                    log: Set(None),
+                    created_at: Set(now),
+                    updated_at: Set(now),
+                };
                 abuild
-                    .save(&state.db)
+                    .insert(&state.db)
                     .await
-                    .context("Failed to reset build to queued")?;
+                    .context("Failed to insert cloned build")?;
 
-                reused_build_ids.insert(b.id);
+                // Copy build features from the original build to the new one.
+                let old_features = EBuildFeature::find()
+                    .filter(CBuildFeature::Build.eq(b.id))
+                    .all(&state.db)
+                    .await
+                    .context("Failed to query build features for cloning")?;
+                for feat in old_features {
+                    let af = ABuildFeature {
+                        id: Set(Uuid::new_v4()),
+                        build: Set(new_build_id),
+                        feature: Set(feat.feature),
+                    };
+                    af.insert(&state.db)
+                        .await
+                        .context("Failed to copy build feature")?;
+                }
 
-                // Re-add to BFS with the existing build ID so sub-dependencies are
-                // traversed. The parent dep {build_id → b.id} will be emitted via the
-                // dependency_id mechanism at the end of the BFS iteration for b.drv.
-                references.push((b.derivation_path.clone(), Some(build_id), b.id));
+                reused_build_ids.insert(new_build_id);
 
-                trace!(build = %build_id, dependency = %b.id, "Re-queuing non-completed build for dependency traversal");
+                references.push((b.derivation_path.clone(), Some(build_id), new_build_id));
+
+                trace!(old_build = %b.id, new_build = %new_build_id, "Cloned failed/aborted build as new record for re-evaluation");
             }
         }
 

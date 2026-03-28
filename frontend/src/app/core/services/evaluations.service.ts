@@ -35,6 +35,12 @@ export interface BuildItem {
   status: string; // BuildStatus as string
 }
 
+export interface BuildProduct {
+  file_type: string;
+  name: string;
+  path: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class EvaluationsService {
   private api = inject(ApiService);
@@ -61,5 +67,9 @@ export class EvaluationsService {
 
   getBuildGraph(buildId: string): Observable<BuildGraph> {
     return this.api.get<BuildGraph>(`builds/${buildId}/graph`);
+  }
+
+  getBuildDownloads(buildId: string): Observable<BuildProduct[]> {
+    return this.api.get<BuildProduct[]>(`builds/${buildId}/downloads`);
   }
 }

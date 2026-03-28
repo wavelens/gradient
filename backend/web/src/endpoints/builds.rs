@@ -755,6 +755,200 @@ pub async fn get_build_download(
     Err(WebError::not_found("File"))
 }
 
+/// Public (no auth) equivalent of `get_build_downloads` — only works when the
+/// organization that owns the build is marked `public = true`.
+pub async fn get_build_downloads_public(
+    state: State<Arc<ServerState>>,
+    Path(build_id): Path<Uuid>,
+) -> WebResult<Json<BaseResponse<Vec<BuildProduct>>>> {
+    let build = EBuild::find_by_id(build_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Build"))?;
+
+    let evaluation = EEvaluation::find_by_id(build.evaluation)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::InternalServerError("Build data inconsistency".to_string()))?;
+
+    let organization_id = if let Some(project_id) = evaluation.project {
+        let project = EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                WebError::InternalServerError("Evaluation data inconsistency".to_string())
+            })?;
+        project.organization
+    } else {
+        EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                WebError::InternalServerError("Direct build data inconsistency".to_string())
+            })?
+            .organization
+    };
+
+    let organization = EOrganization::find_by_id(organization_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::InternalServerError("Organization data inconsistency".to_string()))?;
+
+    if !organization.public {
+        return Err(WebError::not_found("Build"));
+    }
+
+    let build_outputs = EBuildOutput::find()
+        .filter(CBuildOutput::Build.eq(build_id))
+        .all(&state.db)
+        .await?;
+
+    let mut products = Vec::new();
+    for output in build_outputs {
+        let hydra_products_path = format!("{}/nix-support/hydra-build-products", output.output);
+        if let Ok(content) = fs::read_to_string(&hydra_products_path).await {
+            for line in content.lines() {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 && parts[0] == "file" {
+                    let file_type = parts[1].to_string();
+                    let file_path = parts[2..].join(" ");
+                    let filename = std::path::Path::new(&file_path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(&file_path)
+                        .to_string();
+                    products.push(BuildProduct {
+                        file_type,
+                        name: filename,
+                        path: file_path,
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: products,
+    }))
+}
+
+/// Public (no auth) equivalent of `get_build_download` — only works when the
+/// organization that owns the build is marked `public = true`.
+pub async fn get_build_download_public(
+    state: State<Arc<ServerState>>,
+    Path((build_id, filename)): Path<(Uuid, String)>,
+) -> Result<Response, WebError> {
+    let build = EBuild::find_by_id(build_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Build"))?;
+
+    let evaluation = EEvaluation::find_by_id(build.evaluation)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::InternalServerError("Build data inconsistency".to_string()))?;
+
+    let organization_id = if let Some(project_id) = evaluation.project {
+        let project = EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                WebError::InternalServerError("Evaluation data inconsistency".to_string())
+            })?;
+        project.organization
+    } else {
+        EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| {
+                WebError::InternalServerError("Direct build data inconsistency".to_string())
+            })?
+            .organization
+    };
+
+    let organization = EOrganization::find_by_id(organization_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::InternalServerError("Organization data inconsistency".to_string()))?;
+
+    if !organization.public {
+        return Err(WebError::not_found("Build"));
+    }
+
+    let build_outputs = EBuildOutput::find()
+        .filter(CBuildOutput::Build.eq(build_id))
+        .all(&state.db)
+        .await?;
+
+    for output in build_outputs {
+        let hydra_products_path = format!("{}/nix-support/hydra-build-products", output.output);
+        if let Ok(content) = fs::read_to_string(&hydra_products_path).await {
+            for line in content.lines() {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 && parts[0] == "file" {
+                    let file_path = parts[2..].join(" ");
+                    let file_name = std::path::Path::new(&file_path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("");
+                    if file_name == filename {
+                        match fs::read(&file_path).await {
+                            Ok(contents) => {
+                                let content_type = match std::path::Path::new(&filename)
+                                    .extension()
+                                    .and_then(|ext| ext.to_str())
+                                {
+                                    Some("tar") => "application/x-tar",
+                                    Some("gz") => "application/gzip",
+                                    Some("zst") => "application/zstd",
+                                    Some("txt") => "text/plain",
+                                    Some("json") => "application/json",
+                                    Some("zip") => "application/zip",
+                                    _ => "application/octet-stream",
+                                };
+                                return Ok((
+                                    StatusCode::OK,
+                                    [
+                                        (header::CONTENT_TYPE, content_type),
+                                        (
+                                            header::CONTENT_DISPOSITION,
+                                            &format!("attachment; filename=\"{}\"", filename),
+                                        ),
+                                    ],
+                                    contents,
+                                )
+                                    .into_response());
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    build_id = %build_id,
+                                    filename = %filename,
+                                    error = %e,
+                                    "Failed to read file for public download"
+                                );
+                                return Err(WebError::InternalServerError(
+                                    "Failed to read file".to_string(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Err(WebError::not_found("File"))
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DirectBuildInfo {
     pub id: String,

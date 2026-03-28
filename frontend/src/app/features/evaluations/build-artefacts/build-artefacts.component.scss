@@ -1,0 +1,162 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.page {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: $spacing-xl $spacing-lg;
+}
+
+.page-header {
+  margin-bottom: $spacing-xl;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  font-size: $font-size-xs;
+  color: $text-light;
+  margin-bottom: $spacing-sm;
+
+  .breadcrumb-link {
+    color: $text-secondary;
+    text-decoration: none;
+    &:hover { color: $text-primary; }
+  }
+
+  .breadcrumb-sep { color: $text-light; }
+  .breadcrumb-cur { color: $text-secondary; }
+  .breadcrumb-id {
+    font-family: monospace;
+    color: $text-secondary;
+    font-size: $font-size-xs;
+  }
+}
+
+h1 {
+  font-size: $font-size-xl;
+  font-weight: 600;
+  color: $text-primary;
+  margin: 0;
+}
+
+// ── Empty state ───────────────────────────────────────────────────────────────
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  padding: $spacing-xxl $spacing-lg;
+  text-align: center;
+  color: $text-light;
+
+  .material-symbols-outlined {
+    font-size: 48px;
+    opacity: 0.4;
+  }
+
+  p {
+    margin: 0;
+    font-size: $font-size-md;
+    color: $text-secondary;
+  }
+
+  .empty-hint {
+    font-size: $font-size-sm;
+
+    code {
+      font-size: $font-size-xs;
+      background: $color-secondary;
+      padding: 1px 5px;
+      border-radius: $border-radius-sm;
+    }
+  }
+}
+
+// ── Artefacts list ────────────────────────────────────────────────────────────
+
+.artefacts-list {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+}
+
+.artefact-row {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  padding: $spacing-sm $spacing-md;
+  background: $color-secondary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  transition: border-color $transition-fast;
+
+  &:hover {
+    border-color: rgba($text-secondary, 0.4);
+  }
+}
+
+.file-type-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: $border-radius-sm;
+  background: rgba($color-info, 0.15);
+  color: $color-info;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+
+.artefact-name {
+  flex: 1;
+  font-size: $font-size-sm;
+  color: $text-primary;
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.download-btn {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  background: $color-primary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  color: $text-secondary;
+  font-size: $font-size-sm;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color $transition-fast, border-color $transition-fast, background $transition-fast;
+
+  .material-symbols-outlined { font-size: 1rem; }
+
+  &:hover:not(:disabled) {
+    color: $text-primary;
+    border-color: rgba($text-secondary, 0.4);
+    background: $color-hover;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.spin { animation: spin 0.8s linear infinite; }

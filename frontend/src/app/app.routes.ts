@@ -101,6 +101,15 @@ export const routes: Routes = [
           ),
       },
 
+      // Build artefacts
+      {
+        path: 'organization/:org/artefacts/:buildId',
+        loadComponent: () =>
+          import('./features/evaluations/build-artefacts/build-artefacts.component').then(
+            (m) => m.BuildArtefactsComponent
+          ),
+      },
+
       // Dependency graph
       {
         path: 'organization/:org/graph/:buildId',

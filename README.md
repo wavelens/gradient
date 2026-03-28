@@ -19,11 +19,11 @@ Gradient is a web-based Nix-based Continuous Integration (CI) system.
 - **API**: provides a RESTful API with API-Key management for authentication.
 - **Streaming Logs**: real-time log streaming for builds.
 - **Rich Project Configuration**: check all branches, pull requests, and tags. (planned)
-- **OAuth2**: support for OAuth2 for user authentication.
+- **OAuth2 / OIDC**: integrated single-sign-on support
 - **Cache**: integrated nix store cache.
 - **Remote Builds**: support for building nix derviations without having nix installed locally.
 - **Deployment Module**: Support for easy Pull-Deployment.
-- **Dependency Graph** — interactive visualization of Nix build dependency trees
+- **Dependency Graph**: interactive visualization of Nix build dependency trees
 - **Actions Integration**: Stream logs directly into GitHub Actions and other CI systems (planned).
 
 ## Installation

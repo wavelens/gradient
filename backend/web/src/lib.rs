@@ -225,6 +225,14 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             Arc::clone(&state),
             authorization::authorize,
         ))
+        .route(
+            "/builds/{build}/artefacts",
+            get(builds::get_build_downloads_public),
+        )
+        .route(
+            "/builds/{build}/artefacts/{filename}",
+            get(builds::get_build_download_public),
+        )
         .route("/auth/basic/login", post(auth::post_basic_login))
         .route("/auth/basic/register", post(auth::post_basic_register))
         .route("/auth/check-username", post(auth::post_check_username))
