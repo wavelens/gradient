@@ -13,6 +13,7 @@ pub mod orgs;
 pub mod projects;
 pub mod servers;
 pub mod user;
+pub mod webhooks;
 
 use crate::error::{WebError, WebResult};
 use axum::extract::{Json, State};

@@ -266,6 +266,7 @@ pub type EServer = server::Entity;
 pub type EServerArchitecture = server_architecture::Entity;
 pub type EServerFeature = server_feature::Entity;
 pub type EUser = user::Entity;
+pub type EWebhook = webhook::Entity;
 
 pub type MApi = api::Model;
 pub type MBuild = build::Model;
@@ -288,6 +289,7 @@ pub type MServer = server::Model;
 pub type MServerArchitecture = server_architecture::Model;
 pub type MServerFeature = server_feature::Model;
 pub type MUser = user::Model;
+pub type MWebhook = webhook::Model;
 
 pub type AApi = api::ActiveModel;
 pub type ABuild = build::ActiveModel;
@@ -310,6 +312,7 @@ pub type AServer = server::ActiveModel;
 pub type AServerArchitecture = server_architecture::ActiveModel;
 pub type AServerFeature = server_feature::ActiveModel;
 pub type AUser = user::ActiveModel;
+pub type AWebhook = webhook::ActiveModel;
 
 pub type CApi = api::Column;
 pub type CBuild = build::Column;
@@ -332,6 +335,7 @@ pub type CServer = server::Column;
 pub type CServerArchitecture = server_architecture::Column;
 pub type CServerFeature = server_feature::Column;
 pub type CUser = user::Column;
+pub type CWebhook = webhook::Column;
 
 pub type RApi = api::Relation;
 pub type RBuild = build::Relation;
@@ -354,3 +358,4 @@ pub type RServer = server::Relation;
 pub type RServerArchitecture = server_architecture::Relation;
 pub type RServerFeature = server_feature::Relation;
 pub type RUser = user::Relation;
+pub type RWebhook = webhook::Relation;

@@ -1,0 +1,321 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+use crate::error::{WebError, WebResult};
+use axum::extract::{Path, State};
+use axum::{Extension, Json};
+use chrono::Utc;
+use core::database::get_any_organization_by_name;
+use core::types::*;
+use sea_orm::ActiveValue::Set;
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use uuid::Uuid;
+
+use super::projects::user_can_edit;
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct CreateWebhookRequest {
+    pub name: String,
+    pub url: String,
+    pub secret: String,
+    pub events: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct UpdateWebhookRequest {
+    pub name: Option<String>,
+    pub url: Option<String>,
+    pub secret: Option<String>,
+    pub events: Option<Vec<String>>,
+    pub active: Option<bool>,
+}
+
+/// Public-safe webhook view — secret is never exposed.
+#[derive(Serialize, Debug)]
+pub struct WebhookResponse {
+    pub id: Uuid,
+    pub organization: Uuid,
+    pub name: String,
+    pub url: String,
+    pub events: serde_json::Value,
+    pub active: bool,
+    pub created_by: Uuid,
+    pub created_at: chrono::NaiveDateTime,
+}
+
+impl From<MWebhook> for WebhookResponse {
+    fn from(w: MWebhook) -> Self {
+        WebhookResponse {
+            id: w.id,
+            organization: w.organization,
+            name: w.name,
+            url: w.url,
+            events: w.events,
+            active: w.active,
+            created_by: w.created_by,
+            created_at: w.created_at,
+        }
+    }
+}
+
+/// `GET /webhook/{organization}` — list all webhooks for an organization.
+pub async fn get(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(organization): Path<String>,
+) -> WebResult<Json<BaseResponse<Vec<WebhookResponse>>>> {
+    let organization = get_any_organization_by_name(state.0.clone(), organization)
+        .await
+        .map_err(|e| WebError::InternalServerError(e.to_string()))?
+        .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if !user_can_edit(&state, user.id, organization.id).await? {
+        return Err(WebError::Forbidden(
+            "You do not have permission to view webhooks for this organization.".to_string(),
+        ));
+    }
+
+    let webhooks = EWebhook::find()
+        .filter(CWebhook::Organization.eq(organization.id))
+        .all(&state.db)
+        .await?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: webhooks.into_iter().map(WebhookResponse::from).collect(),
+    }))
+}
+
+/// `PUT /webhook/{organization}` — create a new webhook.
+pub async fn put(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(organization): Path<String>,
+    Json(body): Json<CreateWebhookRequest>,
+) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
+    let organization = get_any_organization_by_name(state.0.clone(), organization)
+        .await
+        .map_err(|e| WebError::InternalServerError(e.to_string()))?
+        .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if !user_can_edit(&state, user.id, organization.id).await? {
+        return Err(WebError::Forbidden(
+            "You do not have permission to create webhooks for this organization.".to_string(),
+        ));
+    }
+
+    if body.name.is_empty() {
+        return Err(WebError::BadRequest("Webhook name cannot be empty.".to_string()));
+    }
+    if body.url.is_empty() {
+        return Err(WebError::BadRequest("Webhook URL cannot be empty.".to_string()));
+    }
+    if body.secret.is_empty() {
+        return Err(WebError::BadRequest("Webhook secret cannot be empty.".to_string()));
+    }
+
+    let webhook = AWebhook {
+        id: Set(Uuid::new_v4()),
+        organization: Set(organization.id),
+        name: Set(body.name),
+        url: Set(body.url),
+        secret: Set(body.secret),
+        events: Set(serde_json::Value::Array(
+            body.events.into_iter().map(serde_json::Value::String).collect(),
+        )),
+        active: Set(true),
+        created_by: Set(user.id),
+        created_at: Set(Utc::now().naive_utc()),
+    };
+
+    let webhook = webhook.insert(&state.db).await?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: WebhookResponse::from(webhook),
+    }))
+}
+
+/// `GET /webhook/{organization}/{webhook}` — get a single webhook.
+pub async fn get_webhook(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, webhook_id)): Path<(String, Uuid)>,
+) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
+    let organization = get_any_organization_by_name(state.0.clone(), organization)
+        .await
+        .map_err(|e| WebError::InternalServerError(e.to_string()))?
+        .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if !user_can_edit(&state, user.id, organization.id).await? {
+        return Err(WebError::Forbidden(
+            "You do not have permission to view this webhook.".to_string(),
+        ));
+    }
+
+    let webhook = EWebhook::find()
+        .filter(CWebhook::Id.eq(webhook_id))
+        .filter(CWebhook::Organization.eq(organization.id))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Webhook"))?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: WebhookResponse::from(webhook),
+    }))
+}
+
+/// `PATCH /webhook/{organization}/{webhook}` — update a webhook.
+pub async fn patch_webhook(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, webhook_id)): Path<(String, Uuid)>,
+    Json(body): Json<UpdateWebhookRequest>,
+) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
+    let organization = get_any_organization_by_name(state.0.clone(), organization)
+        .await
+        .map_err(|e| WebError::InternalServerError(e.to_string()))?
+        .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if !user_can_edit(&state, user.id, organization.id).await? {
+        return Err(WebError::Forbidden(
+            "You do not have permission to modify this webhook.".to_string(),
+        ));
+    }
+
+    let webhook = EWebhook::find()
+        .filter(CWebhook::Id.eq(webhook_id))
+        .filter(CWebhook::Organization.eq(organization.id))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Webhook"))?;
+
+    let mut active_webhook: AWebhook = webhook.into_active_model();
+
+    if let Some(name) = body.name {
+        active_webhook.name = Set(name);
+    }
+    if let Some(url) = body.url {
+        active_webhook.url = Set(url);
+    }
+    if let Some(secret) = body.secret {
+        active_webhook.secret = Set(secret);
+    }
+    if let Some(events) = body.events {
+        active_webhook.events = Set(serde_json::Value::Array(
+            events.into_iter().map(serde_json::Value::String).collect(),
+        ));
+    }
+    if let Some(active) = body.active {
+        active_webhook.active = Set(active);
+    }
+
+    let updated = active_webhook.update(&state.db).await?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: WebhookResponse::from(updated),
+    }))
+}
+
+/// `DELETE /webhook/{organization}/{webhook}` — delete a webhook.
+pub async fn delete_webhook(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, webhook_id)): Path<(String, Uuid)>,
+) -> WebResult<Json<BaseResponse<bool>>> {
+    let organization = get_any_organization_by_name(state.0.clone(), organization)
+        .await
+        .map_err(|e| WebError::InternalServerError(e.to_string()))?
+        .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if !user_can_edit(&state, user.id, organization.id).await? {
+        return Err(WebError::Forbidden(
+            "You do not have permission to delete this webhook.".to_string(),
+        ));
+    }
+
+    let webhook = EWebhook::find()
+        .filter(CWebhook::Id.eq(webhook_id))
+        .filter(CWebhook::Organization.eq(organization.id))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Webhook"))?;
+
+    webhook.into_active_model().delete(&state.db).await?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: true,
+    }))
+}
+
+/// `POST /webhook/{organization}/{webhook}/test` — send a test event.
+pub async fn post_webhook_test(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, webhook_id)): Path<(String, Uuid)>,
+) -> WebResult<Json<BaseResponse<bool>>> {
+    let organization = get_any_organization_by_name(state.0.clone(), organization)
+        .await
+        .map_err(|e| WebError::InternalServerError(e.to_string()))?
+        .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if !user_can_edit(&state, user.id, organization.id).await? {
+        return Err(WebError::Forbidden(
+            "You do not have permission to test this webhook.".to_string(),
+        ));
+    }
+
+    let webhook = EWebhook::find()
+        .filter(CWebhook::Id.eq(webhook_id))
+        .filter(CWebhook::Organization.eq(organization.id))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Webhook"))?;
+
+    let payload = serde_json::json!({
+        "event": "ping",
+        "data": {
+            "test": true,
+            "webhook_id": webhook.id,
+            "organization": organization.name,
+        }
+    });
+
+    let body_str = serde_json::to_string(&payload).unwrap_or_default();
+    let signature = core::webhooks::sign_webhook_payload(&webhook.secret, &body_str);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| WebError::InternalServerError(e.to_string()))?;
+
+    let resp = client
+        .post(&webhook.url)
+        .header("Content-Type", "application/json")
+        .header("X-Gradient-Signature", signature)
+        .header("X-Gradient-Event", "ping")
+        .body(body_str)
+        .send()
+        .await
+        .map_err(|e| WebError::InternalServerError(format!("Webhook delivery failed: {}", e)))?;
+
+    if !resp.status().is_success() {
+        return Err(WebError::InternalServerError(format!(
+            "Webhook endpoint returned status {}",
+            resp.status()
+        )));
+    }
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: true,
+    }))
+}

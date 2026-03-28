@@ -46,7 +46,7 @@ pub struct ProjectResponse {
 }
 
 /// Returns true if the user has Admin or Write role in the organization.
-async fn user_can_edit(
+pub(crate) async fn user_can_edit(
     state: &Arc<ServerState>,
     user_id: Uuid,
     organization_id: Uuid,
@@ -744,46 +744,83 @@ pub async fn get_project_entry_points(
     .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
 
-    let latest_evaluation_id = match project.last_evaluation {
-        Some(id) => id,
-        None => {
-            return Ok(Json(BaseResponse {
-                error: false,
-                message: vec![],
-            }))
-        }
-    };
-
-    let evaluation = EEvaluation::find_by_id(latest_evaluation_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Evaluation"))?;
-
-    let entry_points = EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.eq(latest_evaluation_id))
+    // Collect all evaluations for this project that have reached at least Building
+    // state, ordered most-recent-first.  A new evaluation may only rebuild a
+    // subset of derivations; unchanged ones live in older evaluations.  We
+    // therefore merge entry points across all qualifying evaluations, keeping
+    // the most recent entry point for each unique derivation path.
+    let evaluations = EEvaluation::find()
+        .filter(CEvaluation::Project.eq(project.id))
+        .filter(
+            Condition::any()
+                .add(CEvaluation::Status.eq(EvaluationStatus::Building))
+                .add(CEvaluation::Status.eq(EvaluationStatus::Completed))
+                .add(CEvaluation::Status.eq(EvaluationStatus::Failed))
+                .add(CEvaluation::Status.eq(EvaluationStatus::Aborted)),
+        )
+        .order_by_desc(CEvaluation::CreatedAt)
         .all(&state.db)
         .await?;
 
-    if entry_points.is_empty() {
+    if evaluations.is_empty() {
         return Ok(Json(BaseResponse {
             error: false,
             message: vec![],
         }));
     }
 
-    let build_ids: Vec<Uuid> = entry_points.iter().map(|ep| ep.build).collect();
+    let eval_ids: Vec<Uuid> = evaluations.iter().map(|e| e.id).collect();
+    // rank 0 = most recent
+    let eval_rank: HashMap<Uuid, usize> =
+        eval_ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+    let eval_map: HashMap<Uuid, MEvaluation> =
+        evaluations.into_iter().map(|e| (e.id, e)).collect();
 
+    let all_entry_points = EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.is_in(eval_ids))
+        .all(&state.db)
+        .await?;
+
+    if all_entry_points.is_empty() {
+        return Ok(Json(BaseResponse {
+            error: false,
+            message: vec![],
+        }));
+    }
+
+    let build_ids: Vec<Uuid> = all_entry_points.iter().map(|ep| ep.build).collect();
     let builds = EBuild::find()
         .filter(CBuild::Id.is_in(build_ids))
         .all(&state.db)
         .await?;
-
-    use std::collections::HashMap;
     let build_map: HashMap<Uuid, MBuild> = builds.into_iter().map(|b| (b.id, b)).collect();
 
+    // For each derivation path keep the entry point from the most recent evaluation.
+    let mut best: HashMap<String, MEntryPoint> = HashMap::new();
+    for ep in all_entry_points {
+        if let Some(build) = build_map.get(&ep.build) {
+            let drv = build.derivation_path.clone();
+            let ep_rank = eval_rank.get(&ep.evaluation).copied().unwrap_or(usize::MAX);
+            let replace = match best.get(&drv) {
+                None => true,
+                Some(existing) => {
+                    let existing_rank =
+                        eval_rank.get(&existing.evaluation).copied().unwrap_or(usize::MAX);
+                    ep_rank < existing_rank
+                }
+            };
+            if replace {
+                best.insert(drv, ep);
+            }
+        }
+    }
+
+    let best_eps: Vec<MEntryPoint> = best.into_values().collect();
+
     // Batch-query outputs for completed builds to check for hydra-build-products
-    let completed_ids: Vec<Uuid> = build_map
-        .values()
+    let completed_ids: Vec<Uuid> = best_eps
+        .iter()
+        .filter_map(|ep| build_map.get(&ep.build))
         .filter(|b| b.status == BuildStatus::Completed)
         .map(|b| b.id)
         .collect();
@@ -809,9 +846,13 @@ pub async fn get_project_entry_points(
 
     let mut summaries = Vec::new();
 
-    for ep in entry_points {
+    for ep in best_eps {
         let build = match build_map.get(&ep.build) {
             Some(b) => b,
+            None => continue,
+        };
+        let evaluation = match eval_map.get(&ep.evaluation) {
+            Some(e) => e,
             None => continue,
         };
 

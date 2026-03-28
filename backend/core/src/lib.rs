@@ -14,6 +14,7 @@ pub mod permission;
 pub mod sources;
 pub mod state;
 pub mod types;
+pub mod webhooks;
 
 use clap::Parser;
 use database::connect_db;

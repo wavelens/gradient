@@ -1,0 +1,210 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+use crate::types::*;
+use entity::build::BuildStatus;
+use entity::evaluation::EvaluationStatus;
+use hmac::{Hmac, Mac};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sha2::Sha256;
+use std::sync::Arc;
+use tracing::{error, warn};
+use uuid::Uuid;
+
+type HmacSha256 = Hmac<Sha256>;
+
+/// Signs `body` with HMAC-SHA256 using `secret` and returns `sha256=<hex>`.
+pub fn sign_webhook_payload(secret: &str, body: &str) -> String {
+    match HmacSha256::new_from_slice(secret.as_bytes()) {
+        Ok(mut mac) => {
+            mac.update(body.as_bytes());
+            format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+        }
+        Err(_) => String::new(),
+    }
+}
+
+pub async fn fire_evaluation_webhook(
+    state: Arc<ServerState>,
+    evaluation: MEvaluation,
+    status: EvaluationStatus,
+) {
+    let event = match status {
+        EvaluationStatus::Queued => "evaluation.queued",
+        EvaluationStatus::Evaluating => "evaluation.started",
+        EvaluationStatus::Building => "evaluation.building",
+        EvaluationStatus::Completed => "evaluation.completed",
+        EvaluationStatus::Failed => "evaluation.failed",
+        EvaluationStatus::Aborted => "evaluation.aborted",
+    };
+
+    let org_id = match evaluation.project {
+        Some(project_id) => match EProject::find_by_id(project_id).one(&state.db).await {
+            Ok(Some(project)) => project.organization,
+            Ok(None) => {
+                warn!(evaluation_id = %evaluation.id, "Project not found for webhook delivery");
+                return;
+            }
+            Err(e) => {
+                error!(error = %e, evaluation_id = %evaluation.id, "DB error looking up project for webhook");
+                return;
+            }
+        },
+        None => return, // direct builds don't belong to an org project; skip
+    };
+
+    let payload = serde_json::json!({
+        "evaluation_id": evaluation.id,
+        "project_id": evaluation.project,
+        "repository": evaluation.repository,
+        "status": event,
+        "error": evaluation.error,
+    });
+
+    fire_webhooks(state, org_id, event.to_string(), payload).await;
+}
+
+pub async fn fire_build_webhook(
+    state: Arc<ServerState>,
+    build: MBuild,
+    status: BuildStatus,
+) {
+    let event = match status {
+        BuildStatus::Queued => "build.queued",
+        BuildStatus::Building => "build.started",
+        BuildStatus::Completed => "build.completed",
+        BuildStatus::Failed => "build.failed",
+        BuildStatus::Created | BuildStatus::Aborted => return,
+    };
+
+    let org_id = match get_build_org_id(&state, build.evaluation).await {
+        Some(id) => id,
+        None => return,
+    };
+
+    let payload = serde_json::json!({
+        "build_id": build.id,
+        "evaluation_id": build.evaluation,
+        "derivation_path": build.derivation_path,
+        "status": event,
+    });
+
+    fire_webhooks(state, org_id, event.to_string(), payload).await;
+}
+
+async fn get_build_org_id(state: &Arc<ServerState>, evaluation_id: Uuid) -> Option<Uuid> {
+    let evaluation = match EEvaluation::find_by_id(evaluation_id).one(&state.db).await {
+        Ok(Some(e)) => e,
+        Ok(None) => {
+            warn!(evaluation_id = %evaluation_id, "Evaluation not found for webhook delivery");
+            return None;
+        }
+        Err(e) => {
+            error!(error = %e, evaluation_id = %evaluation_id, "DB error looking up evaluation for webhook");
+            return None;
+        }
+    };
+
+    let project_id = evaluation.project?;
+
+    match EProject::find_by_id(project_id).one(&state.db).await {
+        Ok(Some(project)) => Some(project.organization),
+        Ok(None) => {
+            warn!(project_id = %project_id, "Project not found for webhook delivery");
+            None
+        }
+        Err(e) => {
+            error!(error = %e, project_id = %project_id, "DB error looking up project for webhook");
+            None
+        }
+    }
+}
+
+async fn fire_webhooks(
+    state: Arc<ServerState>,
+    org_id: Uuid,
+    event: String,
+    payload: serde_json::Value,
+) {
+    let webhooks = match EWebhook::find()
+        .filter(CWebhook::Organization.eq(org_id))
+        .filter(CWebhook::Active.eq(true))
+        .all(&state.db)
+        .await
+    {
+        Ok(w) => w,
+        Err(e) => {
+            error!(error = %e, org_id = %org_id, "Failed to query webhooks");
+            return;
+        }
+    };
+
+    if webhooks.is_empty() {
+        return;
+    }
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            error!(error = %e, "Failed to build reqwest client for webhook delivery");
+            return;
+        }
+    };
+
+    let body = serde_json::json!({
+        "event": event,
+        "data": payload,
+    });
+
+    let body_str = match serde_json::to_string(&body) {
+        Ok(s) => s,
+        Err(e) => {
+            error!(error = %e, "Failed to serialize webhook payload");
+            return;
+        }
+    };
+
+    for webhook in webhooks {
+        let subscribed = webhook
+            .events
+            .as_array()
+            .map(|arr| arr.iter().any(|e| e.as_str() == Some(event.as_str())))
+            .unwrap_or(false);
+
+        if !subscribed {
+            continue;
+        }
+
+        let signature = sign_webhook_payload(&webhook.secret, &body_str);
+
+        let result = client
+            .post(&webhook.url)
+            .header("Content-Type", "application/json")
+            .header("X-Gradient-Signature", signature)
+            .header("X-Gradient-Event", event.as_str())
+            .body(body_str.clone())
+            .send()
+            .await;
+
+        match result {
+            Ok(resp) if !resp.status().is_success() => {
+                warn!(
+                    webhook_id = %webhook.id,
+                    url = %webhook.url,
+                    status = %resp.status(),
+                    "Webhook delivery returned non-success status"
+                );
+            }
+            Err(e) => {
+                warn!(error = %e, webhook_id = %webhook.id, url = %webhook.url, "Webhook delivery failed");
+            }
+            Ok(_) => {}
+        }
+    }
+}

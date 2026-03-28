@@ -984,6 +984,38 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             Some(evaluation.id)
         };
 
+        // Guard against the race condition where the API endpoint (or a
+        // concurrent fetcher tick) already created a Queued/Evaluating/Building
+        // evaluation while we were checking for updates with stale project data.
+        match EEvaluation::find()
+            .filter(CEvaluation::Project.eq(project.id))
+            .filter(
+                Condition::any()
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Evaluating))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Building)),
+            )
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(existing)) => {
+                // An evaluation is already in progress — reuse it and bail out.
+                let mut active_project: AProject = project.clone().into();
+                active_project.last_check_at = Set(Utc::now().naive_utc());
+                active_project.force_evaluation = Set(false);
+                if let Err(e) = active_project.update(&state.db).await {
+                    error!(error = %e, "Failed to update project after in-progress guard");
+                }
+                return existing;
+            }
+            Ok(None) => {}
+            Err(e) => {
+                error!(error = %e, "Failed to check for in-progress evaluations");
+                time::sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        }
+
         let (commit_message, author_email, author_name) =
             match get_commit_info(Arc::clone(&state), &project, commit_hash).await {
                 Ok((msg, email, name)) => (msg, email, name),
@@ -1471,11 +1503,20 @@ pub async fn update_build_status(
 
     let mut active_build: ABuild = build.clone().into_active_model();
 
+    let webhook_status = status.clone();
     active_build.status = Set(status);
     active_build.updated_at = Set(Utc::now().naive_utc());
 
     match active_build.update(&state.db).await {
-        Ok(updated_build) => updated_build,
+        Ok(updated_build) => {
+            let webhook_state = Arc::clone(&state);
+            let webhook_build = updated_build.clone();
+            tokio::spawn(async move {
+                core::webhooks::fire_build_webhook(webhook_state, webhook_build, webhook_status)
+                    .await;
+            });
+            updated_build
+        }
         Err(e) => {
             error!(error = %e, build_id = %build.id, "Failed to update build status");
             build
@@ -1580,11 +1621,25 @@ pub async fn update_evaluation_status(
     debug!(evaluation_id = %evaluation.id, status = ?status, "Updating evaluation status");
 
     let mut active_evaluation: AEvaluation = evaluation.clone().into_active_model();
+
+    let webhook_status = status.clone();
     active_evaluation.status = Set(status);
     active_evaluation.updated_at = Set(Utc::now().naive_utc());
 
     match active_evaluation.update(&state.db).await {
-        Ok(updated_eval) => updated_eval,
+        Ok(updated_eval) => {
+            let webhook_state = Arc::clone(&state);
+            let webhook_eval = updated_eval.clone();
+            tokio::spawn(async move {
+                core::webhooks::fire_evaluation_webhook(
+                    webhook_state,
+                    webhook_eval,
+                    webhook_status,
+                )
+                .await;
+            });
+            updated_eval
+        }
         Err(e) => {
             error!(error = %e, evaluation_id = %evaluation.id, "Failed to update evaluation status");
             evaluation

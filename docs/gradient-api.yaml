@@ -2142,6 +2142,210 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  # ── Webhooks ─────────────────────────────────────────────────────────────────
+
+  /webhook/{organization}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+    get:
+      tags: [webhooks]
+      summary: List webhooks
+      description: Returns all webhooks configured for the organization. Requires Admin or Write role.
+      operationId: listWebhooks
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of webhooks (secret is never included)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Webhook'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [webhooks]
+      summary: Create webhook
+      description: Creates a new webhook for the organization. Requires Admin or Write role.
+      operationId: createWebhook
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWebhookRequest'
+      responses:
+        '200':
+          description: Created webhook
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Webhook'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /webhook/{organization}/{webhook}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - name: webhook
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Webhook UUID
+    get:
+      tags: [webhooks]
+      summary: Get webhook
+      description: Returns a single webhook. Requires Admin or Write role. Secret is never returned.
+      operationId: getWebhook
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Webhook
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Webhook'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [webhooks]
+      summary: Update webhook
+      description: Updates a webhook's name, URL, secret, events, or active state. Requires Admin or Write role.
+      operationId: updateWebhook
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWebhookRequest'
+      responses:
+        '200':
+          description: Updated webhook
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Webhook'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [webhooks]
+      summary: Delete webhook
+      description: Permanently deletes a webhook. Requires Admin or Write role.
+      operationId: deleteWebhook
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Deletion confirmed
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: boolean
+                        example: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /webhook/{organization}/{webhook}/test:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - name: webhook
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Webhook UUID
+    post:
+      tags: [webhooks]
+      summary: Send test event
+      description: |-
+        Sends a `ping` event to the webhook URL to verify delivery. Requires Admin or Write role.
+
+        The request body sent to the webhook URL will be:
+        ```json
+        { "event": "ping", "data": { "test": true, "webhook_id": "...", "organization": "..." } }
+        ```
+      operationId: testWebhook
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Test event delivered successfully
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: boolean
+                        example: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          description: Webhook delivery failed
+
   # ── Nix Cache Protocol ───────────────────────────────────────────────────────
   # These endpoints live outside /api/v1. The server URL for these is the root,
   # e.g. https://gradient.example.com (no /api/v1 prefix).
@@ -3029,3 +3233,115 @@ components:
           type: string
           description: Git author name
           example: Alice Example
+
+    # ── Webhooks ──────────────────────────────────────────────────────────────
+
+    Webhook:
+      type: object
+      required: [id, organization, name, url, events, active, created_by, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Webhook UUID
+        organization:
+          type: string
+          format: uuid
+          description: Organization UUID
+        name:
+          type: string
+          description: Human-readable webhook name
+          example: My Webhook
+        url:
+          type: string
+          format: uri
+          description: URL that receives webhook POST requests
+          example: https://example.com/hooks/gradient
+        events:
+          type: array
+          description: |-
+            List of event types this webhook subscribes to. Supported events:
+            - `evaluation.queued` — an evaluation was queued
+            - `evaluation.started` — an evaluation began (Evaluating state)
+            - `evaluation.building` — an evaluation entered the Building state
+            - `evaluation.completed` — an evaluation completed successfully
+            - `evaluation.failed` — an evaluation failed
+            - `evaluation.aborted` — an evaluation was aborted
+            - `build.queued` — a build was queued
+            - `build.started` — a build started executing
+            - `build.completed` — a build completed successfully
+            - `build.failed` — a build failed
+          items:
+            type: string
+            enum:
+              - evaluation.queued
+              - evaluation.started
+              - evaluation.building
+              - evaluation.completed
+              - evaluation.failed
+              - evaluation.aborted
+              - build.queued
+              - build.started
+              - build.completed
+              - build.failed
+          example: ["evaluation.completed", "build.failed"]
+        active:
+          type: boolean
+          description: Whether the webhook is active and will receive events
+          default: true
+        created_by:
+          type: string
+          format: uuid
+          description: UUID of the user who created the webhook
+        created_at:
+          type: string
+          format: date-time
+          description: Creation timestamp
+
+    CreateWebhookRequest:
+      type: object
+      required: [name, url, secret, events]
+      properties:
+        name:
+          type: string
+          description: Human-readable webhook name
+          example: My Webhook
+        url:
+          type: string
+          format: uri
+          description: URL to send webhook POST requests to
+          example: https://example.com/hooks/gradient
+        secret:
+          type: string
+          description: |-
+            HMAC-SHA256 signing secret. Each delivery includes an
+            `X-Gradient-Signature: sha256=<hex>` header computed with this secret.
+          example: "s3cr3t-webhook-key"
+        events:
+          type: array
+          description: Event types to subscribe to
+          items:
+            type: string
+          example: ["evaluation.completed", "build.failed"]
+
+    UpdateWebhookRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: New name
+        url:
+          type: string
+          format: uri
+          description: New URL
+        secret:
+          type: string
+          description: New signing secret
+        events:
+          type: array
+          description: New event subscription list (replaces existing)
+          items:
+            type: string
+        active:
+          type: boolean
+          description: Enable or disable the webhook

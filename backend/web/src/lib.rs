@@ -221,6 +221,20 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             post(servers::post_server_active).delete(servers::delete_server_active),
         )
         .route("/commits/{commit}", get(commits::get_commit))
+        .route(
+            "/webhook/{organization}",
+            get(webhooks::get).put(webhooks::put),
+        )
+        .route(
+            "/webhook/{organization}/{webhook}",
+            get(webhooks::get_webhook)
+                .patch(webhooks::patch_webhook)
+                .delete(webhooks::delete_webhook),
+        )
+        .route(
+            "/webhook/{organization}/{webhook}/test",
+            post(webhooks::post_webhook_test),
+        )
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize,

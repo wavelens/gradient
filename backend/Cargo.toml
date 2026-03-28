@@ -29,7 +29,9 @@ chrono           = "0.4"
 futures          = "0.3"
 mockall          = "0.14"
 rand             = "0.9"
-sea-orm          = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
+hmac             = "0.12"
+reqwest          = { version = "0.13", features = ["json"] }
+sea-orm          = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-json", "with-uuid"] }
 sea-orm-migration = { version = "1.1", features = ["with-uuid", "with-chrono", "with-json", "sqlx-postgres", "runtime-tokio"] }
 sentry           = "0.47"
 serde            = { version = "1", features = ["derive"] }

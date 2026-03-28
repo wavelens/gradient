@@ -30,6 +30,9 @@ tracing          = { workspace = true }
 sha2             = { workspace = true }
 uuid             = { workspace = true }
 
+hmac             = { workspace = true }
+reqwest          = { workspace = true }
+
 # Crate-specific dependencies
 async-ssh2-lite  = { version = "0.5", features = ["tokio"] }
 base64           = "0.22"
