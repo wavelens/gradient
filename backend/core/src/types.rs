@@ -5,6 +5,7 @@
  */
 
 use super::input::{greater_than_zero, port_in_range};
+use super::log_storage::LogStorage;
 use async_ssh2_lite::{AsyncChannel, TokioTcpStream};
 use clap::Parser;
 use entity::*;
@@ -12,6 +13,7 @@ use nix_daemon::nix::DaemonStore;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -107,6 +109,7 @@ pub struct Cli {
 pub struct ServerState {
     pub db: DatabaseConnection,
     pub cli: Cli,
+    pub log_storage: Arc<dyn LogStorage>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

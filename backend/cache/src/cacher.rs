@@ -10,6 +10,7 @@ use core::sources::{
     clear_key, format_cache_key, get_cache_nar_location, get_hash_from_path,
     get_path_from_build_output, write_key,
 };
+use sha2::{Digest, Sha256};
 use core::types::*;
 use nix_daemon::{Progress, Store};
 use sea_orm::ActiveValue::Set;
@@ -204,12 +205,21 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         }
     }
 
+    let is_entry_point = EEntryPoint::find()
+        .filter(CEntryPoint::Build.eq(build.id))
+        .one(&state.db)
+        .await
+        .unwrap_or(None)
+        .is_some();
+
     info!(
         hash = %build_output.hash,
         package = %build_output.package,
+        is_entry_point,
         "Caching build output"
     );
-    let pack_result = pack_build_output(Arc::clone(&state), build_output.clone()).await;
+    let pack_result =
+        pack_build_output(Arc::clone(&state), build_output.clone(), is_entry_point).await;
     let (file_hash, file_size) = match pack_result {
         Ok(result) => result,
         Err(e) => {
@@ -382,68 +392,67 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
 pub async fn pack_build_output(
     state: Arc<ServerState>,
     build_output: MBuildOutput,
+    is_entry_point: bool,
 ) -> Result<(String, u32)> {
     let path = get_path_from_build_output(build_output);
 
     let (path_hash, _path_package) =
         get_hash_from_path(path.clone()).context("Failed to parse build output path")?;
-    let file_location_tmp =
-        get_cache_nar_location(state.cli.base_path.clone(), path_hash.clone(), false)
-            .context("Failed to get cache location for temp file")?;
-    let file_location =
-        get_cache_nar_location(state.cli.base_path.clone(), path_hash.clone(), true)
-            .context("Failed to get cache location")?;
 
-    let output = Command::new(state.cli.binpath_nix.clone())
+    // Pack the NAR into memory
+    let pack_output = Command::new(state.cli.binpath_nix.clone())
         .arg("nar")
         .arg("pack")
-        .arg(path)
+        .arg(&path)
         .output()
         .await
         .context("Failed to execute nix nar pack command")?;
 
-    if !output.status.success() {
-        anyhow::bail!("Nix nar pack command failed");
+    if !pack_output.status.success() {
+        bail!("Nix nar pack command failed");
     }
 
-    tokio::fs::write(file_location_tmp.clone(), output.stdout)
-        .await
-        .context("Failed to write temporary NAR file")?;
+    let nar_data = pack_output.stdout;
 
-    let input_data = tokio::fs::read(file_location_tmp.clone())
-        .await
-        .context("Failed to read temporary NAR file")?;
-
+    // Compress in memory to compute file_hash / file_size — no disk writes
     let compressed_data =
-        zstd::bulk::compress(&input_data, 19).context("Failed to compress NAR data")?;
+        zstd::bulk::compress(&nar_data, 19).context("Failed to compress NAR data")?;
 
-    tokio::fs::write(file_location.clone(), compressed_data)
-        .await
-        .context("Failed to write compressed NAR file")?;
+    let file_size = compressed_data.len() as u32;
+    let file_hash = nix_base32_sha256(&compressed_data);
 
-    tokio::fs::remove_file(file_location_tmp.clone())
-        .await
-        .context("Failed to remove temporary NAR file")?;
-
-    let output = Command::new(state.cli.binpath_nix.clone())
-        .arg("hash")
-        .arg("file")
-        .arg("--base32")
-        .arg(file_location.clone())
-        .output()
-        .await
-        .context("Failed to execute nix hash file command")?;
-
-    if !output.status.success() {
-        bail!("Nix hash file command failed");
+    // Only persist the raw NAR to disk for entry-point builds;
+    // non-entry-point NARs are compressed on the fly when served
+    if is_entry_point {
+        let nar_location = get_cache_nar_location(state.cli.base_path.clone(), path_hash)
+            .context("Failed to get NAR file location")?;
+        tokio::fs::write(&nar_location, &nar_data)
+            .await
+            .context("Failed to write entry-point NAR to disk")?;
     }
-
-    let file_hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
-
-    let file_metadata = std::fs::metadata(file_location).context("Failed to get file metadata")?;
-    let file_size = file_metadata.len() as u32;
 
     Ok((format!("sha256:{}", file_hash), file_size))
+}
+
+/// Compute SHA-256 of `data` and return it encoded in Nix's base-32 alphabet.
+///
+/// Nix base-32 uses the alphabet `0123456789abcdfghijklmnpqrsvwxyz` (no e/o/t/u)
+/// and encodes 5 bits per character, most-significant group first.
+fn nix_base32_sha256(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
+    let hash: [u8; 32] = Sha256::digest(data).into();
+    let len = (hash.len() * 8 - 1) / 5 + 1; // 52 for SHA-256
+    let mut out = String::with_capacity(len);
+    for n in (0..len).rev() {
+        let b = n * 5;
+        let i = b / 8;
+        let j = b % 8;
+        let byte0 = hash.get(i).copied().unwrap_or(0) as u32;
+        let byte1 = hash.get(i + 1).copied().unwrap_or(0) as u32;
+        let c = ((byte0 >> j) | (byte1 << (8 - j))) & 0x1f;
+        out.push(CHARS[c as usize] as char);
+    }
+    out
 }
 
 async fn get_next_build_output(state: Arc<ServerState>) -> Option<MBuildOutput> {
@@ -483,7 +492,7 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
             .await
             .context("Failed to update build output")?;
 
-        let file_location = get_cache_nar_location(state.cli.base_path.clone(), hash.clone(), true)
+        let file_location = get_cache_nar_location(state.cli.base_path.clone(), hash.clone())
             .context("Failed to get cache NAR location")?;
         if std::fs::metadata(&file_location).is_ok() {
             std::fs::remove_file(&file_location)
@@ -528,9 +537,8 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
                 let subentry = subentry.context("Failed to read subdirectory entry")?;
                 let file_path = subentry.path();
 
-                if file_path.extension().and_then(|s| s.to_str()) == Some("zst")
-                    && let Some(file_name) = file_path.file_stem().and_then(|s| s.to_str())
-                    && let Some(hash_part) = file_name.strip_suffix(".nar")
+                if file_path.extension().and_then(|s| s.to_str()) == Some("nar")
+                    && let Some(hash_part) = file_path.file_stem().and_then(|s| s.to_str())
                 {
                     let parent_dir = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
                     let full_hash = format!("{}{}", parent_dir, hash_part);

@@ -13,6 +13,8 @@ use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use entity::server::Architecture;
 use futures::stream::{self, StreamExt};
+
+type OutputInfo = HashMap<String, (Option<String>, Option<String>, Option<String>)>;
 use nix_daemon::{BasicDerivation, DerivationOutput};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -142,7 +144,7 @@ async fn parse_derivation_file(
     //   - "path" includes the full "/nix/store/..." path
     //   - "hashAlgo": "r:sha256" | "sha256" | "text:sha256"  (method+algo combined)
     //   - no "method" field
-    let output_info: HashMap<String, (Option<String>, Option<String>, Option<String>)> =
+    let output_info: OutputInfo =
         derivation_data
             .get("outputs")
             .and_then(|v| v.as_object())

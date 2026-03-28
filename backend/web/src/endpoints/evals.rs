@@ -334,7 +334,7 @@ pub async fn post_evaluation_builds(
         .add(CBuild::Status.eq(entity::build::BuildStatus::Building));
 
     let stream = stream! {
-        let mut last_logs: HashMap<Uuid, String> = HashMap::new();
+        let mut last_logs: HashMap<Uuid, usize> = HashMap::new();
 
         let past_builds = match EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation.id))
@@ -350,8 +350,8 @@ pub async fn post_evaluation_builds(
 
         for build in past_builds {
             let name = drv_display_name(&build.derivation_path);
-            let log = build.log.unwrap_or("".to_string());
-            last_logs.insert(build.id, log.clone());
+            let log = state.log_storage.read(build.id).await.unwrap_or_default();
+            last_logs.insert(build.id, log.len());
 
             // TODO: Chunkify past log
             yield log
@@ -404,25 +404,19 @@ pub async fn post_evaluation_builds(
 
             for build in builds {
                 let name = drv_display_name(&build.derivation_path);
-                let log = build.log.unwrap_or("".to_string());
+                let log = state.log_storage.read(build.id).await.unwrap_or_default();
+                let last_offset = *last_logs.get(&build.id).unwrap_or(&0);
+                let log_new = log[last_offset..].to_string();
 
-                if last_logs.contains_key(&build.id) {
-                    let last_log = match last_logs.get(&build.id) {
-                        Some(log) => log,
-                        None => continue, // This should not happen since we just checked contains_key
-                    };
-                    let log_new = log.replace(last_log.as_str(), "");
-
-                    if !log_new.is_empty() {
-                        last_logs.insert(build.id, log.clone());
-                        yield log_new
-                            .split("\n")
-                            .map(|l| format!("{}> {}", name, l))
-                            .collect::<Vec<String>>()
-                            .join("\n");
-                    }
+                if !log_new.is_empty() {
+                    last_logs.insert(build.id, log.len());
+                    yield log_new
+                        .split("\n")
+                        .map(|l| format!("{}> {}", name, l))
+                        .collect::<Vec<String>>()
+                        .join("\n");
                 } else {
-                    last_logs.insert(build.id, log.clone());
+                    last_logs.entry(build.id).or_insert(0);
                 }
             }
         }

@@ -9,6 +9,7 @@ pub mod database;
 pub mod email;
 pub mod executer;
 pub mod input;
+pub mod log_storage;
 pub mod permission;
 pub mod sources;
 pub mod state;
@@ -16,7 +17,9 @@ pub mod types;
 
 use clap::Parser;
 use database::connect_db;
+use log_storage::FileLogStorage;
 use state::load_and_apply_state;
+use std::path::Path;
 use std::sync::Arc;
 use types::*;
 
@@ -47,5 +50,17 @@ pub async fn init_state() -> Arc<ServerState> {
         std::process::exit(1);
     }
 
-    Arc::new(ServerState { db, cli })
+    let log_storage = match FileLogStorage::new(Path::new(&cli.base_path)).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Failed to initialize log storage: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    Arc::new(ServerState {
+        db,
+        cli,
+        log_storage: Arc::new(log_storage),
+    })
 }

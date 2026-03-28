@@ -25,7 +25,6 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::process::Command;
-use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -977,8 +976,8 @@ pub async fn nar(
         ));
     }
 
-    let file_path =
-        get_cache_nar_location(state.cli.base_path.clone(), path_hash, true).map_err(|e| {
+    let nar_file_path =
+        get_cache_nar_location(state.cli.base_path.clone(), path_hash.clone()).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(BaseResponse {
@@ -988,18 +987,87 @@ pub async fn nar(
             )
         })?;
 
-    let file = tokio::fs::File::open(&file_path).await.map_err(|e| {
+    let nar_bytes = if tokio::fs::metadata(&nar_file_path).await.is_ok() {
+        // Entry-point build: raw NAR is on disk — read and compress on the fly
+        tokio::fs::read(&nar_file_path).await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to read NAR file: {}", e),
+                }),
+            )
+        })?
+    } else {
+        // Non-entry-point: find the store path and pack on demand
+        let build_output = EBuildOutput::find()
+            .filter(
+                Condition::all()
+                    .add(CBuildOutput::IsCached.eq(true))
+                    .add(CBuildOutput::Hash.eq(path_hash)),
+            )
+            .one(&state.db)
+            .await
+            .map_err(WebError::from)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: format!("Database error: {}", e),
+                    }),
+                )
+            })?
+            .ok_or_else(|| {
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Path not found".to_string(),
+                    }),
+                )
+            })?;
+
+        let nix_path = get_path_from_build_output(build_output);
+
+        let output = Command::new(state.cli.binpath_nix.clone())
+            .arg("nar")
+            .arg("pack")
+            .arg(&nix_path)
+            .output()
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: format!("Failed to pack NAR: {}", e),
+                    }),
+                )
+            })?;
+
+        if !output.status.success() {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: "nix nar pack failed".to_string(),
+                }),
+            ));
+        }
+
+        output.stdout
+    };
+
+    let compressed = zstd::bulk::compress(&nar_bytes, 19).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(BaseResponse {
                 error: true,
-                message: format!("Failed to open file: {}", e),
+                message: format!("Failed to compress NAR: {}", e),
             }),
         )
     })?;
-
-    let stream = ReaderStream::new(file);
-    let body = Body::from_stream(stream);
 
     Response::builder()
         .status(StatusCode::OK)
@@ -1007,7 +1075,7 @@ pub async fn nar(
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/x-nix-nar"),
         )
-        .body(body)
+        .body(Body::from(compressed))
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

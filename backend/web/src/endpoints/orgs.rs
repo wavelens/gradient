@@ -75,7 +75,7 @@ pub async fn get_org_name_available(
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-) -> WebResult<Json<BaseResponse<ListResponse>>> {
+) -> WebResult<Json<BaseResponse<Vec<MOrganization>>>> {
     // TODO: Implement pagination
     let organizations = EOrganization::find()
         .join_rev(
@@ -89,20 +89,10 @@ pub async fn get(
         .all(&state.db)
         .await?;
 
-    let organizations: ListResponse = organizations
-        .iter()
-        .map(|o| ListItem {
-            id: o.id,
-            name: o.name.clone(),
-        })
-        .collect();
-
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: organizations,
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn put(

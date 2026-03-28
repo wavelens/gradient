@@ -9,8 +9,6 @@ use async_ssh2_lite::{AsyncSession, TokioTcpStream};
 use futures::Stream;
 use nix_daemon::nix::DaemonStore;
 use nix_daemon::{self, BasicDerivation, BuildMode, BuildResult, PathInfo, Progress, Store};
-use sea_orm::ActiveModelTrait;
-use sea_orm::ActiveValue::Set;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -98,7 +96,7 @@ pub async fn execute_build(
     info!("Executing build");
 
     let derivation_path = get_builds_path(vec![&build]).first().unwrap().to_string();
-    let mut build = build.clone();
+    let build = build.clone();
 
     let mut prog = remote_store.build_derivation(derivation_path, derivation, BuildMode::Normal);
 
@@ -130,37 +128,24 @@ pub async fn execute_build(
 
             let elapsed = last_flush.elapsed().as_millis();
             if elapsed >= FLUSH_INTERVAL_MS || pending.len() >= FLUSH_THRESHOLD_BYTES {
-                let full_log = format!(
-                    "{}{}",
-                    build.log.as_ref().unwrap_or(&"".to_string()),
-                    pending
-                );
+                state
+                    .log_storage
+                    .append(build.id, &pending)
+                    .await
+                    .context("Failed to append build log")?;
                 pending.clear();
                 last_flush = Instant::now();
-
-                let mut abuild: ABuild = build.clone().into();
-                abuild.log = Set(Some(full_log));
-                build = abuild
-                    .update(&state.db)
-                    .await
-                    .context("Failed to update build log")?;
             }
         }
     }
 
     // Flush any remaining buffered log
     if !pending.is_empty() {
-        let full_log = format!(
-            "{}{}",
-            build.log.as_ref().unwrap_or(&"".to_string()),
-            pending
-        );
-        let mut abuild: ABuild = build.clone().into();
-        abuild.log = Set(Some(full_log));
-        build = abuild
-            .update(&state.db)
+        state
+            .log_storage
+            .append(build.id, &pending)
             .await
-            .context("Failed to update build log")?;
+            .context("Failed to append build log")?;
     }
 
     match prog.result().await.map_err(|e| e.into()) {

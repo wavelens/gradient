@@ -326,7 +326,6 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 let mut abuild: ABuild = b.clone().into();
                 if b.status != BuildStatus::Completed {
                     abuild.status = Set(BuildStatus::Completed);
-                    abuild.log = Set(None);
                 }
 
                 abuild.evaluation = Set(evaluation.id);
@@ -349,7 +348,6 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                     architecture: Set(b.architecture.clone()),
                     status: Set(BuildStatus::Queued),
                     server: Set(None),
-                    log: Set(None),
                     created_at: Set(now),
                     updated_at: Set(now),
                 };
@@ -462,7 +460,6 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 architecture: system,
                 status: BuildStatus::Created,
                 server: None,
-                log: None,
                 created_at: Utc::now().naive_utc(),
                 updated_at: Utc::now().naive_utc(),
             }
@@ -474,7 +471,6 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 architecture: system,
                 status: BuildStatus::Completed,
                 server: None,
-                log: None,
                 created_at: Utc::now().naive_utc(),
                 updated_at: Utc::now().naive_utc(),
             }
@@ -684,7 +680,6 @@ async fn add_existing_build(
         architecture: Set(system),
         status: Set(BuildStatus::Completed),
         server: Set(None),
-        log: Set(None),
         created_at: Set(Utc::now().naive_utc()),
         updated_at: Set(Utc::now().naive_utc()),
     };

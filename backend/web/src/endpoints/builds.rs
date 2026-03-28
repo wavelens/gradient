@@ -182,7 +182,11 @@ pub async fn get_build_log(
         return Err(WebError::not_found("Build"));
     }
 
-    let log = build.log.unwrap_or_else(|| "".to_string());
+    let log = state
+        .log_storage
+        .read(build_id)
+        .await
+        .unwrap_or_default();
     let res = BaseResponse {
         error: false,
         message: log,
@@ -250,7 +254,7 @@ pub async fn post_build_log(
 
     // TODO: check if build is building
     let stream = stream! {
-        let mut last_log = build.log.unwrap_or("".to_string());
+        let mut last_offset: usize = 0;
         let mut sent_any: bool = false;
 
         loop {
@@ -262,12 +266,12 @@ pub async fn post_build_log(
                 Err(_) => break,
             };
 
-            let log = build.log.unwrap_or("".to_string());
-            let log_new = log[last_log.len()..].to_string();
+            let log = state.log_storage.read(build_id).await.unwrap_or_default();
+            let log_new = log[last_offset..].to_string();
 
             if !log_new.is_empty() {
                 sent_any = true;
-                last_log = log;
+                last_offset = log.len();
                 yield log_new;
             }
 

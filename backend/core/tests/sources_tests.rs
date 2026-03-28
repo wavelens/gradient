@@ -112,15 +112,10 @@ fn test_get_cache_nar_location() {
     let base_path = "/tmp/test_cache".to_string();
     let hash = "abc123def456789012345678901234567890abcd".to_string();
 
-    let compressed_location =
-        get_cache_nar_location(base_path.clone(), hash.clone(), true).unwrap();
-    let uncompressed_location =
-        get_cache_nar_location(base_path.clone(), hash.clone(), false).unwrap();
+    let location = get_cache_nar_location(base_path.clone(), hash.clone()).unwrap();
 
-    assert!(compressed_location.ends_with(".nar.zst"));
-    assert!(uncompressed_location.ends_with(".nar"));
-    assert!(compressed_location.contains("/ab/"));
-    assert!(uncompressed_location.contains("/ab/"));
+    assert!(location.ends_with(".nar"));
+    assert!(location.contains("/ab/"));
 
     // Cleanup
     std::fs::remove_dir_all("/tmp/test_cache").ok();

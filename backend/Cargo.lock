@@ -872,6 +872,7 @@ dependencies = [
  "sea-orm",
  "sentry",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
@@ -1081,6 +1082,7 @@ dependencies = [
  "sea-orm-migration",
  "serde",
  "serde_json",
+ "sha2",
  "ssh-key",
  "tempfile",
  "thiserror 2.0.18",
@@ -5952,6 +5954,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "zstd",
 ]
 
 [[package]]

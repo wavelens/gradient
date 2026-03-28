@@ -598,7 +598,7 @@ paths:
     get:
       tags: [orgs]
       summary: List organizations
-      description: Returns all organizations owned by the current user.
+      description: Returns all organizations the current user is a member of.
       operationId: listOrgs
       responses:
         '200':
@@ -611,7 +611,9 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/ListResponse'
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Organization'
         '401':
           $ref: '#/components/responses/Unauthorized'
     put:
@@ -955,7 +957,7 @@ paths:
     get:
       tags: [projects]
       summary: List projects
-      description: Returns all projects in the given organization.
+      description: Returns all projects in the given organization with full details.
       operationId: listProjects
       responses:
         '200':
@@ -968,7 +970,9 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/ListResponse'
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Project'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':

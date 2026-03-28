@@ -8,27 +8,48 @@ description = "Nix-based Continuous Integration System"
 repository = "https://github.com/wavelens/gradient"
 
 [workspace]
-members = [".", "core", "builder", "web", "cache", "entity", "migration"]
+members = [".", "core", "builder", "web", "cache", "entity", "migration", "nix-daemon"]
 resolver = "2"
 
 [workspace.dependencies]
-tokio = { version = "1.48", features = ["rt-multi-thread"] }
-uuid = { version = "1.19", features = ["fast-rng", "macro-diagnostics", "v4"] }
-sea-orm = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
-chrono = "0.4"
-serde = { version = "1", features = ["derive"] }
-tracing = "0.1"
+# Internal crates
+builder   = { path = "builder" }
+cache     = { path = "cache" }
+core      = { path = "core", package = "core" }
+entity    = { path = "entity" }
+migration = { path = "migration" }
+nix-daemon = { path = "nix-daemon" }
+web       = { path = "web" }
+
+# External
+anyhow           = "1.0"
+async-stream     = "0.3"
+async-trait      = "0.1"
+chrono           = "0.4"
+futures          = "0.3"
+mockall          = "0.14"
+rand             = "0.9"
+sea-orm          = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-uuid"] }
+sea-orm-migration = { version = "1.1", features = ["with-uuid", "with-chrono", "with-json", "sqlx-postgres", "runtime-tokio"] }
+sentry           = "0.47"
+serde            = { version = "1", features = ["derive"] }
+serde_json       = "1.0"
+sha2             = "0.10"
+thiserror        = "2.0"
+tokio            = { version = "1.48", features = ["rt-multi-thread"] }
+tokio-test       = "0.4"
+tracing          = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-anyhow = "1.0"
-thiserror = "2.0"
+uuid             = { version = "1.19", features = ["fast-rng", "macro-diagnostics", "v4"] }
+zstd             = "0.13"
 
 [dependencies]
-builder = { path = "builder" }
-cache = { path = "cache" }
-clap = { version = "4.5", features = ["derive"] }
-gradient-core = { path = "core", package = "core" }
-sentry = "0.47"
-tokio = { version = "1.48", features = ["process", "rt-multi-thread"] }
-tracing = { workspace = true }
+builder          = { workspace = true }
+cache            = { workspace = true }
+clap             = { version = "4.5", features = ["derive"] }
+gradient-core    = { path = "core", package = "core" }
+sentry           = { workspace = true }
+tokio            = { workspace = true, features = ["process"] }
+tracing          = { workspace = true }
 tracing-subscriber = { workspace = true }
-web = { path = "web" }
+web              = { workspace = true }

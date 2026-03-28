@@ -539,9 +539,9 @@ pub fn generate_signing_key(secret_file: String) -> Result<(String, String), Sou
 
     let keypair = KeyPair::generate();
     // Base64-encode the full 64-byte keypair (seed || public key)
-    let key_b64 = general_purpose::STANDARD.encode(&*keypair);
+    let key_b64 = general_purpose::STANDARD.encode(*keypair);
     // Derive the standalone public key (last 32 bytes)
-    let public_key_b64 = general_purpose::STANDARD.encode(&*keypair.pk);
+    let public_key_b64 = general_purpose::STANDARD.encode(*keypair.pk);
 
     let encrypted_private_key =
         crypter::encrypt_with_password(&secret, key_b64.as_bytes())
@@ -677,7 +677,6 @@ pub fn get_path_from_build_output(build_output: MBuildOutput) -> String {
 pub fn get_cache_nar_location(
     base_path: String,
     hash: String,
-    compressed: bool,
 ) -> Result<String, SourceError> {
     let hash_hex = hash.as_str();
     std::fs::create_dir_all(format!("{}/nars/{}", base_path, &hash_hex[0..2])).map_err(|e| {
@@ -687,11 +686,10 @@ pub fn get_cache_nar_location(
     })?;
 
     Ok(format!(
-        "{}/nars/{}/{}.nar{}",
+        "{}/nars/{}/{}.nar",
         base_path,
         &hash_hex[0..2],
         &hash_hex[2..],
-        if compressed { ".zst" } else { "" }
     ))
 }
 

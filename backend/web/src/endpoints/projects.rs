@@ -151,7 +151,7 @@ pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> WebResult<Json<BaseResponse<ListResponse>>> {
+) -> WebResult<Json<BaseResponse<Vec<ProjectResponse>>>> {
     // TODO: Implement pagination
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
@@ -163,20 +163,32 @@ pub async fn get(
         .all(&state.db)
         .await?;
 
-    let projects: ListResponse = projects
-        .iter()
-        .map(|p| ListItem {
+    let can_edit = user_can_edit(&state, user.id, organization.id).await?;
+
+    let projects: Vec<ProjectResponse> = projects
+        .into_iter()
+        .map(|p| ProjectResponse {
             id: p.id,
-            name: p.name.clone(),
+            organization: p.organization,
+            name: p.name,
+            active: p.active,
+            display_name: p.display_name,
+            description: p.description,
+            repository: p.repository,
+            evaluation_wildcard: p.evaluation_wildcard,
+            last_evaluation: p.last_evaluation,
+            force_evaluation: p.force_evaluation,
+            created_by: p.created_by,
+            created_at: p.created_at,
+            managed: p.managed,
+            can_edit,
         })
         .collect();
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: projects,
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn put(

@@ -5,10 +5,11 @@
  - logging in without authorization
  - retry failed builds (retry)
  - Add Non-SSH server as default
- - Save build log in Storage not Database
- - Wrong OIDC as log in journal error
+ - Log OIDC Errors in journal error
  - Add Super User
  - Base Servers (for all orgs)
+ - Entry points show latest possible entry points
+ - Queued and Evaluating (2 evaluations) at the same time
  - aborted evaluations should restart on server restart
  - if git link is http(s) make link clickable
  - no Hover Effect on Dashboard for non clickable Elements
