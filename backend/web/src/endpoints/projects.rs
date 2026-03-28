@@ -692,9 +692,23 @@ pub async fn get_project_entry_points(
     .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
 
+    let latest_evaluation_id = match project.last_evaluation {
+        Some(id) => id,
+        None => {
+            return Ok(Json(BaseResponse {
+                error: false,
+                message: vec![],
+            }))
+        }
+    };
+
+    let evaluation = EEvaluation::find_by_id(latest_evaluation_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Evaluation"))?;
+
     let entry_points = EEntryPoint::find()
-        .filter(CEntryPoint::Project.eq(project.id))
-        .order_by_desc(CEntryPoint::CreatedAt)
+        .filter(CEntryPoint::Evaluation.eq(latest_evaluation_id))
         .all(&state.db)
         .await?;
 
@@ -706,23 +720,15 @@ pub async fn get_project_entry_points(
     }
 
     let build_ids: Vec<Uuid> = entry_points.iter().map(|ep| ep.build).collect();
-    let evaluation_ids: Vec<Uuid> = entry_points.iter().map(|ep| ep.evaluation).collect();
 
     let builds = EBuild::find()
         .filter(CBuild::Id.is_in(build_ids))
         .all(&state.db)
         .await?;
 
-    let evaluations = EEvaluation::find()
-        .filter(CEvaluation::Id.is_in(evaluation_ids))
-        .all(&state.db)
-        .await?;
-
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     let build_map: HashMap<Uuid, MBuild> = builds.into_iter().map(|b| (b.id, b)).collect();
-    let eval_map: HashMap<Uuid, MEvaluation> = evaluations.into_iter().map(|e| (e.id, e)).collect();
 
-    let mut seen: HashSet<String> = HashSet::new();
     let mut summaries = Vec::new();
 
     for ep in entry_points {
@@ -730,23 +736,17 @@ pub async fn get_project_entry_points(
             Some(b) => b,
             None => continue,
         };
-        let evaluation = match eval_map.get(&ep.evaluation) {
-            Some(e) => e,
-            None => continue,
-        };
 
-        if seen.insert(build.derivation_path.clone()) {
-            summaries.push(EntryPointSummary {
-                id: ep.id,
-                build_id: build.id,
-                derivation_path: build.derivation_path.clone(),
-                build_status: build.status.clone(),
-                architecture: build.architecture.clone(),
-                evaluation_id: evaluation.id,
-                evaluation_status: evaluation.status.clone(),
-                created_at: ep.created_at,
-            });
-        }
+        summaries.push(EntryPointSummary {
+            id: ep.id,
+            build_id: build.id,
+            derivation_path: build.derivation_path.clone(),
+            build_status: build.status.clone(),
+            architecture: build.architecture.clone(),
+            evaluation_id: evaluation.id,
+            evaluation_status: evaluation.status.clone(),
+            created_at: ep.created_at,
+        });
     }
 
     Ok(Json(BaseResponse {

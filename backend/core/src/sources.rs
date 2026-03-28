@@ -535,12 +535,41 @@ pub fn generate_signing_key(secret_file: String) -> Result<String, SourceError> 
     let secret = crate::input::load_secret_bytes(&secret_file);
 
     let private_key = KeyPair::generate();
-    let encrypted_private_key = crypter::encrypt_with_password(&secret, *private_key)
-        .ok_or(SourceError::CryptographicOperation)?;
+    // Base64-encode the raw key bytes so the decrypted value is valid UTF-8
+    let key_b64 = general_purpose::STANDARD.encode(&*private_key);
+    let encrypted_private_key =
+        crypter::encrypt_with_password(&secret, key_b64.as_bytes())
+            .ok_or(SourceError::CryptographicOperation)?;
 
-    let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_private_key);
+    Ok(general_purpose::STANDARD.encode(&encrypted_private_key))
+}
 
-    Ok(encrypted_private_key)
+pub fn format_cache_public_key(
+    secret_file: String,
+    cache: MCache,
+    url: String,
+) -> Result<String, SourceError> {
+    let key_b64 = decrypt_signing_key(secret_file, cache.clone())?;
+
+    let key_bytes = general_purpose::STANDARD
+        .decode(key_b64.trim())
+        .map_err(|e| SourceError::CacheKeyDecoding {
+            cache: cache.name.clone(),
+            reason: format!("Failed to base64-decode signing key: {}", e),
+        })?;
+
+    // The ed25519 keypair is 64 bytes: first 32 = seed, last 32 = public key
+    if key_bytes.len() < 32 {
+        return Err(SourceError::KeyPairConversion);
+    }
+    let pubkey_b64 = general_purpose::STANDARD.encode(&key_bytes[key_bytes.len() - 32..]);
+
+    let base_url = url
+        .replace("https://", "")
+        .replace("http://", "")
+        .replace(":", "-");
+
+    Ok(format!("{}-{}:{}", base_url, cache.name, pubkey_b64))
 }
 
 pub fn decrypt_signing_key(secret_file: String, cache: MCache) -> Result<String, SourceError> {

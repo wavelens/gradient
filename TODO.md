@@ -1,10 +1,8 @@
- - garbage collection and gcroots
  - build error: wrong build mode
+ - garbage collection and gcroots
  - invalid auth attempts
 
  - Artifacts downloadable
- - missing redirect after login
- - stayed logged in on multiple tabs
  - graph node should enter when release mouse button is not dragging
  - logging in without authorization
  - retry failed builds (retry)
@@ -12,6 +10,7 @@
  - Add Non-SSH server as default
  - Save build log in Storage not Database
  - Wrong OIDC as log in journal error
+ - Add Super User
  - Base Servers (for all orgs)
  - Hover Effect on Dashboard for non clickable Elements
  - Add Footer: AGPL License and link to github and wavelens and version

@@ -66,8 +66,9 @@ export class AuthService {
         tap((token) => {
           this.tokenSignal.set(token);
           localStorage.setItem('jwt_token', token);
-          this.loadUser();
         }),
+        switchMap(() => this.api.get<User>('user')),
+        tap((user) => this.userSignal.set(user)),
         finalize(() => this.loadingSignal.set(false))
       );
   }
@@ -137,10 +138,12 @@ export class AuthService {
   /**
    * Complete login with a token received from an external flow (e.g. OIDC callback)
    */
-  loginWithToken(token: string): void {
+  loginWithToken(token: string): Observable<User> {
     this.tokenSignal.set(token);
     localStorage.setItem('jwt_token', token);
-    this.loadUser();
+    return this.api.get<User>('user').pipe(
+      tap((user) => this.userSignal.set(user))
+    );
   }
 
   /**

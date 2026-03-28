@@ -35,7 +35,7 @@ info:
     substituters = https://gradient.example.com/cache/mycache
     trusted-public-keys = gradient.example.com-mycache:...
     ```
-    The public key is returned by `GET /api/v1/caches/{cache}/key`.
+    The public key is returned by `GET /api/v1/caches/{cache}/public-key`.
 
     ## State Management
 
@@ -2008,18 +2008,88 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /caches/{cache}/public:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    post:
+      tags: [caches]
+      summary: Make cache public
+      description: Makes the cache visible to all authenticated users.
+      operationId: makeCachePublic
+      responses:
+        '200':
+          description: Cache is now public
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [caches]
+      summary: Make cache private
+      description: Restricts the cache to its owner only.
+      operationId: makeCachePrivate
+      responses:
+        '200':
+          description: Cache is now private
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /caches/{cache}/key:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [caches]
+      summary: Get cache secret signing key
+      description: |-
+        Returns the Nix-format secret signing key string for the cache, e.g.:
+        `gradient.example.com-mycache:AAAA...` (base64-encoded 64-byte ed25519 keypair)
+
+        This key is used internally by Gradient to sign store paths uploaded to the cache.
+        Keep it secret — do not add it to `nix.conf`.
+        To configure Nix clients, use the public key from `GET /caches/{cache}/public-key` instead.
+      operationId: getCacheKey
+      responses:
+        '200':
+          description: Cache secret signing key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "gradient.example.com-mycache:AAAA..."
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/public-key:
     parameters:
       - $ref: '#/components/parameters/CacheSlug'
     get:
       tags: [caches]
       summary: Get cache public key
       description: |-
-        Returns the Nix-format cache public key string, e.g.:
-        `gradient.example.com-mycache:abc123...`
+        Returns the Nix-format public key string for the cache, e.g.:
+        `gradient.example.com-mycache:AAAA...` (base64-encoded 32-byte ed25519 public key)
 
-        Add this to `trusted-public-keys` in `nix.conf` or NixOS configuration.
-      operationId: getCacheKey
+        Add this value to `trusted-public-keys` in `nix.conf` or NixOS configuration so
+        Nix clients can verify signatures on store paths served from this cache.
+      operationId: getCachePublicKey
       responses:
         '200':
           description: Cache public key

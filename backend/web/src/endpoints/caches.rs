@@ -16,8 +16,8 @@ use core::database::{get_any_cache_by_name, get_cache_by_name};
 use core::executer::{get_local_store, get_pathinfo};
 use core::input::{check_index_name, validate_display_name};
 use core::sources::{
-    format_cache_key, generate_signing_key, get_cache_nar_location, get_hash_from_url,
-    get_path_from_build_output,
+    format_cache_key, format_cache_public_key, generate_signing_key, get_cache_nar_location,
+    get_hash_from_url, get_path_from_build_output,
 };
 use core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -661,6 +661,66 @@ pub async fn get_cache_key(
     };
 
     Ok(Json(res))
+}
+
+pub async fn get_cache_public_key(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(cache): Path<String>,
+) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
+    let cache: MCache = match get_any_cache_by_name(state.0.clone(), cache.clone()).await {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Cache not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
+                }),
+            ));
+        }
+    };
+
+    if !cache.public && cache.created_by != user.id {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(BaseResponse {
+                error: true,
+                message: "Cache not found".to_string(),
+            }),
+        ));
+    }
+
+    let public_key = match format_cache_public_key(
+        state.cli.crypt_secret_file.clone(),
+        cache,
+        state.cli.serve_url.clone(),
+    ) {
+        Ok(key) => key,
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to derive public key: {}", e),
+                }),
+            ));
+        }
+    };
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: public_key,
+    }))
 }
 
 pub async fn nix_cache_info(

@@ -21,8 +21,10 @@ export class OidcCallbackComponent implements OnInit {
   ngOnInit(): void {
     const token = this.route.snapshot.queryParamMap.get('token');
     if (token) {
-      this.authService.loginWithToken(token);
-      this.router.navigate(['/']);
+      this.authService.loginWithToken(token).subscribe({
+        next: () => this.router.navigate(['/']),
+        error: () => this.router.navigate(['/account/login']),
+      });
     } else {
       this.router.navigate(['/account/login']);
     }

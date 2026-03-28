@@ -166,6 +166,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             post(caches::post_cache_public).delete(caches::delete_cache_public),
         )
         .route("/caches/{cache}/key", get(caches::get_cache_key))
+        .route("/caches/{cache}/public-key", get(caches::get_cache_public_key))
         .route("/builds/{build}", get(builds::get_build))
         .route(
             "/builds/{build}/dependencies",

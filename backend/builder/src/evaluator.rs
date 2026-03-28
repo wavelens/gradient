@@ -338,14 +338,9 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 all_dependencies.push(dep);
             } else {
                 // Not in nix store — needs to be rebuilt.
-                // Delete stale dependency records so scheduling is not blocked by old state,
-                // then re-add to the BFS queue so sub-dependencies are re-traversed.
-                EBuildDependency::delete_many()
-                    .filter(CBuildDependency::Build.eq(b.id))
-                    .exec(&state.db)
-                    .await
-                    .context("Failed to delete stale build dependencies")?;
-
+                // Dependencies (build_dependency records) are unchanged since the derivation
+                // inputs are the same. Re-add to the BFS queue so any non-completed
+                // sub-dependencies are also reset to Queued recursively.
                 let mut abuild: ABuild = b.clone().into();
                 abuild.status = Set(BuildStatus::Queued);
                 abuild.log = Set(None);
@@ -358,9 +353,8 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 reused_build_ids.insert(b.id);
 
                 // Re-add to BFS with the existing build ID so sub-dependencies are
-                // processed and correct dependency records are created.
-                // The parent dep {build_id → b.id} will be emitted via the dependency_id
-                // mechanism at the end of the BFS iteration for b.derivation_path.
+                // traversed. The parent dep {build_id → b.id} will be emitted via the
+                // dependency_id mechanism at the end of the BFS iteration for b.drv.
                 references.push((b.derivation_path.clone(), Some(build_id), b.id));
 
                 trace!(build = %build_id, dependency = %b.id, "Re-queuing non-completed build for dependency traversal");
