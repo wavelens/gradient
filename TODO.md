@@ -6,6 +6,7 @@
  - logging in without authorization
  - retry failed builds (retry)
  - Builds should appear increamentally on log page.
+ - Copy old runs
  - Add Non-SSH server as default
  - Save build log in Storage not Database
  - Wrong OIDC as log in journal error
@@ -13,7 +14,10 @@
  - Add Max Concurrent Builds per Server Option
  - Base Servers (for all orgs)
  - aborted evaluations should restart on server restart
+ - caches should return the public key in instead of having multiple api endpoints for public key
  - graph node should enter when release mouse button is not dragging
  - graph "aborted" should be gray color
+ - log when last selected build was building as the selected build is completed go to the next building build (or wait for the next build to start)
+ - double logs with more new lines than needed (when streaming new lines are added to the log)
  - no Hover Effect on Dashboard for non clickable Elements
  - Add Footer: AGPL License and link to github and wavelens and version

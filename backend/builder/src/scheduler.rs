@@ -38,7 +38,7 @@ async fn parse_derivation_file(
     Vec<String>,
     HashMap<String, String>,
     HashSet<String>,
-    HashMap<String, (Option<String>, Option<String>)>,
+    HashMap<String, (Option<String>, Option<String>, Option<String>)>,
 )> {
     if !derivation_path.ends_with(".drv") {
         return Ok((
@@ -131,61 +131,90 @@ async fn parse_derivation_file(
         })
         .unwrap_or_default();
 
-    // Extract per-output hash info for fixed-output derivations so the nix
-    // daemon recognises them as FODs and grants sandbox network access.
-    let output_hashes: HashMap<String, (Option<String>, Option<String>)> = derivation_data
-        .get("outputs")
-        .and_then(|v| v.as_object())
-        .map(|obj| {
-            obj.iter()
-                .map(|(k, v)| {
-                    let hash_algo = v
-                        .get("hashAlgo")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                    let hash = v
-                        .get("hash")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                    (k.to_string(), (hash_algo, hash))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    // Extract per-output info: path, hashAlgo, and hash.
+    //
+    // New nix JSON format (2.22+):
+    //   - "path" omits the "/nix/store/" prefix (or is absent for FODs)
+    //   - "method": "flat" | "nar" | "text"  (separate from hashAlgo)
+    //   - "hashAlgo": "sha256"  (just the algorithm)
+    //
+    // Old nix JSON format:
+    //   - "path" includes the full "/nix/store/..." path
+    //   - "hashAlgo": "r:sha256" | "sha256" | "text:sha256"  (method+algo combined)
+    //   - no "method" field
+    let output_info: HashMap<String, (Option<String>, Option<String>, Option<String>)> =
+        derivation_data
+            .get("outputs")
+            .and_then(|v| v.as_object())
+            .map(|obj| {
+                obj.iter()
+                    .map(|(k, v)| {
+                        // Path: new nix omits the store prefix; old nix includes it.
+                        let path = v
+                            .get("path")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                            .map(|s| {
+                                if s.starts_with("/nix/store/") {
+                                    s.to_string()
+                                } else {
+                                    format!("/nix/store/{}", s)
+                                }
+                            });
 
-    Ok((builder, args, env, input_srcs, output_hashes))
+                        // hashAlgo: combine method + algo for new nix format.
+                        // Old nix already includes the method in hashAlgo ("r:sha256").
+                        let algo = v
+                            .get("hashAlgo")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty());
+                        let hash_algo = algo.map(|algo| {
+                            // If algo already contains ":" it's old format (method included).
+                            if algo.contains(':') {
+                                algo.to_string()
+                            } else {
+                                // New format: look for separate "method" field.
+                                match v.get("method").and_then(|v| v.as_str()) {
+                                    Some("nar") => format!("r:{}", algo),
+                                    Some("text") => format!("text:{}", algo),
+                                    _ => algo.to_string(), // "flat" or absent → no prefix
+                                }
+                            }
+                        });
+
+                        let hash = v
+                            .get("hash")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string());
+
+                        (k.to_string(), (path, hash_algo, hash))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+    Ok((builder, args, env, input_srcs, output_info))
 }
 
 async fn create_basic_derivation(
     build: &MBuild,
-    local_daemon: &mut LocalNixStore,
+    _local_daemon: &mut LocalNixStore,
     dependencies: Vec<String>,
     state: Arc<ServerState>,
 ) -> anyhow::Result<BasicDerivation> {
-    let out_paths = match local_daemon {
-        LocalNixStore::UnixStream(store) => {
-            get_output_paths(build.derivation_path.clone(), store).await?
-        }
-        LocalNixStore::CommandDuplex(store) => {
-            get_output_paths(build.derivation_path.clone(), store).await?
-        }
-    };
-
-    let (builder, args, env, input_srcs, output_hashes) =
+    let (builder, args, env, input_srcs, output_info) =
         parse_derivation_file(state.cli.binpath_nix.as_str(), &build.derivation_path)
             .await
             .context("Failed to parse derivation file")?;
 
+    // Build outputs from `nix derivation show` JSON. Always include the path.
     let mut outputs = HashMap::new();
-    for (name, path) in out_paths {
-        let (hash_algo, hash) = output_hashes
-            .get(&name)
-            .cloned()
-            .unwrap_or((None, None));
+    for (name, (json_path, hash_algo, hash)) in output_info {
         outputs.insert(
             name,
             DerivationOutput {
-                path: Some(path),
+                path: json_path,
                 hash_algo,
                 hash,
             },

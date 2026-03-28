@@ -21,6 +21,7 @@ pub struct Model {
     pub description: String,
     pub active: bool,
     pub priority: i32,
+    #[serde(skip_serializing)]
     pub signing_key: String,
     pub public: bool,
     pub created_by: Uuid,
