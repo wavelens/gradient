@@ -18,6 +18,7 @@ export interface UserSettings {
   username: string;
   name: string;
   email: string;
+  is_oidc: boolean;
 }
 
 export interface ApiKey {

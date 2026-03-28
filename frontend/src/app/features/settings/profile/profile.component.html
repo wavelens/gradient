@@ -30,25 +30,33 @@
     <!-- Profile Form -->
     <div class="settings-section">
       <h2>Personal Information</h2>
+      @if (isOidc()) {
+        <div class="message-banner info">
+          <span class="material-symbols-outlined">info</span>
+          Your profile is managed by your identity provider and cannot be edited here.
+        </div>
+      }
       <div class="settings-card">
         <div class="form-group">
           <label for="username">Username</label>
-          <input pInputText id="username" [(ngModel)]="formData.username" class="w-full" />
+          <input pInputText id="username" [(ngModel)]="formData.username" class="w-full" [disabled]="isOidc()" />
         </div>
 
         <div class="form-group">
           <label for="name">Full Name</label>
-          <input pInputText id="name" [(ngModel)]="formData.name" class="w-full" />
+          <input pInputText id="name" [(ngModel)]="formData.name" class="w-full" [disabled]="isOidc()" />
         </div>
 
         <div class="form-group">
           <label for="email">Email</label>
-          <input pInputText id="email" type="email" [(ngModel)]="formData.email" class="w-full" />
+          <input pInputText id="email" type="email" [(ngModel)]="formData.email" class="w-full" [disabled]="isOidc()" />
         </div>
 
-        <div class="form-actions">
-          <button pButton label="Save Changes" icon="pi pi-check" (click)="saveSettings()" [loading]="saving()" [disabled]="saving()"></button>
-        </div>
+        @if (!isOidc()) {
+          <div class="form-actions">
+            <button pButton label="Save Changes" icon="pi pi-check" (click)="saveSettings()" [loading]="saving()" [disabled]="saving()"></button>
+          </div>
+        }
       </div>
     </div>
 

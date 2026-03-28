@@ -44,6 +44,7 @@ pub struct GetUserSettingsResponse {
     pub username: String,
     pub name: String,
     pub email: String,
+    pub is_oidc: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -209,6 +210,7 @@ pub async fn get_settings(
     let res = BaseResponse {
         error: false,
         message: GetUserSettingsResponse {
+            is_oidc: user.password.is_none(),
             username: user.username.clone(),
             name: user.name.clone(),
             email: user.email.clone(),
@@ -226,6 +228,11 @@ pub async fn patch_settings(
     // Prevent modification of state-managed users
     if user.managed {
         return Err(WebError::Forbidden("Cannot modify state-managed user. This user is managed by configuration and cannot be edited through the API.".to_string()));
+    }
+
+    // OIDC users cannot edit their profile — identity is managed by the provider
+    if user.password.is_none() {
+        return Err(WebError::Forbidden("Cannot modify profile of an OIDC user. Your profile is managed by your identity provider.".to_string()));
     }
 
     let mut auser: AUser = user.into();

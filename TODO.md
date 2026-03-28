@@ -3,7 +3,6 @@
  - invalid auth attempts
 
  - Artifacts downloadable
- - graph node should enter when release mouse button is not dragging
  - logging in without authorization
  - retry failed builds (retry)
  - Builds should appear increamentally on log page.
@@ -11,6 +10,10 @@
  - Save build log in Storage not Database
  - Wrong OIDC as log in journal error
  - Add Super User
+ - Add Max Concurrent Builds per Server Option
  - Base Servers (for all orgs)
- - Hover Effect on Dashboard for non clickable Elements
+ - aborted evaluations should restart on server restart
+ - graph node should enter when release mouse button is not dragging
+ - graph "aborted" should be gray color
+ - no Hover Effect on Dashboard for non clickable Elements
  - Add Footer: AGPL License and link to github and wavelens and version

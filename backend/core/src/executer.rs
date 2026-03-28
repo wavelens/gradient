@@ -124,6 +124,9 @@ pub async fn execute_build(
             && !text.is_empty()
         {
             pending.push_str(&text);
+            if !text.ends_with('\n') {
+                pending.push('\n');
+            }
 
             let elapsed = last_flush.elapsed().as_millis();
             if elapsed >= FLUSH_INTERVAL_MS || pending.len() >= FLUSH_THRESHOLD_BYTES {

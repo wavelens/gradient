@@ -38,6 +38,7 @@ async fn parse_derivation_file(
     Vec<String>,
     HashMap<String, String>,
     HashSet<String>,
+    HashMap<String, (Option<String>, Option<String>)>,
 )> {
     if !derivation_path.ends_with(".drv") {
         return Ok((
@@ -45,6 +46,7 @@ async fn parse_derivation_file(
             vec![],
             HashMap::new(),
             HashSet::new(),
+            HashMap::new(),
         ));
     }
 
@@ -129,7 +131,29 @@ async fn parse_derivation_file(
         })
         .unwrap_or_default();
 
-    Ok((builder, args, env, input_srcs))
+    // Extract per-output hash info for fixed-output derivations so the nix
+    // daemon recognises them as FODs and grants sandbox network access.
+    let output_hashes: HashMap<String, (Option<String>, Option<String>)> = derivation_data
+        .get("outputs")
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            obj.iter()
+                .map(|(k, v)| {
+                    let hash_algo = v
+                        .get("hashAlgo")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let hash = v
+                        .get("hash")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    (k.to_string(), (hash_algo, hash))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok((builder, args, env, input_srcs, output_hashes))
 }
 
 async fn create_basic_derivation(
@@ -147,19 +171,23 @@ async fn create_basic_derivation(
         }
     };
 
-    let (builder, args, env, input_srcs) =
+    let (builder, args, env, input_srcs, output_hashes) =
         parse_derivation_file(state.cli.binpath_nix.as_str(), &build.derivation_path)
             .await
             .context("Failed to parse derivation file")?;
 
     let mut outputs = HashMap::new();
     for (name, path) in out_paths {
+        let (hash_algo, hash) = output_hashes
+            .get(&name)
+            .cloned()
+            .unwrap_or((None, None));
         outputs.insert(
             name,
             DerivationOutput {
                 path: Some(path),
-                hash_algo: None,
-                hash: None,
+                hash_algo,
+                hash,
             },
         );
     }
@@ -1606,14 +1634,16 @@ async fn check_evaluation_status(state: Arc<ServerState>, evaluation_id: Uuid) {
         .map(|b| b.status)
         .collect::<Vec<BuildStatus>>();
 
+    let in_progress = statuses.iter().any(|s| {
+        matches!(s, BuildStatus::Queued | BuildStatus::Created | BuildStatus::Building)
+    });
+
     let status = if statuses.iter().all(|s| *s == BuildStatus::Completed) {
         EvaluationStatus::Completed
-    } else if statuses.contains(&BuildStatus::Building) {
+    } else if !in_progress && statuses.contains(&BuildStatus::Failed) {
         EvaluationStatus::Failed
-    } else if statuses.contains(&BuildStatus::Aborted) {
+    } else if !in_progress && statuses.contains(&BuildStatus::Aborted) {
         EvaluationStatus::Aborted
-    } else if statuses.contains(&BuildStatus::Failed) {
-        EvaluationStatus::Failed
     } else {
         return;
     };

@@ -38,6 +38,7 @@ export class ProfileComponent implements OnInit {
   loading = signal(true);
   saving = signal(false);
   deleting = signal(false);
+  isOidc = signal(false);
 
   showDeleteDialog = signal(false);
   errorMessage = signal<string | null>(null);
@@ -57,6 +58,7 @@ export class ProfileComponent implements OnInit {
     this.loading.set(true);
     this.userService.getUserSettings().subscribe({
       next: (settings) => {
+        this.isOidc.set(settings.is_oidc);
         this.formData = {
           username: settings.username,
           name: settings.name,
