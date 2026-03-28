@@ -181,30 +181,7 @@
   .build-item.selected & { color: $text-primary; }
 }
 
-.build-dl-link {
-  display: flex;
-  align-items: center;
-  color: $text-light;
-  text-decoration: none;
-  flex-shrink: 0;
-  padding: 2px;
-  border-radius: $border-radius-sm;
-  transition: color $transition-fast, background $transition-fast;
-
-  .material-symbols-outlined { font-size: 0.95rem; }
-
-  &:not(.disabled):hover {
-    color: $text-primary;
-    background: $color-hover;
-  }
-
-  &.disabled {
-    opacity: 0.3;
-    cursor: default;
-    pointer-events: none;
-  }
-}
-
+.build-dl-link,
 .graph-link {
   display: none;
   align-items: center;
@@ -223,6 +200,7 @@
   }
 }
 
+.build-item:hover .build-dl-link,
 .build-item:hover .graph-link { display: flex; }
 
 // ── Right Main ────────────────────────────────────────────────────────────────

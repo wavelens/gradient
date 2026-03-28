@@ -786,8 +786,8 @@ async fn apply_caches(
             )
         })?;
 
-        // Validate that the signing key is base64 encoded
-        general_purpose::STANDARD
+        // Validate that the signing key is base64 encoded and derive the public key
+        let key_bytes = general_purpose::STANDARD
             .decode(signing_key.trim())
             .map_err(|e| {
                 format!(
@@ -796,7 +796,18 @@ async fn apply_caches(
                 )
             })?;
 
-        // Encrypt signing key using crypter library
+        if key_bytes.len() < 32 {
+            return Err(format!(
+                "Signing key for cache '{}' is too short (expected at least 32 bytes)",
+                state_cache.name
+            )
+            .into());
+        }
+
+        // The last 32 bytes of the ed25519 keypair are the public key
+        let public_key = general_purpose::STANDARD.encode(&key_bytes[key_bytes.len() - 32..]);
+
+        // Encrypt private key using crypter library
         let secret = load_secret_bytes(crypt_secret_file);
 
         let encrypted_bytes = crypter::encrypt_with_password(&secret, signing_key.trim())
@@ -826,7 +837,8 @@ async fn apply_caches(
             cache_model.description = Set(state_cache.description.clone());
             cache_model.active = Set(state_cache.active);
             cache_model.priority = Set(state_cache.priority);
-            cache_model.signing_key = Set(encrypted_signing_key.clone());
+            cache_model.public_key = Set(public_key.clone());
+            cache_model.private_key = Set(encrypted_signing_key.clone());
             cache_model.created_by = Set(*created_by_id);
             cache_model.public = Set(state_cache.public);
             cache_model.managed = Set(true);
@@ -843,7 +855,8 @@ async fn apply_caches(
                 description: Set(state_cache.description.clone()),
                 active: Set(state_cache.active),
                 priority: Set(state_cache.priority),
-                signing_key: Set(encrypted_signing_key),
+                public_key: Set(public_key),
+                private_key: Set(encrypted_signing_key),
                 public: Set(state_cache.public),
                 created_by: Set(*created_by_id),
                 created_at: Set(now),

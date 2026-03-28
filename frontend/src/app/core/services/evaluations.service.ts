@@ -31,8 +31,9 @@ export interface BuildGraph {
 
 export interface BuildItem {
   id: string;
-  name: string;   // derivation path
-  status: string; // BuildStatus as string
+  name: string;          // derivation path
+  status: string;        // BuildStatus as string
+  has_artefacts: boolean;
 }
 
 export interface BuildProduct {

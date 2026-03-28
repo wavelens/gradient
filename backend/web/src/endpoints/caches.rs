@@ -232,10 +232,11 @@ pub async fn put(
         return Err(WebError::already_exists("Cache Name"));
     }
 
-    let signing_key = generate_signing_key(state.cli.crypt_secret_file.clone()).map_err(|e| {
-        tracing::error!("Failed to generate signing key: {}", e);
-        WebError::InternalServerError("Failed to generate signing key".to_string())
-    })?;
+    let (private_key, public_key) =
+        generate_signing_key(state.cli.crypt_secret_file.clone()).map_err(|e| {
+            tracing::error!("Failed to generate signing key: {}", e);
+            WebError::InternalServerError("Failed to generate signing key".to_string())
+        })?;
 
     let cache = ACache {
         id: Set(Uuid::new_v4()),
@@ -244,7 +245,8 @@ pub async fn put(
         display_name: Set(body.display_name.clone()),
         description: Set(body.description.clone()),
         priority: Set(body.priority),
-        signing_key: Set(signing_key),
+        public_key: Set(public_key),
+        private_key: Set(private_key),
         public: Set(body.public.unwrap_or(false)),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),

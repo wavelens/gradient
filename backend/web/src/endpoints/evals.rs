@@ -16,6 +16,7 @@ use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::fs;
 use tracing::error;
 use uuid::Uuid;
 
@@ -29,6 +30,7 @@ pub struct BuildItem {
     pub id: Uuid,
     pub name: String,
     pub status: String,
+    pub has_artefacts: bool,
 }
 
 #[derive(Serialize, Debug)]
@@ -235,6 +237,32 @@ pub async fn get_evaluation_builds(
         .all(&state.db)
         .await?;
 
+    // Batch-query outputs for completed builds to check for hydra-build-products
+    let completed_ids: Vec<Uuid> = builds
+        .iter()
+        .filter(|b| b.status == entity::build::BuildStatus::Completed)
+        .map(|b| b.id)
+        .collect();
+
+    let all_outputs = if completed_ids.is_empty() {
+        vec![]
+    } else {
+        EBuildOutput::find()
+            .filter(CBuildOutput::Build.is_in(completed_ids))
+            .all(&state.db)
+            .await?
+    };
+
+    let mut has_artefacts_map: HashMap<Uuid, bool> = HashMap::new();
+    for output in all_outputs {
+        let path = format!("{}/nix-support/hydra-build-products", output.output);
+        if fs::metadata(&path).await.is_ok() {
+            has_artefacts_map.insert(output.build, true);
+        } else {
+            has_artefacts_map.entry(output.build).or_insert(false);
+        }
+    }
+
     let builds: Vec<BuildItem> = builds
         .iter()
         .filter(|b| b.derivation_path.ends_with(".drv"))
@@ -242,6 +270,7 @@ pub async fn get_evaluation_builds(
             id: b.id,
             name: b.derivation_path.clone(),
             status: format!("{:?}", b.status),
+            has_artefacts: *has_artefacts_map.get(&b.id).unwrap_or(&false),
         })
         .collect();
 

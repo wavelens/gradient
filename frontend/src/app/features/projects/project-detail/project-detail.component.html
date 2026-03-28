@@ -78,8 +78,8 @@
                   </span>
                   <a
                     [class.graph-icon-link]="true"
-                    [class.disabled]="ep.build_status !== 'Completed'"
-                    [routerLink]="ep.build_status === 'Completed' ? ['/organization', orgName, 'artefacts', ep.build_id] : null"
+                    [class.disabled]="ep.build_status !== 'Completed' || !ep.has_artefacts"
+                    [routerLink]="ep.build_status === 'Completed' && ep.has_artefacts ? ['/organization', orgName, 'artefacts', ep.build_id] : null"
                     [queryParams]="{ project: projectName }"
                     title="View build artefacts"
                   >
@@ -137,7 +137,7 @@
                 <div class="evaluation-header">
                   <h3>
                     <a [routerLink]="['/organization', orgName, 'log', evaluation.id]">
-                      Evaluation {{ evaluation.id.substring(0, 8) }}
+                      Evaluation {{ evaluation.commit.substring(0, 8) }}
                     </a>
                   </h3>
                   <span class="status-badge" [class]="getStatusClass(evaluation.status)">

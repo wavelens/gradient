@@ -531,17 +531,26 @@ pub fn format_public_key(organization: MOrganization) -> String {
     format!("{} {}", organization.public_key, organization.id)
 }
 
-pub fn generate_signing_key(secret_file: String) -> Result<String, SourceError> {
+/// Returns `(encrypted_private_key, public_key_b64)`.
+/// The private key is the full 64-byte ed25519 keypair encrypted and base64-encoded.
+/// The public key is the last 32 bytes of the keypair, base64-encoded in plaintext.
+pub fn generate_signing_key(secret_file: String) -> Result<(String, String), SourceError> {
     let secret = crate::input::load_secret_bytes(&secret_file);
 
-    let private_key = KeyPair::generate();
-    // Base64-encode the raw key bytes so the decrypted value is valid UTF-8
-    let key_b64 = general_purpose::STANDARD.encode(&*private_key);
+    let keypair = KeyPair::generate();
+    // Base64-encode the full 64-byte keypair (seed || public key)
+    let key_b64 = general_purpose::STANDARD.encode(&*keypair);
+    // Derive the standalone public key (last 32 bytes)
+    let public_key_b64 = general_purpose::STANDARD.encode(&*keypair.pk);
+
     let encrypted_private_key =
         crypter::encrypt_with_password(&secret, key_b64.as_bytes())
             .ok_or(SourceError::CryptographicOperation)?;
 
-    Ok(general_purpose::STANDARD.encode(&encrypted_private_key))
+    Ok((
+        general_purpose::STANDARD.encode(&encrypted_private_key),
+        public_key_b64,
+    ))
 }
 
 pub fn format_cache_public_key(
@@ -549,20 +558,23 @@ pub fn format_cache_public_key(
     cache: MCache,
     url: String,
 ) -> Result<String, SourceError> {
-    let key_b64 = decrypt_signing_key(secret_file, cache.clone())?;
-
-    let key_bytes = general_purpose::STANDARD
-        .decode(key_b64.trim())
-        .map_err(|e| SourceError::CacheKeyDecoding {
-            cache: cache.name.clone(),
-            reason: format!("Failed to base64-decode signing key: {}", e),
-        })?;
-
-    // The ed25519 keypair is 64 bytes: first 32 = seed, last 32 = public key
-    if key_bytes.len() < 32 {
-        return Err(SourceError::KeyPairConversion);
-    }
-    let pubkey_b64 = general_purpose::STANDARD.encode(&key_bytes[key_bytes.len() - 32..]);
+    // Use the stored public key when available; fall back to deriving it from
+    // the encrypted private key for caches created before the split migration.
+    let pubkey_b64 = if cache.public_key.is_empty() {
+        let key_b64 = decrypt_signing_key(secret_file, cache.clone())?;
+        let key_bytes = general_purpose::STANDARD
+            .decode(key_b64.trim())
+            .map_err(|e| SourceError::CacheKeyDecoding {
+                cache: cache.name.clone(),
+                reason: format!("Failed to base64-decode signing key: {}", e),
+            })?;
+        if key_bytes.len() < 32 {
+            return Err(SourceError::KeyPairConversion);
+        }
+        general_purpose::STANDARD.encode(&key_bytes[key_bytes.len() - 32..])
+    } else {
+        cache.public_key.clone()
+    };
 
     let base_url = url
         .replace("https://", "")
@@ -576,10 +588,10 @@ pub fn decrypt_signing_key(secret_file: String, cache: MCache) -> Result<String,
     let secret = crate::input::load_secret_bytes(&secret_file);
 
     let encrypted_private_key = general_purpose::STANDARD
-        .decode(cache.clone().signing_key)
+        .decode(cache.clone().private_key)
         .map_err(|e| SourceError::CacheKeyDecoding {
             cache: cache.name.clone(),
-            reason: format!("{}. The signing key in the cache appears to be corrupted or not properly base64-encoded.", e)
+            reason: format!("{}. The private key in the cache appears to be corrupted or not properly base64-encoded.", e)
         })?;
 
     let decrypted_private_key = crypter::decrypt_with_password(&secret, encrypted_private_key)

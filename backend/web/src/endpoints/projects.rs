@@ -22,6 +22,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect,
 };
+use tokio::fs;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -94,6 +95,7 @@ pub struct EntryPointSummary {
     pub build_id: Uuid,
     pub derivation_path: String,
     pub build_status: BuildStatus,
+    pub has_artefacts: bool,
     pub architecture: entity::server::Architecture,
     pub evaluation_id: Uuid,
     pub evaluation_status: EvaluationStatus,
@@ -103,6 +105,7 @@ pub struct EntryPointSummary {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EvaluationSummary {
     pub id: Uuid,
+    pub commit: String,
     pub status: EvaluationStatus,
     pub total_builds: i64,
     pub failed_builds: i64,
@@ -662,6 +665,12 @@ pub async fn get_project_details(
     let mut evaluation_summaries = Vec::new();
 
     for evaluation in evaluations {
+        let commit_hash = ECommit::find_by_id(evaluation.commit)
+            .one(&state.db)
+            .await?
+            .map(|c| vec_to_hex(&c.hash))
+            .unwrap_or_default();
+
         // Count total builds for this evaluation
         let total_builds = EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation.id))
@@ -680,6 +689,7 @@ pub async fn get_project_details(
 
         evaluation_summaries.push(EvaluationSummary {
             id: evaluation.id,
+            commit: commit_hash,
             status: evaluation.status,
             total_builds: total_builds as i64,
             failed_builds: failed_builds as i64,
@@ -759,6 +769,32 @@ pub async fn get_project_entry_points(
     use std::collections::HashMap;
     let build_map: HashMap<Uuid, MBuild> = builds.into_iter().map(|b| (b.id, b)).collect();
 
+    // Batch-query outputs for completed builds to check for hydra-build-products
+    let completed_ids: Vec<Uuid> = build_map
+        .values()
+        .filter(|b| b.status == BuildStatus::Completed)
+        .map(|b| b.id)
+        .collect();
+
+    let all_outputs = if completed_ids.is_empty() {
+        vec![]
+    } else {
+        EBuildOutput::find()
+            .filter(CBuildOutput::Build.is_in(completed_ids))
+            .all(&state.db)
+            .await?
+    };
+
+    let mut has_artefacts_map: HashMap<Uuid, bool> = HashMap::new();
+    for output in all_outputs {
+        let path = format!("{}/nix-support/hydra-build-products", output.output);
+        if fs::metadata(&path).await.is_ok() {
+            has_artefacts_map.insert(output.build, true);
+        } else {
+            has_artefacts_map.entry(output.build).or_insert(false);
+        }
+    }
+
     let mut summaries = Vec::new();
 
     for ep in entry_points {
@@ -772,6 +808,7 @@ pub async fn get_project_entry_points(
             build_id: build.id,
             derivation_path: build.derivation_path.clone(),
             build_status: build.status.clone(),
+            has_artefacts: *has_artefacts_map.get(&build.id).unwrap_or(&false),
             architecture: build.architecture.clone(),
             evaluation_id: evaluation.id,
             evaluation_status: evaluation.status.clone(),

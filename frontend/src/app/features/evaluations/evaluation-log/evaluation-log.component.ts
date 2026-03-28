@@ -73,11 +73,19 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.builds().find(b => b.id === this.selectedBuildId()) ?? null
   );
 
+  visibleBuilds = signal<BuildItem[]>([]);
+
   private pollSub?: Subscription;
   private durationInterval?: ReturnType<typeof setInterval>;
   private activeStreamReader?: ReadableStreamDefaultReader<Uint8Array>;
   private streamingBuildId?: string;
   private logLines: string[] = [];
+  private autoFollowBuilding = false;
+  private isInitialBuildsLoad = true;
+  private pendingBuilds: BuildItem[] = [];
+  private buildRevealTimer?: ReturnType<typeof setInterval>;
+  private pendingLogLines: string[] = [];
+  private logDrainTimer?: ReturnType<typeof setInterval>;
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
@@ -94,6 +102,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.stopPolling();
     this.stopDurationTimer();
     this.stopActiveStream();
+    this.stopBuildRevealTimer();
   }
 
   loadEvaluation(): void {
@@ -131,14 +140,63 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       next: (builds) => {
         const prevSelected = this.selectedBuild();
         this.builds.set(this.sortBuilds(builds));
-
-        // Auto-reload logs when the selected build transitions from Queued → Building
         const newSelected = this.selectedBuild();
+        const isEvaluating = this.evaluation()?.status === 'Evaluating';
+
+        // ── Build list visibility ───────────────────────────────────────────
+        if (this.isInitialBuildsLoad) {
+          // First load: always show everything immediately
+          this.visibleBuilds.set(this.builds());
+          this.isInitialBuildsLoad = false;
+        } else if (!isEvaluating) {
+          // Evaluation is no longer Evaluating: flush all builds immediately
+          this.flushPendingBuilds();
+        } else {
+          // Still evaluating: incrementally reveal newly added builds
+          const knownIds = new Set([
+            ...this.visibleBuilds().map(b => b.id),
+            ...this.pendingBuilds.map(b => b.id),
+          ]);
+          const newBuilds = this.builds().filter(b => !knownIds.has(b.id));
+          if (newBuilds.length > 0) {
+            this.pendingBuilds.push(...newBuilds);
+            this.startBuildRevealTimer();
+          }
+          // Refresh statuses & order of already-visible builds
+          this.visibleBuilds.update(vbs =>
+            this.sortBuilds(vbs.map(vb => this.builds().find(b => b.id === vb.id) ?? vb))
+          );
+        }
+
+        // ── Log transitions ─────────────────────────────────────────────────
+
+        // Queued → Building: reload logs for the newly started build
         if (prevSelected?.status === 'Queued' && newSelected?.status === 'Building') {
           this.logLines = [];
+          this.pendingLogLines = [];
           this.logHtml.set('');
           this.logLoading.set(true);
           this.fetchInitialLogs(newSelected.id);
+        }
+
+        // Building → Completed: flush all pending log lines, then follow next build
+        if (prevSelected?.status === 'Building' && newSelected?.status === 'Completed') {
+          this.flushPendingLogs();
+          const next = this.builds().find(b => b.status === 'Building');
+          if (next) {
+            this.selectBuild(next);
+          } else {
+            this.autoFollowBuilding = true;
+          }
+        }
+
+        // Auto-select the first building build while waiting for one to start
+        if (this.autoFollowBuilding) {
+          const next = this.builds().find(b => b.status === 'Building');
+          if (next) {
+            this.autoFollowBuilding = false;
+            this.selectBuild(next);
+          }
         }
 
         if (this.initialBuildId) {
@@ -182,6 +240,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   selectBuild(build: BuildItem): void {
     if (this.selectedBuildId() === build.id) return;
 
+    this.autoFollowBuilding = false;
     this.stopActiveStream();
     this.logLines = [];
     this.logHtml.set('');
@@ -257,9 +316,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         const chunk = decoder.decode(value, { stream: true });
         if (chunk.trim()) {
           const newLines = this.parseLogContent(chunk);
-          this.logLines.push(...newLines);
-          this.renderLog();
-          this.scrollToBottomIfAuto();
+          this.pendingLogLines.push(...newLines);
+          this.startLogDrainTimer();
         }
       }
     } catch {
@@ -274,6 +332,68 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     try { this.activeStreamReader?.cancel(); } catch { /* ignore */ }
     this.activeStreamReader = undefined;
     this.streamingBuildId = undefined;
+    this.pendingLogLines = [];
+    this.stopLogDrainTimer();
+  }
+
+  // ── Build reveal animation ──────────────────────────────────────────────────
+
+  private startBuildRevealTimer(): void {
+    if (this.buildRevealTimer !== undefined) return;
+    this.buildRevealTimer = setInterval(() => {
+      if (this.pendingBuilds.length === 0) {
+        this.stopBuildRevealTimer();
+        return;
+      }
+      const next = this.pendingBuilds.shift()!;
+      this.visibleBuilds.update(vbs => this.sortBuilds([...vbs, next]));
+    }, 200);
+  }
+
+  private stopBuildRevealTimer(): void {
+    if (this.buildRevealTimer !== undefined) {
+      clearInterval(this.buildRevealTimer);
+      this.buildRevealTimer = undefined;
+    }
+  }
+
+  private flushPendingBuilds(): void {
+    this.stopBuildRevealTimer();
+    this.pendingBuilds = [];
+    this.visibleBuilds.set(this.builds());
+  }
+
+  // ── Log drain animation ─────────────────────────────────────────────────────
+
+  private startLogDrainTimer(): void {
+    if (this.logDrainTimer !== undefined) return;
+    this.logDrainTimer = setInterval(() => {
+      if (this.pendingLogLines.length === 0) return;
+      // Drain faster when the queue is large so we never fall too far behind
+      const count = this.pendingLogLines.length > 30
+        ? Math.ceil(this.pendingLogLines.length / 8)
+        : 1;
+      this.logLines.push(...this.pendingLogLines.splice(0, count));
+      this.renderLog();
+      this.scrollToBottomIfAuto();
+    }, 80);
+  }
+
+  private stopLogDrainTimer(): void {
+    if (this.logDrainTimer !== undefined) {
+      clearInterval(this.logDrainTimer);
+      this.logDrainTimer = undefined;
+    }
+  }
+
+  private flushPendingLogs(): void {
+    this.stopLogDrainTimer();
+    if (this.pendingLogLines.length > 0) {
+      this.logLines.push(...this.pendingLogLines);
+      this.pendingLogLines = [];
+      this.renderLog();
+      this.scrollToBottomIfAuto();
+    }
   }
 
   // ── Log parsing & rendering ─────────────────────────────────────────────────
@@ -440,7 +560,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
   selectAdjacentBuild(index: number): void {
-    const list = this.builds();
+    const list = this.visibleBuilds();
     if (index < 0 || index >= list.length) return;
     this.selectBuild(list[index]);
     setTimeout(() => {

@@ -21,8 +21,9 @@ pub struct Model {
     pub description: String,
     pub active: bool,
     pub priority: i32,
+    pub public_key: String,
     #[serde(skip_serializing)]
-    pub signing_key: String,
+    pub private_key: String,
     pub public: bool,
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
@@ -38,7 +39,8 @@ impl std::fmt::Debug for Model {
             .field("description", &self.description)
             .field("active", &self.active)
             .field("priority", &self.priority)
-            .field("signing_key", &"[redacted]")
+            .field("public_key", &self.public_key)
+            .field("private_key", &"[redacted]")
             .field("public", &self.public)
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)

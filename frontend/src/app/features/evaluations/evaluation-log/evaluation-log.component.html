@@ -41,11 +41,11 @@
 
       <div class="builds-list-header">Builds</div>
 
-      @if (builds().length === 0) {
+      @if (visibleBuilds().length === 0) {
         <div class="no-builds">No builds yet</div>
       } @else {
         <div class="builds-list">
-          @for (build of builds(); track build.id; let i = $index) {
+          @for (build of visibleBuilds(); track build.id; let i = $index) {
             <div
               class="build-item status-{{ build.status.toLowerCase() }}"
               [class.selected]="selectedBuildId() === build.id"
@@ -61,16 +61,17 @@
             >
               <span class="build-dot status-{{ build.status.toLowerCase() }}"></span>
               <span class="build-name">{{ buildDisplayName(build.name) }}</span>
-              <a
-                class="build-dl-link"
-                [class.disabled]="build.status !== 'Completed'"
-                [routerLink]="build.status === 'Completed' ? ['/organization', orgName, 'artefacts', build.id] : null"
-                [queryParams]="{ evalId: evaluationId }"
-                (click)="$event.stopPropagation()"
-                title="View build artefacts"
-              >
-                <span class="material-symbols-outlined">download</span>
-              </a>
+              @if (build.status === 'Completed' && build.has_artefacts) {
+                <a
+                  class="build-dl-link"
+                  [routerLink]="['/organization', orgName, 'artefacts', build.id]"
+                  [queryParams]="{ evalId: evaluationId }"
+                  (click)="$event.stopPropagation()"
+                  title="View build artefacts"
+                >
+                  <span class="material-symbols-outlined">download</span>
+                </a>
+              }
               <a
                 class="graph-link"
                 [routerLink]="['/organization', orgName, 'graph', build.id]"

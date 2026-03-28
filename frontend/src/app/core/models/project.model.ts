@@ -26,6 +26,7 @@ export interface Project {
 
 export interface EvaluationSummary {
   id: string;
+  commit: string;
   status: EvaluationStatus;
   total_builds: number;
   failed_builds: number;
@@ -38,6 +39,7 @@ export interface EntryPointSummary {
   build_id: string;
   derivation_path: string;
   build_status: BuildStatus;
+  has_artefacts: boolean;
   architecture: Architecture;
   evaluation_id: string;
   evaluation_status: EvaluationStatus;

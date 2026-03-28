@@ -2,18 +2,14 @@
  - garbage collection and gcroots
  - invalid git ssh auth attempts
 
- - Artifacts downloadable
  - logging in without authorization
  - retry failed builds (retry)
- - Builds should appear increamentally on log page.
- - Copy old builds
  - Add Non-SSH server as default
  - Save build log in Storage not Database
  - Wrong OIDC as log in journal error
  - Add Super User
  - Base Servers (for all orgs)
  - aborted evaluations should restart on server restart
- - evaluation should show commit hash instead of evaluation uuid
- - log when last selected build was building as the selected build is completed go to the next building build (or wait for the next build to start)
+ - if git link is http(s) make link clickable
  - no Hover Effect on Dashboard for non clickable Elements
  - Add Footer: AGPL License and link to github and wavelens and version
