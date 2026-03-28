@@ -896,7 +896,8 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                                 Condition::any()
                                     .add(CEvaluation::Status.eq(EvaluationStatus::Completed))
                                     .add(CEvaluation::Status.eq(EvaluationStatus::Failed))
-                                    .add(CEvaluation::Status.eq(EvaluationStatus::Aborted)),
+                                    .add(CEvaluation::Status.eq(EvaluationStatus::Aborted))
+                                    .add(CEvaluation::Status.eq(EvaluationStatus::Queued)),
                             )
                             .one(&intern_state.db)
                             .await
@@ -962,6 +963,18 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             );
             std::process::exit(1);
         };
+
+        // If the evaluation was pre-created as Queued (e.g. via the API endpoint), use it
+        // directly without creating a new one.
+        if evaluation.status == EvaluationStatus::Queued && evaluation.id != Uuid::nil() {
+            let mut active_project: AProject = project.clone().into();
+            active_project.last_check_at = Set(Utc::now().naive_utc());
+            active_project.force_evaluation = Set(false);
+            if let Err(e) = active_project.update(&state.db).await {
+                error!(error = %e, "Failed to update project");
+            }
+            return evaluation.clone();
+        }
 
         let evaluation_id = if evaluation.id == Uuid::nil() {
             None
@@ -1411,14 +1424,14 @@ async fn reserve_available_server(
         };
 
         let mut abuild: ABuild = build.clone().into();
-        if running_builds.is_empty() {
+        if running_builds.len() < s.max_concurrent_builds as usize {
             abuild.server = Set(Some(s.id));
             abuild.status = Set(BuildStatus::Building);
             abuild.updated_at = Set(Utc::now().naive_utc());
 
             match abuild.update(&state.db).await {
                 Ok(updated_build) => {
-                    debug!(build_id = %updated_build.id, "Selected next build");
+                    debug!(build_id = %updated_build.id, server_id = %s.id, running = running_builds.len(), max = s.max_concurrent_builds, "Selected next build");
                     return Some((updated_build, s));
                 }
                 Err(e) => {

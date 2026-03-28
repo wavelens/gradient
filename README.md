@@ -12,7 +12,7 @@ Gradient is a web-based Nix-based Continuous Integration (CI) system.
 
 ## Features
 
-<!-- OLD Image: ![Gradient](./docs/gradient.png) -->
+![Gradient](./docs/gradient.png)
 
 - **Modern UI**: has a clean and intuitive user interface.
 - **Organizations**: multiple organizations, which work independently from each other (e.g. different servers, user access).

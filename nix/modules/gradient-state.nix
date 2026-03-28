@@ -191,6 +191,12 @@
         description = "List of feature names supported by this server";
       };
 
+      max_concurrent_builds = mkOption {
+        type = types.int;
+        default = 1;
+        description = "Maximum number of builds that can run concurrently on this server";
+      };
+
       created_by = mkOption {
         type = types.str;
         description = "Username of the user who created this server";

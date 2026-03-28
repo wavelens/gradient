@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
 use axum::{Extension, Json};
-use chrono::Utc;
+use chrono::{NaiveDateTime, Utc};
 use core::database::{get_any_cache_by_name, get_cache_by_name};
 use core::executer::{get_local_store, get_pathinfo};
 use core::input::{check_index_name, validate_display_name};
@@ -35,6 +35,21 @@ pub struct MakeCacheRequest {
     pub description: String,
     pub priority: i32,
     pub public: Option<bool>,
+}
+
+#[derive(Serialize)]
+pub struct CacheResponse {
+    pub id: Uuid,
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    pub active: bool,
+    pub priority: i32,
+    pub public_key: String,
+    pub public: bool,
+    pub created_by: Uuid,
+    pub created_at: NaiveDateTime,
+    pub managed: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -265,7 +280,7 @@ pub async fn get_cache(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
-) -> WebResult<Json<BaseResponse<MCache>>> {
+) -> WebResult<Json<BaseResponse<CacheResponse>>> {
     let cache: MCache = get_any_cache_by_name(state.0.clone(), cache.clone())
         .await?
         .ok_or_else(|| WebError::not_found("Cache"))?;
@@ -274,9 +289,31 @@ pub async fn get_cache(
         return Err(WebError::not_found("Cache"));
     }
 
+    let public_key = format_cache_public_key(
+        state.cli.crypt_secret_file.clone(),
+        cache.clone(),
+        state.cli.serve_url.clone(),
+    )
+    .map_err(|e| {
+        tracing::error!("Failed to derive public key: {}", e);
+        WebError::InternalServerError("Failed to derive public key".to_string())
+    })?;
+
     let res = BaseResponse {
         error: false,
-        message: cache,
+        message: CacheResponse {
+            id: cache.id,
+            name: cache.name,
+            display_name: cache.display_name,
+            description: cache.description,
+            active: cache.active,
+            priority: cache.priority,
+            public_key,
+            public: cache.public,
+            created_by: cache.created_by,
+            created_at: cache.created_at,
+            managed: cache.managed,
+        },
     };
 
     Ok(Json(res))

@@ -30,6 +30,12 @@ pub struct MakeServerRequest {
     pub username: String,
     pub architectures: Vec<String>,
     pub features: Vec<String>,
+    #[serde(default = "default_max_concurrent_builds")]
+    pub max_concurrent_builds: i32,
+}
+
+fn default_max_concurrent_builds() -> i32 {
+    1
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,6 +47,7 @@ pub struct PatchServerRequest {
     pub username: Option<String>,
     pub architectures: Option<Vec<String>>,
     pub features: Option<Vec<String>>,
+    pub max_concurrent_builds: Option<i32>,
 }
 
 pub async fn get(
@@ -107,6 +114,12 @@ pub async fn put(
         return Err(WebError::already_exists("Server Name"));
     }
 
+    if body.max_concurrent_builds < 1 {
+        return Err(WebError::BadRequest(
+            "max_concurrent_builds must be at least 1".to_string(),
+        ));
+    }
+
     let server = AServer {
         id: Set(Uuid::new_v4()),
         name: Set(body.name.clone()),
@@ -117,6 +130,7 @@ pub async fn put(
         port: Set(body.port),
         username: Set(body.username.clone()),
         last_connection_at: Set(*NULL_TIME),
+        max_concurrent_builds: Set(body.max_concurrent_builds),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
         managed: Set(false),
@@ -318,6 +332,19 @@ pub async fn patch_server(
 
     if let Some(username) = body.username.clone() {
         aserver.username = Set(username);
+    }
+
+    if let Some(max_concurrent_builds) = body.max_concurrent_builds {
+        if max_concurrent_builds < 1 {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(BaseResponse {
+                    error: true,
+                    message: "max_concurrent_builds must be at least 1".to_string(),
+                }),
+            ));
+        }
+        aserver.max_concurrent_builds = Set(max_concurrent_builds);
     }
 
     if let Some(architectures) = body.architectures.clone() {

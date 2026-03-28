@@ -179,7 +179,7 @@ in {
         maxConcurrentBuilds = lib.mkOption {
           description = "The maximum number of concurrent builds.";
           type = lib.types.ints.unsigned;
-          default = 1;
+          default = 100;
         };
 
         logLevel = lib.mkOption {

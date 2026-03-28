@@ -98,6 +98,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   // Interaction
   private isPanning = false;
   private panStart = { x: 0, y: 0, tx: 0, ty: 0 };
+  private didDrag = false;
 
   private pollSub?: Subscription;
   private timerInterval?: ReturnType<typeof setInterval>;
@@ -474,13 +475,19 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   onSvgMousedown(event: MouseEvent): void {
     if (event.button !== 0) return;
     this.isPanning = true;
+    this.didDrag = false;
     this.panStart = { x: event.clientX, y: event.clientY, tx: this.tx(), ty: this.ty() };
   }
 
   onMousemove(event: MouseEvent): void {
     if (this.isPanning) {
-      this.tx.set(this.panStart.tx + event.clientX - this.panStart.x);
-      this.ty.set(this.panStart.ty + event.clientY - this.panStart.y);
+      const dx = event.clientX - this.panStart.x;
+      const dy = event.clientY - this.panStart.y;
+      if (!this.didDrag && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+        this.didDrag = true;
+      }
+      this.tx.set(this.panStart.tx + dx);
+      this.ty.set(this.panStart.ty + dy);
     }
     if (this.hoveredNode()) {
       this.tooltipX.set(event.clientX + 14);
@@ -582,7 +589,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       case 'Failed':    return '#ef4444';
       case 'Building':  return '#3b82f6';
       case 'Queued':    return '#eab308';
-      case 'Aborted':   return '#f97316';
+      case 'Aborted':   return '#6b7280';
       case 'Created':   return '#6b7280';
       default:          return '#abb0b4';
     }
@@ -592,7 +599,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
     switch (status) {
       case 'Completed':               return 'status-success';
       case 'Failed':                  return 'status-danger';
-      case 'Aborted':                 return 'status-warning';
+      case 'Aborted':                 return 'status-neutral';
       case 'Building': case 'Queued': return 'status-running';
       default:                        return '';
     }

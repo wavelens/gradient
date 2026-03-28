@@ -55,10 +55,6 @@ export class CachesService {
     return this.api.delete<void>(`caches/${cache}`);
   }
 
-  getCacheKey(cache: string): Observable<string> {
-    return this.api.get<string>(`caches/${cache}/key`);
-  }
-
   activateCache(cache: string): Observable<void> {
     return this.api.post<void>(`caches/${cache}/active`);
   }

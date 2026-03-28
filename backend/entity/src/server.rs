@@ -83,6 +83,7 @@ pub struct Model {
     pub port: i32,
     pub username: String,
     pub last_connection_at: NaiveDateTime,
+    pub max_concurrent_builds: i32,
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
     pub managed: bool,

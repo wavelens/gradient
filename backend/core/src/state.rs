@@ -71,7 +71,13 @@ pub struct StateServer {
     pub architectures: Vec<String>,
     #[serde(default)]
     pub features: Vec<String>,
+    #[serde(default = "default_max_concurrent_builds")]
+    pub max_concurrent_builds: i32,
     pub created_by: String,
+}
+
+fn default_max_concurrent_builds() -> i32 {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -721,6 +727,7 @@ async fn apply_servers(
             serv.host = Set(state_server.host.clone());
             serv.port = Set(state_server.port);
             serv.username = Set(state_server.username.clone());
+            serv.max_concurrent_builds = Set(state_server.max_concurrent_builds);
             serv.created_by = Set(*created_by_id);
             serv.managed = Set(true);
             serv.update(db).await?;
@@ -737,6 +744,7 @@ async fn apply_servers(
                 port: Set(state_server.port),
                 username: Set(state_server.username.clone()),
                 last_connection_at: Set(now),
+                max_concurrent_builds: Set(state_server.max_concurrent_builds),
                 created_by: Set(*created_by_id),
                 created_at: Set(now),
                 managed: Set(true),

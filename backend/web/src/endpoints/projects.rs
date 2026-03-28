@@ -85,7 +85,7 @@ pub struct PatchProjectRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TransferOwnershipRequest {
-    pub user: String,
+    pub organization: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -528,9 +528,48 @@ pub async fn post_project_evaluate(
         }
     }
 
+    let mut project_for_check = project.clone();
+    project_for_check.force_evaluation = true;
+    let (_has_updates, commit_hash) = check_project_updates(Arc::clone(&state), &project_for_check)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
+
+    if commit_hash.is_empty() {
+        return Err(WebError::InternalServerError(
+            "Failed to fetch repository state".to_string(),
+        ));
+    }
+
+    let now = Utc::now().naive_utc();
+
+    let acommit = ACommit {
+        id: Set(Uuid::new_v4()),
+        message: Set(String::new()),
+        hash: Set(commit_hash),
+        author: Set(None),
+        author_name: Set(String::new()),
+    };
+    let commit = acommit.insert(&state.db).await?;
+
+    let aevaluation = AEvaluation {
+        id: Set(Uuid::new_v4()),
+        project: Set(Some(project.id)),
+        repository: Set(project.repository.clone()),
+        commit: Set(commit.id),
+        wildcard: Set(project.evaluation_wildcard.clone()),
+        status: Set(EvaluationStatus::Queued),
+        previous: Set(project.last_evaluation),
+        next: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+        error: Set(None),
+    };
+    let evaluation = aevaluation.insert(&state.db).await?;
+
     let mut aproject: AProject = project.into();
 
     aproject.last_check_at = Set(*NULL_TIME);
+    aproject.last_evaluation = Set(Some(evaluation.id));
     aproject.force_evaluation = Set(true);
     aproject.save(&state.db).await?;
 
@@ -572,31 +611,22 @@ pub async fn post_project_transfer(
         ));
     }
 
-    let new_owner = EUser::find()
-        .filter(CUser::Username.eq(body.user.clone()))
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("User"))?;
+    let new_organization = get_organization_by_name(
+        state.0.clone(),
+        user.id,
+        body.organization.clone(),
+    )
+    .await?
+    .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    // New owner must be a member of the organization
-    let is_member = EOrganizationUser::find()
-        .filter(
-            Condition::all()
-                .add(COrganizationUser::Organization.eq(organization.id))
-                .add(COrganizationUser::User.eq(new_owner.id)),
-        )
-        .one(&state.db)
-        .await?
-        .is_some();
-
-    if !is_member {
+    if new_organization.id == organization.id {
         return Err(WebError::BadRequest(
-            "The new owner must be a member of the organization.".to_string(),
+            "Project is already in this organization.".to_string(),
         ));
     }
 
     let mut aproject: AProject = project.into();
-    aproject.created_by = Set(new_owner.id);
+    aproject.organization = Set(new_organization.id);
     aproject.update(&state.db).await?;
 
     let res = BaseResponse {

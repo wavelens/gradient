@@ -7,6 +7,8 @@ import json
 
 start_all()
 machine.wait_for_unit("gradient-server.service")
+machine.wait_for_unit("nginx.service")
+machine.wait_for_open_port(80)
 
 with subtest("check service started successfully with state"):
     machine.succeed("systemctl is-active gradient-server.service")

@@ -11,6 +11,7 @@ export interface Cache {
   description: string;
   active: boolean;
   priority: number;
+  public_key?: string;
   public: boolean;
   created_by?: string;
   created_at?: string;

@@ -251,12 +251,7 @@ pub async fn post_build_log(
     // TODO: check if build is building
     let stream = stream! {
         let mut last_log = build.log.unwrap_or("".to_string());
-        let mut first_response: bool = true;
-        if !last_log.is_empty() {
-            // TODO: Chunkify past log
-            first_response = false;
-            yield last_log.clone();
-        }
+        let mut sent_any: bool = false;
 
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -268,20 +263,16 @@ pub async fn post_build_log(
             };
 
             let log = build.log.unwrap_or("".to_string());
-            let log_new = if last_log.is_empty() {
-                log.clone()
-            } else {
-                log[last_log.len()..].to_string()
-            };
+            let log_new = log[last_log.len()..].to_string();
 
             if !log_new.is_empty() {
-                first_response = false;
+                sent_any = true;
                 last_log = log;
                 yield log_new;
             }
 
             if build.status != entity::build::BuildStatus::Building {
-                if first_response {
+                if !sent_any {
                     yield "".to_string();
                 }
                 break;

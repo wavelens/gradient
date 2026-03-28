@@ -296,11 +296,14 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           }
         }
         // Handle remaining literal escape sequences (non-JSON streams)
-        return line
+        const decoded = line
           .replace(/\\u001b/g, '\u001b')
           .replace(/\\n/g, '\n')
-          .replace(/\\t/g, '\t')
-          .split('\n');
+          .replace(/\\t/g, '\t');
+        // Strip a single trailing newline so split('\n') doesn't produce a
+        // spurious empty element that renders as a blank line between chunks.
+        const trimmed = decoded.endsWith('\n') ? decoded.slice(0, -1) : decoded;
+        return trimmed.split('\n');
       });
   }
 

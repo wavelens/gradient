@@ -32,8 +32,6 @@ export class CacheDetailComponent implements OnInit {
 
   loading = signal(true);
   cache = signal<Cache | null>(null);
-  publicKey = signal<string | null>(null);
-  keyLoading = signal(false);
   copied = signal<string | null>(null);
 
   cacheName = '';
@@ -51,11 +49,6 @@ export class CacheDetailComponent implements OnInit {
       next: (cache) => {
         this.cache.set(cache);
         this.loading.set(false);
-        this.keyLoading.set(true);
-        this.cachesService.getCacheKey(this.cacheName).subscribe({
-          next: (key) => { this.publicKey.set(key); this.keyLoading.set(false); },
-          error: () => { this.publicKey.set(null); this.keyLoading.set(false); },
-        });
       },
       error: (error) => {
         console.error('Failed to load cache:', error);

@@ -55,11 +55,9 @@
         <div class="usage-row">
           <span class="usage-label">Trusted Public Key</span>
           <div class="code-block">
-            @if (keyLoading()) {
-              <code class="text-secondary">Loading...</code>
-            } @else if (publicKey()) {
-              <code>{{ publicKey() }}</code>
-              <button class="copy-btn" (click)="copy(publicKey()!, 'key')" [title]="copied() === 'key' ? 'Copied!' : 'Copy'">
+            @if (c.public_key) {
+              <code>{{ c.public_key }}</code>
+              <button class="copy-btn" (click)="copy(c.public_key!, 'key')" [title]="copied() === 'key' ? 'Copied!' : 'Copy'">
                 <span class="material-symbols-outlined">{{ copied() === 'key' ? 'check' : 'content_copy' }}</span>
               </button>
             } @else {
@@ -71,12 +69,10 @@
         <div class="usage-row">
           <span class="usage-label">nix.conf snippet</span>
           <div class="code-block multiline">
-            @if (keyLoading()) {
-              <pre class="text-secondary">Loading...</pre>
-            } @else if (publicKey()) {
+            @if (c.public_key) {
               <pre>substituters = {{ cacheUrl }}
-trusted-public-keys = {{ publicKey() }}</pre>
-              <button class="copy-btn" (click)="copy('substituters = ' + cacheUrl + '\ntrusted-public-keys = ' + publicKey()!, 'conf')" [title]="copied() === 'conf' ? 'Copied!' : 'Copy'">
+trusted-public-keys = {{ c.public_key }}</pre>
+              <button class="copy-btn" (click)="copy('substituters = ' + cacheUrl + '\ntrusted-public-keys = ' + c.public_key!, 'conf')" [title]="copied() === 'conf' ? 'Copied!' : 'Copy'">
                 <span class="material-symbols-outlined">{{ copied() === 'conf' ? 'check' : 'content_copy' }}</span>
               </button>
             } @else {
