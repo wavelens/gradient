@@ -31,10 +31,7 @@ enum MainCommands {
         shell: Shell,
     },
     /// Get or set configuration values
-    Config {
-        key: String,
-        value: Option<String>,
-    },
+    Config { key: String, value: Option<String> },
     /// Check server connection status
     Status,
     /// Register a new user account
@@ -120,9 +117,7 @@ pub async fn run_cli() -> std::io::Result<()> {
             let auth_token = set_get_value(ConfigKey::AuthToken, None, true);
 
             if server_url.is_none() {
-                eprintln!(
-                    "Server URL is not set. Use `gradient config server <url>` to set it."
-                );
+                eprintln!("Server URL is not set. Use `gradient config server <url>` to set it.");
                 std::process::exit(1);
             }
 

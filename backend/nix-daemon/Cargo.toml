@@ -28,7 +28,7 @@ tracing      = { workspace = true }
 
 # Crate-specific dependencies
 num_enum     = "0.7"
-serde_with   = "3.16"
+serde_with   = "3.18"
 strum        = { version = "0.28", features = ["derive"] }
 tap          = "1.0"
 tokio-stream = "0.1"

@@ -7,6 +7,7 @@
 use base64::{Engine, engine::general_purpose};
 use ed25519_compact::KeyPair;
 use entity::evaluation::EvaluationStatus;
+use git2::{Direction, RemoteCallbacks};
 use sea_orm::EntityTrait;
 use ssh_key::{
     Algorithm, LineEnding, PrivateKey, private::Ed25519Keypair, private::Ed25519PrivateKey,
@@ -21,7 +22,7 @@ use thiserror::Error;
 use tokio::process::Command;
 use tracing::{debug, error, info, instrument};
 
-use super::input::{check_repository_url_is_ssh, hex_to_vec, vec_to_hex};
+use super::input::{check_repository_url_is_ssh, vec_to_hex};
 use super::types::*;
 
 #[derive(Debug, Clone, Error)]
@@ -96,6 +97,47 @@ pub enum SourceError {
     OrganizationNotFound { id: uuid::Uuid },
 }
 
+/// List the remote HEAD ref without spawning a git process.
+/// Uses libgit2 via the `git2` crate; SSH credentials are passed in-memory.
+fn ls_remote_head(
+    url: &str,
+    private_key: Option<&str>,
+    public_key: Option<&str>,
+) -> Result<Vec<u8>, SourceError> {
+    let mut remote =
+        git2::Remote::create_detached(url).map_err(|e| SourceError::GitCommand(e.to_string()))?;
+
+    let mut callbacks = RemoteCallbacks::new();
+    if let (Some(priv_key), Some(pub_key)) = (private_key, public_key) {
+        let priv_key = priv_key.to_string();
+        let pub_key = pub_key.to_string();
+        callbacks.credentials(move |_url, username_from_url, _allowed| {
+            git2::Cred::ssh_key_from_memory(
+                username_from_url.unwrap_or("git"),
+                Some(&pub_key),
+                &priv_key,
+                None,
+            )
+        });
+    }
+
+    let conn = remote
+        .connect_auth(Direction::Fetch, Some(callbacks), None)
+        .map_err(|e| SourceError::GitCommandFailed {
+            stderr: e.message().to_string(),
+        })?;
+
+    let list = conn.list().map_err(|e| SourceError::GitCommandFailed {
+        stderr: e.message().to_string(),
+    })?;
+
+    list.iter()
+        .find(|h| h.name() == "HEAD")
+        .or_else(|| list.first())
+        .map(|h| h.oid().as_bytes().to_vec())
+        .ok_or(SourceError::GitHashExtraction)
+}
+
 #[instrument(skip(state), fields(project_id = %project.id, project_name = %project.name))]
 pub async fn check_project_updates(
     state: Arc<ServerState>,
@@ -103,7 +145,8 @@ pub async fn check_project_updates(
 ) -> Result<(bool, Vec<u8>), SourceError> {
     debug!("Checking for updates on project");
 
-    let cmd = match if check_repository_url_is_ssh(&project.repository) {
+    let url = project.repository.clone();
+    let ssh_creds: Option<(String, String)> = if check_repository_url_is_ssh(&url) {
         let organization = EOrganization::find_by_id(project.organization)
             .one(&state.db)
             .await
@@ -113,72 +156,33 @@ pub async fn check_project_updates(
             .ok_or(SourceError::OrganizationNotFound {
                 id: project.organization,
             })?;
-
-        let (private_key, _public_key) =
-            decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization)?;
-
-        let ssh_key_path = write_key(private_key)?;
-
-        let cmd = Command::new(state.cli.binpath_git.clone())
-            .arg("-c")
-            .arg(format!("core.sshCommand={} -i {} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", state.cli.binpath_ssh, ssh_key_path))
-            .arg("ls-remote")
-            .arg(&project.repository)
-            .output()
-            .await;
-
-        clear_key(ssh_key_path)?;
-
-        cmd
+        Some(decrypt_ssh_private_key(
+            state.cli.crypt_secret_file.clone(),
+            organization,
+        )?)
     } else {
-        Command::new(state.cli.binpath_git.clone())
-            .arg("ls-remote")
-            .arg(&project.repository)
-            .output()
-            .await
-    } {
-        Ok(output) => output,
-        Err(e) => {
-            error!(error = %e, "Failed to execute git ls-remote command");
-            return Ok((false, vec![]));
-        }
+        None
     };
 
-    if !cmd.status.success() {
-        let errmsg = String::from_utf8(cmd.stderr).map_err(|_| SourceError::GitOutputParsing)?;
-        if errmsg.contains("cannot run ssh: No such file or directory") {
-            error!(stderr = %errmsg, "SSH binary not found. Please ensure OpenSSH client is available in PATH or set GRADIENT_BINPATH_SSH");
-        } else if errmsg.contains("Permission denied")
-            || errmsg.contains("Host key verification failed")
-        {
-            error!(stderr = %errmsg, "SSH authentication failed. Please check SSH key configuration");
-        } else if errmsg.contains("Connection refused") || errmsg.contains("Network is unreachable")
-        {
-            error!(stderr = %errmsg, "SSH connection failed. Please check repository URL and network connectivity");
+    let remote_hash = match tokio::task::spawn_blocking(move || {
+        if let Some((private_key, public_key)) = ssh_creds {
+            ls_remote_head(&url, Some(&private_key), Some(&public_key))
         } else {
-            error!(stderr = %errmsg, "Git ls-remote command failed");
+            ls_remote_head(&url, None, None)
         }
-        return Ok((false, vec![]));
-    }
-
-    let output = String::from_utf8(cmd.stdout).map_err(|_| SourceError::GitOutputParsing)?;
-    let output = output.lines().collect::<Vec<&str>>()[0]
-        .split_whitespace()
-        .collect::<Vec<&str>>();
-
-    if output.len() != 2 {
-        error!("Invalid git ls-remote output format: expected hash and ref");
-        return Ok((false, vec![]));
-    }
-
-    let remote_hash = match hex_to_vec(output[0]) {
+    })
+    .await
+    .map_err(|e| SourceError::GitExecution {
+        error: e.to_string(),
+    })? {
         Ok(hash) => hash,
         Err(e) => {
-            error!(error = %e, "Failed to parse remote hash");
+            error!(error = %e, "Failed to get remote HEAD ref");
             return Ok((false, vec![]));
         }
     };
-    let remote_hash_str = output[0];
+
+    let remote_hash_str = vec_to_hex(&remote_hash);
     debug!(remote_hash = %remote_hash_str, "Retrieved remote hash");
 
     if project.force_evaluation {
@@ -237,13 +241,9 @@ pub async fn get_commit_info(
     debug!("Fetching commit info");
 
     let hash_str = vec_to_hex(commit_hash);
-    let temp_dir = format!(
-        "{}/temp_clone_{}",
-        state.cli.base_path,
-        uuid::Uuid::new_v4()
-    );
+    let url = project.repository.clone();
 
-    let clone_cmd = if check_repository_url_is_ssh(&project.repository) {
+    let ssh_creds: Option<(String, String)> = if check_repository_url_is_ssh(&url) {
         let organization = EOrganization::find_by_id(project.organization)
             .one(&state.db)
             .await
@@ -253,94 +253,61 @@ pub async fn get_commit_info(
             .ok_or(SourceError::OrganizationNotFound {
                 id: project.organization,
             })?;
-
-        let (private_key, _public_key) =
-            decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization)?;
-
-        let ssh_key_path = write_key(private_key)?;
-
-        let cmd = Command::new(state.cli.binpath_git.clone())
-            .arg("clone")
-            .arg("--bare")
-            .arg("-c")
-            .arg(format!("core.sshCommand={} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", state.cli.binpath_ssh, ssh_key_path))
-            .arg(&project.repository)
-            .arg(&temp_dir)
-            .output()
-            .await;
-
-        clear_key(ssh_key_path)?;
-
-        cmd
+        Some(decrypt_ssh_private_key(
+            state.cli.crypt_secret_file.clone(),
+            organization,
+        )?)
     } else {
-        Command::new(state.cli.binpath_git.clone())
-            .arg("clone")
-            .arg("--bare")
-            .arg(&project.repository)
-            .arg(&temp_dir)
-            .output()
-            .await
+        None
     };
 
-    match clone_cmd {
-        Ok(output) => {
-            if !output.status.success() {
-                let err = String::from_utf8_lossy(&output.stderr);
-                return Err(SourceError::GitCommandFailed {
-                    stderr: err.to_string(),
-                });
-            }
-        }
-        Err(e) => {
-            return Err(SourceError::GitExecution {
-                error: e.to_string(),
+    let temp_dir = tempfile::TempDir::new().map_err(|e| SourceError::FileRead {
+        reason: e.to_string(),
+    })?;
+    let temp_path = temp_dir.path().to_path_buf();
+
+    tokio::task::spawn_blocking(move || {
+        let mut callbacks = RemoteCallbacks::new();
+        if let Some((private_key, public_key)) = ssh_creds {
+            callbacks.credentials(move |_url, username_from_url, _allowed| {
+                git2::Cred::ssh_key_from_memory(
+                    username_from_url.unwrap_or("git"),
+                    Some(&public_key),
+                    &private_key,
+                    None,
+                )
             });
         }
-    }
 
-    let show_cmd = Command::new(state.cli.binpath_git.clone())
-        .arg("show")
-        .arg("--format=%s%n%ae%n%an")
-        .arg("--no-patch")
-        .arg(&hash_str)
-        .current_dir(&temp_dir)
-        .output()
-        .await;
+        let mut fo = git2::FetchOptions::new();
+        fo.remote_callbacks(callbacks);
 
-    let result = match show_cmd {
-        Ok(output) => {
-            if !output.status.success() {
-                let err = String::from_utf8_lossy(&output.stderr);
-                Err(SourceError::GitCommandFailed {
-                    stderr: err.to_string(),
-                })
-            } else {
-                let stdout =
-                    String::from_utf8(output.stdout).map_err(|_| SourceError::GitOutputParsing)?;
-                let lines: Vec<&str> = stdout.lines().collect();
+        let mut builder = git2::build::RepoBuilder::new();
+        builder.bare(true);
+        builder.fetch_options(fo);
+        let repo = builder
+            .clone(&url, &temp_path)
+            .map_err(|e| SourceError::GitCommandFailed {
+                stderr: e.message().to_string(),
+            })?;
 
-                if lines.len() < 3 {
-                    Err(SourceError::InsufficientCommitInfo)
-                } else {
-                    let message = lines[0].to_string();
-                    let author_email = if lines[1].is_empty() {
-                        None
-                    } else {
-                        Some(lines[1].to_string())
-                    };
-                    let author_name = lines[2].to_string();
-                    Ok((message, author_email, author_name))
-                }
-            }
-        }
-        Err(e) => Err(SourceError::GitExecution {
-            error: e.to_string(),
-        }),
-    };
+        let oid = git2::Oid::from_str(&hash_str).map_err(|_| SourceError::GitOutputParsing)?;
+        let commit = repo
+            .find_commit(oid)
+            .map_err(|e| SourceError::GitCommandFailed {
+                stderr: e.message().to_string(),
+            })?;
 
-    std::fs::remove_dir_all(&temp_dir).ok();
+        let message = commit.summary().unwrap_or("").to_string();
+        let author_email = commit.author().email().map(|s| s.to_string());
+        let author_name = commit.author().name().unwrap_or("").to_string();
 
-    result
+        Ok((message, author_email, author_name))
+    })
+    .await
+    .map_err(|e| SourceError::GitExecution {
+        error: e.to_string(),
+    })?
 }
 
 pub fn write_key(private_key: String) -> Result<String, SourceError> {
@@ -543,9 +510,8 @@ pub fn generate_signing_key(secret_file: String) -> Result<(String, String), Sou
     // Derive the standalone public key (last 32 bytes)
     let public_key_b64 = general_purpose::STANDARD.encode(*keypair.pk);
 
-    let encrypted_private_key =
-        crypter::encrypt_with_password(&secret, key_b64.as_bytes())
-            .ok_or(SourceError::CryptographicOperation)?;
+    let encrypted_private_key = crypter::encrypt_with_password(&secret, key_b64.as_bytes())
+        .ok_or(SourceError::CryptographicOperation)?;
 
     Ok((
         general_purpose::STANDARD.encode(&encrypted_private_key),
@@ -674,10 +640,7 @@ pub fn get_path_from_build_output(build_output: MBuildOutput) -> String {
     format!("/nix/store/{}-{}", build_output.hash, build_output.package)
 }
 
-pub fn get_cache_nar_location(
-    base_path: String,
-    hash: String,
-) -> Result<String, SourceError> {
+pub fn get_cache_nar_location(base_path: String, hash: String) -> Result<String, SourceError> {
     let hash_hex = hash.as_str();
     std::fs::create_dir_all(format!("{}/nars/{}", base_path, &hash_hex[0..2])).map_err(|e| {
         SourceError::FileRead {

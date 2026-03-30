@@ -33,13 +33,6 @@ in {
         description = "The nix package to use";
       };
 
-      package_git = lib.mkOption {
-        default = config.programs.git.package;
-        defaultText = "config.programs.git.package";
-        type = lib.types.package;
-        description = "The git package to use";
-      };
-
       package_ssh = lib.mkOption {
         default = config.programs.ssh.package;
         defaultText = "config.programs.ssh.package";
@@ -198,7 +191,6 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
-    environment.systemPackages = [ cfg.package_git ];
     systemd.services.gradient-server = {
       wantedBy = [ "multi-user.target" ];
       after = [
@@ -208,7 +200,6 @@ in {
 
       path = [
         cfg.package_nix
-        cfg.package_git
         cfg.package_ssh
       ];
 
@@ -255,7 +246,6 @@ in {
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString cfg.settings.maxConcurrentEvaluations;
         GRADIENT_MAX_CONCURRENT_BUILDS = toString cfg.settings.maxConcurrentBuilds;
         GRADIENT_BINPATH_NIX = lib.getExe cfg.package_nix;
-        GRADIENT_BINPATH_GIT = lib.getExe cfg.package_git;
         GRADIENT_BINPATH_SSH = lib.getExe' cfg.package_ssh "ssh";
         GRADIENT_OIDC_ENABLED = lib.boolToString cfg.oidc.enable;
         GRADIENT_DISABLE_REGISTRATION = lib.boolToString cfg.settings.disableRegistration;

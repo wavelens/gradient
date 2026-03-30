@@ -110,6 +110,7 @@ pub async fn get_project(
     Ok(parse_response(res).await)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn patch_project(
     config: RequestConfig,
     organization: String,

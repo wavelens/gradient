@@ -71,8 +71,6 @@ pub struct Cli {
     pub serve_cache: bool,
     #[arg(long, env = "GRADIENT_BINPATH_NIX", default_value = "nix")]
     pub binpath_nix: String,
-    #[arg(long, env = "GRADIENT_BINPATH_GIT", default_value = "git")]
-    pub binpath_git: String,
     #[arg(long, env = "GRADIENT_BINPATH_SSH", default_value = "ssh")]
     pub binpath_ssh: String,
     #[arg(long, env = "GRADIENT_REPORT_ERRORS", default_value = "false")]

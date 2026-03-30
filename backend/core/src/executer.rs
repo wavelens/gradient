@@ -6,12 +6,9 @@
 
 use anyhow::{Context, Result};
 use async_ssh2_lite::{AsyncSession, TokioTcpStream};
-use futures::Stream;
 use nix_daemon::nix::DaemonStore;
 use nix_daemon::{self, BasicDerivation, BuildMode, BuildResult, PathInfo, Progress, Store};
-use serde::Serialize;
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -20,17 +17,10 @@ use tokio::{
     time::Instant,
 };
 use tracing::{error, info, instrument};
-use uuid::Uuid;
 
 use super::input;
 use super::sources::get_hash_from_path;
 use super::types::*;
-
-#[derive(Debug, Clone, Serialize)]
-pub struct BuildLogStreamResponse {
-    pub build_id: Uuid,
-    pub log: String,
-}
 
 pub async fn connect(
     server: MServer,
@@ -259,83 +249,6 @@ pub async fn get_output_paths<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
         .result()
         .await?;
     Ok(output_map)
-}
-
-pub fn get_buildlog_stream(
-    server: MServer,
-    build: MBuild,
-    public_key: String,
-    private_key: String,
-) -> anyhow::Result<Pin<Box<dyn Stream<Item = BuildLogStreamResponse> + Send>>> {
-    let stream = async_stream::stream! {
-        let server_addr = match input::url_to_addr(server.host.as_str(), server.port) {
-            Ok(addr) => addr,
-            Err(e) => {
-                tracing::error!("Failed to parse server address: {:?}", e);
-                return;
-            }
-        };
-
-        let mut session = match AsyncSession::<TokioTcpStream>::connect(server_addr, None).await {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!("Failed to connect to server: {:?}", e);
-                return;
-            }
-        };
-
-        if let Err(e) = init_session(&mut session, server.username.as_str(), public_key, private_key).await {
-            tracing::error!("Failed to initialize session: {:?}", e);
-            return;
-        }
-
-        let mut channel = match session.channel_session().await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!("Failed to create channel: {:?}", e);
-                return;
-            }
-        };
-
-        let command = format!("watch -n 0.5 nix-store --read-log {}", build.derivation_path);
-
-        if let Err(e) = channel.exec(command.as_str()).await {
-            tracing::error!("Failed to execute command: {:?}", e);
-            return;
-        }
-
-        let mut buffer = [0; 1024];
-        let mut log = String::new();
-
-        loop {
-            let len = match channel.read(&mut buffer).await {
-                Ok(l) => l,
-                Err(e) => {
-                    tracing::error!("Failed to read from channel: {:?}", e);
-                    break;
-                }
-            };
-
-            if len == 0 {
-                break;
-            }
-
-            match std::str::from_utf8(&buffer[..len]) {
-                Ok(s) => log.push_str(s),
-                Err(e) => {
-                    tracing::error!("Failed to parse UTF-8: {:?}", e);
-                    continue;
-                }
-            }
-
-            yield BuildLogStreamResponse {
-                build_id: build.id,
-                log: log.clone(),
-            };
-        }
-    };
-
-    Ok(Box::pin(stream))
 }
 
 pub async fn get_local_store(organization: Option<MOrganization>) -> Result<LocalNixStore> {

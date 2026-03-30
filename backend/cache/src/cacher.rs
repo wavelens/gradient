@@ -10,13 +10,13 @@ use core::sources::{
     clear_key, format_cache_key, get_cache_nar_location, get_hash_from_path,
     get_path_from_build_output, write_key,
 };
-use sha2::{Digest, Sha256};
 use core::types::*;
 use nix_daemon::{Progress, Store};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
 };
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
@@ -218,8 +218,10 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         is_entry_point,
         "Caching build output"
     );
+
     let pack_result =
         pack_build_output(Arc::clone(&state), build_output.clone(), is_entry_point).await;
+
     let (file_hash, file_size) = match pack_result {
         Ok(result) => result,
         Err(e) => {
@@ -426,6 +428,7 @@ pub async fn pack_build_output(
     if is_entry_point {
         let nar_location = get_cache_nar_location(state.cli.base_path.clone(), path_hash)
             .context("Failed to get NAR file location")?;
+
         tokio::fs::write(&nar_location, &nar_data)
             .await
             .context("Failed to write entry-point NAR to disk")?;

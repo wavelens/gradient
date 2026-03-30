@@ -88,6 +88,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private logDrainTimer?: ReturnType<typeof setInterval>;
 
   ngOnInit(): void {
+    document.body.style.overflow = 'hidden';
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') || '';
     this.initialBuildId = this.route.snapshot.queryParamMap.get('build');
@@ -99,6 +100,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    document.body.style.overflow = '';
     this.stopPolling();
     this.stopDurationTimer();
     this.stopActiveStream();
@@ -128,6 +130,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   };
 
   private sortBuilds(builds: BuildItem[]): BuildItem[] {
+    if (this.evaluation()?.status === 'Building') {
+      return [...builds].sort((a, b) =>
+        this.buildDisplayName(a.name).localeCompare(this.buildDisplayName(b.name))
+      );
+    }
     return [...builds].sort((a, b) => {
       const oa = this.buildStatusOrder[a.status] ?? 99;
       const ob = this.buildStatusOrder[b.status] ?? 99;
@@ -159,7 +166,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           ]);
           const newBuilds = this.builds().filter(b => !knownIds.has(b.id));
           if (newBuilds.length > 0) {
-            this.pendingBuilds.push(...newBuilds);
+            this.pendingBuilds.unshift(...newBuilds);
             this.startBuildRevealTimer();
           }
           // Refresh statuses & order of already-visible builds
@@ -346,7 +353,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         return;
       }
       const next = this.pendingBuilds.shift()!;
-      this.visibleBuilds.update(vbs => this.sortBuilds([...vbs, next]));
+      this.visibleBuilds.update(vbs => [next, ...vbs]);
     }, 200);
   }
 

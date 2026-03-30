@@ -23,7 +23,12 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Webhook::Url).text().not_null())
                     .col(ColumnDef::new(Webhook::Secret).text().not_null())
                     .col(ColumnDef::new(Webhook::Events).json().not_null())
-                    .col(ColumnDef::new(Webhook::Active).boolean().not_null().default(true))
+                    .col(
+                        ColumnDef::new(Webhook::Active)
+                            .boolean()
+                            .not_null()
+                            .default(true),
+                    )
                     .col(ColumnDef::new(Webhook::CreatedBy).uuid().not_null())
                     .col(ColumnDef::new(Webhook::CreatedAt).date_time().not_null())
                     .foreign_key(

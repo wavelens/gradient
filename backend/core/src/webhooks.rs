@@ -7,7 +7,7 @@
 use crate::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use sha2::Sha256;
 use std::sync::Arc;
@@ -67,11 +67,7 @@ pub async fn fire_evaluation_webhook(
     fire_webhooks(state, org_id, event.to_string(), payload).await;
 }
 
-pub async fn fire_build_webhook(
-    state: Arc<ServerState>,
-    build: MBuild,
-    status: BuildStatus,
-) {
+pub async fn fire_build_webhook(state: Arc<ServerState>, build: MBuild, status: BuildStatus) {
     let event = match status {
         BuildStatus::Queued => "build.queued",
         BuildStatus::Building => "build.started",

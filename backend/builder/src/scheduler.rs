@@ -144,57 +144,56 @@ async fn parse_derivation_file(
     //   - "path" includes the full "/nix/store/..." path
     //   - "hashAlgo": "r:sha256" | "sha256" | "text:sha256"  (method+algo combined)
     //   - no "method" field
-    let output_info: OutputInfo =
-        derivation_data
-            .get("outputs")
-            .and_then(|v| v.as_object())
-            .map(|obj| {
-                obj.iter()
-                    .map(|(k, v)| {
-                        // Path: new nix omits the store prefix; old nix includes it.
-                        let path = v
-                            .get("path")
-                            .and_then(|v| v.as_str())
-                            .filter(|s| !s.is_empty())
-                            .map(|s| {
-                                if s.starts_with("/nix/store/") {
-                                    s.to_string()
-                                } else {
-                                    format!("/nix/store/{}", s)
-                                }
-                            });
-
-                        // hashAlgo: combine method + algo for new nix format.
-                        // Old nix already includes the method in hashAlgo ("r:sha256").
-                        let algo = v
-                            .get("hashAlgo")
-                            .and_then(|v| v.as_str())
-                            .filter(|s| !s.is_empty());
-                        let hash_algo = algo.map(|algo| {
-                            // If algo already contains ":" it's old format (method included).
-                            if algo.contains(':') {
-                                algo.to_string()
+    let output_info: OutputInfo = derivation_data
+        .get("outputs")
+        .and_then(|v| v.as_object())
+        .map(|obj| {
+            obj.iter()
+                .map(|(k, v)| {
+                    // Path: new nix omits the store prefix; old nix includes it.
+                    let path = v
+                        .get("path")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| {
+                            if s.starts_with("/nix/store/") {
+                                s.to_string()
                             } else {
-                                // New format: look for separate "method" field.
-                                match v.get("method").and_then(|v| v.as_str()) {
-                                    Some("nar") => format!("r:{}", algo),
-                                    Some("text") => format!("text:{}", algo),
-                                    _ => algo.to_string(), // "flat" or absent → no prefix
-                                }
+                                format!("/nix/store/{}", s)
                             }
                         });
 
-                        let hash = v
-                            .get("hash")
-                            .and_then(|v| v.as_str())
-                            .filter(|s| !s.is_empty())
-                            .map(|s| s.to_string());
+                    // hashAlgo: combine method + algo for new nix format.
+                    // Old nix already includes the method in hashAlgo ("r:sha256").
+                    let algo = v
+                        .get("hashAlgo")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty());
+                    let hash_algo = algo.map(|algo| {
+                        // If algo already contains ":" it's old format (method included).
+                        if algo.contains(':') {
+                            algo.to_string()
+                        } else {
+                            // New format: look for separate "method" field.
+                            match v.get("method").and_then(|v| v.as_str()) {
+                                Some("nar") => format!("r:{}", algo),
+                                Some("text") => format!("text:{}", algo),
+                                _ => algo.to_string(), // "flat" or absent → no prefix
+                            }
+                        }
+                    });
 
-                        (k.to_string(), (path, hash_algo, hash))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+                    let hash = v
+                        .get("hash")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string());
+
+                    (k.to_string(), (path, hash_algo, hash))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     Ok((builder, args, env, input_srcs, output_info))
 }
@@ -1437,7 +1436,7 @@ async fn reserve_available_server(
             state,
             evaluation,
             EvaluationStatus::Aborted,
-            "No servers available to build this evaluation. Please ensure at least one server is configured and active for the required architecture.".to_string(),
+            format!("No servers available to build {}. Please ensure at least one server is configured and active for the required architecture.", build.derivation_path).to_string(),
         ).await;
 
         return None;
@@ -1734,7 +1733,10 @@ async fn check_evaluation_status(state: Arc<ServerState>, evaluation_id: Uuid) {
         .collect::<Vec<BuildStatus>>();
 
     let in_progress = statuses.iter().any(|s| {
-        matches!(s, BuildStatus::Queued | BuildStatus::Created | BuildStatus::Building)
+        matches!(
+            s,
+            BuildStatus::Queued | BuildStatus::Created | BuildStatus::Building
+        )
     });
 
     let status = if statuses.iter().all(|s| *s == BuildStatus::Completed) {

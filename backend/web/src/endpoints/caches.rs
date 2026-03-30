@@ -7,7 +7,6 @@
 use crate::error::{WebError, WebResult};
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use std::collections::HashMap;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
 use axum::{Extension, Json};
@@ -23,6 +22,7 @@ use core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::process::Command;
 use uuid::Uuid;
@@ -231,8 +231,8 @@ pub async fn put(
         return Err(WebError::already_exists("Cache Name"));
     }
 
-    let (private_key, public_key) =
-        generate_signing_key(state.cli.crypt_secret_file.clone()).map_err(|e| {
+    let (private_key, public_key) = generate_signing_key(state.cli.crypt_secret_file.clone())
+        .map_err(|e| {
             tracing::error!("Failed to generate signing key: {}", e);
             WebError::InternalServerError("Failed to generate signing key".to_string())
         })?;
@@ -976,8 +976,8 @@ pub async fn nar(
         ));
     }
 
-    let nar_file_path =
-        get_cache_nar_location(state.cli.base_path.clone(), path_hash.clone()).map_err(|e| {
+    let nar_file_path = get_cache_nar_location(state.cli.base_path.clone(), path_hash.clone())
+        .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(BaseResponse {

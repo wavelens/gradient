@@ -99,7 +99,7 @@ pub fn ask_for_input(prompt: &str) -> String {
     let mut inp = String::new();
     io::stdin()
         .read_line(&mut inp)
-        .expect(format!("Failed to read {}.", prompt).as_str());
+        .unwrap_or_else(|_| panic!("Failed to read {}.", prompt));
     let inp = inp.trim().to_string();
 
     if inp.is_empty() {

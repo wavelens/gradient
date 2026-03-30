@@ -110,13 +110,19 @@ pub async fn put(
     }
 
     if body.name.is_empty() {
-        return Err(WebError::BadRequest("Webhook name cannot be empty.".to_string()));
+        return Err(WebError::BadRequest(
+            "Webhook name cannot be empty.".to_string(),
+        ));
     }
     if body.url.is_empty() {
-        return Err(WebError::BadRequest("Webhook URL cannot be empty.".to_string()));
+        return Err(WebError::BadRequest(
+            "Webhook URL cannot be empty.".to_string(),
+        ));
     }
     if body.secret.is_empty() {
-        return Err(WebError::BadRequest("Webhook secret cannot be empty.".to_string()));
+        return Err(WebError::BadRequest(
+            "Webhook secret cannot be empty.".to_string(),
+        ));
     }
 
     let webhook = AWebhook {
@@ -126,7 +132,10 @@ pub async fn put(
         url: Set(body.url),
         secret: Set(body.secret),
         events: Set(serde_json::Value::Array(
-            body.events.into_iter().map(serde_json::Value::String).collect(),
+            body.events
+                .into_iter()
+                .map(serde_json::Value::String)
+                .collect(),
         )),
         active: Set(true),
         created_by: Set(user.id),

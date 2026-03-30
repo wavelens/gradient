@@ -47,7 +47,7 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
 
     // Parse the derivation to extract just the derivation name (after #)
     let derivation_name = if derivation.contains('#') {
-        derivation.split('#').last().unwrap_or(&derivation)
+        derivation.split('#').next_back().unwrap_or(&derivation)
     } else {
         &derivation
     };
@@ -71,7 +71,7 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
 
     // Get list of files tracked by git
     let git_files = Command::new("git")
-        .args(&["ls-files"])
+        .args(["ls-files"])
         .output()
         .map_err(|e| {
             if !quiet {
@@ -105,10 +105,8 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
     for file_path in file_list {
         if let Ok(content) = std::fs::read(&file_path) {
             files.insert(file_path, content);
-        } else {
-            if !quiet {
-                eprintln!("Warning: Could not read file {}", file_path);
-            }
+        } else if !quiet {
+            eprintln!("Warning: Could not read file {}", file_path);
         }
     }
 
@@ -168,13 +166,12 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
 
     // First, wait for builds to be created
     let build_ids: Vec<String> = loop {
-        match builds::get_evaluation_builds(config.clone(), evaluation_id.clone()).await {
-            Ok(response) => {
-                if !response.error && !response.message.is_empty() {
-                    break response.message.iter().map(|b| b.id.clone()).collect();
-                }
-            }
-            Err(_) => {}
+        if let Ok(response) =
+            builds::get_evaluation_builds(config.clone(), evaluation_id.clone()).await
+            && !response.error
+            && !response.message.is_empty()
+        {
+            break response.message.iter().map(|b| b.id.clone()).collect();
         }
 
         max_retries -= 1;
@@ -200,10 +197,10 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
         }
 
         // Stream the build log
-        if let Err(e) = builds::post_build(config.clone(), build_id.clone()).await {
-            if !quiet {
-                eprintln!("Failed to stream logs for build {}: {}", build_id, e);
-            }
+        if let Err(e) = builds::post_build(config.clone(), build_id.clone()).await
+            && !quiet
+        {
+            eprintln!("Failed to stream logs for build {}: {}", build_id, e);
         }
 
         if !quiet {

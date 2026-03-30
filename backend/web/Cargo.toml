@@ -36,12 +36,12 @@ email_address = "0.2"
 git-url-parse = "0.6"
 http          = "1.4"
 http-body-util = "0.1"
-jsonwebtoken  = { version = "10.2", features = ["aws_lc_rs"] }
-password-auth = { version = "1.0.0", features = ["argon2"] }
+jsonwebtoken  = { version = "10.3", features = ["aws_lc_rs"] }
+password-auth = { version = "1.0", features = ["argon2"] }
 reqwest       = { version = "0.13", features = ["json", "form"] }
 tokio-util    = { version = "0.7", features = ["io"] }
 tower         = "0.5"
-tower-http    = { version = "0.6.8", features = ["cors", "trace"] }
+tower-http    = { version = "0.6", features = ["cors", "trace"] }
 url           = "2.5"
 
 [dev-dependencies]

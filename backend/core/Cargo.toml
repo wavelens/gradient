@@ -13,7 +13,6 @@ path = "src/lib.rs"
 [dependencies]
 # Workspace dependencies
 anyhow           = { workspace = true }
-async-stream     = { workspace = true }
 chrono           = { workspace = true }
 entity           = { workspace = true }
 futures          = { workspace = true }
@@ -36,7 +35,8 @@ reqwest          = { workspace = true }
 # Crate-specific dependencies
 async-ssh2-lite  = { version = "0.5", features = ["tokio"] }
 base64           = "0.22"
-clap             = { version = "4.5", features = ["derive", "env"] }
+git2             = { workspace = true }
+clap             = { version = "4.6", features = ["derive", "env"] }
 crypter          = { version = "0.3", features = ["argon"] }
 ed25519-compact  = { version = "2.2", features = ["random"] }
 git-url-parse    = "0.6"
@@ -45,7 +45,7 @@ lettre           = { version = "0.11", default-features = false, features = ["sm
 password-auth    = "1.0"
 rand_core        = "0.9"
 ssh-key          = { version = "0.6", features = ["ed25519"] }
-tempfile         = "3.24"
+tempfile         = "3.27"
 
 [dev-dependencies]
 mockall    = { workspace = true }

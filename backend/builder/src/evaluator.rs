@@ -273,7 +273,8 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             let in_dependencies = dependencies.iter().any(|(path, _, _)| *path == d_path);
 
             if in_builds || in_dependencies {
-                let d_id = if let Some(b) = all_builds.iter().find(|b| b.derivation_path == d_path) {
+                let d_id = if let Some(b) = all_builds.iter().find(|b| b.derivation_path == d_path)
+                {
                     b.id
                 } else if let Some((_, id)) = pending.iter().find(|(p, _)| *p == d_path) {
                     *id
@@ -438,9 +439,8 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         .collect();
 
     for handle in handles {
-        let (build_id, path, system, features) = handle
-            .await
-            .context("get_features_cmd task panicked")??;
+        let (build_id, path, system, features) =
+            handle.await.context("get_features_cmd task panicked")??;
 
         if reused_build_ids.contains(&build_id) {
             // Already updated in DB during BFS — skip re-insertion

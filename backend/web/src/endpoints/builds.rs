@@ -182,11 +182,7 @@ pub async fn get_build_log(
         return Err(WebError::not_found("Build"));
     }
 
-    let log = state
-        .log_storage
-        .read(build_id)
-        .await
-        .unwrap_or_default();
+    let log = state.log_storage.read(build_id).await.unwrap_or_default();
     let res = BaseResponse {
         error: false,
         message: log,
@@ -797,7 +793,9 @@ pub async fn get_build_downloads_public(
     let organization = EOrganization::find_by_id(organization_id)
         .one(&state.db)
         .await?
-        .ok_or_else(|| WebError::InternalServerError("Organization data inconsistency".to_string()))?;
+        .ok_or_else(|| {
+            WebError::InternalServerError("Organization data inconsistency".to_string())
+        })?;
 
     if !organization.public {
         return Err(WebError::not_found("Build"));
@@ -879,7 +877,9 @@ pub async fn get_build_download_public(
     let organization = EOrganization::find_by_id(organization_id)
         .one(&state.db)
         .await?
-        .ok_or_else(|| WebError::InternalServerError("Organization data inconsistency".to_string()))?;
+        .ok_or_else(|| {
+            WebError::InternalServerError("Organization data inconsistency".to_string())
+        })?;
 
     if !organization.public {
         return Err(WebError::not_found("Build"));

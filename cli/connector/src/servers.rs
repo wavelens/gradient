@@ -62,6 +62,7 @@ pub async fn get(
     Ok(parse_response(res).await)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn put(
     config: RequestConfig,
     organization: String,
@@ -117,6 +118,7 @@ pub async fn get_server(
     Ok(parse_response(res).await)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn patch_server(
     config: RequestConfig,
     organization: String,

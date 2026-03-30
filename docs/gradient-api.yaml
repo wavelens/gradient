@@ -1114,8 +1114,18 @@ paths:
     get:
       tags: [projects]
       summary: List entry points
-      description: Returns the current root builds (entry points) for the project — the top-level derivations produced by the latest evaluation.
+      description: >
+        Returns the root builds (entry points) for the project from the last evaluation by default.
+        Pass `evaluation_id` to retrieve entry points from a specific evaluation instead.
       operationId: listProjectEntryPoints
+      parameters:
+        - name: evaluation_id
+          in: query
+          required: false
+          description: UUID of a specific evaluation to retrieve entry points from. Defaults to the project's last evaluation.
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: Entry points

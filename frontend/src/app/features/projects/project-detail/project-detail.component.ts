@@ -73,7 +73,11 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
 
   loadEntryPoints(): void {
     this.projectsService.getEntryPoints(this.orgName, this.projectName).subscribe({
-      next: (eps) => this.entryPoints.set(eps),
+      next: (eps) => this.entryPoints.set(
+        [...eps].sort((a, b) =>
+          this.getDerivationName(a.derivation_path).localeCompare(this.getDerivationName(b.derivation_path))
+        )
+      ),
       error: (error) => console.error('Failed to load entry points:', error),
     });
   }
