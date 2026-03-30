@@ -9,7 +9,7 @@ use chrono::Utc;
 use core::database::add_features;
 use core::executer::*;
 use core::input::{parse_evaluation_wildcard, repository_url_to_nix, vec_to_hex};
-use core::sources::prefetch_flake;
+use core::sources::{prefetch_flake, clear_key, decrypt_ssh_private_key, write_key};
 use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
@@ -90,7 +90,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         Arc::clone(&state),
         repository.clone(),
         wildcards,
-        organization,
+        organization.clone(),
     )
     .await
     .map_err(|e| anyhow::anyhow!("Failed to evaluate: {}", e))?;
@@ -109,9 +109,18 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     for derivation_string in all_derivations {
         let path = format!("{}#{}", repository, derivation_string);
 
+        let (private_key, _public_key) =
+            decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization.clone())?;
+
+        let ssh_key_path = write_key(private_key)?;
+        let git_ssh_command = format!(
+            "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
+            state.cli.binpath_ssh, ssh_key_path
+        );
+
         // TODO: use nix api
         let (derivation, _references) =
-            match get_derivation_cmd(state.cli.binpath_nix.as_str(), &path).await {
+            match get_derivation_cmd(state.cli.binpath_nix.as_str(), &path, &git_ssh_command).await {
                 Ok((d, r)) => (d, r),
                 Err(e) => {
                     let error_msg = e.to_string();
@@ -124,6 +133,8 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                     continue;
                 }
             };
+
+        clear_key(ssh_key_path).ok();
 
         let missing = core::executer::get_missing_builds(vec![derivation.clone()], store).await?;
 
@@ -521,12 +532,14 @@ async fn find_builds(
 pub async fn get_derivation_cmd(
     binpath_nix: &str,
     path: &str,
+    git_ssh_command: &str,
 ) -> anyhow::Result<(String, Vec<String>)> {
     let output = Command::new(binpath_nix)
         .arg("path-info")
         .arg("--json")
         .arg("--derivation")
         .arg(path)
+        .env("GIT_SSH_COMMAND", &git_ssh_command)
         .output()
         .await?;
 
@@ -738,8 +751,6 @@ async fn get_flake_derivations(
     wildcards: Vec<&str>,
     organization: MOrganization,
 ) -> Result<Vec<String>> {
-    use core::sources::{clear_key, decrypt_ssh_private_key, write_key};
-
     let (private_key, _public_key) =
         decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization)?;
 

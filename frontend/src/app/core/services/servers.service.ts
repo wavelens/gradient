@@ -7,14 +7,14 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { Server } from '@core/models';
+import { Server, Paginated } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class ServersService {
   private api = inject(ApiService);
 
-  getServers(org: string): Observable<{ id: string; name: string }[]> {
-    return this.api.get<{ id: string; name: string }[]>(`servers/${org}`);
+  getServers(org: string, page = 1, perPage = 50): Observable<Paginated<{ id: string; name: string }[]>> {
+    return this.api.get<Paginated<{ id: string; name: string }[]>>(`servers/${org}?page=${page}&per_page=${perPage}`);
   }
 
   getServer(org: string, server: string): Observable<Server> {

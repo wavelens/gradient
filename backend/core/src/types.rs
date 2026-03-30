@@ -116,6 +116,29 @@ pub struct BaseResponse<T> {
     pub message: T,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Paginated<T> {
+    pub items: T,
+    pub total: u64,
+    pub page: u64,
+    pub per_page: u64,
+}
+
+#[derive(Deserialize, Debug, Default)]
+pub struct PaginationParams {
+    pub page: Option<u64>,
+    pub per_page: Option<u64>,
+}
+
+impl PaginationParams {
+    pub fn page(&self) -> u64 {
+        self.page.unwrap_or(1).max(1)
+    }
+    pub fn per_page(&self) -> u64 {
+        self.per_page.unwrap_or(50).clamp(1, 100)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListItem {
     pub id: Uuid,

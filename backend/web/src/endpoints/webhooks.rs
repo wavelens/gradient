@@ -10,6 +10,7 @@ use axum::{Extension, Json};
 use chrono::Utc;
 use core::database::get_any_organization_by_name;
 use core::types::*;
+use core::webhooks::{decrypt_webhook_secret, encrypt_webhook_secret};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -125,12 +126,15 @@ pub async fn put(
         ));
     }
 
+    let encrypted_secret = encrypt_webhook_secret(&state.cli.crypt_secret_file, &body.secret)
+        .map_err(|e| WebError::InternalServerError(format!("Failed to encrypt secret: {}", e)))?;
+
     let webhook = AWebhook {
         id: Set(Uuid::new_v4()),
         organization: Set(organization.id),
         name: Set(body.name),
         url: Set(body.url),
-        secret: Set(body.secret),
+        secret: Set(encrypted_secret),
         events: Set(serde_json::Value::Array(
             body.events
                 .into_iter()
@@ -214,7 +218,9 @@ pub async fn patch_webhook(
         active_webhook.url = Set(url);
     }
     if let Some(secret) = body.secret {
-        active_webhook.secret = Set(secret);
+        let encrypted = encrypt_webhook_secret(&state.cli.crypt_secret_file, &secret)
+            .map_err(|e| WebError::InternalServerError(format!("Failed to encrypt secret: {}", e)))?;
+        active_webhook.secret = Set(encrypted);
     }
     if let Some(events) = body.events {
         active_webhook.events = Set(serde_json::Value::Array(
@@ -299,7 +305,9 @@ pub async fn post_webhook_test(
     });
 
     let body_str = serde_json::to_string(&payload).unwrap_or_default();
-    let signature = core::webhooks::sign_webhook_payload(&webhook.secret, &body_str);
+    let plaintext_secret = decrypt_webhook_secret(&state.cli.crypt_secret_file, &webhook.secret)
+        .map_err(|e| WebError::InternalServerError(format!("Failed to decrypt webhook secret: {}", e)))?;
+    let signature = core::webhooks::sign_webhook_payload(&plaintext_secret, &body_str);
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))

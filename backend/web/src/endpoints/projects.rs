@@ -151,21 +151,26 @@ pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> WebResult<Json<BaseResponse<Vec<ProjectResponse>>>> {
-    // TODO: Implement pagination
+    Query(params): Query<PaginationParams>,
+) -> WebResult<Json<BaseResponse<Paginated<Vec<ProjectResponse>>>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
             .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    let projects = EProject::find()
-        .filter(CProject::Organization.eq(organization.id))
-        .all(&state.db)
-        .await?;
-
+    let page = params.page();
+    let per_page = params.per_page();
     let can_edit = user_can_edit(&state, user.id, organization.id).await?;
 
-    let projects: Vec<ProjectResponse> = projects
+    let paginator = EProject::find()
+        .filter(CProject::Organization.eq(organization.id))
+        .order_by_asc(CProject::CreatedAt)
+        .paginate(&state.db, per_page);
+
+    let total = paginator.num_items().await?;
+    let raw = paginator.fetch_page(page - 1).await?;
+
+    let items: Vec<ProjectResponse> = raw
         .into_iter()
         .map(|p| ProjectResponse {
             id: p.id,
@@ -187,7 +192,7 @@ pub async fn get(
 
     Ok(Json(BaseResponse {
         error: false,
-        message: projects,
+        message: Paginated { items, total, page, per_page },
     }))
 }
 

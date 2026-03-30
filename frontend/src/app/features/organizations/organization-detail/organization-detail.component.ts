@@ -46,6 +46,8 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
   loading = signal(true);
   organization = signal<Organization | null>(null);
   projects = signal<Project[]>([]);
+  projectsTotal = signal(0);
+  projectsPage = signal(1);
   showCreateDialog = signal(false);
   creating = signal(false);
   nameCheckState = signal<'idle' | 'checking' | 'available' | 'taken'>('idle');
@@ -83,11 +85,13 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
 
     forkJoin({
       organization: this.organizationsService.getOrganization(this.orgName),
-      projects: this.projectsService.getProjects(this.orgName),
+      projects: this.projectsService.getProjects(this.orgName, this.projectsPage()),
     }).subscribe({
       next: ({ organization, projects }) => {
         this.organization.set(organization);
-        this.projects.set(projects);
+        this.projects.set(projects.items);
+        this.projectsTotal.set(projects.total);
+        this.projectsPage.set(projects.page);
         this.loading.set(false);
       },
       error: (error) => {

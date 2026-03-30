@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use base64::{Engine, engine::general_purpose};
+use crate::input::load_secret_bytes;
 use crate::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
@@ -15,6 +17,25 @@ use tracing::{error, warn};
 use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
+
+/// Encrypts `plaintext_secret` with the server crypt key and returns a base64-encoded ciphertext.
+pub fn encrypt_webhook_secret(crypt_secret_file: &str, plaintext: &str) -> Result<String, String> {
+    let key = load_secret_bytes(crypt_secret_file);
+    let ciphertext = crypter::encrypt_with_password(&key, plaintext.as_bytes())
+        .ok_or_else(|| "Encryption failed".to_string())?;
+    Ok(general_purpose::STANDARD.encode(ciphertext))
+}
+
+/// Decrypts a base64-encoded ciphertext produced by `encrypt_webhook_secret`.
+pub fn decrypt_webhook_secret(crypt_secret_file: &str, encoded: &str) -> Result<String, String> {
+    let key = load_secret_bytes(crypt_secret_file);
+    let ciphertext = general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|e| format!("Base64 decode error: {}", e))?;
+    let plaintext = crypter::decrypt_with_password(&key, ciphertext)
+        .ok_or_else(|| "Decryption failed".to_string())?;
+    String::from_utf8(plaintext).map_err(|e| format!("UTF-8 decode error: {}", e))
+}
 
 /// Signs `body` with HMAC-SHA256 using `secret` and returns `sha256=<hex>`.
 pub fn sign_webhook_payload(secret: &str, body: &str) -> String {
@@ -177,7 +198,14 @@ async fn fire_webhooks(
             continue;
         }
 
-        let signature = sign_webhook_payload(&webhook.secret, &body_str);
+        let plaintext_secret = match decrypt_webhook_secret(&state.cli.crypt_secret_file, &webhook.secret) {
+            Ok(s) => s,
+            Err(e) => {
+                error!(error = %e, webhook_id = %webhook.id, "Failed to decrypt webhook secret; skipping delivery");
+                continue;
+            }
+        };
+        let signature = sign_webhook_payload(&plaintext_secret, &body_str);
 
         let result = client
             .post(&webhook.url)

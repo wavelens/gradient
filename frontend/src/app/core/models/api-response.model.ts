@@ -8,3 +8,10 @@ export interface ApiResponse<T> {
   error: boolean;
   message: T | string;
 }
+
+export interface Paginated<T> {
+  items: T;
+  total: number;
+  page: number;
+  per_page: number;
+}

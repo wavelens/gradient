@@ -161,48 +161,33 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         return;
     }
 
-    let organization_caches = match EOrganizationCache::find()
+    let cache_ids: Vec<Uuid> = match EOrganizationCache::find()
         .filter(COrganizationCache::Organization.eq(organization.id))
         .all(&state.db)
         .await
     {
-        Ok(caches) => caches,
+        Ok(ocs) => ocs.into_iter().map(|oc| oc.cache).collect(),
         Err(e) => {
             error!(error = %e, "Failed to query organization caches");
             return;
         }
     };
 
-    for organization_cache in organization_caches {
-        let ocs = match EOrganizationCache::find()
-            .filter(COrganizationCache::Cache.eq(organization_cache.cache))
-            .all(&state.db)
-            .await
-        {
-            Ok(caches) => caches,
-            Err(e) => {
-                error!(error = %e, "Failed to query cache organizations");
-                continue;
-            }
-        };
-
-        for oc in ocs {
-            let cache = match ECache::find_by_id(oc.cache).one(&state.db).await {
-                Ok(Some(c)) => c,
-                Ok(None) => {
-                    error!("Cache not found: {}", oc.cache);
-                    continue;
-                }
-                Err(e) => {
-                    error!(error = %e, "Failed to query cache");
-                    continue;
-                }
-            };
-
-            if cache.active {
-                sign_build_output(Arc::clone(&state), cache.clone(), build_output.clone()).await;
-            }
+    let active_caches = match ECache::find()
+        .filter(CCache::Id.is_in(cache_ids))
+        .filter(CCache::Active.eq(true))
+        .all(&state.db)
+        .await
+    {
+        Ok(caches) => caches,
+        Err(e) => {
+            error!(error = %e, "Failed to query active caches");
+            return;
         }
+    };
+
+    for cache in active_caches {
+        sign_build_output(Arc::clone(&state), cache, build_output.clone()).await;
     }
 
     let is_entry_point = EEntryPoint::find()

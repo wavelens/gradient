@@ -42,6 +42,8 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
 
   loading = signal(true);
   organizations = signal<Organization[]>([]);
+  orgsTotal = signal(0);
+  orgsPage = signal(1);
   showCreateDialog = signal(false);
   creating = signal(false);
   nameCheckState = signal<'idle' | 'checking' | 'available' | 'taken'>('idle');
@@ -54,6 +56,8 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
   };
 
   publicOrgs = signal<Organization[]>([]);
+  publicTotal = signal(0);
+  publicPage = signal(1);
   publicLoading = signal(false);
 
   ngOnInit(): void {
@@ -74,11 +78,13 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
     this.nameCheck$.complete();
   }
 
-  loadOrganizations(): void {
+  loadOrganizations(page = this.orgsPage()): void {
     this.loading.set(true);
-    this.organizationsService.getOrganizations().subscribe({
-      next: (orgs) => {
-        this.organizations.set(orgs);
+    this.organizationsService.getOrganizations(page).subscribe({
+      next: (result) => {
+        this.organizations.set(result.items);
+        this.orgsTotal.set(result.total);
+        this.orgsPage.set(result.page);
         this.loading.set(false);
       },
       error: (error) => {
@@ -88,11 +94,13 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
     });
   }
 
-  loadPublicOrganizations(): void {
+  loadPublicOrganizations(page = this.publicPage()): void {
     this.publicLoading.set(true);
-    this.organizationsService.getPublicOrganizations().subscribe({
-      next: (orgs) => {
-        this.publicOrgs.set(orgs);
+    this.organizationsService.getPublicOrganizations(page).subscribe({
+      next: (result) => {
+        this.publicOrgs.set(result.items);
+        this.publicTotal.set(result.total);
+        this.publicPage.set(result.page);
         this.publicLoading.set(false);
       },
       error: () => this.publicLoading.set(false),

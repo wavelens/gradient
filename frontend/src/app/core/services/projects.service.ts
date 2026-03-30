@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { Project, ProjectDetail, EntryPointSummary } from '@core/models';
+import { Project, ProjectDetail, EntryPointSummary, Paginated } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
 export class ProjectsService {
@@ -17,8 +17,8 @@ export class ProjectsService {
     return this.api.get<boolean>(`projects/${organization}/available?name=${encodeURIComponent(name)}`);
   }
 
-  getProjects(organization: string): Observable<Project[]> {
-    return this.api.get<Project[]>(`projects/${organization}`);
+  getProjects(organization: string, page = 1, perPage = 50): Observable<Paginated<Project[]>> {
+    return this.api.get<Paginated<Project[]>>(`projects/${organization}?page=${page}&per_page=${perPage}`);
   }
 
   getProject(organization: string, project: string): Observable<ProjectDetail> {

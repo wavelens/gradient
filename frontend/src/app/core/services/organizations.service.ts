@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { Organization } from '@core/models';
+import { Organization, Paginated } from '@core/models';
 
 export interface OrgMember {
   id: string;   // username
@@ -18,12 +18,12 @@ export interface OrgMember {
 export class OrganizationsService {
   private api = inject(ApiService);
 
-  getOrganizations(): Observable<Organization[]> {
-    return this.api.get<Organization[]>('orgs');
+  getOrganizations(page = 1, perPage = 50): Observable<Paginated<Organization[]>> {
+    return this.api.get<Paginated<Organization[]>>(`orgs?page=${page}&per_page=${perPage}`);
   }
 
-  getPublicOrganizations(): Observable<Organization[]> {
-    return this.api.get<Organization[]>('orgs/public');
+  getPublicOrganizations(page = 1, perPage = 50): Observable<Paginated<Organization[]>> {
+    return this.api.get<Paginated<Organization[]>>(`orgs/public?page=${page}&per_page=${perPage}`);
   }
 
   setPublic(name: string): Observable<string> {

@@ -5,7 +5,7 @@
  */
 
 use crate::error::{WebError, WebResult};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use chrono::Utc;
@@ -16,7 +16,7 @@ use core::input::{check_index_name, validate_display_name};
 use core::sources::decrypt_ssh_private_key;
 use core::types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -54,32 +54,33 @@ pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> WebResult<Json<BaseResponse<ListResponse>>> {
-    // TODO: Implement pagination
+    Query(params): Query<PaginationParams>,
+) -> WebResult<Json<BaseResponse<Paginated<ListResponse>>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
             .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    let servers = EServer::find()
-        .filter(CServer::Organization.eq(organization.id))
-        .all(&state.db)
-        .await?;
+    let page = params.page();
+    let per_page = params.per_page();
 
-    let servers: ListResponse = servers
+    let paginator = EServer::find()
+        .filter(CServer::Organization.eq(organization.id))
+        .order_by_asc(CServer::CreatedAt)
+        .paginate(&state.db, per_page);
+
+    let total = paginator.num_items().await?;
+    let raw = paginator.fetch_page(page - 1).await?;
+
+    let items: ListResponse = raw
         .iter()
-        .map(|s| ListItem {
-            id: s.id,
-            name: s.name.clone(),
-        })
+        .map(|s| ListItem { id: s.id, name: s.name.clone() })
         .collect();
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
-        message: servers,
-    };
-
-    Ok(Json(res))
+        message: Paginated { items, total, page, per_page },
+    }))
 }
 
 pub async fn put(

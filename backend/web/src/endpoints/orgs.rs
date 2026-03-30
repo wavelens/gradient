@@ -16,8 +16,8 @@ use core::sources::{format_public_key, generate_ssh_key};
 use core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QuerySelect,
-    RelationTrait,
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, JoinType, PaginatorTrait, QueryFilter,
+    QueryOrder, QuerySelect, RelationTrait,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -75,9 +75,12 @@ pub async fn get_org_name_available(
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-) -> WebResult<Json<BaseResponse<Vec<MOrganization>>>> {
-    // TODO: Implement pagination
-    let organizations = EOrganization::find()
+    Query(params): Query<PaginationParams>,
+) -> WebResult<Json<BaseResponse<Paginated<Vec<MOrganization>>>>> {
+    let page = params.page();
+    let per_page = params.per_page();
+
+    let paginator = EOrganization::find()
         .join_rev(
             JoinType::InnerJoin,
             EOrganizationUser::belongs_to(entity::organization::Entity)
@@ -86,12 +89,15 @@ pub async fn get(
                 .into(),
         )
         .filter(COrganizationUser::User.eq(user.id))
-        .all(&state.db)
-        .await?;
+        .order_by_asc(COrganization::CreatedAt)
+        .paginate(&state.db, per_page);
+
+    let total = paginator.num_items().await?;
+    let items = paginator.fetch_page(page - 1).await?;
 
     Ok(Json(BaseResponse {
         error: false,
-        message: organizations,
+        message: Paginated { items, total, page, per_page },
     }))
 }
 
@@ -159,15 +165,22 @@ pub async fn put(
 pub async fn get_public_organizations(
     state: State<Arc<ServerState>>,
     Extension(_user): Extension<MUser>,
-) -> WebResult<Json<BaseResponse<Vec<MOrganization>>>> {
-    let organizations = EOrganization::find()
+    Query(params): Query<PaginationParams>,
+) -> WebResult<Json<BaseResponse<Paginated<Vec<MOrganization>>>>> {
+    let page = params.page();
+    let per_page = params.per_page();
+
+    let paginator = EOrganization::find()
         .filter(COrganization::Public.eq(true))
-        .all(&state.db)
-        .await?;
+        .order_by_asc(COrganization::CreatedAt)
+        .paginate(&state.db, per_page);
+
+    let total = paginator.num_items().await?;
+    let items = paginator.fetch_page(page - 1).await?;
 
     Ok(Json(BaseResponse {
         error: false,
-        message: organizations,
+        message: Paginated { items, total, page, per_page },
     }))
 }
 

@@ -52,6 +52,8 @@ export class ServersComponent implements OnInit {
 
   orgName = '';
   servers = signal<Server[]>([]);
+  serversTotal = signal(0);
+  serversPage = signal(1);
   showCreateDialog = signal(false);
   errorMessage = signal<string | null>(null);
 
@@ -77,17 +79,19 @@ export class ServersComponent implements OnInit {
     this.loadServers();
   }
 
-  loadServers(): void {
+  loadServers(page = this.serversPage()): void {
     this.loading.set(true);
-    this.serversService.getServers(this.orgName).subscribe({
-      next: (list) => {
-        if (list.length === 0) {
+    this.serversService.getServers(this.orgName, page).subscribe({
+      next: (result) => {
+        this.serversTotal.set(result.total);
+        this.serversPage.set(result.page);
+        if (result.items.length === 0) {
           this.servers.set([]);
           this.loading.set(false);
           return;
         }
         forkJoin(
-          list.map(item =>
+          result.items.map(item =>
             this.serversService.getServer(this.orgName, item.name).pipe(
               catchError(() => of(null))
             )
