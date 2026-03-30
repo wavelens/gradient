@@ -745,16 +745,22 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                             }
                         };
 
+                    let output_path = format!("/nix/store/{}", realisation.out_path);
+                    let has_artefacts = tokio::fs::metadata(
+                        format!("{}/nix-support/hydra-build-products", output_path)
+                    ).await.is_ok();
+
                     build_outputs.push(ABuildOutput {
                         id: Set(Uuid::new_v4()),
                         build: Set(build.id),
                         name: Set(build_output_name),
-                        output: Set(format!("/nix/store/{}", realisation.out_path)),
+                        output: Set(output_path),
                         hash: Set(build_output_hash),
                         package: Set(build_output_package),
                         file_hash: Set(None),
                         file_size: Set(None),
                         is_cached: Set(false),
+                        has_artefacts: Set(has_artefacts),
                         ca: Set(None),
                         created_at: Set(Utc::now().naive_utc()),
                     });

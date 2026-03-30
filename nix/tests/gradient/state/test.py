@@ -35,7 +35,7 @@ with subtest("check state-managed organizations exist"):
     """.replace("alice_token", alice_token_to_use)))
 
     assert req.get("error") == False, f"Failed to get organizations: {req.get('message')}"
-    orgs = req.get("message")
+    orgs = req.get("message").get("items")
 
     corp_org = None
     for org in orgs:
@@ -52,7 +52,7 @@ with subtest("check state-managed projects exist"):
     """.replace("alice_token", alice_token_to_use)))
 
     assert req.get("error") == False, f"Failed to get projects: {req.get('message')}"
-    projects = req.get("message")
+    projects = req.get("message").get("items")
 
     project_names = [p.get("name") for p in projects]
     assert "web-app" in project_names, f"web-app project missing. Found: {project_names}"
@@ -64,7 +64,7 @@ with subtest("check state-managed servers exist"):
     """.replace("alice_token", alice_token_to_use)))
 
     assert req.get("error") == False, f"Failed to get servers: {req.get('message')}"
-    servers = req.get("message")
+    servers = req.get("message").get("items")
 
     server_names = [s.get("name") for s in servers]
     assert "build-server-1" in server_names, f"build-server-1 missing. Found: {server_names}"
@@ -76,7 +76,7 @@ with subtest("check state-managed caches exist"):
     """.replace("alice_token", alice_token_to_use)))
 
     assert req.get("error") == False, f"Failed to get caches: {req.get('message')}"
-    caches = req.get("message")
+    caches = req.get("message").get("items")
 
     cache_names = [c.get("name") for c in caches]
     assert "main" in cache_names, f"main missing. Found: {cache_names}"

@@ -24,7 +24,6 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::fs;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -798,24 +797,18 @@ pub async fn get_project_entry_points(
         .map(|b| b.id)
         .collect();
 
-    let all_outputs = if completed_ids.is_empty() {
-        vec![]
+    let has_artefacts_map: HashMap<Uuid, bool> = if completed_ids.is_empty() {
+        HashMap::new()
     } else {
         EBuildOutput::find()
             .filter(CBuildOutput::Build.is_in(completed_ids))
+            .filter(CBuildOutput::HasArtefacts.eq(true))
             .all(&state.db)
             .await?
+            .into_iter()
+            .map(|o| (o.build, true))
+            .collect()
     };
-
-    let mut has_artefacts_map: HashMap<Uuid, bool> = HashMap::new();
-    for output in all_outputs {
-        let path = format!("{}/nix-support/hydra-build-products", output.output);
-        if fs::metadata(&path).await.is_ok() {
-            has_artefacts_map.insert(output.build, true);
-        } else {
-            has_artefacts_map.entry(output.build).or_insert(false);
-        }
-    }
 
     let mut summaries = Vec::new();
     for ep in entry_points {

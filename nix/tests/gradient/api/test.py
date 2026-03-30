@@ -84,8 +84,9 @@ with subtest("check api /orgs"):
     """.replace("api_key", api_key)))
 
     assert req.get("error") == False, req.get("message")
-    assert len(req.get("message")) == 1, "Should have only one organization"
-    assert req.get("message")[0].get("id") == org_id, "Organization ID should match"
+    orgs = req.get("message").get("items")
+    assert len(orgs) == 1, "Should have only one organization"
+    assert orgs[0].get("id") == org_id, "Organization ID should match"
 
 with subtest("check api /orgs/{organization}"):
     org_name = "myorganization"

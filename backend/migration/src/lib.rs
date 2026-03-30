@@ -36,6 +36,7 @@ mod m20260326_000001_add_public_to_cache;
 mod m20260328_000000_add_max_concurrent_builds_to_server;
 mod m20260328_000001_split_cache_signing_key;
 mod m20260329_000000_create_table_webhook;
+mod m20260330_000000_add_has_artefacts_to_build_output;
 
 pub struct Migrator;
 
@@ -73,6 +74,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260328_000000_add_max_concurrent_builds_to_server::Migration),
             Box::new(m20260328_000001_split_cache_signing_key::Migration),
             Box::new(m20260329_000000_create_table_webhook::Migration),
+            Box::new(m20260330_000000_add_has_artefacts_to_build_output::Migration),
         ]
     }
 }

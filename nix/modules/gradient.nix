@@ -40,6 +40,13 @@ in {
         description = "The openssh package to use";
       };
 
+      package_git = lib.mkOption {
+        default = pkgs.git;
+        defaultText = "pkgs.git";
+        type = lib.types.package;
+        description = "The git package to use (required by Nix when fetching git+https:// flake inputs)";
+      };
+
       domain = lib.mkOption {
         description = "The domain under which Gradient runs.";
         type = lib.types.str;
@@ -201,6 +208,7 @@ in {
       path = [
         cfg.package_nix
         cfg.package_ssh
+        cfg.package_git
       ];
 
       serviceConfig = {

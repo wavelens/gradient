@@ -48,7 +48,7 @@ export class DashboardComponent implements OnInit {
       caches: this.cachesService.getCaches(),
     }).subscribe({
       next: ({ organizations, caches }) => {
-        this.organizations.set(organizations);
+        this.organizations.set(organizations.items);
         this.caches.set(caches);
         this.loading.set(false);
       },

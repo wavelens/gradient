@@ -1,6 +1,7 @@
  - build error: wrong build mode
  - garbage collection and gcroots
- - invalid git ssh auth attempts
+ - invalid git ssh auth attempts - fixed maybe?
+ - input_drvs aren't uploaded to builder
 
  - logging in without authorization
  - retry failed builds (retry)
@@ -11,5 +12,6 @@
  - Entry points show latest possible entry points
  - aborted evaluations should restart on server restart
  - if git link is http(s) make link clickable
+ - static links to specific buid logs to share with others
  - no Hover Effect on Dashboard for non clickable Elements
  - Add Footer: AGPL License and link to github and wavelens and version

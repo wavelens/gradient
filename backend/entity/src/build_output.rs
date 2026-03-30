@@ -22,6 +22,7 @@ pub struct Model {
     pub file_hash: Option<String>,
     pub file_size: Option<i64>,
     pub is_cached: bool,
+    pub has_artefacts: bool,
     pub ca: Option<String>,
     pub created_at: NaiveDateTime,
 }

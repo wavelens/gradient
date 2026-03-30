@@ -318,6 +318,11 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             }
         });
 
+        let not_missing = get_missing_builds(vec![dependency.clone()], store)
+            .await
+            .context("Failed to get missing builds")?
+            .is_empty();
+
         for b in check_availablity {
             references.retain(|(d, _, _)| *d != b.derivation_path);
 
@@ -347,10 +352,12 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                     .context("Failed to save build status")?;
 
                 all_dependencies.push(dep);
-            } else {
-                // Not in nix store — clone the failed/aborted build as a fresh record so
-                // its history is preserved. Sub-dependencies are re-traversed under the
-                // new ID via the BFS queue.
+            } else if !not_missing {
+                // Not in nix store AND the current build also needs building — clone
+                // the failed/aborted build as a fresh record so its sub-dependency graph
+                // is re-traversed under the new ID via the BFS queue.
+                // (When `not_missing` is true the parent is already built; we skip
+                //  cloning to avoid orphaned Queued builds with no dependencies.)
                 let new_build_id = Uuid::new_v4();
                 let now = Utc::now().naive_utc();
                 let abuild = ABuild {
@@ -392,11 +399,6 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 trace!(old_build = %b.id, new_build = %new_build_id, "Cloned failed/aborted build as new record for re-evaluation");
             }
         }
-
-        let not_missing = get_missing_builds(vec![dependency.clone()], store)
-            .await
-            .context("Failed to get missing builds")?
-            .is_empty();
 
         if not_missing {
             add_existing_build(
@@ -721,6 +723,10 @@ async fn add_existing_build(
 
     if let Ok(outputs) = outputs {
         for output in outputs {
+            let has_artefacts = tokio::fs::metadata(
+                format!("{}/nix-support/hydra-build-products", output.path)
+            ).await.is_ok();
+
             let abuild_output = ABuildOutput {
                 id: Set(Uuid::new_v4()),
                 build: Set(build.id),
@@ -731,6 +737,7 @@ async fn add_existing_build(
                 file_hash: Set(None),
                 file_size: Set(None),
                 is_cached: Set(false),
+                has_artefacts: Set(has_artefacts),
                 ca: Set(output.ca),
                 created_at: Set(Utc::now().naive_utc()),
             };

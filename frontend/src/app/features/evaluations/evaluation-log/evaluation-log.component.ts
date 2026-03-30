@@ -130,15 +130,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   };
 
   private sortBuilds(builds: BuildItem[]): BuildItem[] {
-    if (this.evaluation()?.status === 'Building') {
-      return [...builds].sort((a, b) =>
-        this.buildDisplayName(a.name).localeCompare(this.buildDisplayName(b.name))
-      );
-    }
     return [...builds].sort((a, b) => {
       const oa = this.buildStatusOrder[a.status] ?? 99;
       const ob = this.buildStatusOrder[b.status] ?? 99;
-      return oa - ob;
+      if (oa !== ob) return oa - ob;
+      return this.buildDisplayName(a.name).localeCompare(this.buildDisplayName(b.name));
     });
   }
 
