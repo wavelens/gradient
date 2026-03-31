@@ -445,28 +445,20 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 debug!(build = %dep.build, dependency = %dep.dependency, "Created dependency");
             }
 
-            if active_builds.is_empty() {
-                update_evaluation_status(
-                    Arc::clone(&state),
-                    evaluation,
-                    EvaluationStatus::Completed,
-                )
-                .await;
-                return;
-            }
-
-            const BUILD_BATCH_SIZE: usize = 1000;
-            for chunk in active_builds.chunks(BUILD_BATCH_SIZE) {
-                if let Err(e) = EBuild::insert_many(chunk.to_vec()).exec(&state.db).await {
-                    error!(error = %e, "Failed to insert builds");
-                    update_evaluation_status_with_error(
-                        Arc::clone(&state),
-                        evaluation,
-                        EvaluationStatus::Failed,
-                        format!("Failed to insert builds: {}", e),
-                    )
-                    .await;
-                    return;
+            if !active_builds.is_empty() {
+                const BUILD_BATCH_SIZE: usize = 1000;
+                for chunk in active_builds.chunks(BUILD_BATCH_SIZE) {
+                    if let Err(e) = EBuild::insert_many(chunk.to_vec()).exec(&state.db).await {
+                        error!(error = %e, "Failed to insert builds");
+                        update_evaluation_status_with_error(
+                            Arc::clone(&state),
+                            evaluation,
+                            EvaluationStatus::Failed,
+                            format!("Failed to insert builds: {}", e),
+                        )
+                        .await;
+                        return;
+                    }
                 }
             }
 
@@ -523,7 +515,27 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 }
             }
 
-            for build in builds {
+            // Transition all Created builds for this evaluation to Queued now that
+            // their dependency records are fully inserted. This covers both newly
+            // created builds and clones of previously-failed builds.
+            let created_builds = EBuild::find()
+                .filter(CBuild::Evaluation.eq(evaluation.id))
+                .filter(CBuild::Status.eq(BuildStatus::Created))
+                .all(&state.db)
+                .await
+                .unwrap_or_default();
+
+            if created_builds.is_empty() {
+                update_evaluation_status(
+                    Arc::clone(&state),
+                    evaluation,
+                    EvaluationStatus::Completed,
+                )
+                .await;
+                return;
+            }
+
+            for build in created_builds {
                 update_build_status(Arc::clone(&state), build, BuildStatus::Queued).await;
             }
 

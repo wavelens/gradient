@@ -257,11 +257,12 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             .context("Failed to get derivation info")?
             .context("Derivation not found in Nix store")?;
 
+        // TODO: can be optimized by also using Aborted and Failed builds.
         let already_exists = find_builds(
             Arc::clone(&state),
             organization_id,
             path_info.references.clone(),
-            false,
+            true,
         )
         .await
         .context("Failed to find existing builds")?;
@@ -318,11 +319,6 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             }
         });
 
-        let not_missing = get_missing_builds(vec![dependency.clone()], store)
-            .await
-            .context("Failed to get missing builds")?
-            .is_empty();
-
         for b in check_availablity {
             references.retain(|(d, _, _)| *d != b.derivation_path);
 
@@ -331,7 +327,6 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 .context("Failed to get missing builds")?
                 .is_empty()
             {
-                // Already in nix store — mark Completed and reuse as-is
                 let dep = MBuildDependency {
                     id: Uuid::new_v4(),
                     build: build_id,
@@ -352,12 +347,12 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                     .context("Failed to save build status")?;
 
                 all_dependencies.push(dep);
-            } else if !not_missing {
-                // Not in nix store AND the current build also needs building — clone
-                // the failed/aborted build as a fresh record so its sub-dependency graph
-                // is re-traversed under the new ID via the BFS queue.
-                // (When `not_missing` is true the parent is already built; we skip
-                //  cloning to avoid orphaned Queued builds with no dependencies.)
+            } else {
+                // Not in nix store — clone the failed/aborted build as a fresh record so
+                // its history is preserved. Sub-dependencies are re-traversed under the
+                // new ID via the BFS queue.
+                // Use Created (not Queued) so the scheduler cannot pick this build up
+                // before the new dependency records are bulk-inserted (race condition fix).
                 let new_build_id = Uuid::new_v4();
                 let now = Utc::now().naive_utc();
                 let abuild = ABuild {
@@ -365,11 +360,12 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                     evaluation: Set(evaluation.id),
                     derivation_path: Set(b.derivation_path.clone()),
                     architecture: Set(b.architecture.clone()),
-                    status: Set(BuildStatus::Queued),
+                    status: Set(BuildStatus::Created),
                     server: Set(None),
                     created_at: Set(now),
                     updated_at: Set(now),
                 };
+
                 abuild
                     .insert(&state.db)
                     .await
@@ -381,6 +377,7 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                     .all(&state.db)
                     .await
                     .context("Failed to query build features for cloning")?;
+
                 for feat in old_features {
                     let af = ABuildFeature {
                         id: Set(Uuid::new_v4()),
@@ -399,6 +396,11 @@ async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
                 trace!(old_build = %b.id, new_build = %new_build_id, "Cloned failed/aborted build as new record for re-evaluation");
             }
         }
+
+        let not_missing = get_missing_builds(vec![dependency.clone()], store)
+            .await
+            .context("Failed to get missing builds")?
+            .is_empty();
 
         if not_missing {
             add_existing_build(
@@ -1066,7 +1068,14 @@ pub async fn evaluate_direct(
                 }
             }
 
-            for build in builds {
+            let created_builds = EBuild::find()
+                .filter(CBuild::Evaluation.eq(evaluation.id))
+                .filter(CBuild::Status.eq(BuildStatus::Created))
+                .all(&state.db)
+                .await
+                .unwrap_or_default();
+
+            for build in created_builds {
                 crate::scheduler::update_build_status(
                     Arc::clone(&state),
                     build,
