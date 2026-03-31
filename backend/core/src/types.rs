@@ -101,6 +101,8 @@ pub struct Cli {
     pub state_file: Option<String>,
     #[arg(long, env = "GRADIENT_DELETE_STATE", default_value = "true")]
     pub delete_state: bool,
+    #[arg(long, env = "GRADIENT_KEEP_EVALUATIONS", default_value = "0")]
+    pub keep_evaluations: usize,
 }
 
 #[derive(Debug)]

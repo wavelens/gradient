@@ -6,8 +6,8 @@
 
 import { Injectable, signal, computed, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { BehaviorSubject, Observable, of, filter, take } from 'rxjs';
-import { tap, map, switchMap, catchError, finalize } from 'rxjs/operators';
+import { BehaviorSubject, Observable, filter, take } from 'rxjs';
+import { tap, switchMap, finalize } from 'rxjs/operators';
 import { ApiService } from './api.service';
 import { User } from '@core/models';
 
@@ -37,17 +37,11 @@ export class AuthService {
   }
 
   /**
-   * Initialize authentication state from stored token
+   * Initialize authentication state by probing the /user endpoint.
+   * The JWT is stored in an httpOnly cookie so JS never touches it directly.
    */
   private initializeAuth(): void {
-    const storedToken = localStorage.getItem('jwt_token');
-
-    if (storedToken) {
-      this.tokenSignal.set(storedToken);
-      this.loadUser(() => this.initializedSubject.next(true));
-    } else {
-      this.initializedSubject.next(true);
-    }
+    this.loadUser(() => this.initializedSubject.next(true));
   }
 
   /**
@@ -63,10 +57,6 @@ export class AuthService {
         remember_me: rememberMe,
       })
       .pipe(
-        tap((token) => {
-          this.tokenSignal.set(token);
-          localStorage.setItem('jwt_token', token);
-        }),
         switchMap(() => this.api.get<User>('user')),
         tap((user) => this.userSignal.set(user)),
         finalize(() => this.loadingSignal.set(false))
@@ -104,7 +94,6 @@ export class AuthService {
       finalize(() => {
         this.userSignal.set(null);
         this.tokenSignal.set(null);
-        localStorage.removeItem('jwt_token');
         this.router.navigate(['/account/login']);
       })
     );
@@ -122,25 +111,16 @@ export class AuthService {
       error: () => {
         this.userSignal.set(null);
         this.tokenSignal.set(null);
-        localStorage.removeItem('jwt_token');
         onComplete?.();
       },
     });
   }
 
   /**
-   * Get the current JWT token
+   * Complete login after an external flow (e.g. OIDC callback).
+   * The cookie is already set by the backend redirect; just load the user.
    */
-  getToken(): string | null {
-    return this.tokenSignal();
-  }
-
-  /**
-   * Complete login with a token received from an external flow (e.g. OIDC callback)
-   */
-  loginWithToken(token: string): Observable<User> {
-    this.tokenSignal.set(token);
-    localStorage.setItem('jwt_token', token);
+  loginWithCookie(): Observable<User> {
     return this.api.get<User>('user').pipe(
       tap((user) => this.userSignal.set(user))
     );

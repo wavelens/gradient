@@ -111,7 +111,7 @@
   align-items: center;
   gap: $spacing-md;
   padding: $spacing-sm $spacing-md;
-  background: $color-secondary;
+  background: $color-tertiary;
   border: 1px solid $color-border;
   border-radius: $border-radius-sm;
   transition: border-color $transition-fast;
@@ -143,37 +143,46 @@
   text-overflow: ellipsis;
 }
 
-.download-btn {
+.copy-btn {
   display: flex;
   align-items: center;
-  gap: $spacing-xs;
-  padding: $spacing-xs $spacing-sm;
-  background: $color-primary;
-  border: 1px solid $color-border;
+  padding: $spacing-xs;
+  background: none;
+  border: 1px solid transparent;
   border-radius: $border-radius-sm;
-  color: $text-secondary;
-  font-size: $font-size-sm;
+  color: $text-light;
   cursor: pointer;
   flex-shrink: 0;
   transition: color $transition-fast, border-color $transition-fast, background $transition-fast;
 
   .material-symbols-outlined { font-size: 1rem; }
 
-  &:hover:not(:disabled) {
-    color: $text-primary;
-    border-color: rgba($text-secondary, 0.4);
+  &:hover {
+    color: $text-secondary;
+    border-color: $color-border;
     background: $color-hover;
   }
+}
 
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+.download-btn {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-xs $spacing-sm;
+  background: $color-hover;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  color: $text-secondary;
+  font-size: $font-size-sm;
+  text-decoration: none;
+  flex-shrink: 0;
+  transition: color $transition-fast, border-color $transition-fast, background $transition-fast;
+
+  .material-symbols-outlined { font-size: 1rem; }
+
+  &:hover {
+    color: $text-primary;
+    border-color: rgba($text-secondary, 0.4);
+    background: $color-border;
   }
 }
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
-
-.spin { animation: spin 0.8s linear infinite; }

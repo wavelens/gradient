@@ -251,6 +251,23 @@ pub async fn get_project_by_name(
     }
 }
 
+pub async fn get_any_project_by_name(
+    state: Arc<ServerState>,
+    organization_name: String,
+    project_name: String,
+) -> Result<Option<(MOrganization, MProject)>> {
+    match get_any_organization_by_name(state.clone(), organization_name).await? {
+        Some(o) => Ok(EProject::find()
+            .filter(CProject::Organization.eq(o.id))
+            .filter(CProject::Name.eq(project_name))
+            .one(&state.db)
+            .await
+            .context("Failed to query project")?
+            .map(|p| (o, p))),
+        None => Ok(None),
+    }
+}
+
 pub async fn get_server_by_name(
     state: Arc<ServerState>,
     user_id: Uuid,

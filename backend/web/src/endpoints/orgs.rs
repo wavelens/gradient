@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::authorization::MaybeUser;
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
@@ -164,7 +165,6 @@ pub async fn put(
 
 pub async fn get_public_organizations(
     state: State<Arc<ServerState>>,
-    Extension(_user): Extension<MUser>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<MOrganization>>>>> {
     let page = params.page();
@@ -186,7 +186,7 @@ pub async fn get_public_organizations(
 
 pub async fn get_organization(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<MOrganization>>> {
     let organization: MOrganization =
@@ -195,18 +195,20 @@ pub async fn get_organization(
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     if !organization.public {
-        let is_member = user_is_org_member(&state.0, user.id, organization.id).await?;
-        if !is_member {
-            return Err(WebError::not_found("Organization"));
+        match &maybe_user {
+            Some(user) => {
+                if !user_is_org_member(&state.0, user.id, organization.id).await? {
+                    return Err(WebError::not_found("Organization"));
+                }
+            }
+            None => return Err(WebError::not_found("Organization")),
         }
     }
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: organization,
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn patch_organization(
@@ -293,7 +295,7 @@ pub async fn delete_organization(
 
 pub async fn get_organization_users(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<StringListItem>>>> {
     let organization: MOrganization =
@@ -302,9 +304,13 @@ pub async fn get_organization_users(
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
     if !organization.public {
-        let is_member = user_is_org_member(&state.0, user.id, organization.id).await?;
-        if !is_member {
-            return Err(WebError::not_found("Organization"));
+        match &maybe_user {
+            Some(user) => {
+                if !user_is_org_member(&state.0, user.id, organization.id).await? {
+                    return Err(WebError::not_found("Organization"));
+                }
+            }
+            None => return Err(WebError::not_found("Organization")),
         }
     }
 

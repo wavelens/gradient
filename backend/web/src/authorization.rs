@@ -43,15 +43,23 @@ pub struct Cliams {
     pub id: Uuid,
 }
 
+fn token_from_cookie(req: &Request) -> Option<String> {
+    let cookie_header = req.headers().get(axum::http::header::COOKIE)?.to_str().ok()?;
+    cookie_header
+        .split(';')
+        .map(str::trim)
+        .find_map(|part| part.strip_prefix("jwt_token=").map(str::to_owned))
+}
+
 pub async fn authorize(
     state: State<Arc<ServerState>>,
     mut req: Request,
     next: Next,
 ) -> Result<Response<Body>, (StatusCode, Json<BaseResponse<String>>)> {
-    let auth_header = req.headers_mut().get(axum::http::header::AUTHORIZATION);
+    let auth_header = req.headers().get(axum::http::header::AUTHORIZATION);
 
-    let auth_header = match auth_header {
-        Some(header) => header.to_str().map_err(|_| {
+    let token_str: String = if let Some(header) = auth_header {
+        let val = header.to_str().map_err(|_| {
             (
                 StatusCode::FORBIDDEN,
                 Json(BaseResponse {
@@ -59,43 +67,29 @@ pub async fn authorize(
                     message: "Authorization header empty".to_string(),
                 }),
             )
-        })?,
-        None => {
+        })?;
+        let mut parts = val.split_whitespace();
+        let (bearer, token) = (parts.next(), parts.next());
+        if bearer != Some("Bearer") || token.is_none() {
             return Err((
                 StatusCode::FORBIDDEN,
                 Json(BaseResponse {
                     error: true,
-                    message: "Authorization header not found".to_string(),
+                    message: "Invalid Authorization header".to_string(),
                 }),
             ));
         }
-    };
-
-    let mut header = auth_header.split_whitespace();
-
-    let (bearer, token) = (header.next(), header.next());
-
-    if bearer != Some("Bearer") || token.is_none() {
+        token.unwrap().to_string()
+    } else if let Some(t) = token_from_cookie(&req) {
+        t
+    } else {
         return Err((
             StatusCode::FORBIDDEN,
             Json(BaseResponse {
                 error: true,
-                message: "Invalid Authorization header".to_string(),
+                message: "Authorization header not found".to_string(),
             }),
         ));
-    }
-
-    let token_str = match token {
-        Some(t) => t.to_string(),
-        None => {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Missing authorization token".to_string(),
-                }),
-            ));
-        }
     };
 
     let token_data = match decode_jwt(state.clone(), token_str).await {
@@ -137,6 +131,89 @@ pub async fn authorize(
 
     req.extensions_mut().insert(current_user);
     Ok(next.run(req).await)
+}
+
+/// Extension type for optional authentication.
+/// Inserted by `authorize_optional` into every request regardless of whether
+/// the caller is logged in.
+#[derive(Clone)]
+pub struct MaybeUser(pub Option<MUser>);
+
+/// Middleware that attempts to authenticate the caller but never rejects the
+/// request.  Handlers receive `Extension(MaybeUser(maybe_user))` where
+/// `maybe_user` is `Some(user)` for authenticated callers and `None` for
+/// unauthenticated ones.
+pub async fn authorize_optional(
+    state: State<Arc<ServerState>>,
+    mut req: Request,
+    next: Next,
+) -> Response<Body> {
+    let maybe_user = if let Some(token_str) = extract_bearer_or_cookie(req.headers()) {
+        if let Ok(token_data) = decode_jwt(State(Arc::clone(&state)), token_str).await {
+            EUser::find_by_id(token_data.claims.id)
+                .one(&state.db)
+                .await
+                .ok()
+                .flatten()
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    req.extensions_mut().insert(MaybeUser(maybe_user));
+    next.run(req).await
+}
+
+/// Claims for short-lived (1 h) per-build download tokens.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DownloadClaims {
+    pub exp: usize,
+    pub iat: usize,
+    pub build_id: Uuid,
+}
+
+pub fn encode_download_token(
+    state: State<Arc<ServerState>>,
+    build_id: Uuid,
+) -> Result<String, StatusCode> {
+    let now = Utc::now();
+    let exp = (now + Duration::hours(1)).timestamp() as usize;
+    let iat = now.timestamp() as usize;
+    let claim = DownloadClaims { iat, exp, build_id };
+    let secret = load_secret(&state.cli.jwt_secret_file);
+    encode(&Header::default(), &claim, &EncodingKey::from_secret(secret.as_ref()))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+pub async fn decode_download_token(
+    state: State<Arc<ServerState>>,
+    token: String,
+) -> Result<DownloadClaims, StatusCode> {
+    let secret = load_secret(&state.cli.jwt_secret_file);
+    decode::<DownloadClaims>(
+        &token,
+        &DecodingKey::from_secret(secret.as_ref()),
+        &Validation::default(),
+    )
+    .map(|d| d.claims)
+    .map_err(|_| StatusCode::UNAUTHORIZED)
+}
+
+/// Extract a bearer token from the Authorization header or the `jwt_token` cookie.
+pub fn extract_bearer_or_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
+    if let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) {
+        let val = auth.to_str().ok()?;
+        let mut parts = val.split_whitespace();
+        if parts.next() == Some("Bearer") {
+            return parts.next().map(str::to_owned);
+        }
+    }
+    let cookie_header = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
+    cookie_header
+        .split(';')
+        .map(str::trim)
+        .find_map(|part| part.strip_prefix("jwt_token=").map(str::to_owned))
 }
 
 pub fn encode_jwt(

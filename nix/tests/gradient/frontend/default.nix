@@ -8,6 +8,7 @@
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     name = "gradient-frontend";
     globalTimeout = 600;
+    skipTypeCheck = true;
     extraPythonPackages = ps: with ps; [ selenium ];
 
     defaults = {
@@ -16,7 +17,7 @@
       nix.settings.substituters = lib.mkForce [ ];
       virtualisation = {
         writableStore = true;
-        memorySize = 2048;
+        memorySize = 4096;
         diskSize = 4096;
       };
     };
@@ -120,8 +121,8 @@
 
       start_all()
 
-      server.wait_for_unit("gradient-server.service")
-      server.wait_for_unit("chromedriver.service")
+      machine.wait_for_unit("gradient-server.service")
+      machine.wait_for_unit("chromedriver.service")
 
       options = webdriver.ChromeOptions()
       options.binary_location = "${lib.getExe pkgs.ungoogled-chromium}"

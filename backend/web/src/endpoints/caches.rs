@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -264,7 +265,6 @@ pub async fn put(
 
 pub async fn get_public_caches(
     state: State<Arc<ServerState>>,
-    Extension(_user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<Vec<MCache>>>> {
     let caches = ECache::find()
         .filter(CCache::Public.eq(true))
@@ -279,15 +279,18 @@ pub async fn get_public_caches(
 
 pub async fn get_cache(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<CacheResponse>>> {
     let cache: MCache = get_any_cache_by_name(state.0.clone(), cache.clone())
         .await?
         .ok_or_else(|| WebError::not_found("Cache"))?;
 
-    if !cache.public && cache.created_by != user.id {
-        return Err(WebError::not_found("Cache"));
+    if !cache.public {
+        match &maybe_user {
+            Some(user) if cache.created_by == user.id => {}
+            _ => return Err(WebError::not_found("Cache")),
+        }
     }
 
     let public_key = format_cache_public_key(
@@ -703,7 +706,7 @@ pub async fn get_cache_key(
 
 pub async fn get_cache_public_key(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(cache): Path<String>,
 ) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
     let cache: MCache = match get_any_cache_by_name(state.0.clone(), cache.clone()).await {
@@ -728,7 +731,8 @@ pub async fn get_cache_public_key(
         }
     };
 
-    if !cache.public && cache.created_by != user.id {
+    let allowed = cache.public || matches!(&maybe_user, Some(u) if u.id == cache.created_by);
+    if !allowed {
         return Err((
             StatusCode::NOT_FOUND,
             Json(BaseResponse {

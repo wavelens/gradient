@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
+import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
@@ -29,6 +30,7 @@ import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, 
 })
 export class ProjectDetailComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
+  protected authService = inject(AuthService);
   private projectsService = inject(ProjectsService);
 
   loading = signal(true);

@@ -7,20 +7,13 @@
 import { HttpInterceptorFn } from '@angular/common/http';
 
 /**
- * HTTP interceptor that adds the Bearer token to all outgoing requests
+ * HTTP interceptor that enables cookie-based auth for all API requests.
+ * The JWT is stored in an httpOnly cookie; withCredentials ensures the
+ * browser sends it automatically on every request.
  */
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
-  // Get token from localStorage or sessionStorage
-  const token =
-    localStorage.getItem('jwt_token') || sessionStorage.getItem('jwt_token');
-
-  // If token exists and this is an API request, add Authorization header
-  if (token && req.url.includes('/api/v1')) {
-    req = req.clone({
-      setHeaders: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+  if (req.url.includes('/api/v1')) {
+    req = req.clone({ withCredentials: true });
   }
 
   return next(req);

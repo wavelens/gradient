@@ -32,6 +32,57 @@ export const routes: Routes = [
     ],
   },
 
+  // Public-browsable routes (no login required, write actions hidden)
+  {
+    path: 'organization/:org',
+    loadComponent: () =>
+      import('./features/organizations/organization-detail/organization-detail.component').then(
+        (m) => m.OrganizationDetailComponent
+      ),
+  },
+  {
+    path: 'organization/:org/project/:project',
+    loadComponent: () =>
+      import('./features/projects/project-detail/project-detail.component').then(
+        (m) => m.ProjectDetailComponent
+      ),
+  },
+  {
+    path: 'organization/:org/artefacts/:buildId',
+    loadComponent: () =>
+      import('./features/evaluations/build-artefacts/build-artefacts.component').then(
+        (m) => m.BuildArtefactsComponent
+      ),
+  },
+  {
+    path: 'organization/:org/graph/:buildId',
+    loadComponent: () =>
+      import('./features/evaluations/dependency-graph/dependency-graph.component').then(
+        (m) => m.DependencyGraphComponent
+      ),
+  },
+  {
+    path: 'organization/:org/log/:evaluationId',
+    loadComponent: () =>
+      import('./features/evaluations/evaluation-log/evaluation-log.component').then(
+        (m) => m.EvaluationLogComponent
+      ),
+  },
+  {
+    path: 'organization/:org/log',
+    loadComponent: () =>
+      import('./features/evaluations/evaluation-log/evaluation-log.component').then(
+        (m) => m.EvaluationLogComponent
+      ),
+  },
+  {
+    path: 'caches/:cache',
+    loadComponent: () =>
+      import('./features/caches/cache-detail/cache-detail.component').then(
+        (m) => m.CacheDetailComponent
+      ),
+  },
+
   // Protected routes (require authentication)
   {
     path: '',
@@ -50,13 +101,6 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/organizations/organization-list/organization-list.component').then(
             (m) => m.OrganizationListComponent
-          ),
-      },
-      {
-        path: 'organization/:org',
-        loadComponent: () =>
-          import('./features/organizations/organization-detail/organization-detail.component').then(
-            (m) => m.OrganizationDetailComponent
           ),
       },
       {
@@ -87,51 +131,10 @@ export const routes: Routes = [
 
       // Projects
       {
-        path: 'organization/:org/project/:project',
-        loadComponent: () =>
-          import('./features/projects/project-detail/project-detail.component').then(
-            (m) => m.ProjectDetailComponent
-          ),
-      },
-      {
         path: 'organization/:org/project/:project/settings',
         loadComponent: () =>
           import('./features/projects/project-settings/project-settings.component').then(
             (m) => m.ProjectSettingsComponent
-          ),
-      },
-
-      // Build artefacts
-      {
-        path: 'organization/:org/artefacts/:buildId',
-        loadComponent: () =>
-          import('./features/evaluations/build-artefacts/build-artefacts.component').then(
-            (m) => m.BuildArtefactsComponent
-          ),
-      },
-
-      // Dependency graph
-      {
-        path: 'organization/:org/graph/:buildId',
-        loadComponent: () =>
-          import('./features/evaluations/dependency-graph/dependency-graph.component').then(
-            (m) => m.DependencyGraphComponent
-          ),
-      },
-
-      // Evaluations
-      {
-        path: 'organization/:org/log/:evaluationId',
-        loadComponent: () =>
-          import('./features/evaluations/evaluation-log/evaluation-log.component').then(
-            (m) => m.EvaluationLogComponent
-          ),
-      },
-      {
-        path: 'organization/:org/log',
-        loadComponent: () =>
-          import('./features/evaluations/evaluation-log/evaluation-log.component').then(
-            (m) => m.EvaluationLogComponent
           ),
       },
 
@@ -141,13 +144,6 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/caches/cache-list/cache-list.component').then(
             (m) => m.CacheListComponent
-          ),
-      },
-      {
-        path: 'caches/:cache',
-        loadComponent: () =>
-          import('./features/caches/cache-detail/cache-detail.component').then(
-            (m) => m.CacheDetailComponent
           ),
       },
       {

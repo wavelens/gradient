@@ -14,6 +14,7 @@ import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
+import { AuthService } from '@core/services/auth.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
@@ -39,6 +40,7 @@ import { Organization, Project } from '@core/models';
 })
 export class OrganizationDetailComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
+  protected authService = inject(AuthService);
   private organizationsService = inject(OrganizationsService);
   private projectsService = inject(ProjectsService);
   private nameCheck$ = new Subject<string>();

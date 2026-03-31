@@ -9,8 +9,8 @@ use crate::error::{WebError, WebResult};
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
-use axum::response::Response;
+use axum::http::{HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 use core::consts::*;
 use core::email::{EmailService, generate_verification_token};
@@ -142,7 +142,7 @@ pub async fn post_basic_register(
 pub async fn post_basic_login(
     state: State<Arc<ServerState>>,
     Json(body): Json<MakeLoginRequest>,
-) -> WebResult<Json<BaseResponse<String>>> {
+) -> WebResult<Response> {
     if state.cli.oidc_required {
         return Err(WebError::oauth_required());
     }
@@ -172,12 +172,14 @@ pub async fn post_basic_login(
         .await
         .map_err(|_| WebError::failed_to_update_user())?;
 
-    let res = BaseResponse {
-        error: false,
-        message: token,
-    };
-
-    Ok(Json(res))
+    let cookie = jwt_cookie(&token, body.remember_me);
+    let res = BaseResponse { error: false, message: token };
+    let mut response = Json(res).into_response();
+    response.headers_mut().insert(
+        axum::http::header::SET_COOKIE,
+        HeaderValue::from_str(&cookie).map_err(|_| WebError::InternalServerError("Bad cookie".to_string()))?,
+    );
+    Ok(response)
 }
 
 pub async fn get_oauth_authorize(
@@ -260,11 +262,12 @@ pub async fn get_oidc_callback(
     let token =
         encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
 
-    let redirect_url = format!("/account/oidc-callback?token={}", token);
+    let cookie = jwt_cookie(&token, false);
 
     match Response::builder()
         .status(StatusCode::FOUND)
-        .header("Location", redirect_url)
+        .header("Location", "/account/oidc-callback")
+        .header("Set-Cookie", &cookie)
         .body(Body::empty())
     {
         Ok(response) => Ok(response),
@@ -277,14 +280,28 @@ pub async fn get_oidc_callback(
     }
 }
 
-pub async fn post_logout(_state: State<Arc<ServerState>>) -> WebResult<Json<BaseResponse<String>>> {
-    // TODO: invalidate token if needed
+pub async fn post_logout(_state: State<Arc<ServerState>>) -> WebResult<Response> {
     let res = BaseResponse {
         error: false,
         message: "Logout Successfully".to_string(),
     };
+    let mut response = Json(res).into_response();
+    response.headers_mut().insert(
+        axum::http::header::SET_COOKIE,
+        HeaderValue::from_static(
+            "jwt_token=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0",
+        ),
+    );
+    Ok(response)
+}
 
-    Ok(Json(res))
+fn jwt_cookie(token: &str, remember_me: bool) -> String {
+    let base = format!("jwt_token={}; HttpOnly; Secure; SameSite=Strict; Path=/", token);
+    if remember_me {
+        format!("{}; Max-Age=2592000", base) // 30 days
+    } else {
+        base
+    }
 }
 
 pub async fn post_check_username(

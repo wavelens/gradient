@@ -22,6 +22,7 @@ import { interval, Subscription } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
 import { EvaluationsService, BuildItem } from '@core/services/evaluations.service';
 import { Evaluation } from '@core/models';
+import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { ButtonModule } from 'primeng/button';
 import { environment } from '@environments/environment';
@@ -37,6 +38,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private evalService = inject(EvaluationsService);
+  protected authService = inject(AuthService);
   private sanitizer = inject(DomSanitizer);
   private cdr = inject(ChangeDetectorRef);
 
@@ -258,9 +260,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private async fetchInitialLogs(buildId: string): Promise<void> {
     try {
       const token = localStorage.getItem('jwt_token') || sessionStorage.getItem('jwt_token') || '';
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
       const response = await fetch(`${environment.apiUrl}/builds/${buildId}/log`, {
         method: 'GET',
-        headers: { Authorization: `Bearer ${token}` },
+        headers,
       });
 
       if (response.ok) {
@@ -296,6 +299,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
     try {
       const token = localStorage.getItem('jwt_token') || sessionStorage.getItem('jwt_token') || '';
+      if (!token) return;
       const response = await fetch(`${environment.apiUrl}/builds/${buildId}/log`, {
         method: 'POST',
         headers: {

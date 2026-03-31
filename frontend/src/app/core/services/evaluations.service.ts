@@ -73,4 +73,8 @@ export class EvaluationsService {
   getBuildDownloads(buildId: string): Observable<BuildProduct[]> {
     return this.api.get<BuildProduct[]>(`builds/${buildId}/downloads`);
   }
+
+  getDownloadToken(buildId: string): Observable<string> {
+    return this.api.get<string>(`builds/${buildId}/download-token`);
+  }
 }

@@ -32,23 +32,25 @@
           </span>
         </div>
       </div>
-      <div class="header-actions">
-        <button
-          pButton
-          label="Start Evaluation"
-          icon="pi pi-play"
-          (click)="startEvaluation()"
-          [loading]="starting()"
-          [disabled]="starting()"
-        ></button>
-        <a
-          pButton
-          label="Settings"
-          icon="pi pi-cog"
-          severity="secondary"
-          [routerLink]="['/organization', orgName, 'project', projectName, 'settings']"
-        ></a>
-      </div>
+      @if (authService.isAuthenticated()) {
+        <div class="header-actions">
+          <button
+            pButton
+            label="Start Evaluation"
+            icon="pi pi-play"
+            (click)="startEvaluation()"
+            [loading]="starting()"
+            [disabled]="starting()"
+          ></button>
+          <a
+            pButton
+            label="Settings"
+            icon="pi pi-cog"
+            severity="secondary"
+            [routerLink]="['/organization', orgName, 'project', projectName, 'settings']"
+          ></a>
+        </div>
+      }
     </div>
 
     <!-- Current Builds -->

@@ -8,17 +8,24 @@ info:
 
     ## Authentication
 
-    Most endpoints require a bearer token. Two token types are accepted:
+    Most endpoints require authentication. Three methods are accepted:
 
-    | Type | Format | How to obtain |
+    | Method | How to send | How to obtain |
     |---|---|---|
-    | JWT | `Bearer <token>` | `POST /auth/basic/login` or OIDC flow |
-    | API Key | `Bearer GRAD<key>` | `POST /user/keys` |
+    | JWT (cookie) | `jwt_token` httpOnly cookie | Set automatically on login |
+    | JWT (header) | `Authorization: Bearer <token>` | `POST /auth/basic/login` or OIDC flow |
+    | API Key | `Authorization: Bearer GRAD<key>` | `POST /user/keys` |
 
-    Pass the token in the `Authorization` header:
-    ```
-    Authorization: Bearer eyJhbGci...
-    ```
+    Cookie auth is the default for browser clients — the `jwt_token` cookie is set
+    by the login and OIDC-callback endpoints and cleared on logout. The
+    `Authorization` header is accepted as a fallback (e.g. for CI/scripts).
+
+    ### Download tokens
+
+    `GET /builds/{build}/download/{filename}` additionally accepts a short-lived
+    (1 h) download token via `?token=<download_token>`. Obtain one from
+    `GET /builds/{build}/download-token` while authenticated. Download tokens are
+    scoped to a single build and are safe to share in a URL.
 
     ## Common Response Envelope
 
@@ -1564,6 +1571,32 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /builds/{build}/download-token:
+    parameters:
+      - $ref: '#/components/parameters/BuildId'
+    get:
+      tags: [builds]
+      summary: Generate a short-lived download token
+      description: |-
+        Returns a signed JWT that is valid for **1 hour** and grants access to all
+        artefact downloads for the specified build. Pass it as `?token=<value>` on
+        `GET /builds/{build}/download/{filename}` to share a link without exposing
+        long-lived credentials.
+
+        Requires the caller to be a member of the organisation that owns the build.
+      operationId: getBuildDownloadToken
+      responses:
+        '200':
+          description: Download token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /builds/{build}/download/{filename}:
     parameters:
       - $ref: '#/components/parameters/BuildId'
@@ -1576,8 +1609,24 @@ paths:
     get:
       tags: [builds]
       summary: Download build artefact
-      description: Streams a build artefact file. The `Content-Type` and `Content-Disposition` headers are set based on the file extension.
+      description: |-
+        Streams a build artefact file. `Content-Type` and `Content-Disposition`
+        headers are set based on the file extension.
+
+        Authentication is resolved in order:
+        1. `?token=<download_token>` — a short-lived per-build token from
+           `GET /builds/{build}/download-token` (1 h validity, no session needed).
+        2. `jwt_token` cookie or `Authorization: Bearer` header — standard session auth.
       operationId: downloadBuildArtefact
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Short-lived download token obtained from `/download-token`
+      security:
+        - {}
       responses:
         '200':
           description: File contents

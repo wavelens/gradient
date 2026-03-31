@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::authorization::MaybeUser;
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use async_stream::stream;
@@ -59,7 +60,7 @@ fn drv_display_name(path: &str) -> String {
 
 pub async fn get_evaluation(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(evaluation_id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<EvaluationResponse>>> {
     let evaluation = EEvaluation::find_by_id(evaluation_id)
@@ -101,7 +102,15 @@ pub async fn get_evaluation(
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
-    if !user_is_org_member(&state, user.id, organization.id).await? {
+    let can_access = if organization.public {
+        true
+    } else {
+        match &maybe_user {
+            Some(user) => user_is_org_member(&state, user.id, organization.id).await?,
+            None => false,
+        }
+    };
+    if !can_access {
         return Err(WebError::not_found("Evaluation"));
     }
 
@@ -186,7 +195,7 @@ pub async fn post_evaluation(
 
 pub async fn get_evaluation_builds(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(evaluation_id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<Vec<BuildItem>>>> {
     let evaluation = EEvaluation::find_by_id(evaluation_id)
@@ -227,7 +236,15 @@ pub async fn get_evaluation_builds(
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
-    if !user_is_org_member(&state, user.id, organization.id).await? {
+    let can_access = if organization.public {
+        true
+    } else {
+        match &maybe_user {
+            Some(user) => user_is_org_member(&state, user.id, organization.id).await?,
+            None => false,
+        }
+    };
+    if !can_access {
         return Err(WebError::not_found("Evaluation"));
     }
 

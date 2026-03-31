@@ -9,7 +9,7 @@ pub mod endpoints;
 pub mod error;
 
 use axum::body::Body;
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post, put};
 use axum::{Router, middleware};
 use bytes::Bytes;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
@@ -68,15 +68,13 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             },
         );
 
-    let api = Router::new()
+    // ── Routes that always require a valid session ────────────────────────────
+    let auth_api = Router::new()
         .route("/orgs", get(orgs::get).put(orgs::put))
         .route("/orgs/available", get(orgs::get_org_name_available))
-        .route("/orgs/public", get(orgs::get_public_organizations))
         .route(
             "/orgs/{organization}",
-            get(orgs::get_organization)
-                .patch(orgs::patch_organization)
-                .delete(orgs::delete_organization),
+            patch(orgs::patch_organization).delete(orgs::delete_organization),
         )
         .route(
             "/orgs/{organization}/public",
@@ -84,8 +82,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         )
         .route(
             "/orgs/{organization}/users",
-            get(orgs::get_organization_users)
-                .post(orgs::post_organization_users)
+            post(orgs::post_organization_users)
                 .patch(orgs::patch_organization_users)
                 .delete(orgs::delete_organization_users),
         )
@@ -102,27 +99,14 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             post(orgs::post_organization_subscribe_cache)
                 .delete(orgs::delete_organization_subscribe_cache),
         )
-        .route(
-            "/projects/{organization}",
-            get(projects::get).put(projects::put),
-        )
+        .route("/projects/{organization}", put(projects::put))
         .route(
             "/projects/{organization}/available",
             get(projects::get_project_name_available),
         )
         .route(
             "/projects/{organization}/{project}",
-            get(projects::get_project)
-                .patch(projects::patch_project)
-                .delete(projects::delete_project),
-        )
-        .route(
-            "/projects/{organization}/{project}/details",
-            get(projects::get_project_details),
-        )
-        .route(
-            "/projects/{organization}/{project}/entry-points",
-            get(projects::get_project_entry_points),
+            patch(projects::patch_project).delete(projects::delete_project),
         )
         .route(
             "/projects/{organization}/{project}/transfer",
@@ -140,22 +124,26 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/projects/{organization}/{project}/active",
             post(projects::post_project_active).delete(projects::delete_project_active),
         )
-        .route(
-            "/evals/{evaluation}",
-            get(evals::get_evaluation).post(evals::post_evaluation),
-        )
+        .route("/evals/{evaluation}", post(evals::post_evaluation))
         .route(
             "/evals/{evaluation}/builds",
-            get(evals::get_evaluation_builds).post(evals::post_evaluation_builds),
+            post(evals::post_evaluation_builds),
+        )
+        .route("/builds/{build}/log", post(builds::post_build_log))
+        .route(
+            "/builds/{build}/download-token",
+            get(builds::get_build_download_token),
+        )
+        .route("/builds", post(builds::post_direct_build))
+        .route(
+            "/builds/direct/recent",
+            get(builds::get_recent_direct_builds),
         )
         .route("/caches", get(caches::get).put(caches::put))
         .route("/caches/available", get(caches::get_cache_name_available))
-        .route("/caches/public", get(caches::get_public_caches))
         .route(
             "/caches/{cache}",
-            get(caches::get_cache)
-                .patch(caches::patch_cache)
-                .delete(caches::delete_cache),
+            patch(caches::patch_cache).delete(caches::delete_cache),
         )
         .route(
             "/caches/{cache}/active",
@@ -166,33 +154,6 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             post(caches::post_cache_public).delete(caches::delete_cache_public),
         )
         .route("/caches/{cache}/key", get(caches::get_cache_key))
-        .route(
-            "/caches/{cache}/public-key",
-            get(caches::get_cache_public_key),
-        )
-        .route("/builds/{build}", get(builds::get_build))
-        .route(
-            "/builds/{build}/dependencies",
-            get(builds::get_build_dependencies),
-        )
-        .route("/builds/{build}/graph", get(builds::get_build_graph))
-        .route(
-            "/builds/{build}/log",
-            get(builds::get_build_log).post(builds::post_build_log),
-        )
-        .route(
-            "/builds/{build}/downloads",
-            get(builds::get_build_downloads),
-        )
-        .route(
-            "/builds/{build}/download/{filename}",
-            get(builds::get_build_download),
-        )
-        .route("/builds", post(builds::post_direct_build))
-        .route(
-            "/builds/direct/recent",
-            get(builds::get_recent_direct_builds),
-        )
         .route("/user", get(user::get).delete(user::delete))
         .route("/user/search", get(user::get_search))
         .route(
@@ -241,7 +202,60 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize,
-        ))
+        ));
+
+    // ── Routes that accept optional auth (public resources browsable without login) ──
+    let optional_api = Router::new()
+        .route("/orgs/{organization}", get(orgs::get_organization))
+        .route(
+            "/orgs/{organization}/users",
+            get(orgs::get_organization_users),
+        )
+        .route("/projects/{organization}", get(projects::get))
+        .route(
+            "/projects/{organization}/{project}",
+            get(projects::get_project),
+        )
+        .route(
+            "/projects/{organization}/{project}/details",
+            get(projects::get_project_details),
+        )
+        .route(
+            "/projects/{organization}/{project}/entry-points",
+            get(projects::get_project_entry_points),
+        )
+        .route("/evals/{evaluation}", get(evals::get_evaluation))
+        .route(
+            "/evals/{evaluation}/builds",
+            get(evals::get_evaluation_builds),
+        )
+        .route("/builds/{build}", get(builds::get_build))
+        .route("/builds/{build}/log", get(builds::get_build_log))
+        .route(
+            "/builds/{build}/dependencies",
+            get(builds::get_build_dependencies),
+        )
+        .route("/builds/{build}/graph", get(builds::get_build_graph))
+        .route(
+            "/builds/{build}/downloads",
+            get(builds::get_build_downloads),
+        )
+        .route("/caches/{cache}", get(caches::get_cache))
+        .route(
+            "/caches/{cache}/public-key",
+            get(caches::get_cache_public_key),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            authorization::authorize_optional,
+        ));
+
+    let api = Router::new()
+        .merge(auth_api)
+        .merge(optional_api)
+        // ── Fully public (no auth required) ─────────────────────────────────
+        .route("/orgs/public", get(orgs::get_public_organizations))
+        .route("/caches/public", get(caches::get_public_caches))
         .route(
             "/builds/{build}/artefacts",
             get(builds::get_build_downloads_public),
@@ -249,6 +263,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         .route(
             "/builds/{build}/artefacts/{filename}",
             get(builds::get_build_download_public),
+        )
+        .route(
+            "/builds/{build}/download/{filename}",
+            get(builds::get_build_download),
         )
         .route("/auth/basic/login", post(auth::post_basic_login))
         .route("/auth/basic/register", post(auth::post_basic_register))

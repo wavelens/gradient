@@ -182,6 +182,12 @@ in {
           default = 100;
         };
 
+        keepEvaluations = lib.mkOption {
+          description = "How many evaluations to keep in the database and cache.";
+          type = lib.types.ints.unsigned;
+          default = 20;
+        };
+
         logLevel = lib.mkOption {
           description = "The log level for the application.";
           type = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
@@ -189,7 +195,7 @@ in {
         };
 
         deleteState = lib.mkOption {
-          description = "Delete all state (users, organizations, caches) if not manged anymore by state (instead of making editable by user in frontend).";
+          description = "Delete all state (users, organizations, caches) if not manged anymore by state.";
           type = lib.types.bool;
           default = true;
         };
@@ -198,11 +204,16 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    systemd.tmpfiles.rules = [
+      "d /nix/var/nix/gcroots/gradient 0755 gradient gradient -"
+    ];
+
     systemd.services.gradient-server = {
       wantedBy = [ "multi-user.target" ];
       after = [
         "network.target"
         "postgresql.target"
+        "systemd-tmpfiles-setup.service"
       ];
 
       path = [
@@ -224,6 +235,7 @@ in {
         ProtectKernelTunables = true;
         ProtectProc = "invisible";
         ProtectSystem = "strict";
+        ReadWritePaths = [ "/nix/var/nix/gcroots/gradient" ];
         Restart = "on-failure";
         RestartSec = 10;
         RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
@@ -261,6 +273,7 @@ in {
         GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";
         GRADIENT_SERVE_CACHE = lib.boolToString cfg.serveCache;
         GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
+        GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
         GRADIENT_LOG_LEVEL = cfg.settings.logLevel;
         GRADIENT_DELETE_STATE = lib.boolToString cfg.settings.deleteState;
         GRADIENT_STATE_FILE = "%d/gradient_state";

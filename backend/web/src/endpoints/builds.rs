@@ -4,11 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::authorization::{decode_download_token, decode_jwt, encode_download_token, extract_bearer_or_cookie, MaybeUser};
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use async_stream::stream;
-use axum::extract::{Multipart, Path, State};
-use axum::http::{StatusCode, header};
+use axum::extract::{Multipart, Path, Query, State};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
@@ -38,7 +39,7 @@ pub struct BuildWithOutputs {
 
 pub async fn get_build(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(build_id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<BuildWithOutputs>>> {
     let build = EBuild::find_by_id(build_id)
@@ -90,7 +91,15 @@ pub async fn get_build(
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
-    if !user_is_org_member(&state, user.id, organization.id).await? {
+    let can_access = if organization.public {
+        true
+    } else {
+        match &maybe_user {
+            Some(user) => user_is_org_member(&state, user.id, organization.id).await?,
+            None => false,
+        }
+    };
+    if !can_access {
         return Err(WebError::not_found("Build"));
     }
 
@@ -126,7 +135,7 @@ pub async fn get_build(
 
 pub async fn get_build_log(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(build_id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let build = EBuild::find_by_id(build_id)
@@ -178,7 +187,16 @@ pub async fn get_build_log(
             tracing::error!("Organization {} not found", organization_id);
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
-    if !user_is_org_member(&state, user.id, organization.id).await? {
+
+    let can_access = if organization.public {
+        true
+    } else {
+        match &maybe_user {
+            Some(user) => user_is_org_member(&state, user.id, organization.id).await?,
+            None => false,
+        }
+    };
+    if !can_access {
         return Err(WebError::not_found("Build"));
     }
 
@@ -439,7 +457,7 @@ pub struct BuildProduct {
 
 pub async fn get_build_downloads(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(build_id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<Vec<BuildProduct>>>> {
     let build = EBuild::find_by_id(build_id)
@@ -493,7 +511,15 @@ pub async fn get_build_downloads(
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
-    if !user_is_org_member(&state, user.id, organization.id).await? {
+    let can_access = if organization.public {
+        true
+    } else {
+        match &maybe_user {
+            Some(user) => user_is_org_member(&state, user.id, organization.id).await?,
+            None => false,
+        }
+    };
+    if !can_access {
         return Err(WebError::not_found("Build"));
     }
 
@@ -565,10 +591,56 @@ pub async fn get_build_downloads(
     Ok(Json(res))
 }
 
-pub async fn get_build_download(
+#[derive(Deserialize)]
+pub struct DownloadQuery {
+    token: Option<String>,
+}
+
+pub async fn get_build_download_token(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Path(build_id): Path<Uuid>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let build = EBuild::find_by_id(build_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Build"))?;
+
+    let evaluation = EEvaluation::find_by_id(build.evaluation)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::InternalServerError("Build data inconsistency".to_string()))?;
+
+    let organization_id = if let Some(project_id) = evaluation.project {
+        EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| WebError::InternalServerError("Evaluation data inconsistency".to_string()))?
+            .organization
+    } else {
+        EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| WebError::InternalServerError("Direct build data inconsistency".to_string()))?
+            .organization
+    };
+
+    if !user_is_org_member(&state, user.id, organization_id).await? {
+        return Err(WebError::not_found("Build"));
+    }
+
+    let token = encode_download_token(State(Arc::clone(&state)), build_id)
+        .map_err(|_| WebError::failed_to_generate_token())?;
+
+    Ok(Json(BaseResponse { error: false, message: token }))
+}
+
+pub async fn get_build_download(
+    state: State<Arc<ServerState>>,
     Path((build_id, filename)): Path<(Uuid, String)>,
+    Query(query): Query<DownloadQuery>,
+    headers: HeaderMap,
 ) -> Result<Response, WebError> {
     let build = EBuild::find_by_id(build_id)
         .one(&state.db)
@@ -613,16 +685,27 @@ pub async fn get_build_download(
             })?
             .organization
     };
-    let organization = EOrganization::find_by_id(organization_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| {
-            tracing::error!("Organization {} not found", organization_id);
-            WebError::InternalServerError("Organization data inconsistency".to_string())
-        })?;
-
-    if !user_is_org_member(&state, user.id, organization.id).await? {
-        return Err(WebError::not_found("Build"));
+    // Auth: download token OR standard session (cookie / Authorization header)
+    if let Some(token_str) = query.token {
+        let claims = decode_download_token(State(Arc::clone(&state)), token_str)
+            .await
+            .map_err(|_| WebError::Unauthorized("Invalid download token".to_string()))?;
+        if claims.build_id != build_id {
+            return Err(WebError::not_found("Build"));
+        }
+    } else {
+        let token_str = extract_bearer_or_cookie(&headers)
+            .ok_or_else(|| WebError::Unauthorized("Authorization required".to_string()))?;
+        let token_data = decode_jwt(State(Arc::clone(&state)), token_str)
+            .await
+            .map_err(|_| WebError::Unauthorized("Invalid token".to_string()))?;
+        let user = EUser::find_by_id(token_data.claims.id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| WebError::not_found("User"))?;
+        if !user_is_org_member(&state, user.id, organization_id).await? {
+            return Err(WebError::not_found("Build"));
+        }
     }
 
     // Get build outputs to find the file
@@ -1033,7 +1116,11 @@ fn extract_drv_name(path: &str) -> String {
     without_hash.trim_end_matches(".drv").to_string()
 }
 
-async fn authorize_build(state: &Arc<ServerState>, user: &MUser, build_id: Uuid) -> WebResult<()> {
+async fn authorize_build_opt(
+    state: &Arc<ServerState>,
+    maybe_user: &Option<MUser>,
+    build_id: Uuid,
+) -> WebResult<()> {
     let build = EBuild::find_by_id(build_id)
         .one(&state.db)
         .await?
@@ -1070,12 +1157,21 @@ async fn authorize_build(state: &Arc<ServerState>, user: &MUser, build_id: Uuid)
             WebError::InternalServerError("Organization data inconsistency".to_string())
         })?;
 
-    if !user_is_org_member(state, user.id, organization.id).await? {
+    let can_access = if organization.public {
+        true
+    } else {
+        match maybe_user {
+            Some(user) => user_is_org_member(state, user.id, organization.id).await?,
+            None => false,
+        }
+    };
+    if !can_access {
         return Err(WebError::not_found("Build"));
     }
 
     Ok(())
 }
+
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DependencyNode {
@@ -1103,10 +1199,10 @@ pub struct BuildGraph {
 /// GET /builds/{build}/dependencies — direct dependencies of a single build
 pub async fn get_build_dependencies(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(build_id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<Vec<DependencyNode>>>> {
-    authorize_build(&state, &user, build_id).await?;
+    authorize_build_opt(&state, &maybe_user, build_id).await?;
 
     let dep_rows = EBuildDependency::find()
         .filter(CBuildDependency::Build.eq(build_id))
@@ -1145,10 +1241,10 @@ pub async fn get_build_dependencies(
 /// GET /builds/{build}/graph — full transitive dependency graph rooted at a build
 pub async fn get_build_graph(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(build_id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<BuildGraph>>> {
-    authorize_build(&state, &user, build_id).await?;
+    authorize_build_opt(&state, &maybe_user, build_id).await?;
 
     let mut visited: HashSet<Uuid> = HashSet::new();
     let mut nodes: Vec<DependencyNode> = Vec::new();

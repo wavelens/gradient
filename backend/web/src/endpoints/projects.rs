@@ -4,12 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::authorization::MaybeUser;
+use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use chrono::Utc;
 use core::consts::*;
-use core::database::{get_any_organization_by_name, get_organization_by_name, get_project_by_name};
+use core::database::{
+    get_any_organization_by_name, get_organization_by_name, get_project_by_name,
+};
 use core::input::{check_index_name, valid_evaluation_wildcard, validate_display_name, vec_to_hex};
 use core::sources::check_project_updates;
 use core::types::*;
@@ -148,18 +152,32 @@ pub async fn get_project_name_available(
 
 pub async fn get(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(organization): Path<String>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<ProjectResponse>>>>> {
     let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
+        get_any_organization_by_name(state.0.clone(), organization.clone())
             .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
+    if !organization.public {
+        match &maybe_user {
+            Some(user) => {
+                if !user_is_org_member(&state.0, user.id, organization.id).await? {
+                    return Err(WebError::not_found("Organization"));
+                }
+            }
+            None => return Err(WebError::not_found("Organization")),
+        }
+    }
+
     let page = params.page();
     let per_page = params.per_page();
-    let can_edit = user_can_edit(&state, user.id, organization.id).await?;
+    let can_edit = match &maybe_user {
+        Some(user) => user_can_edit(&state, user.id, organization.id).await?,
+        None => false,
+    };
 
     let paginator = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
@@ -265,21 +283,38 @@ pub async fn put(
 
 pub async fn get_project(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectResponse>>> {
-    let (organization, project): (MOrganization, MProject) = get_project_by_name(
-        state.0.clone(),
-        user.id,
-        organization.clone(),
-        project.clone(),
-    )
-    .await?
-    .ok_or_else(|| WebError::not_found("Project"))?;
+    let organization: MOrganization =
+        get_any_organization_by_name(state.0.clone(), organization.clone())
+            .await?
+            .ok_or_else(|| WebError::not_found("Project"))?;
 
-    let can_edit = user_can_edit(&state, user.id, organization.id).await?;
+    if !organization.public {
+        match &maybe_user {
+            Some(user) => {
+                if !user_is_org_member(&state.0, user.id, organization.id).await? {
+                    return Err(WebError::not_found("Project"));
+                }
+            }
+            None => return Err(WebError::not_found("Project")),
+        }
+    }
 
-    let res = BaseResponse {
+    let project: MProject = EProject::find()
+        .filter(CProject::Organization.eq(organization.id))
+        .filter(CProject::Name.eq(project))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Project"))?;
+
+    let can_edit = match &maybe_user {
+        Some(user) => user_can_edit(&state, user.id, organization.id).await?,
+        None => false,
+    };
+
+    Ok(Json(BaseResponse {
         error: false,
         message: ProjectResponse {
             id: project.id,
@@ -297,9 +332,7 @@ pub async fn get_project(
             managed: project.managed,
             can_edit,
         },
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn patch_project(
@@ -655,17 +688,31 @@ pub async fn post_project_transfer(
 
 pub async fn get_project_details(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectDetailsResponse>>> {
-    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
-        state.0.clone(),
-        user.id,
-        organization.clone(),
-        project.clone(),
-    )
-    .await?
-    .ok_or_else(|| WebError::not_found("Project"))?;
+    let organization: MOrganization =
+        get_any_organization_by_name(state.0.clone(), organization.clone())
+            .await?
+            .ok_or_else(|| WebError::not_found("Project"))?;
+
+    if !organization.public {
+        match &maybe_user {
+            Some(user) => {
+                if !user_is_org_member(&state.0, user.id, organization.id).await? {
+                    return Err(WebError::not_found("Project"));
+                }
+            }
+            None => return Err(WebError::not_found("Project")),
+        }
+    }
+
+    let project: MProject = EProject::find()
+        .filter(CProject::Organization.eq(organization.id))
+        .filter(CProject::Name.eq(project))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Project"))?;
 
     // Get last 5 evaluations for this project
     let evaluations = EEvaluation::find()
@@ -738,18 +785,32 @@ pub struct EntryPointsQuery {
 
 pub async fn get_project_entry_points(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<EntryPointsQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<EntryPointSummary>>>> {
-    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
-        state.0.clone(),
-        user.id,
-        organization.clone(),
-        project.clone(),
-    )
-    .await?
-    .ok_or_else(|| WebError::not_found("Project"))?;
+    let organization: MOrganization =
+        get_any_organization_by_name(state.0.clone(), organization.clone())
+            .await?
+            .ok_or_else(|| WebError::not_found("Project"))?;
+
+    if !organization.public {
+        match &maybe_user {
+            Some(user) => {
+                if !user_is_org_member(&state.0, user.id, organization.id).await? {
+                    return Err(WebError::not_found("Project"));
+                }
+            }
+            None => return Err(WebError::not_found("Project")),
+        }
+    }
+
+    let project: MProject = EProject::find()
+        .filter(CProject::Organization.eq(organization.id))
+        .filter(CProject::Name.eq(project))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Project"))?;
 
     // Use the requested evaluation ID, or fall back to the project's last evaluation.
     let eval_id = match params.evaluation_id.or(project.last_evaluation) {

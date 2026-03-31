@@ -132,7 +132,7 @@
           </div>
         </div>
         <div class="info-bar-right">
-          @if (isRunning()) {
+          @if (isRunning() && authService.isAuthenticated()) {
             <button pButton label="Abort" icon="pi pi-times" severity="danger" size="small"
               (click)="abortEvaluation()" [loading]="aborting()" [disabled]="aborting()"></button>
           }

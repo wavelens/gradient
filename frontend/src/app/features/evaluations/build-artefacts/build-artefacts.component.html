@@ -30,19 +30,15 @@
         <div class="artefact-row">
           <span class="file-type-badge">{{ fileTypeLabel(artefact.file_type) }}</span>
           <span class="artefact-name">{{ artefact.name }}</span>
-          <button
+          <a
             class="download-btn"
-            (click)="download(artefact)"
-            [disabled]="downloading() !== null"
+            [href]="downloadUrl(artefact)"
+            [download]="artefact.name"
             [title]="'Download ' + artefact.name"
           >
-            @if (downloading() === artefact.name) {
-              <span class="material-symbols-outlined spin">progress_activity</span>
-            } @else {
-              <span class="material-symbols-outlined">download</span>
-            }
+            <span class="material-symbols-outlined">download</span>
             <span>Download</span>
-          </button>
+          </a>
         </div>
       }
     </div>
