@@ -8,6 +8,7 @@
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     name = "gradient-frontend";
     globalTimeout = 600;
+    extraPythonPackages = ps: with ps; [ selenium ];
 
     defaults = {
       networking.firewall.enable = false;
@@ -30,6 +31,20 @@
           "127.0.0.1" = [ "gradient.local" ];
         };
 
+        virtualisation.forwardPorts = [
+          {
+            from = "host";
+            host.port = 3000;
+            guest.port = 3000;
+          }
+          {
+            from = "host";
+            host.port = 4444;
+            guest.port = 4444;
+          }
+        ];
+
+        nix.settings.max-jobs = 0;
         services = {
           gradient = {
             enable = true;
@@ -70,64 +85,25 @@
               log_destination = lib.mkForce "syslog";
             };
           };
-
-          # Minimal X11 setup for headless browser testing
-          xserver = {
-            enable = true;
-            displayManager.startx.enable = true;
-          };
         };
 
-        # Create test user
-        users.users.testuser = {
-          isNormalUser = true;
-          password = "test";
-          extraGroups = [ "wheel" ];
-        };
-
-        # Install testing packages with proper browser setup
         environment.systemPackages = with pkgs; [
-          chromium
+          ungoogled-chromium
           chromedriver
-          firefox
-          geckodriver
           curl
           jq
           xvfb-run
-          # Custom Python environment with all needed packages
-          (python3.withPackages (ps: with ps; [
-            selenium
-            webdriver-manager
-            requests
-            beautifulsoup4
-            lxml
-            pytest
-          ]))
         ];
-        
-        # Set up browser environment variables
-        environment.variables = {
-          CHROME_BIN = "${pkgs.chromium}/bin/chromium";
-          CHROME_DRIVER = "${pkgs.chromedriver}/bin/chromedriver";
-          FIREFOX_BIN = "${pkgs.firefox}/bin/firefox";
-          GECKO_DRIVER = "${pkgs.geckodriver}/bin/geckodriver";
-        };
 
-        # Configure display for headless testing
-        systemd.services.xvfb = {
-          wantedBy = [ "multi-user.target" ];
+        systemd.services.chromedriver = {
+          description = "ChromeDriver for Selenium tests";
           after = [ "network.target" ];
+          wantedBy = [ "multi-user.target" ];
           serviceConfig = {
-            ExecStart = "${pkgs.xvfb-run}/bin/Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp";
-            Restart = "always";
-            RestartSec = 5;
-            User = "testuser";
-            Group = "users";
+            ExecStart = "${lib.getExe pkgs.chromedriver} --port=4444 --whitelisted-ips=";
+            Restart = "on-failure";
+            Type = "simple";
           };
-        };
-
-        nix.settings = {
-          max-jobs = 0;
         };
       };
     };
@@ -136,6 +112,39 @@
       machine = import ../../modules/debug-host.nix;
     };
 
-    testScript = builtins.readFile ./test-selenium.py;
+    testScript = ''
+      import os
+      from selenium import webdriver
+
+      os.environ["PATH"] += os.pathsep + "${pkgs.chromedriver}/bin"
+
+      start_all()
+
+      server.wait_for_unit("gradient-server.service")
+      server.wait_for_unit("chromedriver.service")
+
+      options = webdriver.ChromeOptions()
+      options.binary_location = "${lib.getExe pkgs.ungoogled-chromium}"
+      options.add_argument("--single-process")
+      options.add_argument("--headless=new")
+      options.add_argument("--no-sandbox")
+      options.add_argument("--disable-setuid-sandbox")
+      options.add_argument("--disable-gpu")
+      options.add_argument("--disk-cache-size=0")
+      options.add_argument("--disable-dev-shm-usage")
+      options.add_argument("--disable-software-rasterizer")
+      options.add_argument("--disable-background-networking")
+      options.add_argument("--disable-sync")
+      options.add_argument("--metrics-recording-only")
+      options.add_argument("--no-first-run")
+      options.add_argument("--disable-extensions")
+      options.add_argument("--disable-features=VizDisplayCompositor")
+      options.add_argument("--host-resolver-rules=MAP gradient.local 127.0.0.1")
+
+      driver = webdriver.Remote(command_executor='http://localhost:4444', options=options)
+
+
+      ${builtins.readFile ./test-login.py}
+    '';
   });
 }
