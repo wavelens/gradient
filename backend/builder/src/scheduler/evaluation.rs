@@ -5,7 +5,7 @@
  */
 
 use chrono::Utc;
-use core::executer::{get_local_store, LocalNixStore};
+use core::executer::get_local_store;
 use core::sources::*;
 use core::types::*;
 use entity::build::BuildStatus;

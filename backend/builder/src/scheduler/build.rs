@@ -15,8 +15,8 @@ use entity::server::Architecture;
 use nix_daemon::{BasicDerivation, DerivationOutput};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, JoinType, QueryFilter,
-    QuerySelect, RelationTrait,
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter,
+    QuerySelect,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
