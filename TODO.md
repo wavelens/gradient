@@ -5,6 +5,19 @@
  - icon and Title for frontend
  - netRc for cache authorization (see https://github.com/cachix/cachix/blob/e8be573b417f3daa3dd4cb9052178f848e0c9d1d/cachix/src/Cachix/Deploy/Activate.hs#L197)
  - before a build is building check again if the build is already built
+ - better comment on org ssh keys (instead of uuid format like cache subscription keys)
+ - show org settings in project settings
+ - in org settings "Regenerate Key" should be nowrap and have confirmation dialog and correct button padding
+ - text in Organization Overview should be "Manage your organizations and teams" -> "Manage your organizations"
+ - in org settings / cache subscription link to cache page
+ - when a cache is deleted also delete all nars in file system (in background)
+ - display names should be able to contain more possible characters (e.g. apostrophes, dots, dashes, underscores etc.)
+ - name availability endpoint should check if name is valid
+ - no feedback on input errors project creation on wildcard
+ - no feedback on input errors on settings pages
+ - project wildcards can contain ", " not only ","
+ - no "Changes Saved" on settings pages
+ - evaluation wildcard "*" should work
  - Add Non-SSH server as default
  - Log OIDC Errors in journal error
  - Add Super User

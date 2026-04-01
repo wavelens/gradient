@@ -155,6 +155,13 @@ export const routes: Routes = [
             (m) => m.CacheSettingsComponent
           ),
       },
+      {
+        path: 'caches/:cache/upstreams',
+        loadComponent: () =>
+          import('./features/caches/cache-upstreams/cache-upstreams.component').then(
+            (m) => m.CacheUpstreamsComponent
+          ),
+      },
 
       // Settings
       {

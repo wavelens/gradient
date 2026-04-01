@@ -16,17 +16,20 @@ use core::database::{get_any_cache_by_name, get_cache_by_name};
 use core::executer::{get_local_store, get_pathinfo};
 use core::input::{check_index_name, validate_display_name};
 use core::sources::{
-    format_cache_key, format_cache_public_key, generate_signing_key, get_cache_nar_location,
-    get_hash_from_url, get_path_from_build_output,
+    clear_key, format_cache_key, format_cache_public_key, generate_signing_key,
+    get_cache_nar_location, get_hash_from_url, get_path_from_build_output, write_key,
 };
 use core::types::*;
 use entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
+use serde_json;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::process::Command;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -904,18 +907,82 @@ pub async fn path(
         ));
     }
 
-    let path_info = match get_nar_by_hash(Arc::clone(&state), cache, path_hash).await {
-        Ok(path_info) => path_info,
-        Err(_) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Path not found".to_string(),
-                }),
-            ));
-        }
-    };
+    let path_info =
+        match get_nar_by_hash(Arc::clone(&state), cache.clone(), path_hash.clone()).await {
+            Ok(path_info) => path_info,
+            Err(_) => {
+                // Check the local nix store first — the path may have been substituted
+                // during a previous narinfo request.
+                if let Some(local_path) = find_store_path_by_hash(&path_hash).await {
+                    match path_info_from_local_store(&state, &cache, &local_path, &path_hash).await
+                    {
+                        Ok(pi) => pi,
+                        Err(e) => {
+                            warn!(error = %e, hash = %path_hash, "path_info_from_local_store failed");
+                            return Err((
+                                StatusCode::NOT_FOUND,
+                                Json(BaseResponse {
+                                    error: true,
+                                    message: "Path not found".to_string(),
+                                }),
+                            ));
+                        }
+                    }
+                } else {
+                    // Try each readable external upstream in order.
+                    let upstreams = ECacheUpstream::find()
+                        .filter(CCacheUpstream::Cache.eq(cache.id))
+                        .all(&state.db)
+                        .await
+                        .unwrap_or_default();
+
+                    let mut upstream_result: Option<NixPathInfo> = None;
+                    for upstream in upstreams {
+                        if upstream.mode == CacheSubscriptionMode::WriteOnly {
+                            continue;
+                        }
+                        if let Some(ref url) = upstream.url {
+                            match substitute_from_external_upstream(
+                                &state,
+                                &cache,
+                                url,
+                                upstream.public_key.as_deref(),
+                                &path_hash,
+                            )
+                            .await
+                            {
+                                Ok(pi) => {
+                                    upstream_result = Some(pi);
+                                    break;
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        error = %e,
+                                        upstream = %url,
+                                        hash = %path_hash,
+                                        "Upstream substitution failed, trying next"
+                                    );
+                                }
+                            }
+                        }
+                        // Internal upstream (another Gradient cache) — TODO: implement
+                    }
+
+                    match upstream_result {
+                        Some(pi) => pi,
+                        None => {
+                            return Err((
+                                StatusCode::NOT_FOUND,
+                                Json(BaseResponse {
+                                    error: true,
+                                    message: "Path not found".to_string(),
+                                }),
+                            ));
+                        }
+                    }
+                }
+            }
+        };
 
     Response::builder()
         .status(StatusCode::OK)
@@ -1018,12 +1085,12 @@ pub async fn nar(
             )
         })?
     } else {
-        // Non-entry-point: find the store path and pack on demand
-        let build_output = EBuildOutput::find()
+        // Try to find a DB record for a locally-built (cached) output.
+        let maybe_output = EBuildOutput::find()
             .filter(
                 Condition::all()
                     .add(CBuildOutput::IsCached.eq(true))
-                    .add(CBuildOutput::Hash.eq(path_hash)),
+                    .add(CBuildOutput::Hash.eq(path_hash.clone())),
             )
             .one(&state.db)
             .await
@@ -1036,23 +1103,32 @@ pub async fn nar(
                         message: format!("Database error: {}", e),
                     }),
                 )
-            })?
-            .ok_or_else(|| {
-                (
-                    StatusCode::NOT_FOUND,
-                    Json(BaseResponse {
-                        error: true,
-                        message: "Path not found".to_string(),
-                    }),
-                )
             })?;
 
-        let nix_path = get_path_from_build_output(build_output);
+        let pack_path: String = if let Some(build_output) = maybe_output {
+            // Non-entry-point build: pack from the nix store path in the DB record.
+            get_path_from_build_output(build_output)
+        } else {
+            // Not in DB — may have been substituted from an upstream during the narinfo
+            // request.  Scan the local nix store for a matching path.
+            match find_store_path_by_hash(&path_hash).await {
+                Some(p) => p,
+                None => {
+                    return Err((
+                        StatusCode::NOT_FOUND,
+                        Json(BaseResponse {
+                            error: true,
+                            message: "Path not found".to_string(),
+                        }),
+                    ));
+                }
+            }
+        };
 
         let output = Command::new(state.cli.binpath_nix.clone())
             .arg("nar")
             .arg("pack")
-            .arg(&nix_path)
+            .arg(&pack_path)
             .output()
             .await
             .map_err(|e| {
@@ -1111,6 +1187,296 @@ pub async fn nar(
                 }),
             )
         })
+}
+
+// ── Nix base-32 SHA-256 (mirrors the implementation in cache/src/cacher.rs) ──
+
+fn nix_base32_sha256(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
+    let hash: [u8; 32] = Sha256::digest(data).into();
+    let len = (hash.len() * 8 - 1) / 5 + 1;
+    let mut out = String::with_capacity(len);
+    for n in (0..len).rev() {
+        let b = n * 5;
+        let i = b / 8;
+        let j = b % 8;
+        let byte0 = hash.get(i).copied().unwrap_or(0) as u32;
+        let byte1 = hash.get(i + 1).copied().unwrap_or(0) as u32;
+        let c = ((byte0 >> j) | (byte1 << (8 - j))) & 0x1f;
+        out.push(CHARS[c as usize] as char);
+    }
+    out
+}
+
+// ── Upstream pull-through helpers ─────────────────────────────────────────────
+
+/// Scans `/nix/store` for a path whose hash prefix matches `hash`.
+/// Returns the full store path (e.g. `/nix/store/{hash}-{name}`) if found.
+async fn find_store_path_by_hash(hash: &str) -> Option<String> {
+    let prefix = format!("{}-", hash);
+    let mut dir = tokio::fs::read_dir("/nix/store").await.ok()?;
+    while let Ok(Some(entry)) = dir.next_entry().await {
+        let name = entry.file_name();
+        let s = name.to_string_lossy();
+        if s.starts_with(&prefix) {
+            return Some(entry.path().to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
+/// Signs `store_path` with the cache's private key and returns the full signature token
+/// (`{key_name}:{base64}`) ready to embed in a narinfo `Sig:` field.
+async fn sign_and_get_sig(
+    state: &ServerState,
+    cache: &MCache,
+    store_path: &str,
+) -> Result<String, WebError> {
+    let secret_key = format_cache_key(
+        state.cli.crypt_secret_file.clone(),
+        cache.clone(),
+        state.cli.serve_url.clone(),
+    )
+    .map_err(|e| {
+        WebError::InternalServerError(format!("Failed to format cache key: {}", e))
+    })?;
+
+    let key_file = write_key(secret_key.clone()).map_err(|e| {
+        WebError::InternalServerError(format!("Failed to write key file: {}", e))
+    })?;
+
+    let sign_out = Command::new(&state.cli.binpath_nix)
+        .arg("store")
+        .arg("sign")
+        .arg("-k")
+        .arg(&key_file)
+        .arg(store_path)
+        .output()
+        .await
+        .map_err(|e| {
+            WebError::InternalServerError(format!("Failed to run nix store sign: {}", e))
+        })?;
+
+    let _ = clear_key(key_file);
+
+    if !sign_out.status.success() {
+        return Err(WebError::InternalServerError(format!(
+            "nix store sign failed: {}",
+            String::from_utf8_lossy(&sign_out.stderr)
+        )));
+    }
+
+    let sigs_out = Command::new(&state.cli.binpath_nix)
+        .arg("path-info")
+        .arg("--sigs")
+        .arg(store_path)
+        .output()
+        .await
+        .map_err(|e| {
+            WebError::InternalServerError(format!("nix path-info --sigs failed: {}", e))
+        })?;
+
+    let signatures = String::from_utf8_lossy(&sigs_out.stdout);
+    let key_name = secret_key.split(':').next().unwrap_or(&cache.name);
+
+    for token in signatures.split_whitespace() {
+        if token.starts_with(&format!("{}:", key_name)) {
+            return Ok(token.trim().to_string());
+        }
+    }
+
+    Err(WebError::InternalServerError(
+        "Signature not found after signing".to_string(),
+    ))
+}
+
+/// Builds a `NixPathInfo` for a path already in the local nix store.
+/// Queries metadata via `nix path-info --json`, packs + compresses to compute file stats,
+/// then signs with the cache's key.
+async fn path_info_from_local_store(
+    state: &Arc<ServerState>,
+    cache: &MCache,
+    store_path: &str,
+    hash: &str,
+) -> Result<NixPathInfo, WebError> {
+    let json_out = Command::new(&state.cli.binpath_nix)
+        .arg("path-info")
+        .arg("--json")
+        .arg(store_path)
+        .output()
+        .await
+        .map_err(|e| {
+            WebError::InternalServerError(format!("nix path-info --json failed: {}", e))
+        })?;
+
+    if !json_out.status.success() {
+        return Err(WebError::InternalServerError(format!(
+            "nix path-info failed: {}",
+            String::from_utf8_lossy(&json_out.stderr)
+        )));
+    }
+
+    let json: serde_json::Value = serde_json::from_slice(&json_out.stdout).map_err(|e| {
+        WebError::InternalServerError(format!("Failed to parse path-info JSON: {}", e))
+    })?;
+
+    // Newer nix returns an array; older nix returns an object keyed by store path.
+    let info = json
+        .as_object()
+        .and_then(|obj| obj.get(store_path).cloned())
+        .or_else(|| {
+            json.as_array().and_then(|arr| {
+                arr.iter()
+                    .find(|v| v.get("path").and_then(|p| p.as_str()) == Some(store_path))
+                    .cloned()
+            })
+        })
+        .ok_or_else(|| {
+            WebError::InternalServerError(format!(
+                "Store path {} not found in nix path-info output",
+                store_path
+            ))
+        })?;
+
+    let nar_hash = info
+        .get("narHash")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let nar_size = info.get("narSize").and_then(|v| v.as_u64()).unwrap_or(0);
+    let references: Vec<String> = info
+        .get("references")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|r| r.as_str())
+                .map(|s| s.strip_prefix("/nix/store/").unwrap_or(s).to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    let deriver = info
+        .get("deriver")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.strip_prefix("/nix/store/").unwrap_or(s).to_string());
+    let ca = info
+        .get("ca")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Pack the NAR and compress to get file_hash / file_size.
+    let pack_out = Command::new(&state.cli.binpath_nix)
+        .arg("nar")
+        .arg("pack")
+        .arg(store_path)
+        .output()
+        .await
+        .map_err(|e| WebError::InternalServerError(format!("nix nar pack failed: {}", e)))?;
+
+    if !pack_out.status.success() {
+        return Err(WebError::InternalServerError(format!(
+            "nix nar pack failed: {}",
+            String::from_utf8_lossy(&pack_out.stderr)
+        )));
+    }
+
+    let compressed = zstd::bulk::compress(&pack_out.stdout, 19).map_err(|e| {
+        WebError::InternalServerError(format!("zstd compression failed: {}", e))
+    })?;
+
+    let file_size = compressed.len() as u32;
+    let file_hash = format!("sha256:{}", nix_base32_sha256(&compressed));
+    let sig = sign_and_get_sig(state, cache, store_path).await?;
+
+    Ok(NixPathInfo {
+        store_path: store_path.to_string(),
+        url: format!("nar/{}.nar.zst", hash),
+        compression: "zstd".to_string(),
+        file_hash,
+        file_size,
+        nar_hash,
+        nar_size,
+        references,
+        deriver,
+        sig,
+        ca,
+    })
+}
+
+/// Fetches the narinfo from an external upstream, copies the full store closure into the local
+/// nix store via `nix copy --from`, signs it with the cache's key, and returns a `NixPathInfo`.
+async fn substitute_from_external_upstream(
+    state: &Arc<ServerState>,
+    cache: &MCache,
+    upstream_url: &str,
+    trusted_public_key: Option<&str>,
+    hash: &str,
+) -> Result<NixPathInfo, WebError> {
+    let narinfo_url = format!(
+        "{}/{}.narinfo",
+        upstream_url.trim_end_matches('/'),
+        hash
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| {
+            WebError::InternalServerError(format!("Failed to build HTTP client: {}", e))
+        })?;
+
+    let resp = client
+        .get(&narinfo_url)
+        .send()
+        .await
+        .map_err(|_| WebError::not_found("Path"))?;
+
+    if !resp.status().is_success() {
+        return Err(WebError::not_found("Path"));
+    }
+
+    let narinfo_text = resp.text().await.map_err(|e| {
+        WebError::InternalServerError(format!("Failed to read upstream narinfo: {}", e))
+    })?;
+
+    let store_path = narinfo_text
+        .lines()
+        .find(|l| l.starts_with("StorePath: "))
+        .and_then(|l| l.splitn(2, ": ").nth(1))
+        .ok_or_else(|| {
+            WebError::InternalServerError("No StorePath in upstream narinfo".to_string())
+        })?
+        .trim()
+        .to_string();
+
+    // Copy the full closure from the upstream into the local nix store.
+    let mut cmd = Command::new(&state.cli.binpath_nix);
+    cmd.arg("copy").arg("--from").arg(upstream_url).arg(&store_path);
+    if let Some(key) = trusted_public_key {
+        cmd.arg("--option").arg("trusted-public-keys").arg(key);
+    } else {
+        cmd.arg("--no-check-sigs");
+    }
+
+    let copy_out = cmd.output().await.map_err(|e| {
+        WebError::InternalServerError(format!("Failed to run nix copy: {}", e))
+    })?;
+
+    if !copy_out.status.success() {
+        return Err(WebError::InternalServerError(format!(
+            "nix copy --from {} failed: {}",
+            upstream_url,
+            String::from_utf8_lossy(&copy_out.stderr)
+        )));
+    }
+
+    info!(
+        store_path = %store_path,
+        upstream = %upstream_url,
+        "Substituted path from external upstream"
+    );
+
+    path_info_from_local_store(state, cache, &store_path, hash).await
 }
 
 // ── Upstream caches ───────────────────────────────────────────────────────────

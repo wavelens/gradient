@@ -100,39 +100,16 @@
 
     <!-- Upstream Caches -->
     <div class="settings-section">
-      <div class="section-header">
-        <h2>Upstream Caches</h2>
-        <button pButton label="Add Upstream" icon="pi pi-plus" severity="secondary" size="small" (click)="openAddUpstreamDialog()"></button>
-      </div>
-      @if (upstreamsLoading()) {
-        <app-loading-spinner message="Loading upstreams..." />
-      } @else if (upstreams().length === 0) {
-        <p class="text-secondary empty-upstreams">No upstream caches configured. Add one to enable pull-through caching.</p>
-      } @else {
-        <div class="upstreams-list">
-          @for (u of upstreams(); track u.id) {
-            <div class="upstream-item">
-              <div class="upstream-info">
-                <span class="upstream-name">{{ u.display_name }}</span>
-                <span class="upstream-type-badge" [class.internal]="u.upstream_cache_id" [class.external]="!u.upstream_cache_id">
-                  {{ u.upstream_cache_id ? 'Internal' : 'External' }}
-                </span>
-                <span class="upstream-mode-badge mode-{{ u.mode.toLowerCase() }}">{{ modeLabel(u.mode) }}</span>
-              </div>
-              <span class="upstream-target text-secondary">{{ u.url ?? u.upstream_cache_id }}</span>
-              <button
-                pButton
-                icon="pi pi-trash"
-                severity="danger"
-                size="small"
-                [loading]="removingUpstreamId() === u.id"
-                [disabled]="removingUpstreamId() !== null"
-                (click)="removeUpstream(u.id)"
-              ></button>
-            </div>
-          }
+      <h2>Upstream Caches</h2>
+      <div class="settings-card">
+        <div class="nav-row">
+          <div>
+            <h3>Upstream Caches</h3>
+            <p class="text-secondary">External and internal caches this cache pulls through from</p>
+          </div>
+          <a pButton label="Manage Upstreams" icon="pi pi-cloud-download" severity="secondary" [routerLink]="['/caches', cacheName, 'upstreams']"></a>
         </div>
-      }
+      </div>
     </div>
 
     <!-- Danger Zone -->
@@ -172,66 +149,6 @@
     </div>
   }
 </div>
-
-<!-- Add Upstream Dialog -->
-<p-dialog
-  header="Add Upstream Cache"
-  [(visible)]="showAddUpstreamDialog"
-  [modal]="true"
-  [style]="{ width: '480px' }"
-  [draggable]="false"
-  [resizable]="false"
->
-  <div class="upstream-form">
-    <div class="form-group">
-      <label>Type</label>
-      <div class="type-toggle">
-        <button class="type-btn" [class.active]="upstreamType === 'internal'" (click)="upstreamType = 'internal'">Internal</button>
-        <button class="type-btn" [class.active]="upstreamType === 'external'" (click)="upstreamType = 'external'">External</button>
-      </div>
-    </div>
-
-    @if (upstreamType === 'internal') {
-      <div class="form-group">
-        <label for="up-cache-name">Cache Name</label>
-        <input pInputText id="up-cache-name" [(ngModel)]="upstreamForm.cache_name" placeholder="my-cache" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="up-display-name-int">Display Name <span class="text-secondary">(optional)</span></label>
-        <input pInputText id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Defaults to the cache's display name" class="w-full" />
-      </div>
-    } @else {
-      <div class="form-group">
-        <label for="up-display-name">Display Name</label>
-        <input pInputText id="up-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="cache.nixos.org" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="up-url">Substituter URL</label>
-        <input pInputText id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="up-pubkey">Public Key</label>
-        <input pInputText id="up-pubkey" [(ngModel)]="upstreamForm.public_key" placeholder="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" class="w-full" />
-      </div>
-    }
-
-    <div class="form-group">
-      <label for="up-mode">Mode</label>
-      <select id="up-mode" [(ngModel)]="upstreamForm.mode" class="role-select w-full">
-        @for (m of modes; track m.value) {
-          <option [value]="m.value">{{ m.label }}</option>
-        }
-      </select>
-      <small class="text-secondary">
-        Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only.
-      </small>
-    </div>
-  </div>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showAddUpstreamDialog.set(false)" [disabled]="addingUpstream()"></button>
-    <button pButton label="Add" icon="pi pi-plus" (click)="addUpstream()" [loading]="addingUpstream()" [disabled]="addingUpstream()"></button>
-  </ng-template>
-</p-dialog>
 
 <!-- Delete Confirmation Dialog -->
 <p-dialog

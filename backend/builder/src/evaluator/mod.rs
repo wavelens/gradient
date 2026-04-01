@@ -152,9 +152,13 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         let existing_builds =
             find_builds(Arc::clone(&state), organization_id, vec![derivation.clone()], true).await?;
         if let Some(existing) = existing_builds.first() {
-            acc.entry_point_build_ids.push(existing.id);
-            debug!(derivation = %derivation, "Skipping package - already exists");
-            continue;
+            let missing = get_missing_builds(vec![existing.derivation_path.clone()], store).await?;
+            if missing.is_empty() {
+                acc.entry_point_build_ids.push(existing.id);
+                debug!(derivation = %derivation, "Skipping package - already exists in DB and store");
+                continue;
+            }
+            debug!(derivation = %derivation, "Completed build found in DB but missing from nix store, re-evaluating");
         }
 
         info!(derivation = %derivation, path = %path, "Creating build");

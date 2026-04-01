@@ -26,6 +26,7 @@ thiserror    = { workspace = true }
 tokio        = { workspace = true, features = ["process"] }
 tracing      = { workspace = true }
 uuid         = { workspace = true }
+sha2         = { workspace = true }
 zstd         = { workspace = true }
 
 # Crate-specific dependencies

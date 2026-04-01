@@ -1,0 +1,189 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: $spacing-xxl;
+
+  h1 { font-size: $font-size-xxl; margin: 0 0 $spacing-sm 0; }
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $text-secondary;
+
+  .breadcrumb-link { color: $text-secondary; text-decoration: none; &:hover { color: $text-primary; } }
+  .breadcrumb-separator { color: $text-light; }
+  .breadcrumb-current { color: $text-primary; }
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-xxl;
+  text-align: center;
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+
+  .material-symbols-outlined { font-size: 48px; color: $text-secondary; margin-bottom: $spacing-md; }
+  h3 { margin: 0 0 $spacing-sm 0; }
+  p { margin: 0 0 $spacing-lg 0; }
+}
+
+.upstreams-list {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+}
+
+.upstream-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: $spacing-md $spacing-lg;
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+}
+
+.upstream-info {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+
+  .material-symbols-outlined { font-size: 20px; color: $text-secondary; flex-shrink: 0; }
+}
+
+.upstream-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.upstream-name {
+  font-weight: 500;
+  font-size: $font-size-sm;
+}
+
+.upstream-target {
+  font-size: $font-size-xs;
+  font-family: $font-family-mono;
+}
+
+.upstream-actions {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  flex-shrink: 0;
+}
+
+.upstream-type-badge,
+.upstream-mode-badge {
+  display: inline-block;
+  padding: 2px $spacing-sm;
+  border-radius: $border-radius-sm;
+  font-size: $font-size-xs;
+  font-weight: 500;
+  white-space: nowrap;
+
+  &.internal {
+    background: rgba($color-info, 0.15);
+    color: $color-info;
+  }
+
+  &.external {
+    background: rgba($color-warning, 0.15);
+    color: $color-warning;
+  }
+
+  &.mode-readwrite {
+    background: rgba($color-success, 0.15);
+    color: $color-success;
+  }
+
+  &.mode-readonly {
+    background: rgba($color-info, 0.15);
+    color: $color-info;
+  }
+
+  &.mode-writeonly {
+    background: rgba($color-warning, 0.15);
+    color: $color-warning;
+  }
+}
+
+.upstream-form {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+
+  .form-group { margin-bottom: 0; }
+}
+
+.type-toggle {
+  display: flex;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  overflow: hidden;
+}
+
+.type-btn {
+  flex: 1;
+  padding: $spacing-sm $spacing-md;
+  background: transparent;
+  border: none;
+  color: $text-secondary;
+  font-size: $font-size-sm;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+
+  & + & { border-left: 1px solid $color-border; }
+
+  &.active {
+    background: $color-info;
+    color: $text-primary;
+  }
+
+  &:not(.active):hover {
+    background: $color-quaternary;
+    color: $text-primary;
+  }
+}
+
+.form-group {
+  margin-bottom: $spacing-md;
+
+  label { display: block; margin-bottom: $spacing-sm; font-size: $font-size-sm; font-weight: 500; }
+  small { display: block; margin-top: $spacing-xs; font-size: $font-size-xs; }
+
+  &:last-child { margin-bottom: 0; }
+}
+
+.role-select {
+  width: 100%;
+  padding: $spacing-sm $spacing-md;
+  background: $color-quaternary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  color: $text-primary;
+  font-size: $font-size-md;
+  cursor: pointer;
+
+  &:focus { outline: none; border-color: $text-secondary; }
+}
+
+.w-full { width: 100%; }
