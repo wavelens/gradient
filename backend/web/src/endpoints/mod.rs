@@ -12,6 +12,7 @@ pub mod evals;
 pub mod orgs;
 pub mod projects;
 pub mod servers;
+pub mod stats;
 pub mod user;
 pub mod webhooks;
 

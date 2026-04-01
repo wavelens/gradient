@@ -9,7 +9,7 @@ pub mod endpoints;
 pub mod error;
 
 use axum::body::Body;
-use axum::routing::{get, patch, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Router, middleware};
 use bytes::Bytes;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
@@ -154,6 +154,14 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             post(caches::post_cache_public).delete(caches::delete_cache_public),
         )
         .route("/caches/{cache}/key", get(caches::get_cache_key))
+        .route(
+            "/caches/{cache}/upstreams",
+            get(caches::get_cache_upstreams).put(caches::put_cache_upstream),
+        )
+        .route(
+            "/caches/{cache}/upstreams/{id}",
+            delete(caches::delete_cache_upstream),
+        )
         .route("/user", get(user::get).delete(user::delete))
         .route("/user/search", get(user::get_search))
         .route(
@@ -245,6 +253,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/caches/{cache}/public-key",
             get(caches::get_cache_public_key),
         )
+        .route("/caches/{cache}/stats", get(stats::get_cache_stats))
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize_optional,

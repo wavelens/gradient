@@ -20,6 +20,7 @@ use core::sources::{
     get_hash_from_url, get_path_from_build_output,
 };
 use core::types::*;
+use entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -254,6 +255,20 @@ pub async fn put(
     };
 
     let cache = cache.insert(&state.db).await?;
+
+    ACacheUpstream {
+        id: Set(Uuid::new_v4()),
+        cache: Set(cache.id),
+        display_name: Set("cache.nixos.org".to_string()),
+        mode: Set(CacheSubscriptionMode::ReadOnly),
+        upstream_cache: Set(None),
+        url: Set(Some("https://cache.nixos.org".to_string())),
+        public_key: Set(Some(
+            "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=".to_string(),
+        )),
+    }
+    .insert(&state.db)
+    .await?;
 
     let res = BaseResponse {
         error: false,
@@ -1073,6 +1088,13 @@ pub async fn nar(
         )
     })?;
 
+    let bytes_len = compressed.len() as i64;
+    let cache_id = cache.id;
+    let state_for_metric = Arc::clone(&state.0);
+    tokio::spawn(async move {
+        super::stats::record_nar_traffic(state_for_metric, cache_id, bytes_len).await;
+    });
+
     Response::builder()
         .status(StatusCode::OK)
         .header(
@@ -1089,4 +1111,130 @@ pub async fn nar(
                 }),
             )
         })
+}
+
+// ── Upstream caches ───────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AddUpstreamRequest {
+    /// An upstream that is another Gradient-managed cache (referenced by name).
+    Internal {
+        cache_name: String,
+        display_name: Option<String>,
+        mode: Option<CacheSubscriptionMode>,
+    },
+    /// An upstream that is an external Nix binary cache.
+    External {
+        display_name: String,
+        url: String,
+        public_key: String,
+        mode: Option<CacheSubscriptionMode>,
+    },
+}
+
+#[derive(Serialize)]
+pub struct UpstreamCacheItem {
+    pub id: Uuid,
+    pub display_name: String,
+    pub mode: CacheSubscriptionMode,
+    /// Set for internal upstreams.
+    pub upstream_cache_id: Option<Uuid>,
+    /// Set for external upstreams.
+    pub url: Option<String>,
+    pub public_key: Option<String>,
+}
+
+pub async fn get_cache_upstreams(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(cache): Path<String>,
+) -> WebResult<Json<BaseResponse<Vec<UpstreamCacheItem>>>> {
+    let cache = get_cache_by_name(state.0.clone(), user.id, cache)
+        .await?
+        .ok_or_else(|| WebError::not_found("Cache"))?;
+
+    let upstreams = ECacheUpstream::find()
+        .filter(CCacheUpstream::Cache.eq(cache.id))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|u| UpstreamCacheItem {
+            id: u.id,
+            display_name: u.display_name,
+            mode: u.mode,
+            upstream_cache_id: u.upstream_cache,
+            url: u.url,
+            public_key: u.public_key,
+        })
+        .collect();
+
+    Ok(Json(BaseResponse { error: false, message: upstreams }))
+}
+
+pub async fn put_cache_upstream(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(cache): Path<String>,
+    Json(body): Json<AddUpstreamRequest>,
+) -> WebResult<Json<BaseResponse<Uuid>>> {
+    let cache = get_cache_by_name(state.0.clone(), user.id, cache)
+        .await?
+        .ok_or_else(|| WebError::not_found("Cache"))?;
+
+    let record = match body {
+        AddUpstreamRequest::Internal { cache_name, display_name, mode } => {
+            let upstream = get_cache_by_name(state.0.clone(), user.id, cache_name.clone())
+                .await?
+                .ok_or_else(|| WebError::not_found("Upstream cache"))?;
+            if upstream.id == cache.id {
+                return Err(WebError::BadRequest("A cache cannot be its own upstream".to_string()));
+            }
+            let name = display_name.unwrap_or_else(|| upstream.display_name.clone());
+            ACacheUpstream {
+                id: Set(Uuid::new_v4()),
+                cache: Set(cache.id),
+                display_name: Set(name),
+                mode: Set(mode.unwrap_or(CacheSubscriptionMode::ReadWrite)),
+                upstream_cache: Set(Some(upstream.id)),
+                url: Set(None),
+                public_key: Set(None),
+            }
+        }
+        AddUpstreamRequest::External { display_name, url, public_key, mode } => {
+            ACacheUpstream {
+                id: Set(Uuid::new_v4()),
+                cache: Set(cache.id),
+                display_name: Set(display_name),
+                mode: Set(mode.unwrap_or(CacheSubscriptionMode::ReadWrite)),
+                upstream_cache: Set(None),
+                url: Set(Some(url)),
+                public_key: Set(Some(public_key)),
+            }
+        }
+    };
+
+    let inserted = record.insert(&state.db).await?;
+    Ok(Json(BaseResponse { error: false, message: inserted.id }))
+}
+
+pub async fn delete_cache_upstream(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((cache, upstream_id)): Path<(String, Uuid)>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let cache = get_cache_by_name(state.0.clone(), user.id, cache)
+        .await?
+        .ok_or_else(|| WebError::not_found("Cache"))?;
+
+    let record = ECacheUpstream::find_by_id(upstream_id)
+        .filter(CCacheUpstream::Cache.eq(cache.id))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Upstream cache"))?;
+
+    let active: ACacheUpstream = record.into();
+    active.delete(&state.db).await?;
+
+    Ok(Json(BaseResponse { error: false, message: "Upstream removed".to_string() }))
 }

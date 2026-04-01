@@ -15,6 +15,7 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { CachesService } from '@core/services/caches.service';
+import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
 import { Cache } from '@core/models';
@@ -38,6 +39,7 @@ import { Cache } from '@core/models';
 })
 export class CacheListComponent implements OnInit, OnDestroy {
   private cachesService = inject(CachesService);
+  protected authService = inject(AuthService);
   private nameCheck$ = new Subject<string>();
 
   loading = signal(true);
@@ -63,7 +65,11 @@ export class CacheListComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    this.loadCaches();
+    if (this.authService.isAuthenticated()) {
+      this.loadCaches();
+    } else {
+      this.loading.set(false);
+    }
     this.loadPublicCaches();
     this.nameCheck$.pipe(
       debounceTime(400),

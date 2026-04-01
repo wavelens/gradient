@@ -10,7 +10,9 @@
       <h1>Organizations</h1>
       <p class="text-secondary">Manage your organizations and teams</p>
     </div>
-    <button pButton label="Create Organization" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+    @if (authService.isAuthenticated()) {
+      <button pButton label="Create Organization" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+    }
   </div>
 
   @if (loading()) {
@@ -42,9 +44,9 @@
       <app-empty-state
         icon="corporate_fare"
         title="No organizations yet"
-        message="Create your first organization to get started with Gradient"
-        actionLabel="Create Organization"
-        (actionClick)="openCreateDialog()"
+        [message]="authService.isAuthenticated() ? 'Create your first organization to get started with Gradient' : 'No organizations have been created yet'"
+        [actionLabel]="authService.isAuthenticated() ? 'Create Organization' : ''"
+        (actionClick)="authService.isAuthenticated() && openCreateDialog()"
       />
     }
   }

@@ -13,6 +13,7 @@ use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
 use builder::scheduler::abort_evaluation;
 use core::types::*;
+use core::input::vec_to_hex;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -39,7 +40,7 @@ pub struct EvaluationResponse {
     pub project: Option<Uuid>,
     pub project_name: Option<String>,
     pub repository: String,
-    pub commit: Uuid,
+    pub commit: String,
     pub wildcard: String,
     pub status: entity::evaluation::EvaluationStatus,
     pub previous: Option<Uuid>,
@@ -114,6 +115,12 @@ pub async fn get_evaluation(
         return Err(WebError::not_found("Evaluation"));
     }
 
+    let commit_hash = ECommit::find_by_id(evaluation.commit)
+        .one(&state.db)
+        .await?
+        .map(|c| vec_to_hex(&c.hash))
+        .unwrap_or_default();
+
     let res = BaseResponse {
         error: false,
         message: EvaluationResponse {
@@ -121,7 +128,7 @@ pub async fn get_evaluation(
             project: evaluation.project,
             project_name,
             repository: evaluation.repository,
-            commit: evaluation.commit,
+            commit: commit_hash,
             wildcard: evaluation.wildcard,
             status: evaluation.status,
             previous: evaluation.previous,

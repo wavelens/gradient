@@ -13,9 +13,11 @@
     </div>
 
     <nav class="header-nav">
-      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">
-        Dashboard
-      </a>
+      @if (authService.isAuthenticated()) {
+        <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">
+          Dashboard
+        </a>
+      }
       <a routerLink="/organizations" routerLinkActive="active">
         Organizations
       </a>
@@ -31,6 +33,11 @@
         <button class="logout-btn" (click)="logout()">
           <span class="material-symbols-outlined">logout</span>
         </button>
+      </div>
+    } @else {
+      <div class="header-user">
+        <a routerLink="/account/login" class="user-link">Login</a>
+        <a routerLink="/account/register" class="user-link">Register</a>
       </div>
     }
   </div>

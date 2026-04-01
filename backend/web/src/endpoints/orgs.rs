@@ -600,13 +600,27 @@ pub async fn delete_organization_public(
     }))
 }
 
+use entity::organization_cache::CacheSubscriptionMode;
+
+#[derive(Deserialize)]
+pub struct SubscribeCacheRequest {
+    pub mode: Option<CacheSubscriptionMode>,
+}
+
+#[derive(Serialize)]
+pub struct CacheSubscriptionItem {
+    pub id: Uuid,
+    pub name: String,
+    pub mode: CacheSubscriptionMode,
+}
+
 pub async fn get_organization_subscribe(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
-) -> WebResult<Json<BaseResponse<ListResponse>>> {
+) -> WebResult<Json<BaseResponse<Vec<CacheSubscriptionItem>>>> {
     let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
+        get_organization_by_name(state.0.clone(), user.id, organization)
             .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
@@ -615,28 +629,25 @@ pub async fn get_organization_subscribe(
         .all(&state.db)
         .await?;
 
-    let mut subscribed: ListResponse = Vec::new();
+    let mut subscribed = Vec::new();
     for oc in organization_caches {
         if let Ok(Some(cache)) = ECache::find_by_id(oc.cache).one(&state.db).await {
-            subscribed.push(ListItem {
+            subscribed.push(CacheSubscriptionItem {
                 id: oc.cache,
                 name: cache.name,
+                mode: oc.mode,
             });
         }
     }
 
-    let res = BaseResponse {
-        error: false,
-        message: subscribed,
-    };
-
-    Ok(Json(res))
+    Ok(Json(BaseResponse { error: false, message: subscribed }))
 }
 
 pub async fn post_organization_subscribe_cache(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, cache)): Path<(String, String)>,
+    body: Option<Json<SubscribeCacheRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
@@ -647,7 +658,7 @@ pub async fn post_organization_subscribe_cache(
         .await?
         .ok_or_else(|| WebError::not_found("Cache"))?;
 
-    let organization_cache = EOrganizationCache::find()
+    let already = EOrganizationCache::find()
         .filter(
             Condition::all()
                 .add(COrganizationCache::Organization.eq(organization.id))
@@ -656,26 +667,24 @@ pub async fn post_organization_subscribe_cache(
         .one(&state.db)
         .await?;
 
-    if organization_cache.is_some() {
-        return Err(WebError::already_exists(
-            "Organization already subscribed to Cache",
-        ));
+    if already.is_some() {
+        return Err(WebError::already_exists("Organization already subscribed to Cache"));
     }
 
-    let aorganization_cache = AOrganizationCache {
+    let mode = body
+        .and_then(|b| b.mode.clone())
+        .unwrap_or(CacheSubscriptionMode::ReadWrite);
+
+    AOrganizationCache {
         id: Set(Uuid::new_v4()),
         organization: Set(organization.id),
         cache: Set(cache.id),
-    };
+        mode: Set(mode),
+    }
+    .insert(&state.db)
+    .await?;
 
-    aorganization_cache.insert(&state.db).await?;
-
-    let res = BaseResponse {
-        error: false,
-        message: "Cache subscribed".to_string(),
-    };
-
-    Ok(Json(res))
+    Ok(Json(BaseResponse { error: false, message: "Cache subscribed".to_string() }))
 }
 
 pub async fn delete_organization_subscribe_cache(
@@ -692,7 +701,7 @@ pub async fn delete_organization_subscribe_cache(
         .await?
         .ok_or_else(|| WebError::not_found("Cache"))?;
 
-    let organization_cache = EOrganizationCache::find()
+    let record = EOrganizationCache::find()
         .filter(
             Condition::all()
                 .add(COrganizationCache::Organization.eq(organization.id))
@@ -702,13 +711,8 @@ pub async fn delete_organization_subscribe_cache(
         .await?
         .ok_or_else(|| WebError::BadRequest("Organization not subscribed to Cache".to_string()))?;
 
-    let aorganization_cache: AOrganizationCache = organization_cache.into();
-    aorganization_cache.delete(&state.db).await?;
+    let active: AOrganizationCache = record.into();
+    active.delete(&state.db).await?;
 
-    let res = BaseResponse {
-        error: false,
-        message: "Cache unsubscribed".to_string(),
-    };
-
-    Ok(Json(res))
+    Ok(Json(BaseResponse { error: false, message: "Cache unsubscribed".to_string() }))
 }

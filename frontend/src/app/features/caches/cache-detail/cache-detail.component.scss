@@ -175,6 +175,71 @@
   }
 }
 
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: $spacing-md;
+  margin-bottom: $spacing-lg;
+}
+
+.stat-card {
+  background-color: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+  padding: $spacing-md $spacing-lg;
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+
+  .stat-label {
+    font-size: $font-size-xs;
+    color: $text-secondary;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .stat-value {
+    font-size: $font-size-xl;
+    font-weight: 600;
+    color: $text-primary;
+  }
+}
+
+.chart-card {
+  background-color: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+  padding: $spacing-lg;
+}
+
+.window-tabs {
+  display: flex;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-md;
+
+  .window-tab {
+    background: none;
+    border: 1px solid $color-border;
+    border-radius: $border-radius-sm;
+    color: $text-secondary;
+    cursor: pointer;
+    font-size: $font-size-sm;
+    padding: $spacing-xs $spacing-md;
+    transition: color $transition-fast, border-color $transition-fast, background-color $transition-fast;
+
+    &:hover {
+      color: $text-primary;
+      border-color: $text-secondary;
+    }
+
+    &.active {
+      background-color: $color-info;
+      border-color: $color-info;
+      color: $text-primary;
+    }
+  }
+}
+
 .info-card {
   background-color: $color-tertiary;
   border: 1px solid $color-border;

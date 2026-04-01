@@ -9,6 +9,31 @@ import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
 import { Cache } from '@core/models';
 
+export type CacheSubscriptionMode = 'ReadWrite' | 'ReadOnly' | 'WriteOnly';
+
+export interface UpstreamCache {
+  id: string;
+  display_name: string;
+  mode: CacheSubscriptionMode;
+  upstream_cache_id: string | null;
+  url: string | null;
+  public_key: string | null;
+}
+
+export interface CacheMetricPoint {
+  time: string;
+  bytes: number;
+  requests: number;
+}
+
+export interface CacheStats {
+  total_bytes: number;
+  minutes: CacheMetricPoint[];
+  hours: CacheMetricPoint[];
+  days: CacheMetricPoint[];
+  weeks: CacheMetricPoint[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class CachesService {
   private api = inject(ApiService);
@@ -61,5 +86,34 @@ export class CachesService {
 
   deactivateCache(cache: string): Observable<void> {
     return this.api.delete<void>(`caches/${cache}/active`);
+  }
+
+  getCacheStats(cache: string): Observable<CacheStats> {
+    return this.api.get<CacheStats>(`caches/${cache}/stats`);
+  }
+
+  getCacheUpstreams(cache: string): Observable<UpstreamCache[]> {
+    return this.api.get<UpstreamCache[]>(`caches/${cache}/upstreams`);
+  }
+
+  addInternalUpstream(cache: string, data: {
+    cache_name: string;
+    display_name?: string;
+    mode?: CacheSubscriptionMode;
+  }): Observable<string> {
+    return this.api.put<string>(`caches/${cache}/upstreams`, { type: 'internal', ...data });
+  }
+
+  addExternalUpstream(cache: string, data: {
+    display_name: string;
+    url: string;
+    public_key: string;
+    mode?: CacheSubscriptionMode;
+  }): Observable<string> {
+    return this.api.put<string>(`caches/${cache}/upstreams`, { type: 'external', ...data });
+  }
+
+  removeUpstream(cache: string, upstreamId: string): Observable<void> {
+    return this.api.delete<void>(`caches/${cache}/upstreams/${upstreamId}`);
   }
 }

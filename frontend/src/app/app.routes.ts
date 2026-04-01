@@ -83,6 +83,22 @@ export const routes: Routes = [
       ),
   },
 
+  // Public-browsable list routes
+  {
+    path: 'organizations',
+    loadComponent: () =>
+      import('./features/organizations/organization-list/organization-list.component').then(
+        (m) => m.OrganizationListComponent
+      ),
+  },
+  {
+    path: 'caches',
+    loadComponent: () =>
+      import('./features/caches/cache-list/cache-list.component').then(
+        (m) => m.CacheListComponent
+      ),
+  },
+
   // Protected routes (require authentication)
   {
     path: '',
@@ -96,13 +112,6 @@ export const routes: Routes = [
       },
 
       // Organizations
-      {
-        path: 'organizations',
-        loadComponent: () =>
-          import('./features/organizations/organization-list/organization-list.component').then(
-            (m) => m.OrganizationListComponent
-          ),
-      },
       {
         path: 'organization/:org/settings',
         loadComponent: () =>
@@ -139,13 +148,6 @@ export const routes: Routes = [
       },
 
       // Caches
-      {
-        path: 'caches',
-        loadComponent: () =>
-          import('./features/caches/cache-list/cache-list.component').then(
-            (m) => m.CacheListComponent
-          ),
-      },
       {
         path: 'caches/:cache/settings',
         loadComponent: () =>

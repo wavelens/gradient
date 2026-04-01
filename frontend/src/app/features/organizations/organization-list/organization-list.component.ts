@@ -15,6 +15,7 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { OrganizationsService } from '@core/services/organizations.service';
+import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
 import { Organization } from '@core/models';
@@ -38,6 +39,7 @@ import { Organization } from '@core/models';
 })
 export class OrganizationListComponent implements OnInit, OnDestroy {
   private organizationsService = inject(OrganizationsService);
+  protected authService = inject(AuthService);
   private nameCheck$ = new Subject<string>();
 
   loading = signal(true);
@@ -61,7 +63,11 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
   publicLoading = signal(false);
 
   ngOnInit(): void {
-    this.loadOrganizations();
+    if (this.authService.isAuthenticated()) {
+      this.loadOrganizations();
+    } else {
+      this.loading.set(false);
+    }
     this.loadPublicOrganizations();
     this.nameCheck$.pipe(
       debounceTime(400),

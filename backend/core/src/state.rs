@@ -888,6 +888,7 @@ async fn apply_caches(
                     id: Set(Uuid::new_v4()),
                     organization: Set(*org_id),
                     cache: Set(cache_id),
+                    mode: Set(organization_cache::CacheSubscriptionMode::ReadWrite),
                 };
                 org_cache_model.insert(db).await?;
                 tracing::info!(

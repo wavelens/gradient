@@ -4,47 +4,40 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::organization_cache::CacheSubscriptionMode;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
-#[sea_orm(rs_type = "i32", db_type = "Integer")]
-pub enum CacheSubscriptionMode {
-    /// Read from and write to this cache (default).
-    #[sea_orm(num_value = 0)]
-    ReadWrite,
-    /// Only read (use as binary cache substituter, never push to it).
-    #[sea_orm(num_value = 1)]
-    ReadOnly,
-    /// Only write (push build outputs, never use as substituter).
-    #[sea_orm(num_value = 2)]
-    WriteOnly,
-}
-
+/// An upstream cache entry attached to a Gradient cache.
+///
+/// Exactly one of `upstream_cache` (internal) or `url`+`public_key` (external)
+/// must be populated — enforced at the application level.
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
-#[sea_orm(table_name = "organization_cache")]
+#[sea_orm(table_name = "cache_upstream")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
-    pub organization: Uuid,
+    /// The owning Gradient cache that has this upstream configured.
     pub cache: Uuid,
+    pub display_name: String,
     pub mode: CacheSubscriptionMode,
+    /// Set when the upstream is another Gradient-managed cache.
+    pub upstream_cache: Option<Uuid>,
+    /// Set when the upstream is an external cache.
+    pub url: Option<String>,
+    /// Trusted public key for the external cache (Nix signing key format).
+    pub public_key: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]
 pub enum Relation {
-    Organization,
     Cache,
 }
 
 impl RelationTrait for Relation {
     fn def(&self) -> RelationDef {
         match self {
-            Self::Organization => Entity::belongs_to(super::organization::Entity)
-                .from(Column::Organization)
-                .to(super::organization::Column::Id)
-                .into(),
             Self::Cache => Entity::belongs_to(super::cache::Entity)
                 .from(Column::Cache)
                 .to(super::cache::Column::Id)

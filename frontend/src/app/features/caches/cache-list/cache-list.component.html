@@ -10,7 +10,9 @@
       <h1>Caches</h1>
       <p class="text-secondary">Manage your build caches</p>
     </div>
-    <button pButton label="Create Cache" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+    @if (authService.isAuthenticated()) {
+      <button pButton label="Create Cache" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+    }
   </div>
 
   @if (loading()) {
@@ -81,9 +83,9 @@
       <app-empty-state
         icon="storage"
         title="No caches yet"
-        message="Create your first cache to store build artifacts"
-        actionLabel="Create Cache"
-        (actionClick)="openCreateDialog()"
+        [message]="authService.isAuthenticated() ? 'Create your first cache to store build artifacts' : 'No caches have been created yet'"
+        [actionLabel]="authService.isAuthenticated() ? 'Create Cache' : ''"
+        (actionClick)="authService.isAuthenticated() && openCreateDialog()"
       />
     }
   }
