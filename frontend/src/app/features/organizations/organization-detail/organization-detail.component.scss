@@ -177,6 +177,10 @@
 
 .text-danger { color: $color-danger; }
 
+.input-invalid {
+  border-color: $color-danger !important;
+}
+
 .name-input-wrapper {
   position: relative;
   display: flex;

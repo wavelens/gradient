@@ -83,12 +83,14 @@
           <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
         } @else if (nameCheckState() === 'available') {
           <span class="name-check-icon available"><span class="material-symbols-outlined">check</span></span>
-        } @else if (nameCheckState() === 'taken') {
+        } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
           <span class="name-check-icon taken"><span class="material-symbols-outlined">close</span></span>
         }
       </div>
       @if (nameCheckState() === 'taken') {
         <small class="text-danger">This name is already taken.</small>
+      } @else if (nameCheckState() === 'invalid') {
+        <small class="text-danger">Only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.</small>
       } @else {
         <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
       }
@@ -139,9 +141,14 @@
         [(ngModel)]="newProject.evaluation_wildcard"
         placeholder="**"
         class="w-full"
+        [class.input-invalid]="wildcardInvalid"
         (keyup.enter)="createProject()"
       />
-      <small class="text-secondary">Pattern for selecting which outputs to evaluate (default: packages.x86_64-linux.*)</small>
+      @if (wildcardInvalid) {
+        <small class="text-danger">Each pattern must be non-empty, not start with a period, and contain no spaces.</small>
+      } @else {
+        <small class="text-secondary">Pattern for selecting which outputs to evaluate (default: packages.x86_64-linux.*)</small>
+      }
     </div>
   </div>
 
@@ -157,7 +164,7 @@
       pButton
       label="Create"
       (click)="createProject()"
-      [disabled]="!newProject.name || !newProject.display_name || !newProject.repository || nameCheckState() === 'taken' || nameCheckState() === 'checking' || creating()"
+      [disabled]="!newProject.name || !newProject.display_name || !newProject.repository || wildcardInvalid || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking' || creating()"
       [loading]="creating()"
     ></button>
   </ng-template>

@@ -50,6 +50,7 @@ export class ProjectSettingsComponent implements OnInit {
   project = signal<Project | null>(null);
   showDeleteDialog = signal(false);
   errorMessage = signal<string | null>(null);
+  saveSuccess = signal(false);
   transferUsername = '';
   transferError = signal<string | null>(null);
   transferSuccess = signal(false);
@@ -94,9 +95,11 @@ export class ProjectSettingsComponent implements OnInit {
   saveSettings(): void {
     this.saving.set(true);
     this.errorMessage.set(null);
+    this.saveSuccess.set(false);
     this.projectsService.updateProject(this.orgName, this.projectName, this.formData).subscribe({
       next: () => {
         this.saving.set(false);
+        this.saveSuccess.set(true);
         this.loadProject();
       },
       error: (error) => {

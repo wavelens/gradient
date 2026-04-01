@@ -48,7 +48,7 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
   orgsPage = signal(1);
   showCreateDialog = signal(false);
   creating = signal(false);
-  nameCheckState = signal<'idle' | 'checking' | 'available' | 'taken'>('idle');
+  nameCheckState = signal<'idle' | 'invalid' | 'checking' | 'available' | 'taken'>('idle');
 
   newOrg = {
     name: '',
@@ -120,7 +120,13 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
   }
 
   onOrgNameChange(name: string): void {
-    this.nameCheckState.set(name ? 'checking' : 'idle');
+    if (!name) { this.nameCheckState.set('idle'); this.nameCheck$.next(''); return; }
+    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
+      this.nameCheckState.set('invalid');
+      this.nameCheck$.next('');
+      return;
+    }
+    this.nameCheckState.set('checking');
     this.nameCheck$.next(name);
   }
 

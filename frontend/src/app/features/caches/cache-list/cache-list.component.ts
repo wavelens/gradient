@@ -46,7 +46,7 @@ export class CacheListComponent implements OnInit, OnDestroy {
   caches = signal<Cache[]>([]);
   showCreateDialog = signal(false);
   creating = signal(false);
-  nameCheckState = signal<'idle' | 'checking' | 'available' | 'taken'>('idle');
+  nameCheckState = signal<'idle' | 'invalid' | 'checking' | 'available' | 'taken'>('idle');
 
   newCache = {
     name: '',
@@ -118,7 +118,13 @@ export class CacheListComponent implements OnInit, OnDestroy {
   }
 
   onCacheNameChange(name: string): void {
-    this.nameCheckState.set(name ? 'checking' : 'idle');
+    if (!name) { this.nameCheckState.set('idle'); this.nameCheck$.next(''); return; }
+    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
+      this.nameCheckState.set('invalid');
+      this.nameCheck$.next('');
+      return;
+    }
+    this.nameCheckState.set('checking');
     this.nameCheck$.next(name);
   }
 

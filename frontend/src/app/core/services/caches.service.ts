@@ -108,9 +108,17 @@ export class CachesService {
     display_name: string;
     url: string;
     public_key: string;
-    mode?: CacheSubscriptionMode;
   }): Observable<string> {
     return this.api.put<string>(`caches/${cache}/upstreams`, { type: 'external', ...data });
+  }
+
+  updateUpstream(cache: string, upstreamId: string, data: {
+    display_name?: string;
+    mode?: CacheSubscriptionMode;
+    url?: string;
+    public_key?: string;
+  }): Observable<string> {
+    return this.api.patch<string>(`caches/${cache}/upstreams/${upstreamId}`, data);
   }
 
   removeUpstream(cache: string, upstreamId: string): Observable<void> {

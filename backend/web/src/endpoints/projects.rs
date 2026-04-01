@@ -135,6 +135,9 @@ pub async fn get_project_name_available(
     Query(params): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
+    if check_index_name(&name).is_err() {
+        return Ok(Json(BaseResponse { error: false, message: false }));
+    }
     let org = get_any_organization_by_name(state.0.clone(), organization)
         .await?
         .ok_or_else(|| WebError::not_found("Organization"))?;

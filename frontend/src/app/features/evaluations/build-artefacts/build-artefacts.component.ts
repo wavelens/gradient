@@ -29,6 +29,7 @@ export class BuildArtefactsComponent implements OnInit {
   loading = signal(true);
   artefacts = signal<BuildProduct[]>([]);
   private downloadToken = signal<string | null>(null);
+  private isPublicOrg = signal(false);
 
   orgName = '';
   buildId = '';
@@ -41,17 +42,16 @@ export class BuildArtefactsComponent implements OnInit {
     this.projectName = this.route.snapshot.queryParamMap.get('project') || '';
     this.evalId      = this.route.snapshot.queryParamMap.get('evalId') || '';
     this.loadArtefacts();
-    if (this.authService.isAuthenticated()) {
-      this.orgsService.getOrganization(this.orgName).subscribe({
-        next: (org) => {
-          if (!org.public) {
-            this.evalService.getDownloadToken(this.buildId).subscribe({
-              next: (token) => this.downloadToken.set(token),
-            });
-          }
-        },
-      });
-    }
+    this.orgsService.getOrganization(this.orgName).subscribe({
+      next: (org) => {
+        this.isPublicOrg.set(org.public);
+        if (this.authService.isAuthenticated() && !org.public) {
+          this.evalService.getDownloadToken(this.buildId).subscribe({
+            next: (token) => this.downloadToken.set(token),
+          });
+        }
+      },
+    });
   }
 
   loadArtefacts(): void {
@@ -65,6 +65,9 @@ export class BuildArtefactsComponent implements OnInit {
   }
 
   downloadUrl(artefact: BuildProduct): string {
+    if (this.isPublicOrg()) {
+      return `${environment.apiUrl}/builds/${this.buildId}/artefacts/${encodeURIComponent(artefact.name)}`;
+    }
     const base = `${environment.apiUrl}/builds/${this.buildId}/download/${encodeURIComponent(artefact.name)}`;
     const token = this.downloadToken();
     return token ? `${base}?token=${encodeURIComponent(token)}` : base;

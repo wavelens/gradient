@@ -22,14 +22,14 @@ use core::sources::{
 use core::types::*;
 use entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::process::Command;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -185,6 +185,9 @@ pub async fn get_cache_name_available(
     Query(params): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
+    if check_index_name(&name).is_err() {
+        return Ok(Json(BaseResponse { error: false, message: false }));
+    }
     let exists = ECache::find()
         .filter(CCache::Name.eq(name.as_str()))
         .one(&state.db)
@@ -459,6 +462,73 @@ pub async fn patch_cache(
     Ok(Json(res))
 }
 
+async fn cleanup_nars_for_orgs(state: Arc<ServerState>, org_ids: Vec<Uuid>) {
+    for org_id in org_ids {
+        let remaining = EOrganizationCache::find()
+            .filter(COrganizationCache::Organization.eq(org_id))
+            .one(&state.db)
+            .await
+            .unwrap_or(None);
+
+        if remaining.is_some() {
+            continue;
+        }
+
+        let project_ids: Vec<Uuid> = EProject::find()
+            .filter(CProject::Organization.eq(org_id))
+            .all(&state.db)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+
+        let eval_ids: Vec<Uuid> = EEvaluation::find()
+            .filter(CEvaluation::Project.is_in(project_ids))
+            .all(&state.db)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+
+        let build_ids: Vec<Uuid> = EBuild::find()
+            .filter(CBuild::Evaluation.is_in(eval_ids))
+            .all(&state.db)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|b| b.id)
+            .collect();
+
+        let outputs = EBuildOutput::find()
+            .filter(
+                Condition::all()
+                    .add(CBuildOutput::Build.is_in(build_ids))
+                    .add(CBuildOutput::IsCached.eq(true)),
+            )
+            .all(&state.db)
+            .await
+            .unwrap_or_default();
+
+        for output in outputs {
+            if let Ok(nar_path) = get_cache_nar_location(state.cli.base_path.clone(), output.hash.clone()) {
+                if let Err(e) = tokio::fs::remove_file(&nar_path).await {
+                    if e.kind() != std::io::ErrorKind::NotFound {
+                        error!(error = %e, path = %nar_path, "Failed to remove NAR file");
+                    }
+                }
+            }
+
+            let mut active = output.into_active_model();
+            active.is_cached = Set(false);
+            if let Err(e) = active.update(&state.db).await {
+                error!(error = %e, "Failed to update build_output is_cached flag");
+            }
+        }
+    }
+}
+
 pub async fn delete_cache(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -497,6 +567,17 @@ pub async fn delete_cache(
         ));
     }
 
+    // Collect orgs that subscribe to this cache before deleting it, so we can
+    // clean up orphaned NAR files in the background afterwards.
+    let subscribing_orgs: Vec<Uuid> = EOrganizationCache::find()
+        .filter(COrganizationCache::Cache.eq(cache.id))
+        .all(&state.db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|oc| oc.organization)
+        .collect();
+
     let acache: ACache = cache.into();
     if let Err(e) = acache.delete(&state.db).await {
         return Err((
@@ -507,6 +588,12 @@ pub async fn delete_cache(
             }),
         ));
     }
+
+    // Spawn background task to delete now-orphaned NAR files.
+    let state_bg = Arc::clone(&state);
+    tokio::spawn(async move {
+        cleanup_nars_for_orgs(state_bg, subscribing_orgs).await;
+    });
 
     let res = BaseResponse {
         error: false,
@@ -1490,12 +1577,11 @@ pub enum AddUpstreamRequest {
         display_name: Option<String>,
         mode: Option<CacheSubscriptionMode>,
     },
-    /// An upstream that is an external Nix binary cache.
+    /// An upstream that is an external Nix binary cache. Always ReadOnly.
     External {
         display_name: String,
         url: String,
         public_key: String,
-        mode: Option<CacheSubscriptionMode>,
     },
 }
 
@@ -1567,12 +1653,12 @@ pub async fn put_cache_upstream(
                 public_key: Set(None),
             }
         }
-        AddUpstreamRequest::External { display_name, url, public_key, mode } => {
+        AddUpstreamRequest::External { display_name, url, public_key } => {
             ACacheUpstream {
                 id: Set(Uuid::new_v4()),
                 cache: Set(cache.id),
                 display_name: Set(display_name),
-                mode: Set(mode.unwrap_or(CacheSubscriptionMode::ReadWrite)),
+                mode: Set(CacheSubscriptionMode::ReadOnly),
                 upstream_cache: Set(None),
                 url: Set(Some(url)),
                 public_key: Set(Some(public_key)),
@@ -1582,6 +1668,54 @@ pub async fn put_cache_upstream(
 
     let inserted = record.insert(&state.db).await?;
     Ok(Json(BaseResponse { error: false, message: inserted.id }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PatchUpstreamRequest {
+    pub display_name: Option<String>,
+    pub mode: Option<CacheSubscriptionMode>,
+    pub url: Option<String>,
+    pub public_key: Option<String>,
+}
+
+pub async fn patch_cache_upstream(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((cache, upstream_id)): Path<(String, Uuid)>,
+    Json(body): Json<PatchUpstreamRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let cache = get_cache_by_name(state.0.clone(), user.id, cache)
+        .await?
+        .ok_or_else(|| WebError::not_found("Cache"))?;
+
+    let record = ECacheUpstream::find_by_id(upstream_id)
+        .filter(CCacheUpstream::Cache.eq(cache.id))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Upstream cache"))?;
+
+    let is_external = record.upstream_cache.is_none();
+    let mut active = record.into_active_model();
+
+    if let Some(name) = body.display_name {
+        active.display_name = Set(name);
+    }
+    if is_external {
+        // External upstreams are always ReadOnly
+        active.mode = Set(CacheSubscriptionMode::ReadOnly);
+        if let Some(url) = body.url {
+            active.url = Set(Some(url));
+        }
+        if let Some(key) = body.public_key {
+            active.public_key = Set(Some(key));
+        }
+    } else if let Some(mode) = body.mode {
+        active.mode = Set(mode);
+    }
+
+    active.update(&state.db).await?;
+
+    Ok(Json(BaseResponse { error: false, message: "Upstream updated".to_string() }))
 }
 
 pub async fn delete_cache_upstream(

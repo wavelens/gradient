@@ -60,6 +60,8 @@ export class OrganizationSettingsComponent implements OnInit {
   showDeleteDialog = signal(false);
   showAddMemberDialog = signal(false);
   showRegenerateKeyDialog = signal(false);
+  saveError = signal<string | null>(null);
+  saveSuccess = signal(false);
   memberError = signal<string | null>(null);
   userSuggestions = signal<string[]>([]);
 
@@ -134,6 +136,8 @@ export class OrganizationSettingsComponent implements OnInit {
 
   saveSettings(): void {
     this.saving.set(true);
+    this.saveError.set(null);
+    this.saveSuccess.set(false);
     const visibilityCall = this.formData.public
       ? this.organizationsService.setPublic(this.orgName)
       : this.organizationsService.setPrivate(this.orgName);
@@ -146,17 +150,18 @@ export class OrganizationSettingsComponent implements OnInit {
         visibilityCall.subscribe({
           next: () => {
             this.saving.set(false);
+            this.saveSuccess.set(true);
             this.loadOrganization();
           },
           error: (error) => {
-            console.error('Failed to update visibility:', error);
+            this.saveError.set(error?.message || 'Failed to update visibility.');
             this.saving.set(false);
             this.loadOrganization();
           },
         });
       },
       error: (error) => {
-        console.error('Failed to save settings:', error);
+        this.saveError.set(error?.message || 'Failed to save settings.');
         this.saving.set(false);
       },
     });

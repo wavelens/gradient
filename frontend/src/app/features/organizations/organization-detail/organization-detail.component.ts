@@ -52,7 +52,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
   projectsPage = signal(1);
   showCreateDialog = signal(false);
   creating = signal(false);
-  nameCheckState = signal<'idle' | 'checking' | 'available' | 'taken'>('idle');
+  nameCheckState = signal<'idle' | 'invalid' | 'checking' | 'available' | 'taken'>('idle');
 
   orgName = '';
 
@@ -110,8 +110,21 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
   }
 
   onProjectNameChange(name: string): void {
-    this.nameCheckState.set(name ? 'checking' : 'idle');
+    if (!name) { this.nameCheckState.set('idle'); this.nameCheck$.next(''); return; }
+    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
+      this.nameCheckState.set('invalid');
+      this.nameCheck$.next('');
+      return;
+    }
+    this.nameCheckState.set('checking');
     this.nameCheck$.next(name);
+  }
+
+  get wildcardInvalid(): boolean {
+    const w = this.newProject.evaluation_wildcard.trim();
+    if (!w) return false; // empty means use default — not invalid
+    const parts = w.split(',').map((p) => p.trim());
+    return parts.some((p) => !p || p.startsWith('.') || /\s/.test(p));
   }
 
   createProject(): void {

@@ -193,8 +193,6 @@ pub fn parse_evaluation_wildcard(s: &str) -> Result<Vec<&str>, InputError> {
         return Err(InputError::EvaluationWildcardWhitespace);
     } else if s.contains(",,") {
         return Err(InputError::EvaluationWildcardConsecutiveCommas);
-    } else if s.split_whitespace().count() > 1 {
-        return Err(InputError::EvaluationWildcardInternalWhitespace);
     }
 
     let seperate_evaluations = s.split(",").map(|sub| sub.trim()).collect::<Vec<&str>>();
@@ -204,6 +202,10 @@ pub fn parse_evaluation_wildcard(s: &str) -> Result<Vec<&str>, InputError> {
     for evaluation in seperate_evaluations {
         if evaluation.is_empty() {
             return Err(InputError::EvaluationWildcardEmpty);
+        }
+
+        if evaluation.split_whitespace().count() > 1 {
+            return Err(InputError::EvaluationWildcardInternalWhitespace);
         }
 
         if evaluation.starts_with(".") {

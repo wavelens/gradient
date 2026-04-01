@@ -15,6 +15,30 @@ use tracing::error;
 
 use super::nix_commands::JsonOutput;
 
+/// Splits a Nix attribute path on `.`, respecting double-quoted segments.
+/// `packages.x86_64-linux."python3.12".*` → `["packages", "x86_64-linux", "\"python3.12\"", "*"]`
+fn split_attr_path(path: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+
+    for ch in path.chars() {
+        match ch {
+            '"' => {
+                in_quotes = !in_quotes;
+                current.push(ch);
+            }
+            '.' if !in_quotes => {
+                segments.push(current.clone());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    segments.push(current);
+    segments
+}
+
 /// Expands wildcard patterns against a flake's attribute tree and returns all matching derivation
 /// paths (e.g. `packages.x86_64-linux.hello`).
 pub(super) async fn get_flake_derivations(
@@ -38,10 +62,7 @@ pub(super) async fn get_flake_derivations(
     let mut partial_derivations: HashMap<String, HashSet<String>> = HashMap::new();
 
     'outer: for w in wildcards.iter().map(|w| {
-        format!("{}.#", w)
-            .split(".")
-            .map(|s| s.to_string())
-            .collect::<Vec<String>>()
+        split_attr_path(&format!("{}.#", w))
     }) {
         for (it, t) in w.iter().enumerate() {
             if t.contains("*") || t.contains("#") {

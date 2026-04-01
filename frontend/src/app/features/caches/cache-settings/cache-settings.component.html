@@ -85,6 +85,18 @@
           <small class="text-secondary">Public caches are visible and readable by all users</small>
         </div>
 
+        @if (saveError()) {
+          <div class="message-banner error">
+            <span class="material-symbols-outlined">error</span>
+            {{ saveError() }}
+          </div>
+        }
+        @if (saveSuccess()) {
+          <div class="message-banner success">
+            <span class="material-symbols-outlined">check_circle</span>
+            Changes saved.
+          </div>
+        }
         <div class="form-actions">
           <button
             pButton

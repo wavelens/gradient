@@ -27,6 +27,12 @@
         {{ errorMessage() }}
       </div>
     }
+    @if (saveSuccess()) {
+      <div class="success-banner">
+        <span class="material-symbols-outlined">check_circle</span>
+        Changes saved.
+      </div>
+    }
 
     <!-- General Settings -->
     <div class="settings-section">

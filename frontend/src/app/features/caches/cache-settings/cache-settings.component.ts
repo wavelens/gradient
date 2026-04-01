@@ -46,6 +46,8 @@ export class CacheSettingsComponent implements OnInit {
 
   cache = signal<Cache | null>(null);
   showDeleteDialog = signal(false);
+  saveError = signal<string | null>(null);
+  saveSuccess = signal(false);
 
   cacheName = '';
 
@@ -89,6 +91,8 @@ export class CacheSettingsComponent implements OnInit {
   saveSettings(): void {
     if (this.priorityInvalid) return;
     this.saving.set(true);
+    this.saveError.set(null);
+    this.saveSuccess.set(false);
 
     const visibilityCall = this.formData.public
       ? this.cachesService.setCachePublic(this.cacheName)
@@ -103,17 +107,18 @@ export class CacheSettingsComponent implements OnInit {
         visibilityCall.subscribe({
           next: () => {
             this.saving.set(false);
+            this.saveSuccess.set(true);
             this.loadCache();
           },
           error: (error) => {
-            console.error('Failed to update visibility:', error);
+            this.saveError.set(error?.message || 'Failed to update visibility.');
             this.saving.set(false);
             this.loadCache();
           },
         });
       },
       error: (error) => {
-        console.error('Failed to save settings:', error);
+        this.saveError.set(error?.message || 'Failed to save settings.');
         this.saving.set(false);
       },
     });

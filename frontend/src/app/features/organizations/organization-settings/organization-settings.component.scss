@@ -6,6 +6,29 @@
 
 @use '../../../styles/variables' as *;
 
+.message-banner {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  border-radius: $border-radius-md;
+  padding: $spacing-md;
+  margin-bottom: $spacing-lg;
+
+  .material-symbols-outlined { font-size: 20px; }
+
+  &.error {
+    background: rgba($color-danger, 0.1);
+    border: 1px solid rgba($color-danger, 0.5);
+    color: $color-danger;
+  }
+
+  &.success {
+    background: rgba($color-success, 0.1);
+    border: 1px solid rgba($color-success, 0.5);
+    color: $color-success;
+  }
+}
+
 .page-header {
   margin-bottom: $spacing-xxl;
 
@@ -120,9 +143,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: $spacing-lg;
 
   h3 { margin: 0 0 $spacing-xs 0; }
   p { margin: 0; }
+
+  a, button { flex-shrink: 0; white-space: nowrap; }
 }
 
 .ssh-key-area {
@@ -157,9 +183,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: $spacing-lg;
 
   h3 { margin: 0 0 $spacing-xs 0; }
   p { margin: 0; }
+
+  button { flex-shrink: 0; white-space: nowrap; }
 }
 
 .dialog-content {

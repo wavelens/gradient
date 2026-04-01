@@ -62,6 +62,9 @@ pub async fn get_org_name_available(
     Query(params): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
+    if check_index_name(&name).is_err() {
+        return Ok(Json(BaseResponse { error: false, message: false }));
+    }
     let exists = EOrganization::find()
         .filter(COrganization::Name.eq(name.as_str()))
         .one(&state.db)

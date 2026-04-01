@@ -8,7 +8,7 @@
   <div class="page-header">
     <div>
       <h1>Organizations</h1>
-      <p class="text-secondary">Manage your organizations and teams</p>
+      <p class="text-secondary">Manage your organizations</p>
     </div>
     @if (authService.isAuthenticated()) {
       <button pButton label="Create Organization" icon="pi pi-plus" (click)="openCreateDialog()"></button>
@@ -103,12 +103,14 @@
           <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
         } @else if (nameCheckState() === 'available') {
           <span class="name-check-icon available"><span class="material-symbols-outlined">check</span></span>
-        } @else if (nameCheckState() === 'taken') {
+        } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
           <span class="name-check-icon taken"><span class="material-symbols-outlined">close</span></span>
         }
       </div>
       @if (nameCheckState() === 'taken') {
         <small class="text-danger">This name is already taken.</small>
+      } @else if (nameCheckState() === 'invalid') {
+        <small class="text-danger">Only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.</small>
       } @else {
         <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
       }
@@ -160,7 +162,7 @@
       pButton
       label="Create"
       (click)="createOrganization()"
-      [disabled]="!newOrg.name || !newOrg.display_name || nameCheckState() === 'taken' || nameCheckState() === 'checking' || creating()"
+      [disabled]="!newOrg.name || !newOrg.display_name || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking' || creating()"
       [loading]="creating()"
     ></button>
   </ng-template>

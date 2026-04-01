@@ -50,6 +50,13 @@
             <div class="upstream-actions">
               <button
                 pButton
+                icon="pi pi-pencil"
+                severity="secondary"
+                [disabled]="removingUpstreamId() !== null"
+                (click)="openEditDialog(u)"
+              ></button>
+              <button
+                pButton
                 icon="pi pi-trash"
                 severity="danger"
                 [loading]="removingUpstreamId() === u.id"
@@ -63,6 +70,49 @@
     }
   }
 </div>
+
+<!-- Edit Upstream Dialog -->
+<p-dialog
+  header="Edit Upstream Cache"
+  [(visible)]="showEditDialog"
+  [modal]="true"
+  [style]="{ width: '480px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  @if (editingUpstream(); as u) {
+    <div class="upstream-form">
+      <div class="form-group">
+        <label for="edit-display-name">Display Name</label>
+        <input pInputText id="edit-display-name" [(ngModel)]="editForm.display_name" class="w-full" />
+      </div>
+      @if (!u.upstream_cache_id) {
+        <div class="form-group">
+          <label for="edit-url">Substituter URL</label>
+          <input pInputText id="edit-url" [(ngModel)]="editForm.url" class="w-full" />
+        </div>
+        <div class="form-group">
+          <label for="edit-pubkey">Public Key</label>
+          <input pInputText id="edit-pubkey" [(ngModel)]="editForm.public_key" class="w-full" />
+        </div>
+        <small class="text-secondary">External caches are always Read Only.</small>
+      } @else {
+        <div class="form-group">
+          <label for="edit-mode">Mode</label>
+          <select id="edit-mode" [(ngModel)]="editForm.mode" class="role-select w-full">
+            @for (m of modes; track m.value) {
+              <option [value]="m.value">{{ m.label }}</option>
+            }
+          </select>
+        </div>
+      }
+    </div>
+  }
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="savingUpstream()"></button>
+    <button pButton label="Save" icon="pi pi-check" (click)="saveUpstream()" [loading]="savingUpstream()" [disabled]="savingUpstream()"></button>
+  </ng-template>
+</p-dialog>
 
 <!-- Add Upstream Dialog -->
 <p-dialog
@@ -106,17 +156,21 @@
       </div>
     }
 
-    <div class="form-group">
-      <label for="up-mode">Mode</label>
-      <select id="up-mode" [(ngModel)]="upstreamForm.mode" class="role-select w-full">
-        @for (m of modes; track m.value) {
-          <option [value]="m.value">{{ m.label }}</option>
-        }
-      </select>
-      <small class="text-secondary">
-        Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only.
-      </small>
-    </div>
+    @if (upstreamType === 'internal') {
+      <div class="form-group">
+        <label for="up-mode">Mode</label>
+        <select id="up-mode" [(ngModel)]="upstreamForm.mode" class="role-select w-full">
+          @for (m of modes; track m.value) {
+            <option [value]="m.value">{{ m.label }}</option>
+          }
+        </select>
+        <small class="text-secondary">
+          Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only.
+        </small>
+      </div>
+    } @else {
+      <small class="text-secondary">External caches are always Read Only.</small>
+    }
   </div>
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showAddDialog.set(false)" [disabled]="addingUpstream()"></button>

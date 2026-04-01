@@ -130,6 +130,7 @@
   display: flex;
   flex-direction: column;
   gap: $spacing-md;
+  padding-top: $spacing-md;
 
   .form-group { margin-bottom: 0; }
 }

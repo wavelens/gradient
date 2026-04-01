@@ -35,10 +35,13 @@ export class CacheUpstreamsComponent implements OnInit {
 
   loading = signal(true);
   addingUpstream = signal(false);
+  savingUpstream = signal(false);
   removingUpstreamId = signal<string | null>(null);
 
   upstreams = signal<UpstreamCache[]>([]);
   showAddDialog = signal(false);
+  showEditDialog = signal(false);
+  editingUpstream = signal<UpstreamCache | null>(null);
 
   cacheName = '';
   cacheDisplayName = '';
@@ -50,6 +53,13 @@ export class CacheUpstreamsComponent implements OnInit {
     url: '',
     public_key: '',
     mode: 'ReadWrite' as CacheSubscriptionMode,
+  };
+
+  editForm = {
+    display_name: '',
+    mode: 'ReadWrite' as CacheSubscriptionMode,
+    url: '',
+    public_key: '',
   };
 
   readonly modes: { value: CacheSubscriptionMode; label: string }[] = [
@@ -88,6 +98,41 @@ export class CacheUpstreamsComponent implements OnInit {
     this.showAddDialog.set(true);
   }
 
+  openEditDialog(upstream: UpstreamCache): void {
+    this.editingUpstream.set(upstream);
+    this.editForm = {
+      display_name: upstream.display_name,
+      mode: upstream.mode,
+      url: upstream.url ?? '',
+      public_key: upstream.public_key ?? '',
+    };
+    this.showEditDialog.set(true);
+  }
+
+  saveUpstream(): void {
+    const upstream = this.editingUpstream();
+    if (!upstream) return;
+    this.savingUpstream.set(true);
+    const isExternal = !upstream.upstream_cache_id;
+    const data: { display_name?: string; mode?: CacheSubscriptionMode; url?: string; public_key?: string } = {
+      display_name: this.editForm.display_name || undefined,
+    };
+    if (!isExternal) {
+      data.mode = this.editForm.mode;
+    } else {
+      data.url = this.editForm.url || undefined;
+      data.public_key = this.editForm.public_key || undefined;
+    }
+    this.cachesService.updateUpstream(this.cacheName, upstream.id, data).subscribe({
+      next: () => {
+        this.savingUpstream.set(false);
+        this.showEditDialog.set(false);
+        this.loadUpstreams();
+      },
+      error: () => this.savingUpstream.set(false),
+    });
+  }
+
   addUpstream(): void {
     this.addingUpstream.set(true);
     const obs = this.upstreamType === 'internal'
@@ -100,7 +145,6 @@ export class CacheUpstreamsComponent implements OnInit {
           display_name: this.upstreamForm.display_name,
           url: this.upstreamForm.url,
           public_key: this.upstreamForm.public_key,
-          mode: this.upstreamForm.mode,
         });
 
     obs.subscribe({

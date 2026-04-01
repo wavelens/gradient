@@ -38,6 +38,20 @@
   .material-symbols-outlined { font-size: 20px; }
 }
 
+.success-banner {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  background: rgba($color-success, 0.1);
+  border: 1px solid rgba($color-success, 0.5);
+  border-radius: $border-radius-md;
+  padding: $spacing-md;
+  color: $color-success;
+  margin-bottom: $spacing-lg;
+
+  .material-symbols-outlined { font-size: 20px; }
+}
+
 .info-banner {
   display: flex;
   align-items: center;

@@ -233,6 +233,9 @@ fn test_parse_evaluation_wildcard() {
     let result = parse_evaluation_wildcard("*.nix,*.toml").unwrap();
     assert_eq!(result, vec!["*.nix", "*.toml"]);
 
+    let result = parse_evaluation_wildcard("*.nix, *.toml").unwrap();
+    assert_eq!(result, vec!["*.nix", "*.toml"]);
+
     // Invalid wildcards
     assert!(parse_evaluation_wildcard("").is_err());
     assert!(parse_evaluation_wildcard("test,,test").is_err());

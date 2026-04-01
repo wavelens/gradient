@@ -9,7 +9,7 @@ pub mod endpoints;
 pub mod error;
 
 use axum::body::Body;
-use axum::routing::{delete, get, patch, post, put};
+use axum::routing::{get, patch, post, put};
 use axum::{Router, middleware};
 use bytes::Bytes;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
@@ -160,7 +160,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         )
         .route(
             "/caches/{cache}/upstreams/{id}",
-            delete(caches::delete_cache_upstream),
+            patch(caches::patch_cache_upstream).delete(caches::delete_cache_upstream),
         )
         .route("/user", get(user::get).delete(user::delete))
         .route("/user/search", get(user::get_search))
