@@ -14,7 +14,7 @@
 
 stdenv.mkDerivation rec {
   pname = "gradient-frontend";
-  version = "0.5.0";
+  version = "1.0.0";
 
   src = lib.cleanSourceWith {
     filter = name: type: !(type == "directory" && builtins.elem (baseNameOf name) [".github" "target" "node_modules" "dist" ".angular"]);
@@ -24,7 +24,7 @@ stdenv.mkDerivation rec {
   pnpmDeps = fetchPnpmDeps {
     inherit pname version src;
     fetcherVersion = 3;
-    hash = "sha256-gDmGHJhpq8EJxeBndeAEPZZ/TZmF/KPSpoXDOVIUTA4=";
+    hash = "sha256-XSERnCs8/W6HBuTS5SurCX2uzqPrniKdaF7dpP6XrrI=";
   };
 
   nativeBuildInputs = [

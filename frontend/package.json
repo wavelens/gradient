@@ -1,6 +1,6 @@
 {
   "name": "gradient-frontend",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
@@ -34,13 +34,13 @@
     "apexcharts": "^5.10.4",
     "ng-apexcharts": "^2.3.0",
     "primeicons": "^7.0.0",
-    "primeng": "^21.1.4",
+    "primeng": "^21.1.5",
     "rxjs": "~7.8.2",
     "tslib": "^2.8.1"
   },
   "devDependencies": {
-    "@angular/build": "^21.2.5",
-    "@angular/cli": "^21.2.5",
+    "@angular/build": "^21.2.6",
+    "@angular/cli": "^21.2.6",
     "@angular/compiler-cli": "^21.2.6",
     "jsdom": "^29.0.1",
     "typescript": "~5.9.3",
