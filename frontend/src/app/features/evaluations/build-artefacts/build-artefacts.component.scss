@@ -143,6 +143,13 @@
   text-overflow: ellipsis;
 }
 
+.artefact-size {
+  font-size: $font-size-xs;
+  color: $text-light;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .copy-btn {
   display: flex;
   align-items: center;

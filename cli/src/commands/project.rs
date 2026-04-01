@@ -268,10 +268,10 @@ pub async fn handle(cmd: Commands) {
                 })
                 .unwrap();
 
-            if res.message.is_empty() {
+            if res.message.items.is_empty() {
                 println!("You have no projects.");
             } else {
-                for project in res.message {
+                for project in res.message.items {
                     println!("{}: {}", project.name, project.id);
                 }
             }

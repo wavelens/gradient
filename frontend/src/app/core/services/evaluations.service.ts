@@ -40,6 +40,7 @@ export interface BuildProduct {
   file_type: string;
   name: string;
   path: string;
+  size?: number;
 }
 
 @Injectable({ providedIn: 'root' })

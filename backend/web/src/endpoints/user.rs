@@ -45,6 +45,7 @@ pub struct GetUserSettingsResponse {
     pub name: String,
     pub email: String,
     pub is_oidc: bool,
+    pub managed: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -129,6 +130,7 @@ pub async fn get_keys(
         .map(|k| ListItem {
             id: k.id,
             name: k.name.clone(),
+            managed: k.managed,
         })
         .collect();
 
@@ -193,6 +195,10 @@ pub async fn delete_keys(
         .await?
         .ok_or_else(|| WebError::not_found("API-Key"))?;
 
+    if api_key.managed {
+        return Err(WebError::Forbidden("Cannot delete a state-managed API key.".to_string()));
+    }
+
     let aapi_key: AApi = api_key.into();
     aapi_key.delete(&state.db).await?;
 
@@ -211,6 +217,7 @@ pub async fn get_settings(
         error: false,
         message: GetUserSettingsResponse {
             is_oidc: user.password.is_none(),
+            managed: user.managed,
             username: user.username.clone(),
             name: user.name.clone(),
             email: user.email.clone(),

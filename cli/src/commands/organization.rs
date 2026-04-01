@@ -156,10 +156,10 @@ pub async fn handle(cmd: Commands) {
                 exit(1);
             }
 
-            if res.message.is_empty() {
+            if res.message.items.is_empty() {
                 println!("You have no organizations.");
             } else {
-                for org in res.message {
+                for org in res.message.items {
                     println!("{}: {}", org.name, org.id);
                 }
             }

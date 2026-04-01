@@ -11,7 +11,7 @@ use core::types::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::process::Command;
-use tracing::error;
+use tracing::{debug, error};
 
 use super::nix_commands::JsonOutput;
 
@@ -60,6 +60,21 @@ pub(super) async fn get_flake_derivations(
     // let mut all_keys: HashMap<String, HashSet<String>> = HashMap::new(); add this line when
     // optimizing partial_derivations
     let mut partial_derivations: HashMap<String, HashSet<String>> = HashMap::new();
+
+    // Expand a bare `*` into `*.*` and `*.*.*` so that derivations at depth 2
+    // (e.g. formatter.x86_64-linux) and depth 3 (e.g. packages.x86_64-linux.hello) are
+    // both discovered.
+    let expanded: Vec<String> = wildcards
+        .iter()
+        .flat_map(|&w| {
+            if w == "*" {
+                vec!["*.*".to_string(), "*.*.*".to_string()]
+            } else {
+                vec![w.to_string()]
+            }
+        })
+        .collect();
+    let wildcards: Vec<&str> = expanded.iter().map(|s| s.as_str()).collect();
 
     'outer: for w in wildcards.iter().map(|w| {
         split_attr_path(&format!("{}.#", w))
@@ -163,6 +178,7 @@ pub(super) async fn get_flake_derivations(
                     }
 
                     let eval_target = format!("{}#{}", repository.clone(), current_key);
+                    debug!(cmd = %format!("{} eval {} --apply builtins.attrNames --json", state.cli.binpath_nix, eval_target), "executing nix command");
                     let keys = Command::new(state.cli.binpath_nix.clone())
                         .arg("eval")
                         .arg(&eval_target)
@@ -177,6 +193,7 @@ pub(super) async fn get_flake_derivations(
                     if keys.contains(&"type".to_string()) && type_check {
                         let type_eval_target =
                             format!("{}#{}.type", repository.clone(), current_key);
+                        debug!(cmd = %format!("{} eval {} --json", state.cli.binpath_nix, type_eval_target), "executing nix command");
                         let type_value = Command::new(state.cli.binpath_nix.clone())
                             .arg("eval")
                             .arg(&type_eval_target)

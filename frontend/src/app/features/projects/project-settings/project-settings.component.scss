@@ -7,6 +7,9 @@
 @use '../../../styles/variables' as *;
 
 .page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   margin-bottom: $spacing-xxl;
   h1 { font-size: $font-size-xxl; margin: 0 0 $spacing-sm 0; }
 }

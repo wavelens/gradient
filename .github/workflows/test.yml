@@ -11,14 +11,14 @@ jobs:
     strategy:
       matrix:
         test:
-          # - gradient-state
+          - gradient-state
           - gradient-api
           # - gradient-building # GitHub Actions time out
           - gradient-cache
           # - gradient-frontend # Not ready for testing
           - gradient-mail
-          # - gradient-oidc
-          # - gradient-remote
+          - gradient-oidc
+          - gradient-remote
       fail-fast: false
     steps:
     - name: Checkout repository

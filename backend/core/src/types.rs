@@ -145,6 +145,7 @@ impl PaginationParams {
 pub struct ListItem {
     pub id: Uuid,
     pub name: String,
+    pub managed: bool,
 }
 
 pub struct CommandDuplex {

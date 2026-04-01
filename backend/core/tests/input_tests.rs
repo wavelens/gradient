@@ -227,6 +227,9 @@ fn test_parse_evaluation_wildcard() {
     use gradient_core::input::parse_evaluation_wildcard;
 
     // Valid wildcards
+    let result = parse_evaluation_wildcard("*").unwrap();
+    assert_eq!(result, vec!["*"]);
+
     let result = parse_evaluation_wildcard("*.nix").unwrap();
     assert_eq!(result, vec!["*.nix"]);
 
@@ -247,6 +250,7 @@ fn test_parse_evaluation_wildcard() {
 fn test_valid_evaluation_wildcard() {
     use gradient_core::input::valid_evaluation_wildcard;
 
+    assert!(valid_evaluation_wildcard("*"));
     assert!(valid_evaluation_wildcard("*.nix"));
     assert!(valid_evaluation_wildcard("*.nix,*.toml"));
     assert!(!valid_evaluation_wildcard(""));

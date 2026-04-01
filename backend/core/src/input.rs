@@ -66,7 +66,7 @@ pub enum InputError {
     DisplayNameEmpty,
     #[error("Display name cannot exceed 100 characters")]
     DisplayNameTooLong,
-    #[error("Display name can only contain letters, numbers, and spaces")]
+    #[error("Display name can only contain letters, numbers, spaces, apostrophes, dots, dashes, and underscores")]
     DisplayNameInvalidCharacters,
     #[error("Display name cannot start or end with spaces")]
     DisplayNameInvalidStartEnd,
@@ -373,10 +373,10 @@ pub fn validate_display_name(display_name: &str) -> Result<(), InputError> {
         return Err(InputError::DisplayNameTooLong);
     }
 
-    // Check for valid characters (alphanumeric and spaces only)
+    // Check for valid characters (alphanumeric, spaces, apostrophes, dots, dashes, underscores)
     if !display_name
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == ' ')
+        .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '\'' | '.' | '-' | '_'))
     {
         return Err(InputError::DisplayNameInvalidCharacters);
     }

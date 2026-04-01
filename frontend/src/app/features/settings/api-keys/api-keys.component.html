@@ -35,7 +35,12 @@
             <div class="key-info">
               <span class="material-symbols-outlined">key</span>
               <div>
-                <div class="key-name">{{ key.name }}</div>
+                <div class="key-name">
+                  {{ key.name }}
+                  @if (key.managed) {
+                    <span class="badge badge-managed">Managed</span>
+                  }
+                </div>
                 <div class="key-id text-secondary">{{ key.id }}</div>
               </div>
             </div>
@@ -46,7 +51,7 @@
               severity="danger"
               (click)="deleteKey(key)"
               [loading]="deletingId() === key.id"
-              [disabled]="deletingId() !== null"
+              [disabled]="deletingId() !== null || key.managed"
             ></button>
           </div>
         }

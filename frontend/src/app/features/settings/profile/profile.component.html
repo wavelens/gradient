@@ -30,7 +30,12 @@
     <!-- Profile Form -->
     <div class="settings-section">
       <h2>Personal Information</h2>
-      @if (isOidc()) {
+      @if (isManaged()) {
+        <div class="message-banner info">
+          <span class="material-symbols-outlined">info</span>
+          This account is managed declaratively and cannot be edited here.
+        </div>
+      } @else if (isOidc()) {
         <div class="message-banner info">
           <span class="material-symbols-outlined">info</span>
           Your profile is managed by your identity provider and cannot be edited here.
@@ -39,20 +44,20 @@
       <div class="settings-card">
         <div class="form-group">
           <label for="username">Username</label>
-          <input pInputText id="username" [(ngModel)]="formData.username" class="w-full" [disabled]="isOidc()" />
+          <input pInputText id="username" [(ngModel)]="formData.username" class="w-full" [disabled]="isOidc() || isManaged()" />
         </div>
 
         <div class="form-group">
           <label for="name">Full Name</label>
-          <input pInputText id="name" [(ngModel)]="formData.name" class="w-full" [disabled]="isOidc()" />
+          <input pInputText id="name" [(ngModel)]="formData.name" class="w-full" [disabled]="isOidc() || isManaged()" />
         </div>
 
         <div class="form-group">
           <label for="email">Email</label>
-          <input pInputText id="email" type="email" [(ngModel)]="formData.email" class="w-full" [disabled]="isOidc()" />
+          <input pInputText id="email" type="email" [(ngModel)]="formData.email" class="w-full" [disabled]="isOidc() || isManaged()" />
         </div>
 
-        @if (!isOidc()) {
+        @if (!isOidc() && !isManaged()) {
           <div class="form-actions">
             <button pButton label="Save Changes" icon="pi pi-check" (click)="saveSettings()" [loading]="saving()" [disabled]="saving()"></button>
           </div>
@@ -83,7 +88,7 @@
             <h3>Delete Account</h3>
             <p class="text-secondary">Permanently delete your account and all associated data.</p>
           </div>
-          <button pButton label="Delete Account" icon="pi pi-trash" severity="danger" (click)="showDeleteDialog.set(true)"></button>
+          <button pButton label="Delete Account" icon="pi pi-trash" severity="danger" (click)="showDeleteDialog.set(true)" [disabled]="isManaged()"></button>
         </div>
       </div>
     </div>

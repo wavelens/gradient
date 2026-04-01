@@ -19,6 +19,9 @@
         </div>
         <h1>Project Settings</h1>
       </div>
+      <a [routerLink]="['/organization', orgName, 'settings']">
+        <button pButton label="Organization Settings" icon="pi pi-building" severity="secondary"></button>
+      </a>
     </div>
 
     @if (errorMessage()) {

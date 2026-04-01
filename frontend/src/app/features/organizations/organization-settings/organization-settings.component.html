@@ -22,6 +22,12 @@
     <!-- General Settings -->
     <div class="settings-section">
       <h2>General</h2>
+      @if (org.managed) {
+        <div class="message-banner info">
+          <span class="material-symbols-outlined">info</span>
+          This organization is managed declaratively and cannot be edited here.
+        </div>
+      }
       <div class="settings-card">
         <div class="form-group">
           <label for="org-name">Name</label>
@@ -42,6 +48,7 @@
             id="display-name"
             [(ngModel)]="formData.display_name"
             class="w-full"
+            [disabled]="org.managed"
           />
         </div>
 
@@ -53,40 +60,43 @@
             [(ngModel)]="formData.description"
             rows="3"
             class="w-full"
+            [disabled]="org.managed"
           ></textarea>
         </div>
 
         <div class="form-group">
           <label for="visibility">Visibility</label>
-          <select id="visibility" [(ngModel)]="formData.public" class="role-select">
+          <select id="visibility" [(ngModel)]="formData.public" class="role-select" [disabled]="org.managed">
             <option [ngValue]="false">Private</option>
             <option [ngValue]="true">Public</option>
           </select>
           <small class="text-secondary">Public organizations are visible and readable by all users</small>
         </div>
 
-        @if (saveError()) {
-          <div class="message-banner error">
-            <span class="material-symbols-outlined">error</span>
-            {{ saveError() }}
+        @if (!org.managed) {
+          @if (saveError()) {
+            <div class="message-banner error">
+              <span class="material-symbols-outlined">error</span>
+              {{ saveError() }}
+            </div>
+          }
+          @if (saveSuccess()) {
+            <div class="message-banner success">
+              <span class="material-symbols-outlined">check_circle</span>
+              Changes saved.
+            </div>
+          }
+          <div class="form-actions">
+            <button
+              pButton
+              label="Save Changes"
+              icon="pi pi-check"
+              (click)="saveSettings()"
+              [loading]="saving()"
+              [disabled]="saving()"
+            ></button>
           </div>
         }
-        @if (saveSuccess()) {
-          <div class="message-banner success">
-            <span class="material-symbols-outlined">check_circle</span>
-            Changes saved.
-          </div>
-        }
-        <div class="form-actions">
-          <button
-            pButton
-            label="Save Changes"
-            icon="pi pi-check"
-            (click)="saveSettings()"
-            [loading]="saving()"
-            [disabled]="saving()"
-          ></button>
-        </div>
       </div>
     </div>
 
@@ -168,7 +178,7 @@
         <app-loading-spinner message="Loading SSH key..." />
       } @else {
         <div class="settings-card">
-          <p class="text-secondary">This SSH key is used to access private repositories.</p>
+          <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.). It is not related to cache subscription keys.</p>
           @if (sshKey()) {
             <div class="form-group">
               <label>Public Key</label>
@@ -214,7 +224,7 @@
               icon="pi pi-refresh"
               severity="danger"
               (click)="showRegenerateKeyDialog.set(true)"
-              [disabled]="generatingSSH()"
+              [disabled]="generatingSSH() || org.managed"
             ></button>
           </div>
           <p-divider />
@@ -230,6 +240,7 @@
             icon="pi pi-trash"
             severity="danger"
             (click)="showDeleteDialog.set(true)"
+            [disabled]="org.managed"
           ></button>
         </div>
       </div>

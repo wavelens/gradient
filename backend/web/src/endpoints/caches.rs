@@ -512,12 +512,11 @@ async fn cleanup_nars_for_orgs(state: Arc<ServerState>, org_ids: Vec<Uuid>) {
             .unwrap_or_default();
 
         for output in outputs {
-            if let Ok(nar_path) = get_cache_nar_location(state.cli.base_path.clone(), output.hash.clone()) {
-                if let Err(e) = tokio::fs::remove_file(&nar_path).await {
-                    if e.kind() != std::io::ErrorKind::NotFound {
-                        error!(error = %e, path = %nar_path, "Failed to remove NAR file");
-                    }
-                }
+            if let Ok(nar_path) = get_cache_nar_location(state.cli.base_path.clone(), output.hash.clone())
+                && let Err(e) = tokio::fs::remove_file(&nar_path).await
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                error!(error = %e, path = %nar_path, "Failed to remove NAR file");
             }
 
             let mut active = output.into_active_model();
@@ -1529,7 +1528,7 @@ async fn substitute_from_external_upstream(
     let store_path = narinfo_text
         .lines()
         .find(|l| l.starts_with("StorePath: "))
-        .and_then(|l| l.splitn(2, ": ").nth(1))
+        .and_then(|l| l.split_once(": ").map(|x| x.1))
         .ok_or_else(|| {
             WebError::InternalServerError("No StorePath in upstream narinfo".to_string())
         })?

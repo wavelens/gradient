@@ -56,10 +56,12 @@ async fn parse_derivation_file(
         ));
     }
 
+    let full_drv_path = nix_store_path(derivation_path);
+    debug!(cmd = %format!("{} derivation show {}", binpath_nix, full_drv_path), "executing nix command");
     let output = Command::new(binpath_nix)
         .arg("derivation")
         .arg("show")
-        .arg(derivation_path)
+        .arg(&full_drv_path)
         .output()
         .await
         .context("Failed to execute nix derivation show command")?;
@@ -80,11 +82,12 @@ async fn parse_derivation_file(
 
     let derivation_data = parsed_json
         .as_object()
-        .ok_or_else(|| anyhow::anyhow!("Expected JSON object"))?
-        .get(derivation_path)
-        .ok_or_else(|| anyhow::anyhow!("Expected JSON object with path"))?
+        .context("nix derivation show: expected top-level JSON object")?
+        .values()
+        .next()
+        .context("nix derivation show: output object was empty")?
         .as_object()
-        .ok_or_else(|| anyhow::anyhow!("Expected JSON object with path"))?;
+        .context("nix derivation show: derivation entry is not an object")?;
 
     let builder = derivation_data
         .get("builder")
@@ -950,14 +953,15 @@ async fn get_build_dependencies_sorted(
 
     let mut dependencies = HashSet::new();
     for dependency in &bdependencies_direct {
+        let dep_full_path = nix_store_path(&dependency.derivation_path);
         let output_map = if dependency.derivation_path.ends_with(".drv") {
             // TODO: find better way to get correct dependencies
             let mut deps = match local_store {
                 LocalNixStore::UnixStream(store) => {
-                    get_output_paths(dependency.derivation_path.clone(), store).await
+                    get_output_paths(dep_full_path.clone(), store).await
                 }
                 LocalNixStore::CommandDuplex(store) => {
-                    get_output_paths(dependency.derivation_path.clone(), store).await
+                    get_output_paths(dep_full_path.clone(), store).await
                 }
             }.map_err(|e| {
                 error!(error = %e, derivation_path = %dependency.derivation_path, "Failed to get output path for dependency");
@@ -979,7 +983,7 @@ async fn get_build_dependencies_sorted(
             deps.retain(|d| !missing.contains(d));
             deps
         } else {
-            vec![dependency.derivation_path.clone()]
+            vec![dep_full_path]
         };
 
         dependencies.extend(output_map);

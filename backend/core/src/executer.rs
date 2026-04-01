@@ -212,9 +212,10 @@ pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
 
     for path in paths {
         if path.ends_with(".drv") {
-            let output_map = get_output_paths(path.clone(), store)
+            let full_path = nix_store_path(&path);
+            let output_map = get_output_paths(full_path.clone(), store)
                 .await
-                .with_context(|| format!("Failed to get output path for {}", path))?;
+                .with_context(|| format!("Failed to get output path for {}", full_path))?;
 
             // TODO: Handle multiple outputs properly
             for out_path in output_map.values() {
@@ -313,10 +314,24 @@ pub async fn get_local_store(organization: Option<MOrganization>) -> Result<Loca
     }
 }
 
-pub fn get_builds_path(builds: Vec<&MBuild>) -> Vec<&str> {
+/// Returns the full `/nix/store/` path for a derivation hash-name stored without prefix.
+pub fn nix_store_path(hash_name: &str) -> String {
+    if hash_name.starts_with('/') {
+        hash_name.to_string()
+    } else {
+        format!("/nix/store/{}", hash_name)
+    }
+}
+
+/// Strips the `/nix/store/` prefix from a path, returning just the hash-name component.
+pub fn strip_nix_store_prefix(path: &str) -> String {
+    path.strip_prefix("/nix/store/").unwrap_or(path).to_string()
+}
+
+pub fn get_builds_path(builds: Vec<&MBuild>) -> Vec<String> {
     builds
         .iter()
-        .map(|build| build.derivation_path.as_str())
+        .map(|build| nix_store_path(&build.derivation_path))
         .collect()
 }
 

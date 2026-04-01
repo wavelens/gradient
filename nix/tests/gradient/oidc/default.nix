@@ -217,7 +217,7 @@
       # Check that the callback returned a redirect to the frontend OIDC callback route
       if "302" not in callback_response:
           raise Exception(f"OIDC callback did not return 302 redirect: {callback_response}")
-      if "/account/oidc-callback?token=" not in callback_response:
+      if "/account/oidc-callback" not in callback_response:
           raise Exception(f"OIDC callback redirect missing expected location: {callback_response}")
 
       # Test callback with missing code

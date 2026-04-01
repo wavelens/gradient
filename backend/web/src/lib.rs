@@ -248,6 +248,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/builds/{build}/downloads",
             get(builds::get_build_downloads),
         )
+        .route(
+            "/builds/{build}/download/{filename}",
+            get(builds::get_build_download),
+        )
         .route("/caches/{cache}", get(caches::get_cache))
         .route(
             "/caches/{cache}/public-key",
@@ -265,18 +269,6 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         // ── Fully public (no auth required) ─────────────────────────────────
         .route("/orgs/public", get(orgs::get_public_organizations))
         .route("/caches/public", get(caches::get_public_caches))
-        .route(
-            "/builds/{build}/artefacts",
-            get(builds::get_build_downloads_public),
-        )
-        .route(
-            "/builds/{build}/artefacts/{filename}",
-            get(builds::get_build_download_public),
-        )
-        .route(
-            "/builds/{build}/download/{filename}",
-            get(builds::get_build_download),
-        )
         .route("/auth/basic/login", post(auth::post_basic_login))
         .route("/auth/basic/register", post(auth::post_basic_register))
         .route("/auth/check-username", post(auth::post_check_username))

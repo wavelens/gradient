@@ -76,7 +76,7 @@ with subtest("check state-managed caches exist"):
     """.replace("alice_token", alice_token_to_use)))
 
     assert req.get("error") == False, f"Failed to get caches: {req.get('message')}"
-    caches = req.get("message").get("items")
+    caches = req.get("message")
 
     cache_names = [c.get("name") for c in caches]
     assert "main" in cache_names, f"main missing. Found: {cache_names}"

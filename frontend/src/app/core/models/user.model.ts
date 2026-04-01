@@ -19,9 +19,11 @@ export interface UserSettings {
   name: string;
   email: string;
   is_oidc: boolean;
+  managed: boolean;
 }
 
 export interface ApiKey {
   id: string;
   name: string;
+  managed: boolean;
 }

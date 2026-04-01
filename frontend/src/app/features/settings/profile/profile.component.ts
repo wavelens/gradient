@@ -39,6 +39,7 @@ export class ProfileComponent implements OnInit {
   saving = signal(false);
   deleting = signal(false);
   isOidc = signal(false);
+  isManaged = signal(false);
 
   showDeleteDialog = signal(false);
   errorMessage = signal<string | null>(null);
@@ -59,6 +60,7 @@ export class ProfileComponent implements OnInit {
     this.userService.getUserSettings().subscribe({
       next: (settings) => {
         this.isOidc.set(settings.is_oidc);
+        this.isManaged.set(settings.managed);
         this.formData = {
           username: settings.username,
           name: settings.name,

@@ -35,7 +35,16 @@ pub struct ListItem {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Paginated<T> {
+    pub items: T,
+    pub total: u64,
+    pub page: u64,
+    pub per_page: u64,
+}
+
 pub type ListResponse = Vec<ListItem>;
+pub type PaginatedListResponse = Paginated<Vec<ListItem>>;
 pub type RequestType = reqwest::Method;
 
 async fn parse_response<T: DeserializeOwned>(res: reqwest::Response) -> BaseResponse<T> {

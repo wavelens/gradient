@@ -47,7 +47,7 @@ pub struct PatchServerRequest {
 pub async fn get(
     config: RequestConfig,
     organization: String,
-) -> Result<BaseResponse<ListResponse>, String> {
+) -> Result<BaseResponse<PaginatedListResponse>, String> {
     let res = get_client(
         config,
         format!("servers/{}", organization),

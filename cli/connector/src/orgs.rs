@@ -44,7 +44,7 @@ pub struct RemoveUserRequest {
     pub user: String,
 }
 
-pub async fn get(config: RequestConfig) -> Result<BaseResponse<ListResponse>, String> {
+pub async fn get(config: RequestConfig) -> Result<BaseResponse<PaginatedListResponse>, String> {
     let res = get_client(config, "orgs".to_string(), RequestType::GET, true)
         .unwrap()
         .send()

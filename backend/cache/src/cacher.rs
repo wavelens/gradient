@@ -607,12 +607,12 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
 
         // Break the linked list: NULL out `previous` on the oldest surviving evaluation so that
         // deleting the old evaluations does not cascade into the surviving chain.
-        if let Some(oldest_surviving) = evaluations[..keep].last() {
-            if oldest_surviving.previous.is_some() {
-                let mut a: AEvaluation = oldest_surviving.clone().into_active_model();
-                a.previous = Set(None);
-                a.update(&state.db).await.context("Failed to unlink oldest surviving evaluation")?;
-            }
+        if let Some(oldest_surviving) = evaluations[..keep].last()
+            && oldest_surviving.previous.is_some()
+        {
+            let mut a: AEvaluation = oldest_surviving.clone().into_active_model();
+            a.previous = Set(None);
+            a.update(&state.db).await.context("Failed to unlink oldest surviving evaluation")?;
         }
 
         // NULL out previous/next on every evaluation being deleted so that cascade between
@@ -642,10 +642,10 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
 
                 // Remove the build log.
                 let log_path = format!("{}/logs/{}.log", state.cli.base_path, build.id);
-                if let Err(e) = tokio::fs::remove_file(&log_path).await {
-                    if e.kind() != std::io::ErrorKind::NotFound {
-                        warn!(error = %e, path = %log_path, "Failed to remove build log");
-                    }
+                if let Err(e) = tokio::fs::remove_file(&log_path).await
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    warn!(error = %e, path = %log_path, "Failed to remove build log");
                 }
 
                 // Remove cached NAR files and GC root symlinks for each build output.
@@ -662,10 +662,10 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
                     }
                     match get_cache_nar_location(state.cli.base_path.clone(), output.hash.clone()) {
                         Ok(nar_path) => {
-                            if let Err(e) = tokio::fs::remove_file(&nar_path).await {
-                                if e.kind() != std::io::ErrorKind::NotFound {
-                                    warn!(error = %e, path = %nar_path, "Failed to remove NAR file");
-                                }
+                            if let Err(e) = tokio::fs::remove_file(&nar_path).await
+                                && e.kind() != std::io::ErrorKind::NotFound
+                            {
+                                warn!(error = %e, path = %nar_path, "Failed to remove NAR file");
                             }
                         }
                         Err(e) => warn!(error = %e, hash = %output.hash, "Failed to resolve NAR path for GC"),

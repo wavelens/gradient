@@ -74,7 +74,7 @@ pub async fn get(
 
     let items: ListResponse = raw
         .iter()
-        .map(|s| ListItem { id: s.id, name: s.name.clone() })
+        .map(|s| ListItem { id: s.id, name: s.name.clone(), managed: s.managed })
         .collect();
 
     Ok(Json(BaseResponse {

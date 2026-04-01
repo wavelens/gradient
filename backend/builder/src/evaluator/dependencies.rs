@@ -106,12 +106,13 @@ pub(super) async fn add_existing_build(
         .await
         .context("Failed to get local store")?;
 
+    let full_derivation = core::executer::nix_store_path(&derivation);
     let outputs = match local_store {
         LocalNixStore::UnixStream(mut store) => {
-            core::executer::get_build_outputs_from_derivation(derivation.clone(), &mut store).await
+            core::executer::get_build_outputs_from_derivation(full_derivation.clone(), &mut store).await
         }
         LocalNixStore::CommandDuplex(mut store) => {
-            core::executer::get_build_outputs_from_derivation(derivation.clone(), &mut store).await
+            core::executer::get_build_outputs_from_derivation(full_derivation, &mut store).await
         }
     };
 
@@ -181,24 +182,29 @@ pub(super) async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unp
             "Processing derivation"
         );
 
-        let path_info = get_pathinfo(dependency.clone(), store)
+        let path_info = get_pathinfo(nix_store_path(&dependency), store)
             .await
             .context("Failed to get derivation info")?
             .context("Derivation not found in Nix store")?;
+
+        // Strip /nix/store/ prefix from references so they match the format stored in the DB.
+        let stripped_references: Vec<String> = path_info
+            .references
+            .iter()
+            .map(|r| strip_nix_store_prefix(r))
+            .collect();
 
         // TODO: can be optimized by also using Aborted and Failed builds.
         let already_exists = find_builds(
             Arc::clone(&state),
             organization_id,
-            path_info.references.clone(),
+            stripped_references.clone(),
             true,
         )
         .await
         .context("Failed to find existing builds")?;
 
-        let mut references = path_info
-            .references
-            .clone()
+        let mut references = stripped_references
             .into_iter()
             .map(|d| (d, Some(build_id), Uuid::new_v4()))
             .collect::<Vec<(String, Option<Uuid>, Uuid)>>();

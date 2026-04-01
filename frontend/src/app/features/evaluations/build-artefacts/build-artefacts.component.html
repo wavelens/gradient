@@ -30,6 +30,9 @@
         <div class="artefact-row">
           <span class="file-type-badge">{{ fileTypeLabel(artefact.file_type) }}</span>
           <span class="artefact-name">{{ artefact.name }}</span>
+          @if (artefact.size !== undefined) {
+            <span class="artefact-size">{{ formatSize(artefact.size) }}</span>
+          }
           <a
             class="download-btn"
             [href]="downloadUrl(artefact)"

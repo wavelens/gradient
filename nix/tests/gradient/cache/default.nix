@@ -237,8 +237,9 @@
           in_building = True
         elif line.strip() == "===== Log =====":
           break
-        elif in_building and line.startswith("/nix/store/") and "hello" in line:
-          store_path_drv = line.strip()
+        elif in_building and "hello" in line and line.strip().endswith(".drv"):
+          drv = line.strip()
+          store_path_drv = drv if drv.startswith("/nix/store/") else f"/nix/store/{drv}"
           break
 
       store_path = server.succeed(f"${lib.getExe pkgs.nix} path-info {store_path_drv}^out").strip()

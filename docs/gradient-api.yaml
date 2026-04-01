@@ -20,12 +20,18 @@ info:
     by the login and OIDC-callback endpoints and cleared on logout. The
     `Authorization` header is accepted as a fallback (e.g. for CI/scripts).
 
-    ### Download tokens
+    ### Artefact downloads
 
-    `GET /builds/{build}/download/{filename}` additionally accepts a short-lived
-    (1 h) download token via `?token=<download_token>`. Obtain one from
-    `GET /builds/{build}/download-token` while authenticated. Download tokens are
-    scoped to a single build and are safe to share in a URL.
+    `GET /builds/{build}/download/{filename}` serves build artefacts declared in
+    `nix-support/hydra-build-products`. Access is granted when any of the following
+    conditions is met:
+
+    - The owning organisation is **public** — no credentials required.
+    - A short-lived (1 h) **download token** is supplied via `?token=<download_token>`.
+      Obtain one from `GET /builds/{build}/download-token` while authenticated.
+      Tokens are scoped to a single build and are safe to embed in URLs.
+    - A valid session (`jwt_token` cookie or `Authorization: Bearer` header) belonging
+      to a member of the owning organisation.
 
     ## Common Response Envelope
 
@@ -485,7 +491,7 @@ paths:
     delete:
       tags: [user]
       summary: Delete API key
-      description: Deletes the API key with the given name.
+      description: Deletes the API key with the given name. State-managed keys cannot be deleted.
       operationId: deleteUserKey
       requestBody:
         required: true
@@ -502,6 +508,8 @@ paths:
                 $ref: '#/components/schemas/StringResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -1550,7 +1558,9 @@ paths:
       description: |-
         Returns downloadable artefacts declared in the build's
         `nix-support/hydra-build-products` file. Each entry has a file type,
-        filename, and Nix store path.
+        filename, Nix store path, and file size in bytes.
+
+        Accessible without authentication when the owning organisation is public.
       operationId: getBuildDownloads
       responses:
         '200':
@@ -1613,10 +1623,12 @@ paths:
         Streams a build artefact file. `Content-Type` and `Content-Disposition`
         headers are set based on the file extension.
 
-        Authentication is resolved in order:
-        1. `?token=<download_token>` — a short-lived per-build token from
-           `GET /builds/{build}/download-token` (1 h validity, no session needed).
-        2. `jwt_token` cookie or `Authorization: Bearer` header — standard session auth.
+        Access is granted when **any** of the following is satisfied:
+        1. The owning organisation is public — no credentials required.
+        2. `?token=<download_token>` — a short-lived per-build token from
+           `GET /builds/{build}/download-token` (1 h validity, safe to embed in URLs).
+        3. `jwt_token` cookie or `Authorization: Bearer` header and the caller is a
+           member of the owning organisation.
       operationId: downloadBuildArtefact
       parameters:
         - name: token
@@ -2564,13 +2576,16 @@ components:
 
     ListItem:
       type: object
-      required: [id, name]
+      required: [id, name, managed]
       properties:
         id:
           type: string
           format: uuid
         name:
           type: string
+        managed:
+          type: boolean
+          description: Whether this item is managed declaratively by server configuration
 
     ListResponse:
       type: array
@@ -2667,7 +2682,7 @@ components:
 
     GetUserSettingsResponse:
       type: object
-      required: [username, name, email]
+      required: [username, name, email, is_oidc, managed]
       properties:
         username:
           type: string
@@ -2676,6 +2691,12 @@ components:
         email:
           type: string
           format: email
+        is_oidc:
+          type: boolean
+          description: Whether this user authenticates via OIDC (profile is read-only)
+        managed:
+          type: boolean
+          description: Whether this user is managed declaratively by server configuration
 
     PatchUserSettingsRequest:
       type: object
@@ -3083,6 +3104,12 @@ components:
           type: string
           description: Full Nix store path to the file
           example: "/nix/store/xyz-nixos-iso/nixos-24.11-x86_64-linux.iso"
+        size:
+          type: integer
+          format: int64
+          nullable: true
+          description: File size in bytes, or null if the file could not be stat'd
+          example: 734003200
 
     DirectBuildInfo:
       type: object
