@@ -205,6 +205,9 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         return Err(anyhow::anyhow!(full_error));
     }
 
+    let mut seen = std::collections::HashSet::new();
+    acc.entry_point_build_ids.retain(|id| seen.insert(*id));
+
     Ok((acc.builds, acc.dependencies, acc.entry_point_build_ids))
 }
 

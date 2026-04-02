@@ -11,5 +11,6 @@
  - aborted evaluations should restart on server restart
  - if git link is http(s) make link clickable
  - static links to specific buid logs to share with others
+ - grayed out delete account button has hover effect, should not have
  - no Hover Effect on Dashboard for non clickable Elements
  - Add Footer: AGPL License and link to github and wavelens and version
