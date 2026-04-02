@@ -259,11 +259,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   private async fetchInitialLogs(buildId: string): Promise<void> {
     try {
-      const token = localStorage.getItem('jwt_token') || sessionStorage.getItem('jwt_token') || '';
-      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
       const response = await fetch(`${environment.apiUrl}/builds/${buildId}/log`, {
         method: 'GET',
-        headers,
+        credentials: 'include',
       });
 
       if (response.ok) {
@@ -298,14 +296,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.streamingBuildId = buildId;
 
     try {
-      const token = localStorage.getItem('jwt_token') || sessionStorage.getItem('jwt_token') || '';
-      if (!token) return;
       const response = await fetch(`${environment.apiUrl}/builds/${buildId}/log`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/jsonstream',
-        },
+        credentials: 'include',
       });
 
       if (!response.ok || !response.body) return;

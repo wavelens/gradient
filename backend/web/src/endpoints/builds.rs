@@ -9,7 +9,7 @@ use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use async_stream::stream;
 use axum::extract::{Multipart, Path, Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
@@ -213,7 +213,7 @@ pub async fn post_build_log(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(build_id): Path<Uuid>,
-) -> Result<StreamBodyAs<'static>, WebError> {
+) -> Result<Response, WebError> {
     let build = EBuild::find_by_id(build_id)
         .one(&state.db)
         .await?
@@ -266,9 +266,12 @@ pub async fn post_build_log(
         return Err(WebError::not_found("Build"));
     }
 
-    // TODO: check if build is building
+    // Capture current log length so the stream only delivers new content,
+    // avoiding duplication of what the client already received via GET.
+    let initial_offset = state.log_storage.read(build_id).await.unwrap_or_default().len();
+
     let stream = stream! {
-        let mut last_offset: usize = 0;
+        let mut last_offset: usize = initial_offset;
         let mut sent_any: bool = false;
 
         loop {
@@ -298,7 +301,10 @@ pub async fn post_build_log(
         }
     };
 
-    Ok(StreamBodyAs::json_nl(stream))
+    let mut response = StreamBodyAs::json_nl(stream).into_response();
+    response.headers_mut().insert("X-Accel-Buffering", HeaderValue::from_static("no"));
+    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    Ok(response)
 }
 
 #[derive(Deserialize)]
