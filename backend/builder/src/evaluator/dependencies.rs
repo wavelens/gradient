@@ -107,14 +107,7 @@ pub(super) async fn add_existing_build(
         .context("Failed to get local store")?;
 
     let full_derivation = core::executer::nix_store_path(&derivation);
-    let outputs = match local_store {
-        LocalNixStore::UnixStream(mut store) => {
-            core::executer::get_build_outputs_from_derivation(full_derivation.clone(), &mut store).await
-        }
-        LocalNixStore::CommandDuplex(mut store) => {
-            core::executer::get_build_outputs_from_derivation(full_derivation, &mut store).await
-        }
-    };
+    let outputs = core::executer::get_build_outputs_from_derivation(full_derivation, &mut local_store).await;
 
     if let Ok(outputs) = outputs {
         for output in outputs {

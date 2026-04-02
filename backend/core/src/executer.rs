@@ -49,7 +49,7 @@ pub async fn connect(
 
     channel.exec(command.as_str()).await?;
 
-    Ok(DaemonStore::builder().init(channel).await?)
+    Ok(DaemonStore::builder().init(BoxedIo::new(channel)).await?)
 }
 
 pub async fn init_session(
@@ -254,26 +254,14 @@ pub async fn get_output_paths<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
 
 pub async fn get_local_store(organization: Option<MOrganization>) -> Result<LocalNixStore> {
     if organization.as_ref().is_none_or(|org| org.use_nix_store) {
-        let store = DaemonStore::builder()
-            .init(
-                UnixStream::connect("/nix/var/nix/daemon-socket/socket")
-                    .await
-                    .context("Failed to connect to Nix daemon socket")?,
-            )
+        let socket = UnixStream::connect("/nix/var/nix/daemon-socket/socket")
             .await
-            .context("Failed to connect to local Nix daemon")?;
+            .context("Failed to connect to Nix daemon socket")?;
 
-        // let nix_path_hashmap = HashMap::new();
-        // nix_path_hashmap.insert(
-
-        //     "NIX_PATH".to_string(),
-        //     "/nix/var/nix/profiles/per-user/root/channels".to_string(),
-        // );
-
-        // store.set_options(nix_daemon::ClientSettings { keep_failed: (), keep_going: (), try_fallback: (), verbosity: (), max_build_jobs: (), max_silent_time: (), verbose_build: (), build_cores: (), use_substitutes: (), overrides:  }
-        // }
-
-        Ok(LocalNixStore::UnixStream(store))
+        DaemonStore::builder()
+            .init(BoxedIo::new(socket))
+            .await
+            .context("Failed to connect to local Nix daemon")
     } else {
         let org = organization.ok_or_else(|| {
             anyhow::anyhow!("Organization should be Some when not using nix store")
@@ -298,19 +286,12 @@ pub async fn get_local_store(organization: Option<MOrganization>) -> Result<Loca
             .stdout
             .take()
             .ok_or_else(|| anyhow::anyhow!("Failed to open stdout"))?;
-        let _stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("Failed to open stderr"))?;
+        let _stderr = child.stderr.take();
 
-        let duplex = CommandDuplex { stdin, stdout };
-
-        let store = DaemonStore::builder()
-            .init(duplex)
+        DaemonStore::builder()
+            .init(BoxedIo::new(tokio::io::join(stdout, stdin)))
             .await
-            .context("Failed to initialize daemon store")?;
-
-        Ok(LocalNixStore::CommandDuplex(store))
+            .context("Failed to initialize daemon store")
     }
 }
 

@@ -166,25 +166,17 @@ async fn get_nar_by_hash(
 
     let path = get_path_from_build_output(build_output.clone());
 
-    let local_store = get_local_store(None).await.map_err(|e| {
+    let mut local_store = get_local_store(None).await.map_err(|e| {
         tracing::error!("Failed to get local store: {}", e);
         WebError::InternalServerError("Failed to access local store".to_string())
     })?;
-    let pathinfo = match local_store {
-        LocalNixStore::UnixStream(mut store) => get_pathinfo(path.to_string(), &mut store)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to get pathinfo: {}", e);
-                WebError::InternalServerError("Failed to get path information".to_string())
-            })?,
-        LocalNixStore::CommandDuplex(mut store) => get_pathinfo(path.to_string(), &mut store)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to get pathinfo: {}", e);
-                WebError::InternalServerError("Failed to get path information".to_string())
-            })?,
-    }
-    .ok_or_else(|| WebError::not_found("Path"))?;
+    let pathinfo = get_pathinfo(path.to_string(), &mut local_store)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get pathinfo: {}", e);
+            WebError::InternalServerError("Failed to get path information".to_string())
+        })?
+        .ok_or_else(|| WebError::not_found("Path"))?;
 
     let output = Command::new(state.cli.binpath_nix.clone())
         .arg("hash")

@@ -116,6 +116,7 @@
                 name = "main";
                 signing_key_file = "/etc/gradient/secrets/main_cache_key";
                 organizations = [ "org" ];
+                public = true;
                 created_by = "admin";
               }];
             };

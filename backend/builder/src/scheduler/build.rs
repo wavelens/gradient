@@ -380,14 +380,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         debug!(index = i, dependency = %dep, "Dependency order");
     }
 
-    if let Err(e) = match local_daemon {
-        LocalNixStore::UnixStream(ref mut store) => {
-            copy_builds(dependencies.clone(), store, &mut server_daemon, false).await
-        }
-        LocalNixStore::CommandDuplex(ref mut store) => {
-            copy_builds(dependencies.clone(), store, &mut server_daemon, false).await
-        }
-    } {
+    if let Err(e) = copy_builds(dependencies.clone(), local_daemon, &mut server_daemon, false).await {
         error!(error = %e, "Failed to copy build dependencies");
         update_build_status(Arc::clone(&state), build.clone(), BuildStatus::Failed).await;
         return;
@@ -422,14 +415,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                     .map(|realisation| format!("/nix/store/{}", realisation.out_path))
                     .collect::<Vec<String>>();
 
-                if let Err(e) = match local_daemon {
-                    LocalNixStore::UnixStream(ref mut store) => {
-                        copy_builds(copy_results, &mut server_daemon, store, true).await
-                    }
-                    LocalNixStore::CommandDuplex(ref mut store) => {
-                        copy_builds(copy_results, &mut server_daemon, store, true).await
-                    }
-                } {
+                if let Err(e) = copy_builds(copy_results, &mut server_daemon, local_daemon, true).await {
                     error!(error = %e, "Failed to copy build results");
                     update_build_status(Arc::clone(&state), build.clone(), BuildStatus::Failed)
                         .await;
@@ -956,26 +942,15 @@ async fn get_build_dependencies_sorted(
         let dep_full_path = nix_store_path(&dependency.derivation_path);
         let output_map = if dependency.derivation_path.ends_with(".drv") {
             // TODO: find better way to get correct dependencies
-            let mut deps = match local_store {
-                LocalNixStore::UnixStream(store) => {
-                    get_output_paths(dep_full_path.clone(), store).await
-                }
-                LocalNixStore::CommandDuplex(store) => {
-                    get_output_paths(dep_full_path.clone(), store).await
-                }
-            }.map_err(|e| {
+            let mut deps = get_output_paths(dep_full_path.clone(), local_store).await
+            .map_err(|e| {
                 error!(error = %e, derivation_path = %dependency.derivation_path, "Failed to get output path for dependency");
                 "Failed to get output path for dependency".to_string()
             })?
             .values().cloned().collect::<Vec<String>>();
 
-            let missing = match local_store {
-                LocalNixStore::UnixStream(store) => {
-                    get_missing_builds(deps.clone(), store).await
-                } LocalNixStore::CommandDuplex(store) => {
-                    get_missing_builds(deps.clone(), store).await
-                }
-            }.map_err(|e| {
+            let missing = get_missing_builds(deps.clone(), local_store).await
+            .map_err(|e| {
                 error!(error = %e, derivation_path = %dependency.derivation_path, "Failed to get missing builds for dependency");
                 "Failed to get missing builds for dependency".to_string()
             })?;

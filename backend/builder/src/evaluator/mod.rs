@@ -224,14 +224,7 @@ pub async fn evaluate_direct(
     let mut direct_evaluation = evaluation.clone();
     direct_evaluation.repository = temp_dir.clone();
 
-    let evaluation_result = match local_store {
-        LocalNixStore::UnixStream(mut store) => {
-            evaluate(Arc::clone(&state), &mut store, &direct_evaluation).await
-        }
-        LocalNixStore::CommandDuplex(mut store) => {
-            evaluate(Arc::clone(&state), &mut store, &direct_evaluation).await
-        }
-    };
+    let evaluation_result = evaluate(Arc::clone(&state), &mut local_store, &direct_evaluation).await;
 
     match evaluation_result {
         Ok((builds, dependencies, _entry_point_build_ids)) => {

@@ -178,20 +178,12 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
 
     let local_store = core::executer::get_local_store(Some(organization.clone())).await;
     if let Ok(mut local_store) = local_store {
-        let path_exists = match local_store {
-            core::types::LocalNixStore::UnixStream(ref mut store) => store
-                .query_pathinfo(path.clone())
-                .result()
-                .await
-                .unwrap_or(None)
-                .is_some(),
-            core::types::LocalNixStore::CommandDuplex(ref mut store) => store
-                .query_pathinfo(path.clone())
-                .result()
-                .await
-                .unwrap_or(None)
-                .is_some(),
-        };
+        let path_exists = local_store
+            .query_pathinfo(path.clone())
+            .result()
+            .await
+            .unwrap_or(None)
+            .is_some();
 
         if !path_exists {
             warn!(path = %path, "Path not found in local store, skipping cache");

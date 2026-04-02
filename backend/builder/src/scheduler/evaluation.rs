@@ -195,14 +195,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
         }
     };
 
-    let builds = match local_daemon {
-        LocalNixStore::UnixStream(mut store) => {
-            evaluate(Arc::clone(&state), &mut store, &evaluation).await
-        }
-        LocalNixStore::CommandDuplex(mut store) => {
-            evaluate(Arc::clone(&state), &mut store, &evaluation).await
-        }
-    };
+    let builds = evaluate(Arc::clone(&state), &mut local_daemon, &evaluation).await;
 
     match builds {
         Ok(builds) => {

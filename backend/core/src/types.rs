@@ -6,7 +6,6 @@
 
 use super::input::{greater_than_zero, port_in_range};
 use super::log_storage::LogStorage;
-use async_ssh2_lite::{AsyncChannel, TokioTcpStream};
 use clap::Parser;
 use entity::*;
 use nix_daemon::nix::DaemonStore;
@@ -17,7 +16,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::net::UnixStream;
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
@@ -148,42 +146,47 @@ pub struct ListItem {
     pub managed: bool,
 }
 
-pub struct CommandDuplex {
-    pub stdin: tokio::process::ChildStdin,
-    pub stdout: tokio::process::ChildStdout,
+/// Combined async I/O trait used for type-erasing Nix daemon connections.
+pub trait AsyncIo: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncIo for T {}
+
+/// Type-erased wrapper over any bidirectional async I/O stream.
+/// Lets callers hold a `DaemonStore<BoxedIo>` regardless of whether the
+/// underlying transport is a Unix socket, a stdio pipe, or a TCP channel.
+pub struct BoxedIo(Box<dyn AsyncIo>);
+
+impl BoxedIo {
+    pub fn new(io: impl AsyncIo + 'static) -> Self {
+        Self(Box::new(io))
+    }
 }
 
-impl AsyncRead for CommandDuplex {
+impl AsyncRead for BoxedIo {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.stdout).poll_read(cx, buf)
+        Pin::new(&mut *self.0).poll_read(cx, buf)
     }
 }
 
-impl AsyncWrite for CommandDuplex {
+impl AsyncWrite for BoxedIo {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.stdin).poll_write(cx, buf)
+        Pin::new(&mut *self.0).poll_write(cx, buf)
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.stdin).poll_flush(cx)
+        Pin::new(&mut *self.0).poll_flush(cx)
     }
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.stdin).poll_shutdown(cx)
+        Pin::new(&mut *self.0).poll_shutdown(cx)
     }
-}
-
-pub enum LocalNixStore {
-    UnixStream(DaemonStore<UnixStream>),
-    CommandDuplex(DaemonStore<CommandDuplex>),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -267,7 +270,10 @@ pub struct BuildOutputPath {
 }
 
 pub type ListResponse = Vec<ListItem>;
-pub type NixStore = DaemonStore<AsyncChannel<TokioTcpStream>>;
+/// A Nix daemon store connection over any transport (Unix socket, stdio pipe, SSH channel).
+pub type NixStore = DaemonStore<BoxedIo>;
+/// Alias kept for call-sites that previously used the local-store enum.
+pub type LocalNixStore = DaemonStore<BoxedIo>;
 
 pub type EApi = api::Entity;
 pub type EBuild = build::Entity;
