@@ -205,6 +205,12 @@ in {
           type = lib.types.bool;
           default = true;
         };
+
+        cacheTtlHours = lib.mkOption {
+          description = "TTL in hours for non-entry-point cached NAR files. 0 disables GC.";
+          type = lib.types.ints.unsigned;
+          default = 336;
+        };
       };
     };
   };
@@ -283,6 +289,7 @@ in {
         GRADIENT_MAX_NIXDAEMON_CONNECTIONS = toString cfg.settings.maxNixdaemonConnections;
         GRADIENT_LOG_LEVEL = cfg.settings.logLevel;
         GRADIENT_DELETE_STATE = lib.boolToString cfg.settings.deleteState;
+        GRADIENT_NAR_TTL_HOURS = toString cfg.settings.cacheTtlHours;
         GRADIENT_STATE_FILE = "%d/gradient_state";
         GRADIENT_CREDENTIALS_DIR = "%d";
         RUST_LOG = cfg.settings.logLevel;

@@ -7,16 +7,16 @@
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use core::sources::{
-    clear_key, format_cache_key, get_cache_nar_location, get_hash_from_path,
-    get_path_from_build_output, write_key,
+    clear_key, format_cache_key, get_cache_nar_compressed_location, get_cache_nar_location,
+    get_hash_from_path, get_path_from_build_output, write_key,
 };
 use core::types::*;
 use entity::evaluation::EvaluationStatus;
 use nix_daemon::{Progress, Store};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
-    QuerySelect,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseBackend, EntityTrait,
+    IntoActiveModel, QueryFilter, QueryOrder, QuerySelect, Statement,
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -93,6 +93,13 @@ pub async fn cache_loop(state: Arc<ServerState>) {
                         error!(error = %e, "Evaluation GC failed");
                     } else {
                         info!("Evaluation GC completed successfully");
+                    }
+                }
+                if state.cli.nar_ttl_hours > 0 {
+                    if let Err(e) = cleanup_stale_cached_nars(Arc::clone(&state)).await {
+                        error!(error = %e, "NAR TTL GC failed");
+                    } else {
+                        info!("NAR TTL GC completed successfully");
                     }
                 }
             }
@@ -270,9 +277,7 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         return;
     }
 
-    if is_entry_point {
-        create_gcroot(&build_output.hash, &build_output.package).await;
-    }
+    create_gcroot(&build_output.hash, &build_output.package).await;
 }
 
 pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_output: MBuildOutput) {
@@ -717,6 +722,112 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
         }
 
         info!(project_id = %project.id, deleted = delete_ids.len(), "Evaluation GC done");
+    }
+
+    Ok(())
+}
+
+/// Garbage-collects non-entry-point cached NARs whose `last_fetched_at` is older than
+/// `GRADIENT_NAR_TTL_HOURS`. For each stale output:
+///   1. Deletes the on-disk compressed NAR (`.nar.zst`).
+///   2. Attempts `nix store delete` to free nix store space (skipped silently if the path
+///      is still reachable from a GC root, e.g. as a dependency of an entry-point).
+///   3. Marks `is_cached = false` only when the nix store deletion succeeds.
+pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
+    let ttl_hours = state.cli.nar_ttl_hours;
+    if ttl_hours == 0 {
+        return Ok(());
+    }
+
+    // Find non-entry-point outputs that haven't been fetched within the TTL.
+    let rows = state
+        .db
+        .query_all(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"SELECT bo.id, bo.hash, bo.package
+               FROM build_output bo
+               JOIN build b ON b.id = bo.build
+               WHERE bo.is_cached = true
+                 AND bo.last_fetched_at IS NOT NULL
+                 AND bo.last_fetched_at < NOW() AT TIME ZONE 'UTC' - ($1 * INTERVAL '1 hour')
+                 AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.build = b.id)"#,
+            [sea_orm::Value::BigInt(Some(ttl_hours as i64))],
+        ))
+        .await
+        .context("Failed to query stale cached NARs")?;
+
+    for row in rows {
+        let id: uuid::Uuid = match row.try_get("", "id") {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let hash: String = match row.try_get("", "hash") {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let package: String = match row.try_get("", "package") {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let store_path = format!("/nix/store/{}-{}", hash, package);
+
+        // 1. Delete the compressed NAR cache file (best-effort).
+        if let Ok(zst_path) = get_cache_nar_compressed_location(state.cli.base_path.clone(), hash.clone()) {
+            if let Err(e) = tokio::fs::remove_file(&zst_path).await {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    warn!(error = %e, path = %zst_path, "Failed to remove stale compressed NAR");
+                }
+            }
+        }
+
+        // 2. Remove the GC root so the path is no longer pinned by us.
+        remove_gcroot(&hash, &package).await;
+
+        // 3. Try to delete from the nix store. This will fail if the path is still
+        //    reachable from another GC root (e.g. dependency of a live entry-point),
+        //    which is intentional — we only free what is truly unreachable.
+        let nix_bin = state.cli.binpath_nix.clone();
+        let sp_clone = store_path.clone();
+        let delete_result = Command::new(&nix_bin)
+            .arg("store")
+            .arg("delete")
+            .arg(&sp_clone)
+            .output()
+            .await;
+
+        let store_deleted = match delete_result {
+            Ok(out) => {
+                if out.status.success() {
+                    info!(store_path = %store_path, "GC'd stale NAR from nix store");
+                    true
+                } else {
+                    debug!(
+                        store_path = %store_path,
+                        stderr = %String::from_utf8_lossy(&out.stderr),
+                        "nix store delete skipped (path still referenced)"
+                    );
+                    false
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, store_path = %store_path, "Failed to run nix store delete");
+                false
+            }
+        };
+
+        // 4. Mark is_cached = false only if the store path was actually deleted.
+        if store_deleted {
+            if let Ok(Some(bo)) = EBuildOutput::find_by_id(id).one(&state.db).await {
+                let mut active = bo.into_active_model();
+                active.is_cached = Set(false);
+                active.file_hash = Set(None);
+                active.file_size = Set(None);
+                active.last_fetched_at = Set(None);
+                if let Err(e) = active.update(&state.db).await {
+                    warn!(error = %e, id = %id, "Failed to mark build_output as uncached after GC");
+                }
+            }
+        }
     }
 
     Ok(())

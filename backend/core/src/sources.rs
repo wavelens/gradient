@@ -724,6 +724,24 @@ pub fn get_cache_nar_location(base_path: String, hash: String) -> Result<String,
     ))
 }
 
+/// Returns the on-disk path for a compressed (zstd) NAR cache file.
+/// Used for non-entry-point builds that are cached on first serve.
+pub fn get_cache_nar_compressed_location(base_path: String, hash: String) -> Result<String, SourceError> {
+    let hash_hex = hash.as_str();
+    std::fs::create_dir_all(format!("{}/nars/{}", base_path, &hash_hex[0..2])).map_err(|e| {
+        SourceError::FileRead {
+            reason: e.to_string(),
+        }
+    })?;
+
+    Ok(format!(
+        "{}/nars/{}/{}.nar.zst",
+        base_path,
+        &hash_hex[0..2],
+        &hash_hex[2..],
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

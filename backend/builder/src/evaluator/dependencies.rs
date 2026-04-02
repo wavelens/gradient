@@ -130,6 +130,7 @@ pub(super) async fn add_existing_build(
                 has_artefacts: Set(has_artefacts),
                 ca: Set(output.ca),
                 created_at: Set(Utc::now().naive_utc()),
+                last_fetched_at: Set(None),
             };
 
             abuild_output

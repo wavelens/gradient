@@ -104,6 +104,12 @@ pub struct Cli {
     pub keep_evaluations: usize,
     #[arg(long, env = "GRADIENT_MAX_NIXDAEMON_CONNECTIONS", value_parser = greater_than_zero::<usize>, default_value = "8")]
     pub max_nixdaemon_connections: usize,
+    /// TTL in hours for non-entry-point NAR cache files. When a cached NAR has not been
+    /// fetched within this many hours it is removed from disk and garbage-collected from
+    /// the nix store (entry-point packages with GC roots are never touched).
+    /// Set to 0 to disable (default).
+    #[arg(long, env = "GRADIENT_NAR_TTL_HOURS", default_value_t = 0)]
+    pub nar_ttl_hours: u64,
 }
 
 #[derive(Debug)]

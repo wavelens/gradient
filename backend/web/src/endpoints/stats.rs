@@ -84,19 +84,26 @@ async fn aggregate_traffic(
     db: &sea_orm::DatabaseConnection,
     cache_id: Uuid,
     trunc_unit: &str,
-    interval: &str,
+    back_interval: &str,
 ) -> Result<Vec<CacheMetricPoint>, WebError> {
+    // Use generate_series so every bucket in the window is present, including the
+    // current one — this makes the traffic graph always run to "now" with zeros.
     let sql = format!(
-        r#"SELECT date_trunc('{trunc_unit}', bucket_time) as period,
-                  COALESCE(SUM(bytes_sent), 0)::bigint as bytes,
-                  COALESCE(SUM(nar_count), 0)::bigint as requests
-           FROM cache_metric
-           WHERE cache = $1
-             AND bucket_time > (NOW() AT TIME ZONE 'UTC') - INTERVAL '{interval}'
-           GROUP BY period
-           ORDER BY period"#,
+        r#"SELECT gs.period,
+                  COALESCE(SUM(cm.bytes_sent), 0)::bigint AS bytes,
+                  COALESCE(SUM(cm.nar_count),  0)::bigint AS requests
+           FROM generate_series(
+               date_trunc('{trunc_unit}', NOW() AT TIME ZONE 'UTC') - INTERVAL '{back_interval}',
+               date_trunc('{trunc_unit}', NOW() AT TIME ZONE 'UTC'),
+               INTERVAL '1 {trunc_unit}'
+           ) AS gs(period)
+           LEFT JOIN cache_metric cm
+               ON date_trunc('{trunc_unit}', cm.bucket_time) = gs.period
+              AND cm.cache = $1
+           GROUP BY gs.period
+           ORDER BY gs.period"#,
         trunc_unit = trunc_unit,
-        interval = interval,
+        back_interval = back_interval,
     );
 
     let rows = db
@@ -161,10 +168,10 @@ pub async fn get_cache_stats(
         .unwrap_or(0);
 
     let (minutes, hours, days, weeks) = tokio::try_join!(
-        aggregate_traffic(&state.db, cache.id, "minute", "60 minutes"),
-        aggregate_traffic(&state.db, cache.id, "hour", "24 hours"),
-        aggregate_traffic(&state.db, cache.id, "day", "30 days"),
-        aggregate_traffic(&state.db, cache.id, "week", "12 weeks"),
+        aggregate_traffic(&state.db, cache.id, "minute", "59 minutes"),
+        aggregate_traffic(&state.db, cache.id, "hour",   "23 hours"),
+        aggregate_traffic(&state.db, cache.id, "day",    "29 days"),
+        aggregate_traffic(&state.db, cache.id, "week",   "11 weeks"),
     )?;
 
     Ok(Json(BaseResponse {

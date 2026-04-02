@@ -17,21 +17,18 @@ use core::database::{get_any_cache_by_name, get_cache_by_name};
 use core::executer::get_pathinfo;
 use core::input::{check_index_name, validate_display_name};
 use core::sources::{
-    clear_key, format_cache_key, format_cache_public_key, generate_signing_key,
-    get_cache_nar_location, get_hash_from_url, get_path_from_build_output, sign_narinfo_fingerprint,
-    write_key,
+    format_cache_key, format_cache_public_key, generate_signing_key, get_cache_nar_compressed_location,
+    get_cache_nar_location, get_hash_from_url, get_path_from_build_output,
 };
 use core::types::*;
 use entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::{Deserialize, Serialize};
-use serde_json;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::process::Command;
-use tracing::{error, info, warn};
+use tracing::error;
 use uuid::Uuid;
 
 /// Extracts HTTP Basic Auth credentials and resolves them to a user.
@@ -1109,82 +1106,17 @@ pub async fn path(
 
     require_cache_auth(&headers, &state, &cache).await?;
 
-    let path_info =
-        match get_nar_by_hash(Arc::clone(&state), cache.clone(), path_hash.clone()).await {
-            Ok(path_info) => path_info,
-            Err(_) => {
-                // Check the local nix store first — the path may have been substituted
-                // during a previous narinfo request.
-                if let Some(local_path) = find_store_path_by_hash(&path_hash).await {
-                    match path_info_from_local_store(&state, &cache, &local_path).await
-                    {
-                        Ok(pi) => pi,
-                        Err(e) => {
-                            warn!(error = %e, hash = %path_hash, "path_info_from_local_store failed");
-                            return Err((
-                                StatusCode::NOT_FOUND,
-                                Json(BaseResponse {
-                                    error: true,
-                                    message: "Path not found".to_string(),
-                                }),
-                            ));
-                        }
-                    }
-                } else {
-                    // Try each readable external upstream in order.
-                    let upstreams = ECacheUpstream::find()
-                        .filter(CCacheUpstream::Cache.eq(cache.id))
-                        .all(&state.db)
-                        .await
-                        .unwrap_or_default();
-
-                    let mut upstream_result: Option<NixPathInfo> = None;
-                    for upstream in upstreams {
-                        if upstream.mode == CacheSubscriptionMode::WriteOnly {
-                            continue;
-                        }
-                        if let Some(ref url) = upstream.url {
-                            match substitute_from_external_upstream(
-                                &state,
-                                &cache,
-                                url,
-                                upstream.public_key.as_deref(),
-                                &path_hash,
-                            )
-                            .await
-                            {
-                                Ok(pi) => {
-                                    upstream_result = Some(pi);
-                                    break;
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        error = %e,
-                                        upstream = %url,
-                                        hash = %path_hash,
-                                        "Upstream substitution failed, trying next"
-                                    );
-                                }
-                            }
-                        }
-                        // Internal upstream (another Gradient cache) — TODO: implement
-                    }
-
-                    match upstream_result {
-                        Some(pi) => pi,
-                        None => {
-                            return Err((
-                                StatusCode::NOT_FOUND,
-                                Json(BaseResponse {
-                                    error: true,
-                                    message: "Path not found".to_string(),
-                                }),
-                            ));
-                        }
-                    }
-                }
-            }
-        };
+    let path_info = get_nar_by_hash(Arc::clone(&state), cache.clone(), path_hash.clone())
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Path not found".to_string(),
+                }),
+            )
+        })?;
 
     Response::builder()
         .status(StatusCode::OK)
@@ -1267,88 +1199,9 @@ pub async fn nar(
 
     require_cache_auth(&headers, &state, &cache).await?;
 
-    // Pull-through proxy: if this file hash was registered by substitute_from_external_upstream,
-    // fetch bytes directly from the upstream and record traffic — no local nix store involved.
-    if let Some(upstream_nar_url) = get_upstream_nar_proxy_map()
-        .lock()
-        .ok()
-        .and_then(|m| m.get(&path_hash).cloned())
-    {
-        let proxy_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(BaseResponse {
-                        error: true,
-                        message: format!("HTTP client error: {}", e),
-                    }),
-                )
-            })?;
-
-        let proxy_resp = proxy_client
-            .get(&upstream_nar_url)
-            .send()
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(BaseResponse {
-                        error: true,
-                        message: format!("Failed to fetch upstream NAR: {}", e),
-                    }),
-                )
-            })?;
-
-        if !proxy_resp.status().is_success() {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Upstream NAR not available".to_string(),
-                }),
-            ));
-        }
-
-        let nar_bytes = proxy_resp.bytes().await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: format!("Failed to read upstream NAR: {}", e),
-                }),
-            )
-        })?;
-
-        let bytes_len = nar_bytes.len() as i64;
-        let cache_id = cache.id;
-        let state_for_metric = Arc::clone(&state.0);
-        tokio::spawn(async move {
-            super::stats::record_nar_traffic(state_for_metric, cache_id, bytes_len).await;
-        });
-
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header(
-                header::CONTENT_TYPE,
-                HeaderValue::from_static("application/x-nix-nar"),
-            )
-            .body(Body::from(nar_bytes))
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(BaseResponse {
-                        error: true,
-                        message: format!("Failed to build response: {}", e),
-                    }),
-                )
-            });
-    }
-
-    // The URL now uses the file hash (nix32 of compressed content).
+    // The URL uses the file hash (nix32 of compressed content).
     // Resolve it to the store hash so we can locate the on-disk NAR or pack path.
-    let (effective_hash, upstream_store_path) = {
+    let effective_hash = {
         let by_file = EBuildOutput::find()
             .filter(
                 Condition::all()
@@ -1368,13 +1221,10 @@ pub async fn nar(
                 )
             })?;
         if let Some(output) = by_file {
-            (output.hash, None)
-        } else if let Some(sp) = get_upstream_map().lock().ok().and_then(|m| m.get(&path_hash).cloned()) {
-            let h = sp.trim_start_matches("/nix/store/").split('-').next().unwrap_or("").to_string();
-            (h, Some(sp))
+            output.hash
         } else {
-            // Fallback: treat path_hash as store hash (backward compatibility).
-            (path_hash.clone(), None)
+            // Fallback: path_hash may itself be a store hash (legacy / direct hash URLs).
+            path_hash.clone()
         }
     };
 
@@ -1389,9 +1239,33 @@ pub async fn nar(
             )
         })?;
 
-    let nar_bytes = if tokio::fs::metadata(&nar_file_path).await.is_ok() {
-        // Entry-point build: raw NAR is on disk — read and compress on the fly
-        tokio::fs::read(&nar_file_path).await.map_err(|e| {
+    let compressed_nar_path =
+        get_cache_nar_compressed_location(state.cli.base_path.clone(), effective_hash.clone())
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: format!("Failed to get compressed cache location: {}", e),
+                    }),
+                )
+            })?;
+
+    let compressed = if tokio::fs::metadata(&compressed_nar_path).await.is_ok() {
+        // Compressed NAR already cached on disk — serve directly.
+        tokio::fs::read(&compressed_nar_path).await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to read compressed NAR: {}", e),
+                }),
+            )
+        })?
+    } else if tokio::fs::metadata(&nar_file_path).await.is_ok() {
+        // Entry-point: raw NAR on disk — compress on the fly (no disk write needed,
+        // entry-points are GC-rooted and always available).
+        let nar_bytes = tokio::fs::read(&nar_file_path).await.map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(BaseResponse {
@@ -1399,9 +1273,13 @@ pub async fn nar(
                     message: format!("Failed to read NAR file: {}", e),
                 }),
             )
-        })?
+        })?;
+        tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_bytes, 3))
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Compression task panicked: {}", e) })))?
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Failed to compress NAR: {}", e) })))?
     } else {
-        // Try to find a DB record for a locally-built (cached) output.
+        // Non-entry-point: pack from the nix store on the fly.
         let maybe_output = EBuildOutput::find()
             .filter(
                 Condition::all()
@@ -1421,26 +1299,16 @@ pub async fn nar(
                 )
             })?;
 
-        let pack_path: String = if let Some(build_output) = maybe_output {
-            // Non-entry-point build: pack from the nix store path in the DB record.
-            get_path_from_build_output(build_output)
-        } else if let Some(sp) = upstream_store_path {
-            // Upstream-substituted path resolved from the file-hash map.
-            sp
+        let pack_path = if let Some(ref bo) = maybe_output {
+            get_path_from_build_output(bo.clone())
         } else {
-            // Scan the local nix store for a matching path.
-            match find_store_path_by_hash(&effective_hash).await {
-                Some(p) => p,
-                None => {
-                    return Err((
-                        StatusCode::NOT_FOUND,
-                        Json(BaseResponse {
-                            error: true,
-                            message: "Path not found".to_string(),
-                        }),
-                    ));
-                }
-            }
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Path not found".to_string(),
+                }),
+            ));
         };
 
         let output = Command::new(state.cli.binpath_nix.clone())
@@ -1469,29 +1337,24 @@ pub async fn nar(
             ));
         }
 
-        output.stdout
-    };
+        let nar_bytes = output.stdout;
+        let compressed_path_clone = compressed_nar_path.clone();
+        let compressed =
+            tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_bytes, 3))
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Compression task panicked: {}", e) })))?
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Failed to compress NAR: {}", e) })))?;
 
-    let compressed = tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_bytes, 3))
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: format!("Compression task panicked: {}", e),
-                }),
-            )
-        })?
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: format!("Failed to compress NAR: {}", e),
-                }),
-            )
-        })?;
+        // Persist compressed NAR so future requests skip the pack step.
+        let to_write = compressed.clone();
+        tokio::spawn(async move {
+            if let Err(e) = tokio::fs::write(&compressed_path_clone, &to_write).await {
+                tracing::warn!(error = %e, path = %compressed_path_clone, "Failed to write compressed NAR cache");
+            }
+        });
+
+        compressed
+    };
 
     let bytes_len = compressed.len() as i64;
     let cache_id = cache.id;
@@ -1499,6 +1362,27 @@ pub async fn nar(
     tokio::spawn(async move {
         super::stats::record_nar_traffic(state_for_metric, cache_id, bytes_len).await;
     });
+
+    // Update last_fetched_at for the served build_output (fire-and-forget).
+    {
+        let state_for_fetch = Arc::clone(&state.0);
+        let hash = effective_hash.clone();
+        tokio::spawn(async move {
+            use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+            let now = chrono::Utc::now().naive_utc();
+            let _ = state_for_fetch
+                .db
+                .execute(Statement::from_sql_and_values(
+                    DatabaseBackend::Postgres,
+                    "UPDATE build_output SET last_fetched_at = $1 WHERE hash = $2 AND is_cached = true",
+                    [
+                        sea_orm::Value::ChronoDateTimeUtc(Some(Box::new(chrono::DateTime::from_naive_utc_and_offset(now, chrono::Utc)))),
+                        sea_orm::Value::String(Some(Box::new(hash))),
+                    ],
+                ))
+                .await;
+        });
+    }
 
     Response::builder()
         .status(StatusCode::OK)
@@ -1518,7 +1402,7 @@ pub async fn nar(
         })
 }
 
-// ── Nix base-32 SHA-256 (mirrors the implementation in cache/src/cacher.rs) ──
+// ── Nix helpers ───────────────────────────────────────────────────────────────
 
 fn nix32_encode(bytes: &[u8]) -> String {
     const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
@@ -1536,11 +1420,6 @@ fn nix32_encode(bytes: &[u8]) -> String {
     out
 }
 
-fn nix_base32_sha256(data: &[u8]) -> String {
-    let hash: [u8; 32] = Sha256::digest(data).into();
-    nix32_encode(&hash)
-}
-
 /// Converts any NarHash string (SRI `sha256-{base64}`, nix32 `sha256:{nix32}`, or bare hex)
 /// to the narinfo wire format `sha256:{nix32}`.
 fn normalize_nar_hash(hash: &str) -> String {
@@ -1552,355 +1431,6 @@ fn normalize_nar_hash(hash: &str) -> String {
     hash.to_string()
 }
 
-// ── File-hash → store-path map for upstream-substituted paths ─────────────────
-
-use std::sync::OnceLock;
-
-fn get_upstream_map() -> &'static std::sync::Mutex<HashMap<String, String>> {
-    static MAP: OnceLock<std::sync::Mutex<HashMap<String, String>>> = OnceLock::new();
-    MAP.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
-}
-
-/// Maps `file_hash_nix32 → full upstream NAR URL` for pull-through paths that are
-/// served by proxying the upstream directly (no local nix store involvement).
-fn get_upstream_nar_proxy_map() -> &'static std::sync::Mutex<HashMap<String, String>> {
-    static PROXY_MAP: OnceLock<std::sync::Mutex<HashMap<String, String>>> = OnceLock::new();
-    PROXY_MAP.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
-}
-
-// ── Upstream pull-through helpers ─────────────────────────────────────────────
-
-/// Scans `/nix/store` for a path whose hash prefix matches `hash`.
-/// Returns the full store path (e.g. `/nix/store/{hash}-{name}`) if found.
-async fn find_store_path_by_hash(hash: &str) -> Option<String> {
-    let prefix = format!("{}-", hash);
-    let mut dir = tokio::fs::read_dir("/nix/store").await.ok()?;
-    while let Ok(Some(entry)) = dir.next_entry().await {
-        let name = entry.file_name();
-        let s = name.to_string_lossy();
-        if s.starts_with(&prefix) {
-            return Some(entry.path().to_string_lossy().into_owned());
-        }
-    }
-    None
-}
-
-/// Signs `store_path` with the cache's private key and returns the full signature token
-/// (`{key_name}:{base64}`) ready to embed in a narinfo `Sig:` field.
-async fn sign_and_get_sig(
-    state: &ServerState,
-    cache: &MCache,
-    store_path: &str,
-) -> Result<String, WebError> {
-    let secret_key = format_cache_key(
-        state.cli.crypt_secret_file.clone(),
-        cache.clone(),
-        state.cli.serve_url.clone(),
-    )
-    .map_err(|e| {
-        WebError::InternalServerError(format!("Failed to format cache key: {}", e))
-    })?;
-
-    let key_file = write_key(secret_key.clone()).map_err(|e| {
-        WebError::InternalServerError(format!("Failed to write key file: {}", e))
-    })?;
-
-    let sign_out = Command::new(&state.cli.binpath_nix)
-        .arg("store")
-        .arg("sign")
-        .arg("-k")
-        .arg(&key_file)
-        .arg(store_path)
-        .output()
-        .await
-        .map_err(|e| {
-            WebError::InternalServerError(format!("Failed to run nix store sign: {}", e))
-        })?;
-
-    let _ = clear_key(key_file);
-
-    if !sign_out.status.success() {
-        return Err(WebError::InternalServerError(format!(
-            "nix store sign failed: {}",
-            String::from_utf8_lossy(&sign_out.stderr)
-        )));
-    }
-
-    let sigs_out = Command::new(&state.cli.binpath_nix)
-        .arg("path-info")
-        .arg("--sigs")
-        .arg(store_path)
-        .output()
-        .await
-        .map_err(|e| {
-            WebError::InternalServerError(format!("nix path-info --sigs failed: {}", e))
-        })?;
-
-    let signatures = String::from_utf8_lossy(&sigs_out.stdout);
-    let key_name = secret_key.split(':').next().unwrap_or(&cache.name);
-
-    for token in signatures.split_whitespace() {
-        if token.starts_with(&format!("{}:", key_name)) {
-            return Ok(token.trim().to_string());
-        }
-    }
-
-    Err(WebError::InternalServerError(
-        "Signature not found after signing".to_string(),
-    ))
-}
-
-/// Builds a `NixPathInfo` for a path already in the local nix store.
-/// Queries metadata via `nix path-info --json`, packs + compresses to compute file stats,
-/// then signs with the cache's key.
-async fn path_info_from_local_store(
-    state: &Arc<ServerState>,
-    cache: &MCache,
-    store_path: &str,
-) -> Result<NixPathInfo, WebError> {
-    let json_out = Command::new(&state.cli.binpath_nix)
-        .arg("path-info")
-        .arg("--json")
-        .arg(store_path)
-        .output()
-        .await
-        .map_err(|e| {
-            WebError::InternalServerError(format!("nix path-info --json failed: {}", e))
-        })?;
-
-    if !json_out.status.success() {
-        return Err(WebError::InternalServerError(format!(
-            "nix path-info failed: {}",
-            String::from_utf8_lossy(&json_out.stderr)
-        )));
-    }
-
-    let json: serde_json::Value = serde_json::from_slice(&json_out.stdout).map_err(|e| {
-        WebError::InternalServerError(format!("Failed to parse path-info JSON: {}", e))
-    })?;
-
-    // Newer nix returns an array; older nix returns an object keyed by store path.
-    let info = json
-        .as_object()
-        .and_then(|obj| obj.get(store_path).cloned())
-        .or_else(|| {
-            json.as_array().and_then(|arr| {
-                arr.iter()
-                    .find(|v| v.get("path").and_then(|p| p.as_str()) == Some(store_path))
-                    .cloned()
-            })
-        })
-        .ok_or_else(|| {
-            WebError::InternalServerError(format!(
-                "Store path {} not found in nix path-info output",
-                store_path
-            ))
-        })?;
-
-    let nar_hash = normalize_nar_hash(
-        info.get("narHash")
-            .and_then(|v| v.as_str())
-            .unwrap_or(""),
-    );
-    let nar_size = info.get("narSize").and_then(|v| v.as_u64()).unwrap_or(0);
-    let references: Vec<String> = info
-        .get("references")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|r| r.as_str())
-                .map(|s| s.strip_prefix("/nix/store/").unwrap_or(s).to_string())
-                .collect()
-        })
-        .unwrap_or_default();
-    let deriver = info
-        .get("deriver")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.strip_prefix("/nix/store/").unwrap_or(s).to_string());
-    let ca = info
-        .get("ca")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-
-    // Pack the NAR and compress to get file_hash / file_size.
-    let pack_out = Command::new(&state.cli.binpath_nix)
-        .arg("nar")
-        .arg("pack")
-        .arg(store_path)
-        .output()
-        .await
-        .map_err(|e| WebError::InternalServerError(format!("nix nar pack failed: {}", e)))?;
-
-    if !pack_out.status.success() {
-        return Err(WebError::InternalServerError(format!(
-            "nix nar pack failed: {}",
-            String::from_utf8_lossy(&pack_out.stderr)
-        )));
-    }
-
-    let stdout = pack_out.stdout;
-    let compressed = tokio::task::spawn_blocking(move || zstd::bulk::compress(&stdout, 3))
-        .await
-        .map_err(|e| WebError::InternalServerError(format!("Compression task panicked: {}", e)))?
-        .map_err(|e| WebError::InternalServerError(format!("zstd compression failed: {}", e)))?;
-
-    let file_size = compressed.len() as u32;
-    let file_hash_nix32 = nix_base32_sha256(&compressed);
-    let file_hash = format!("sha256:{}", file_hash_nix32);
-    let sig = sign_and_get_sig(state, cache, store_path).await?;
-
-    // Store file-hash → store-path mapping so the nar handler can resolve it.
-    if let Ok(mut map) = get_upstream_map().lock() {
-        map.insert(file_hash_nix32.clone(), store_path.to_string());
-    }
-
-    Ok(NixPathInfo {
-        store_path: store_path.to_string(),
-        url: format!("nar/{}.nar.zst", file_hash_nix32),
-        compression: "zstd".to_string(),
-        file_hash,
-        file_size,
-        nar_hash,
-        nar_size,
-        references,
-        deriver,
-        sig,
-        ca,
-    })
-}
-
-/// Fetches the narinfo from an external upstream, signs it with the cache's own key,
-/// and registers the NAR URL for HTTP proxying — without touching the local nix store.
-///
-/// This keeps pull-through traffic out of `total_stored` while still recording it in
-/// the traffic metrics when the NAR is actually served.
-async fn substitute_from_external_upstream(
-    state: &Arc<ServerState>,
-    cache: &MCache,
-    upstream_url: &str,
-    _trusted_public_key: Option<&str>,
-    hash: &str,
-) -> Result<NixPathInfo, WebError> {
-    let narinfo_url = format!(
-        "{}/{}.narinfo",
-        upstream_url.trim_end_matches('/'),
-        hash
-    );
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| {
-            WebError::InternalServerError(format!("Failed to build HTTP client: {}", e))
-        })?;
-
-    let resp = client
-        .get(&narinfo_url)
-        .send()
-        .await
-        .map_err(|_| WebError::not_found("Path"))?;
-
-    if !resp.status().is_success() {
-        return Err(WebError::not_found("Path"));
-    }
-
-    let narinfo_text = resp.text().await.map_err(|e| {
-        WebError::InternalServerError(format!("Failed to read upstream narinfo: {}", e))
-    })?;
-
-    // Helper: extract a single-line field value.
-    fn field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
-        let prefix = format!("{}: ", key);
-        text.lines()
-            .find(|l| l.starts_with(&prefix))
-            .and_then(|l| l.split_once(": ").map(|x| x.1))
-            .map(|s| s.trim())
-    }
-
-    let store_path = field(&narinfo_text, "StorePath")
-        .ok_or_else(|| WebError::InternalServerError("No StorePath in upstream narinfo".to_string()))?
-        .to_string();
-    let nar_hash_raw = field(&narinfo_text, "NarHash")
-        .ok_or_else(|| WebError::InternalServerError("No NarHash in upstream narinfo".to_string()))?
-        .to_string();
-    let nar_size: u64 = field(&narinfo_text, "NarSize")
-        .and_then(|s| s.parse().ok())
-        .ok_or_else(|| WebError::InternalServerError("No NarSize in upstream narinfo".to_string()))?;
-    let upstream_nar_rel = field(&narinfo_text, "URL")
-        .ok_or_else(|| WebError::InternalServerError("No URL in upstream narinfo".to_string()))?
-        .to_string();
-    let file_hash_raw = field(&narinfo_text, "FileHash")
-        .ok_or_else(|| WebError::InternalServerError("No FileHash in upstream narinfo".to_string()))?
-        .to_string();
-    let file_size: u64 = field(&narinfo_text, "FileSize")
-        .and_then(|s| s.parse().ok())
-        .ok_or_else(|| WebError::InternalServerError("No FileSize in upstream narinfo".to_string()))?;
-    let compression = field(&narinfo_text, "Compression").unwrap_or("xz").to_string();
-
-    let references: Vec<String> = narinfo_text
-        .lines()
-        .find(|l| l.starts_with("References: "))
-        .map(|l| l["References: ".len()..].trim().to_string())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.split_whitespace().map(|r| r.to_string()).collect())
-        .unwrap_or_default();
-
-    let deriver = field(&narinfo_text, "Deriver")
-        .filter(|s| !s.is_empty() && *s != "unknown-deriver")
-        .map(|s| s.to_string());
-    let ca = field(&narinfo_text, "CA").map(|s| s.to_string());
-
-    let nar_hash = normalize_nar_hash(&nar_hash_raw);
-
-    // Sign narinfo fingerprint with our own key — no nix store involvement.
-    let sig = sign_narinfo_fingerprint(
-        state.cli.crypt_secret_file.clone(),
-        cache.clone(),
-        state.cli.serve_url.clone(),
-        &store_path,
-        &nar_hash,
-        nar_size,
-        &references,
-    )
-    .map_err(|e| WebError::InternalServerError(format!("Failed to sign narinfo: {}", e)))?;
-
-    // Build full upstream NAR URL.
-    let full_upstream_nar_url = if upstream_nar_rel.starts_with("http://")
-        || upstream_nar_rel.starts_with("https://")
-    {
-        upstream_nar_rel.clone()
-    } else {
-        format!("{}/{}", upstream_url.trim_end_matches('/'), upstream_nar_rel)
-    };
-
-    let file_hash_nix32 = file_hash_raw.trim_start_matches("sha256:").to_string();
-
-    // Register file-hash → upstream NAR URL so the nar handler can proxy it directly.
-    if let Ok(mut map) = get_upstream_nar_proxy_map().lock() {
-        map.insert(file_hash_nix32.clone(), full_upstream_nar_url);
-    }
-
-    info!(
-        store_path = %store_path,
-        upstream = %upstream_url,
-        "Pull-through: registered upstream NAR proxy"
-    );
-
-    Ok(NixPathInfo {
-        store_path,
-        url: format!("nar/{}.nar.{}", file_hash_nix32, compression),
-        compression,
-        file_hash: file_hash_raw,
-        file_size: file_size as u32,
-        nar_hash,
-        nar_size,
-        references,
-        deriver,
-        sig,
-        ca,
-    })
-}
 
 // ── Upstream caches ───────────────────────────────────────────────────────────
 

@@ -25,6 +25,7 @@ pub struct Model {
     pub has_artefacts: bool,
     pub ca: Option<String>,
     pub created_at: NaiveDateTime,
+    pub last_fetched_at: Option<NaiveDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

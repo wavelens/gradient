@@ -456,6 +456,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                         has_artefacts: Set(has_artefacts),
                         ca: Set(None),
                         created_at: Set(Utc::now().naive_utc()),
+                        last_fetched_at: Set(None),
                     });
                 }
 

@@ -40,6 +40,7 @@ mod m20260330_000000_add_has_artefacts_to_build_output;
 mod m20260401_000000_create_table_cache_metric;
 mod m20260401_000001_add_mode_to_organization_cache;
 mod m20260401_000002_create_table_cache_upstream;
+mod m20260402_000000_add_last_fetched_at_to_build_output;
 
 pub struct Migrator;
 
@@ -81,6 +82,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260401_000000_create_table_cache_metric::Migration),
             Box::new(m20260401_000001_add_mode_to_organization_cache::Migration),
             Box::new(m20260401_000002_create_table_cache_upstream::Migration),
+            Box::new(m20260402_000000_add_last_fetched_at_to_build_output::Migration),
         ]
     }
 }
