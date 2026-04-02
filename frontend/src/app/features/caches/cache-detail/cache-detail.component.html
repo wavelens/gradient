@@ -128,6 +128,22 @@ trusted-public-keys = &lt;unavailable&gt;</pre>
             }
           </div>
         </div>
+
+        @if (!c.public) {
+          <div class="usage-divider"></div>
+          <h3 class="usage-section-title">Authentication</h3>
+          <p class="text-secondary">This cache is private. Run the following command as root to install the credentials Nix needs to access it:</p>
+          <div class="usage-row">
+            <span class="usage-label">Install netrc</span>
+            <div class="code-block multiline">
+              <pre>{{ installNetrcCommand }}</pre>
+              <button class="copy-btn" (click)="copy(installNetrcCommand, 'netrc')" [title]="copied() === 'netrc' ? 'Copied!' : 'Copy'">
+                <span class="material-symbols-outlined">{{ copied() === 'netrc' ? 'check' : 'content_copy' }}</span>
+              </button>
+            </div>
+          </div>
+          <p class="text-secondary usage-hint">Replace <code>&lt;YOUR_TOKEN&gt;</code> with your API key or login token. The command writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon can authenticate against this cache.</p>
+        }
       </div>
     </div>
 

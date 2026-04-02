@@ -63,6 +63,11 @@ export class CacheDetailComponent implements OnInit {
 
   cacheName = '';
   cacheUrl = '';
+  serverUrl = '';
+
+  get installNetrcCommand(): string {
+    return `nix run wavelens/gradient#gradient-cli -- cache install-netrc --server ${this.serverUrl} --token <YOUR_TOKEN> --cache ${this.cacheName}`;
+  }
 
   readonly windows: { key: Window; label: string }[] = [
     { key: 'minutes', label: 'Minutes' },
@@ -159,7 +164,8 @@ export class CacheDetailComponent implements OnInit {
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
-    this.cacheUrl = `${window.location.origin}/cache/${this.cacheName}`;
+    this.serverUrl = window.location.origin;
+    this.cacheUrl = `${this.serverUrl}/cache/${this.cacheName}`;
     this.loadCache();
     this.loadStats();
   }

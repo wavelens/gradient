@@ -6016,6 +6016,7 @@ dependencies = [
  "axum",
  "axum-streams",
  "axum-test",
+ "base64",
  "builder",
  "bytes",
  "chrono",

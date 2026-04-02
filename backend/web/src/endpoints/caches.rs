@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::authorization::MaybeUser;
+use crate::authorization::{MaybeUser, decode_jwt, generate_api_key};
 use crate::error::{WebError, WebResult};
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Response;
 use axum::{Extension, Json};
+use base64::Engine;
 use chrono::{NaiveDateTime, Utc};
 use core::database::{get_any_cache_by_name, get_cache_by_name};
 use core::executer::{get_local_store, get_pathinfo};
@@ -31,6 +32,78 @@ use std::sync::Arc;
 use tokio::process::Command;
 use tracing::{error, info, warn};
 use uuid::Uuid;
+
+/// Extracts HTTP Basic Auth credentials and resolves them to a user.
+/// The password field is treated as a JWT or API key (the username is ignored).
+async fn try_authenticate_basic(headers: &HeaderMap, state: &Arc<ServerState>) -> Option<MUser> {
+    let auth = headers.get(axum::http::header::AUTHORIZATION)?;
+    let val = auth.to_str().ok()?;
+    let encoded = val.strip_prefix("Basic ")?;
+    let decoded = base64::engine::general_purpose::STANDARD.decode(encoded).ok()?;
+    let creds = String::from_utf8(decoded).ok()?;
+    let password = creds.split_once(':').map(|(_, p)| p)?.to_string();
+    let token_data = decode_jwt(State(Arc::clone(state)), password).await.ok()?;
+    EUser::find_by_id(token_data.claims.id)
+        .one(&state.db)
+        .await
+        .ok()
+        .flatten()
+}
+
+/// Returns true if `user` is allowed to read `cache`.
+/// Access is granted when the user is the cache owner or belongs to any
+/// organization that subscribes to the cache.
+async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &MUser) -> bool {
+    if cache.created_by == user.id {
+        return true;
+    }
+
+    let org_ids: Vec<Uuid> = EOrganizationUser::find()
+        .filter(COrganizationUser::User.eq(user.id))
+        .all(&state.db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|ou| ou.organization)
+        .collect();
+
+    if org_ids.is_empty() {
+        return false;
+    }
+
+    EOrganizationCache::find()
+        .filter(COrganizationCache::Cache.eq(cache.id))
+        .filter(COrganizationCache::Organization.is_in(org_ids))
+        .one(&state.db)
+        .await
+        .unwrap_or(None)
+        .is_some()
+}
+
+/// Checks authorization for a private cache request.
+/// Returns `Ok(())` if the cache is public or if valid credentials grant access.
+/// Returns `Err(401)` with a `WWW-Authenticate: Basic` challenge otherwise.
+async fn require_cache_auth(
+    headers: &HeaderMap,
+    state: &Arc<ServerState>,
+    cache: &MCache,
+) -> Result<(), (StatusCode, Json<BaseResponse<String>>)> {
+    if cache.public {
+        return Ok(());
+    }
+
+    let maybe_user = try_authenticate_basic(headers, state).await;
+    match maybe_user {
+        Some(user) if user_can_access_cache(state, cache, &user).await => Ok(()),
+        _ => Err((
+            StatusCode::UNAUTHORIZED,
+            Json(BaseResponse {
+                error: true,
+                message: "Authentication required to access this cache".to_string(),
+            }),
+        )),
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct MakeCacheRequest {
@@ -869,8 +942,77 @@ pub async fn get_cache_public_key(
     }))
 }
 
+/// Returns a `.netrc` snippet for authenticating Nix against this cache.
+///
+/// Format:
+/// ```text
+/// machine <host>
+/// login gradient
+/// password GRAD<api_key>
+/// ```
+///
+/// A dedicated API key named `netrc-<cache>` is created on first call and reused
+/// on subsequent calls, so the returned credentials stay stable.
+pub async fn get_cache_netrc(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path(cache): Path<String>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let cache = get_any_cache_by_name(state.0.clone(), cache.clone())
+        .await?
+        .ok_or_else(|| WebError::not_found("Cache"))?;
+
+    if !cache.public && !user_can_access_cache(&state, &cache, &user).await {
+        return Err(WebError::not_found("Cache"));
+    }
+
+    let key_name = format!("netrc-{}", cache.name);
+
+    let raw_key = match EApi::find()
+        .filter(CApi::OwnedBy.eq(user.id))
+        .filter(CApi::Name.eq(key_name.clone()))
+        .one(&state.db)
+        .await?
+    {
+        Some(existing) => existing.key,
+        None => {
+            let new_key = generate_api_key();
+            AApi {
+                id: Set(Uuid::new_v4()),
+                owned_by: Set(user.id),
+                name: Set(key_name),
+                key: Set(new_key.clone()),
+                last_used_at: Set(Utc::now().naive_utc()),
+                created_at: Set(Utc::now().naive_utc()),
+                managed: Set(false),
+            }
+            .insert(&state.db)
+            .await?;
+            new_key
+        }
+    };
+
+    let host = state
+        .cli
+        .serve_url
+        .replace("https://", "")
+        .replace("http://", "")
+        .split('/')
+        .next()
+        .unwrap_or("localhost")
+        .to_string();
+
+    let netrc = format!("machine {}\nlogin gradient\npassword GRAD{}\n", host, raw_key);
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: netrc,
+    }))
+}
+
 pub async fn nix_cache_info(
     state: State<Arc<ServerState>>,
+    headers: HeaderMap,
     Path(cache): Path<String>,
 ) -> Result<Response<String>, (StatusCode, Json<BaseResponse<String>>)> {
     let cache: MCache = match ECache::find()
@@ -909,6 +1051,8 @@ pub async fn nix_cache_info(
         ));
     }
 
+    require_cache_auth(&headers, &state, &cache).await?;
+
     let res = NixCacheInfo {
         want_mass_query: true,
         store_dir: "/nix/store".to_string(),
@@ -935,6 +1079,7 @@ pub async fn nix_cache_info(
 
 pub async fn path(
     state: State<Arc<ServerState>>,
+    headers: HeaderMap,
     Path((cache, path)): Path<(String, String)>,
 ) -> Result<Response<String>, (StatusCode, Json<BaseResponse<String>>)> {
     let path_hash = get_hash_from_url(path.clone()).map_err(|e| {
@@ -992,6 +1137,8 @@ pub async fn path(
             }),
         ));
     }
+
+    require_cache_auth(&headers, &state, &cache).await?;
 
     let path_info =
         match get_nar_by_hash(Arc::clone(&state), cache.clone(), path_hash.clone()).await {
@@ -1090,6 +1237,7 @@ pub async fn path(
 
 pub async fn nar(
     state: State<Arc<ServerState>>,
+    headers: HeaderMap,
     Path((cache, path)): Path<(String, String)>,
 ) -> Result<Response, (StatusCode, Json<BaseResponse<String>>)> {
     let path_hash = get_hash_from_url(path.clone()).map_err(|e| {
@@ -1147,6 +1295,8 @@ pub async fn nar(
             }),
         ));
     }
+
+    require_cache_auth(&headers, &state, &cache).await?;
 
     let nar_file_path = get_cache_nar_location(state.cli.base_path.clone(), path_hash.clone())
         .map_err(|e| {

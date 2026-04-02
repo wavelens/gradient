@@ -9,6 +9,7 @@ use crate::input::*;
 use clap::{Subcommand, arg};
 use connector::*;
 use std::process::exit;
+use std::fs;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -37,6 +38,23 @@ pub enum Commands {
     },
     Show {
         name: String,
+    },
+    /// Fetch the netrc credentials for a cache and install them into a netrc file.
+    /// Credentials are passed directly as flags — no config.toml is read or written.
+    /// Intended to be run as root (e.g. sudo) to install into /etc/nix/netrc.
+    InstallNetrc {
+        /// Gradient server URL (e.g. https://gradient.example.com)
+        #[arg(short, long)]
+        server: String,
+        /// Bearer token (JWT or API key) used to authenticate the request
+        #[arg(short, long)]
+        token: String,
+        /// Name of the cache whose netrc credentials to install
+        #[arg(short, long)]
+        cache: String,
+        /// Path to the netrc file to update (default: /etc/nix/netrc)
+        #[arg(short = 'f', long, default_value = "/etc/nix/netrc")]
+        netrc_file: String,
     },
 }
 
@@ -196,5 +214,79 @@ pub async fn handle(cmd: Commands) {
 
             println!("Cache Public Key: {:?}", res.message);
         }
+
+        Commands::InstallNetrc { server, token, cache, netrc_file } => {
+            let config = RequestConfig { server_url: server, token: Some(token) };
+
+            let res = caches::get_cache_netrc(config, cache.clone())
+                .await
+                .map_err(|e| {
+                    eprintln!("{}", e);
+                    exit(1);
+                })
+                .unwrap();
+
+            if res.error {
+                eprintln!("Failed to fetch netrc for cache '{}': {}", cache, res.message);
+                exit(1);
+            }
+
+            let new_entry = res.message;
+
+            // Extract the machine hostname from "machine <host>\n..."
+            let machine_host = new_entry
+                .lines()
+                .find(|l| l.starts_with("machine "))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .unwrap_or("");
+
+            // Read existing netrc, removing any stale entry for this machine.
+            let existing = fs::read_to_string(&netrc_file).unwrap_or_default();
+            let filtered = remove_netrc_entry(&existing, machine_host);
+
+            let updated = if filtered.ends_with('\n') || filtered.is_empty() {
+                format!("{}{}", filtered, new_entry)
+            } else {
+                format!("{}\n{}", filtered, new_entry)
+            };
+
+            // Ensure parent directory exists.
+            if let Some(parent) = std::path::Path::new(&netrc_file).parent() {
+                if let Err(e) = fs::create_dir_all(parent) {
+                    eprintln!("Failed to create directory '{}': {}", parent.display(), e);
+                    exit(1);
+                }
+            }
+
+            fs::write(&netrc_file, &updated).unwrap_or_else(|e| {
+                eprintln!("Failed to write '{}': {}", netrc_file, e);
+                exit(1);
+            });
+
+            println!("netrc credentials for '{}' installed into '{}'.", cache, netrc_file);
+        }
     }
+}
+
+/// Remove all lines belonging to a `machine <host>` block from a netrc file's contents.
+/// A block ends at the next `machine` line or end of file.
+fn remove_netrc_entry(contents: &str, host: &str) -> String {
+    if host.is_empty() {
+        return contents.to_string();
+    }
+
+    let mut result = String::new();
+    let mut skip = false;
+
+    for line in contents.lines() {
+        if line.starts_with("machine ") {
+            skip = line.split_whitespace().nth(1) == Some(host);
+        }
+        if !skip {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+
+    result
 }

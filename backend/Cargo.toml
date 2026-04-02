@@ -23,6 +23,7 @@ web       = { path = "web" }
 
 # External
 anyhow           = "1.0"
+base64           = "0.22"
 async-stream     = "0.3"
 git2             = "0.20"
 async-trait      = "0.1"

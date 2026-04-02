@@ -2180,6 +2180,191 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /caches/{cache}/netrc:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [caches]
+      summary: Get netrc credentials for cache
+      description: |-
+        Returns a `.netrc` snippet that Nix can use to authenticate against a private cache.
+
+        Format:
+        ```
+        machine <host>
+        login gradient
+        password GRAD<api_key>
+        ```
+
+        A dedicated API key named `netrc-<cache>` is created on first call and reused on
+        subsequent calls, so the returned credentials remain stable. The password is accepted
+        as HTTP Basic Auth by the cache-serving endpoints (`/cache/{cache}/...`).
+
+        Intended usage (as root, so Nix daemon can read the file):
+        ```
+        sudo gradient cache install-netrc --server https://gradient.example.com \
+          --token $TOKEN --cache my-cache
+        ```
+      operationId: getCacheNetrc
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: netrc snippet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+              example:
+                error: false
+                message: "machine gradient.example.com\nlogin gradient\npassword GRADabcdef...\n"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/stats:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [caches]
+      summary: Get cache statistics
+      description: Returns bandwidth and hit statistics for the cache.
+      operationId: getCacheStats
+      responses:
+        '200':
+          description: Cache statistics
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/CacheStats'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/upstreams:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [caches]
+      summary: List upstream caches
+      description: Returns all upstream caches configured for this cache (both internal Gradient caches and external binary caches).
+      operationId: listCacheUpstreams
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of upstream entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/CacheUpstream'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [caches]
+      summary: Add upstream cache
+      description: |-
+        Adds an upstream cache. Two types are supported:
+
+        - **internal** — another Gradient-managed cache (referenced by name). Supports ReadOnly / ReadWrite / WriteOnly modes.
+        - **external** — an arbitrary Nix binary cache URL. Always ReadOnly.
+      operationId: addCacheUpstream
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddUpstreamRequest'
+      responses:
+        '200':
+          description: Upstream added — returns the new upstream UUID
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: string
+                        format: uuid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/upstreams/{id}:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Upstream entry UUID
+    patch:
+      tags: [caches]
+      summary: Update upstream cache
+      description: |-
+        Updates an upstream entry. For external upstreams the mode is always forced to ReadOnly;
+        `url` and `public_key` may be updated. For internal upstreams only `mode` and `display_name` apply.
+      operationId: patchCacheUpstream
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchUpstreamRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [caches]
+      summary: Remove upstream cache
+      operationId: deleteCacheUpstream
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Commits ──────────────────────────────────────────────────────────────────
 
   /commits/{commit}:
@@ -3292,6 +3477,106 @@ components:
         created_at:
           type: string
           format: date-time
+
+    CacheStats:
+      type: object
+      properties:
+        nar_bytes_served:
+          type: integer
+          format: int64
+          description: Total compressed bytes served from this cache
+        hits:
+          type: integer
+          format: int64
+          description: Number of successful narinfo / NAR requests
+
+    CacheUpstream:
+      type: object
+      required: [id, display_name, mode]
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        mode:
+          type: string
+          enum: [read_only, read_write, write_only]
+          description: How this cache uses the upstream
+        upstream_cache_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set for internal (Gradient-managed) upstreams
+        url:
+          type: string
+          format: uri
+          nullable: true
+          description: Set for external upstream binary caches
+        public_key:
+          type: string
+          nullable: true
+          description: Nix-format public key used to verify signatures from the external upstream
+
+    AddUpstreamRequest:
+      oneOf:
+        - title: Internal upstream
+          type: object
+          required: [type, cache_name]
+          properties:
+            type:
+              type: string
+              enum: [internal]
+            cache_name:
+              type: string
+              description: Name of the Gradient-managed cache to use as upstream
+            display_name:
+              type: string
+              nullable: true
+            mode:
+              type: string
+              enum: [read_only, read_write, write_only]
+              nullable: true
+              description: Defaults to read_write
+        - title: External upstream
+          type: object
+          required: [type, display_name, url, public_key]
+          properties:
+            type:
+              type: string
+              enum: [external]
+            display_name:
+              type: string
+            url:
+              type: string
+              format: uri
+              description: URL of the external Nix binary cache
+              example: https://cache.nixos.org
+            public_key:
+              type: string
+              description: Nix-format public key for signature verification
+              example: "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+
+    PatchUpstreamRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+          nullable: true
+        mode:
+          type: string
+          enum: [read_only, read_write, write_only]
+          nullable: true
+          description: Only applies to internal upstreams; external upstreams are always read_only
+        url:
+          type: string
+          format: uri
+          nullable: true
+          description: Only applies to external upstreams
+        public_key:
+          type: string
+          nullable: true
+          description: Only applies to external upstreams
 
     # ── Commits ───────────────────────────────────────────────────────────────
 

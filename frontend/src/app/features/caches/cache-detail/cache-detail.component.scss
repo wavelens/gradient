@@ -338,4 +338,22 @@
       .material-symbols-outlined { font-size: 16px; }
     }
   }
+
+  .usage-divider {
+    border: none;
+    border-top: 1px solid $color-border;
+    margin: $spacing-lg 0;
+  }
+
+  .usage-section-title {
+    font-size: $font-size-md;
+    font-weight: 600;
+    color: $text-primary;
+    margin: 0 0 $spacing-sm 0;
+  }
+
+  .usage-hint {
+    margin-top: $spacing-sm;
+    font-size: $font-size-xs;
+  }
 }

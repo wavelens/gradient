@@ -154,6 +154,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             post(caches::post_cache_public).delete(caches::delete_cache_public),
         )
         .route("/caches/{cache}/key", get(caches::get_cache_key))
+        .route("/caches/{cache}/netrc", get(caches::get_cache_netrc))
         .route(
             "/caches/{cache}/upstreams",
             get(caches::get_cache_upstreams).put(caches::put_cache_upstream),

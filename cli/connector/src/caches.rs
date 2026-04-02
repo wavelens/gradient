@@ -187,3 +187,21 @@ pub async fn get_cache_key(
 
     Ok(parse_response(res).await)
 }
+
+pub async fn get_cache_netrc(
+    config: RequestConfig,
+    cache: String,
+) -> Result<BaseResponse<String>, String> {
+    let res = get_client(
+        config,
+        format!("caches/{}/netrc", cache),
+        RequestType::GET,
+        true,
+    )
+    .unwrap()
+    .send()
+    .await
+    .unwrap();
+
+    Ok(parse_response(res).await)
+}
