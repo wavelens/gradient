@@ -112,6 +112,7 @@ pub struct ServerState {
     pub cli: Cli,
     pub log_storage: Arc<dyn LogStorage>,
     pub nix_store_pool: NixStorePool,
+    pub web_nix_store_pool: NixStorePool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -166,7 +166,7 @@ async fn get_nar_by_hash(
 
     let path = get_path_from_build_output(build_output.clone());
 
-    let mut local_store = state.nix_store_pool.acquire().await.map_err(|e| {
+    let mut local_store = state.web_nix_store_pool.acquire().await.map_err(|e| {
         tracing::error!("Failed to acquire local store: {}", e);
         WebError::InternalServerError("Failed to access local store".to_string())
     })?;
@@ -178,34 +178,7 @@ async fn get_nar_by_hash(
         })?
         .ok_or_else(|| WebError::not_found("Path"))?;
 
-    let output = Command::new(state.cli.binpath_nix.clone())
-        .arg("hash")
-        .arg("convert")
-        .arg("--from")
-        .arg("base16")
-        .arg("--to")
-        .arg("nix32")
-        .arg("--hash-algo")
-        .arg("sha256")
-        .arg(pathinfo.nar_hash)
-        .output()
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to execute nix hash convert: {}", e);
-            WebError::InternalServerError("Failed to convert hash".to_string())
-        })?;
-
-    if !output.status.success() {
-        tracing::error!(
-            "Nix hash convert failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return Err(WebError::InternalServerError(
-            "Failed to convert hash".to_string(),
-        ));
-    }
-
-    let nar_hash = String::from_utf8_lossy(&output.stdout).to_string();
+    let nar_hash = normalize_nar_hash(&pathinfo.nar_hash);
 
     let references = pathinfo
         .references
@@ -225,18 +198,21 @@ async fn get_nar_by_hash(
         sig_url, cache.name, build_output_signature.signature
     );
 
+    let file_hash = build_output
+        .file_hash
+        .ok_or_else(|| WebError::BadRequest("Missing file hash".to_string()))?;
+    let file_hash_nix32 = file_hash.trim_start_matches("sha256:").to_string();
+
     Ok(NixPathInfo {
         store_path: path,
-        url: format!("nar/{}.nar.zst", hash),
+        url: format!("nar/{}.nar.zst", file_hash_nix32),
         compression: "zstd".to_string(),
-        file_hash: build_output
-            .file_hash
-            .ok_or_else(|| WebError::BadRequest("Missing file hash".to_string()))?,
+        file_hash,
         file_size: build_output
             .file_size
             .ok_or_else(|| WebError::BadRequest("Missing file size".to_string()))?
             as u32,
-        nar_hash: format!("sha256:{}", nar_hash.trim()),
+        nar_hash,
         nar_size: pathinfo.nar_size,
         references,
         deriver: pathinfo.deriver,
@@ -1139,7 +1115,7 @@ pub async fn path(
                 // Check the local nix store first — the path may have been substituted
                 // during a previous narinfo request.
                 if let Some(local_path) = find_store_path_by_hash(&path_hash).await {
-                    match path_info_from_local_store(&state, &cache, &local_path, &path_hash).await
+                    match path_info_from_local_store(&state, &cache, &local_path).await
                     {
                         Ok(pi) => pi,
                         Err(e) => {
@@ -1290,7 +1266,39 @@ pub async fn nar(
 
     require_cache_auth(&headers, &state, &cache).await?;
 
-    let nar_file_path = get_cache_nar_location(state.cli.base_path.clone(), path_hash.clone())
+    // The URL now uses the file hash (nix32 of compressed content).
+    // Resolve it to the store hash so we can locate the on-disk NAR or pack path.
+    let (effective_hash, upstream_store_path) = {
+        let by_file = EBuildOutput::find()
+            .filter(
+                Condition::all()
+                    .add(CBuildOutput::IsCached.eq(true))
+                    .add(CBuildOutput::FileHash.eq(format!("sha256:{}", path_hash))),
+            )
+            .one(&state.db)
+            .await
+            .map_err(WebError::from)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: format!("Database error: {}", e),
+                    }),
+                )
+            })?;
+        if let Some(output) = by_file {
+            (output.hash, None)
+        } else if let Some(sp) = get_upstream_map().lock().ok().and_then(|m| m.get(&path_hash).cloned()) {
+            let h = sp.trim_start_matches("/nix/store/").split('-').next().unwrap_or("").to_string();
+            (h, Some(sp))
+        } else {
+            // Fallback: treat path_hash as store hash (backward compatibility).
+            (path_hash.clone(), None)
+        }
+    };
+
+    let nar_file_path = get_cache_nar_location(state.cli.base_path.clone(), effective_hash.clone())
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1318,7 +1326,7 @@ pub async fn nar(
             .filter(
                 Condition::all()
                     .add(CBuildOutput::IsCached.eq(true))
-                    .add(CBuildOutput::Hash.eq(path_hash.clone())),
+                    .add(CBuildOutput::Hash.eq(effective_hash.clone())),
             )
             .one(&state.db)
             .await
@@ -1336,10 +1344,12 @@ pub async fn nar(
         let pack_path: String = if let Some(build_output) = maybe_output {
             // Non-entry-point build: pack from the nix store path in the DB record.
             get_path_from_build_output(build_output)
+        } else if let Some(sp) = upstream_store_path {
+            // Upstream-substituted path resolved from the file-hash map.
+            sp
         } else {
-            // Not in DB — may have been substituted from an upstream during the narinfo
-            // request.  Scan the local nix store for a matching path.
-            match find_store_path_by_hash(&path_hash).await {
+            // Scan the local nix store for a matching path.
+            match find_store_path_by_hash(&effective_hash).await {
                 Some(p) => p,
                 None => {
                     return Err((
@@ -1419,21 +1429,45 @@ pub async fn nar(
 
 // ── Nix base-32 SHA-256 (mirrors the implementation in cache/src/cacher.rs) ──
 
-fn nix_base32_sha256(data: &[u8]) -> String {
+fn nix32_encode(bytes: &[u8]) -> String {
     const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
-    let hash: [u8; 32] = Sha256::digest(data).into();
-    let len = (hash.len() * 8 - 1) / 5 + 1;
+    let len = (bytes.len() * 8 - 1) / 5 + 1;
     let mut out = String::with_capacity(len);
     for n in (0..len).rev() {
         let b = n * 5;
         let i = b / 8;
         let j = b % 8;
-        let byte0 = hash.get(i).copied().unwrap_or(0) as u32;
-        let byte1 = hash.get(i + 1).copied().unwrap_or(0) as u32;
+        let byte0 = bytes.get(i).copied().unwrap_or(0) as u32;
+        let byte1 = bytes.get(i + 1).copied().unwrap_or(0) as u32;
         let c = ((byte0 >> j) | (byte1 << (8 - j))) & 0x1f;
         out.push(CHARS[c as usize] as char);
     }
     out
+}
+
+fn nix_base32_sha256(data: &[u8]) -> String {
+    let hash: [u8; 32] = Sha256::digest(data).into();
+    nix32_encode(&hash)
+}
+
+/// Converts any NarHash string (SRI `sha256-{base64}`, nix32 `sha256:{nix32}`, or bare hex)
+/// to the narinfo wire format `sha256:{nix32}`.
+fn normalize_nar_hash(hash: &str) -> String {
+    if let Some(b64) = hash.strip_prefix("sha256-") {
+        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) {
+            return format!("sha256:{}", nix32_encode(&bytes));
+        }
+    }
+    hash.to_string()
+}
+
+// ── File-hash → store-path map for upstream-substituted paths ─────────────────
+
+use std::sync::OnceLock;
+
+fn get_upstream_map() -> &'static std::sync::Mutex<HashMap<String, String>> {
+    static MAP: OnceLock<std::sync::Mutex<HashMap<String, String>>> = OnceLock::new();
+    MAP.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
 // ── Upstream pull-through helpers ─────────────────────────────────────────────
@@ -1525,7 +1559,6 @@ async fn path_info_from_local_store(
     state: &Arc<ServerState>,
     cache: &MCache,
     store_path: &str,
-    hash: &str,
 ) -> Result<NixPathInfo, WebError> {
     let json_out = Command::new(&state.cli.binpath_nix)
         .arg("path-info")
@@ -1566,11 +1599,11 @@ async fn path_info_from_local_store(
             ))
         })?;
 
-    let nar_hash = info
-        .get("narHash")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let nar_hash = normalize_nar_hash(
+        info.get("narHash")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
+    );
     let nar_size = info.get("narSize").and_then(|v| v.as_u64()).unwrap_or(0);
     let references: Vec<String> = info
         .get("references")
@@ -1613,12 +1646,18 @@ async fn path_info_from_local_store(
     })?;
 
     let file_size = compressed.len() as u32;
-    let file_hash = format!("sha256:{}", nix_base32_sha256(&compressed));
+    let file_hash_nix32 = nix_base32_sha256(&compressed);
+    let file_hash = format!("sha256:{}", file_hash_nix32);
     let sig = sign_and_get_sig(state, cache, store_path).await?;
+
+    // Store file-hash → store-path mapping so the nar handler can resolve it.
+    if let Ok(mut map) = get_upstream_map().lock() {
+        map.insert(file_hash_nix32.clone(), store_path.to_string());
+    }
 
     Ok(NixPathInfo {
         store_path: store_path.to_string(),
-        url: format!("nar/{}.nar.zst", hash),
+        url: format!("nar/{}.nar.zst", file_hash_nix32),
         compression: "zstd".to_string(),
         file_hash,
         file_size,
@@ -1704,7 +1743,7 @@ async fn substitute_from_external_upstream(
         "Substituted path from external upstream"
     );
 
-    path_info_from_local_store(state, cache, &store_path, hash).await
+    path_info_from_local_store(state, cache, &store_path).await
 }
 
 // ── Upstream caches ───────────────────────────────────────────────────────────

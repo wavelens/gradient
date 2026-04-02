@@ -62,11 +62,13 @@ pub async fn init_state() -> Arc<ServerState> {
     };
 
     let nix_store_pool = NixStorePool::new(cli.max_nixdaemon_connections);
+    let web_nix_store_pool = NixStorePool::new(1);
 
     Arc::new(ServerState {
         db,
         cli,
         log_storage: Arc::new(log_storage),
         nix_store_pool,
+        web_nix_store_pool,
     })
 }

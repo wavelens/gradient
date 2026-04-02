@@ -92,7 +92,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         let path = format!("{}#{}", repository, derivation_string);
 
         let (private_key, _public_key) =
-            decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization.clone())?;
+            decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization.clone(), &state.cli.serve_url)?;
 
         let ssh_key_path = write_key(private_key)?;
         let git_ssh_command = format!(

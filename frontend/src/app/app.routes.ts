@@ -14,11 +14,13 @@ export const routes: Routes = [
     children: [
       {
         path: 'login',
+        title: 'Sign In',
         loadComponent: () =>
           import('./features/auth/login/login.component').then((m) => m.LoginComponent),
       },
       {
         path: 'register',
+        title: 'Register',
         loadComponent: () =>
           import('./features/auth/register/register.component').then((m) => m.RegisterComponent),
       },
@@ -35,6 +37,7 @@ export const routes: Routes = [
   // Public-browsable routes (no login required, write actions hidden)
   {
     path: 'organization/:org',
+    title: 'Organization',
     loadComponent: () =>
       import('./features/organizations/organization-detail/organization-detail.component').then(
         (m) => m.OrganizationDetailComponent
@@ -42,6 +45,7 @@ export const routes: Routes = [
   },
   {
     path: 'organization/:org/project/:project',
+    title: 'Project',
     loadComponent: () =>
       import('./features/projects/project-detail/project-detail.component').then(
         (m) => m.ProjectDetailComponent
@@ -49,6 +53,7 @@ export const routes: Routes = [
   },
   {
     path: 'organization/:org/artefacts/:buildId',
+    title: 'Build Artefacts',
     loadComponent: () =>
       import('./features/evaluations/build-artefacts/build-artefacts.component').then(
         (m) => m.BuildArtefactsComponent
@@ -56,6 +61,7 @@ export const routes: Routes = [
   },
   {
     path: 'organization/:org/graph/:buildId',
+    title: 'Dependency Graph',
     loadComponent: () =>
       import('./features/evaluations/dependency-graph/dependency-graph.component').then(
         (m) => m.DependencyGraphComponent
@@ -63,6 +69,7 @@ export const routes: Routes = [
   },
   {
     path: 'organization/:org/log/:evaluationId',
+    title: 'Evaluation Log',
     loadComponent: () =>
       import('./features/evaluations/evaluation-log/evaluation-log.component').then(
         (m) => m.EvaluationLogComponent
@@ -70,6 +77,7 @@ export const routes: Routes = [
   },
   {
     path: 'organization/:org/log',
+    title: 'Evaluation Log',
     loadComponent: () =>
       import('./features/evaluations/evaluation-log/evaluation-log.component').then(
         (m) => m.EvaluationLogComponent
@@ -77,6 +85,7 @@ export const routes: Routes = [
   },
   {
     path: 'caches/:cache',
+    title: 'Cache',
     loadComponent: () =>
       import('./features/caches/cache-detail/cache-detail.component').then(
         (m) => m.CacheDetailComponent
@@ -86,6 +95,7 @@ export const routes: Routes = [
   // Public-browsable list routes
   {
     path: 'organizations',
+    title: 'Organizations',
     loadComponent: () =>
       import('./features/organizations/organization-list/organization-list.component').then(
         (m) => m.OrganizationListComponent
@@ -93,6 +103,7 @@ export const routes: Routes = [
   },
   {
     path: 'caches',
+    title: 'Caches',
     loadComponent: () =>
       import('./features/caches/cache-list/cache-list.component').then(
         (m) => m.CacheListComponent
@@ -107,6 +118,7 @@ export const routes: Routes = [
       // Dashboard
       {
         path: '',
+        title: 'Dashboard',
         loadComponent: () =>
           import('./features/dashboard/dashboard.component').then((m) => m.DashboardComponent),
       },
@@ -114,6 +126,7 @@ export const routes: Routes = [
       // Organizations
       {
         path: 'organization/:org/settings',
+        title: 'Organization Settings',
         loadComponent: () =>
           import('./features/organizations/organization-settings/organization-settings.component').then(
             (m) => m.OrganizationSettingsComponent
@@ -123,6 +136,7 @@ export const routes: Routes = [
       // Servers
       {
         path: 'organization/:org/servers',
+        title: 'Servers',
         loadComponent: () =>
           import('./features/organizations/servers/servers.component').then(
             (m) => m.ServersComponent
@@ -132,6 +146,7 @@ export const routes: Routes = [
       // Cache Subscriptions
       {
         path: 'organization/:org/caches',
+        title: 'Cache Subscriptions',
         loadComponent: () =>
           import('./features/organizations/cache-subscriptions/cache-subscriptions.component').then(
             (m) => m.CacheSubscriptionsComponent
@@ -141,6 +156,7 @@ export const routes: Routes = [
       // Projects
       {
         path: 'organization/:org/project/:project/settings',
+        title: 'Project Settings',
         loadComponent: () =>
           import('./features/projects/project-settings/project-settings.component').then(
             (m) => m.ProjectSettingsComponent
@@ -150,6 +166,7 @@ export const routes: Routes = [
       // Caches
       {
         path: 'caches/:cache/settings',
+        title: 'Cache Settings',
         loadComponent: () =>
           import('./features/caches/cache-settings/cache-settings.component').then(
             (m) => m.CacheSettingsComponent
@@ -157,6 +174,7 @@ export const routes: Routes = [
       },
       {
         path: 'caches/:cache/upstreams',
+        title: 'Upstream Caches',
         loadComponent: () =>
           import('./features/caches/cache-upstreams/cache-upstreams.component').then(
             (m) => m.CacheUpstreamsComponent
@@ -166,6 +184,7 @@ export const routes: Routes = [
       // Settings
       {
         path: 'settings/profile',
+        title: 'Profile',
         loadComponent: () =>
           import('./features/settings/profile/profile.component').then(
             (m) => m.ProfileComponent
@@ -173,6 +192,7 @@ export const routes: Routes = [
       },
       {
         path: 'settings/keys',
+        title: 'API Keys',
         loadComponent: () =>
           import('./features/settings/api-keys/api-keys.component').then(
             (m) => m.ApiKeysComponent

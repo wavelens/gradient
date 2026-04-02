@@ -162,6 +162,7 @@ pub async fn check_project_updates(
         Some(decrypt_ssh_private_key(
             state.cli.crypt_secret_file.clone(),
             organization,
+            &state.cli.serve_url,
         )?)
     } else {
         None
@@ -259,6 +260,7 @@ pub async fn get_commit_info(
         Some(decrypt_ssh_private_key(
             state.cli.crypt_secret_file.clone(),
             organization,
+            &state.cli.serve_url,
         )?)
     } else {
         None
@@ -351,7 +353,7 @@ pub async fn prefetch_flake(
     debug!("Prefetching flake inputs for repository: {}", repository);
 
     let (private_key, _public_key) =
-        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization)?;
+        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization, &state.cli.serve_url)?;
 
     let ssh_key_path = write_key(private_key)?;
 
@@ -453,6 +455,7 @@ pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), SourceE
 pub fn decrypt_ssh_private_key(
     secret_file: String,
     organization: MOrganization,
+    serve_url: &str,
 ) -> Result<(String, String), SourceError> {
     let secret = crate::input::load_secret_bytes(&secret_file);
 
@@ -494,14 +497,20 @@ pub fn decrypt_ssh_private_key(
         }
     };
 
-    let formatted_public_key = format_public_key(organization);
+    let formatted_public_key = format_public_key(organization, serve_url);
     let decrypted_private_key = format!("{}\n", decrypted_private_key);
 
     Ok((decrypted_private_key, formatted_public_key))
 }
 
-pub fn format_public_key(organization: MOrganization) -> String {
-    format!("{} {}", organization.public_key, organization.id)
+pub fn format_public_key(organization: MOrganization, serve_url: &str) -> String {
+    let hostname = serve_url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or(serve_url);
+    format!("{} {}-{}", organization.public_key, hostname, organization.name)
 }
 
 /// Returns `(encrypted_private_key, public_key_b64)`.

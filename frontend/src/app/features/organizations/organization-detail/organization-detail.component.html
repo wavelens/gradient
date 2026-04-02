@@ -16,7 +16,7 @@
       @if (authService.isAuthenticated()) {
         <div class="header-actions">
           <button pButton label="Create Project" icon="pi pi-plus" (click)="openCreateDialog()"></button>
-          <a pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/organization', orgName, 'settings']"></a>
+          <button pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/organization', orgName, 'settings']"></button>
         </div>
       }
     </div>

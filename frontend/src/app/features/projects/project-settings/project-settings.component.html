@@ -19,9 +19,7 @@
         </div>
         <h1>Project Settings</h1>
       </div>
-      <a [routerLink]="['/organization', orgName, 'settings']">
-        <button pButton label="Organization Settings" icon="pi pi-building" severity="secondary"></button>
-      </a>
+      <button pButton label="Organization Settings" icon="pi pi-building" severity="secondary" [routerLink]="['/organization', orgName, 'settings']"></button>
     </div>
 
     @if (errorMessage()) {
@@ -119,33 +117,14 @@
               <h3>Transfer Ownership</h3>
               <p class="text-secondary">Transfer this project to another organization member.</p>
             </div>
-            <div class="transfer-controls">
-              <p-autoComplete
-                [(ngModel)]="transferUsername"
-                [suggestions]="transferUserSuggestions()"
-                (completeMethod)="onTransferUserSearch($event)"
-                placeholder="Username"
-                styleClass="transfer-input"
-                [forceSelection]="false"
-                [disabled]="transferring()"
-              />
-              <button
-                pButton
-                label="Transfer"
-                icon="pi pi-send"
-                severity="warn"
-                (click)="transferOwnership()"
-                [loading]="transferring()"
-                [disabled]="transferring() || !transferUsername.trim()"
-              ></button>
-            </div>
+            <button
+              pButton
+              label="Transfer Ownership"
+              icon="pi pi-send"
+              severity="warn"
+              (click)="showTransferDialog.set(true)"
+            ></button>
           </div>
-          @if (transferError()) {
-            <div class="danger-feedback danger-feedback--error">{{ transferError() }}</div>
-          }
-          @if (transferSuccess()) {
-            <div class="danger-feedback danger-feedback--success">Ownership transferred successfully.</div>
-          }
           <div class="danger-divider"></div>
           <div class="danger-row">
             <div>
@@ -159,6 +138,49 @@
     }
   }
 </div>
+
+<!-- Transfer Ownership Dialog -->
+<p-dialog
+  header="Transfer Ownership"
+  [(visible)]="showTransferDialog"
+  [modal]="true"
+  [style]="{ width: '420px' }"
+  [draggable]="false"
+  [resizable]="false"
+  (onHide)="onTransferDialogHide()"
+>
+  <div class="dialog-content">
+    <p>Transfer <strong>{{ project()?.display_name }}</strong> to another organization member. This action cannot be undone.</p>
+    @if (transferError()) {
+      <div class="dialog-error">
+        <span class="material-symbols-outlined">error</span>
+        {{ transferError() }}
+      </div>
+    }
+    @if (transferSuccess()) {
+      <div class="dialog-success">
+        <span class="material-symbols-outlined">check_circle</span>
+        Ownership transferred successfully.
+      </div>
+    }
+    <div class="form-group">
+      <label>New Owner</label>
+      <p-autoComplete
+        [(ngModel)]="transferUsername"
+        [suggestions]="transferUserSuggestions()"
+        (completeMethod)="onTransferUserSearch($event)"
+        placeholder="Username"
+        styleClass="w-full"
+        [forceSelection]="false"
+        [disabled]="transferring()"
+      />
+    </div>
+  </div>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showTransferDialog.set(false)" [disabled]="transferring()"></button>
+    <button pButton label="Transfer" icon="pi pi-send" severity="warn" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferUsername.trim()"></button>
+  </ng-template>
+</p-dialog>
 
 <!-- Delete Confirmation Dialog -->
 <p-dialog

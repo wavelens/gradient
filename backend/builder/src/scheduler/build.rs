@@ -320,7 +320,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
     };
 
     let (private_key, public_key) =
-        match decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization) {
+        match decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization, &state.cli.serve_url) {
             Ok(keys) => keys,
             Err(e) => {
                 error!(error = %e, "Failed to decrypt SSH private key");

@@ -2,7 +2,6 @@
  - input_drvs aren't uploaded to builder
 
  - sometimes frontend is unresponsive when io / cpu is fully utilized
- - icon and Title for frontend
  - before a build is building check again if the build is already built
  - Add Non-SSH server as default
  - Log OIDC Errors in journal error
@@ -11,6 +10,6 @@
  - aborted evaluations should restart on server restart
  - if git link is http(s) make link clickable
  - static links to specific buid logs to share with others
- - grayed out delete account button has hover effect, should not have
+ - state for upstream caches settings
  - no Hover Effect on Dashboard for non clickable Elements
  - Add Footer: AGPL License and link to github and wavelens and version

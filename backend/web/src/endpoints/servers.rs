@@ -663,7 +663,7 @@ pub async fn post_server_check_connection(
     };
 
     let (private_key, public_key) =
-        match decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization.clone()) {
+        match decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization.clone(), &state.cli.serve_url) {
             Ok(keys) => keys,
             Err(e) => {
                 return Err((

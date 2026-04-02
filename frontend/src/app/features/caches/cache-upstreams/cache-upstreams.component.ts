@@ -42,6 +42,8 @@ export class CacheUpstreamsComponent implements OnInit {
   showAddDialog = signal(false);
   showEditDialog = signal(false);
   editingUpstream = signal<UpstreamCache | null>(null);
+  addError = signal<string | null>(null);
+  editError = signal<string | null>(null);
 
   cacheName = '';
   cacheDisplayName = '';
@@ -92,9 +94,33 @@ export class CacheUpstreamsComponent implements OnInit {
     });
   }
 
+  isAddFormValid(): boolean {
+    if (this.upstreamType === 'internal') {
+      return this.upstreamForm.cache_name.trim().length > 0;
+    }
+    return (
+      this.upstreamForm.display_name.trim().length > 0 &&
+      this.upstreamForm.url.trim().length > 0 &&
+      this.upstreamForm.public_key.trim().length > 0
+    );
+  }
+
+  isEditFormValid(): boolean {
+    const upstream = this.editingUpstream();
+    if (!upstream) return false;
+    const isExternal = !upstream.upstream_cache_id;
+    if (!isExternal) return true;
+    return (
+      this.editForm.display_name.trim().length > 0 &&
+      this.editForm.url.trim().length > 0 &&
+      this.editForm.public_key.trim().length > 0
+    );
+  }
+
   openAddDialog(): void {
     this.upstreamType = 'internal';
     this.upstreamForm = { cache_name: '', display_name: '', url: '', public_key: '', mode: 'ReadWrite' };
+    this.addError.set(null);
     this.showAddDialog.set(true);
   }
 
@@ -106,12 +132,18 @@ export class CacheUpstreamsComponent implements OnInit {
       url: upstream.url ?? '',
       public_key: upstream.public_key ?? '',
     };
+    this.editError.set(null);
     this.showEditDialog.set(true);
   }
 
   saveUpstream(): void {
     const upstream = this.editingUpstream();
     if (!upstream) return;
+    if (!this.isEditFormValid()) {
+      this.editError.set('Please fill in all required fields.');
+      return;
+    }
+    this.editError.set(null);
     this.savingUpstream.set(true);
     const isExternal = !upstream.upstream_cache_id;
     const data: { display_name?: string; mode?: CacheSubscriptionMode; url?: string; public_key?: string } = {
@@ -134,6 +166,15 @@ export class CacheUpstreamsComponent implements OnInit {
   }
 
   addUpstream(): void {
+    if (!this.isAddFormValid()) {
+      this.addError.set(
+        this.upstreamType === 'internal'
+          ? 'Cache name is required.'
+          : 'Display name, substituter URL and public key are required.'
+      );
+      return;
+    }
+    this.addError.set(null);
     this.addingUpstream.set(true);
     const obs = this.upstreamType === 'internal'
       ? this.cachesService.addInternalUpstream(this.cacheName, {

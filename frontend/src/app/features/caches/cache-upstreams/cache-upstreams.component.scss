@@ -188,3 +188,16 @@
 }
 
 .w-full { width: 100%; }
+
+.dialog-error {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  background: rgba($color-danger, 0.1);
+  border: 1px solid rgba($color-danger, 0.5);
+  border-radius: $border-radius-md;
+  padding: $spacing-md;
+  color: $color-danger;
+  font-size: $font-size-sm;
+  margin-bottom: $spacing-md;
+}

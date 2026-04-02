@@ -509,7 +509,7 @@ pub async fn get_organization_ssh(
 
     let res = BaseResponse {
         error: false,
-        message: format_public_key(organization),
+        message: format_public_key(organization, &state.cli.serve_url),
     };
 
     Ok(Json(res))
@@ -545,7 +545,7 @@ pub async fn post_organization_ssh(
 
     let res = BaseResponse {
         error: false,
-        message: format_public_key(organization),
+        message: format_public_key(organization, &state.cli.serve_url),
     };
 
     Ok(Json(res))

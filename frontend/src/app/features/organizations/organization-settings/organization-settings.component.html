@@ -158,7 +158,7 @@
             <h3>Servers</h3>
             <p class="text-secondary">Manage build servers for this organization</p>
           </div>
-          <a pButton label="Manage Servers" icon="pi pi-server" severity="secondary" [routerLink]="['/organization', orgName, 'servers']"></a>
+          <button pButton label="Manage Servers" icon="pi pi-server" severity="secondary" [routerLink]="['/organization', orgName, 'servers']"></button>
         </div>
         <p-divider />
         <div class="nav-row">
@@ -166,7 +166,7 @@
             <h3>Cache Subscriptions</h3>
             <p class="text-secondary">Nix binary caches this organization pushes builds to</p>
           </div>
-          <a pButton label="Manage Caches" icon="pi pi-database" severity="secondary" [routerLink]="['/organization', orgName, 'caches']"></a>
+          <button pButton label="Manage Caches" icon="pi pi-database" severity="secondary" [routerLink]="['/organization', orgName, 'caches']"></button>
         </div>
       </div>
     </div>
@@ -178,7 +178,7 @@
         <app-loading-spinner message="Loading SSH key..." />
       } @else {
         <div class="settings-card">
-          <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.). It is not related to cache subscription keys.</p>
+          <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories and Build Server. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.) and to your connected remote Build Servers authorized_keys file.</p>
           @if (sshKey()) {
             <div class="form-group">
               <label>Public Key</label>

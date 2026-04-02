@@ -80,6 +80,12 @@
   [draggable]="false"
   [resizable]="false"
 >
+  @if (editError()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ editError() }}
+    </div>
+  }
   @if (editingUpstream(); as u) {
     <div class="upstream-form">
       <div class="form-group">
@@ -110,7 +116,7 @@
   }
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="savingUpstream()"></button>
-    <button pButton label="Save" icon="pi pi-check" (click)="saveUpstream()" [loading]="savingUpstream()" [disabled]="savingUpstream()"></button>
+    <button pButton label="Save" icon="pi pi-check" (click)="saveUpstream()" [loading]="savingUpstream()" [disabled]="savingUpstream() || !isEditFormValid()"></button>
   </ng-template>
 </p-dialog>
 
@@ -123,6 +129,12 @@
   [draggable]="false"
   [resizable]="false"
 >
+  @if (addError()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ addError() }}
+    </div>
+  }
   <div class="upstream-form">
     <div class="form-group">
       <label>Type</label>
@@ -174,6 +186,6 @@
   </div>
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showAddDialog.set(false)" [disabled]="addingUpstream()"></button>
-    <button pButton label="Add" icon="pi pi-plus" (click)="addUpstream()" [loading]="addingUpstream()" [disabled]="addingUpstream()"></button>
+    <button pButton label="Add" icon="pi pi-plus" (click)="addUpstream()" [loading]="addingUpstream()" [disabled]="addingUpstream() || !isAddFormValid()"></button>
   </ng-template>
 </p-dialog>

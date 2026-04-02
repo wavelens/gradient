@@ -49,6 +49,7 @@ export class ProjectSettingsComponent implements OnInit {
 
   project = signal<Project | null>(null);
   showDeleteDialog = signal(false);
+  showTransferDialog = signal(false);
   errorMessage = signal<string | null>(null);
   saveSuccess = signal(false);
   transferUsername = '';
@@ -141,6 +142,12 @@ export class ProjectSettingsComponent implements OnInit {
     });
   }
 
+  onTransferDialogHide(): void {
+    this.transferUsername = '';
+    this.transferError.set(null);
+    this.transferSuccess.set(false);
+  }
+
   transferOwnership(): void {
     if (!this.transferUsername.trim()) return;
     this.transferring.set(true);
@@ -152,6 +159,7 @@ export class ProjectSettingsComponent implements OnInit {
         this.transferSuccess.set(true);
         this.transferUsername = '';
         this.loadProject();
+        setTimeout(() => this.showTransferDialog.set(false), 1500);
       },
       error: (error) => {
         this.transferError.set(error.message || 'Failed to transfer ownership.');

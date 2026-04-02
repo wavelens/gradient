@@ -110,6 +110,10 @@ a {
     background: $color-hover;
     border-color: $text-secondary;
   }
+
+  &:disabled {
+    pointer-events: none;
+  }
 }
 
 .p-inputtext {
