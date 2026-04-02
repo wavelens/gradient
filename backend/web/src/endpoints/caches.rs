@@ -14,7 +14,7 @@ use axum::{Extension, Json};
 use base64::Engine;
 use chrono::{NaiveDateTime, Utc};
 use core::database::{get_any_cache_by_name, get_cache_by_name};
-use core::executer::{get_local_store, get_pathinfo};
+use core::executer::get_pathinfo;
 use core::input::{check_index_name, validate_display_name};
 use core::sources::{
     clear_key, format_cache_key, format_cache_public_key, generate_signing_key,
@@ -166,11 +166,11 @@ async fn get_nar_by_hash(
 
     let path = get_path_from_build_output(build_output.clone());
 
-    let mut local_store = get_local_store(None).await.map_err(|e| {
-        tracing::error!("Failed to get local store: {}", e);
+    let mut local_store = state.nix_store_pool.acquire().await.map_err(|e| {
+        tracing::error!("Failed to acquire local store: {}", e);
         WebError::InternalServerError("Failed to access local store".to_string())
     })?;
-    let pathinfo = get_pathinfo(path.to_string(), &mut local_store)
+    let pathinfo = get_pathinfo(path.to_string(), &mut *local_store)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get pathinfo: {}", e);

@@ -11,6 +11,7 @@ pub mod executer;
 pub mod input;
 pub mod log_storage;
 pub mod permission;
+pub mod pool;
 pub mod sources;
 pub mod state;
 pub mod types;
@@ -19,6 +20,7 @@ pub mod webhooks;
 use clap::Parser;
 use database::connect_db;
 use log_storage::FileLogStorage;
+use pool::NixStorePool;
 use state::load_and_apply_state;
 use std::path::Path;
 use std::sync::Arc;
@@ -59,9 +61,12 @@ pub async fn init_state() -> Arc<ServerState> {
         }
     };
 
+    let nix_store_pool = NixStorePool::new(cli.max_nixdaemon_connections);
+
     Arc::new(ServerState {
         db,
         cli,
         log_storage: Arc::new(log_storage),
+        nix_store_pool,
     })
 }

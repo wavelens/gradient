@@ -180,7 +180,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
         (None, organization)
     };
 
-    let local_daemon = match get_local_store(Some(organization)).await {
+    let mut local_daemon = match get_local_store(Some(organization)).await {
         Ok(s) => s,
         Err(e) => {
             error!(error = %e, "Failed to get local store");
@@ -329,7 +329,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
         }
 
         Err(e) => {
-            error!(error = %e, "Failed to evaluate");
+            error!(error = %format!("{:#}", e), "Failed to evaluate");
             update_evaluation_status_with_error(
                 Arc::clone(&state),
                 evaluation,

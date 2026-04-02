@@ -179,7 +179,7 @@ pub(super) async fn get_flake_derivations(
 
                     let eval_target = format!("{}#{}", repository.clone(), current_key);
                     debug!(cmd = %format!("{} eval {} --apply builtins.attrNames --json", state.cli.binpath_nix, eval_target), "executing nix command");
-                    let keys = Command::new(state.cli.binpath_nix.clone())
+                    let keys = match Command::new(state.cli.binpath_nix.clone())
                         .arg("eval")
                         .arg(&eval_target)
                         .arg("--apply")
@@ -187,8 +187,17 @@ pub(super) async fn get_flake_derivations(
                         .arg("--json")
                         .env("GIT_SSH_COMMAND", &git_ssh_command)
                         .output()
-                        .await?
-                        .json_to_vec()?;
+                        .await
+                    {
+                        Err(e) => return Err(e.into()),
+                        Ok(output) => match output.json_to_vec() {
+                            Ok(keys) => keys,
+                            Err(e) => {
+                                debug!(path = %current_key, error = %e, "Skipping attribute path not present in flake");
+                                continue;
+                            }
+                        },
+                    };
 
                     if keys.contains(&"type".to_string()) && type_check {
                         let type_eval_target =

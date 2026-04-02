@@ -222,7 +222,7 @@ pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
                 output_paths.insert(path.clone(), out_path.clone());
             }
         } else {
-            output_paths.insert(path.clone(), path);
+            output_paths.insert(path.clone(), nix_store_path(&path));
         }
     }
 

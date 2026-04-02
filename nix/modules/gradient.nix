@@ -188,6 +188,12 @@ in {
           default = 20;
         };
 
+        maxNixdaemonConnections = lib.mkOption {
+          description = "The maximum number of simultaneous local Nix daemon connections in the connection pool.";
+          type = lib.types.ints.positive;
+          default = 24;
+        };
+
         logLevel = lib.mkOption {
           description = "The log level for the application.";
           type = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
@@ -274,6 +280,7 @@ in {
         GRADIENT_SERVE_CACHE = lib.boolToString cfg.serveCache;
         GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
         GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
+        GRADIENT_MAX_NIXDAEMON_CONNECTIONS = toString cfg.settings.maxNixdaemonConnections;
         GRADIENT_LOG_LEVEL = cfg.settings.logLevel;
         GRADIENT_DELETE_STATE = lib.boolToString cfg.settings.deleteState;
         GRADIENT_STATE_FILE = "%d/gradient_state";

@@ -80,9 +80,15 @@ async fn parse_derivation_file(
         )
     })?;
 
-    let derivation_data = parsed_json
+    let top = parsed_json
         .as_object()
-        .context("nix derivation show: expected top-level JSON object")?
+        .context("nix derivation show: expected top-level JSON object")?;
+    let drv_map = if let Some(inner) = top.get("derivations").and_then(|v| v.as_object()) {
+        inner
+    } else {
+        top
+    };
+    let derivation_data = drv_map
         .values()
         .next()
         .context("nix derivation show: output object was empty")?
@@ -380,7 +386,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         debug!(index = i, dependency = %dep, "Dependency order");
     }
 
-    if let Err(e) = copy_builds(dependencies.clone(), local_daemon, &mut server_daemon, false).await {
+    if let Err(e) = copy_builds(dependencies.clone(), &mut local_daemon, &mut server_daemon, false).await {
         error!(error = %e, "Failed to copy build dependencies");
         update_build_status(Arc::clone(&state), build.clone(), BuildStatus::Failed).await;
         return;
@@ -415,7 +421,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                     .map(|realisation| format!("/nix/store/{}", realisation.out_path))
                     .collect::<Vec<String>>();
 
-                if let Err(e) = copy_builds(copy_results, &mut server_daemon, local_daemon, true).await {
+                if let Err(e) = copy_builds(copy_results, &mut server_daemon, &mut local_daemon, true).await {
                     error!(error = %e, "Failed to copy build results");
                     update_build_status(Arc::clone(&state), build.clone(), BuildStatus::Failed)
                         .await;

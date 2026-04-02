@@ -102,12 +102,14 @@ pub(super) async fn add_existing_build(
         error!(error = %e, "Failed to add features for build");
     }
 
-    let local_store = get_local_store(None)
+    let mut local_store = state
+        .nix_store_pool
+        .acquire()
         .await
-        .context("Failed to get local store")?;
+        .context("Failed to acquire local store")?;
 
     let full_derivation = core::executer::nix_store_path(&derivation);
-    let outputs = core::executer::get_build_outputs_from_derivation(full_derivation, &mut local_store).await;
+    let outputs = core::executer::get_build_outputs_from_derivation(full_derivation, &mut *local_store).await;
 
     if let Ok(outputs) = outputs {
         for output in outputs {
@@ -250,11 +252,14 @@ pub(super) async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unp
         for b in check_availability {
             references.retain(|(d, _, _)| *d != b.derivation_path);
 
-            if get_missing_builds(vec![b.derivation_path.clone()], store)
-                .await
-                .context("Failed to get missing builds")?
-                .is_empty()
-            {
+            let in_store = match get_missing_builds(vec![b.derivation_path.clone()], store).await {
+                Ok(missing) => missing.is_empty(),
+                Err(e) => {
+                    debug!(error = %format!("{:#}", e), path = %b.derivation_path, "Failed to check store presence, treating as missing");
+                    false
+                }
+            };
+            if in_store {
                 // Already in the store — mark as Completed and reuse.
                 let dep = MBuildDependency {
                     id: Uuid::new_v4(),
@@ -326,10 +331,13 @@ pub(super) async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unp
             }
         }
 
-        let not_missing = get_missing_builds(vec![dependency.clone()], store)
-            .await
-            .context("Failed to get missing builds")?
-            .is_empty();
+        let not_missing = match get_missing_builds(vec![dependency.clone()], store).await {
+            Ok(missing) => missing.is_empty(),
+            Err(e) => {
+                debug!(error = %format!("{:#}", e), path = %dependency, "Failed to check store presence, treating as missing");
+                false
+            }
+        };
 
         if not_missing {
             add_existing_build(

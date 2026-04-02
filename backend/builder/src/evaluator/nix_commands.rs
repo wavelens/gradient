@@ -165,9 +165,19 @@ pub async fn get_features_cmd(
         )
     })?;
 
-    let drv_obj = parsed_json
+    // Newer Nix versions wrap derivations under a top-level "derivations" key:
+    //   { "derivations": { "hash.drv": { ... } } }
+    // Older versions use a flat top-level map:
+    //   { "hash.drv": { ... } }
+    let top = parsed_json
         .as_object()
-        .context("nix derivation show: expected top-level JSON object")?
+        .context("nix derivation show: expected top-level JSON object")?;
+    let drv_map = if let Some(inner) = top.get("derivations").and_then(|v| v.as_object()) {
+        inner
+    } else {
+        top
+    };
+    let drv_obj = drv_map
         .values()
         .next()
         .context("nix derivation show: output object was empty")?

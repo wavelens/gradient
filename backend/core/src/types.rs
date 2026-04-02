@@ -6,6 +6,7 @@
 
 use super::input::{greater_than_zero, port_in_range};
 use super::log_storage::LogStorage;
+use super::pool::NixStorePool;
 use clap::Parser;
 use entity::*;
 use nix_daemon::nix::DaemonStore;
@@ -101,6 +102,8 @@ pub struct Cli {
     pub delete_state: bool,
     #[arg(long, env = "GRADIENT_KEEP_EVALUATIONS", default_value = "0")]
     pub keep_evaluations: usize,
+    #[arg(long, env = "GRADIENT_MAX_NIXDAEMON_CONNECTIONS", value_parser = greater_than_zero::<usize>, default_value = "8")]
+    pub max_nixdaemon_connections: usize,
 }
 
 #[derive(Debug)]
@@ -108,6 +111,7 @@ pub struct ServerState {
     pub db: DatabaseConnection,
     pub cli: Cli,
     pub log_storage: Arc<dyn LogStorage>,
+    pub nix_store_pool: NixStorePool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

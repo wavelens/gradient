@@ -217,14 +217,16 @@ pub async fn evaluate_direct(
     temp_dir: String,
 ) -> Result<()> {
     info!(evaluation_id = %evaluation.id, "Starting direct evaluation");
-    let local_store = get_local_store(None)
+    let mut local_store = state
+        .nix_store_pool
+        .acquire()
         .await
-        .context("Failed to get local store for direct evaluation")?;
+        .context("Failed to acquire local store for direct evaluation")?;
 
     let mut direct_evaluation = evaluation.clone();
     direct_evaluation.repository = temp_dir.clone();
 
-    let evaluation_result = evaluate(Arc::clone(&state), &mut local_store, &direct_evaluation).await;
+    let evaluation_result = evaluate(Arc::clone(&state), &mut *local_store, &direct_evaluation).await;
 
     match evaluation_result {
         Ok((builds, dependencies, _entry_point_build_ids)) => {
