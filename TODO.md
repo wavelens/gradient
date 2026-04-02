@@ -3,9 +3,7 @@
 
  - sometimes frontend is unresponsive when io / cpu is fully utilized
  - icon and Title for frontend
- - netRc for cache authorization (see https://github.com/cachix/cachix/blob/e8be573b417f3daa3dd4cb9052178f848e0c9d1d/cachix/src/Cachix/Deploy/Activate.hs#L197)
  - before a build is building check again if the build is already built
- - in org settings / cache: subscription link to cache page
  - Add Non-SSH server as default
  - Log OIDC Errors in journal error
  - Add Super User

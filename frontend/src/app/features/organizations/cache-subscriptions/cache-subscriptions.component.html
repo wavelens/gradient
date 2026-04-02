@@ -36,7 +36,7 @@
           <div class="cache-row">
             <div class="cache-info">
               <span class="material-symbols-outlined">storage</span>
-              <div class="cache-name">{{ cache.name }}</div>
+              <a [routerLink]="['/caches', cache.name]" class="cache-name">{{ cache.name }}</a>
             </div>
             <div class="cache-actions">
               <button
