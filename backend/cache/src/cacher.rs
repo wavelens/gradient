@@ -458,9 +458,10 @@ pub async fn pack_build_output(
     let nar_data_for_disk = if is_entry_point { nar_data.clone() } else { vec![] };
 
     // Compress in memory to compute file_hash / file_size — no disk writes.
-    // Offload to a blocking thread so the async executor stays free.
+    // Must use the same level (3) as the web handler uses when serving, so that
+    // the narinfo FileHash matches the bytes clients actually receive.
     let compressed_data = tokio::task::spawn_blocking(move || {
-        zstd::bulk::compress(&nar_data, 19)
+        zstd::bulk::compress(&nar_data, 3)
     })
     .await
     .context("Compression task panicked")?

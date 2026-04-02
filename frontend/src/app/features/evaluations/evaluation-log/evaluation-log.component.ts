@@ -49,7 +49,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   builds = signal<BuildItem[]>([]);
   selectedBuildId = signal<string | null>(null);
   logHtml = signal<SafeHtml>('');
-  logLoading = signal(false);
+  logLoading = signal(true);
   aborting = signal(false);
   autoScroll = signal(true);
   showScrollBtn = signal(false);
@@ -252,6 +252,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.selectedBuildId.set(build.id);
     this.autoScroll.set(true);
     this.showScrollBtn.set(false);
+
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { build: build.id },
+      replaceUrl: true,
+    });
 
     this.logLoading.set(true);
     this.fetchInitialLogs(build.id);
