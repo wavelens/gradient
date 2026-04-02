@@ -5,7 +5,7 @@
  */
 
 use base64::{Engine, engine::general_purpose};
-use ed25519_compact::KeyPair;
+use ed25519_compact::{KeyPair, SecretKey};
 use entity::evaluation::EvaluationStatus;
 use git2::{Direction, RemoteCallbacks};
 use sea_orm::EntityTrait;
@@ -605,6 +605,59 @@ pub fn format_cache_key(
     ))
 }
 
+/// Signs a Nix narinfo fingerprint directly with the cache's Ed25519 key.
+///
+/// Fingerprint format: `1;{store_path};{nar_hash};{nar_size};{refs_sorted_comma}`
+/// Returns a full signature token: `{key_name}:{base64_sig}`.
+///
+/// References should be bare store-path names (without `/nix/store/` prefix);
+/// this function adds the prefix before sorting and joining.
+pub fn sign_narinfo_fingerprint(
+    secret_file: String,
+    cache: MCache,
+    serve_url: String,
+    store_path: &str,
+    nar_hash: &str,
+    nar_size: u64,
+    references: &[String],
+) -> Result<String, SourceError> {
+    let key_b64 = decrypt_signing_key(secret_file, cache.clone())?;
+    let key_bytes = general_purpose::STANDARD
+        .decode(key_b64.trim())
+        .map_err(|e| SourceError::CacheKeyDecoding {
+            cache: cache.name.clone(),
+            reason: format!("Failed to base64-decode signing key: {}", e),
+        })?;
+
+    let secret_key = SecretKey::from_slice(&key_bytes)
+        .map_err(|_| SourceError::KeyPairConversion)?;
+
+    // Nix fingerprint uses full store paths for references, sorted lexicographically.
+    let mut full_refs: Vec<String> = references
+        .iter()
+        .map(|r| {
+            if r.starts_with("/nix/store/") {
+                r.clone()
+            } else {
+                format!("/nix/store/{}", r)
+            }
+        })
+        .collect();
+    full_refs.sort();
+    let refs_str = full_refs.join(",");
+
+    let fingerprint = format!("1;{};{};{};{}", store_path, nar_hash, nar_size, refs_str);
+    let sig = secret_key.sign(fingerprint.as_bytes(), None);
+    let sig_b64 = general_purpose::STANDARD.encode(*sig);
+
+    let base_url = serve_url
+        .replace("https://", "")
+        .replace("http://", "")
+        .replace(":", "-");
+
+    Ok(format!("{}-{}:{}", base_url, cache.name, sig_b64))
+}
+
 pub fn get_hash_from_url(url: String) -> Result<String, SourceError> {
     let path_split = url.split('.').collect::<Vec<&str>>();
 
@@ -613,8 +666,8 @@ pub fn get_hash_from_url(url: String) -> Result<String, SourceError> {
         return Err(SourceError::InvalidPath);
     }
 
-    // Check hash length (32 characters)
-    if path_split[0].len() != 32 {
+    // Accept 32-char store-path hashes (160-bit nix32) and 52-char file/nar hashes (256-bit nix32)
+    if path_split[0].len() != 32 && path_split[0].len() != 52 {
         return Err(SourceError::InvalidPath);
     }
 

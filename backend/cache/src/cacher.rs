@@ -16,6 +16,7 @@ use nix_daemon::{Progress, Store};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
+    QuerySelect,
 };
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -67,16 +68,15 @@ pub async fn cache_loop(state: Arc<ServerState>) {
         None
     };
 
+    let concurrency = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     let mut interval = time::interval(Duration::from_secs(5));
     let mut cleanup_counter = 0;
     const CLEANUP_INTERVAL: u32 = 720;
 
     loop {
-        let build = get_next_build_output(Arc::clone(&state)).await;
+        let builds = get_next_build_outputs(Arc::clone(&state), concurrency).await;
 
-        if let Some(build) = build {
-            cache_build_output(Arc::clone(&state), build).await;
-        } else {
+        if builds.is_empty() {
             interval.tick().await;
 
             // Periodically run cleanup
@@ -95,6 +95,17 @@ pub async fn cache_loop(state: Arc<ServerState>) {
                         info!("Evaluation GC completed successfully");
                     }
                 }
+            }
+        } else {
+            let tasks: Vec<_> = builds
+                .into_iter()
+                .map(|build| {
+                    let s = Arc::clone(&state);
+                    tokio::spawn(async move { cache_build_output(s, build).await })
+                })
+                .collect();
+            for task in tasks {
+                let _ = task.await;
             }
         }
     }
@@ -438,10 +449,17 @@ pub async fn pack_build_output(
     }
 
     let nar_data = pack_output.stdout;
+    // Keep a copy for on-disk persistence (entry-point builds only).
+    let nar_data_for_disk = if is_entry_point { nar_data.clone() } else { vec![] };
 
-    // Compress in memory to compute file_hash / file_size — no disk writes
-    let compressed_data =
-        zstd::bulk::compress(&nar_data, 19).context("Failed to compress NAR data")?;
+    // Compress in memory to compute file_hash / file_size — no disk writes.
+    // Offload to a blocking thread so the async executor stays free.
+    let compressed_data = tokio::task::spawn_blocking(move || {
+        zstd::bulk::compress(&nar_data, 19)
+    })
+    .await
+    .context("Compression task panicked")?
+    .context("Failed to compress NAR data")?;
 
     let file_size = compressed_data.len() as u32;
     let file_hash = nix_base32_sha256(&compressed_data);
@@ -452,7 +470,7 @@ pub async fn pack_build_output(
         let nar_location = get_cache_nar_location(state.cli.base_path.clone(), path_hash)
             .context("Failed to get NAR file location")?;
 
-        tokio::fs::write(&nar_location, &nar_data)
+        tokio::fs::write(&nar_location, &nar_data_for_disk)
             .await
             .context("Failed to write entry-point NAR to disk")?;
     }
@@ -481,15 +499,16 @@ fn nix_base32_sha256(data: &[u8]) -> String {
     out
 }
 
-async fn get_next_build_output(state: Arc<ServerState>) -> Option<MBuildOutput> {
+async fn get_next_build_outputs(state: Arc<ServerState>, limit: usize) -> Vec<MBuildOutput> {
     EBuildOutput::find()
         .filter(CBuildOutput::IsCached.eq(false))
         .order_by_asc(CBuildOutput::CreatedAt)
-        .one(&state.db)
+        .limit(limit as u64)
+        .all(&state.db)
         .await
         .unwrap_or_else(|e| {
-            error!(error = %e, "Failed to query next build output");
-            None
+            error!(error = %e, "Failed to query next build outputs");
+            vec![]
         })
 }
 

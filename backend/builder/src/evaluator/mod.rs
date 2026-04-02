@@ -17,6 +17,7 @@ use core::sources::{clear_key, decrypt_ssh_private_key, prefetch_flake, write_ke
 use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
+use futures::stream::{self, StreamExt};
 use nix_daemon::nix::DaemonStore;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use std::sync::Arc;
@@ -88,35 +89,51 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     let mut failed_derivations: Vec<(String, String)> = vec![];
     let total_derivations = all_derivations.len();
 
-    for derivation_string in all_derivations {
-        let path = format!("{}#{}", repository, derivation_string);
+    // Resolve all derivation paths in parallel — each `nix path-info --derivation` call
+    // is independent and CPU-bound, so running them concurrently uses all available cores.
+    let (private_key, _public_key) =
+        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization.clone(), &state.cli.serve_url)?;
+    let ssh_key_path = write_key(private_key)?;
+    let git_ssh_command = format!(
+        "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
+        state.cli.binpath_ssh, ssh_key_path
+    );
 
-        let (private_key, _public_key) =
-            decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization.clone(), &state.cli.serve_url)?;
-
-        let ssh_key_path = write_key(private_key)?;
-        let git_ssh_command = format!(
-            "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
-            state.cli.binpath_ssh, ssh_key_path
-        );
-
-        // TODO: use nix api
-        let (derivation, _references) =
-            match get_derivation_cmd(state.cli.binpath_nix.as_str(), &path, &git_ssh_command).await {
-                Ok((d, r)) => (d, r),
-                Err(e) => {
-                    let error_msg = e.to_string();
-                    warn!(
-                        error = %e,
-                        derivation = %derivation_string,
-                        "Derivation failed, skipping broken package"
-                    );
-                    failed_derivations.push((derivation_string.clone(), error_msg));
-                    continue;
+    let concurrency = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let binpath_nix = state.cli.binpath_nix.clone();
+    let resolved: Vec<(String, Result<(String, Vec<String>)>)> =
+        stream::iter(all_derivations.into_iter())
+            .map(|derivation_string| {
+                let path = format!("{}#{}", repository, derivation_string);
+                let bn = binpath_nix.clone();
+                let gc = git_ssh_command.clone();
+                async move {
+                    let result = get_derivation_cmd(&bn, &path, &gc).await;
+                    (derivation_string, result)
                 }
-            };
+            })
+            .buffer_unordered(concurrency)
+            .collect()
+            .await;
 
-        clear_key(ssh_key_path).ok();
+    clear_key(ssh_key_path).ok();
+
+    // Process resolved derivations sequentially (store and acc require exclusive access).
+    for (derivation_string, derivation_result) in resolved {
+        // TODO: use nix api
+        let (derivation, _references) = match derivation_result {
+            Ok((d, r)) => (d, r),
+            Err(e) => {
+                let error_msg = e.to_string();
+                warn!(
+                    error = %e,
+                    derivation = %derivation_string,
+                    "Derivation failed, skipping broken package"
+                );
+                failed_derivations.push((derivation_string.clone(), error_msg));
+                continue;
+            }
+        };
 
         let missing = get_missing_builds(vec![derivation.clone()], store).await?;
 
@@ -161,7 +178,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             debug!(derivation = %derivation, "Completed build found in DB but missing from nix store, re-evaluating");
         }
 
-        info!(derivation = %derivation, path = %path, "Creating build");
+        info!(derivation = %derivation, "Creating build");
 
         let entry_point_idx = acc.builds.len();
         query_all_dependencies(

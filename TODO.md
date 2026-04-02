@@ -3,6 +3,7 @@
 
  - sometimes frontend is unresponsive when io / cpu is fully utilized
  - before a build is building check again if the build is already built
+ - there a to types of displays in frontend for managed declaratively info, make everything consistent
  - Add Non-SSH server as default
  - Log OIDC Errors in journal error
  - Add Super User
