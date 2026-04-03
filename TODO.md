@@ -4,6 +4,12 @@
  - sometimes frontend is unresponsive when io / cpu is fully utilized
  - before a build is building check again if the build is already built
  - there a to types of displays in frontend for managed declaratively info, make everything consistent
+ - Better defaults for server features
+ - Scrollingbar on edit server page
+ - remove whitespace in features page
+ - visualize errors on project creation
+ - add visualization for projects and organizations to show what org / project is doing
+ - caches subscription only when user has subscribe permission in cache and org / show missing permissions error for caches when trying to subscribe
  - Add Non-SSH server as default
  - Log OIDC Errors in journal error
  - Add Super User

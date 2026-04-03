@@ -250,6 +250,7 @@ in {
         ReadWritePaths = [ "/nix/var/nix/gcroots/gradient" ];
         Restart = "on-failure";
         RestartSec = 10;
+        LimitNOFILE = 65535;
         RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
         RestrictNamespaces = true;
         RestrictRealtime = true;

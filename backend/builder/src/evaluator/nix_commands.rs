@@ -177,6 +177,7 @@ pub async fn get_features_cmd(
     } else {
         top
     };
+
     let drv_obj = drv_map
         .values()
         .next()

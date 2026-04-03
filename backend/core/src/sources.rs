@@ -361,6 +361,7 @@ pub async fn prefetch_flake(
         .arg("flake")
         .arg("archive")
         .arg(&repository)
+        .arg("--no-write-lock-file")
         .env("GIT_SSH_COMMAND", format!("{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", state.cli.binpath_ssh, ssh_key_path))
         .output()
         .await;
