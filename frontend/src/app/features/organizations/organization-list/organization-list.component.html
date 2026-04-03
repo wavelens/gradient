@@ -28,11 +28,19 @@
             <div class="org-content">
               <h3>{{ org.display_name || org.name }}</h3>
               <p class="text-secondary">{{ org.description || 'No description' }}</p>
-              @if (org.role) {
-                <span class="role-badge" [class.owner]="org.role === 'owner'">
-                  {{ org.role }}
-                </span>
-              }
+              <div class="org-badges">
+                @if (org.role) {
+                  <span class="role-badge" [class.owner]="org.role === 'owner'">
+                    {{ org.role }}
+                  </span>
+                }
+                @if (org.running_evaluations && org.running_evaluations > 0) {
+                  <span class="activity-badge">
+                    <span class="material-symbols-outlined spinning">sync</span>
+                    {{ org.running_evaluations }} running
+                  </span>
+                }
+              </div>
             </div>
             <div class="org-arrow">
               <span class="material-symbols-outlined">arrow_forward</span>
@@ -86,6 +94,12 @@
   [draggable]="false"
   [resizable]="false"
 >
+  @if (createError()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ createError() }}
+    </div>
+  }
   <div class="dialog-content">
     <div class="form-group">
       <label for="name">Name *</label>

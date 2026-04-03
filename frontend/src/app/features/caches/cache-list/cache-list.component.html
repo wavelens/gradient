@@ -132,6 +132,12 @@
   [draggable]="false"
   [resizable]="false"
 >
+  @if (createError()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ createError() }}
+    </div>
+  }
   <div class="dialog-content">
     <div class="form-group">
       <label for="cache-name">Name *</label>

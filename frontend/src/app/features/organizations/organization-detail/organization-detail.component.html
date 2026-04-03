@@ -34,6 +34,16 @@
               <div class="project-content">
                 <h3>{{ project.display_name || project.name }}</h3>
                 <p class="text-secondary">{{ project.description || 'No description' }}</p>
+                <div class="project-meta">
+                  @if (project.last_evaluation_status) {
+                    <span class="eval-status-badge" [class]="getEvalStatusClass(project.last_evaluation_status)">
+                      <span class="material-symbols-outlined" [class.spinning]="isRunningStatus(project.last_evaluation_status)">
+                        {{ getEvalStatusIcon(project.last_evaluation_status) }}
+                      </span>
+                      {{ project.last_evaluation_status }}
+                    </span>
+                  }
+                </div>
               </div>
               <div class="project-arrow">
                 <span class="material-symbols-outlined">arrow_forward</span>
@@ -66,6 +76,12 @@
   [draggable]="false"
   [resizable]="false"
 >
+  @if (createError()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ createError() }}
+    </div>
+  }
   <div class="dialog-content">
     <div class="form-group">
       <label for="proj-name">Name *</label>

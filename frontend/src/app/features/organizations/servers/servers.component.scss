@@ -130,3 +130,13 @@
 }
 
 .w-full { width: 100%; }
+
+p-inputnumber {
+  display: block;
+  width: 100%;
+
+  ::ng-deep .p-inputnumber,
+  ::ng-deep .p-inputnumber-input {
+    width: 100%;
+  }
+}

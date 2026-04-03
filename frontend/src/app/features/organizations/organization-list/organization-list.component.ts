@@ -8,7 +8,7 @@ import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Subject } from 'rxjs';
+import { Subject, EMPTY } from 'rxjs';
 import { debounceTime, switchMap } from 'rxjs/operators';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
@@ -48,6 +48,7 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
   orgsPage = signal(1);
   showCreateDialog = signal(false);
   creating = signal(false);
+  createError = signal<string | null>(null);
   nameCheckState = signal<'idle' | 'invalid' | 'checking' | 'available' | 'taken'>('idle');
 
   newOrg = {
@@ -71,10 +72,7 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
     this.loadPublicOrganizations();
     this.nameCheck$.pipe(
       debounceTime(400),
-      switchMap((name) => {
-        if (!name) { this.nameCheckState.set('idle'); return []; }
-        return this.organizationsService.checkOrgNameAvailable(name);
-      }),
+      switchMap((name) => name ? this.organizationsService.checkOrgNameAvailable(name) : EMPTY),
     ).subscribe((available) => {
       this.nameCheckState.set(available ? 'available' : 'taken');
     });
@@ -116,6 +114,7 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
   openCreateDialog(): void {
     this.newOrg = { name: '', display_name: '', description: '', public: false };
     this.nameCheckState.set('idle');
+    this.createError.set(null);
     this.showCreateDialog.set(true);
   }
 
@@ -123,7 +122,7 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
     if (!name) { this.nameCheckState.set('idle'); this.nameCheck$.next(''); return; }
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
       this.nameCheckState.set('invalid');
-      this.nameCheck$.next('');
+      this.nameCheck$.next(''); // cancel any pending debounce without making an API call
       return;
     }
     this.nameCheckState.set('checking');
@@ -136,6 +135,7 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
     }
 
     this.creating.set(true);
+    this.createError.set(null);
     this.organizationsService.createOrganization(this.newOrg).subscribe({
       next: () => {
         this.creating.set(false);
@@ -143,7 +143,7 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
         this.loadOrganizations();
       },
       error: (error) => {
-        console.error('Failed to create organization:', error);
+        this.createError.set(error?.message || 'Failed to create organization.');
         this.creating.set(false);
       },
     });

@@ -8,7 +8,7 @@ import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Subject } from 'rxjs';
+import { Subject, EMPTY } from 'rxjs';
 import { debounceTime, switchMap } from 'rxjs/operators';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
@@ -46,6 +46,7 @@ export class CacheListComponent implements OnInit, OnDestroy {
   caches = signal<Cache[]>([]);
   showCreateDialog = signal(false);
   creating = signal(false);
+  createError = signal<string | null>(null);
   nameCheckState = signal<'idle' | 'invalid' | 'checking' | 'available' | 'taken'>('idle');
 
   newCache = {
@@ -73,10 +74,7 @@ export class CacheListComponent implements OnInit, OnDestroy {
     this.loadPublicCaches();
     this.nameCheck$.pipe(
       debounceTime(400),
-      switchMap((name) => {
-        if (!name) { this.nameCheckState.set('idle'); return []; }
-        return this.cachesService.checkCacheNameAvailable(name);
-      }),
+      switchMap((name) => name ? this.cachesService.checkCacheNameAvailable(name) : EMPTY),
     ).subscribe((available) => {
       this.nameCheckState.set(available ? 'available' : 'taken');
     });
@@ -114,6 +112,7 @@ export class CacheListComponent implements OnInit, OnDestroy {
   openCreateDialog(): void {
     this.newCache = { name: '', display_name: '', description: '', priority: 50, public: false };
     this.nameCheckState.set('idle');
+    this.createError.set(null);
     this.showCreateDialog.set(true);
   }
 
@@ -121,7 +120,7 @@ export class CacheListComponent implements OnInit, OnDestroy {
     if (!name) { this.nameCheckState.set('idle'); this.nameCheck$.next(''); return; }
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
       this.nameCheckState.set('invalid');
-      this.nameCheck$.next('');
+      this.nameCheck$.next(''); // cancel any pending debounce without making an API call
       return;
     }
     this.nameCheckState.set('checking');
@@ -134,6 +133,7 @@ export class CacheListComponent implements OnInit, OnDestroy {
     }
 
     this.creating.set(true);
+    this.createError.set(null);
     this.cachesService.createCache(this.newCache).subscribe({
       next: () => {
         this.creating.set(false);
@@ -141,7 +141,7 @@ export class CacheListComponent implements OnInit, OnDestroy {
         this.loadCaches();
       },
       error: (error) => {
-        console.error('Failed to create cache:', error);
+        this.createError.set(error?.message || 'Failed to create cache.');
         this.creating.set(false);
       },
     });

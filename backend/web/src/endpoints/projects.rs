@@ -41,6 +41,7 @@ pub struct ProjectResponse {
     pub repository: String,
     pub evaluation_wildcard: String,
     pub last_evaluation: Option<Uuid>,
+    pub last_evaluation_status: Option<EvaluationStatus>,
     pub force_evaluation: bool,
     pub created_by: Uuid,
     pub created_at: chrono::NaiveDateTime,
@@ -127,6 +128,7 @@ pub struct ProjectDetailsResponse {
     pub active: bool,
     pub created_at: chrono::NaiveDateTime,
     pub last_evaluations: Vec<EvaluationSummary>,
+    pub can_edit: bool,
 }
 
 pub async fn get_project_name_available(
@@ -190,23 +192,41 @@ pub async fn get(
     let total = paginator.num_items().await?;
     let raw = paginator.fetch_page(page - 1).await?;
 
+    // Batch-fetch the status of the last evaluation for each project.
+    let eval_ids: Vec<Uuid> = raw.iter().filter_map(|p| p.last_evaluation).collect();
+    let eval_status_map: HashMap<Uuid, EvaluationStatus> = if eval_ids.is_empty() {
+        HashMap::new()
+    } else {
+        EEvaluation::find()
+            .filter(CEvaluation::Id.is_in(eval_ids))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|e| (e.id, e.status))
+            .collect()
+    };
+
     let items: Vec<ProjectResponse> = raw
         .into_iter()
-        .map(|p| ProjectResponse {
-            id: p.id,
-            organization: p.organization,
-            name: p.name,
-            active: p.active,
-            display_name: p.display_name,
-            description: p.description,
-            repository: p.repository,
-            evaluation_wildcard: p.evaluation_wildcard,
-            last_evaluation: p.last_evaluation,
-            force_evaluation: p.force_evaluation,
-            created_by: p.created_by,
-            created_at: p.created_at,
-            managed: p.managed,
-            can_edit,
+        .map(|p| {
+            let last_evaluation_status = p.last_evaluation.and_then(|id| eval_status_map.get(&id).cloned());
+            ProjectResponse {
+                id: p.id,
+                organization: p.organization,
+                name: p.name,
+                active: p.active,
+                display_name: p.display_name,
+                description: p.description,
+                repository: p.repository,
+                evaluation_wildcard: p.evaluation_wildcard,
+                last_evaluation: p.last_evaluation,
+                last_evaluation_status,
+                force_evaluation: p.force_evaluation,
+                created_by: p.created_by,
+                created_at: p.created_at,
+                managed: p.managed,
+                can_edit,
+            }
         })
         .collect();
 
@@ -251,7 +271,8 @@ pub async fn put(
         return Err(WebError::already_exists("Project Name"));
     }
 
-    if !valid_evaluation_wildcard(body.evaluation_wildcard.clone().as_str()) {
+    let evaluation_wildcard = body.evaluation_wildcard.trim().to_string();
+    if !valid_evaluation_wildcard(&evaluation_wildcard) {
         return Err(WebError::BadRequest(
             "Invalid Evaluation Wildcard".to_string(),
         ));
@@ -262,10 +283,10 @@ pub async fn put(
         organization: Set(organization.id),
         name: Set(body.name.clone()),
         active: Set(true),
-        display_name: Set(body.display_name.clone()),
-        description: Set(body.description.clone()),
+        display_name: Set(body.display_name.trim().to_string()),
+        description: Set(body.description.trim().to_string()),
         repository: Set(body.repository.clone()),
-        evaluation_wildcard: Set(body.evaluation_wildcard.clone()),
+        evaluation_wildcard: Set(evaluation_wildcard),
         last_evaluation: Set(None),
         last_check_at: Set(*NULL_TIME),
         force_evaluation: Set(false),
@@ -317,6 +338,15 @@ pub async fn get_project(
         None => false,
     };
 
+    let last_evaluation_status = if let Some(eval_id) = project.last_evaluation {
+        EEvaluation::find_by_id(eval_id)
+            .one(&state.db)
+            .await?
+            .map(|e| e.status)
+    } else {
+        None
+    };
+
     Ok(Json(BaseResponse {
         error: false,
         message: ProjectResponse {
@@ -329,6 +359,7 @@ pub async fn get_project(
             repository: project.repository,
             evaluation_wildcard: project.evaluation_wildcard,
             last_evaluation: project.last_evaluation,
+            last_evaluation_status,
             force_evaluation: project.force_evaluation,
             created_by: project.created_by,
             created_at: project.created_at,
@@ -388,6 +419,7 @@ pub async fn patch_project(
     }
 
     if let Some(display_name) = body.display_name {
+        let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
             return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
         }
@@ -395,7 +427,7 @@ pub async fn patch_project(
     }
 
     if let Some(description) = body.description {
-        aproject.description = Set(description);
+        aproject.description = Set(description.trim().to_string());
     }
 
     if let Some(repository) = body.repository {
@@ -406,7 +438,8 @@ pub async fn patch_project(
     }
 
     if let Some(evaluation_wildcard) = body.evaluation_wildcard {
-        if !valid_evaluation_wildcard(evaluation_wildcard.as_str()) {
+        let evaluation_wildcard = evaluation_wildcard.trim().to_string();
+        if !valid_evaluation_wildcard(&evaluation_wildcard) {
             return Err(WebError::BadRequest(
                 "Invalid Evaluation Wildcard".to_string(),
             ));
@@ -761,6 +794,11 @@ pub async fn get_project_details(
         });
     }
 
+    let can_edit = match &maybe_user {
+        Some(user) => user_can_edit(&state, user.id, organization.id).await?,
+        None => false,
+    };
+
     let project_details = ProjectDetailsResponse {
         id: project.id,
         name: project.name,
@@ -771,6 +809,7 @@ pub async fn get_project_details(
         active: project.active,
         created_at: project.created_at,
         last_evaluations: evaluation_summaries,
+        can_edit,
     };
 
     let res = BaseResponse {

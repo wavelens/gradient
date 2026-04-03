@@ -17,8 +17,22 @@
       <h1>Cache Subscriptions</h1>
       <p class="text-secondary">Nix binary caches this organization pushes builds to</p>
     </div>
-    <button pButton label="Subscribe to Cache" icon="pi pi-plus" (click)="openSubscribeDialog()"></button>
+    <button
+      pButton
+      label="Subscribe to Cache"
+      icon="pi pi-plus"
+      [disabled]="canManageSubscriptions() === false"
+      [pTooltip]="canManageSubscriptions() === false ? 'You need Write or Admin permissions to manage cache subscriptions' : ''"
+      (click)="openSubscribeDialog()"
+    ></button>
   </div>
+
+  @if (canManageSubscriptions() === false) {
+    <div class="permission-error">
+      <span class="material-symbols-outlined">lock</span>
+      <span>You need <strong>Write</strong> or <strong>Admin</strong> permissions in this organization to manage cache subscriptions.</span>
+    </div>
+  }
 
   @if (loading()) {
     <app-loading-spinner message="Loading cache subscriptions..." />
@@ -28,7 +42,13 @@
         <span class="material-symbols-outlined">storage</span>
         <h3>No cache subscriptions</h3>
         <p class="text-secondary">Subscribe to a Nix binary cache to have builds pushed there automatically.</p>
-        <button pButton label="Subscribe to Cache" icon="pi pi-plus" (click)="openSubscribeDialog()"></button>
+        <button
+          pButton
+          label="Subscribe to Cache"
+          icon="pi pi-plus"
+          [disabled]="canManageSubscriptions() === false"
+          (click)="openSubscribeDialog()"
+        ></button>
       </div>
     } @else {
       <div class="caches-list">

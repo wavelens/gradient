@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { CardModule } from 'primeng/card';
-import { CachesService, CacheStats, CacheMetricPoint } from '@core/services/caches.service';
+import { CachesService, CacheStats, CacheMetricPoint, UpstreamCache } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { Cache } from '@core/models';
 import {
@@ -57,9 +57,21 @@ export class CacheDetailComponent implements OnInit {
   loading = signal(true);
   statsLoading = signal(true);
   cache = signal<Cache | null>(null);
+  upstreams = signal<UpstreamCache[]>([]);
   stats = signal<CacheStats | null>(null);
   copied = signal<string | null>(null);
   activeWindow = signal<Window>('hours');
+
+  externalUpstreamKeys = computed(() =>
+    this.upstreams()
+      .filter(u => u.public_key)
+      .map(u => u.public_key!)
+  );
+
+  allPublicKeys = computed(() => {
+    const own = this.cache()?.public_key;
+    return [...(own ? [own] : []), ...this.externalUpstreamKeys()];
+  });
 
   cacheName = '';
   cacheUrl = '';
@@ -168,6 +180,7 @@ export class CacheDetailComponent implements OnInit {
     this.cacheUrl = `${this.serverUrl}/cache/${this.cacheName}`;
     this.loadCache();
     this.loadStats();
+    this.loadUpstreams();
   }
 
   loadCache(): void {
@@ -181,6 +194,13 @@ export class CacheDetailComponent implements OnInit {
         console.error('Failed to load cache:', error);
         this.loading.set(false);
       },
+    });
+  }
+
+  loadUpstreams(): void {
+    this.cachesService.getCacheUpstreams(this.cacheName).subscribe({
+      next: (upstreams) => this.upstreams.set(upstreams),
+      error: () => {},
     });
   }
 

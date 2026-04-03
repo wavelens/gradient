@@ -304,18 +304,21 @@
 
 // ── Error banner ──────────────────────────────────────────────────────────────
 
-.error-banner {
+.message-banner {
   display: flex;
-  align-items: flex-start;
   gap: $spacing-sm;
-  background: rgba($color-danger, 0.08);
-  border-bottom: 1px solid rgba($color-danger, 0.4);
-  padding: $spacing-sm $spacing-lg;
-  color: $color-danger;
   flex-shrink: 0;
   font-size: $font-size-sm;
 
   .material-symbols-outlined { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+
+  &.error {
+    align-items: flex-start;
+    background: rgba($color-danger, 0.08);
+    border-bottom: 1px solid rgba($color-danger, 0.4);
+    padding: $spacing-sm $spacing-lg;
+    color: $color-danger;
+  }
 }
 
 .error-text {

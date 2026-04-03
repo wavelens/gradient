@@ -29,6 +29,7 @@ export class ServersService {
     username: string;
     architectures: string[];
     features: string[];
+    max_concurrent_builds: number;
   }): Observable<string> {
     return this.api.put<string>(`servers/${org}`, data);
   }
@@ -42,6 +43,9 @@ export class ServersService {
     host?: string;
     port?: number;
     username?: string;
+    architectures?: string[];
+    features?: string[];
+    max_concurrent_builds?: number;
   }): Observable<string> {
     return this.api.patch<string>(`servers/${org}/${server}`, data);
   }

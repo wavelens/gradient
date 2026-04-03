@@ -15,6 +15,9 @@ export interface Server {
   host: string;
   port: number;
   username: string;
+  architectures: string[];
+  features: string[];
+  max_concurrent_builds: number;
   last_connection_at?: string;
   managed: boolean;
   created_by?: string;

@@ -10,8 +10,8 @@ use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use chrono::Utc;
-use core::consts::BASE_ROLE_ADMIN_ID;
-use core::database::{get_any_organization_by_name, get_cache_by_name, get_organization_by_name};
+use core::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_WRITE_ID};
+use core::database::{get_any_cache_by_name, get_any_organization_by_name, get_organization_by_name};
 use core::input::{check_index_name, validate_display_name};
 use core::sources::{format_public_key, generate_ssh_key};
 use core::types::*;
@@ -76,11 +76,26 @@ pub async fn get_org_name_available(
     }))
 }
 
+#[derive(Serialize)]
+pub struct OrganizationSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    pub public_key: Option<String>,
+    pub use_nix_store: bool,
+    pub public: bool,
+    pub managed: bool,
+    pub created_by: Uuid,
+    pub created_at: chrono::NaiveDateTime,
+    pub running_evaluations: i64,
+}
+
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Query(params): Query<PaginationParams>,
-) -> WebResult<Json<BaseResponse<Paginated<Vec<MOrganization>>>>> {
+) -> WebResult<Json<BaseResponse<Paginated<Vec<OrganizationSummary>>>>> {
     let page = params.page();
     let per_page = params.per_page();
 
@@ -97,7 +112,55 @@ pub async fn get(
         .paginate(&state.db, per_page);
 
     let total = paginator.num_items().await?;
-    let items = paginator.fetch_page(page - 1).await?;
+    let orgs = paginator.fetch_page(page - 1).await?;
+
+    // Batch-count running evaluations per organization.
+    let org_ids: Vec<Uuid> = orgs.iter().map(|o| o.id).collect();
+    let projects = EProject::find()
+        .filter(CProject::Organization.is_in(org_ids))
+        .all(&state.db)
+        .await?;
+    let project_ids: Vec<Uuid> = projects.iter().map(|p| p.id).collect();
+    let project_to_org: HashMap<Uuid, Uuid> = projects.into_iter().map(|p| (p.id, p.organization)).collect();
+
+    let mut running_per_org: HashMap<Uuid, i64> = HashMap::new();
+    if !project_ids.is_empty() {
+        use entity::evaluation::EvaluationStatus;
+        let running = EEvaluation::find()
+            .filter(CEvaluation::Project.is_in(project_ids))
+            .filter(
+                Condition::any()
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Evaluating))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Building)),
+            )
+            .all(&state.db)
+            .await?;
+        for eval in running {
+            if let Some(project_id) = eval.project {
+                if let Some(&org_id) = project_to_org.get(&project_id) {
+                    *running_per_org.entry(org_id).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+
+    let items: Vec<OrganizationSummary> = orgs
+        .into_iter()
+        .map(|o| OrganizationSummary {
+            running_evaluations: *running_per_org.get(&o.id).unwrap_or(&0),
+            id: o.id,
+            name: o.name,
+            display_name: o.display_name,
+            description: o.description,
+            public_key: Some(o.public_key),
+            use_nix_store: o.use_nix_store,
+            public: o.public,
+            managed: o.managed,
+            created_by: o.created_by,
+            created_at: o.created_at,
+        })
+        .collect();
 
     Ok(Json(BaseResponse {
         error: false,
@@ -136,8 +199,8 @@ pub async fn put(
     let organization = AOrganization {
         id: Set(Uuid::new_v4()),
         name: Set(body.name.clone()),
-        display_name: Set(body.display_name.clone()),
-        description: Set(body.description.clone()),
+        display_name: Set(body.display_name.trim().to_string()),
+        description: Set(body.description.trim().to_string()),
         public_key: Set(public_key),
         private_key: Set(private_key),
         use_nix_store: Set(true),
@@ -250,6 +313,7 @@ pub async fn patch_organization(
     }
 
     if let Some(display_name) = body.display_name {
+        let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
             return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
         }
@@ -257,7 +321,7 @@ pub async fn patch_organization(
     }
 
     if let Some(description) = body.description {
-        aorganization.description = Set(description);
+        aorganization.description = Set(description.trim().to_string());
     }
 
     let organization = aorganization.update(&state.db).await?;
@@ -657,9 +721,35 @@ pub async fn post_organization_subscribe_cache(
             .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone())
+    let org_user = EOrganizationUser::find()
+        .filter(
+            Condition::all()
+                .add(COrganizationUser::Organization.eq(organization.id))
+                .add(COrganizationUser::User.eq(user.id)),
+        )
+        .one(&state.db)
+        .await?;
+
+    let has_write_permission = matches!(
+        org_user,
+        Some(ref ou) if ou.role == BASE_ROLE_ADMIN_ID || ou.role == BASE_ROLE_WRITE_ID
+    );
+
+    if !has_write_permission {
+        return Err(WebError::Forbidden(
+            "You need Write or Admin permissions in this organization to manage cache subscriptions".to_string(),
+        ));
+    }
+
+    let cache: MCache = get_any_cache_by_name(state.0.clone(), cache.clone())
         .await?
         .ok_or_else(|| WebError::not_found("Cache"))?;
+
+    if !cache.public && cache.created_by != user.id {
+        return Err(WebError::Forbidden(
+            "You don't have permission to subscribe to this cache. The cache is private and you are not the owner.".to_string(),
+        ));
+    }
 
     let already = EOrganizationCache::find()
         .filter(
@@ -700,7 +790,27 @@ pub async fn delete_organization_subscribe_cache(
             .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone())
+    let org_user = EOrganizationUser::find()
+        .filter(
+            Condition::all()
+                .add(COrganizationUser::Organization.eq(organization.id))
+                .add(COrganizationUser::User.eq(user.id)),
+        )
+        .one(&state.db)
+        .await?;
+
+    let has_write_permission = matches!(
+        org_user,
+        Some(ref ou) if ou.role == BASE_ROLE_ADMIN_ID || ou.role == BASE_ROLE_WRITE_ID
+    );
+
+    if !has_write_permission {
+        return Err(WebError::Forbidden(
+            "You need Write or Admin permissions in this organization to manage cache subscriptions".to_string(),
+        ));
+    }
+
+    let cache: MCache = get_any_cache_by_name(state.0.clone(), cache.clone())
         .await?
         .ok_or_else(|| WebError::not_found("Cache"))?;
 

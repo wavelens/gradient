@@ -27,47 +27,33 @@
   .breadcrumb-current { color: $text-primary; }
 }
 
-.error-banner {
+.message-banner {
   display: flex;
   align-items: center;
   gap: $spacing-sm;
-  background: rgba($color-danger, 0.1);
-  border: 1px solid rgba($color-danger, 0.5);
   border-radius: $border-radius-md;
   padding: $spacing-md;
-  color: $color-danger;
   margin-bottom: $spacing-lg;
 
   .material-symbols-outlined { font-size: 20px; }
-}
 
-.success-banner {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  background: rgba($color-success, 0.1);
-  border: 1px solid rgba($color-success, 0.5);
-  border-radius: $border-radius-md;
-  padding: $spacing-md;
-  color: $color-success;
-  margin-bottom: $spacing-lg;
+  &.error {
+    background: rgba($color-danger, 0.1);
+    border: 1px solid rgba($color-danger, 0.5);
+    color: $color-danger;
+  }
 
-  .material-symbols-outlined { font-size: 20px; }
-}
+  &.success {
+    background: rgba($color-success, 0.1);
+    border: 1px solid rgba($color-success, 0.5);
+    color: $color-success;
+  }
 
-.info-banner {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  background: rgba($color-info, 0.08);
-  border: 1px solid rgba($color-info, 0.4);
-  border-radius: $border-radius-md;
-  padding: $spacing-md;
-  color: $color-info;
-  margin-bottom: $spacing-md;
-  font-size: $font-size-sm;
-
-  .material-symbols-outlined { font-size: 18px; flex-shrink: 0; }
+  &.info {
+    background: rgba($color-info, 0.1);
+    border: 1px solid rgba($color-info, 0.5);
+    color: $color-info;
+  }
 }
 
 .settings-section {

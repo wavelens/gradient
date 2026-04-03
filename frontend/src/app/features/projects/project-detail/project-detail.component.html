@@ -34,14 +34,16 @@
       </div>
       @if (authService.isAuthenticated()) {
         <div class="header-actions">
-          <button
-            pButton
-            label="Start Evaluation"
-            icon="pi pi-play"
-            (click)="startEvaluation()"
-            [loading]="starting()"
-            [disabled]="starting()"
-          ></button>
+          @if (proj.can_edit) {
+            <button
+              pButton
+              label="Start Evaluation"
+              icon="pi pi-play"
+              (click)="startEvaluation()"
+              [loading]="starting()"
+              [disabled]="starting()"
+            ></button>
+          }
           <button
             pButton
             label="Settings"
@@ -184,9 +186,9 @@
         <app-empty-state
           icon="assessment"
           title="No evaluations yet"
-          message="Start your first evaluation to begin building"
-          actionLabel="Start Evaluation"
-          (actionClick)="startEvaluation()"
+          [message]="proj.can_edit ? 'Start your first evaluation to begin building' : 'No evaluations have been run yet'"
+          [actionLabel]="proj.can_edit ? 'Start Evaluation' : ''"
+          (actionClick)="proj.can_edit && startEvaluation()"
         />
       }
     </div>

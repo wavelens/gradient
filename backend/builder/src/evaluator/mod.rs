@@ -25,6 +25,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
+type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
+
 use dependencies::{add_existing_build, find_builds, query_all_dependencies, EvaluationAccumulator};
 use flake::get_flake_derivations;
 use super::scheduler::{update_evaluation_status, update_evaluation_status_with_error};
@@ -101,7 +103,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
     let concurrency = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
     let binpath_nix = state.cli.binpath_nix.clone();
-    let resolved: Vec<(String, Result<(String, Vec<String>)>)> =
+    let resolved: Vec<ResolvedDerivation> =
         stream::iter(all_derivations.into_iter())
             .map(|derivation_string| {
                 let path = format!("{}#{}", repository, derivation_string);

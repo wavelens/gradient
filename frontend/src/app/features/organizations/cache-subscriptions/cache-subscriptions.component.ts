@@ -12,8 +12,10 @@ import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { AutoCompleteModule } from 'primeng/autocomplete';
+import { TooltipModule } from 'primeng/tooltip';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { CachesService } from '@core/services/caches.service';
+import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 
 @Component({
@@ -27,6 +29,7 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
     ButtonModule,
     InputTextModule,
     AutoCompleteModule,
+    TooltipModule,
     LoadingSpinnerComponent,
   ],
   templateUrl: './cache-subscriptions.component.html',
@@ -36,12 +39,14 @@ export class CacheSubscriptionsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private orgsService = inject(OrganizationsService);
   private cachesService = inject(CachesService);
+  private authService = inject(AuthService);
 
   loading = signal(true);
   subscribing = signal(false);
   unsubscribingId = signal<string | null>(null);
   showSubscribeDialog = signal(false);
   errorMessage = signal<string | null>(null);
+  canManageSubscriptions = signal<boolean | null>(null);
 
   orgName = '';
   caches = signal<{ id: string; name: string }[]>([]);
@@ -52,6 +57,22 @@ export class CacheSubscriptionsComponent implements OnInit {
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.loadCaches();
+    this.loadOrgPermission();
+  }
+
+  private loadOrgPermission(): void {
+    const currentUser = this.authService.user();
+    if (!currentUser) {
+      this.canManageSubscriptions.set(false);
+      return;
+    }
+    this.orgsService.getMembers(this.orgName).subscribe({
+      next: (members) => {
+        const me = members.find((m) => m.id === currentUser.username);
+        this.canManageSubscriptions.set(!!me && (me.name === 'Admin' || me.name === 'Write'));
+      },
+      error: () => this.canManageSubscriptions.set(false),
+    });
   }
 
   loadCaches(): void {
@@ -66,6 +87,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   }
 
   openSubscribeDialog(): void {
+    if (!this.canManageSubscriptions()) return;
     this.newCacheName = '';
     this.errorMessage.set(null);
     this.cacheSuggestions.set([]);

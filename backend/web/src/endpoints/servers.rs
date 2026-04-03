@@ -124,7 +124,7 @@ pub async fn put(
     let server = AServer {
         id: Set(Uuid::new_v4()),
         name: Set(body.name.clone()),
-        display_name: Set(body.display_name.clone()),
+        display_name: Set(body.display_name.trim().to_string()),
         organization: Set(organization.id),
         active: Set(true),
         host: Set(body.host.clone()),
@@ -311,6 +311,7 @@ pub async fn patch_server(
     }
 
     if let Some(display_name) = body.display_name.clone() {
+        let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
             return Err((
                 StatusCode::BAD_REQUEST,

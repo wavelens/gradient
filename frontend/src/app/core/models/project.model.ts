@@ -16,6 +16,7 @@ export interface Project {
   repository: string;
   evaluation_wildcard: string;
   last_evaluation?: string;
+  last_evaluation_status?: EvaluationStatus;
   last_check_at?: string;
   force_evaluation: boolean;
   created_by?: string;
@@ -56,6 +57,7 @@ export interface ProjectDetail {
   active: boolean;
   created_at: string;
   last_evaluations: EvaluationSummary[];
+  can_edit: boolean;
 }
 
 export interface Evaluation {

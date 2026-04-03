@@ -434,9 +434,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   private readonly ansiColorMap: Record<string, string> = {
-    // Reset / close
-    '0':    '</span>', '39': '</span>', '49': '</span>',
-    '22': '</span>', '23': '</span>', '24': '</span>',
     // Styles
     '1': '<span style="font-weight:bold">',
     '2': '<span style="opacity:0.6">',
@@ -470,14 +467,25 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     '35;1': '<span style="color:#a855f7;font-weight:bold">',
   };
 
+  private static readonly ANSI_RESETS = new Set(['0', '', '39', '49', '22', '23', '24']);
+
   private convertAnsiToHtml(text: string): string {
     const escaped = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
-    return escaped.replace(/\u001b\[([0-9;]*)m/g, (_, code: string) => {
-      return this.ansiColorMap[code] ?? '';
+    let openSpans = 0;
+    const result = escaped.replace(/\u001b\[([0-9;]*)m/g, (_, code: string) => {
+      if (EvaluationLogComponent.ANSI_RESETS.has(code)) {
+        const closing = '</span>'.repeat(openSpans);
+        openSpans = 0;
+        return closing;
+      }
+      const tag = this.ansiColorMap[code];
+      if (tag) { openSpans++; return tag; }
+      return '';
     });
+    return result + '</span>'.repeat(openSpans);
   }
 
   private renderLog(): void {

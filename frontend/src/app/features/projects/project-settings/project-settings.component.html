@@ -23,13 +23,13 @@
     </div>
 
     @if (errorMessage()) {
-      <div class="error-banner">
+      <div class="message-banner error">
         <span class="material-symbols-outlined">error</span>
         {{ errorMessage() }}
       </div>
     }
     @if (saveSuccess()) {
-      <div class="success-banner">
+      <div class="message-banner success">
         <span class="material-symbols-outlined">check_circle</span>
         Changes saved.
       </div>
@@ -39,12 +39,12 @@
     <div class="settings-section">
       <h2>General</h2>
       @if (proj.managed) {
-        <div class="info-banner">
+        <div class="message-banner info">
           <span class="material-symbols-outlined">info</span>
           This project is managed declaratively and cannot be edited here.
         </div>
       } @else if (!proj.can_edit) {
-        <div class="info-banner">
+        <div class="message-banner info">
           <span class="material-symbols-outlined">info</span>
           You have read-only access to this project.
         </div>

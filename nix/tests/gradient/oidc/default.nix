@@ -220,8 +220,39 @@
       if "/account/oidc-callback" not in callback_response:
           raise Exception(f"OIDC callback redirect missing expected location: {callback_response}")
 
-      # Test callback with missing code
+      # Extract JWT token from Set-Cookie header
+      jwt_token = None
+      for line in callback_response.splitlines():
+          if line.lower().startswith("set-cookie:") and "jwt_token=" in line:
+              for part in line.split(";"):
+                  part = part.strip()
+                  if part.startswith("jwt_token="):
+                      jwt_token = part[len("jwt_token="):]
+                      break
+              break
+
+      if not jwt_token:
+          raise Exception(f"Could not extract jwt_token cookie from callback response: {callback_response}")
+      print(f"Successfully extracted JWT token")
+
+      print("=== Testing Authenticated API Access with OIDC Token ===")
+
+      # Use the JWT token to call an authenticated endpoint
+      profile_response = server.succeed(f"""
+        ${lib.getExe pkgs.curl} -s -i \
+          -H "Authorization: Bearer {jwt_token}" \
+          "http://gradient.local/api/v1/user"
+      """)
+      print(f"Profile response: {profile_response}")
+
+      if "200" not in profile_response:
+          raise Exception(f"Authenticated profile request failed: {profile_response}")
+      if "testuser" not in profile_response and "test@example.com" not in profile_response:
+          raise Exception(f"Profile response missing expected user data: {profile_response}")
+
       print("=== Testing OIDC Error Handling ===")
+
+      # Test callback with error parameter
       error_response = server.succeed("""
         ${lib.getExe pkgs.curl} -s -i \
           "http://gradient.local/api/v1/auth/oidc/callback?error=access_denied" || true
@@ -230,16 +261,15 @@
 
       print("=== Testing OIDC Token Validation ===")
 
-      # Test that protected endpoints require authentication
+      # Test that protected endpoints require authentication without a token
       protected_response = server.succeed("""
         ${lib.getExe pkgs.curl} -s -i \
-          "http://gradient.local/api/v1/user/profile" || true
+          "http://gradient.local/api/v1/user" || true
       """)
       print(f"Protected endpoint response: {protected_response}")
 
-      # Should return 401 Unauthorized
-      if "401" not in protected_response and "Unauthorized" not in protected_response:
-          print("Warning: Protected endpoint should require authentication")
+      if "401" not in protected_response and "403" not in protected_response:
+          raise Exception(f"Protected endpoint should require authentication, got: {protected_response}")
 
       print("=== OIDC Integration Tests Completed Successfully ===")
       '';

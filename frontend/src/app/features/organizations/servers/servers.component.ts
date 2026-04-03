@@ -48,7 +48,7 @@ export class ServersComponent implements OnInit {
   testResult = signal<{ id: string; ok: boolean; message: string } | null>(null);
   showEditDialog = signal(false);
   editServer: Server | null = null;
-  editForm = { display_name: '', host: '', port: 22, username: '' };
+  editForm = { display_name: '', host: '', port: 22, username: '', architectures: [] as string[], features: '', max_concurrent_builds: 1 };
 
   orgName = '';
   servers = signal<Server[]>([]);
@@ -71,7 +71,8 @@ export class ServersComponent implements OnInit {
     port: 22,
     username: 'root',
     architectures: [] as string[],
-    features: '',
+    features: 'nixos-test,benchmark,big-parallel,kvm',
+    max_concurrent_builds: 1,
   };
 
   ngOnInit(): void {
@@ -112,7 +113,7 @@ export class ServersComponent implements OnInit {
   }
 
   openCreateDialog(): void {
-    this.newServer = { name: '', display_name: '', host: '', port: 22, username: 'root', architectures: [], features: '' };
+    this.newServer = { name: '', display_name: '', host: '', port: 22, username: 'root', architectures: [], features: 'nixos-test,benchmark,big-parallel,kvm', max_concurrent_builds: 1 };
     this.errorMessage.set(null);
     this.showCreateDialog.set(true);
   }
@@ -133,6 +134,7 @@ export class ServersComponent implements OnInit {
       username: this.newServer.username,
       architectures: this.newServer.architectures,
       features,
+      max_concurrent_builds: this.newServer.max_concurrent_builds,
     }).subscribe({
       next: () => {
         this.creating.set(false);
@@ -153,6 +155,9 @@ export class ServersComponent implements OnInit {
       host: server.host,
       port: server.port,
       username: server.username,
+      architectures: [...(server.architectures || [])],
+      features: (server.features || []).join(', '),
+      max_concurrent_builds: server.max_concurrent_builds || 1,
     };
     this.errorMessage.set(null);
     this.showEditDialog.set(true);
@@ -162,7 +167,19 @@ export class ServersComponent implements OnInit {
     if (!this.editServer || !this.editForm.host) return;
     this.saving.set(true);
     this.errorMessage.set(null);
-    this.serversService.patchServer(this.orgName, this.editServer.name, this.editForm).subscribe({
+    const editFeatures = this.editForm.features
+      .split(',')
+      .map(f => f.trim())
+      .filter(f => f.length > 0);
+    this.serversService.patchServer(this.orgName, this.editServer.name, {
+      display_name: this.editForm.display_name,
+      host: this.editForm.host,
+      port: this.editForm.port,
+      username: this.editForm.username,
+      architectures: this.editForm.architectures,
+      features: editFeatures,
+      max_concurrent_builds: this.editForm.max_concurrent_builds,
+    }).subscribe({
       next: () => {
         this.saving.set(false);
         this.showEditDialog.set(false);
@@ -205,6 +222,15 @@ export class ServersComponent implements OnInit {
     });
   }
 
+  stripSpaces(field: 'newFeatures' | 'editFeatures', value: string): void {
+    const stripped = value.replace(/\s/g, '');
+    if (field === 'newFeatures') {
+      this.newServer.features = stripped;
+    } else {
+      this.editForm.features = stripped;
+    }
+  }
+
   isArchSelected(arch: string): boolean {
     return this.newServer.architectures.includes(arch);
   }
@@ -215,6 +241,19 @@ export class ServersComponent implements OnInit {
       this.newServer.architectures.splice(idx, 1);
     } else {
       this.newServer.architectures.push(arch);
+    }
+  }
+
+  isEditArchSelected(arch: string): boolean {
+    return this.editForm.architectures.includes(arch);
+  }
+
+  toggleEditArch(arch: string): void {
+    const idx = this.editForm.architectures.indexOf(arch);
+    if (idx >= 0) {
+      this.editForm.architectures.splice(idx, 1);
+    } else {
+      this.editForm.architectures.push(arch);
     }
   }
 }

@@ -120,6 +120,29 @@
     <label for="edit-user">SSH User</label>
     <input pInputText id="edit-user" [(ngModel)]="editForm.username" class="w-full" (keyup.enter)="saveEdit()" />
   </div>
+  <div class="form-group">
+    <label>Architectures</label>
+    <div class="arch-list">
+      @for (arch of availableArchitectures; track arch.value) {
+        <label class="arch-item">
+          <input
+            type="checkbox"
+            [checked]="isEditArchSelected(arch.value)"
+            (change)="toggleEditArch(arch.value)"
+          />
+          {{ arch.label }}
+        </label>
+      }
+    </div>
+  </div>
+  <div class="form-group">
+    <label for="edit-features">Features <span class="text-secondary">(comma-separated, optional)</span></label>
+    <input pInputText id="edit-features" [(ngModel)]="editForm.features" placeholder="e.g. big-parallel,kvm" class="w-full" (ngModelChange)="stripSpaces('editFeatures', $event)" (keyup.enter)="saveEdit()" />
+  </div>
+  <div class="form-group">
+    <label for="edit-max-builds">Max Concurrent Builds</label>
+    <p-inputnumber id="edit-max-builds" [(ngModel)]="editForm.max_concurrent_builds" [min]="1" [max]="128" class="w-full" />
+  </div>
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="saving()"></button>
     <button
@@ -187,7 +210,11 @@
   </div>
   <div class="form-group">
     <label for="server-features">Features <span class="text-secondary">(comma-separated, optional)</span></label>
-    <input pInputText id="server-features" [(ngModel)]="newServer.features" placeholder="e.g. big-parallel,kvm" class="w-full" (keyup.enter)="createServer()" />
+    <input pInputText id="server-features" [(ngModel)]="newServer.features" placeholder="e.g. big-parallel,kvm" class="w-full" (ngModelChange)="stripSpaces('newFeatures', $event)" (keyup.enter)="createServer()" />
+  </div>
+  <div class="form-group">
+    <label for="server-max-builds">Max Concurrent Builds</label>
+    <p-inputnumber id="server-max-builds" [(ngModel)]="newServer.max_concurrent_builds" [min]="1" [max]="128" class="w-full" />
   </div>
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="creating()"></button>

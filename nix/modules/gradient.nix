@@ -328,6 +328,7 @@ in {
         virtualHosts."${cfg.domain}" = {
           enableACME = true;
           forceSSL = true;
+          http2 = true;
           locations = {
             "/" = lib.mkIf cfg.frontend.enable {
               root = "${cfg.frontend.package}/share/gradient-frontend";

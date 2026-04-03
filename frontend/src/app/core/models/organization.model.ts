@@ -16,6 +16,7 @@ export interface Organization {
   created_by?: string;
   created_at?: string;
   role?: 'owner' | 'member';
+  running_evaluations?: number;
 }
 
 export interface OrganizationMember {

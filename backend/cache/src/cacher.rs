@@ -461,7 +461,7 @@ pub async fn pack_build_output(
     // Must use the same level (3) as the web handler uses when serving, so that
     // the narinfo FileHash matches the bytes clients actually receive.
     let compressed_data = tokio::task::spawn_blocking(move || {
-        zstd::bulk::compress(&nar_data, 3)
+        zstd::bulk::compress(&nar_data, 6)
     })
     .await
     .context("Compression task panicked")?
@@ -773,12 +773,11 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         let store_path = format!("/nix/store/{}-{}", hash, package);
 
         // 1. Delete the compressed NAR cache file (best-effort).
-        if let Ok(zst_path) = get_cache_nar_compressed_location(state.cli.base_path.clone(), hash.clone()) {
-            if let Err(e) = tokio::fs::remove_file(&zst_path).await {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    warn!(error = %e, path = %zst_path, "Failed to remove stale compressed NAR");
-                }
-            }
+        if let Ok(zst_path) = get_cache_nar_compressed_location(state.cli.base_path.clone(), hash.clone())
+            && let Err(e) = tokio::fs::remove_file(&zst_path).await
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            warn!(error = %e, path = %zst_path, "Failed to remove stale compressed NAR");
         }
 
         // 2. Remove the GC root so the path is no longer pinned by us.
@@ -817,16 +816,16 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         };
 
         // 4. Mark is_cached = false only if the store path was actually deleted.
-        if store_deleted {
-            if let Ok(Some(bo)) = EBuildOutput::find_by_id(id).one(&state.db).await {
-                let mut active = bo.into_active_model();
-                active.is_cached = Set(false);
-                active.file_hash = Set(None);
-                active.file_size = Set(None);
-                active.last_fetched_at = Set(None);
-                if let Err(e) = active.update(&state.db).await {
-                    warn!(error = %e, id = %id, "Failed to mark build_output as uncached after GC");
-                }
+        if store_deleted
+            && let Ok(Some(bo)) = EBuildOutput::find_by_id(id).one(&state.db).await
+        {
+            let mut active = bo.into_active_model();
+            active.is_cached = Set(false);
+            active.file_hash = Set(None);
+            active.file_size = Set(None);
+            active.last_fetched_at = Set(None);
+            if let Err(e) = active.update(&state.db).await {
+                warn!(error = %e, id = %id, "Failed to mark build_output as uncached after GC");
             }
         }
     }

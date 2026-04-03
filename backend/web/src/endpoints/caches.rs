@@ -151,6 +151,51 @@ async fn get_nar_by_hash(
         .map_err(WebError::from)?
         .ok_or_else(|| WebError::not_found("Path"))?;
 
+    // Verify the build was produced by an org that subscribes to this cache.
+    let build = EBuild::find_by_id(build_output.build)
+        .one(&state.db)
+        .await
+        .map_err(WebError::from)?
+        .ok_or_else(|| WebError::not_found("Path"))?;
+
+    let evaluation = EEvaluation::find_by_id(build.evaluation)
+        .one(&state.db)
+        .await
+        .map_err(WebError::from)?
+        .ok_or_else(|| WebError::not_found("Path"))?;
+
+    let organization_id = if let Some(project_id) = evaluation.project {
+        let project = EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await
+            .map_err(WebError::from)?
+            .ok_or_else(|| WebError::not_found("Path"))?;
+        project.organization
+    } else {
+        let direct_build = EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await
+            .map_err(WebError::from)?
+            .ok_or_else(|| WebError::not_found("Path"))?;
+        direct_build.organization
+    };
+
+    let subscribed = EOrganizationCache::find()
+        .filter(
+            Condition::all()
+                .add(COrganizationCache::Organization.eq(organization_id))
+                .add(COrganizationCache::Cache.eq(cache.id)),
+        )
+        .one(&state.db)
+        .await
+        .map_err(WebError::from)?
+        .is_some();
+
+    if !subscribed {
+        return Err(WebError::not_found("Path"));
+    }
+
     let build_output_signature = EBuildOutputSignature::find()
         .filter(
             Condition::all()
@@ -243,8 +288,33 @@ pub async fn get(
     Extension(user): Extension<MUser>,
 ) -> WebResult<Json<BaseResponse<Vec<MCache>>>> {
     // TODO: Implement pagination
+    // Find all orgs the user belongs to
+    let org_memberships = EOrganizationUser::find()
+        .filter(COrganizationUser::User.eq(user.id))
+        .all(&state.db)
+        .await?;
+
+    let org_ids: Vec<Uuid> = org_memberships.into_iter().map(|m| m.organization).collect();
+
+    // Find cache IDs subscribed by those orgs
+    let org_cache_ids: Vec<Uuid> = if org_ids.is_empty() {
+        vec![]
+    } else {
+        EOrganizationCache::find()
+            .filter(COrganizationCache::Organization.is_in(org_ids))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|oc| oc.cache)
+            .collect()
+    };
+
     let caches = ECache::find()
-        .filter(CCache::CreatedBy.eq(user.id))
+        .filter(
+            Condition::any()
+                .add(CCache::CreatedBy.eq(user.id))
+                .add(CCache::Id.is_in(org_cache_ids)),
+        )
         .all(&state.db)
         .await?;
 
@@ -288,8 +358,8 @@ pub async fn put(
         id: Set(Uuid::new_v4()),
         name: Set(body.name.clone()),
         active: Set(true),
-        display_name: Set(body.display_name.clone()),
-        description: Set(body.description.clone()),
+        display_name: Set(body.display_name.trim().to_string()),
+        description: Set(body.description.trim().to_string()),
         priority: Set(body.priority),
         public_key: Set(public_key),
         private_key: Set(private_key),
@@ -463,6 +533,7 @@ pub async fn patch_cache(
     }
 
     if let Some(display_name) = body.display_name {
+        let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -476,7 +547,7 @@ pub async fn patch_cache(
     }
 
     if let Some(description) = body.description {
-        acache.description = Set(description);
+        acache.description = Set(description.trim().to_string());
     }
 
     if let Some(priority) = body.priority {
@@ -1106,34 +1177,76 @@ pub async fn path(
 
     require_cache_auth(&headers, &state, &cache).await?;
 
-    let path_info = get_nar_by_hash(Arc::clone(&state), cache.clone(), path_hash.clone())
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Path not found".to_string(),
-                }),
+    if let Ok(path_info) = get_nar_by_hash(Arc::clone(&state), cache.clone(), path_hash.clone()).await {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/x-nix-narinfo"),
             )
-        })?;
+            .body(path_info.to_nix_string())
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: format!("Failed to build response: {}", e),
+                    }),
+                )
+            });
+    }
 
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/x-nix-narinfo"),
-        )
-        .body(path_info.to_nix_string())
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: format!("Failed to build response: {}", e),
-                }),
+    // Fall back: check external upstream caches.
+    let upstreams = ECacheUpstream::find()
+        .filter(CCacheUpstream::Cache.eq(cache.id))
+        .all(&state.db)
+        .await
+        .unwrap_or_default();
+
+    let http_client = reqwest::Client::new();
+    for upstream in upstreams {
+        let Some(ref base_url) = upstream.url else { continue };
+        let narinfo_url = format!("{}/{}.narinfo", base_url.trim_end_matches('/'), path_hash);
+        let Ok(resp) = http_client.get(&narinfo_url).send().await else { continue };
+        if !resp.status().is_success() { continue; }
+        let Ok(body) = resp.text().await else { continue };
+        // Rewrite the URL: field to proxy through our upstream_nar endpoint.
+        let rewritten = body
+            .lines()
+            .map(|line| {
+                if let Some(nar_path) = line.strip_prefix("URL: ") {
+                    format!("URL: nar/upstream/{}/{}", upstream.id, nar_path.trim())
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n") + "\n";
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/x-nix-narinfo"),
             )
-        })
+            .body(rewritten)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: format!("Failed to build response: {}", e),
+                    }),
+                )
+            });
+    }
+
+    Err((
+        StatusCode::NOT_FOUND,
+        Json(BaseResponse {
+            error: true,
+            message: "Path not found".to_string(),
+        }),
+    ))
 }
 
 pub async fn nar(
@@ -1340,7 +1453,7 @@ pub async fn nar(
         let nar_bytes = output.stdout;
         let compressed_path_clone = compressed_nar_path.clone();
         let compressed =
-            tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_bytes, 3))
+            tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_bytes, 6))
                 .await
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Compression task panicked: {}", e) })))?
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Failed to compress NAR: {}", e) })))?;
@@ -1400,6 +1513,60 @@ pub async fn nar(
                 }),
             )
         })
+}
+
+pub async fn upstream_nar(
+    state: State<Arc<ServerState>>,
+    headers: HeaderMap,
+    Path((cache_name, upstream_id, path)): Path<(String, Uuid, String)>,
+) -> Result<Response, (StatusCode, Json<BaseResponse<String>>)> {
+    let cache: MCache = match ECache::find()
+        .filter(CCache::Name.eq(cache_name))
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => return Err((StatusCode::NOT_FOUND, Json(BaseResponse { error: true, message: "Cache not found".to_string() }))),
+        Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Database error: {}", e) }))),
+    };
+
+    if !cache.active {
+        return Err((StatusCode::BAD_REQUEST, Json(BaseResponse { error: true, message: "Cache is disabled".to_string() })));
+    }
+
+    require_cache_auth(&headers, &state, &cache).await?;
+
+    let upstream = ECacheUpstream::find_by_id(upstream_id)
+        .filter(CCacheUpstream::Cache.eq(cache.id))
+        .one(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Database error: {}", e) })))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(BaseResponse { error: true, message: "Upstream not found".to_string() })))?;
+
+    let base_url = upstream.url.ok_or_else(|| (StatusCode::BAD_REQUEST, Json(BaseResponse { error: true, message: "Not an external upstream".to_string() })))?;
+
+    let nar_url = format!("{}/nar/{}", base_url.trim_end_matches('/'), path);
+    let http_client = reqwest::Client::new();
+    let resp = http_client
+        .get(&nar_url)
+        .send()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, Json(BaseResponse { error: true, message: format!("Upstream request failed: {}", e) })))?;
+
+    if !resp.status().is_success() {
+        return Err((StatusCode::NOT_FOUND, Json(BaseResponse { error: true, message: "Not found in upstream".to_string() })));
+    }
+
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, Json(BaseResponse { error: true, message: format!("Failed to read upstream response: {}", e) })))?;
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, HeaderValue::from_static("application/x-nix-nar"))
+        .body(Body::from(bytes))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Failed to build response: {}", e) })))
 }
 
 // ── Nix helpers ───────────────────────────────────────────────────────────────

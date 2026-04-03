@@ -1,22 +1,11 @@
- - invalid git ssh auth attempts - fixed maybe?
- - input_drvs aren't uploaded to builder
-
  - sometimes frontend is unresponsive when io / cpu is fully utilized
  - before a build is building check again if the build is already built
- - there a to types of displays in frontend for managed declaratively info, make everything consistent
- - Better defaults for server features
- - Scrollingbar on edit server page
- - remove whitespace in features page
- - visualize errors on project creation
- - add visualization for projects and organizations to show what org / project is doing
- - caches subscription only when user has subscribe permission in cache and org / show missing permissions error for caches when trying to subscribe
- - Add Non-SSH server as default
+ - build logs get lost when new build is made (but does not need new building because now already built)
+ - show build times for each build (while building, do not write in DB)
  - Log OIDC Errors in journal error
  - Add Super User
- - Base Servers (for all orgs)
- - aborted evaluations should restart on server restart
+ - Add Non-SSH server as default
+ - Base (Default) Servers (for all orgs), configured only in state
  - if git link is http(s) make link clickable
- - static links to specific buid logs to share with others
  - state for upstream caches settings
- - no Hover Effect on Dashboard for non clickable Elements
  - Add Footer: AGPL License and link to github and wavelens and version
