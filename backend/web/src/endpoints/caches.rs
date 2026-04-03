@@ -1423,8 +1423,22 @@ fn nix32_encode(bytes: &[u8]) -> String {
 /// Converts any NarHash string (SRI `sha256-{base64}`, nix32 `sha256:{nix32}`, or bare hex)
 /// to the narinfo wire format `sha256:{nix32}`.
 fn normalize_nar_hash(hash: &str) -> String {
+    // SRI format: sha256-<base64>
     if let Some(b64) = hash.strip_prefix("sha256-") {
         if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) {
+            return format!("sha256:{}", nix32_encode(&bytes));
+        }
+    }
+    // Already in nix32 format: sha256:<nix32>
+    if hash.starts_with("sha256:") {
+        return hash.to_string();
+    }
+    // Raw hex (64 chars = 32 bytes SHA-256)
+    if hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        if let Ok(bytes) = (0..32)
+            .map(|i| u8::from_str_radix(&hash[i * 2..i * 2 + 2], 16))
+            .collect::<Result<Vec<u8>, _>>()
+        {
             return format!("sha256:{}", nix32_encode(&bytes));
         }
     }
