@@ -33,8 +33,14 @@
 }
 
 // Global Styles
-html {
+html, body {
   overflow-x: hidden;
+}
+
+// Make page components fill remaining vertical space so the footer stays at the bottom.
+// Angular's router-outlet inserts activated components as siblings of the outlet element.
+app-root > *:not(app-header):not(app-footer):not(router-outlet) {
+  flex: 1;
 }
 
 body {

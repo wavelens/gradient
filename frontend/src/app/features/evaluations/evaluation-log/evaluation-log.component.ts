@@ -90,6 +90,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private logDrainTimer?: ReturnType<typeof setInterval>;
 
   ngOnInit(): void {
+    document.documentElement.style.overflow = 'hidden';
     document.body.style.overflow = 'hidden';
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') || '';
@@ -102,6 +103,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    document.documentElement.style.overflow = '';
     document.body.style.overflow = '';
     this.stopPolling();
     this.stopDurationTimer();

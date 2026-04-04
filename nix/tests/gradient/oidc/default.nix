@@ -233,7 +233,8 @@
 
       if not jwt_token:
           raise Exception(f"Could not extract jwt_token cookie from callback response: {callback_response}")
-      print(f"Successfully extracted JWT token")
+
+      print("Successfully extracted JWT token")
 
       print("=== Testing Authenticated API Access with OIDC Token ===")
 

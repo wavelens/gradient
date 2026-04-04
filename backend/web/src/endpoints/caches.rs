@@ -1114,6 +1114,73 @@ pub async fn nix_cache_info(
         })
 }
 
+pub async fn gradient_cache_info(
+    state: State<Arc<ServerState>>,
+    headers: HeaderMap,
+    Path(cache): Path<String>,
+) -> Result<Response<String>, (StatusCode, Json<BaseResponse<String>>)> {
+    let cache: MCache = match ECache::find()
+        .filter(CCache::Name.eq(cache))
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Cache not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
+                }),
+            ));
+        }
+    };
+
+    if !cache.active {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: "Cache is disabled".to_string(),
+            }),
+        ));
+    }
+
+    require_cache_auth(&headers, &state, &cache).await?;
+
+    let body = format!(
+        "GradientVersion: {}\nGradientUrl: {}\n",
+        env!("CARGO_PKG_VERSION"),
+        state.cli.serve_url,
+    );
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/x-gradient-cache-info"),
+        )
+        .body(body)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to build response: {}", e),
+                }),
+            )
+        })
+}
+
 pub async fn path(
     state: State<Arc<ServerState>>,
     headers: HeaderMap,

@@ -205,7 +205,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 _ => {}
             }
 
-            let (builds, dependencies, entry_point_build_ids) = builds;
+            let (builds, dependencies, entry_point_build_ids, failed_derivations) = builds;
             let active_builds = builds
                 .iter()
                 .map(|b| b.clone().into_active_model())
@@ -308,6 +308,26 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 .all(&state.db)
                 .await
                 .unwrap_or_default();
+
+            // Persist any partial evaluation failures so they're visible in the UI.
+            if !failed_derivations.is_empty() {
+                let error_msg = format!(
+                    "{} package(s) failed to evaluate:\n{}",
+                    failed_derivations.len(),
+                    failed_derivations
+                        .iter()
+                        .map(|(d, e)| format!("  - {}: {}", d, e))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                warn!(%error_msg, "Partial evaluation failure — some derivations skipped");
+                let mut active: AEvaluation = evaluation.clone().into_active_model();
+                active.error = Set(Some(error_msg));
+                active.updated_at = Set(Utc::now().naive_utc());
+                if let Err(e) = active.update(&state.db).await {
+                    error!(error = %e, "Failed to persist partial evaluation error");
+                }
+            }
 
             if created_builds.is_empty() {
                 update_evaluation_status(

@@ -1,0 +1,11 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+:host {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}

@@ -56,6 +56,7 @@ pub async fn get_health() -> WebResult<Json<BaseResponse<String>>> {
 
 #[derive(Serialize)]
 pub struct ServerConfig {
+    pub version: String,
     pub oidc_enabled: bool,
     pub registration_disabled: bool,
     pub email_verification_enabled: bool,
@@ -67,6 +68,7 @@ pub async fn get_config(
     let res = BaseResponse {
         error: false,
         message: ServerConfig {
+            version: env!("CARGO_PKG_VERSION").to_string(),
             oidc_enabled: state.cli.oidc_enabled,
             registration_disabled: state.cli.disable_registration || state.cli.oidc_required,
             email_verification_enabled: state.cli.email_enabled

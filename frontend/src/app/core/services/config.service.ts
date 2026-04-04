@@ -10,6 +10,7 @@ import { firstValueFrom } from 'rxjs';
 import { environment } from '@environments/environment';
 
 interface ServerConfig {
+  version: string;
   oidc_enabled: boolean;
   registration_disabled: boolean;
   email_verification_enabled: boolean;
@@ -19,6 +20,8 @@ interface ServerConfig {
 export class ConfigService {
   private http = inject(HttpClient);
 
+  backendVersion = '';
+  frontendVersion = environment.version;
   oidcEnabled = false;
   registrationDisabled = false;
   emailVerificationEnabled = false;
@@ -31,6 +34,7 @@ export class ConfigService {
     )
       .then((res) => {
         if (!res.error) {
+          this.backendVersion = res.message.version;
           this.oidcEnabled = res.message.oidc_enabled;
           this.registrationDisabled = res.message.registration_disabled;
           this.emailVerificationEnabled = res.message.email_verification_enabled;

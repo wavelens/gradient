@@ -1,4 +1,3 @@
- - sometimes frontend is unresponsive when io / cpu is fully utilized
  - before a build is building check again if the build is already built
  - build logs get lost when new build is made (but does not need new building because now already built)
  - show build times for each build (while building, do not write in DB)
@@ -8,4 +7,3 @@
  - Base (Default) Servers (for all orgs), configured only in state
  - if git link is http(s) make link clickable
  - state for upstream caches settings
- - Add Footer: AGPL License and link to github and wavelens and version

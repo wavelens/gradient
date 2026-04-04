@@ -54,6 +54,7 @@ export const routes: Routes = [
   {
     path: 'organization/:org/artefacts/:buildId',
     title: 'Build Artefacts',
+    data: { hideFooter: true },
     loadComponent: () =>
       import('./features/evaluations/build-artefacts/build-artefacts.component').then(
         (m) => m.BuildArtefactsComponent
@@ -62,6 +63,7 @@ export const routes: Routes = [
   {
     path: 'organization/:org/graph/:buildId',
     title: 'Dependency Graph',
+    data: { hideFooter: true },
     loadComponent: () =>
       import('./features/evaluations/dependency-graph/dependency-graph.component').then(
         (m) => m.DependencyGraphComponent
@@ -70,6 +72,7 @@ export const routes: Routes = [
   {
     path: 'organization/:org/log/:evaluationId',
     title: 'Evaluation Log',
+    data: { hideFooter: true },
     loadComponent: () =>
       import('./features/evaluations/evaluation-log/evaluation-log.component').then(
         (m) => m.EvaluationLogComponent
@@ -78,6 +81,7 @@ export const routes: Routes = [
   {
     path: 'organization/:org/log',
     title: 'Evaluation Log',
+    data: { hideFooter: true },
     loadComponent: () =>
       import('./features/evaluations/evaluation-log/evaluation-log.component').then(
         (m) => m.EvaluationLogComponent

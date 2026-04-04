@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import { version } from '../../package.json';
+
 export const environment = {
   production: true,
-  apiUrl: '/api/v1',  // Relative URL for production
-  oidcEnabled: false,  // Will be replaced at build time
-  registrationDisabled: false,  // Will be replaced at build time
+  apiUrl: '/api/v1',
+  version,
+  oidcEnabled: false,
+  registrationDisabled: false,
 };

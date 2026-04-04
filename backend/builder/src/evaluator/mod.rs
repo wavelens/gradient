@@ -39,7 +39,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     state: Arc<ServerState>,
     store: &mut DaemonStore<C>,
     evaluation: &MEvaluation,
-) -> Result<(Vec<MBuild>, Vec<MBuildDependency>, Vec<Uuid>)> {
+) -> Result<(Vec<MBuild>, Vec<MBuildDependency>, Vec<Uuid>, Vec<(String, String)>)> {
     info!("Starting evaluation");
     update_evaluation_status(
         Arc::clone(&state),
@@ -227,7 +227,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
     let mut seen = std::collections::HashSet::new();
     acc.entry_point_build_ids.retain(|id| seen.insert(*id));
 
-    Ok((acc.builds, acc.dependencies, acc.entry_point_build_ids))
+    Ok((acc.builds, acc.dependencies, acc.entry_point_build_ids, failed_derivations))
 }
 
 /// Runs evaluation for a direct (non-repository) build using a local temp directory as the flake
@@ -251,7 +251,7 @@ pub async fn evaluate_direct(
     let evaluation_result = evaluate(Arc::clone(&state), &mut *local_store, &direct_evaluation).await;
 
     match evaluation_result {
-        Ok((builds, dependencies, _entry_point_build_ids)) => {
+        Ok((builds, dependencies, _entry_point_build_ids, _failed_derivations)) => {
             info!(
                 build_count = builds.len(),
                 dependency_count = dependencies.len(),
