@@ -68,6 +68,7 @@
   .material-symbols-outlined { font-size: 20px; color: $text-secondary; }
   .server-name { font-weight: 500; }
   .server-host { font-size: $font-size-sm; font-family: $font-family-mono; }
+  .server-builds-limit { font-family: $font-family-base; color: $text-light; }
 }
 
 .server-meta {

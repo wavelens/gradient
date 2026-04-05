@@ -38,7 +38,10 @@
               <span class="material-symbols-outlined">dns</span>
               <div>
                 <div class="server-name">{{ server.display_name || server.name }}</div>
-                <div class="server-host text-secondary">{{ server.host }}:{{ server.port }}</div>
+                <div class="server-host text-secondary">
+                  {{ server.host }}:{{ server.port }}
+                  <span class="server-builds-limit">· {{ server.max_concurrent_builds }} concurrent build{{ server.max_concurrent_builds === 1 ? '' : 's' }}</span>
+                </div>
               </div>
             </div>
             <div class="server-meta">
