@@ -61,6 +61,9 @@
             >
               <span class="build-dot status-{{ build.status.toLowerCase() }}"></span>
               <span class="build-name">{{ buildDisplayName(build.name) }}</span>
+              @if (getBuildElapsed(build)) {
+                <span class="build-elapsed" [class.build-elapsed--running]="build.status === 'Building'">{{ getBuildElapsed(build) }}</span>
+              }
               @if (build.status === 'Completed' && build.has_artefacts) {
                 <a
                   class="build-dl-link"

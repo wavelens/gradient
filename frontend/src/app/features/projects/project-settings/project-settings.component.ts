@@ -65,6 +65,7 @@ export class ProjectSettingsComponent implements OnInit {
     description: '',
     repository: '',
     evaluation_wildcard: '',
+    keep_evaluations: 30,
   };
 
   ngOnInit(): void {
@@ -83,6 +84,7 @@ export class ProjectSettingsComponent implements OnInit {
           description: project.description,
           repository: project.repository,
           evaluation_wildcard: project.evaluation_wildcard,
+          keep_evaluations: project.keep_evaluations,
         };
         this.loading.set(false);
       },

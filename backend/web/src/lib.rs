@@ -233,6 +233,10 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             "/projects/{organization}/{project}/entry-points",
             get(projects::get_project_entry_points),
         )
+        .route(
+            "/projects/{organization}/{project}/metrics",
+            get(projects::get_project_metrics),
+        )
         .route("/evals/{evaluation}", get(evals::get_evaluation))
         .route(
             "/evals/{evaluation}/builds",

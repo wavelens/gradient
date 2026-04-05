@@ -54,6 +54,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   autoScroll = signal(true);
   showScrollBtn = signal(false);
   duration = signal('0:00');
+  private tick = signal(0);
 
   orgName = '';
   evaluationId = '';
@@ -130,6 +131,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     Queued: 1,
     Failed: 2,
     Aborted: 3,
+    DependencyFailed: 3,
     Completed: 4,
   };
 
@@ -532,6 +534,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.durationInterval = setInterval(() => {
       const ev = this.evaluation();
       if (ev) this.updateDuration(ev);
+      this.tick.update(t => t + 1);
     }, 1000);
   }
 
@@ -589,6 +592,30 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     // /nix/store/hash-name-version.drv → name-version (strip hash prefix only)
     const filename = path.split('/').pop() ?? path;
     return filename.replace(/^[^-]+-/, '').replace(/\.drv$/, '');
+  }
+
+  getBuildElapsed(build: BuildItem): string {
+    if (build.status === 'Completed') {
+      if (build.build_time_ms !== null) return this.formatMs(build.build_time_ms);
+      return '';
+    }
+    if (build.status === 'Building') {
+      this.tick(); // reactive dependency — re-evaluated every second
+      const ts = build.updated_at;
+      const start = new Date(ts.includes('Z') || ts.includes('+') ? ts : ts + 'Z');
+      return this.formatMs(Math.max(0, Date.now() - start.getTime()));
+    }
+    return '';
+  }
+
+  private formatMs(ms: number): string {
+    const totalSecs = Math.floor(ms / 1000);
+    const h = Math.floor(totalSecs / 3600);
+    const m = Math.floor((totalSecs % 3600) / 60);
+    const s = totalSecs % 60;
+    return h > 0
+      ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      : `${m}:${String(s).padStart(2, '0')}`;
   }
 
   isRunning(): boolean {

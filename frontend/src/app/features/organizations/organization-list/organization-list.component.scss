@@ -142,7 +142,7 @@
   .material-symbols-outlined { font-size: 13px; }
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spin { to { transform: rotate(-360deg); } }
 .spinning { display: inline-block; animation: spin 1.2s linear infinite; }
 
 .discover-header {

@@ -185,7 +185,7 @@ in {
         keepEvaluations = lib.mkOption {
           description = "How many evaluations to keep in the database and cache.";
           type = lib.types.ints.unsigned;
-          default = 20;
+          default = 5;
         };
 
         maxNixdaemonConnections = lib.mkOption {

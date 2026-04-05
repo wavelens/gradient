@@ -24,6 +24,8 @@ pub enum BuildStatus {
     Failed,
     #[sea_orm(num_value = 5)]
     Aborted,
+    #[sea_orm(num_value = 6)]
+    DependencyFailed,
 }
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
@@ -36,6 +38,8 @@ pub struct Model {
     pub derivation_path: String,
     pub architecture: super::server::Architecture,
     pub server: Option<Uuid>,
+    pub log_id: Option<Uuid>,
+    pub build_time_ms: Option<i64>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }

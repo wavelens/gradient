@@ -89,6 +89,8 @@ pub(super) async fn add_existing_build(
         architecture: Set(system),
         status: Set(BuildStatus::Completed),
         server: Set(None),
+        log_id: Set(Some(build_id)),
+        build_time_ms: Set(None),
         created_at: Set(Utc::now().naive_utc()),
         updated_at: Set(Utc::now().naive_utc()),
     };
@@ -297,6 +299,8 @@ pub(super) async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unp
                     architecture: Set(b.architecture.clone()),
                     status: Set(BuildStatus::Created),
                     server: Set(None),
+                    log_id: Set(Some(new_build_id)),
+                    build_time_ms: Set(None),
                     created_at: Set(now),
                     updated_at: Set(now),
                 };
@@ -414,6 +418,8 @@ pub(super) async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unp
                 architecture: system,
                 status: BuildStatus::Created,
                 server: None,
+                log_id: Some(build_id),
+                build_time_ms: None,
                 created_at: Utc::now().naive_utc(),
                 updated_at: Utc::now().naive_utc(),
             }
@@ -425,6 +431,8 @@ pub(super) async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unp
                 architecture: system,
                 status: BuildStatus::Completed,
                 server: None,
+                log_id: Some(build_id),
+                build_time_ms: None,
                 created_at: Utc::now().naive_utc(),
                 updated_at: Utc::now().naive_utc(),
             }

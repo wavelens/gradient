@@ -32,6 +32,8 @@ pub struct BuildItem {
     pub name: String,
     pub status: String,
     pub has_artefacts: bool,
+    pub updated_at: chrono::NaiveDateTime,
+    pub build_time_ms: Option<i64>,
 }
 
 #[derive(Serialize, Debug)]
@@ -283,6 +285,8 @@ pub async fn get_evaluation_builds(
             name: b.derivation_path.clone(),
             status: format!("{:?}", b.status),
             has_artefacts: *has_artefacts_map.get(&b.id).unwrap_or(&false),
+            updated_at: b.updated_at,
+            build_time_ms: b.build_time_ms,
         })
         .collect();
 
@@ -362,7 +366,7 @@ pub async fn post_evaluation_builds(
 
         for build in past_builds {
             let name = drv_display_name(&build.derivation_path);
-            let log = state.log_storage.read(build.id).await.unwrap_or_default();
+            let log = state.log_storage.read(build.log_id.unwrap_or(build.id)).await.unwrap_or_default();
             last_logs.insert(build.id, log.len());
 
             // TODO: Chunkify past log
@@ -416,7 +420,7 @@ pub async fn post_evaluation_builds(
 
             for build in builds {
                 let name = drv_display_name(&build.derivation_path);
-                let log = state.log_storage.read(build.id).await.unwrap_or_default();
+                let log = state.log_storage.read(build.log_id.unwrap_or(build.id)).await.unwrap_or_default();
                 let last_offset = *last_logs.get(&build.id).unwrap_or(&0);
                 let log_new = log[last_offset..].to_string();
 

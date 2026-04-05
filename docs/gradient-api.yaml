@@ -1250,6 +1250,32 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /projects/{organization}/{project}/metrics:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    get:
+      tags: [projects]
+      summary: Get project metrics
+      description: Returns per-evaluation metric points for the last `keep_evaluations` completed evaluations.
+      operationId: getProjectMetrics
+      responses:
+        '200':
+          description: Project metrics
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ProjectMetricsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Evaluations ──────────────────────────────────────────────────────────────
 
   /evals/{evaluation}:
@@ -3001,6 +3027,10 @@ components:
           type: string
         evaluation_wildcard:
           type: string
+        keep_evaluations:
+          type: integer
+          minimum: 1
+          description: Number of completed evaluations to retain for metrics and history
 
     Project:
       type: object
@@ -3025,6 +3055,9 @@ components:
           type: string
         active:
           type: boolean
+        keep_evaluations:
+          type: integer
+          description: Number of completed evaluations retained for metrics and history
         created_by:
           type: string
           format: uuid
@@ -3046,24 +3079,46 @@ components:
 
     EvaluationSummary:
       type: object
-      required: [id, status, builds, created_at]
+      required: [id, commit, status, total_builds, failed_builds, completed_entry_points, failed_entry_points, created_at, updated_at]
       properties:
         id:
           type: string
           format: uuid
+        commit:
+          type: string
+          description: Hex-encoded commit hash
         status:
           $ref: '#/components/schemas/EvaluationStatus'
-        builds:
+        total_builds:
           type: integer
           description: Total number of builds in this evaluation
+        failed_builds:
+          type: integer
+          description: Number of failed builds
+        completed_entry_points:
+          type: integer
+          description: Number of entry points with Completed build status
+        failed_entry_points:
+          type: integer
+          description: Number of entry points with Failed build status
+        entry_point_diff:
+          type: integer
+          nullable: true
+          description: Difference in entry point count compared to the previous evaluation (null if no previous evaluation)
         created_at:
+          type: string
+          format: date-time
+        updated_at:
           type: string
           format: date-time
 
     ProjectDetailsResponse:
       type: object
-      required: [recent_evaluations, entry_points]
+      required: [keep_evaluations, recent_evaluations, entry_points]
       properties:
+        keep_evaluations:
+          type: integer
+          description: Number of completed evaluations retained for metrics and history
         latest_evaluation:
           allOf:
             - $ref: '#/components/schemas/EvaluationSummary'
@@ -3076,6 +3131,46 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/EntryPointSummary'
+
+    ProjectMetricsResponse:
+      type: object
+      required: [keep_evaluations, points]
+      properties:
+        keep_evaluations:
+          type: integer
+          description: Configured retention limit for this project
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectMetricPoint'
+
+    ProjectMetricPoint:
+      type: object
+      required: [evaluation_id, created_at, build_time_total_ms, eval_time_ms, dependencies_count]
+      properties:
+        evaluation_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        build_time_total_ms:
+          type: integer
+          description: Sum of all completed build durations in milliseconds
+        eval_time_ms:
+          type: integer
+          description: Wall-clock evaluation duration in milliseconds
+        output_size_bytes:
+          type: integer
+          nullable: true
+          description: Total size of entry-point output paths (excluding dependencies)
+        closure_size_bytes:
+          type: integer
+          nullable: true
+          description: Total closure size including all transitive dependencies
+        dependencies_count:
+          type: integer
+          description: Number of dependency builds (excluding entry points)
 
     # ── Evaluations ───────────────────────────────────────────────────────────
 
@@ -3148,7 +3243,7 @@ components:
 
     BuildItem:
       type: object
-      required: [id, name, status]
+      required: [id, name, status, updated_at]
       properties:
         id:
           type: string
@@ -3159,6 +3254,14 @@ components:
         status:
           type: string
           description: Build status string (e.g. `"Queued"`, `"Building"`, `"Succeeded"`)
+        updated_at:
+          type: string
+          format: date-time
+          description: Last time the build status changed
+        build_time_ms:
+          type: integer
+          nullable: true
+          description: Measured build duration in milliseconds (null if not yet recorded)
 
     # ── Builds ────────────────────────────────────────────────────────────────
 

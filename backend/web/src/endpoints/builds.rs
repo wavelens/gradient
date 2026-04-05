@@ -200,7 +200,8 @@ pub async fn get_build_log(
         return Err(WebError::not_found("Build"));
     }
 
-    let log = state.log_storage.read(build_id).await.unwrap_or_default();
+    let log_key = build.log_id.unwrap_or(build_id);
+    let log = state.log_storage.read(log_key).await.unwrap_or_default();
     let res = BaseResponse {
         error: false,
         message: log,
@@ -268,7 +269,8 @@ pub async fn post_build_log(
 
     // Capture current log length so the stream only delivers new content,
     // avoiding duplication of what the client already received via GET.
-    let initial_offset = state.log_storage.read(build_id).await.unwrap_or_default().len();
+    let log_key = build.log_id.unwrap_or(build_id);
+    let initial_offset = state.log_storage.read(log_key).await.unwrap_or_default().len();
 
     let stream = stream! {
         let mut last_offset: usize = initial_offset;
@@ -283,7 +285,7 @@ pub async fn post_build_log(
                 Err(_) => break,
             };
 
-            let log = state.log_storage.read(build_id).await.unwrap_or_default();
+            let log = state.log_storage.read(build.log_id.unwrap_or(build_id)).await.unwrap_or_default();
             let log_new = log[last_offset..].to_string();
 
             if !log_new.is_empty() {

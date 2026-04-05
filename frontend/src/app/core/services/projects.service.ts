@@ -54,8 +54,11 @@ export class ProjectsService {
     return this.api.delete<string>(`projects/${organization}/${project}`);
   }
 
-  getEntryPoints(organization: string, project: string): Observable<EntryPointSummary[]> {
-    return this.api.get<EntryPointSummary[]>(`projects/${organization}/${project}/entry-points`);
+  getEntryPoints(organization: string, project: string, evaluationId?: string): Observable<EntryPointSummary[]> {
+    const url = evaluationId
+      ? `projects/${organization}/${project}/entry-points?evaluation_id=${evaluationId}`
+      : `projects/${organization}/${project}/entry-points`;
+    return this.api.get<EntryPointSummary[]>(url);
   }
 
   startEvaluation(organization: string, project: string): Observable<string> {
@@ -77,4 +80,23 @@ export class ProjectsService {
   deactivateProject(organization: string, project: string): Observable<string> {
     return this.api.delete<string>(`projects/${organization}/${project}/active`);
   }
+
+  getProjectMetrics(organization: string, project: string): Observable<ProjectMetricsResponse> {
+    return this.api.get<ProjectMetricsResponse>(`projects/${organization}/${project}/metrics`);
+  }
+}
+
+export interface ProjectMetricPoint {
+  evaluation_id: string;
+  created_at: string;
+  build_time_total_ms: number;
+  eval_time_ms: number;
+  output_size_bytes: number | null;
+  closure_size_bytes: number | null;
+  dependencies_count: number;
+}
+
+export interface ProjectMetricsResponse {
+  keep_evaluations: number;
+  points: ProjectMetricPoint[];
 }

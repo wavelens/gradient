@@ -46,6 +46,7 @@ pub struct ProjectResponse {
     pub created_by: Uuid,
     pub created_at: chrono::NaiveDateTime,
     pub managed: bool,
+    pub keep_evaluations: i32,
     pub can_edit: bool,
 }
 
@@ -86,6 +87,7 @@ pub struct PatchProjectRequest {
     pub description: Option<String>,
     pub repository: Option<String>,
     pub evaluation_wildcard: Option<String>,
+    pub keep_evaluations: Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -113,6 +115,9 @@ pub struct EvaluationSummary {
     pub status: EvaluationStatus,
     pub total_builds: i64,
     pub failed_builds: i64,
+    pub completed_entry_points: i64,
+    pub failed_entry_points: i64,
+    pub entry_point_diff: Option<i64>,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
 }
@@ -127,6 +132,7 @@ pub struct ProjectDetailsResponse {
     pub evaluation_wildcard: String,
     pub active: bool,
     pub created_at: chrono::NaiveDateTime,
+    pub keep_evaluations: i32,
     pub last_evaluations: Vec<EvaluationSummary>,
     pub can_edit: bool,
 }
@@ -222,6 +228,7 @@ pub async fn get(
                 last_evaluation: p.last_evaluation,
                 last_evaluation_status,
                 force_evaluation: p.force_evaluation,
+                keep_evaluations: p.keep_evaluations,
                 created_by: p.created_by,
                 created_at: p.created_at,
                 managed: p.managed,
@@ -293,6 +300,7 @@ pub async fn put(
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
         managed: Set(false),
+        keep_evaluations: Set(30),
     };
 
     let project = project.insert(&state.db).await?;
@@ -364,6 +372,7 @@ pub async fn get_project(
             created_by: project.created_by,
             created_at: project.created_at,
             managed: project.managed,
+            keep_evaluations: project.keep_evaluations,
             can_edit,
         },
     }))
@@ -446,6 +455,13 @@ pub async fn patch_project(
         }
 
         aproject.evaluation_wildcard = Set(evaluation_wildcard);
+    }
+
+    if let Some(keep) = body.keep_evaluations {
+        if keep < 1 {
+            return Err(WebError::BadRequest("keep_evaluations must be at least 1".to_string()));
+        }
+        aproject.keep_evaluations = Set(keep);
     }
 
     aproject.force_evaluation = Set(true);
@@ -783,12 +799,51 @@ pub async fn get_project_details(
             .count(&state.db)
             .await?;
 
+        // Get entry point build IDs for this evaluation
+        let ep_builds: Vec<Uuid> = EEntryPoint::find()
+            .filter(CEntryPoint::Evaluation.eq(evaluation.id))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|ep| ep.build)
+            .collect();
+
+        let (completed_entry_points, failed_entry_points, total_entry_points) = if ep_builds.is_empty() {
+            (0i64, 0i64, 0i64)
+        } else {
+            let completed = EBuild::find()
+                .filter(CBuild::Id.is_in(ep_builds.clone()))
+                .filter(CBuild::Status.eq(BuildStatus::Completed))
+                .count(&state.db)
+                .await? as i64;
+            let failed = EBuild::find()
+                .filter(CBuild::Id.is_in(ep_builds.clone()))
+                .filter(CBuild::Status.eq(BuildStatus::Failed))
+                .count(&state.db)
+                .await? as i64;
+            (completed, failed, ep_builds.len() as i64)
+        };
+
+        // Compute diff against previous evaluation's entry point count
+        let entry_point_diff = if let Some(prev_id) = evaluation.previous {
+            let prev_count = EEntryPoint::find()
+                .filter(CEntryPoint::Evaluation.eq(prev_id))
+                .count(&state.db)
+                .await? as i64;
+            Some(total_entry_points - prev_count)
+        } else {
+            None
+        };
+
         evaluation_summaries.push(EvaluationSummary {
             id: evaluation.id,
             commit: commit_hash,
             status: evaluation.status,
             total_builds: total_builds as i64,
             failed_builds: failed_builds as i64,
+            completed_entry_points,
+            failed_entry_points,
+            entry_point_diff,
             created_at: evaluation.created_at,
             updated_at: evaluation.updated_at,
         });
@@ -808,6 +863,7 @@ pub async fn get_project_details(
         evaluation_wildcard: project.evaluation_wildcard,
         active: project.active,
         created_at: project.created_at,
+        keep_evaluations: project.keep_evaluations,
         last_evaluations: evaluation_summaries,
         can_edit,
     };
@@ -935,5 +991,140 @@ pub async fn get_project_entry_points(
     Ok(Json(BaseResponse {
         error: false,
         message: summaries,
+    }))
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ProjectMetricPoint {
+    pub evaluation_id: Uuid,
+    pub created_at: chrono::NaiveDateTime,
+    pub build_time_total_ms: i64,
+    pub eval_time_ms: i64,
+    pub output_size_bytes: Option<i64>,
+    pub closure_size_bytes: Option<i64>,
+    pub dependencies_count: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ProjectMetricsResponse {
+    pub keep_evaluations: i32,
+    pub points: Vec<ProjectMetricPoint>,
+}
+
+pub async fn get_project_metrics(
+    state: State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Path((organization, project)): Path<(String, String)>,
+) -> WebResult<Json<BaseResponse<ProjectMetricsResponse>>> {
+    let organization = get_any_organization_by_name(state.0.clone(), organization)
+        .await?
+        .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if !organization.public {
+        match &maybe_user {
+            Some(user) => {
+                if !user_is_org_member(&state.0, user.id, organization.id).await? {
+                    return Err(WebError::not_found("Project"));
+                }
+            }
+            None => return Err(WebError::not_found("Project")),
+        }
+    }
+
+    let project = EProject::find()
+        .filter(CProject::Organization.eq(organization.id))
+        .filter(CProject::Name.eq(project))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Project"))?;
+
+    let evaluations = EEvaluation::find()
+        .filter(CEvaluation::Project.eq(project.id))
+        .filter(CEvaluation::Status.eq(entity::evaluation::EvaluationStatus::Completed))
+        .order_by_desc(CEvaluation::CreatedAt)
+        .limit(project.keep_evaluations as u64)
+        .all(&state.db)
+        .await?;
+
+    let mut points = Vec::new();
+
+    for evaluation in evaluations {
+        let eval_time_ms = (evaluation.updated_at - evaluation.created_at)
+            .num_milliseconds();
+
+        // Sum build durations for all completed builds
+        let builds = EBuild::find()
+            .filter(CBuild::Evaluation.eq(evaluation.id))
+            .all(&state.db)
+            .await?;
+
+        let build_time_total_ms: i64 = builds
+            .iter()
+            .filter(|b| b.status == BuildStatus::Completed)
+            .map(|b| {
+                b.build_time_ms
+                    .unwrap_or_else(|| (b.updated_at - b.created_at).num_milliseconds())
+            })
+            .sum();
+
+        let total_build_count = builds.len() as i64;
+
+        // Entry points for this evaluation
+        let ep_build_ids: Vec<Uuid> = EEntryPoint::find()
+            .filter(CEntryPoint::Evaluation.eq(evaluation.id))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|ep| ep.build)
+            .collect();
+
+        let entry_point_count = ep_build_ids.len() as i64;
+        let dependencies_count = total_build_count - entry_point_count;
+
+        // Output size: file_size of entry-point build outputs only
+        let output_size_bytes = if ep_build_ids.is_empty() {
+            None
+        } else {
+            let outputs = EBuildOutput::find()
+                .filter(CBuildOutput::Build.is_in(ep_build_ids))
+                .all(&state.db)
+                .await?;
+            let total: i64 = outputs.iter().filter_map(|o| o.file_size).sum();
+            if total > 0 { Some(total) } else { None }
+        };
+
+        // Closure size: file_size of ALL build outputs in this evaluation
+        let all_build_ids: Vec<Uuid> = builds.iter().map(|b| b.id).collect();
+        let closure_size_bytes = if all_build_ids.is_empty() {
+            None
+        } else {
+            let outputs = EBuildOutput::find()
+                .filter(CBuildOutput::Build.is_in(all_build_ids))
+                .all(&state.db)
+                .await?;
+            let total: i64 = outputs.iter().filter_map(|o| o.file_size).sum();
+            if total > 0 { Some(total) } else { None }
+        };
+
+        points.push(ProjectMetricPoint {
+            evaluation_id: evaluation.id,
+            created_at: evaluation.created_at,
+            build_time_total_ms,
+            eval_time_ms,
+            output_size_bytes,
+            closure_size_bytes,
+            dependencies_count,
+        });
+    }
+
+    // Return in chronological order (oldest first for chart x-axis)
+    points.reverse();
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: ProjectMetricsResponse {
+            keep_evaluations: project.keep_evaluations,
+            points,
+        },
     }))
 }

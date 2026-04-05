@@ -29,6 +29,7 @@ pub struct Model {
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
     pub managed: bool,
+    pub keep_evaluations: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

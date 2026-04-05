@@ -29,6 +29,8 @@ async fn test_build_entity_with_status() -> Result<(), DbErr> {
             derivation_path: "/nix/store/abc123-hello-world".to_owned(),
             architecture: server::Architecture::X86_64Linux,
             server: Some(server_id),
+            log_id: Some(build_id),
+            build_time_ms: None,
             created_at: naive_date,
             updated_at: naive_date,
         }]])

@@ -72,9 +72,20 @@
         </div>
 
         <div class="form-group">
-          <label for="proj-wildcard">Evaluation Wildcard</label>
+          <label for="proj-wildcard">
+            Evaluation Wildcard
+            <a href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" target="_blank" rel="noopener noreferrer" class="label-help" title="Learn about evaluation wildcards">
+              <span class="material-symbols-outlined">help</span>
+            </a>
+          </label>
           <input pInputText id="proj-wildcard" [(ngModel)]="formData.evaluation_wildcard" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
           <small class="text-secondary">Pattern for selecting which outputs to evaluate</small>
+        </div>
+
+        <div class="form-group">
+          <label for="proj-keep">Keep Evaluations</label>
+          <input pInputText id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
+          <small class="text-secondary">Number of completed evaluations to retain for metrics and history</small>
         </div>
 
         @if (!proj.managed && proj.can_edit) {

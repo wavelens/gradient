@@ -52,7 +52,6 @@ in rustPlatform.buildRustPackage {
     description = "Gradient cli tool";
     homepage = "https://github.com/wavelens/gradient";
     license = lib.licenses.agpl3Only;
-    platforms = lib.platforms.unix;
     mainProgram = "gradient";
   };
 }

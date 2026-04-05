@@ -19,6 +19,7 @@ export interface Project {
   last_evaluation_status?: EvaluationStatus;
   last_check_at?: string;
   force_evaluation: boolean;
+  keep_evaluations: number;
   created_by?: string;
   created_at?: string;
   managed: boolean;
@@ -31,6 +32,9 @@ export interface EvaluationSummary {
   status: EvaluationStatus;
   total_builds: number;
   failed_builds: number;
+  completed_entry_points: number;
+  failed_entry_points: number;
+  entry_point_diff: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -56,6 +60,7 @@ export interface ProjectDetail {
   evaluation_wildcard: string;
   active: boolean;
   created_at: string;
+  keep_evaluations: number;
   last_evaluations: EvaluationSummary[];
   can_edit: boolean;
 }

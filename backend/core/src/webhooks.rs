@@ -94,7 +94,7 @@ pub async fn fire_build_webhook(state: Arc<ServerState>, build: MBuild, status: 
         BuildStatus::Building => "build.started",
         BuildStatus::Completed => "build.completed",
         BuildStatus::Failed => "build.failed",
-        BuildStatus::Created | BuildStatus::Aborted => return,
+        BuildStatus::Created | BuildStatus::Aborted | BuildStatus::DependencyFailed => return,
     };
 
     let org_id = match get_build_org_id(&state, build.evaluation).await {

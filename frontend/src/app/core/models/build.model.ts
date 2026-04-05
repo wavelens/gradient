@@ -11,7 +11,6 @@ export interface Build {
   derivation_path: string;
   architecture: Architecture;
   server?: string;
-  log?: string;
   created_at: string;
   updated_at: string;
 }
@@ -22,7 +21,8 @@ export type BuildStatus =
   | 'Building'
   | 'Completed'
   | 'Failed'
-  | 'Aborted';
+  | 'Aborted'
+  | 'DependencyFailed';
 
 export type Architecture = string;
 

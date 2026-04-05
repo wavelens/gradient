@@ -120,7 +120,7 @@ pub async fn execute_build(
             if elapsed >= FLUSH_INTERVAL_MS || pending.len() >= FLUSH_THRESHOLD_BYTES {
                 state
                     .log_storage
-                    .append(build.id, &pending)
+                    .append(build.log_id.unwrap_or(build.id), &pending)
                     .await
                     .context("Failed to append build log")?;
                 pending.clear();

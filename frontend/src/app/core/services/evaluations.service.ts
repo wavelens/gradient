@@ -34,6 +34,8 @@ export interface BuildItem {
   name: string;          // derivation path
   status: string;        // BuildStatus as string
   has_artefacts: boolean;
+  updated_at: string;
+  build_time_ms: number | null;
 }
 
 export interface BuildProduct {

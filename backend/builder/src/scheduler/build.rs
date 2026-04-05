@@ -20,7 +20,7 @@ use sea_orm::{
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::task::JoinHandle;
 use tokio::time;
@@ -411,6 +411,8 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
 
     let mut build_outputs: Vec<ABuildOutput> = vec![];
 
+    let build_start = Instant::now();
+
     match execute_build(&build, derivation, &mut server_daemon, Arc::clone(&state)).await {
         Ok((build_returned, result)) => {
             build = build_returned;
@@ -443,6 +445,11 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                         format!("{}/nix-support/hydra-build-products", output_path)
                     ).await.is_ok();
 
+                    let file_size = match get_pathinfo(output_path.clone(), &mut local_daemon).await {
+                        Ok(Some(info)) => Some(info.nar_size as i64),
+                        _ => None,
+                    };
+
                     build_outputs.push(ABuildOutput {
                         id: Set(Uuid::new_v4()),
                         build: Set(build.id),
@@ -451,7 +458,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                         hash: Set(build_output_hash),
                         package: Set(build_output_package),
                         file_hash: Set(None),
-                        file_size: Set(None),
+                        file_size: Set(file_size),
                         is_cached: Set(false),
                         has_artefacts: Set(has_artefacts),
                         ca: Set(None),
@@ -468,6 +475,10 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
 
                 BuildStatus::Failed
             };
+
+            if status == BuildStatus::Completed {
+                build.build_time_ms = Some(build_start.elapsed().as_millis() as i64);
+            }
 
             let updated_build = if status == BuildStatus::Failed {
                 update_build_status_recursivly(Arc::clone(&state), build.clone(), status).await

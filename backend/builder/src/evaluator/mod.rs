@@ -84,7 +84,7 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
 
     if all_derivations.is_empty() {
         warn!("No derivations found for evaluation");
-        return Ok((vec![], vec![], vec![]));
+        return Ok((vec![], vec![], vec![], vec![]));
     }
 
     let mut acc = EvaluationAccumulator::new();

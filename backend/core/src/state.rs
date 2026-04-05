@@ -684,6 +684,7 @@ async fn apply_projects(
                 created_by: Set(*created_by_id),
                 created_at: Set(now),
                 managed: Set(true),
+                keep_evaluations: Set(30),
             };
             proj.insert(db).await?;
             tracing::info!("Created managed project: {}", state_project.name);

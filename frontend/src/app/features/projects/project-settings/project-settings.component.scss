@@ -71,9 +71,25 @@
 
 .form-group {
   margin-bottom: $spacing-lg;
-  label { display: block; margin-bottom: $spacing-sm; font-size: $font-size-sm; font-weight: 500; }
+  label {
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
+    margin-bottom: $spacing-sm;
+    font-size: $font-size-sm;
+    font-weight: 500;
+  }
   small { display: block; margin-top: $spacing-xs; font-size: $font-size-xs; }
   &:last-child { margin-bottom: 0; }
+}
+
+.label-help {
+  display: inline-flex;
+  align-items: center;
+  color: $text-light;
+  line-height: 1;
+  &:hover { color: $text-primary; }
+  .material-symbols-outlined { font-size: 16px; }
 }
 
 .form-actions { display: flex; gap: $spacing-md; margin-top: $spacing-lg; }

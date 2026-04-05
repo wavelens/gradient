@@ -259,6 +259,12 @@
     font-size: $font-size-sm;
     color: $text-light;
 
+    &--grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: $spacing-sm;
+    }
+
     .build-stat {
       display: flex;
       align-items: center;
@@ -278,6 +284,16 @@
 
       &.running {
         color: $color-info;
+      }
+
+      &.ep-diff-pos {
+        color: $color-success;
+        font-weight: 600;
+      }
+
+      &.ep-diff-neg {
+        color: $color-danger;
+        font-weight: 600;
       }
     }
   }

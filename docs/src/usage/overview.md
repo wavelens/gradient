@@ -22,11 +22,11 @@ An implicit `.#` is appended to every wildcard, so `packages.x86_64-linux.*` bec
 
 | Wildcard | Builds |
 |---|---|
-| `packages.x86_64-linux.*` | All x86\_64-linux packages |
+| `packages.x86_64-linux.#` | All x86\_64-linux packages |
 | `checks.x86_64-linux.*` | All x86\_64-linux checks |
-| `packages.*.*` | Packages for all systems |
+| `packages.*` | Packages for all systems |
 | `packages.x86_64-linux.*,checks.x86_64-linux.*` | Both |
-| `nixosConfigurations.*` | All NixOS configurations |
+| `nixosConfigurations.*.config.system.build.toplevel` | All NixOS configurations |
 
 ## Evaluations
 

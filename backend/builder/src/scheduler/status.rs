@@ -24,7 +24,7 @@ pub async fn update_build_status(
         return build;
     }
 
-    if status == BuildStatus::Aborted
+    if (status == BuildStatus::Aborted || status == BuildStatus::DependencyFailed)
         && (build.status == BuildStatus::Completed || build.status == BuildStatus::Failed)
     {
         return build;
@@ -96,7 +96,7 @@ pub(super) async fn update_build_status_recursivly(
             condition = condition.add(CBuild::Id.eq(*dependency));
         }
 
-        let status_condition = if status == BuildStatus::Aborted || status == BuildStatus::Failed {
+        let status_condition = if status == BuildStatus::Aborted || status == BuildStatus::DependencyFailed || status == BuildStatus::Failed {
             Condition::any()
                 .add(CBuild::Status.eq(BuildStatus::Created))
                 .add(CBuild::Status.eq(BuildStatus::Queued))
@@ -119,9 +119,9 @@ pub(super) async fn update_build_status_recursivly(
         };
 
         // Update dependent builds and add them to the queue for further processing.
-        // Dependents of a failed build are aborted (they didn't fail themselves).
-        let propagated_status = if status == BuildStatus::Failed {
-            BuildStatus::Aborted
+        // Dependents of a failed build get DependencyFailed (they didn't fail themselves).
+        let propagated_status = if status == BuildStatus::Failed || status == BuildStatus::DependencyFailed {
+            BuildStatus::DependencyFailed
         } else {
             status.clone()
         };
@@ -281,7 +281,7 @@ pub(super) async fn check_evaluation_status(state: Arc<ServerState>, evaluation_
         EvaluationStatus::Completed
     } else if !in_progress && statuses.contains(&BuildStatus::Failed) {
         EvaluationStatus::Failed
-    } else if !in_progress && statuses.contains(&BuildStatus::Aborted) {
+    } else if !in_progress && (statuses.contains(&BuildStatus::Aborted) || statuses.contains(&BuildStatus::DependencyFailed)) {
         EvaluationStatus::Aborted
     } else {
         return;

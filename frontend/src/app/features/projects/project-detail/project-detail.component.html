@@ -32,8 +32,8 @@
           </span>
         </div>
       </div>
-      @if (authService.isAuthenticated()) {
-        <div class="header-actions">
+      <div class="header-actions">
+        @if (authService.isAuthenticated()) {
           @if (proj.can_edit) {
             <button
               pButton
@@ -51,8 +51,15 @@
             severity="secondary"
             [routerLink]="['/organization', orgName, 'project', projectName, 'settings']"
           ></button>
-        </div>
-      }
+        }
+        <button
+          pButton
+          label="Metrics"
+          icon="pi pi-chart-line"
+          severity="secondary"
+          [routerLink]="['/organization', orgName, 'project', projectName, 'metrics']"
+        ></button>
+      </div>
     </div>
 
     <!-- Current Builds -->
@@ -148,17 +155,31 @@
                     {{ evaluation.status }}
                   </span>
                 </div>
-                <div class="build-stats">
-                  <span class="build-stat">
+                <div class="build-stats build-stats--grid">
+                  <span class="build-stat" title="Total builds in this evaluation">
                     <span class="material-symbols-outlined">construction</span>
-                    {{ evaluation.total_builds }} builds
+                    {{ evaluation.total_builds }}
                   </span>
-                  @if (evaluation.failed_builds > 0) {
-                    <span class="build-stat error">
-                      {{ evaluation.failed_builds }} failed
+                  <span class="build-stat" [class.success]="evaluation.completed_entry_points > 0" title="Completed entry points">
+                    <span class="material-symbols-outlined">check_circle</span>
+                    {{ evaluation.completed_entry_points }}
+                  </span>
+                  <span class="build-stat" [class.error]="evaluation.failed_entry_points > 0" title="Failed entry points">
+                    <span class="material-symbols-outlined">error</span>
+                    {{ evaluation.failed_entry_points }}
+                  </span>
+                  <span
+                    class="build-stat"
+                    [class.ep-diff-pos]="evaluation.entry_point_diff !== null && evaluation.entry_point_diff > 0"
+                    [class.ep-diff-neg]="evaluation.entry_point_diff !== null && evaluation.entry_point_diff < 0"
+                    title="Entry point change compared to previous evaluation"
+                  >
+                    <span class="material-symbols-outlined">
+                      {{ evaluation.entry_point_diff === null ? 'remove' : evaluation.entry_point_diff > 0 ? 'trending_up' : evaluation.entry_point_diff < 0 ? 'trending_down' : 'trending_flat' }}
                     </span>
-                  }
-                  <span class="build-stat" [class.running]="isRunningStatus(evaluation.status)">
+                    {{ evaluation.entry_point_diff !== null ? (evaluation.entry_point_diff > 0 ? '+' : '') + evaluation.entry_point_diff : '—' }}
+                  </span>
+                  <span class="build-stat" [class.running]="isRunningStatus(evaluation.status)" title="Evaluation duration">
                     <span class="material-symbols-outlined">timer</span>
                     {{ getEvaluationDuration(evaluation) }}
                   </span>

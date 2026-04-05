@@ -1,0 +1,89 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: $spacing-xl $spacing-lg;
+}
+
+.page-header {
+  margin-bottom: $spacing-xl;
+
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: $spacing-xs;
+    font-size: $font-size-sm;
+    color: $text-light;
+    margin-bottom: $spacing-sm;
+
+    .breadcrumb-link {
+      color: $text-secondary;
+      text-decoration: none;
+      &:hover { color: $text-primary; }
+    }
+
+    .breadcrumb-separator { color: $text-light; }
+    .breadcrumb-current { color: $text-primary; }
+  }
+
+  h1 {
+    font-size: $font-size-xl;
+    font-weight: 600;
+    color: $text-primary;
+    margin: 0 0 $spacing-xs;
+  }
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-md;
+  padding: $spacing-xl * 2;
+  color: $text-light;
+
+  .material-symbols-outlined { font-size: 48px; opacity: 0.4; }
+}
+
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: $spacing-lg;
+}
+
+.chart-card {
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+  padding: $spacing-md $spacing-md $spacing-sm;
+
+  &--full {
+    grid-column: 1 / -1;
+  }
+}
+
+.chart-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: $spacing-sm;
+}
+
+.chart-title {
+  font-size: $font-size-sm;
+  font-weight: 600;
+  color: $text-primary;
+}
+
+.chart-sub {
+  font-size: $font-size-xs;
+  color: $text-light;
+}

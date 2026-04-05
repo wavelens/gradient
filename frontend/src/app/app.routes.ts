@@ -52,6 +52,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'organization/:org/project/:project/metrics',
+    title: 'Project Metrics',
+    loadComponent: () =>
+      import('./features/projects/project-metrics/project-metrics.component').then(
+        (m) => m.ProjectMetricsComponent
+      ),
+  },
+  {
     path: 'organization/:org/artefacts/:buildId',
     title: 'Build Artefacts',
     data: { hideFooter: true },

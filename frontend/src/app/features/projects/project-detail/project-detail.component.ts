@@ -64,21 +64,37 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
         this.project.set(project);
         if (showLoading) this.loading.set(false);
         this.onProjectDataLoaded();
+        this.loadEntryPoints(project);
       },
       error: (error) => {
         console.error('Failed to load project:', error);
         if (showLoading) this.loading.set(false);
       },
     });
-    this.loadEntryPoints();
   }
 
-  loadEntryPoints(): void {
-    this.projectsService.getEntryPoints(this.orgName, this.projectName).subscribe({
+  private readonly buildStatusOrder: Record<string, number> = {
+    Building: 0,
+    Queued: 1,
+    Failed: 2,
+    Aborted: 3,
+    Completed: 4,
+  };
+
+  private readonly statusesWithBuilds = new Set<EvaluationStatus>(['Building', 'Completed', 'Failed', 'Aborted']);
+
+  loadEntryPoints(project?: ProjectDetail): void {
+    // When the newest eval is Queued/Evaluating it has no builds yet — fall back to
+    // the most recent evaluation that actually has entry points.
+    const evalWithBuilds = project?.last_evaluations?.find(e => this.statusesWithBuilds.has(e.status));
+    this.projectsService.getEntryPoints(this.orgName, this.projectName, evalWithBuilds?.id).subscribe({
       next: (eps) => this.entryPoints.set(
-        [...eps].sort((a, b) =>
-          this.getDerivationName(a.derivation_path).localeCompare(this.getDerivationName(b.derivation_path))
-        )
+        [...eps].sort((a, b) => {
+          const oa = this.buildStatusOrder[a.build_status] ?? 99;
+          const ob = this.buildStatusOrder[b.build_status] ?? 99;
+          if (oa !== ob) return oa - ob;
+          return this.getDerivationName(a.derivation_path).localeCompare(this.getDerivationName(b.derivation_path));
+        })
       ),
       error: (error) => console.error('Failed to load entry points:', error),
     });
@@ -146,7 +162,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     switch (status) {
       case 'Completed': return 'status-success';
       case 'Failed': return 'status-danger';
-      case 'Aborted': return 'status-secondary';
+      case 'Aborted': case 'DependencyFailed': return 'status-secondary';
       case 'Queued': case 'Building': return 'status-running';
       default: return '';
     }
@@ -156,7 +172,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     switch (status) {
       case 'Completed': return 'check_circle';
       case 'Failed': return 'error';
-      case 'Aborted': return 'cancel';
+      case 'Aborted': case 'DependencyFailed': return 'cancel';
       case 'Queued': return 'schedule';
       case 'Building': return 'sync';
       default: return 'help';
