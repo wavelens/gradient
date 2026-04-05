@@ -7,128 +7,139 @@
 { lib, pkgs, config, ... }: let
   cfg = config.services.gradient;
 
-  stateJsonFile = pkgs.writeText "gradient-state.json" (builtins.toJSON cfg.state);
+  stateJsonFile = pkgs.writers.writeJSON "gradient-state.json" cfg.state;
   userPasswordFiles = map (user: "gradient_user_${user.username}_password:${user.password_file}") cfg.state.users;
   orgPrivateKeyFiles = map (org: "gradient_org_${org.name}_private_key:${org.private_key_file}") cfg.state.organizations;
   cacheSigningKeyFiles = map (cache: "gradient_cache_${cache.name}_signing_key:${cache.signing_key_file}") cfg.state.caches;
   apiKeyFiles = map (api_key: "gradient_api_${api_key.name}_key:${api_key.key_file}") cfg.state.api_keys;
 in {
+  # disabledModules = [
+  #   "services/gradient/default.nix"
+  #   "services/gradient/state.nix"
+  # ];
+
   imports = [
     ./gradient-state.nix
-    ./gradient-frontend.nix
   ];
 
   options = {
     services.gradient = {
       enable = lib.mkEnableOption "Gradient";
-      configureNginx = lib.mkEnableOption "Configure Nginx";
-      configurePostgres = lib.mkEnableOption "Configure Postgres";
-      serveCache = lib.mkEnableOption "Serve cache";
-      reportErrors = lib.mkEnableOption "Report errors to Sentry";
-      package = lib.mkPackageOption pkgs "gradient-server" { };
-      package_nix = lib.mkOption {
-        default = config.nix.package;
-        defaultText = "config.nix.package";
-        type = lib.types.package;
-        description = "The nix package to use";
-      };
+      configureNginx = lib.mkEnableOption "Nginx configuration";
+      configurePostgres = lib.mkEnableOption "PostgreSQL configuration";
+      serveCache = lib.mkEnableOption "cache serving";
+      reportErrors = lib.mkEnableOption "error reporting to Sentry";
+      packages = {
+        server = lib.mkPackageOption pkgs "gradient-server" { };
+        frontend = lib.mkPackageOption pkgs "gradient-frontend" { };
+        nix = lib.mkOption {
+          default = config.nix.package;
+          defaultText = "config.nix.package";
+          type = lib.types.package;
+          description = "Nix package to use";
+        };
 
-      package_ssh = lib.mkOption {
-        default = config.programs.ssh.package;
-        defaultText = "config.programs.ssh.package";
-        type = lib.types.package;
-        description = "The openssh package to use";
-      };
+        ssh = lib.mkOption {
+          default = config.programs.ssh.package;
+          defaultText = "config.programs.ssh.package";
+          type = lib.types.package;
+          description = "OpenSSH package to use";
+        };
 
-      package_git = lib.mkOption {
-        default = pkgs.git;
-        defaultText = "pkgs.git";
-        type = lib.types.package;
-        description = "The git package to use (required by Nix when fetching git+https:// flake inputs)";
+        git = lib.mkOption {
+          default = pkgs.git;
+          defaultText = "pkgs.git";
+          type = lib.types.package;
+          description = "Git package to use (required by Nix when fetching git+https:// flake inputs)";
+        };
       };
 
       domain = lib.mkOption {
-        description = "The domain under which Gradient runs.";
+        description = "Domain under which Gradient runs.";
         type = lib.types.str;
         example = "gradient.example.com";
       };
 
       baseDir = lib.mkOption {
-        description = "The base directory for Gradient.";
-        type = lib.types.str;
+        description = "Base directory for Gradient.";
+        type = lib.types.path;
         default = "/var/lib/gradient";
       };
 
       listenAddr = lib.mkOption {
-        description = "The IP address on which Gradient listens.";
+        description = "IP address on which Gradient listens.";
         type = lib.types.str;
         default = "127.0.0.1";
       };
 
       port = lib.mkOption {
-        description = "The port on which Gradient listens.";
+        description = "Port on which Gradient listens.";
         type = lib.types.port;
         default = 3000;
       };
 
       jwtSecretFile = lib.mkOption {
-        description = "The secret key file used to sign JWTs.";
-        type = lib.types.str;
+        description = "Secret key file used to sign JWTs.";
+        type = lib.types.path;
       };
 
       cryptSecretFile = lib.mkOption {
-        description = "The database encryption password file.";
-        type = lib.types.str;
+        description = "Database encryption password file.";
+        type = lib.types.path;
       };
 
       databaseUrl = lib.mkOption {
-        description = "The URL of the database to use.";
+        description = "URL of the database to use.";
         type = lib.types.str;
         default = "postgresql://localhost/gradient?host=/run/postgresql";
       };
 
       databaseUrlFile = lib.mkOption {
-        description = "The URL-file of the database to use.";
-        type = lib.types.str;
+        description = "URL-file of the database to use.";
+        type = lib.types.path;
         default = toString (pkgs.writeText "database_url" cfg.databaseUrl);
-        defaultText = "[database_url]";
+        defaultText = lib.literalExpression "toString (pkgs.writeText \"database_url\" config.services.gradient.databaseUrl);";
         example = "/etc/gradient/database_url";
       };
 
+      frontend = {
+        enable = lib.mkEnableOption "Gradient Frontend";
+      };
+
       oidc = {
-        enable = lib.mkEnableOption "Enable OIDC";
-        required = lib.mkEnableOption "Require OIDC for registration.";
+        enable = lib.mkEnableOption "OIDC";
+        required = lib.mkEnableOption "OIDC requirement for registration.";
         clientId = lib.mkOption {
-          description = "The client ID for OIDC.";
+          description = "Client ID for OIDC.";
           type = lib.types.str;
         };
 
         clientSecretFile = lib.mkOption {
-          description = "The client secret file for OIDC.";
-          type = lib.types.str;
+          description = "Client secret file for OIDC.";
+          type = lib.types.path;
         };
 
         scopes = lib.mkOption {
-          description = "The scopes for OIDC.";
+          description = "Scopes for OIDC.";
           type = lib.types.listOf lib.types.str;
           default = ["openid" "email" "profile"];
         };
 
         discoveryUrl = lib.mkOption {
-          description = "The discovery URL for OIDC.";
+          description = "Discovery URL for OIDC.";
           type = lib.types.str;
         };
 
         iconUrl = lib.mkOption {
-          description = "The icon URL for OIDC provider.";
+          description = "Icon URL for OIDC provider.";
           type = lib.types.nullOr lib.types.str;
           default = null;
         };
       };
 
       email = {
-        enable = lib.mkEnableOption "Enable email functionality";
-        requireVerification = lib.mkEnableOption "Require email verification for new registrations";
+        enable = lib.mkEnableOption "email functionality";
+        requireVerification = lib.mkEnableOption "email verification requirement for registrations";
         smtpHost = lib.mkOption {
           description = "SMTP server hostname";
           type = lib.types.str;
@@ -147,7 +158,7 @@ in {
 
         smtpPasswordFile = lib.mkOption {
           description = "File containing SMTP password";
-          type = lib.types.str;
+          type = lib.types.path;
         };
 
         fromAddress = lib.mkOption {
@@ -171,31 +182,31 @@ in {
       settings = {
         disableRegistration = lib.mkEnableOption "Disable registration. Users must be registered via OIDC.";
         maxConcurrentEvaluations = lib.mkOption {
-          description = "The maximum number of concurrent evaluations.";
+          description = "Maximum number of concurrent evaluations.";
           type = lib.types.ints.unsigned;
           default = 1;
         };
 
         maxConcurrentBuilds = lib.mkOption {
-          description = "The maximum number of concurrent builds.";
+          description = "Maximum number of concurrent builds.";
           type = lib.types.ints.unsigned;
           default = 100;
         };
 
         keepEvaluations = lib.mkOption {
-          description = "How many evaluations to keep in the database and cache.";
+          description = "Amount of evaluations to keep in the database and cache.";
           type = lib.types.ints.unsigned;
           default = 5;
         };
 
         maxNixdaemonConnections = lib.mkOption {
-          description = "The maximum number of simultaneous local Nix daemon connections in the connection pool.";
+          description = "Maximum number of simultaneous local Nix daemon connections in the connection pool.";
           type = lib.types.ints.positive;
           default = 24;
         };
 
         logLevel = lib.mkOption {
-          description = "The log level for the application.";
+          description = "Log level for the application.";
           type = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
           default = "info";
         };
@@ -229,13 +240,13 @@ in {
       ];
 
       path = [
-        cfg.package_nix
-        cfg.package_ssh
-        cfg.package_git
+        cfg.packages.nix
+        cfg.packages.ssh
+        cfg.packages.git
       ];
 
       serviceConfig = {
-        ExecStart = lib.getExe cfg.package;
+        ExecStart = lib.getExe cfg.packages.server;
         StateDirectory = "gradient";
         User = "gradient";
         Group = "gradient";
@@ -278,8 +289,8 @@ in {
         GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString cfg.settings.maxConcurrentEvaluations;
         GRADIENT_MAX_CONCURRENT_BUILDS = toString cfg.settings.maxConcurrentBuilds;
-        GRADIENT_BINPATH_NIX = lib.getExe cfg.package_nix;
-        GRADIENT_BINPATH_SSH = lib.getExe' cfg.package_ssh "ssh";
+        GRADIENT_BINPATH_NIX = lib.getExe cfg.packages.nix;
+        GRADIENT_BINPATH_SSH = lib.getExe' cfg.packages.ssh "ssh";
         GRADIENT_OIDC_ENABLED = lib.boolToString cfg.oidc.enable;
         GRADIENT_DISABLE_REGISTRATION = lib.boolToString cfg.settings.disableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
@@ -331,7 +342,7 @@ in {
           http2 = true;
           locations = {
             "/" = lib.mkIf cfg.frontend.enable {
-              root = "${cfg.frontend.package}/share/gradient-frontend";
+              root = "${cfg.packages.frontend}/share/gradient-frontend";
               tryFiles = "$uri $uri/ /index.html";
             };
 
