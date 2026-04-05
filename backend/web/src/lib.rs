@@ -299,7 +299,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             .route("/cache/{cache}/gradient-cache-info", get(caches::gradient_cache_info))
             .route("/cache/{cache}/nix-cache-info", get(caches::nix_cache_info))
             .route("/cache/{cache}/{path}", get(caches::path))
-            .route("/cache/{cache}/nar/upstream/{upstream_id}/{path}", get(caches::upstream_nar))
+            .route("/cache/{cache}/nar/upstream/{upstream_id}/{*path}", get(caches::upstream_nar))
             .route("/cache/{cache}/nar/{path}", get(caches::nar));
     }
 

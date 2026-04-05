@@ -1612,7 +1612,7 @@ pub async fn upstream_nar(
 
     let base_url = upstream.url.ok_or_else(|| (StatusCode::BAD_REQUEST, Json(BaseResponse { error: true, message: "Not an external upstream".to_string() })))?;
 
-    let nar_url = format!("{}/nar/{}", base_url.trim_end_matches('/'), path);
+    let nar_url = format!("{}/{}", base_url.trim_end_matches('/'), path);
     let http_client = reqwest::Client::new();
     let resp = http_client
         .get(&nar_url)
