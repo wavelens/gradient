@@ -49,9 +49,9 @@
             <div
               class="build-item status-{{ build.status.toLowerCase() }}"
               [class.selected]="selectedBuildId() === build.id"
-              (click)="selectBuild(build)"
-              (keydown.enter)="selectBuild(build)"
-              (keydown.space)="$event.preventDefault(); selectBuild(build)"
+              (click)="selectBuild(build, true)"
+              (keydown.enter)="selectBuild(build, true)"
+              (keydown.space)="$event.preventDefault(); selectBuild(build, true)"
               (keydown.arrowdown)="$event.preventDefault(); selectAdjacentBuild(i + 1)"
               (keydown.arrowup)="$event.preventDefault(); selectAdjacentBuild(i - 1)"
               [title]="build.name"

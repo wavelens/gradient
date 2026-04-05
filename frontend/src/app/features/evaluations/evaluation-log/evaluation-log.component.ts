@@ -84,6 +84,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private streamingBuildId?: string;
   private logLines: string[] = [];
   private autoFollowBuilding = false;
+  private userPickedBuild = false;
   private isInitialBuildsLoad = true;
   private pendingBuilds: BuildItem[] = [];
   private buildRevealTimer?: ReturnType<typeof setInterval>;
@@ -157,6 +158,15 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           // First load: always show everything immediately
           this.visibleBuilds.set(this.builds());
           this.isInitialBuildsLoad = false;
+          // Auto-select first Building build when no explicit build was requested
+          if (!this.initialBuildId) {
+            const firstBuilding = this.builds().find(b => b.status === 'Building');
+            if (firstBuilding) {
+              this.selectBuild(firstBuilding); // isUserAction=false → auto-follow mode
+            } else {
+              this.autoFollowBuilding = true; // wait for first build to start
+            }
+          }
         } else if (!isEvaluating) {
           // Evaluation is no longer Evaluating: flush all builds immediately
           this.flushPendingBuilds();
@@ -188,14 +198,19 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           this.fetchInitialLogs(newSelected.id);
         }
 
-        // Building → Completed: flush all pending log lines, then follow next build
+        // Building → Completed: flush logs.
+        // Only auto-switch to the next building build when in auto-follow mode
+        // (the user hasn't manually picked a build). When the user explicitly
+        // selected or navigated to this build, stay on it so they can read the log.
         if (prevSelected?.status === 'Building' && newSelected?.status === 'Completed') {
           this.flushPendingLogs();
-          const next = this.builds().find(b => b.status === 'Building');
-          if (next) {
-            this.selectBuild(next);
-          } else {
-            this.autoFollowBuilding = true;
+          if (!this.userPickedBuild) {
+            const next = this.builds().find(b => b.status === 'Building');
+            if (next) {
+              this.selectBuild(next);
+            } else {
+              this.autoFollowBuilding = true;
+            }
           }
         }
 
@@ -212,7 +227,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           const target = builds.find(b => b.id === this.initialBuildId);
           if (target) {
             this.initialBuildId = null;
-            this.selectBuild(target);
+            this.selectBuild(target, true);
           }
         }
       },
@@ -246,9 +261,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   // ── Build selection & log loading ──────────────────────────────────────────
 
-  selectBuild(build: BuildItem): void {
+  selectBuild(build: BuildItem, isUserAction = false): void {
     if (this.selectedBuildId() === build.id) return;
 
+    this.userPickedBuild = isUserAction;
     this.autoFollowBuilding = false;
     this.stopActiveStream();
     this.logLines = [];
@@ -581,7 +597,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   selectAdjacentBuild(index: number): void {
     const list = this.visibleBuilds();
     if (index < 0 || index >= list.length) return;
-    this.selectBuild(list[index]);
+    this.selectBuild(list[index], true);
     setTimeout(() => {
       const items = document.querySelectorAll<HTMLElement>('.build-item');
       items[index]?.focus();

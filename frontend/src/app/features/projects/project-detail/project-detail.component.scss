@@ -262,7 +262,7 @@
     &--grid {
       display: inline-grid;
       grid-template-columns: repeat(5, auto);
-      gap: $spacing-xs $spacing-md;
+      gap: $spacing-sm $spacing-lg;
     }
 
     .build-stat {

@@ -22,6 +22,25 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct ServerResponse {
+    pub id: Uuid,
+    pub name: String,
+    pub display_name: String,
+    pub organization: Uuid,
+    pub active: bool,
+    pub host: String,
+    pub port: i32,
+    pub username: String,
+    pub max_concurrent_builds: i32,
+    pub architectures: Vec<String>,
+    pub features: Vec<String>,
+    pub last_connection_at: String,
+    pub managed: bool,
+    pub created_by: Uuid,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct MakeServerRequest {
     pub name: String,
     pub display_name: String,
@@ -182,7 +201,7 @@ pub async fn get_server(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, server)): Path<(String, String)>,
-) -> Result<Json<BaseResponse<MServer>>, (StatusCode, Json<BaseResponse<String>>)> {
+) -> Result<Json<BaseResponse<ServerResponse>>, (StatusCode, Json<BaseResponse<String>>)> {
     let (_organization, server): (MOrganization, MServer) = match get_server_by_name(
         state.0.clone(),
         user.id,
@@ -212,9 +231,50 @@ pub async fn get_server(
         }
     };
 
+    let architectures = EServerArchitecture::find()
+        .filter(CServerArchitecture::Server.eq(server.id))
+        .all(&state.db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|a| a.architecture.to_string())
+        .collect::<Vec<_>>();
+
+    let feature_ids = EServerFeature::find()
+        .filter(CServerFeature::Server.eq(server.id))
+        .all(&state.db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|sf| sf.feature)
+        .collect::<Vec<_>>();
+
+    let mut features = Vec::new();
+    for fid in feature_ids {
+        if let Ok(Some(f)) = EFeature::find_by_id(fid).one(&state.db).await {
+            features.push(f.name);
+        }
+    }
+
     let res = BaseResponse {
         error: false,
-        message: server,
+        message: ServerResponse {
+            id: server.id,
+            name: server.name,
+            display_name: server.display_name,
+            organization: server.organization,
+            active: server.active,
+            host: server.host,
+            port: server.port,
+            username: server.username,
+            max_concurrent_builds: server.max_concurrent_builds,
+            architectures,
+            features,
+            last_connection_at: server.last_connection_at.to_string(),
+            managed: server.managed,
+            created_by: server.created_by,
+            created_at: server.created_at.to_string(),
+        },
     };
 
     Ok(Json(res))
@@ -366,11 +426,49 @@ pub async fn patch_server(
             ));
         }
 
+        let server_id = match aserver.id.clone().into_value() {
+            Some(id) => match id.as_ref_uuid() {
+                Some(uuid) => *uuid,
+                None => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(BaseResponse {
+                            error: true,
+                            message: "Invalid server ID format".to_string(),
+                        }),
+                    ));
+                }
+            },
+            None => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: "Server ID not found".to_string(),
+                    }),
+                ));
+            }
+        };
+
+        if let Err(e) = EServerArchitecture::delete_many()
+            .filter(CServerArchitecture::Server.eq(server_id))
+            .exec(&state.db)
+            .await
+        {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to delete existing architectures: {}", e),
+                }),
+            ));
+        }
+
         let server_architecture = architectures
             .iter()
             .map(|a| AServerArchitecture {
                 id: Set(Uuid::new_v4()),
-                server: aserver.id.clone(),
+                server: Set(server_id),
                 architecture: Set(a.clone()),
             })
             .collect::<Vec<AServerArchitecture>>();
@@ -413,6 +511,47 @@ pub async fn patch_server(
                 ));
             }
         };
+
+        // Collect feature IDs referenced by this server before deleting
+        let old_feature_ids = EServerFeature::find()
+            .filter(CServerFeature::Server.eq(server_id))
+            .all(&state.db)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|sf| sf.feature)
+            .collect::<Vec<_>>();
+
+        if let Err(e) = EServerFeature::delete_many()
+            .filter(CServerFeature::Server.eq(server_id))
+            .exec(&state.db)
+            .await
+        {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to delete existing features: {}", e),
+                }),
+            ));
+        }
+
+        // Delete feature records that are no longer referenced by any server or build
+        for fid in old_feature_ids {
+            let still_used_by_server = EServerFeature::find()
+                .filter(CServerFeature::Feature.eq(fid))
+                .count(&state.db)
+                .await
+                .unwrap_or(1);
+            let still_used_by_build = EBuildFeature::find()
+                .filter(CBuildFeature::Feature.eq(fid))
+                .count(&state.db)
+                .await
+                .unwrap_or(1);
+            if still_used_by_server == 0 && still_used_by_build == 0 {
+                let _ = EFeature::delete_by_id(fid).exec(&state.db).await;
+            }
+        }
 
         let _ = add_features(Arc::clone(&state), features, None, Some(server_id)).await;
     }
