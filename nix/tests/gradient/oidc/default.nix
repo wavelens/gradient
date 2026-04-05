@@ -224,7 +224,8 @@
       jwt_token = None
       for line in callback_response.splitlines():
           if line.lower().startswith("set-cookie:") and "jwt_token=" in line:
-              for part in line.split(";"):
+              cookie_str = line.split(":", 1)[1].strip()
+              for part in cookie_str.split(";"):
                   part = part.strip()
                   if part.startswith("jwt_token="):
                       jwt_token = part[len("jwt_token="):]
