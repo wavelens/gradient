@@ -261,8 +261,8 @@
 
     &--grid {
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: $spacing-sm;
+      grid-template-columns: repeat(5, auto);
+      gap: $spacing-xs $spacing-md;
     }
 
     .build-stat {

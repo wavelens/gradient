@@ -8,8 +8,10 @@
 @use 'sass:color';
 
 :host {
-  display: block;
-  height: calc(100vh - 65px);
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
