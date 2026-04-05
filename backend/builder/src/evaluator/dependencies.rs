@@ -10,13 +10,11 @@ use core::database::add_features;
 use core::executer::*;
 use core::types::*;
 use entity::build::BuildStatus;
-use nix_daemon::nix::DaemonStore;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QuerySelect};
 use std::collections::HashSet;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, trace};
 use uuid::Uuid;
@@ -154,14 +152,18 @@ pub(super) async fn add_existing_build(
 /// All new builds start as `Created` (not `Queued`) to prevent the scheduler from picking them
 /// up before the bulk dependency insert completes. The caller is responsible for transitioning
 /// them to `Queued` after the insert.
-pub(super) async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
+pub(super) async fn query_all_dependencies(
     state: Arc<ServerState>,
     acc: &mut EvaluationAccumulator,
     evaluation: &MEvaluation,
     organization_id: Uuid,
     dependencies: Vec<String>,
-    store: &mut DaemonStore<C>,
 ) -> Result<()> {
+    let mut store = state
+        .nix_store_pool
+        .acquire()
+        .await
+        .context("Failed to acquire nix store connection for dependency traversal")?;
     let mut dependencies = dependencies
         .into_iter()
         .map(|d| (d, None, Uuid::new_v4()))
@@ -179,7 +181,7 @@ pub(super) async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unp
             "Processing derivation"
         );
 
-        let path_info = get_pathinfo(nix_store_path(&dependency), store)
+        let path_info = get_pathinfo(nix_store_path(&dependency), &mut *store)
             .await
             .context("Failed to get derivation info")?
             .context("Derivation not found in Nix store")?;
@@ -254,7 +256,7 @@ pub(super) async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unp
         for b in check_availability {
             references.retain(|(d, _, _)| *d != b.derivation_path);
 
-            let in_store = match get_missing_builds(vec![b.derivation_path.clone()], store).await {
+            let in_store = match get_missing_builds(vec![b.derivation_path.clone()], &mut *store).await {
                 Ok(missing) => missing.is_empty(),
                 Err(e) => {
                     debug!(error = %format!("{:#}", e), path = %b.derivation_path, "Failed to check store presence, treating as missing");
@@ -335,7 +337,7 @@ pub(super) async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unp
             }
         }
 
-        let not_missing = match get_missing_builds(vec![dependency.clone()], store).await {
+        let not_missing = match get_missing_builds(vec![dependency.clone()], &mut *store).await {
             Ok(missing) => missing.is_empty(),
             Err(e) => {
                 debug!(error = %format!("{:#}", e), path = %dependency, "Failed to check store presence, treating as missing");

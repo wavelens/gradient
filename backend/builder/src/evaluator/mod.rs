@@ -10,7 +10,7 @@ mod flake;
 mod nix_commands;
 
 pub use drv::Derivation;
-pub use nix_commands::{get_derivation, get_derivation_cmd, get_features};
+pub use nix_commands::{get_derivation_cmd, get_features};
 
 use anyhow::{Context, Result};
 use core::executer::*;
@@ -20,10 +20,8 @@ use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use futures::stream::{self, StreamExt};
-use nix_daemon::nix::DaemonStore;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
@@ -36,10 +34,9 @@ use super::scheduler::{update_evaluation_status, update_evaluation_status_with_e
 /// Evaluates a flake repository, discovering all matching derivations and building the dependency
 /// graph. Returns accumulated builds, dependency edges, and the IDs of the top-level entry-point
 /// builds (one per wildcard match).
-#[instrument(skip(state, store), fields(evaluation_id = %evaluation.id))]
-pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
+#[instrument(skip(state), fields(evaluation_id = %evaluation.id))]
+pub async fn evaluate(
     state: Arc<ServerState>,
-    store: &mut DaemonStore<C>,
     evaluation: &MEvaluation,
 ) -> Result<(Vec<MBuild>, Vec<MBuildDependency>, Vec<Uuid>, Vec<(String, String)>)> {
     info!("Starting evaluation");
@@ -139,7 +136,10 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             }
         };
 
-        let missing = get_missing_builds(vec![derivation.clone()], store).await?;
+        let missing = {
+            let mut store = state.nix_store_pool.acquire().await.context("Failed to acquire nix store")?;
+            get_missing_builds(vec![derivation.clone()], &mut *store).await?
+        };
 
         if missing.is_empty() {
             debug!(derivation = %derivation, "Skipping package - already in store");
@@ -173,7 +173,10 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
         let existing_builds =
             find_builds(Arc::clone(&state), organization_id, vec![derivation.clone()], true).await?;
         if let Some(existing) = existing_builds.first() {
-            let missing = get_missing_builds(vec![existing.derivation_path.clone()], store).await?;
+            let missing = {
+                let mut store = state.nix_store_pool.acquire().await.context("Failed to acquire nix store")?;
+                get_missing_builds(vec![existing.derivation_path.clone()], &mut *store).await?
+            };
             if missing.is_empty() {
                 acc.entry_point_build_ids.push(existing.id);
                 debug!(derivation = %derivation, "Skipping package - already exists in DB and store");
@@ -191,7 +194,6 @@ pub async fn evaluate<C: AsyncWriteExt + AsyncReadExt + Unpin + Send>(
             evaluation,
             organization_id,
             vec![derivation.clone()],
-            store,
         )
         .await?;
 
@@ -241,16 +243,11 @@ pub async fn evaluate_direct(
     temp_dir: String,
 ) -> Result<()> {
     info!(evaluation_id = %evaluation.id, "Starting direct evaluation");
-    let mut local_store = state
-        .nix_store_pool
-        .acquire()
-        .await
-        .context("Failed to acquire local store for direct evaluation")?;
 
     let mut direct_evaluation = evaluation.clone();
     direct_evaluation.repository = temp_dir.clone();
 
-    let evaluation_result = evaluate(Arc::clone(&state), &mut *local_store, &direct_evaluation).await;
+    let evaluation_result = evaluate(Arc::clone(&state), &direct_evaluation).await;
 
     match evaluation_result {
         Ok((builds, dependencies, _entry_point_build_ids, _failed_derivations)) => {

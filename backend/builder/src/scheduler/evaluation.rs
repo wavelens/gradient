@@ -5,7 +5,6 @@
  */
 
 use chrono::Utc;
-use core::executer::get_local_store;
 use core::sources::*;
 use core::types::*;
 use entity::build::BuildStatus;
@@ -62,140 +61,7 @@ pub async fn schedule_evaluation_loop(state: Arc<ServerState>) {
 pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) {
     info!("Reviewing evaluation");
 
-    let (_project, organization) = if let Some(project_id) = evaluation.project {
-        let project = match EProject::find_by_id(project_id).one(&state.db).await {
-            Ok(Some(p)) => p,
-            Ok(None) => {
-                error!("Project not found: {}", project_id);
-                update_evaluation_status_with_error(
-                    Arc::clone(&state),
-                    evaluation,
-                    EvaluationStatus::Failed,
-                    "Project not found".to_string(),
-                )
-                .await;
-                return;
-            }
-            Err(e) => {
-                error!(error = %e, "Failed to query project");
-                update_evaluation_status_with_error(
-                    Arc::clone(&state),
-                    evaluation,
-                    EvaluationStatus::Failed,
-                    format!("Failed to query project: {}", e),
-                )
-                .await;
-                return;
-            }
-        };
-
-        let organization = match EOrganization::find_by_id(project.organization)
-            .one(&state.db)
-            .await
-        {
-            Ok(Some(o)) => o,
-            Ok(None) => {
-                error!("Organization not found: {}", project.organization);
-                update_evaluation_status_with_error(
-                    Arc::clone(&state),
-                    evaluation,
-                    EvaluationStatus::Failed,
-                    "Organization not found".to_string(),
-                )
-                .await;
-                return;
-            }
-            Err(e) => {
-                error!(error = %e, "Failed to query organization");
-                update_evaluation_status_with_error(
-                    Arc::clone(&state),
-                    evaluation,
-                    EvaluationStatus::Failed,
-                    format!("Failed to query organization: {}", e),
-                )
-                .await;
-                return;
-            }
-        };
-        (Some(project), organization)
-    } else {
-        let direct_build = match EDirectBuild::find()
-            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
-            .one(&state.db)
-            .await
-        {
-            Ok(Some(d)) => d,
-            Ok(None) => {
-                error!("Direct build not found for evaluation: {}", evaluation.id);
-                update_evaluation_status_with_error(
-                    Arc::clone(&state),
-                    evaluation,
-                    EvaluationStatus::Failed,
-                    "Direct build not found".to_string(),
-                )
-                .await;
-                return;
-            }
-            Err(e) => {
-                error!(error = %e, "Failed to query direct build");
-                update_evaluation_status_with_error(
-                    Arc::clone(&state),
-                    evaluation,
-                    EvaluationStatus::Failed,
-                    format!("Failed to query direct build: {}", e),
-                )
-                .await;
-                return;
-            }
-        };
-
-        let organization = match EOrganization::find_by_id(direct_build.organization)
-            .one(&state.db)
-            .await
-        {
-            Ok(Some(o)) => o,
-            Ok(None) => {
-                error!("Organization not found: {}", direct_build.organization);
-                update_evaluation_status_with_error(
-                    Arc::clone(&state),
-                    evaluation,
-                    EvaluationStatus::Failed,
-                    "Organization not found".to_string(),
-                )
-                .await;
-                return;
-            }
-            Err(e) => {
-                error!(error = %e, "Failed to query organization");
-                update_evaluation_status_with_error(
-                    Arc::clone(&state),
-                    evaluation,
-                    EvaluationStatus::Failed,
-                    format!("Failed to query organization: {}", e),
-                )
-                .await;
-                return;
-            }
-        };
-        (None, organization)
-    };
-
-    let mut local_daemon = match get_local_store(Some(organization)).await {
-        Ok(s) => s,
-        Err(e) => {
-            error!(error = %e, "Failed to get local store");
-            update_evaluation_status_with_error(
-                Arc::clone(&state),
-                evaluation,
-                EvaluationStatus::Failed,
-                format!("Failed to get local store: {}", e),
-            )
-            .await;
-            return;
-        }
-    };
-
-    let builds = evaluate(Arc::clone(&state), &mut local_daemon, &evaluation).await;
+    let builds = evaluate(Arc::clone(&state), &evaluation).await;
 
     match builds {
         Ok(builds) => {

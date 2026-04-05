@@ -75,36 +75,6 @@ fn parse_string(s: &str) -> Result<(String, &str)> {
     }
 }
 
-/// Skips over a complete ATerm value (quoted string or bracketed list/tuple, including nesting).
-/// Returns the remaining input after the value.
-fn skip_value(s: &str) -> Result<&str> {
-    let s = s.trim_start();
-    if s.starts_with('"') {
-        let (_, rest) = parse_string(s)?;
-        return Ok(rest);
-    }
-    if s.starts_with('[') || s.starts_with('(') {
-        let mut depth: usize = 0;
-        let mut in_string = false;
-        let mut escape = false;
-        for (i, c) in s.char_indices() {
-            if escape { escape = false; continue; }
-            if c == '\\' && in_string { escape = true; continue; }
-            if c == '"' { in_string = !in_string; continue; }
-            if in_string { continue; }
-            match c {
-                '[' | '(' => depth += 1,
-                ']' | ')' => {
-                    depth -= 1;
-                    if depth == 0 { return Ok(&s[i + 1..]); }
-                }
-                _ => {}
-            }
-        }
-        return Err(anyhow!("unterminated list/tuple"));
-    }
-    Err(anyhow!("unexpected token at: {}", &s[..s.len().min(20)]))
-}
 
 /// Advances past optional leading whitespace and one comma. Returns the rest.
 fn comma(s: &str) -> Result<&str> {
