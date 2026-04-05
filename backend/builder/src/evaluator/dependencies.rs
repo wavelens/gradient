@@ -21,7 +21,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, trace};
 use uuid::Uuid;
 
-use super::nix_commands::get_features_cmd;
+use super::nix_commands::get_features;
 
 /// Accumulates builds, dependency edges, and entry-point IDs across derivation processing.
 pub(super) struct EvaluationAccumulator {
@@ -79,8 +79,7 @@ pub(super) async fn add_existing_build(
     evaluation_id: Uuid,
     build_id: Uuid,
 ) -> Result<MBuild> {
-    let (system, features) =
-        get_features_cmd(state.cli.binpath_nix.as_str(), derivation.as_str()).await?;
+    let (system, features) = get_features(derivation.as_str()).await?;
 
     let abuild = ABuild {
         id: Set(build_id),
@@ -382,11 +381,10 @@ pub(super) async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unp
     let handles: Vec<JoinHandle<FeaturesResult>> = pending
         .iter()
         .map(|(path, build_id)| {
-            let binpath = state.cli.binpath_nix.clone();
             let p = path.clone();
             let id = *build_id;
             tokio::task::spawn(async move {
-                let (arch, features) = get_features_cmd(binpath.as_str(), p.as_str())
+                let (arch, features) = get_features(p.as_str())
                     .await
                     .with_context(|| {
                         format!("Failed to get build features for derivation: {}", p)
@@ -398,7 +396,7 @@ pub(super) async fn query_all_dependencies<C: AsyncWriteExt + AsyncReadExt + Unp
 
     for handle in handles {
         let (build_id, path, system, features) =
-            handle.await.context("get_features_cmd task panicked")??;
+            handle.await.context("get_features task panicked")??;
 
         if reused_build_ids.contains(&build_id) {
             // Already inserted into DB during BFS — skip re-insertion.

@@ -85,7 +85,7 @@
                     </a>
                   </h3>
                   <span class="status-badge" [class]="getBuildStatusClass(ep.build_status)">
-                    {{ ep.build_status }}
+                    {{ formatBuildStatus(ep.build_status) }}
                   </span>
                   <a
                     [class.graph-icon-link]="true"

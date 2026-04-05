@@ -158,6 +158,10 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     return status === 'Queued' || status === 'Building';
   }
 
+  formatBuildStatus(status: BuildStatus): string {
+    return status === 'DependencyFailed' ? 'Dependency Failed' : status;
+  }
+
   getBuildStatusClass(status: BuildStatus): string {
     switch (status) {
       case 'Completed': return 'status-success';

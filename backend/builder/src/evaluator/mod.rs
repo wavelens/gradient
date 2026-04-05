@@ -5,10 +5,12 @@
  */
 
 mod dependencies;
+mod drv;
 mod flake;
 mod nix_commands;
 
-pub use nix_commands::{get_derivation_cmd, get_features_cmd};
+pub use drv::Derivation;
+pub use nix_commands::{get_derivation, get_derivation_cmd, get_features};
 
 use anyhow::{Context, Result};
 use core::executer::*;

@@ -165,7 +165,7 @@
   &.status-building               { background: $color-info; }
   &.status-completed              { background: $color-success; }
   &.status-failed  { background: $color-danger; }
-  &.status-aborted { background: $color-secondary; }
+  &.status-aborted, &.status-dependencyfailed { background: $color-secondary; }
 }
 
 .build-name {
@@ -311,7 +311,7 @@
   &.status-evaluating, &.status-building { background: rgba($color-info, 0.15); color: $color-info; }
   &.status-completed { background: rgba($color-success, 0.15); color: $color-success; }
   &.status-failed  { background: rgba($color-danger, 0.15); color: $color-danger; }
-  &.status-aborted { background: rgba($color-secondary, 0.15); color: $color-secondary; }
+  &.status-aborted, &.status-dependencyfailed { background: rgba($color-secondary, 0.15); color: $color-secondary; }
 }
 
 // ── Error banner ──────────────────────────────────────────────────────────────
