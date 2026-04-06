@@ -155,7 +155,7 @@ To use pull deployment, you need to enable the `gradient-deploy` module in your 
 
 ```nix
 {
-  services.gradient-deploy = {
+  system.gradient-deploy = {
     enable = true;
     server = "https://gradient.example.com";
     apiKeyFile = "/var/lib/gradient-deploy/api-key";

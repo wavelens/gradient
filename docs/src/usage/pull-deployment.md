@@ -40,7 +40,7 @@ Add `gradient.nixosModules.deploy` to the target machine's NixOS configuration:
 
 ```nix
 {
-  services.gradient-deploy = {
+  system.gradient-deploy = {
     enable      = true;
     server      = "https://gradient.example.com";
     apiKeyFile  = "/var/lib/gradient-deploy/api-key";
