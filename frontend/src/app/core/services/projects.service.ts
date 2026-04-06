@@ -84,6 +84,12 @@ export class ProjectsService {
   getProjectMetrics(organization: string, project: string): Observable<ProjectMetricsResponse> {
     return this.api.get<ProjectMetricsResponse>(`projects/${organization}/${project}/metrics`);
   }
+
+  getEntryPointMetrics(organization: string, project: string, eval_attr: string): Observable<EntryPointMetricsResponse> {
+    return this.api.get<EntryPointMetricsResponse>(
+      `projects/${organization}/${project}/entry-point-metrics?eval=${encodeURIComponent(eval_attr)}`
+    );
+  }
 }
 
 export interface ProjectMetricPoint {
@@ -99,4 +105,20 @@ export interface ProjectMetricPoint {
 export interface ProjectMetricsResponse {
   keep_evaluations: number;
   points: ProjectMetricPoint[];
+}
+
+export interface EntryPointMetricPoint {
+  evaluation_id: string;
+  created_at: string;
+  build_status: string;
+  build_time_ms: number | null;
+  output_size_bytes: number | null;
+  closure_size_bytes: number | null;
+  dependencies_count: number;
+}
+
+export interface EntryPointMetricsResponse {
+  eval: string;
+  keep_evaluations: number;
+  points: EntryPointMetricPoint[];
 }

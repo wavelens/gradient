@@ -60,6 +60,14 @@ export const routes: Routes = [
       ),
   },
   {
+    path: 'organization/:org/project/:project/entry-point-metrics',
+    title: 'Entry Point Metrics',
+    loadComponent: () =>
+      import('./features/projects/entry-point-metrics/entry-point-metrics.component').then(
+        (m) => m.EntryPointMetricsComponent
+      ),
+  },
+  {
     path: 'organization/:org/artefacts/:buildId',
     title: 'Build Artefacts',
     data: { hideFooter: true },

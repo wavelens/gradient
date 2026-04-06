@@ -1276,6 +1276,110 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /projects/{organization}/{project}/entry-point-metrics:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    get:
+      tags: [projects]
+      summary: Get entry point metrics
+      description: |-
+        Returns per-evaluation build metrics for a single entry point identified by its
+        Nix attribute path (`eval`), covering the last `keep_evaluations` completed evaluations.
+
+        The `eval` value is the full Nix attribute path as stored in the database, which may
+        contain double-quoted segments for attribute names with special characters
+        (e.g. `packages."x86_64-linux".hello`). URL-encode `"` as `%22` in query strings.
+      operationId: getEntryPointMetrics
+      security: []
+      parameters:
+        - name: eval
+          in: query
+          required: true
+          description: |-
+            Nix attribute path of the entry point, e.g. `packages.x86_64-linux.hello`
+            or `packages.%22x86_64-linux%22.hello` (URL-encoded).
+          schema:
+            type: string
+            example: "packages.x86_64-linux.hello"
+      responses:
+        '200':
+          description: Entry point metrics
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/EntryPointMetricsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{organization}/{project}/entry-point-downloads:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    get:
+      tags: [projects]
+      summary: Download latest entry point build output
+      description: |-
+        Serves the named file from `nix-support/hydra-build-products` for the most recently
+        completed build of the given entry point. Designed as a stable permalink — the URL
+        always resolves to the **newest** successful build.
+
+        Authentication:
+        - **Public organisations** — no credentials required.
+        - **Private organisations** — supply `?token=GRADxxxx` (API key) or a JWT, **or**
+          authenticate via `Authorization: Bearer` header / `jwt_token` session cookie.
+
+        The `eval` value may contain double-quoted Nix attribute segments
+        (e.g. `packages."x86_64-linux".hello`). URL-encode `"` as `%22`.
+      operationId: downloadEntryPointOutput
+      security: []
+      parameters:
+        - name: eval
+          in: query
+          required: true
+          description: |-
+            Nix attribute path of the entry point, e.g. `packages.x86_64-linux.hello`.
+            URL-encode `"` as `%22` for attributes with special characters.
+          schema:
+            type: string
+            example: "packages.x86_64-linux.hello"
+        - name: filename
+          in: query
+          required: true
+          description: Filename as listed in `nix-support/hydra-build-products`.
+          schema:
+            type: string
+            example: "result.tar.gz"
+        - name: token
+          in: query
+          required: false
+          description: |-
+            API key (`GRADxxxx`) or JWT for authenticating static/permalink URLs.
+            Not required when the organisation is public or when a session cookie /
+            `Authorization` header is already present.
+          schema:
+            type: string
+            example: "GRADabcdefghijklmnopqrstuvwxyz0123456789..."
+      responses:
+        '200':
+          description: File contents with appropriate `Content-Type` and `Content-Disposition` headers.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Evaluations ──────────────────────────────────────────────────────────────
 
   /evals/{evaluation}:
@@ -3171,6 +3275,54 @@ components:
         dependencies_count:
           type: integer
           description: Number of dependency builds (excluding entry points)
+
+    EntryPointMetricsResponse:
+      type: object
+      required: [eval, keep_evaluations, points]
+      properties:
+        eval:
+          type: string
+          description: Nix attribute path of the queried entry point
+          example: "packages.x86_64-linux.hello"
+        keep_evaluations:
+          type: integer
+          description: Configured retention limit for this project
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntryPointMetricPoint'
+
+    EntryPointMetricPoint:
+      type: object
+      required: [evaluation_id, created_at, build_status, dependencies_count]
+      properties:
+        evaluation_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        build_status:
+          $ref: '#/components/schemas/BuildStatus'
+        build_time_ms:
+          type: integer
+          format: int64
+          nullable: true
+          description: Build duration in milliseconds, null if not yet recorded or build failed
+        output_size_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: Size of this entry point's direct build outputs in bytes
+        closure_size_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: Total closure size including all transitive dependency outputs
+        dependencies_count:
+          type: integer
+          format: int64
+          description: Number of transitive dependency builds (excluding the entry point itself)
 
     # ── Evaluations ───────────────────────────────────────────────────────────
 

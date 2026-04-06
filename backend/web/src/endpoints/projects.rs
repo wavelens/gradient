@@ -8,6 +8,8 @@ use crate::authorization::MaybeUser;
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use chrono::Utc;
 use core::consts::*;
@@ -28,6 +30,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::fs;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -1129,4 +1132,325 @@ pub async fn get_project_metrics(
             points,
         },
     }))
+}
+
+// ── Per-entry-point metrics ──────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct EntryPointMetricsQuery {
+    pub eval: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct EntryPointMetricPoint {
+    pub evaluation_id: Uuid,
+    pub created_at: chrono::NaiveDateTime,
+    pub build_status: entity::build::BuildStatus,
+    pub build_time_ms: Option<i64>,
+    pub output_size_bytes: Option<i64>,
+    pub closure_size_bytes: Option<i64>,
+    pub dependencies_count: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct EntryPointMetricsResponse {
+    pub eval: String,
+    pub keep_evaluations: i32,
+    pub points: Vec<EntryPointMetricPoint>,
+}
+
+/// Returns per-evaluation build metrics for a single entry point identified by its
+/// `eval` attribute path (e.g. `packages.x86_64-linux.hello`).
+pub async fn get_entry_point_metrics(
+    state: State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Path((organization, project)): Path<(String, String)>,
+    Query(params): Query<EntryPointMetricsQuery>,
+) -> WebResult<Json<BaseResponse<EntryPointMetricsResponse>>> {
+    let organization = get_any_organization_by_name(state.0.clone(), organization)
+        .await?
+        .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if !organization.public {
+        match &maybe_user {
+            Some(user) => {
+                if !user_is_org_member(&state.0, user.id, organization.id).await? {
+                    return Err(WebError::not_found("Project"));
+                }
+            }
+            None => return Err(WebError::not_found("Project")),
+        }
+    }
+
+    let project = EProject::find()
+        .filter(CProject::Organization.eq(organization.id))
+        .filter(CProject::Name.eq(project))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Project"))?;
+
+    let evaluations = EEvaluation::find()
+        .filter(CEvaluation::Project.eq(project.id))
+        .filter(CEvaluation::Status.eq(EvaluationStatus::Completed))
+        .order_by_desc(CEvaluation::CreatedAt)
+        .limit(project.keep_evaluations as u64)
+        .all(&state.db)
+        .await?;
+
+    let mut points = Vec::new();
+
+    for evaluation in evaluations {
+        let Some(ep) = EEntryPoint::find()
+            .filter(CEntryPoint::Evaluation.eq(evaluation.id))
+            .filter(CEntryPoint::Eval.eq(&params.eval))
+            .one(&state.db)
+            .await?
+        else {
+            continue;
+        };
+
+        let Some(build) = EBuild::find_by_id(ep.build).one(&state.db).await? else {
+            continue;
+        };
+
+        // Output size: only this build's outputs
+        let outputs = EBuildOutput::find()
+            .filter(CBuildOutput::Build.eq(build.id))
+            .all(&state.db)
+            .await?;
+        let output_total: i64 = outputs.iter().filter_map(|o| o.file_size).sum();
+        let output_size_bytes = if output_total > 0 { Some(output_total) } else { None };
+
+        let build_time_ms = build.build_time_ms.or_else(|| {
+            if build.status == BuildStatus::Completed {
+                Some((build.updated_at - build.created_at).num_milliseconds())
+            } else {
+                None
+            }
+        });
+
+        // Closure size + dependency count: BFS over this evaluation's dep graph
+        let all_eval_build_ids: Vec<Uuid> = EBuild::find()
+            .filter(CBuild::Evaluation.eq(evaluation.id))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|b| b.id)
+            .collect();
+
+        let dep_edges = if all_eval_build_ids.is_empty() {
+            vec![]
+        } else {
+            EBuildDependency::find()
+                .filter(CBuildDependency::Build.is_in(all_eval_build_ids))
+                .all(&state.db)
+                .await?
+        };
+
+        let mut dep_map: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+        for edge in &dep_edges {
+            dep_map.entry(edge.build).or_default().push(edge.dependency);
+        }
+
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(build.id);
+        while let Some(id) = queue.pop_front() {
+            if !visited.insert(id) { continue; }
+            if let Some(deps) = dep_map.get(&id) {
+                for &dep in deps {
+                    if !visited.contains(&dep) {
+                        queue.push_back(dep);
+                    }
+                }
+            }
+        }
+
+        let dependencies_count = (visited.len() as i64).saturating_sub(1);
+
+        let closure_outputs = EBuildOutput::find()
+            .filter(CBuildOutput::Build.is_in(visited.into_iter().collect::<Vec<_>>()))
+            .all(&state.db)
+            .await?;
+        let closure_total: i64 = closure_outputs.iter().filter_map(|o| o.file_size).sum();
+        let closure_size_bytes = if closure_total > 0 { Some(closure_total) } else { None };
+
+        points.push(EntryPointMetricPoint {
+            evaluation_id: evaluation.id,
+            created_at: evaluation.created_at,
+            build_status: build.status,
+            build_time_ms,
+            output_size_bytes,
+            closure_size_bytes,
+            dependencies_count,
+        });
+    }
+
+    points.reverse();
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: EntryPointMetricsResponse {
+            eval: params.eval,
+            keep_evaluations: project.keep_evaluations,
+            points,
+        },
+    }))
+}
+
+// ── Entry-point download (stable permalink) ──────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct EntryPointDownloadQuery {
+    /// Nix attribute path of the entry point, e.g. `packages."x86_64-linux".hello`.
+    /// URL-encode `"` as `%22` when constructing static links.
+    pub eval: String,
+    /// Filename listed in `nix-support/hydra-build-products`.
+    pub filename: String,
+    /// API key (`GRADxxxx`) or JWT.  Required when the owning organisation is private.
+    /// Pass via this parameter for static/permalink URLs; omit if you already have a
+    /// session cookie or `Authorization: Bearer` header.
+    pub token: Option<String>,
+}
+
+/// Downloads the newest build output for a specific entry point.
+///
+/// Resolves the most recently completed evaluation for the project, finds the entry
+/// point matching `eval`, and serves the named file from `nix-support/hydra-build-products`.
+///
+/// Authentication:
+/// - Public organisations: no credentials required.
+/// - Private organisations: supply `?token=GRADxxxx` (API key) or a JWT, **or** authenticate
+///   via the `Authorization: Bearer` header / `jwt_token` session cookie.
+pub async fn get_entry_point_download(
+    state: State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Path((organization, project)): Path<(String, String)>,
+    Query(params): Query<EntryPointDownloadQuery>,
+) -> Result<Response, WebError> {
+    let organization = get_any_organization_by_name(state.0.clone(), organization)
+        .await?
+        .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    let project = EProject::find()
+        .filter(CProject::Organization.eq(organization.id))
+        .filter(CProject::Name.eq(&project))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Project"))?;
+
+    // Resolve caller identity from ?token= (API key / JWT) or existing session.
+    let resolved_user: Option<MUser> = if let Some(token_str) = params.token {
+        let token_data = crate::authorization::decode_jwt(State(Arc::clone(&state)), token_str)
+            .await
+            .map_err(|_| WebError::Unauthorized("Invalid token".to_string()))?;
+        EUser::find_by_id(token_data.claims.id)
+            .one(&state.db)
+            .await?
+    } else {
+        maybe_user
+    };
+
+    if !organization.public {
+        match resolved_user {
+            Some(ref user) => {
+                if !user_is_org_member(&state, user.id, organization.id).await? {
+                    return Err(WebError::not_found("Project"));
+                }
+            }
+            None => return Err(WebError::Unauthorized("Authorization required".to_string())),
+        }
+    }
+
+    // Most recent completed evaluation for this project.
+    let evaluation = EEvaluation::find()
+        .filter(CEvaluation::Project.eq(project.id))
+        .filter(CEvaluation::Status.eq(EvaluationStatus::Completed))
+        .order_by_desc(CEvaluation::CreatedAt)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Evaluation"))?;
+
+    // Entry point whose `eval` attribute path matches the query param.
+    // Axum URL-decodes the value automatically, so %22 → " before this comparison.
+    let ep = EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.eq(evaluation.id))
+        .filter(CEntryPoint::Eval.eq(&params.eval))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Entry point"))?;
+
+    let build = EBuild::find_by_id(ep.build)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Build"))?;
+
+    if build.status != BuildStatus::Completed {
+        return Err(WebError::not_found("File"));
+    }
+
+    // Walk build outputs, locate the file via hydra-build-products.
+    let build_outputs = EBuildOutput::find()
+        .filter(CBuildOutput::Build.eq(build.id))
+        .all(&state.db)
+        .await?;
+
+    for output in build_outputs {
+        let hydra_products_path = format!("{}/nix-support/hydra-build-products", output.output);
+        if let Ok(content) = fs::read_to_string(&hydra_products_path).await {
+            for line in content.lines() {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 && parts[0] == "file" {
+                    let file_path = parts[2..].join(" ");
+                    let file_name = std::path::Path::new(&file_path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("");
+                    if file_name == params.filename {
+                        match fs::read(&file_path).await {
+                            Ok(contents) => {
+                                let content_type = match std::path::Path::new(&params.filename)
+                                    .extension()
+                                    .and_then(|ext| ext.to_str())
+                                {
+                                    Some("tar") => "application/x-tar",
+                                    Some("gz") => "application/gzip",
+                                    Some("zst") => "application/zstd",
+                                    Some("txt") => "text/plain",
+                                    Some("json") => "application/json",
+                                    Some("zip") => "application/zip",
+                                    _ => "application/octet-stream",
+                                };
+                                return Ok((
+                                    StatusCode::OK,
+                                    [
+                                        (header::CONTENT_TYPE, content_type),
+                                        (
+                                            header::CONTENT_DISPOSITION,
+                                            &format!(
+                                                "attachment; filename=\"{}\"",
+                                                params.filename
+                                            ),
+                                        ),
+                                    ],
+                                    contents,
+                                )
+                                    .into_response());
+                            }
+                            Err(_) => {
+                                return Err(WebError::InternalServerError(
+                                    "Failed to read file".to_string(),
+                                ))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Err(WebError::not_found("File"))
 }

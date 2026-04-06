@@ -104,6 +104,14 @@
                   >
                     <span class="material-symbols-outlined">account_tree</span>
                   </a>
+                  <a
+                    [routerLink]="['/organization', orgName, 'project', projectName, 'entry-point-metrics']"
+                    [queryParams]="{ eval: ep.eval }"
+                    class="graph-icon-link"
+                    title="View entry point metrics"
+                  >
+                    <i class="pi pi-chart-line"></i>
+                  </a>
                 </div>
                 @if (ep.architecture) {
                   <div class="build-stats">

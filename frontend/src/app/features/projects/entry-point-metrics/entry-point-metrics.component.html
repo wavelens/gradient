@@ -1,0 +1,131 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgName }}</a>
+        <span class="breadcrumb-separator">/</span>
+        <a [routerLink]="['/organization', orgName, 'project', projectName]" class="breadcrumb-link">{{ projectName }}</a>
+        <span class="breadcrumb-separator">/</span>
+        <span class="breadcrumb-current">Entry Point Metrics</span>
+      </div>
+      <h1>{{ evalAttr() }}</h1>
+      <p class="text-secondary">Build history over the last {{ keepEvaluations() }} completed evaluations.</p>
+    </div>
+  </div>
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading metrics..." />
+  } @else if (points().length === 0) {
+    <div class="empty-state">
+      <span class="material-symbols-outlined">monitoring</span>
+      <p>No completed evaluations found for this entry point.</p>
+    </div>
+  } @else {
+    <div class="summary-row">
+      <div class="summary-card">
+        <span class="summary-value success">{{ completedCount() }}</span>
+        <span class="summary-label">Completed</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-value error">{{ failedCount() }}</span>
+        <span class="summary-label">Failed</span>
+      </div>
+      <div class="summary-card">
+        <span class="summary-value">{{ points().length }}</span>
+        <span class="summary-label">Total evaluations</span>
+      </div>
+    </div>
+
+    <div class="charts-grid">
+      <div class="chart-card chart-card--full">
+        <div class="chart-header">
+          <span class="chart-title">Build Time</span>
+          <span class="chart-sub">Time to build this package per evaluation</span>
+        </div>
+        <apx-chart
+          [series]="buildTimeChart().series"
+          [chart]="buildTimeChart().chart"
+          [theme]="buildTimeChart().theme"
+          [stroke]="buildTimeChart().stroke"
+          [fill]="buildTimeChart().fill"
+          [colors]="buildTimeChart().colors"
+          [xaxis]="buildTimeChart().xaxis"
+          [yaxis]="buildTimeChart().yaxis"
+          [grid]="buildTimeChart().grid"
+          [tooltip]="buildTimeChart().tooltip"
+          [dataLabels]="buildTimeChart().dataLabels"
+          [markers]="buildTimeChart().markers"
+        />
+      </div>
+
+      <div class="chart-card chart-card--full">
+        <div class="chart-header">
+          <span class="chart-title">Output Size</span>
+          <span class="chart-sub">Size of this package's build output per evaluation</span>
+        </div>
+        <apx-chart
+          [series]="outputSizeChart().series"
+          [chart]="outputSizeChart().chart"
+          [theme]="outputSizeChart().theme"
+          [stroke]="outputSizeChart().stroke"
+          [fill]="outputSizeChart().fill"
+          [colors]="outputSizeChart().colors"
+          [xaxis]="outputSizeChart().xaxis"
+          [yaxis]="outputSizeChart().yaxis"
+          [grid]="outputSizeChart().grid"
+          [tooltip]="outputSizeChart().tooltip"
+          [dataLabels]="outputSizeChart().dataLabels"
+          [markers]="outputSizeChart().markers"
+        />
+      </div>
+
+      <div class="chart-card chart-card--full">
+        <div class="chart-header">
+          <span class="chart-title">Closure Size</span>
+          <span class="chart-sub">Size including all transitive dependencies</span>
+        </div>
+        <apx-chart
+          [series]="closureSizeChart().series"
+          [chart]="closureSizeChart().chart"
+          [theme]="closureSizeChart().theme"
+          [stroke]="closureSizeChart().stroke"
+          [fill]="closureSizeChart().fill"
+          [colors]="closureSizeChart().colors"
+          [xaxis]="closureSizeChart().xaxis"
+          [yaxis]="closureSizeChart().yaxis"
+          [grid]="closureSizeChart().grid"
+          [tooltip]="closureSizeChart().tooltip"
+          [dataLabels]="closureSizeChart().dataLabels"
+          [markers]="closureSizeChart().markers"
+        />
+      </div>
+
+      <div class="chart-card chart-card--full">
+        <div class="chart-header">
+          <span class="chart-title">Dependencies Count</span>
+          <span class="chart-sub">Number of transitive dependency builds</span>
+        </div>
+        <apx-chart
+          [series]="depsChart().series"
+          [chart]="depsChart().chart"
+          [theme]="depsChart().theme"
+          [stroke]="depsChart().stroke"
+          [fill]="depsChart().fill"
+          [colors]="depsChart().colors"
+          [xaxis]="depsChart().xaxis"
+          [yaxis]="depsChart().yaxis"
+          [grid]="depsChart().grid"
+          [tooltip]="depsChart().tooltip"
+          [dataLabels]="depsChart().dataLabels"
+          [markers]="depsChart().markers"
+        />
+      </div>
+    </div>
+  }
+</div>

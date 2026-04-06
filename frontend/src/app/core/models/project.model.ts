@@ -43,6 +43,7 @@ export interface EntryPointSummary {
   id: string;
   build_id: string;
   derivation_path: string;
+  eval: string;
   build_status: BuildStatus;
   has_artefacts: boolean;
   architecture: Architecture;
