@@ -2,5 +2,6 @@
  - Log OIDC Errors in journal error
  - Add Super User
  - Add Non-SSH server as default
+ - enable_registration should be used (also in frontend to modify the UI)
  - Base (Default) Servers (for all orgs), configured only in state
  - if git link is http(s) make link clickable

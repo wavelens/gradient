@@ -50,7 +50,7 @@ pub async fn post_basic_register(
     state: State<Arc<ServerState>>,
     Json(body): Json<MakeUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if state.cli.oidc_required || state.cli.disable_registration {
+    if !state.cli.oidc_required && state.cli.enable_registration {
         return Err(WebError::registration_disabled());
     }
 

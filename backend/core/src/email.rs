@@ -59,7 +59,7 @@ impl EmailService {
 
         let credentials = Credentials::new(smtp_username.clone(), smtp_password);
 
-        let transport = if cli.email_disable_tls {
+        let transport = if !cli.email_enable_tls {
             SmtpTransport::builder_dangerous(smtp_host)
                 .credentials(credentials)
                 .port(cli.email_smtp_port)

@@ -7,13 +7,13 @@
 { lib
 , git
 , installShellFiles
-, nix
 , nixVersions
 , openssl
 , pkg-config
 , rustPlatform
 , stdenv
 }: let
+  nixLatest = nixVersions.latest;
   ignoredPaths = [ ".github" "target" ];
 in rustPlatform.buildRustPackage {
   pname = "gradient-cli";
@@ -31,15 +31,14 @@ in rustPlatform.buildRustPackage {
 
   buildInputs = [
     git
-    nix
-    nixVersions.latest
+    nixLatest
+    (lib.getDev nixLatest)
     openssl
-    pkg-config
   ];
 
   cargoLock.lockFile = ../../cli/Cargo.lock;
 
-  NIX_INCLUDE_PATH = "${lib.getDev nix}/include";
+  NIX_INCLUDE_PATH = "${lib.getDev nixLatest}/include";
 
   postInstall = lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
     installShellCompletion --cmd gradient \

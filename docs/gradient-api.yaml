@@ -143,7 +143,7 @@ paths:
                 error: false
                 message:
                   oidc_enabled: false
-                  registration_disabled: false
+                  registration_enabled: false
                   email_verification_enabled: false
 
   # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -2814,14 +2814,14 @@ components:
 
     ServerConfig:
       type: object
-      required: [oidc_enabled, registration_disabled, email_verification_enabled]
+      required: [oidc_enabled, registration_enabled, email_verification_enabled]
       properties:
         oidc_enabled:
           type: boolean
           description: Whether OIDC/OAuth2 authentication is configured
-        registration_disabled:
+        registration_enabled:
           type: boolean
-          description: Whether new user registration via basic auth is disabled
+          description: Whether new user registration via basic auth is enabled
         email_verification_enabled:
           type: boolean
           description: Whether email verification is required on registration

@@ -12,7 +12,7 @@ import { environment } from '@environments/environment';
 interface ServerConfig {
   version: string;
   oidc_enabled: boolean;
-  registration_disabled: boolean;
+  registration_enabled: boolean;
   email_verification_enabled: boolean;
 }
 
@@ -36,7 +36,7 @@ export class ConfigService {
         if (!res.error) {
           this.backendVersion = res.message.version;
           this.oidcEnabled = res.message.oidc_enabled;
-          this.registrationDisabled = res.message.registration_disabled;
+          this.registrationDisabled = !res.message.registration_enabled;
           this.emailVerificationEnabled = res.message.email_verification_enabled;
         }
       })

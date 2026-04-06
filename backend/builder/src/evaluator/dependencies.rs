@@ -429,13 +429,25 @@ pub(super) async fn query_all_dependencies(
     let mut pending_paths: HashSet<String> = HashSet::new();
     let mut cloned_ids: HashSet<Uuid> = HashSet::new();
 
+    // Reserve 1 permit for `get_missing_builds` called inside `process_node`.
+    // If the entire queue were drained at once and frontier >= pool_size, outer tasks
+    // would fill the semaphore's FIFO queue with waiters. When one outer task completes
+    // and releases a permit, the semaphore gives it to the next FIFO waiter — another
+    // outer task — rather than to `get_missing_builds`'s inner tasks (registered later).
+    // Those inner tasks then wait forever while the outer tasks sit unpolled with held
+    // permits, causing an indefinite stall.  Capping the frontier at pool_size-1
+    // ensures all outer tasks acquire permits immediately (no FIFO waiters), so the
+    // one free permit is always available for `process_node`.
+    let max_concurrent = state.cli.max_nixdaemon_connections.saturating_sub(1).max(1);
+
     while !queue.is_empty() {
-        // Drain the current frontier and fire all get_pathinfo calls concurrently.
+        // Drain at most max_concurrent items to avoid pool starvation (see above).
         // FuturesUnordered is used (not tokio::spawn) so pool guards don't need Send.
         // Results arrive in completion order; deduplication state is updated
         // immediately so later results in the same batch see prior work.
+        let batch_end = queue.len().min(max_concurrent);
         let mut tasks: FuturesUnordered<_> = queue
-            .drain(..)
+            .drain(..batch_end)
             .map(|(dep, parent_id, build_id)| {
                 let state = Arc::clone(&state);
                 async move {

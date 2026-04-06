@@ -80,45 +80,50 @@
             cryptSecretFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
             settings.logLevel = "debug";
             state = {
-              users = [{
-                username = "admin";
-                email = "admin@example.com";
-                password_file = "/etc/gradient/secrets/admin_password";
-              }];
+              users = {
+                admin = {
+                  email = "admin@example.com";
+                  password_file = "/etc/gradient/secrets/admin_password";
+                };
+              };
 
-              organizations = [{
-                name = "org";
-                private_key_file = "/etc/gradient/secrets/corp_ssh_key";
-                created_by = "admin";
-              }];
+              organizations = {
+                org = {
+                  private_key_file = "/etc/gradient/secrets/corp_ssh_key";
+                  created_by = "admin";
+                };
+              };
 
-              projects = [{
-                name = "project";
-                organization = "org";
-                repository = "git://server/test";
-                created_by = "admin";
-              }];
+              projects = {
+                project = {
+                  organization = "org";
+                  repository = "git://server/test";
+                  created_by = "admin";
+                };
+              };
 
-              servers = [{
-                name = "build-server";
-                display_name = "Build Server";
-                organization = "org";
-                active = true;
-                host = "localhost";
-                port = 22;
-                username = "gradient";
-                architectures = [ "x86_64-linux" ];
-                features = [ "big-parallel" "kvm" ];
-                created_by = "admin";
-              }];
+              servers = {
+                build-server = {
+                  display_name = "Build Server";
+                  organization = "org";
+                  active = true;
+                  host = "localhost";
+                  port = 22;
+                  username = "gradient";
+                  architectures = [ "x86_64-linux" ];
+                  features = [ "big-parallel" "kvm" ];
+                  created_by = "admin";
+                };
+              };
 
-              caches = [{
-                name = "main";
-                signing_key_file = "/etc/gradient/secrets/main_cache_key";
-                organizations = [ "org" ];
-                public = true;
-                created_by = "admin";
-              }];
+              caches = {
+                main = {
+                  signing_key_file = "/etc/gradient/secrets/main_cache_key";
+                  organizations = [ "org" ];
+                  public = true;
+                  created_by = "admin";
+                };
+              };
             };
           };
 

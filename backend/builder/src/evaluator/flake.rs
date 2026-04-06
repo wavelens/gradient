@@ -6,14 +6,12 @@
 
 use anyhow::Result;
 use core::consts::FLAKE_START;
-use core::sources::{clear_key, decrypt_ssh_private_key, write_key};
 use core::types::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::process::Command;
 use tracing::{debug, error};
 
-use super::nix_commands::JsonOutput;
+use super::nix_eval::{escape_nix_str, NixEvaluator};
 
 /// Splits a Nix attribute path on `.`, respecting double-quoted segments.
 /// `packages.x86_64-linux."python3.12".*` → `["packages", "x86_64-linux", "\"python3.12\"", "*"]`
@@ -42,25 +40,11 @@ fn split_attr_path(path: &str) -> Vec<String> {
 /// Expands wildcard patterns against a flake's attribute tree and returns all matching derivation
 /// paths (e.g. `packages.x86_64-linux.hello`).
 pub(super) async fn get_flake_derivations(
-    state: Arc<ServerState>,
+    _state: Arc<ServerState>,
     repository: String,
     wildcards: Vec<&str>,
-    organization: MOrganization,
+    _organization: MOrganization,
 ) -> Result<Vec<String>> {
-    let (private_key, _public_key) =
-        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization, &state.cli.serve_url)?;
-
-    let ssh_key_path = write_key(private_key)?;
-    let git_ssh_command = format!(
-        "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
-        state.cli.binpath_ssh, ssh_key_path
-    );
-
-    let mut all_derivations: HashSet<String> = HashSet::new();
-    // let mut all_keys: HashMap<String, HashSet<String>> = HashMap::new(); add this line when
-    // optimizing partial_derivations
-    let mut partial_derivations: HashMap<String, HashSet<String>> = HashMap::new();
-
     // Expand a bare `*` into `*.*` and `*.*.*` so that derivations at depth 2
     // (e.g. formatter.x86_64-linux) and depth 3 (e.g. packages.x86_64-linux.hello) are
     // both discovered.
@@ -74,9 +58,23 @@ pub(super) async fn get_flake_derivations(
             }
         })
         .collect();
-    let wildcards: Vec<&str> = expanded.iter().map(|s| s.as_str()).collect();
 
-    'outer: for w in wildcards.iter().map(|w| {
+    tokio::task::spawn_blocking(move || discover_derivations(&repository, &expanded))
+        .await
+        .map_err(|e| anyhow::anyhow!("evaluator task panicked: {}", e))?
+}
+
+/// Synchronous inner loop — must run inside `spawn_blocking`.
+fn discover_derivations(repository: &str, wildcards: &[String]) -> Result<Vec<String>> {
+    let evaluator = NixEvaluator::new()?;
+    let escaped_repo = escape_nix_str(repository);
+
+    let mut all_derivations: HashSet<String> = HashSet::new();
+    let mut partial_derivations: HashMap<String, HashSet<String>> = HashMap::new();
+
+    let wildcards_ref: Vec<&str> = wildcards.iter().map(|s| s.as_str()).collect();
+
+    'outer: for w in wildcards_ref.iter().map(|w| {
         split_attr_path(&format!("{}.#", w))
     }) {
         for (it, t) in w.iter().enumerate() {
@@ -177,44 +175,44 @@ pub(super) async fn get_flake_derivations(
                         continue;
                     }
 
-                    let eval_target = format!("{}#{}", repository.clone(), current_key);
-                    debug!(cmd = %format!("{} eval {} --apply builtins.attrNames --json", state.cli.binpath_nix, eval_target), "executing nix command");
-                    let keys = match Command::new(state.cli.binpath_nix.clone())
-                        .arg("eval")
-                        .arg(&eval_target)
-                        .arg("--apply")
-                        .arg("builtins.attrNames")
-                        .arg("--json")
-                        .env("GIT_SSH_COMMAND", &git_ssh_command)
-                        .output()
-                        .await
-                    {
-                        Err(e) => return Err(e.into()),
-                        Ok(output) => match output.json_to_vec() {
-                            Ok(keys) => keys,
-                            Err(e) => {
-                                debug!(path = %current_key, error = %e, "Skipping attribute path not present in flake");
-                                continue;
-                            }
-                        },
+                    let expr = format!(
+                        "(builtins.getFlake \"{}\").{}",
+                        escaped_repo, current_key
+                    );
+                    debug!(expr = %expr, "evaluating flake attribute");
+
+                    let keys = match evaluator.attr_names(&expr) {
+                        Ok(keys) => keys,
+                        Err(e) => {
+                            debug!(
+                                path = %current_key,
+                                error = %e,
+                                "Skipping attribute path not present in flake"
+                            );
+                            continue;
+                        }
                     };
 
                     if keys.contains(&"type".to_string()) && type_check {
-                        let type_eval_target =
-                            format!("{}#{}.type", repository.clone(), current_key);
-                        debug!(cmd = %format!("{} eval {} --json", state.cli.binpath_nix, type_eval_target), "executing nix command");
-                        let type_value = Command::new(state.cli.binpath_nix.clone())
-                            .arg("eval")
-                            .arg(&type_eval_target)
-                            .arg("--json")
-                            .env("GIT_SSH_COMMAND", &git_ssh_command)
-                            .output()
-                            .await?
-                            .json_to_string()?;
+                        let type_expr = format!(
+                            "(builtins.getFlake \"{}\").{}.type",
+                            escaped_repo, current_key
+                        );
+                        debug!(expr = %type_expr, "evaluating type attribute");
 
-                        if type_value == "derivation" {
-                            all_derivations.insert(current_key.clone());
-                            continue;
+                        match evaluator.eval_string(&type_expr) {
+                            Ok(type_value) if type_value == "derivation" => {
+                                all_derivations.insert(current_key.clone());
+                                continue;
+                            }
+                            Ok(_) => {}
+                            Err(e) => {
+                                debug!(
+                                    path = %current_key,
+                                    error = %e,
+                                    "Failed to evaluate type attribute"
+                                );
+                            }
                         }
                     }
 
@@ -247,8 +245,6 @@ pub(super) async fn get_flake_derivations(
             }
         }
     }
-
-    clear_key(ssh_key_path).ok();
 
     Ok(all_derivations.into_iter().collect())
 }

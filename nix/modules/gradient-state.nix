@@ -44,10 +44,12 @@
     };
   };
 
-  userType = types.submodule ({ config, ... }: {
+  userType = types.submodule ({ config, name, ... }: {
     options = {
       username = mkOption {
         type = types.str;
+        default = name;
+        defaultText = "<attrset key>";
         description = "Unique username for the user";
       };
 
@@ -76,10 +78,12 @@
     };
   });
 
-  organizationType = types.submodule ({ config, ... }: {
+  organizationType = types.submodule ({ config, name, ... }: {
     options = {
       name = mkOption {
         type = types.str;
+        default = name;
+        defaultText = "<attrset key>";
         description = "Unique name for the organization";
       };
 
@@ -120,10 +124,12 @@
     };
   });
 
-  projectType = types.submodule ({ config, ... }: {
+  projectType = types.submodule ({ config, name, ... }: {
     options = {
       name = mkOption {
         type = types.str;
+        default = name;
+        defaultText = "<attrset key>";
         description = "Unique name for the project";
       };
 
@@ -176,10 +182,12 @@
   });
 
 
-  serverType = types.submodule ({ config, ... }: {
+  serverType = types.submodule ({ config, name, pkgs, ... }: {
     options = {
       name = mkOption {
         type = types.str;
+        default = name;
+        defaultText = "<attrset key>";
         description = "Unique name for the server";
       };
 
@@ -208,7 +216,7 @@
       };
 
       port = mkOption {
-        type = types.int;
+        type = types.port;
         default = 22;
         description = "SSH port of the server";
       };
@@ -220,7 +228,7 @@
 
       architectures = mkOption {
         type = types.listOf (types.enum [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ]);
-        default = [ "x86_64-linux" ];
+        default = [ pkgs.system ];
         description = "List of architectures supported by this server";
       };
 
@@ -231,7 +239,7 @@
       };
 
       max_concurrent_builds = mkOption {
-        type = types.int;
+        type = types.ints.positive;
         default = 1;
         description = "Maximum number of builds that can run concurrently on this server";
       };
@@ -243,10 +251,12 @@
     };
   });
 
-  cacheType = types.submodule ({ config, ... }: {
+  cacheType = types.submodule ({ config, name, ... }: {
     options = {
       name = mkOption {
         type = types.str;
+        default = name;
+        defaultText = "<attrset key>";
         description = "Unique name for the cache";
       };
 
@@ -270,7 +280,7 @@
       };
 
       priority = mkOption {
-        type = types.int;
+        type = types.ints.positive;
         default = 10;
         description = "Priority of the cache (higher is more important)";
       };
@@ -320,10 +330,12 @@
     };
   });
 
-  apiKeyType = types.submodule {
+  apiKeyType = types.submodule ({ name, ... }: {
     options = {
       name = mkOption {
         type = types.str;
+        default = name;
+        defaultText = "<attrset key>";
         description = "Name of the API key";
       };
 
@@ -337,44 +349,44 @@
         description = "Username of the user who owns this API key";
       };
     };
-  };
+  });
 
   stateType = types.submodule {
     options = {
       users = mkOption {
-        type = types.listOf userType;
-        default = [ ];
-        description = "List of users to create";
+        type = types.attrsOf userType;
+        default = { };
+        description = "Attribute set of users to create, keyed by username";
       };
 
       organizations = mkOption {
-        type = types.listOf organizationType;
-        default = [ ];
-        description = "List of organizations to create";
+        type = types.attrsOf organizationType;
+        default = { };
+        description = "Attribute set of organizations to create, keyed by name";
       };
 
       projects = mkOption {
-        type = types.listOf projectType;
-        default = [ ];
-        description = "List of projects to create";
+        type = types.attrsOf projectType;
+        default = { };
+        description = "Attribute set of projects to create, keyed by name";
       };
 
       servers = mkOption {
-        type = types.listOf serverType;
-        default = [ ];
-        description = "List of servers to create";
+        type = types.attrsOf serverType;
+        default = { };
+        description = "Attribute set of servers to create, keyed by name";
       };
 
       caches = mkOption {
-        type = types.listOf cacheType;
-        default = [ ];
-        description = "List of caches to create";
+        type = types.attrsOf cacheType;
+        default = { };
+        description = "Attribute set of caches to create, keyed by name";
       };
 
       api_keys = mkOption {
-        type = types.listOf apiKeyType;
-        default = [ ];
-        description = "List of API keys to create";
+        type = types.attrsOf apiKeyType;
+        default = { };
+        description = "Attribute set of API keys to create, keyed by name";
       };
 
     };
@@ -389,28 +401,25 @@ in
       description = "Gradient state configuration for users, organizations, projects, servers, and caches";
       example = literalExpression ''
         {
-          users = [
-            {
-              username = "alice";
+          users = {
+            alice = {
               name = "Alice Johnson";
               email = "alice@example.com";
               password_file = "/etc/gradient/secrets/alice_password";
               email_verified = true;
-            }
-          ];
-          organizations = [
-            {
-              name = "acme-corp";
+            };
+          };
+          organizations = {
+            acme-corp = {
               display_name = "ACME Corporation";
               description = "Main development organization";
               private_key_file = "/etc/gradient/secrets/acme_ssh_key";
               use_nix_store = true;
               created_by = "alice";
-            }
-          ];
-          projects = [
-            {
-              name = "web-app";
+            };
+          };
+          projects = {
+            web-app = {
               organization = "acme-corp";
               display_name = "Web Application";
               description = "Main web application";
@@ -418,11 +427,10 @@ in
               evaluation_wildcard = "main";
               active = true;
               created_by = "alice";
-            }
-          ];
-          servers = [
-            {
-              name = "build-server-1";
+            };
+          };
+          servers = {
+            build-server-1 = {
               display_name = "Build Server 1";
               organization = "acme-corp";
               host = "build1.internal.acme.com";
@@ -430,18 +438,17 @@ in
               architectures = [ "x86_64-linux" "aarch64-linux" ];
               features = [ "big-parallel" ];
               created_by = "alice";
-            }
-          ];
-          caches = [
-            {
-              name = "main-cache";
+            };
+          };
+          caches = {
+            main-cache = {
               display_name = "Main Binary Cache";
               description = "Primary binary cache";
               signing_key_file = "/etc/gradient/secrets/main_cache_key";
               organizations = [ "acme-corp" ];
               created_by = "alice";
-            }
-          ];
+            };
+          };
         }
       '';
     };

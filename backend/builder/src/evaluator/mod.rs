@@ -8,6 +8,7 @@ mod dependencies;
 mod drv;
 mod flake;
 mod nix_commands;
+mod nix_eval;
 
 pub use drv::Derivation;
 pub use nix_commands::{get_derivation_cmd, get_features};

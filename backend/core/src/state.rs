@@ -129,17 +129,17 @@ pub struct StateApiKey {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateConfiguration {
     #[serde(default)]
-    pub users: Vec<StateUser>,
+    pub users: HashMap<String, StateUser>,
     #[serde(default)]
-    pub organizations: Vec<StateOrganization>,
+    pub organizations: HashMap<String, StateOrganization>,
     #[serde(default)]
-    pub projects: Vec<StateProject>,
+    pub projects: HashMap<String, StateProject>,
     #[serde(default)]
-    pub servers: Vec<StateServer>,
+    pub servers: HashMap<String, StateServer>,
     #[serde(default)]
-    pub caches: Vec<StateCache>,
+    pub caches: HashMap<String, StateCache>,
     #[serde(default)]
-    pub api_keys: Vec<StateApiKey>,
+    pub api_keys: HashMap<String, StateApiKey>,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -185,25 +185,8 @@ impl StateConfiguration {
     pub fn validate(&self) -> ValidationResult {
         let mut errors = Vec::new();
 
-        // Build lookup maps for validation
-        let user_names: HashMap<&String, ()> =
-            self.users.iter().map(|u| (&u.username, ())).collect();
-        let org_names: HashMap<&String, ()> =
-            self.organizations.iter().map(|o| (&o.name, ())).collect();
-
         // Validate users
-        let mut seen_usernames = HashMap::new();
-        for user in &self.users {
-            // Check for duplicate usernames
-            if seen_usernames.contains_key(&user.username) {
-                errors.push(ValidationError {
-                    field: format!("users.{}.username", user.username),
-                    message: "Duplicate username found".to_string(),
-                });
-            }
-            seen_usernames.insert(&user.username, ());
-
-            // Validate email format (basic check)
+        for user in self.users.values() {
             if !user.email.contains('@') {
                 errors.push(ValidationError {
                     field: format!("users.{}.email", user.username),
@@ -213,19 +196,8 @@ impl StateConfiguration {
         }
 
         // Validate organizations
-        let mut seen_org_names = HashMap::new();
-        for org in &self.organizations {
-            // Check for duplicate org names
-            if seen_org_names.contains_key(&org.name) {
-                errors.push(ValidationError {
-                    field: format!("organizations.{}.name", org.name),
-                    message: "Duplicate organization name found".to_string(),
-                });
-            }
-            seen_org_names.insert(&org.name, ());
-
-            // Validate created_by user exists
-            if !user_names.contains_key(&org.created_by) {
+        for org in self.organizations.values() {
+            if !self.users.contains_key(&org.created_by) {
                 errors.push(ValidationError {
                     field: format!("organizations.{}.created_by", org.name),
                     message: format!("User '{}' does not exist", org.created_by),
@@ -234,34 +206,21 @@ impl StateConfiguration {
         }
 
         // Validate projects
-        let mut seen_project_names = HashMap::new();
-        for project in &self.projects {
-            // Check for duplicate project names
-            if seen_project_names.contains_key(&project.name) {
-                errors.push(ValidationError {
-                    field: format!("projects.{}.name", project.name),
-                    message: "Duplicate project name found".to_string(),
-                });
-            }
-            seen_project_names.insert(&project.name, ());
-
-            // Validate organization exists
-            if !org_names.contains_key(&project.organization) {
+        for project in self.projects.values() {
+            if !self.organizations.contains_key(&project.organization) {
                 errors.push(ValidationError {
                     field: format!("projects.{}.organization", project.name),
                     message: format!("Organization '{}' does not exist", project.organization),
                 });
             }
 
-            // Validate created_by user exists
-            if !user_names.contains_key(&project.created_by) {
+            if !self.users.contains_key(&project.created_by) {
                 errors.push(ValidationError {
                     field: format!("projects.{}.created_by", project.name),
                     message: format!("User '{}' does not exist", project.created_by),
                 });
             }
 
-            // Validate repository URL format (basic check)
             if !project.repository.starts_with("http") && !project.repository.starts_with("git") {
                 errors.push(ValidationError {
                     field: format!("projects.{}.repository", project.name),
@@ -271,42 +230,24 @@ impl StateConfiguration {
         }
 
         // Validate servers
-        let mut seen_server_names = HashMap::new();
-        for server in &self.servers {
-            // Check for duplicate server names
-            if seen_server_names.contains_key(&server.name) {
-                errors.push(ValidationError {
-                    field: format!("servers.{}.name", server.name),
-                    message: "Duplicate server name found".to_string(),
-                });
-            }
-            seen_server_names.insert(&server.name, ());
-
-            // Validate organization exists
-            if !org_names.contains_key(&server.organization) {
+        for server in self.servers.values() {
+            if !self.organizations.contains_key(&server.organization) {
                 errors.push(ValidationError {
                     field: format!("servers.{}.organization", server.name),
                     message: format!("Organization '{}' does not exist", server.organization),
                 });
             }
 
-            // Validate created_by user exists
-            if !user_names.contains_key(&server.created_by) {
+            if !self.users.contains_key(&server.created_by) {
                 errors.push(ValidationError {
                     field: format!("servers.{}.created_by", server.name),
                     message: format!("User '{}' does not exist", server.created_by),
                 });
             }
 
-            // Validate architectures
             for arch in &server.architectures {
-                if ![
-                    "x86_64-linux",
-                    "aarch64-linux",
-                    "x86_64-darwin",
-                    "aarch64-darwin",
-                ]
-                .contains(&arch.as_str())
+                if !["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
+                    .contains(&arch.as_str())
                 {
                     errors.push(ValidationError {
                         field: format!("servers.{}.architectures", server.name),
@@ -315,7 +256,6 @@ impl StateConfiguration {
                 }
             }
 
-            // Validate port range
             if server.port < 1 || server.port > 65535 {
                 errors.push(ValidationError {
                     field: format!("servers.{}.port", server.name),
@@ -325,28 +265,16 @@ impl StateConfiguration {
         }
 
         // Validate caches
-        let mut seen_cache_names = HashMap::new();
-        for cache in &self.caches {
-            // Check for duplicate cache names
-            if seen_cache_names.contains_key(&cache.name) {
-                errors.push(ValidationError {
-                    field: format!("caches.{}.name", cache.name),
-                    message: "Duplicate cache name found".to_string(),
-                });
-            }
-            seen_cache_names.insert(&cache.name, ());
-
-            // Validate created_by user exists
-            if !user_names.contains_key(&cache.created_by) {
+        for cache in self.caches.values() {
+            if !self.users.contains_key(&cache.created_by) {
                 errors.push(ValidationError {
                     field: format!("caches.{}.created_by", cache.name),
                     message: format!("User '{}' does not exist", cache.created_by),
                 });
             }
 
-            // Validate organizations exist
             for org_name in &cache.organizations {
-                if !org_names.contains_key(org_name) {
+                if !self.organizations.contains_key(org_name) {
                     errors.push(ValidationError {
                         field: format!("caches.{}.organizations", cache.name),
                         message: format!("Organization '{}' does not exist", org_name),
@@ -356,19 +284,8 @@ impl StateConfiguration {
         }
 
         // Validate API keys
-        let mut seen_api_key_names = HashMap::new();
-        for api_key in &self.api_keys {
-            // Check for duplicate API key names
-            if seen_api_key_names.contains_key(&api_key.name) {
-                errors.push(ValidationError {
-                    field: format!("api_keys.{}.name", api_key.name),
-                    message: "Duplicate API key name found".to_string(),
-                });
-            }
-            seen_api_key_names.insert(&api_key.name, ());
-
-            // Validate owned_by user exists
-            if !user_names.contains_key(&api_key.owned_by) {
+        for api_key in self.api_keys.values() {
+            if !self.users.contains_key(&api_key.owned_by) {
                 errors.push(ValidationError {
                     field: format!("api_keys.{}.owned_by", api_key.name),
                     message: format!("User '{}' does not exist", api_key.owned_by),
@@ -468,12 +385,9 @@ async fn apply_state_to_database(
 
 async fn apply_users(
     db: &DatabaseConnection,
-    state_users: &[StateUser],
+    state_users: &HashMap<String, StateUser>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let _state_usernames: HashMap<&String, &StateUser> =
-        state_users.iter().map(|u| (&u.username, u)).collect();
-
-    for state_user in state_users {
+    for state_user in state_users.values() {
         // Read password from file using credentials directory
         let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
             .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
@@ -547,13 +461,13 @@ fn derive_public_key(private_key: &str) -> Result<String> {
 
 async fn apply_organizations(
     db: &DatabaseConnection,
-    state_orgs: &[StateOrganization],
-    _state_users: &[StateUser],
+    state_orgs: &HashMap<String, StateOrganization>,
+    _state_users: &HashMap<String, StateUser>,
     crypt_secret_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let user_map = create_user_lookup(db).await?;
 
-    for state_org in state_orgs {
+    for state_org in state_orgs.values() {
         // Read private key from file using credentials directory
         let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
             .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
@@ -653,14 +567,14 @@ async fn apply_organizations(
 
 async fn apply_projects(
     db: &DatabaseConnection,
-    state_projects: &[StateProject],
-    _state_users: &[StateUser],
-    _state_orgs: &[StateOrganization],
+    state_projects: &HashMap<String, StateProject>,
+    _state_users: &HashMap<String, StateUser>,
+    _state_orgs: &HashMap<String, StateOrganization>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let user_map = create_user_lookup(db).await?;
     let org_map = create_org_lookup(db).await?;
 
-    for state_project in state_projects {
+    for state_project in state_projects.values() {
         let created_by_id = user_map
             .get(&state_project.created_by)
             .ok_or_else(|| format!("User '{}' not found", state_project.created_by))?;
@@ -719,14 +633,14 @@ async fn apply_projects(
 
 async fn apply_servers(
     db: &DatabaseConnection,
-    state_servers: &[StateServer],
-    _state_users: &[StateUser],
-    _state_orgs: &[StateOrganization],
+    state_servers: &HashMap<String, StateServer>,
+    _state_users: &HashMap<String, StateUser>,
+    _state_orgs: &HashMap<String, StateOrganization>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let user_map = create_user_lookup(db).await?;
     let org_map = create_org_lookup(db).await?;
 
-    for state_server in state_servers {
+    for state_server in state_servers.values() {
         let created_by_id = user_map
             .get(&state_server.created_by)
             .ok_or_else(|| format!("User '{}' not found", state_server.created_by))?;
@@ -787,15 +701,15 @@ async fn apply_servers(
 
 async fn apply_caches(
     db: &DatabaseConnection,
-    state_caches: &[StateCache],
-    _state_users: &[StateUser],
-    _state_orgs: &[StateOrganization],
+    state_caches: &HashMap<String, StateCache>,
+    _state_users: &HashMap<String, StateUser>,
+    _state_orgs: &HashMap<String, StateOrganization>,
     crypt_secret_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let user_map = create_user_lookup(db).await?;
     let org_map = create_org_lookup(db).await?;
 
-    for state_cache in state_caches {
+    for state_cache in state_caches.values() {
         // Read signing key from file using credentials directory
         let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
             .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
@@ -1000,12 +914,12 @@ async fn apply_cache_upstreams(
 
 async fn apply_api_keys(
     db: &DatabaseConnection,
-    state_api_keys: &[StateApiKey],
+    state_api_keys: &HashMap<String, StateApiKey>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let user_lookup = create_user_lookup(db).await?;
     let now = Utc::now().naive_utc();
 
-    for state_api_key in state_api_keys {
+    for state_api_key in state_api_keys.values() {
         let Some(owned_by_id) = user_lookup.get(&state_api_key.owned_by) else {
             return Err(format!(
                 "User '{}' not found for API key '{}'",
@@ -1180,18 +1094,12 @@ async fn unmark_removed_entities(
     delete_state: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create sets of managed entity names from config
-    let state_usernames: std::collections::HashSet<&String> =
-        config.users.iter().map(|u| &u.username).collect();
-    let state_org_names: std::collections::HashSet<&String> =
-        config.organizations.iter().map(|o| &o.name).collect();
-    let state_project_names: std::collections::HashSet<&String> =
-        config.projects.iter().map(|p| &p.name).collect();
-    let state_server_names: std::collections::HashSet<&String> =
-        config.servers.iter().map(|s| &s.name).collect();
-    let state_cache_names: std::collections::HashSet<&String> =
-        config.caches.iter().map(|c| &c.name).collect();
-    let state_api_key_names: std::collections::HashSet<&String> =
-        config.api_keys.iter().map(|k| &k.name).collect();
+    let state_usernames: std::collections::HashSet<&String> = config.users.keys().collect();
+    let state_org_names: std::collections::HashSet<&String> = config.organizations.keys().collect();
+    let state_project_names: std::collections::HashSet<&String> = config.projects.keys().collect();
+    let state_server_names: std::collections::HashSet<&String> = config.servers.keys().collect();
+    let state_cache_names: std::collections::HashSet<&String> = config.caches.keys().collect();
+    let state_api_key_names: std::collections::HashSet<&String> = config.api_keys.keys().collect();
 
     // Unmark users not in state
     let managed_users = user::Entity::find()

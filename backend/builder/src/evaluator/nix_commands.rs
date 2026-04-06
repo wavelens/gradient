@@ -8,72 +8,8 @@ use anyhow::Context;
 use core::executer::{nix_store_path, strip_nix_store_prefix};
 use entity::server::Architecture;
 use serde_json::Value;
-use std::process::Output;
 use tokio::process::Command;
 use tracing::debug;
-
-/// Extension trait for parsing JSON from nix command output.
-pub trait JsonOutput {
-    fn json_to_vec(&self) -> anyhow::Result<Vec<String>>;
-    fn json_to_string(&self) -> anyhow::Result<String>;
-}
-
-impl JsonOutput for Output {
-    fn json_to_vec(&self) -> anyhow::Result<Vec<String>> {
-        if !self.status.success() {
-            anyhow::bail!("{}", String::from_utf8_lossy(&self.stderr));
-        }
-
-        let json_output = String::from_utf8_lossy(&self.stdout);
-        if json_output.trim().is_empty() {
-            anyhow::bail!("Command returned empty output");
-        }
-
-        let parsed_json: Value = serde_json::from_str(&json_output).with_context(|| {
-            format!(
-                "Failed to parse JSON output: '{}', stderr: '{}'",
-                json_output,
-                String::from_utf8_lossy(&self.stderr)
-            )
-        })?;
-
-        parsed_json
-            .as_array()
-            .context("Expected JSON array")?
-            .iter()
-            .map(|v| {
-                v.as_str()
-                    .ok_or("Expected string in JSON array")
-                    .map(|s| s.to_string())
-            })
-            .collect::<Result<Vec<String>, &str>>()
-            .map_err(|e| anyhow::anyhow!("Expected string in JSON array: {}", e))
-    }
-
-    fn json_to_string(&self) -> anyhow::Result<String> {
-        if !self.status.success() {
-            anyhow::bail!("{}", String::from_utf8_lossy(&self.stderr));
-        }
-
-        let json_output = String::from_utf8_lossy(&self.stdout);
-        if json_output.trim().is_empty() {
-            anyhow::bail!("Command returned empty output");
-        }
-
-        let parsed_json: Value = serde_json::from_str(&json_output).with_context(|| {
-            format!(
-                "Failed to parse JSON output: '{}', stderr: '{}'",
-                json_output,
-                String::from_utf8_lossy(&self.stderr)
-            )
-        })?;
-
-        parsed_json
-            .as_str()
-            .context("Expected JSON string")
-            .map(|s| s.to_string())
-    }
-}
 
 /// Resolves a flake output path to its store derivation path via `nix path-info --derivation`.
 pub async fn get_derivation_cmd(

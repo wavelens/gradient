@@ -48,8 +48,8 @@ pub struct Cli {
     pub store_path: Option<String>,
     #[arg(long, env = "GRADIENT_BASE_PATH", default_value = ".")]
     pub base_path: String,
-    #[arg(long, env = "GRADIENT_DISABLE_REGISTRATION", default_value = "false")]
-    pub disable_registration: bool,
+    #[arg(long, env = "GRADIENT_ENABLE_REGISTRATION", default_value = "true")]
+    pub enable_registration: bool,
     #[arg(long, env = "GRADIENT_OIDC_ENABLED", default_value = "false")]
     pub oidc_enabled: bool,
     #[arg(long, env = "GRADIENT_OIDC_REQUIRED", default_value = "false")]
@@ -94,8 +94,8 @@ pub struct Cli {
     pub email_from_address: Option<String>,
     #[arg(long, env = "GRADIENT_EMAIL_FROM_NAME", default_value = "Gradient")]
     pub email_from_name: String,
-    #[arg(long, env = "GRADIENT_EMAIL_DISABLE_TLS", default_value = "false")]
-    pub email_disable_tls: bool,
+    #[arg(long, env = "GRADIENT_EMAIL_ENABLE_TLS", default_value = "true")]
+    pub email_enable_tls: bool,
     #[arg(long, env = "GRADIENT_STATE_FILE")]
     pub state_file: Option<String>,
     #[arg(long, env = "GRADIENT_DELETE_STATE", default_value = "true")]

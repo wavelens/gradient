@@ -79,35 +79,33 @@
             cryptSecretFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
             settings.logLevel = "info";
             state = {
-              users = [
-                {
-                  username = "alice";
+              users = {
+                alice = {
                   name = "Alice Johnson";
                   email = "alice@example.com";
                   password_file = "/etc/gradient/secrets/alice_password";
                   email_verified = true;
-                }
-                {
-                  username = "bob";
+                };
+                bob = {
                   name = "Bob Smith";
                   email = "bob@example.com";
                   password_file = "/etc/gradient/secrets/bob_password";
                   email_verified = false;
-                }
-              ];
+                };
+              };
 
-              organizations = [{
-                name = "corp";
-                display_name = "Corporation";
-                description = "Main development organization";
-                private_key_file = "/etc/gradient/secrets/corp_ssh_key";
-                use_nix_store = true;
-                created_by = "alice";
-              }];
+              organizations = {
+                corp = {
+                  display_name = "Corporation";
+                  description = "Main development organization";
+                  private_key_file = "/etc/gradient/secrets/corp_ssh_key";
+                  use_nix_store = true;
+                  created_by = "alice";
+                };
+              };
 
-              projects = [
-                {
-                  name = "web-app";
+              projects = {
+                web-app = {
                   organization = "corp";
                   display_name = "Web Application";
                   description = "Main web application";
@@ -116,9 +114,8 @@
                   active = true;
                   force_evaluation = false;
                   created_by = "alice";
-                }
-                {
-                  name = "mobile-app";
+                };
+                mobile-app = {
                   organization = "corp";
                   display_name = "Mobile App";
                   description = "Mobile application for iOS and Android";
@@ -127,12 +124,11 @@
                   active = true;
                   force_evaluation = false;
                   created_by = "bob";
-                }
-              ];
+                };
+              };
 
-              servers = [
-                {
-                  name = "build-server-1";
+              servers = {
+                build-server-1 = {
                   display_name = "Build Server 1";
                   organization = "corp";
                   active = true;
@@ -142,9 +138,8 @@
                   architectures = [ "x86_64-linux" "aarch64-linux" ];
                   features = [ "big-parallel" "kvm" ];
                   created_by = "alice";
-                }
-                {
-                  name = "mac-mini-farm";
+                };
+                mac-mini-farm = {
                   display_name = "Mac Mini Build Farm";
                   organization = "corp";
                   active = true;
@@ -154,12 +149,11 @@
                   architectures = [ "x86_64-darwin" "aarch64-darwin" ];
                   features = [ "big-parallel" "nixos-test" ];
                   created_by = "alice";
-                }
-              ];
+                };
+              };
 
-              caches = [
-                {
-                  name = "main";
+              caches = {
+                main = {
                   display_name = "Main Binary Cache";
                   description = "Primary binary cache for all builds";
                   active = true;
@@ -167,9 +161,8 @@
                   signing_key_file = "/etc/gradient/secrets/main_cache_key";
                   organizations = [ "corp" ];
                   created_by = "alice";
-                }
-                {
-                  name = "dev";
+                };
+                dev = {
                   display_name = "Development Cache";
                   description = "Cache for development builds";
                   active = false;
@@ -177,14 +170,15 @@
                   signing_key_file = "/etc/gradient/secrets/dev_cache_key";
                   organizations = [ "corp" ];
                   created_by = "alice";
-                }
-              ];
+                };
+              };
 
-              api_keys = [{
-                name = "alice_admin_key";
-                key_file = "/etc/gradient/secrets/alice_api_key";
-                owned_by = "alice";
-              }];
+              api_keys = {
+                alice_admin_key = {
+                  key_file = "/etc/gradient/secrets/alice_api_key";
+                  owned_by = "alice";
+                };
+              };
             };
           };
 
