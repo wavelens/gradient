@@ -71,7 +71,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 _ => {}
             }
 
-            let (builds, dependencies, entry_point_build_ids, failed_derivations) = builds;
+            let (builds, dependencies, entry_point_build_ids, failed_derivations, pending_features) = builds;
             let active_builds = builds
                 .iter()
                 .map(|b| b.clone().into_active_model())
@@ -137,6 +137,13 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 );
             } else {
                 debug!("No dependencies to insert for evaluation");
+            }
+
+            // Insert build features now that builds are in the DB (FK satisfied).
+            for (build_id, features) in pending_features {
+                if let Err(e) = core::database::add_features(Arc::clone(&state), features, Some(build_id), None).await {
+                    error!(error = %e, build_id = %build_id, "Failed to add features for build");
+                }
             }
 
             if let Some(project_id) = evaluation.project {
@@ -509,9 +516,11 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         // GC: remove evaluations beyond keep_evaluations for this project
         let gc_state = Arc::clone(&state);
         let gc_project_id = project.id;
-        let gc_keep = project.keep_evaluations as u64;
+        let gc_keep = project.keep_evaluations as usize;
         tokio::spawn(async move {
-            gc_old_evaluations(gc_state, gc_project_id, gc_keep).await;
+            if let Err(e) = core::gc::gc_project_evaluations(gc_state, gc_project_id, gc_keep).await {
+                tracing::error!(error = %e, project_id = %gc_project_id, "GC: per-project evaluation GC failed");
+            }
         });
 
         let mut active_project: AProject = project.clone().into();
@@ -537,63 +546,3 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
     }
 }
 
-/// Deletes evaluations for `project_id` beyond the most recent `keep` entries.
-/// Nulls out `previous`/`next` cross-references first to avoid cascade-deleting kept evaluations.
-async fn gc_old_evaluations(state: Arc<ServerState>, project_id: Uuid, keep: u64) {
-    let all_evals = match EEvaluation::find()
-        .filter(CEvaluation::Project.eq(project_id))
-        .order_by_desc(CEvaluation::CreatedAt)
-        .all(&state.db)
-        .await
-    {
-        Ok(evals) => evals,
-        Err(e) => {
-            error!(error = %e, "GC: failed to query evaluations");
-            return;
-        }
-    };
-
-    if all_evals.len() as u64 <= keep {
-        return;
-    }
-
-    let to_delete: Vec<Uuid> = all_evals
-        .into_iter()
-        .skip(keep as usize)
-        .map(|e| e.id)
-        .collect();
-
-    // Null out previous/next pointers on any evaluation that references a to-be-deleted one,
-    // so the ON DELETE CASCADE on those FK columns does not pull in kept evaluations.
-    for &id in &to_delete {
-        if let Ok(evals_referencing) = EEvaluation::find()
-            .filter(
-                Condition::any()
-                    .add(CEvaluation::Previous.eq(id))
-                    .add(CEvaluation::Next.eq(id)),
-            )
-            .all(&state.db)
-            .await
-        {
-            for eval in evals_referencing {
-                let mut ae: AEvaluation = eval.clone().into_active_model();
-                if eval.previous == Some(id) {
-                    ae.previous = Set(None);
-                }
-                if eval.next == Some(id) {
-                    ae.next = Set(None);
-                }
-                if let Err(e) = ae.update(&state.db).await {
-                    error!(error = %e, "GC: failed to null eval cross-reference");
-                }
-            }
-        }
-    }
-
-    for id in &to_delete {
-        match EEvaluation::delete_by_id(*id).exec(&state.db).await {
-            Ok(r) => debug!(evaluation_id = %id, deleted = r.rows_affected, "GC: deleted old evaluation"),
-            Err(e) => error!(error = %e, evaluation_id = %id, "GC: failed to delete evaluation"),
-        }
-    }
-}

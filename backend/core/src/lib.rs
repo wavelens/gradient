@@ -8,6 +8,7 @@ pub mod consts;
 pub mod database;
 pub mod email;
 pub mod executer;
+pub mod gc;
 pub mod input;
 pub mod log_storage;
 pub mod permission;

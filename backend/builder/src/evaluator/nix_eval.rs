@@ -17,6 +17,7 @@
 
 use anyhow::{Context, Result};
 use std::process::Command;
+use nix_bindings::*;
 
 // ---------------------------------------------------------------------------
 // NixEvaluator

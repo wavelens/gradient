@@ -55,6 +55,10 @@ pub struct StateProject {
     #[serde(default)]
     pub force_evaluation: bool,
     pub created_by: String,
+    /// How many evaluations to retain per project. `None` keeps the current DB value (or the
+    /// default of 30 for new projects). Must not exceed `GRADIENT_KEEP_EVALUATIONS` if set.
+    #[serde(default)]
+    pub keep_evaluations: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -602,6 +606,9 @@ async fn apply_projects(
             proj.force_evaluation = Set(state_project.force_evaluation);
             proj.created_by = Set(*created_by_id);
             proj.managed = Set(true);
+            if let Some(keep) = state_project.keep_evaluations {
+                proj.keep_evaluations = Set(keep);
+            }
             proj.update(db).await?;
             tracing::info!("Updated managed project: {}", state_project.name);
         } else {
@@ -621,7 +628,7 @@ async fn apply_projects(
                 created_by: Set(*created_by_id),
                 created_at: Set(now),
                 managed: Set(true),
-                keep_evaluations: Set(30),
+                keep_evaluations: Set(state_project.keep_evaluations.unwrap_or(30)),
             };
             proj.insert(db).await?;
             tracing::info!("Created managed project: {}", state_project.name);

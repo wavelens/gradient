@@ -27,7 +27,7 @@ use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
-type EvaluationOutput = (Vec<MBuild>, Vec<MBuildDependency>, Vec<(Uuid, String)>, Vec<(String, String)>);
+type EvaluationOutput = (Vec<MBuild>, Vec<MBuildDependency>, Vec<(Uuid, String)>, Vec<(String, String)>, Vec<(Uuid, Vec<String>)>);
 
 use dependencies::{add_existing_build, find_builds, query_all_dependencies, EvaluationAccumulator};
 use flake::get_flake_derivations;
@@ -92,7 +92,7 @@ pub async fn evaluate(
 
     if all_derivations.is_empty() {
         warn!("No derivations found for evaluation");
-        return Ok((vec![], vec![], vec![], vec![]));
+        return Ok((vec![], vec![], vec![], vec![], vec![]));
     }
 
     let mut acc = EvaluationAccumulator::new();
@@ -221,7 +221,7 @@ pub async fn evaluate(
     let mut seen = std::collections::HashSet::new();
     acc.entry_point_build_ids.retain(|(id, _)| seen.insert(*id));
 
-    Ok((acc.builds, acc.dependencies, acc.entry_point_build_ids, failed_derivations))
+    Ok((acc.builds, acc.dependencies, acc.entry_point_build_ids, failed_derivations, acc.pending_features))
 }
 
 /// Runs evaluation for a direct (non-repository) build using a local temp directory as the flake
@@ -240,7 +240,7 @@ pub async fn evaluate_direct(
     let evaluation_result = evaluate(Arc::clone(&state), &direct_evaluation).await;
 
     match evaluation_result {
-        Ok((builds, dependencies, _entry_point_build_ids, _failed_derivations)) => {
+        Ok((builds, dependencies, _entry_point_build_ids, _failed_derivations, pending_features)) => {
             info!(
                 build_count = builds.len(),
                 dependency_count = dependencies.len(),
@@ -263,6 +263,12 @@ pub async fn evaluate_direct(
                         .exec(&state.db)
                         .await
                         .context("Failed to insert builds")?;
+                }
+            }
+
+            for (build_id, features) in pending_features {
+                if let Err(e) = core::database::add_features(Arc::clone(&state), features, Some(build_id), None).await {
+                    error!(error = %e, build_id = %build_id, "Failed to add features for direct build");
                 }
             }
 

@@ -11,7 +11,6 @@ use core::sources::{
     get_hash_from_path, get_path_from_build_output, write_key,
 };
 use core::types::*;
-use entity::evaluation::EvaluationStatus;
 use nix_daemon::{Progress, Store};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -88,12 +87,10 @@ pub async fn cache_loop(state: Arc<ServerState>) {
                 } else {
                     info!("Cache cleanup completed successfully");
                 }
-                if state.cli.keep_evaluations > 0 {
-                    if let Err(e) = cleanup_old_evaluations(Arc::clone(&state)).await {
-                        error!(error = %e, "Evaluation GC failed");
-                    } else {
-                        info!("Evaluation GC completed successfully");
-                    }
+                if let Err(e) = cleanup_old_evaluations(Arc::clone(&state)).await {
+                    error!(error = %e, "Evaluation GC failed");
+                } else {
+                    info!("Evaluation GC completed successfully");
                 }
                 if state.cli.nar_ttl_hours > 0 {
                     if let Err(e) = cleanup_stale_cached_nars(Arc::clone(&state)).await {
@@ -570,159 +567,27 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
     Ok(())
 }
 
-/// Deletes evaluations beyond the `keep_evaluations` limit for each project, along with all
-/// associated builds, cached NARs, and log files.
+/// Runs per-project evaluation GC for all projects that have `keep_evaluations > 0`.
 ///
-/// The `evaluation.previous` / `evaluation.next` self-referential FKs both carry CASCADE DELETE,
-/// so we must NULL those out on all affected rows *before* any deletion to prevent the chain from
-/// consuming evaluations we want to keep.
+/// Uses each project's own `keep_evaluations` as the retention limit.  The global
+/// `GRADIENT_KEEP_EVALUATIONS` CLI value acts only as a cap enforced at write time
+/// (see `patch_project`); this function does not re-enforce it.
 pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
-    let keep = state.cli.keep_evaluations;
-
     let projects = EProject::find()
         .all(&state.db)
         .await
         .context("Failed to query projects for evaluation GC")?;
 
     for project in projects {
-        // Newest first so [..keep] are the ones to retain.
-        let evaluations = EEvaluation::find()
-            .filter(CEvaluation::Project.eq(project.id))
-            .order_by_desc(CEvaluation::CreatedAt)
-            .all(&state.db)
-            .await
-            .context("Failed to query evaluations for GC")?;
-
-        if evaluations.len() <= keep {
+        let keep = project.keep_evaluations as usize;
+        if keep == 0 {
             continue;
         }
-
-        // Never GC evaluations that are still running.
-        let to_delete: Vec<MEvaluation> = evaluations[keep..]
-            .iter()
-            .filter(|e| {
-                !matches!(
-                    e.status,
-                    EvaluationStatus::Queued
-                        | EvaluationStatus::Evaluating
-                        | EvaluationStatus::Building
-                )
-            })
-            .cloned()
-            .collect();
-
-        if to_delete.is_empty() {
-            continue;
-        }
-
-        let delete_ids: Vec<Uuid> = to_delete.iter().map(|e| e.id).collect();
-        info!(
-            project_id = %project.id,
-            deleting = delete_ids.len(),
-            "Running evaluation GC"
-        );
-
-        // Break the linked list: NULL out `previous` on the oldest surviving evaluation so that
-        // deleting the old evaluations does not cascade into the surviving chain.
-        if let Some(oldest_surviving) = evaluations[..keep].last()
-            && oldest_surviving.previous.is_some()
+        if let Err(e) =
+            core::gc::gc_project_evaluations(Arc::clone(&state), project.id, keep).await
         {
-            let mut a: AEvaluation = oldest_surviving.clone().into_active_model();
-            a.previous = Set(None);
-            a.update(&state.db).await.context("Failed to unlink oldest surviving evaluation")?;
+            warn!(error = %e, project_id = %project.id, "Evaluation GC failed for project");
         }
-
-        // NULL out previous/next on every evaluation being deleted so that cascade between
-        // the deleted rows themselves does not interfere with the deletion order.
-        for eval in &to_delete {
-            let mut a: AEvaluation = eval.clone().into_active_model();
-            a.previous = Set(None);
-            a.next = Set(None);
-            a.update(&state.db).await.context("Failed to NULL evaluation linked-list pointers")?;
-        }
-
-        // Clean up disk artefacts before removing DB rows.
-        for eval in &to_delete {
-            let builds = EBuild::find()
-                .filter(CBuild::Evaluation.eq(eval.id))
-                .all(&state.db)
-                .await
-                .context("Failed to query builds for evaluation GC")?;
-
-            for build in &builds {
-                let is_ep = EEntryPoint::find()
-                    .filter(CEntryPoint::Build.eq(build.id))
-                    .one(&state.db)
-                    .await
-                    .context("Failed to check entry point status for GC")?
-                    .is_some();
-
-                // Remove the build log.
-                let log_path = format!("{}/logs/{}.log", state.cli.base_path, build.id);
-                if let Err(e) = tokio::fs::remove_file(&log_path).await
-                    && e.kind() != std::io::ErrorKind::NotFound
-                {
-                    warn!(error = %e, path = %log_path, "Failed to remove build log");
-                }
-
-                // Remove cached NAR files and GC root symlinks for each build output.
-                let outputs = EBuildOutput::find()
-                    .filter(CBuildOutput::Build.eq(build.id))
-                    .filter(CBuildOutput::IsCached.eq(true))
-                    .all(&state.db)
-                    .await
-                    .context("Failed to query build outputs for GC")?;
-
-                for output in &outputs {
-                    if is_ep {
-                        remove_gcroot(&output.hash, &output.package).await;
-                    }
-                    match get_cache_nar_location(state.cli.base_path.clone(), output.hash.clone()) {
-                        Ok(nar_path) => {
-                            if let Err(e) = tokio::fs::remove_file(&nar_path).await
-                                && e.kind() != std::io::ErrorKind::NotFound
-                            {
-                                warn!(error = %e, path = %nar_path, "Failed to remove NAR file");
-                            }
-                        }
-                        Err(e) => warn!(error = %e, hash = %output.hash, "Failed to resolve NAR path for GC"),
-                    }
-                }
-            }
-
-            // Collect commit ID before deleting (commit is the parent, so it is NOT cascaded).
-            let commit_id = eval.commit;
-
-            // Delete the evaluation. The DB cascades to:
-            //   evaluation → build → build_output → build_output_signature
-            //                      → build_dependency
-            //                      → build_feature
-            //              → entry_point
-            let a: AEvaluation = eval.clone().into_active_model();
-            a.delete(&state.db).await.context("Failed to delete evaluation")?;
-
-            // Clean up the commit record if nothing else references it.
-            let still_referenced = EEvaluation::find()
-                .filter(CEvaluation::Commit.eq(commit_id))
-                .one(&state.db)
-                .await
-                .context("Failed to check commit references")?;
-
-            if still_referenced.is_none() {
-                let commit = ECommit::find_by_id(commit_id)
-                    .one(&state.db)
-                    .await
-                    .context("Failed to query commit for GC")?;
-                if let Some(c) = commit {
-                    let ac: ACommit = c.into_active_model();
-                    if let Err(e) = ac.delete(&state.db).await {
-                        warn!(error = %e, commit_id = %commit_id, "Failed to delete orphaned commit");
-                    }
-                }
-            }
-        }
-
-        info!(project_id = %project.id, deleted = delete_ids.len(), "Evaluation GC done");
     }
 
     Ok(())

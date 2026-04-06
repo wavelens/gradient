@@ -465,6 +465,13 @@ pub async fn patch_project(
         if keep < 1 {
             return Err(WebError::BadRequest("keep_evaluations must be at least 1".to_string()));
         }
+        let global_max = state.cli.keep_evaluations as i32;
+        if global_max > 0 && keep > global_max {
+            return Err(WebError::BadRequest(format!(
+                "keep_evaluations cannot exceed the server maximum of {}",
+                global_max
+            )));
+        }
         aproject.keep_evaluations = Set(keep);
     }
 

@@ -23,11 +23,15 @@ use uuid::Uuid;
 
 use super::nix_commands::get_features;
 
-/// Accumulates builds, dependency edges, and entry-point IDs across derivation processing.
+/// Accumulates builds, dependency edges, entry-point IDs, and deferred features across
+/// derivation processing. Features are deferred because `build_feature` has a FK to `build`,
+/// so features can only be inserted after the builds are persisted to the DB.
 pub(super) struct EvaluationAccumulator {
     pub(super) builds: Vec<MBuild>,
     pub(super) dependencies: Vec<MBuildDependency>,
     pub(super) entry_point_build_ids: Vec<(Uuid, String)>,
+    /// Features to be inserted after builds are bulk-inserted into the DB.
+    pub(super) pending_features: Vec<(Uuid, Vec<String>)>,
 }
 
 impl EvaluationAccumulator {
@@ -36,6 +40,7 @@ impl EvaluationAccumulator {
             builds: vec![],
             dependencies: vec![],
             entry_point_build_ids: vec![],
+            pending_features: vec![],
         }
     }
 }
@@ -375,9 +380,9 @@ async fn finalize_pending_builds(
             continue;
         }
 
-        if let Err(e) = add_features(Arc::clone(state), features, Some(build_id), None).await {
-            error!(error = %e, "Failed to add features for build");
-        }
+        // Defer feature insertion: build_feature has a FK to build, so features can only
+        // be inserted after the builds are bulk-inserted into the DB by the caller.
+        acc.pending_features.push((build_id, features));
 
         let status = if path.ends_with(".drv") {
             BuildStatus::Created

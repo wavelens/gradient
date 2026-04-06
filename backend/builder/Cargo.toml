@@ -11,22 +11,23 @@ name = "builder"
 path = "src/lib.rs"
 
 [dependencies]
-anyhow     = { workspace = true }
-async-trait = { workspace = true }
-chrono     = { workspace = true }
-core       = { workspace = true }
-entity     = { workspace = true }
-futures    = { workspace = true }
-nix-daemon = { workspace = true }
-sea-orm    = { workspace = true }
-sentry     = { workspace = true }
-serde_json = { workspace = true }
-thiserror  = { workspace = true }
-tokio      = { workspace = true, features = ["process"] }
-tracing    = { workspace = true }
-uuid       = { workspace = true }
+anyhow       = { workspace = true }
+async-trait  = { workspace = true }
+chrono       = { workspace = true }
+core         = { workspace = true }
+entity       = { workspace = true }
+futures      = { workspace = true }
+nix-bindings = { workspace = true }
+nix-daemon   = { workspace = true }
+sea-orm      = { workspace = true }
+sentry       = { workspace = true }
+serde_json   = { workspace = true }
+thiserror    = { workspace = true }
+tokio        = { workspace = true, features = ["process"] }
+tracing      = { workspace = true }
+uuid         = { workspace = true }
 
 [dev-dependencies]
-mockall    = { workspace = true }
-tokio      = { workspace = true, features = ["macros"] }
-tokio-test = { workspace = true }
+mockall      = { workspace = true }
+tokio        = { workspace = true, features = ["macros"] }
+tokio-test   = { workspace = true }
