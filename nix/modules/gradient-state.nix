@@ -388,7 +388,6 @@
         default = { };
         description = "Attribute set of API keys to create, keyed by name";
       };
-
     };
   };
 

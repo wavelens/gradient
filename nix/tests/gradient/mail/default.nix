@@ -50,7 +50,7 @@
             };
 
             settings = {
-              disableRegistration = false;
+              enableRegistration = true;
               logLevel = "debug";
             };
           };

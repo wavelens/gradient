@@ -49,7 +49,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.maxConcurrentEvaluations` | `1` | Simultaneous Nix evaluations |
 | `settings.maxConcurrentBuilds` | `1` | Simultaneous builds across all servers |
 | `settings.logLevel` | `info` | Log level: `trace` `debug` `info` `warn` `error` |
-| `settings.disableRegistration` | `false` | Prevent new user self-registration |
+| `settings.enableRegistration` | `true` | Allow new user self-registration |
 | `settings.deleteState` | `true` | Remove entities no longer in `state` (see below) |
 
 ## OIDC

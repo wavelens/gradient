@@ -28,3 +28,4 @@ serde_json = "1.0"
 connector = { path = "connector" }
 rand = { version = "0.9", features = ["std_rng"] }
 colored = "3.1"
+git2 = "0.20"

@@ -48,7 +48,7 @@
             };
 
             settings = {
-              disableRegistration = true;
+              enableRegistration = false;
               logLevel = "warn";
             };
           };

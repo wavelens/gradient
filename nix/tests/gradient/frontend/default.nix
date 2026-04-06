@@ -58,7 +58,7 @@
             cryptSecretFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
             settings = {
               logLevel = "debug";
-              disableRegistration = false;
+              enableRegistration = true;
             };
           };
 

@@ -9,7 +9,6 @@ use crate::input::*;
 use connector::*;
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Command;
 use std::process::exit;
 
 pub async fn handle_build(derivation: String, organization: Option<String>, quiet: bool) {
@@ -59,41 +58,24 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
         );
     }
 
-    // Check if git is available
-    if Command::new("git").arg("--version").output().is_err() {
-        if !quiet {
-            eprintln!("Error: git command not found.");
-            eprintln!("Git is required to collect files for upload.");
-            eprintln!("Please install git and make sure it's available in PATH.");
-        }
-        exit(1);
-    }
-
     // Get list of files tracked by git
-    let git_files = Command::new("git")
-        .args(["ls-files"])
-        .output()
-        .map_err(|e| {
-            if !quiet {
-                eprintln!("Failed to execute git command: {}", e);
-                eprintln!("Make sure git is installed and available in PATH.");
-            }
-            exit(1);
-        })
-        .unwrap();
-
-    if !git_files.status.success() {
+    let repo = git2::Repository::open(".").unwrap_or_else(|e| {
         if !quiet {
-            eprintln!("Failed to get git files. Make sure you're in a git repository.");
+            eprintln!("Failed to open git repository: {}", e);
         }
         exit(1);
-    }
+    });
 
-    let file_list = String::from_utf8(git_files.stdout)
-        .unwrap()
-        .lines()
-        .map(|s| s.to_string())
-        .collect::<Vec<String>>();
+    let index = repo.index().unwrap_or_else(|e| {
+        if !quiet {
+            eprintln!("Failed to read git index: {}", e);
+        }
+        exit(1);
+    });
+
+    let file_list: Vec<String> = index.iter()
+        .filter_map(|entry| String::from_utf8(entry.path).ok())
+        .collect();
 
     if !quiet {
         println!("Collecting {} files for upload...", file_list.len());
