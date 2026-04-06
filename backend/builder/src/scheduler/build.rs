@@ -21,7 +21,6 @@ use sea_orm::{
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::process::Command;
 use tokio::task::JoinHandle;
 use tokio::time;
 use tracing::{debug, error, info, instrument, warn};
@@ -34,10 +33,9 @@ use super::status::{
 
 type OutputInfo = HashMap<String, (Option<String>, Option<String>, Option<String>)>;
 
-/// Parses a `.drv` file via `nix derivation show` and extracts the builder, args, env,
-/// input sources, and per-output path/hash info needed to construct a `BasicDerivation`.
+/// Parses a `.drv` file directly and extracts the builder, args, env, input sources,
+/// and per-output path/hash info needed to construct a `BasicDerivation`.
 async fn parse_derivation_file(
-    binpath_nix: &str,
     derivation_path: &str,
 ) -> anyhow::Result<(
     String,
@@ -56,159 +54,24 @@ async fn parse_derivation_file(
         ));
     }
 
-    let full_drv_path = nix_store_path(derivation_path);
-    debug!(cmd = %format!("{} derivation show {}", binpath_nix, full_drv_path), "executing nix command");
-    let output = Command::new(binpath_nix)
-        .arg("derivation")
-        .arg("show")
-        .arg(&full_drv_path)
-        .output()
+    let drv = crate::evaluator::get_derivation(derivation_path)
         .await
-        .context("Failed to execute nix derivation show command")?;
+        .with_context(|| format!("Failed to parse derivation file: {}", derivation_path))?;
 
-    if !output.status.success() {
-        anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr));
-    }
-
-    let json_output = String::from_utf8_lossy(&output.stdout);
-    let parsed_json: serde_json::Value = serde_json::from_str(&json_output).with_context(|| {
-        format!(
-            "Failed to parse JSON output from 'nix derivation show {}': '{}', stderr: '{}'",
-            derivation_path,
-            json_output,
-            String::from_utf8_lossy(&output.stderr)
-        )
-    })?;
-
-    let top = parsed_json
-        .as_object()
-        .context("nix derivation show: expected top-level JSON object")?;
-    let drv_map = if let Some(inner) = top.get("derivations").and_then(|v| v.as_object()) {
-        inner
-    } else {
-        top
-    };
-    let derivation_data = drv_map
-        .values()
-        .next()
-        .context("nix derivation show: output object was empty")?
-        .as_object()
-        .context("nix derivation show: derivation entry is not an object")?;
-
-    let builder = derivation_data
-        .get("builder")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
-
-    let args = derivation_data
-        .get("args")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .map(|s| s.to_string())
-                .collect()
+    let output_info: OutputInfo = drv
+        .outputs
+        .into_iter()
+        .map(|o| {
+            let path = if o.path.is_empty() { None } else { Some(o.path) };
+            let hash_algo = if o.hash_algo.is_empty() { None } else { Some(o.hash_algo) };
+            let hash = if o.hash.is_empty() { None } else { Some(o.hash) };
+            (o.name, (path, hash_algo, hash))
         })
-        .unwrap_or_default();
+        .collect();
 
-    let mut env: HashMap<String, String> = derivation_data
-        .get("env")
-        .and_then(|v| v.as_object())
-        .map(|obj| {
-            obj.iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k, s)))
-                // SECURITY: Filter out __json - it must not be in env per Nix C++ code
-                .filter(|(k, _)| k.as_str() != "__json")
-                .map(|(k, s)| (k.to_string(), s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
+    let input_srcs: HashSet<String> = drv.input_sources.into_iter().collect();
 
-    // Handle structured attributes: serialize to JSON and add as __json to env
-    // This matches Nix C++ behavior where structuredAttrs is merged into env during serialization
-    // ONLY add __json when we have legitimate structuredAttrs
-    if let Some(structured_attrs) = derivation_data.get("structuredAttrs") {
-        // Serialize structured attrs to JSON string and add to env as __json
-        let json_str = serde_json::to_string(structured_attrs)
-            .context("Failed to serialize structured attributes")?;
-        env.insert("__json".to_string(), json_str);
-    }
-
-    let input_srcs = derivation_data
-        .get("inputSrcs")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .map(|s| s.to_string())
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // Extract per-output info: path, hashAlgo, and hash.
-    //
-    // New nix JSON format (2.22+):
-    //   - "path" omits the "/nix/store/" prefix (or is absent for FODs)
-    //   - "method": "flat" | "nar" | "text"  (separate from hashAlgo)
-    //   - "hashAlgo": "sha256"  (just the algorithm)
-    //
-    // Old nix JSON format:
-    //   - "path" includes the full "/nix/store/..." path
-    //   - "hashAlgo": "r:sha256" | "sha256" | "text:sha256"  (method+algo combined)
-    //   - no "method" field
-    let output_info: OutputInfo = derivation_data
-        .get("outputs")
-        .and_then(|v| v.as_object())
-        .map(|obj| {
-            obj.iter()
-                .map(|(k, v)| {
-                    // Path: new nix omits the store prefix; old nix includes it.
-                    let path = v
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .filter(|s| !s.is_empty())
-                        .map(|s| {
-                            if s.starts_with("/nix/store/") {
-                                s.to_string()
-                            } else {
-                                format!("/nix/store/{}", s)
-                            }
-                        });
-
-                    // hashAlgo: combine method + algo for new nix format.
-                    // Old nix already includes the method in hashAlgo ("r:sha256").
-                    let algo = v
-                        .get("hashAlgo")
-                        .and_then(|v| v.as_str())
-                        .filter(|s| !s.is_empty());
-                    let hash_algo = algo.map(|algo| {
-                        // If algo already contains ":" it's old format (method included).
-                        if algo.contains(':') {
-                            algo.to_string()
-                        } else {
-                            // New format: look for separate "method" field.
-                            match v.get("method").and_then(|v| v.as_str()) {
-                                Some("nar") => format!("r:{}", algo),
-                                Some("text") => format!("text:{}", algo),
-                                _ => algo.to_string(), // "flat" or absent → no prefix
-                            }
-                        }
-                    });
-
-                    let hash = v
-                        .get("hash")
-                        .and_then(|v| v.as_str())
-                        .filter(|s| !s.is_empty())
-                        .map(|s| s.to_string());
-
-                    (k.to_string(), (path, hash_algo, hash))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    Ok((builder, args, env, input_srcs, output_info))
+    Ok((drv.builder, drv.args, drv.environment, input_srcs, output_info))
 }
 
 /// Constructs a `BasicDerivation` for submission to the remote Nix daemon by combining
@@ -217,10 +80,9 @@ async fn create_basic_derivation(
     build: &MBuild,
     _local_daemon: &mut LocalNixStore,
     dependencies: Vec<String>,
-    state: Arc<ServerState>,
 ) -> anyhow::Result<BasicDerivation> {
     let (builder, args, env, input_srcs, output_info) =
-        parse_derivation_file(state.cli.binpath_nix.as_str(), &build.derivation_path)
+        parse_derivation_file(&build.derivation_path)
             .await
             .context("Failed to parse derivation file")?;
 
@@ -281,6 +143,8 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
                 let schedule = tokio::spawn(schedule_build(Arc::clone(&state), build, server));
                 current_schedules.push(schedule);
                 added_schedule = true;
+            } else {
+                break;
             }
         }
 
@@ -393,7 +257,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
     }
 
     let derivation =
-        match create_basic_derivation(&build, &mut local_daemon, dependencies, Arc::clone(&state))
+        match create_basic_derivation(&build, &mut local_daemon, dependencies)
             .await
         {
             Ok(derivation) => derivation,

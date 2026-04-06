@@ -223,7 +223,6 @@ fn discover_derivations(repository: &str, wildcards: &[String]) -> Result<Vec<St
                                 && s.ends_with(key_end)
                                 && s.len() >= key_start.len() + key_end.len()
                         })
-                        .cloned()
                         .map(|s| format!("\"{}\"", s))
                         .collect::<Vec<String>>();
 

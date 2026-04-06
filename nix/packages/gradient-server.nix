@@ -6,7 +6,9 @@
 
 { lib
 , git
+, glibc
 , installShellFiles
+, llvmPackages
 , nixVersions
 , openssl
 , pkg-config
@@ -14,7 +16,7 @@
 , zstd
 }:
 let
-  nixLatest = nixVersions.latest;
+  nixVersion = nixVersions.nix_2_32;
   ignoredPaths = [ ".github" "target" ];
 in rustPlatform.buildRustPackage {
   pname = "gradient-server";
@@ -28,12 +30,13 @@ in rustPlatform.buildRustPackage {
   nativeBuildInputs = [
     installShellFiles
     pkg-config
+    (lib.getDev nixVersion)
+    (lib.getDev glibc)
   ];
 
   buildInputs = [
     git
-    nixLatest
-    (lib.getDev nixLatest)
+    nixVersion
     openssl
     zstd
   ];
@@ -43,7 +46,8 @@ in rustPlatform.buildRustPackage {
     allowBuiltinFetchGit = true;
   };
 
-  NIX_INCLUDE_PATH = "${lib.getDev nixLatest}/include";
+  LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
+  BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${glibc.dev}";
 
   meta = {
     description = "Nix Continuous Integration System Backend";

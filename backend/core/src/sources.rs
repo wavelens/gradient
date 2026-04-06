@@ -19,7 +19,6 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use tempfile::NamedTempFile;
 use thiserror::Error;
-use tokio::process::Command;
 use tracing::{debug, error, info, instrument};
 
 use super::input::{check_repository_url_is_ssh, vec_to_hex};
@@ -344,62 +343,105 @@ pub fn clear_key(path: String) -> Result<(), SourceError> {
     Ok(())
 }
 
+/// Parses a nix flake URL of the form `git+<scheme>://host/repo?rev=<hash>` into
+/// `(git_url, rev)`.  The `git+` prefix is stripped so the returned URL is
+/// suitable for direct use with libgit2.
+fn parse_nix_git_url(nix_url: &str) -> Result<(String, String), SourceError> {
+    let url = nix_url.strip_prefix("git+").unwrap_or(nix_url);
+    let (base_url, query) = url.split_once('?').ok_or(SourceError::UrlParsing)?;
+    let rev = query
+        .split('&')
+        .find_map(|p| p.strip_prefix("rev="))
+        .ok_or(SourceError::MissingHash)?
+        .to_string();
+    Ok((base_url.to_string(), rev))
+}
+
+/// Fetches the repository into a local temporary directory using libgit2 and
+/// returns a handle to that directory.
+///
+/// For **SSH repositories** the repo is cloned via libgit2 (using in-memory
+/// SSH credentials) and the checked-out working tree is returned so that the
+/// caller can pass `path:<dir>` to the Nix C API, which avoids any further
+/// SSH interaction.
+///
+/// For **HTTPS repositories** `None` is returned; the Nix evaluator will
+/// fetch the flake on demand via `builtins.getFlake`.
 #[instrument(skip(state, organization), fields(repository = %repository))]
 pub async fn prefetch_flake(
     state: Arc<ServerState>,
     repository: String,
     organization: MOrganization,
-) -> Result<(), SourceError> {
-    debug!("Prefetching flake inputs for repository: {}", repository);
-
-    let (private_key, _public_key) =
-        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization, &state.cli.serve_url)?;
-
-    let ssh_key_path = write_key(private_key)?;
-
-    let cmd = Command::new(state.cli.binpath_nix.clone())
-        .arg("flake")
-        .arg("archive")
-        .arg(&repository)
-        .arg("--no-write-lock-file")
-        .env("GIT_SSH_COMMAND", format!("{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null", state.cli.binpath_ssh, ssh_key_path))
-        .output()
-        .await;
-
-    clear_key(ssh_key_path).ok();
-
-    let cmd = match cmd {
-        Ok(output) => output,
-        Err(e) => {
-            error!(error = %e, "Failed to execute nix flake archive command");
-            return Err(SourceError::GitExecution {
-                error: e.to_string(),
-            });
-        }
-    };
-
-    if !cmd.status.success() {
-        let stderr = String::from_utf8_lossy(&cmd.stderr);
-        error!(stderr = %stderr, "Nix flake archive command failed");
-
-        if stderr.contains("command not found") || stderr.contains("No such file") {
-            return Err(SourceError::NixNotFound);
-        } else if stderr.contains("Permission denied") || stderr.contains("authentication failed") {
-            return Err(SourceError::FlakeSSHAuth);
-        } else if stderr.contains("Connection refused") || stderr.contains("Network is unreachable")
-        {
-            return Err(SourceError::FlakeNetworkConnection);
-        } else {
-            return Err(SourceError::NixFlakeArchiveFailed {
-                stderr: stderr.to_string(),
-            });
-        }
+) -> Result<Option<tempfile::TempDir>, SourceError> {
+    if !check_repository_url_is_ssh(&repository) {
+        debug!("HTTPS repository – skipping git clone, nix will fetch on demand");
+        return Ok(None);
     }
 
-    let stdout = String::from_utf8_lossy(&cmd.stdout);
-    debug!(stdout = %stdout, "Nix flake archive completed successfully");
+    debug!("SSH repository – cloning via libgit2: {}", repository);
 
-    Ok(())
+    let (private_key, public_key) =
+        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization, &state.cli.serve_url)?;
+
+    let (git_url, rev) = parse_nix_git_url(&repository)?;
+
+    let temp_dir = tempfile::TempDir::new().map_err(|e| SourceError::FileRead {
+        reason: e.to_string(),
+    })?;
+    let temp_path = temp_dir.path().to_path_buf();
+
+    tokio::task::spawn_blocking(move || {
+        let mut callbacks = RemoteCallbacks::new();
+        callbacks.certificate_check(|_cert, _valid| {
+            Ok(git2::CertificateCheckStatus::CertificateOk)
+        });
+        let priv_key = private_key.clone();
+        let pub_key = public_key.clone();
+        callbacks.credentials(move |_url, username_from_url, _allowed| {
+            git2::Cred::ssh_key_from_memory(
+                username_from_url.unwrap_or("git"),
+                Some(&pub_key),
+                &priv_key,
+                None,
+            )
+        });
+
+        let mut fo = git2::FetchOptions::new();
+        fo.remote_callbacks(callbacks);
+
+        let repo = git2::build::RepoBuilder::new()
+            .fetch_options(fo)
+            .clone(&git_url, &temp_path)
+            .map_err(|e| SourceError::GitCommandFailed {
+                stderr: e.message().to_string(),
+            })?;
+
+        let oid =
+            git2::Oid::from_str(&rev).map_err(|_| SourceError::GitOutputParsing)?;
+        let commit = repo.find_commit(oid).map_err(|e| SourceError::GitCommandFailed {
+            stderr: e.message().to_string(),
+        })?;
+        let tree = commit.tree().map_err(|e| SourceError::GitCommandFailed {
+            stderr: e.message().to_string(),
+        })?;
+
+        let mut co = git2::build::CheckoutBuilder::new();
+        co.force();
+        repo.checkout_tree(tree.as_object(), Some(&mut co))
+            .map_err(|e| SourceError::GitCommandFailed {
+                stderr: e.message().to_string(),
+            })?;
+        repo.set_head_detached(oid).map_err(|e| SourceError::GitCommandFailed {
+            stderr: e.message().to_string(),
+        })?;
+
+        debug!("Cloned repository to {:?} at rev {}", temp_path, rev);
+        Ok::<(), SourceError>(())
+    })
+    .await
+    .map_err(|e| SourceError::GitExecution { error: e.to_string() })??;
+
+    Ok(Some(temp_dir))
 }
 
 pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), SourceError> {

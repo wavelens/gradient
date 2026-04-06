@@ -38,15 +38,21 @@
       buildInputs = [
         stdenv.cc.cc.lib
         pam
+        nixVersions.nix_2_32
       ];
 
       packages = [
         cargo
+        cargo-llvm-cov
+        cargo-nextest
         pkg-config
         rustc
         rustfmt
         sea-orm-cli
         rustEnv
+
+        llvmPackages.lld
+        lldb
 
         http-server
         nodejs
@@ -56,13 +62,20 @@
         sqlite
         postgresql_18
         pgadmin4-desktopmode
-        nixVersions.latest
         zstd
       ];
 
       nativeBuildInputs = [
+        nixVersions.nix_2_32.dev
         pkg-config
+        glibc.dev
       ];
+
+      LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
+      BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${glibc.dev}";
+
+      LLVM_COV = "${llvmPackages.llvm}/bin/llvm-cov";
+      LLVM_PROFDATA = "${llvmPackages.llvm}/bin/llvm-profdata";
 
       EXTRA_CCFLAGS = "-I/usr/include";
       RUST_BACKTRACE = 1;

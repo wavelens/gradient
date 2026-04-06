@@ -23,15 +23,17 @@ web       = { path = "web" }
 
 # External
 anyhow           = "1.0"
-base64           = "0.22"
 async-stream     = "0.3"
-git2             = "0.20"
 async-trait      = "0.1"
+base64           = "0.22"
 chrono           = "0.4"
 futures          = "0.3"
-mockall          = "0.14"
-rand             = "0.9"
+git2             = "0.20"
 hmac             = "0.13"
+mockall          = "0.14"
+# from github
+nix-bindings     = { git = "https://github.com/NotAShelf/nix-bindings" }
+rand             = "0.9"
 reqwest          = { version = "0.13", features = ["json"] }
 sea-orm          = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-json", "with-uuid"] }
 sea-orm-migration = { version = "1.1", features = ["with-uuid", "with-chrono", "with-json", "sqlx-postgres", "runtime-tokio"] }

@@ -11,12 +11,12 @@ mod nix_commands;
 mod nix_eval;
 
 pub use drv::Derivation;
-pub use nix_commands::{get_derivation_cmd, get_features};
+pub use nix_commands::{get_derivation, get_derivation_cmd, get_features};
 
 use anyhow::{Context, Result};
 use core::executer::*;
 use core::input::{parse_evaluation_wildcard, repository_url_to_nix, vec_to_hex};
-use core::sources::{clear_key, decrypt_ssh_private_key, prefetch_flake, write_key};
+use core::sources::prefetch_flake;
 use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
@@ -67,16 +67,23 @@ pub async fn evaluate(
         repository_url_to_nix(&evaluation.repository, vec_to_hex(&commit.hash).as_str())
             .context("Failed to convert repository URL to Nix format")?;
 
-    prefetch_flake(Arc::clone(&state), repository.clone(), organization.clone())
+    let _local_dir = prefetch_flake(Arc::clone(&state), repository.clone(), organization.clone())
         .await
         .context("Failed to prefetch flake")?;
+
+    // For SSH repos the flake was cloned locally; use the path: URL so the Nix
+    // C API never needs SSH credentials.  For HTTPS repos use the original URL.
+    let nix_repository = match _local_dir.as_ref() {
+        Some(dir) => format!("path:{}", dir.path().display()),
+        None => repository.clone(),
+    };
 
     let wildcards = parse_evaluation_wildcard(evaluation.wildcard.as_str())
         .context("Failed to parse evaluation wildcard")?;
 
     let all_derivations = get_flake_derivations(
         Arc::clone(&state),
-        repository.clone(),
+        nix_repository.clone(),
         wildcards,
         organization.clone(),
     )
@@ -94,32 +101,19 @@ pub async fn evaluate(
 
     // Resolve all derivation paths in parallel — each `nix path-info --derivation` call
     // is independent and CPU-bound, so running them concurrently uses all available cores.
-    let (private_key, _public_key) =
-        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization.clone(), &state.cli.serve_url)?;
-    let ssh_key_path = write_key(private_key)?;
-    let git_ssh_command = format!(
-        "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
-        state.cli.binpath_ssh, ssh_key_path
-    );
-
     let concurrency = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
-    let binpath_nix = state.cli.binpath_nix.clone();
     let resolved: Vec<ResolvedDerivation> =
         stream::iter(all_derivations.into_iter())
             .map(|derivation_string| {
-                let path = format!("{}#{}", repository, derivation_string);
-                let bn = binpath_nix.clone();
-                let gc = git_ssh_command.clone();
+                let path = format!("{}#{}", nix_repository, derivation_string);
                 async move {
-                    let result = get_derivation_cmd(&bn, &path, &gc).await;
+                    let result = get_derivation_cmd(&path).await;
                     (derivation_string, result)
                 }
             })
             .buffer_unordered(concurrency)
             .collect()
             .await;
-
-    clear_key(ssh_key_path).ok();
 
     // Process resolved derivations sequentially (store and acc require exclusive access).
     for (derivation_string, derivation_result) in resolved {
