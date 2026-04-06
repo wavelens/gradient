@@ -46,7 +46,7 @@
               smtpPasswordFile = toString (pkgs.writeText "smtpPassword" "test-password");
               fromAddress = "gradient@example.com";
               fromName = "Gradient Test";
-              disableTls = true;
+              enableTls = false;
             };
 
             settings = {
