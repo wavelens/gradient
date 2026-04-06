@@ -17,7 +17,6 @@ chrono     = { workspace = true }
 core       = { workspace = true }
 entity     = { workspace = true }
 futures    = { workspace = true }
-nix-bindings.workspace = true
 nix-daemon = { workspace = true }
 sea-orm    = { workspace = true }
 sentry     = { workspace = true }

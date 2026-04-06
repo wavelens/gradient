@@ -27,7 +27,7 @@ use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
-type EvaluationOutput = (Vec<MBuild>, Vec<MBuildDependency>, Vec<Uuid>, Vec<(String, String)>);
+type EvaluationOutput = (Vec<MBuild>, Vec<MBuildDependency>, Vec<(Uuid, String)>, Vec<(String, String)>);
 
 use dependencies::{add_existing_build, find_builds, query_all_dependencies, EvaluationAccumulator};
 use flake::get_flake_derivations;
@@ -146,7 +146,7 @@ pub async fn evaluate(
             )
             .await
             {
-                Ok(build) => acc.entry_point_build_ids.push(build.id),
+                Ok(build) => acc.entry_point_build_ids.push((build.id, derivation_string.clone())),
                 Err(e) => error!(error = %e, "Failed to add existing build"),
             }
 
@@ -157,7 +157,7 @@ pub async fn evaluate(
 
         if already_exists {
             if let Some(existing) = acc.builds.iter().find(|b| b.derivation_path == derivation) {
-                acc.entry_point_build_ids.push(existing.id);
+                acc.entry_point_build_ids.push((existing.id, derivation_string.clone()));
             }
             debug!(derivation = %derivation, "Skipping package - already in current evaluation");
             continue;
@@ -168,7 +168,7 @@ pub async fn evaluate(
         if let Some(existing) = existing_builds.first() {
             let missing = get_missing_builds(&state.nix_store_pool, vec![existing.derivation_path.clone()]).await?;
             if missing.is_empty() {
-                acc.entry_point_build_ids.push(existing.id);
+                acc.entry_point_build_ids.push((existing.id, derivation_string.clone()));
                 debug!(derivation = %derivation, "Skipping package - already exists in DB and store");
                 continue;
             }
@@ -189,7 +189,7 @@ pub async fn evaluate(
 
         // The root build is the first one pushed during this call.
         if let Some(root) = acc.builds.get(entry_point_idx) {
-            acc.entry_point_build_ids.push(root.id);
+            acc.entry_point_build_ids.push((root.id, derivation_string.clone()));
         }
 
         debug!(derivation = %derivation, "Successfully processed package");
@@ -219,7 +219,7 @@ pub async fn evaluate(
     }
 
     let mut seen = std::collections::HashSet::new();
-    acc.entry_point_build_ids.retain(|id| seen.insert(*id));
+    acc.entry_point_build_ids.retain(|(id, _)| seen.insert(*id));
 
     Ok((acc.builds, acc.dependencies, acc.entry_point_build_ids, failed_derivations))
 }

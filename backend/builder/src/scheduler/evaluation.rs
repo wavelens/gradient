@@ -143,11 +143,12 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 let now = chrono::Utc::now().naive_utc();
                 let active_entry_points = entry_point_build_ids
                     .iter()
-                    .map(|&build_id| AEntryPoint {
+                    .map(|(build_id, eval)| AEntryPoint {
                         id: sea_orm::ActiveValue::Set(Uuid::new_v4()),
                         project: sea_orm::ActiveValue::Set(project_id),
                         evaluation: sea_orm::ActiveValue::Set(evaluation.id),
-                        build: sea_orm::ActiveValue::Set(build_id),
+                        build: sea_orm::ActiveValue::Set(*build_id),
+                        eval: sea_orm::ActiveValue::Set(eval.clone()),
                         created_at: sea_orm::ActiveValue::Set(now),
                     })
                     .collect::<Vec<AEntryPoint>>();

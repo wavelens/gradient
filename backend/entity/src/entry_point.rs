@@ -17,6 +17,7 @@ pub struct Model {
     pub project: Uuid,
     pub evaluation: Uuid,
     pub build: Uuid,
+    pub eval: String,
     pub created_at: NaiveDateTime,
 }
 

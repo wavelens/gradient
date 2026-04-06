@@ -27,7 +27,7 @@ use super::nix_commands::get_features;
 pub(super) struct EvaluationAccumulator {
     pub(super) builds: Vec<MBuild>,
     pub(super) dependencies: Vec<MBuildDependency>,
-    pub(super) entry_point_build_ids: Vec<Uuid>,
+    pub(super) entry_point_build_ids: Vec<(Uuid, String)>,
 }
 
 impl EvaluationAccumulator {

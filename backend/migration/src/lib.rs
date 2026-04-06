@@ -44,6 +44,7 @@ mod m20260402_000000_add_last_fetched_at_to_build_output;
 mod m20260405_000000_add_log_id_to_build;
 mod m20260405_000002_add_build_time_ms_to_build;
 mod m20260405_000003_add_keep_evaluations_to_project;
+mod m20260406_000001_add_eval_to_entry_point;
 
 pub struct Migrator;
 
@@ -89,6 +90,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260405_000000_add_log_id_to_build::Migration),
             Box::new(m20260405_000002_add_build_time_ms_to_build::Migration),
             Box::new(m20260405_000003_add_keep_evaluations_to_project::Migration),
+            Box::new(m20260406_000001_add_eval_to_entry_point::Migration),
         ]
     }
 }
