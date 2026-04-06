@@ -153,6 +153,12 @@
           };
         };
 
+        # Allow git-daemon (runs as nobody) to access repos owned by other users.
+        environment.etc."gitconfig".text = ''
+          [safe]
+            directory = *
+        '';
+
         systemd.tmpfiles.rules = [
           "d /var/lib/git 0755 git git"
           "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
@@ -198,10 +204,10 @@
       nixpkgs_hash = server.succeed("${lib.getExe pkgs.nix} hash path ${self.inputs.nixpkgs}").strip()
       server.succeed(f"sed -i 's#\\[hash\\]#{nixpkgs_hash}#g' /var/lib/git/test/flake.lock")
 
-      server.succeed("chown git:git -R /var/lib/git/test")
       server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add flake.nix")
       server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add flake.lock")
       server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test commit -m 'Initial commit'")
+      server.succeed("chown git:git -R /var/lib/git/test")
 
       # Ensure git repository is available without authentication
       server.succeed("${lib.getExe pkgs.git} clone git://localhost/test test")

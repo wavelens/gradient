@@ -28,8 +28,16 @@ fn init_logging(log_level: &str) {
         .init();
 }
 
-#[tokio::main]
-pub async fn main() -> std::io::Result<()> {
+pub fn main() -> std::io::Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
+        .build()
+        .expect("Failed to build tokio runtime")
+        .block_on(run())
+}
+
+async fn run() -> std::io::Result<()> {
     let state = init_state().await;
 
     // Initialize logging with the configured level

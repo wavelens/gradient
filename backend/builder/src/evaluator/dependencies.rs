@@ -223,6 +223,7 @@ async fn reuse_existing_build(
     if build.status != BuildStatus::Completed {
         abuild.status = Set(BuildStatus::Completed);
     }
+
     abuild.evaluation = Set(evaluation.id);
     abuild.save(&state.db).await.context("save reused build")?;
 
@@ -242,6 +243,7 @@ async fn reuse_existing_build(
 ///    store-presence verification (DB-existing refs + the current derivation).
 /// 3. Resolves each case: reuse in-store builds, clone evicted builds, queue new ones.
 /// 4. Records the parent → this dependency edge.
+#[allow(clippy::too_many_arguments)]
 async fn process_node(
     state: &Arc<ServerState>,
     acc: &mut EvaluationAccumulator,
@@ -296,18 +298,11 @@ async fn process_node(
         .chain(std::iter::once(derivation.clone()))
         .collect();
 
-    let missing: HashSet<String> = {
-        let mut store = state
-            .nix_store_pool
-            .acquire()
-            .await
-            .context("acquire store for missing-check")?;
-        get_missing_builds(paths_to_check, &mut *store)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .collect()
-    };
+    let missing: HashSet<String> = get_missing_builds(&state.nix_store_pool, paths_to_check)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
     // Resolve each DB-existing reference against the store result.
     for existing in check_avail {
@@ -449,6 +444,7 @@ pub(super) async fn query_all_dependencies(
                         .acquire()
                         .await
                         .context("acquire store for pathinfo")?;
+
                     let info = get_pathinfo(nix_store_path(&dep), &mut *store)
                         .await
                         .context("get_pathinfo")?

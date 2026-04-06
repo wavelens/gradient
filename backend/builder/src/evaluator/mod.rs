@@ -137,10 +137,7 @@ pub async fn evaluate(
             }
         };
 
-        let missing = {
-            let mut store = state.nix_store_pool.acquire().await.context("Failed to acquire nix store")?;
-            get_missing_builds(vec![derivation.clone()], &mut *store).await?
-        };
+        let missing = get_missing_builds(&state.nix_store_pool, vec![derivation.clone()]).await?;
 
         if missing.is_empty() {
             debug!(derivation = %derivation, "Skipping package - already in store");
@@ -174,10 +171,7 @@ pub async fn evaluate(
         let existing_builds =
             find_builds(Arc::clone(&state), organization_id, vec![derivation.clone()], true).await?;
         if let Some(existing) = existing_builds.first() {
-            let missing = {
-                let mut store = state.nix_store_pool.acquire().await.context("Failed to acquire nix store")?;
-                get_missing_builds(vec![existing.derivation_path.clone()], &mut *store).await?
-            };
+            let missing = get_missing_builds(&state.nix_store_pool, vec![existing.derivation_path.clone()]).await?;
             if missing.is_empty() {
                 acc.entry_point_build_ids.push(existing.id);
                 debug!(derivation = %derivation, "Skipping package - already exists in DB and store");

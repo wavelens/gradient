@@ -967,7 +967,7 @@ async fn get_build_dependencies_sorted(
             })?
             .values().cloned().collect::<Vec<String>>();
 
-            let missing = get_missing_builds(deps.clone(), local_store).await
+            let missing = get_missing_builds(&state.nix_store_pool, deps.clone()).await
             .map_err(|e| {
                 error!(error = %e, derivation_path = %dependency.derivation_path, "Failed to get missing builds for dependency");
                 "Failed to get missing builds for dependency".to_string()

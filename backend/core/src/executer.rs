@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result};
 use async_ssh2_lite::{AsyncSession, TokioTcpStream};
+use futures::stream::{FuturesUnordered, StreamExt};
 use nix_daemon::nix::DaemonStore;
 use nix_daemon::{self, BasicDerivation, BuildMode, BuildResult, PathInfo, Progress, Store};
 use std::collections::HashMap;
@@ -17,6 +18,8 @@ use tokio::{
     time::Instant,
 };
 use tracing::{error, info, instrument};
+
+use super::pool::NixStorePool;
 
 use super::input;
 use super::sources::get_hash_from_path;
@@ -204,28 +207,47 @@ pub async fn copy_builds<
     Ok(())
 }
 
-pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
-    paths: Vec<String>,
-    store: &mut DaemonStore<A>,
-) -> Result<Vec<String>> {
+pub async fn get_missing_builds(pool: &NixStorePool, paths: Vec<String>) -> Result<Vec<String>> {
+    // Separate plain store paths (no daemon call needed) from .drv paths.
     let mut output_paths: HashMap<String, String> = HashMap::new();
+    let mut drv_paths: Vec<String> = Vec::new();
 
     for path in paths {
         if path.ends_with(".drv") {
-            let full_path = nix_store_path(&path);
-            let output_map = get_output_paths(full_path.clone(), store)
-                .await
-                .with_context(|| format!("Failed to get output path for {}", full_path))?;
-
-            // TODO: Handle multiple outputs properly
-            for out_path in output_map.values() {
-                output_paths.insert(path.clone(), out_path.clone());
-            }
+            drv_paths.push(path);
         } else {
             output_paths.insert(path.clone(), nix_store_path(&path));
         }
     }
 
+    // Resolve all .drv → output path mappings concurrently, one connection each.
+    if !drv_paths.is_empty() {
+        let mut tasks: FuturesUnordered<_> = drv_paths
+            .into_iter()
+            .map(|path| async move {
+                let mut store = pool
+                    .acquire()
+                    .await
+                    .context("acquire store for output map")?;
+                let full_path = nix_store_path(&path);
+                let output_map = get_output_paths(full_path.clone(), &mut *store)
+                    .await
+                    .with_context(|| format!("Failed to get output path for {}", full_path))?;
+                anyhow::Ok((path, output_map))
+            })
+            .collect();
+
+        while let Some(result) = tasks.next().await {
+            let (path, output_map) = result?;
+            // TODO: Handle multiple outputs properly
+            for out_path in output_map.values() {
+                output_paths.insert(path.clone(), out_path.clone());
+            }
+        }
+    }
+
+    // Single batched validity check for all collected output paths.
+    let mut store = pool.acquire().await.context("acquire store for valid paths")?;
     let valid_paths = store
         .query_valid_paths(output_paths.values().clone(), true)
         .result()
@@ -236,7 +258,7 @@ pub async fn get_missing_builds<A: AsyncReadExt + AsyncWriteExt + Unpin + Send>(
         .into_iter()
         .filter(|(_, v)| !valid_paths.contains(v))
         .map(|(k, _)| k)
-        .collect::<Vec<String>>();
+        .collect();
 
     Ok(missing)
 }
