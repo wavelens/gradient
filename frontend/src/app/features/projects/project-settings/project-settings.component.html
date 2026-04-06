@@ -112,7 +112,7 @@
             [severity]="proj.active ? 'warn' : 'success'"
             (click)="toggleActive()"
             [loading]="toggling()"
-            [disabled]="toggling()"
+            [disabled]="toggling() || proj.managed || !proj.can_edit"
           ></button>
         </div>
       </div>
@@ -126,7 +126,7 @@
             <div class="danger-row">
             <div>
               <h3>Transfer Ownership</h3>
-              <p class="text-secondary">Transfer this project to another organization member.</p>
+              <p class="text-secondary">Transfer this project to another organization.</p>
             </div>
             <button
               pButton
@@ -161,7 +161,7 @@
   (onHide)="onTransferDialogHide()"
 >
   <div class="dialog-content">
-    <p>Transfer <strong>{{ project()?.display_name }}</strong> to another organization member. This action cannot be undone.</p>
+    <p>Transfer <strong>{{ project()?.display_name }}</strong> to another organization. This action cannot be undone.</p>
     @if (transferError()) {
       <div class="dialog-error">
         <span class="material-symbols-outlined">error</span>
@@ -175,12 +175,12 @@
       </div>
     }
     <div class="form-group">
-      <label>New Owner</label>
+      <label>Target Organization</label>
       <p-autoComplete
-        [(ngModel)]="transferUsername"
-        [suggestions]="transferUserSuggestions()"
-        (completeMethod)="onTransferUserSearch($event)"
-        placeholder="Username"
+        [(ngModel)]="transferOrgName"
+        [suggestions]="transferOrgSuggestions()"
+        (completeMethod)="onTransferOrgSearch($event)"
+        placeholder="Organization name"
         styleClass="w-full"
         [forceSelection]="false"
         [disabled]="transferring()"
@@ -189,7 +189,7 @@
   </div>
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showTransferDialog.set(false)" [disabled]="transferring()"></button>
-    <button pButton label="Transfer" icon="pi pi-send" severity="warn" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferUsername.trim()"></button>
+    <button pButton label="Transfer" icon="pi pi-send" severity="warn" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferOrgName.trim()"></button>
   </ng-template>
 </p-dialog>
 

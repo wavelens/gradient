@@ -125,6 +125,7 @@ pub struct CacheResponse {
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
     pub managed: bool,
+    pub can_edit: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -433,6 +434,8 @@ pub async fn get_cache(
         WebError::InternalServerError("Failed to derive public key".to_string())
     })?;
 
+    let can_edit = matches!(&maybe_user, Some(u) if u.id == cache.created_by);
+
     let res = BaseResponse {
         error: false,
         message: CacheResponse {
@@ -447,6 +450,7 @@ pub async fn get_cache(
             created_by: cache.created_by,
             created_at: cache.created_at,
             managed: cache.managed,
+            can_edit,
         },
     };
 

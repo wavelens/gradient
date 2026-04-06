@@ -15,6 +15,8 @@ export interface Cache {
   public: boolean;
   created_by?: string;
   created_at?: string;
+  managed: boolean;
+  can_edit: boolean;
 }
 
 export interface CacheKey {

@@ -13,7 +13,7 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { ProjectsService } from '@core/services/projects.service';
-import { UserService } from '@core/services/user.service';
+import { OrganizationsService } from '@core/services/organizations.service';
 import { AutoCompleteModule } from 'primeng/autocomplete';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { Project } from '@core/models';
@@ -39,7 +39,7 @@ export class ProjectSettingsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private projectsService = inject(ProjectsService);
-  private userService = inject(UserService);
+  private orgsService = inject(OrganizationsService);
 
   loading = signal(true);
   saving = signal(false);
@@ -52,10 +52,10 @@ export class ProjectSettingsComponent implements OnInit {
   showTransferDialog = signal(false);
   errorMessage = signal<string | null>(null);
   saveSuccess = signal(false);
-  transferUsername = '';
+  transferOrgName = '';
   transferError = signal<string | null>(null);
   transferSuccess = signal(false);
-  transferUserSuggestions = signal<string[]>([]);
+  transferOrgSuggestions = signal<string[]>([]);
 
   orgName = '';
   projectName = '';
@@ -133,35 +133,40 @@ export class ProjectSettingsComponent implements OnInit {
     });
   }
 
-  onTransferUserSearch(event: { query: string }): void {
-    if (!event.query.trim()) {
-      this.transferUserSuggestions.set([]);
-      return;
-    }
-    this.userService.searchUsers(event.query).subscribe({
-      next: (users) => this.transferUserSuggestions.set(users.map((u) => u.username)),
-      error: () => this.transferUserSuggestions.set([]),
+  onTransferOrgSearch(event: { query: string }): void {
+    const q = event.query.trim().toLowerCase();
+    this.orgsService.getOrganizations().subscribe({
+      next: (res) => {
+        const names = res.items
+          .map((o) => o.name)
+          .filter((n) => n !== this.orgName && (!q || n.toLowerCase().includes(q)));
+        this.transferOrgSuggestions.set(names);
+      },
+      error: () => this.transferOrgSuggestions.set([]),
     });
   }
 
   onTransferDialogHide(): void {
-    this.transferUsername = '';
+    this.transferOrgName = '';
     this.transferError.set(null);
     this.transferSuccess.set(false);
   }
 
   transferOwnership(): void {
-    if (!this.transferUsername.trim()) return;
+    if (!this.transferOrgName.trim()) return;
     this.transferring.set(true);
     this.transferError.set(null);
     this.transferSuccess.set(false);
-    this.projectsService.transferOwnership(this.orgName, this.projectName, this.transferUsername.trim()).subscribe({
+    this.projectsService.transferOwnership(this.orgName, this.projectName, this.transferOrgName.trim()).subscribe({
       next: () => {
         this.transferring.set(false);
         this.transferSuccess.set(true);
-        this.transferUsername = '';
-        this.loadProject();
-        setTimeout(() => this.showTransferDialog.set(false), 1500);
+        const targetOrg = this.transferOrgName.trim();
+        this.transferOrgName = '';
+        setTimeout(() => {
+          this.showTransferDialog.set(false);
+          this.router.navigate(['/organization', targetOrg]);
+        }, 1500);
       },
       error: (error) => {
         this.transferError.set(error.message || 'Failed to transfer ownership.');

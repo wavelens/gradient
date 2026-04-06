@@ -43,14 +43,14 @@
               [loading]="starting()"
               [disabled]="starting()"
             ></button>
+            <button
+              pButton
+              label="Settings"
+              icon="pi pi-cog"
+              severity="secondary"
+              [routerLink]="['/organization', orgName, 'project', projectName, 'settings']"
+            ></button>
           }
-          <button
-            pButton
-            label="Settings"
-            icon="pi pi-cog"
-            severity="secondary"
-            [routerLink]="['/organization', orgName, 'project', projectName, 'settings']"
-          ></button>
         }
         <button
           pButton

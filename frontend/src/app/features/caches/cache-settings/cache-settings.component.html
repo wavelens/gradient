@@ -24,6 +24,17 @@
     <!-- General -->
     <div class="settings-section">
       <h2>General</h2>
+      @if (c.managed) {
+        <div class="message-banner info">
+          <span class="material-symbols-outlined">info</span>
+          This cache is managed declaratively and cannot be edited here.
+        </div>
+      } @else if (!c.can_edit) {
+        <div class="message-banner info">
+          <span class="material-symbols-outlined">info</span>
+          You have read-only access to this cache.
+        </div>
+      }
       <div class="settings-card">
         <div class="form-group">
           <label for="cache-name">Name</label>
@@ -44,6 +55,7 @@
             id="display-name"
             [(ngModel)]="formData.display_name"
             class="w-full"
+            [disabled]="c.managed || !c.can_edit"
           />
         </div>
 
@@ -55,6 +67,7 @@
             [(ngModel)]="formData.description"
             rows="3"
             class="w-full"
+            [disabled]="c.managed || !c.can_edit"
           ></textarea>
         </div>
 
@@ -68,6 +81,7 @@
             class="w-full"
             min="0"
             max="255"
+            [disabled]="c.managed || !c.can_edit"
           />
           @if (priorityInvalid) {
             <small class="text-danger">Priority must be between 0 and 255</small>
@@ -78,7 +92,7 @@
 
         <div class="form-group">
           <label for="visibility">Visibility</label>
-          <select id="visibility" [(ngModel)]="formData.public" class="role-select w-full">
+          <select id="visibility" [(ngModel)]="formData.public" class="role-select w-full" [disabled]="c.managed || !c.can_edit">
             <option [ngValue]="false">Private</option>
             <option [ngValue]="true">Public</option>
           </select>
@@ -97,16 +111,18 @@
             Changes saved.
           </div>
         }
-        <div class="form-actions">
-          <button
-            pButton
-            label="Save Changes"
-            icon="pi pi-check"
-            (click)="saveSettings()"
-            [loading]="saving()"
-            [disabled]="saving() || priorityInvalid"
-          ></button>
-        </div>
+        @if (!c.managed && c.can_edit) {
+          <div class="form-actions">
+            <button
+              pButton
+              label="Save Changes"
+              icon="pi pi-check"
+              (click)="saveSettings()"
+              [loading]="saving()"
+              [disabled]="saving() || priorityInvalid"
+            ></button>
+          </div>
+        }
       </div>
     </div>
 
@@ -119,46 +135,50 @@
             <h3>Upstream Caches</h3>
             <p class="text-secondary">External and internal caches this cache pulls through from</p>
           </div>
-          <button pButton label="Manage Upstreams" icon="pi pi-cloud-download" severity="secondary" [routerLink]="['/caches', cacheName, 'upstreams']"></button>
+          @if (!c.managed && c.can_edit) {
+            <button pButton label="Manage Upstreams" icon="pi pi-cloud-download" severity="secondary" [routerLink]="['/caches', cacheName, 'upstreams']"></button>
+          }
         </div>
       </div>
     </div>
 
-    <!-- Danger Zone -->
-    <div class="settings-section danger-section">
-      <h2>Danger Zone</h2>
-      <div class="settings-card danger-card">
-        <div class="danger-row">
-          <div>
-            <h3>{{ c.active ? 'Deactivate Cache' : 'Activate Cache' }}</h3>
-            <p class="text-secondary">{{ c.active ? 'Stop serving this cache to Nix clients.' : 'Start serving this cache to Nix clients.' }}</p>
+    @if (!c.managed && c.can_edit) {
+      <!-- Danger Zone -->
+      <div class="settings-section danger-section">
+        <h2>Danger Zone</h2>
+        <div class="settings-card danger-card">
+          <div class="danger-row">
+            <div>
+              <h3>{{ c.active ? 'Deactivate Cache' : 'Activate Cache' }}</h3>
+              <p class="text-secondary">{{ c.active ? 'Stop serving this cache to Nix clients.' : 'Start serving this cache to Nix clients.' }}</p>
+            </div>
+            <button
+              pButton
+              [label]="c.active ? 'Deactivate' : 'Activate'"
+              [icon]="c.active ? 'pi pi-times' : 'pi pi-check'"
+              [severity]="c.active ? 'danger' : 'success'"
+              (click)="toggleActive()"
+              [loading]="toggling()"
+              [disabled]="toggling()"
+            ></button>
           </div>
-          <button
-            pButton
-            [label]="c.active ? 'Deactivate' : 'Activate'"
-            [icon]="c.active ? 'pi pi-times' : 'pi pi-check'"
-            [severity]="c.active ? 'danger' : 'success'"
-            (click)="toggleActive()"
-            [loading]="toggling()"
-            [disabled]="toggling()"
-          ></button>
-        </div>
-        <p-divider />
-        <div class="danger-row">
-          <div>
-            <h3>Delete Cache</h3>
-            <p class="text-secondary">Permanently delete this cache and all its stored artifacts.</p>
+          <p-divider />
+          <div class="danger-row">
+            <div>
+              <h3>Delete Cache</h3>
+              <p class="text-secondary">Permanently delete this cache and all its stored artifacts.</p>
+            </div>
+            <button
+              pButton
+              label="Delete Cache"
+              icon="pi pi-trash"
+              severity="danger"
+              (click)="showDeleteDialog.set(true)"
+            ></button>
           </div>
-          <button
-            pButton
-            label="Delete Cache"
-            icon="pi pi-trash"
-            severity="danger"
-            (click)="showDeleteDialog.set(true)"
-          ></button>
         </div>
       </div>
-    </div>
+    }
   }
 </div>
 

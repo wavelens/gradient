@@ -69,8 +69,8 @@ export class ProjectsService {
     return this.api.post<string>(`evals/${evaluationId}`, { method: 'abort' });
   }
 
-  transferOwnership(organization: string, project: string, username: string): Observable<string> {
-    return this.api.post<string>(`projects/${organization}/${project}/transfer`, { user: username });
+  transferOwnership(organization: string, project: string, targetOrg: string): Observable<string> {
+    return this.api.post<string>(`projects/${organization}/${project}/transfer`, { organization: targetOrg });
   }
 
   activateProject(organization: string, project: string): Observable<string> {

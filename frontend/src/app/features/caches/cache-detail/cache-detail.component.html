@@ -31,9 +31,11 @@
           </span>
         </div>
       </div>
-      <div class="header-actions">
-        <button pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></button>
-      </div>
+      @if (c.can_edit) {
+        <div class="header-actions">
+          <button pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></button>
+        </div>
+      }
     </div>
 
     <!-- Stats -->

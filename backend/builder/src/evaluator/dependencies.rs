@@ -10,6 +10,8 @@ use core::database::add_features;
 use core::executer::*;
 use core::types::*;
 use entity::build::BuildStatus;
+use futures::stream::{FuturesUnordered, StreamExt};
+use nix_daemon::PathInfo;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QuerySelect};
@@ -142,247 +144,220 @@ pub(super) async fn add_existing_build(
     Ok(build)
 }
 
-/// BFS traversal over a build's dependency graph.
+/// Returns the build ID for a known derivation path, searching the accumulator,
+/// the pending-build list, and the BFS queue in that order.
+fn resolve_known_build_id(
+    path: &str,
+    acc: &EvaluationAccumulator,
+    pending_builds: &[(String, Uuid)],
+    queue: &[(String, Option<Uuid>, Uuid)],
+) -> Option<Uuid> {
+    acc.builds
+        .iter()
+        .find(|b| b.derivation_path == path)
+        .map(|b| b.id)
+        .or_else(|| pending_builds.iter().find(|(p, _)| p == path).map(|(_, id)| *id))
+        .or_else(|| queue.iter().find(|(p, _, _)| p == path).map(|(_, _, id)| *id))
+}
+
+/// Clones a failed or aborted build into a fresh `Created` record for re-evaluation.
+/// Features are copied from the original. The new ID is tracked in `cloned_ids` so
+/// `finalize_pending_builds` can skip re-inserting it.
+async fn clone_failed_build(
+    state: &Arc<ServerState>,
+    evaluation: &MEvaluation,
+    original: &MBuild,
+    cloned_ids: &mut HashSet<Uuid>,
+) -> Result<Uuid> {
+    let new_id = Uuid::new_v4();
+    let now = Utc::now().naive_utc();
+
+    ABuild {
+        id: Set(new_id),
+        evaluation: Set(evaluation.id),
+        derivation_path: Set(original.derivation_path.clone()),
+        architecture: Set(original.architecture.clone()),
+        status: Set(BuildStatus::Created),
+        server: Set(None),
+        log_id: Set(Some(new_id)),
+        build_time_ms: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(&state.db)
+    .await
+    .context("insert cloned build")?;
+
+    let features = EBuildFeature::find()
+        .filter(CBuildFeature::Build.eq(original.id))
+        .all(&state.db)
+        .await
+        .context("query features for clone")?;
+
+    for feat in features {
+        ABuildFeature {
+            id: Set(Uuid::new_v4()),
+            build: Set(new_id),
+            feature: Set(feat.feature),
+        }
+        .insert(&state.db)
+        .await
+        .context("copy build feature")?;
+    }
+
+    trace!(old_build = %original.id, new_build = %new_id, "Cloned failed build for re-evaluation");
+    cloned_ids.insert(new_id);
+    Ok(new_id)
+}
+
+/// Marks an existing build as `Completed` under the current evaluation and records
+/// the dependency edge from `parent_build_id` → `build.id`.
+async fn reuse_existing_build(
+    state: &Arc<ServerState>,
+    evaluation: &MEvaluation,
+    build: &MBuild,
+    parent_build_id: Uuid,
+    acc: &mut EvaluationAccumulator,
+) -> Result<()> {
+    let mut abuild: ABuild = build.clone().into();
+    if build.status != BuildStatus::Completed {
+        abuild.status = Set(BuildStatus::Completed);
+    }
+    abuild.evaluation = Set(evaluation.id);
+    abuild.save(&state.db).await.context("save reused build")?;
+
+    trace!(build = %parent_build_id, dependency = %build.id, "Reusing existing build (in store)");
+    acc.dependencies.push(MBuildDependency {
+        id: Uuid::new_v4(),
+        build: parent_build_id,
+        dependency: build.id,
+    });
+    Ok(())
+}
+
+/// Processes one derivation node during the BFS:
 ///
-/// Newly discovered builds are accumulated in `acc.builds` and `acc.dependencies`.
-/// Builds already present in the Nix store are recorded as `Completed`. Failed or aborted builds
-/// that are missing from the store are cloned as fresh `Created` records so their dependency
-/// graph can be re-traversed under the new ID.
-///
-/// All new builds start as `Created` (not `Queued`) to prevent the scheduler from picking them
-/// up before the bulk dependency insert completes. The caller is responsible for transitioning
-/// them to `Queued` after the insert.
-pub(super) async fn query_all_dependencies(
-    state: Arc<ServerState>,
+/// 1. Classifies each reference as "already tracked", "exists in DB", or "new".
+/// 2. Issues a **single** `get_missing_builds` call for all paths that need
+///    store-presence verification (DB-existing refs + the current derivation).
+/// 3. Resolves each case: reuse in-store builds, clone evicted builds, queue new ones.
+/// 4. Records the parent → this dependency edge.
+async fn process_node(
+    state: &Arc<ServerState>,
     acc: &mut EvaluationAccumulator,
     evaluation: &MEvaluation,
     organization_id: Uuid,
-    dependencies: Vec<String>,
+    queue: &mut Vec<(String, Option<Uuid>, Uuid)>,
+    pending_builds: &mut Vec<(String, Uuid)>,
+    pending_paths: &mut HashSet<String>,
+    cloned_ids: &mut HashSet<Uuid>,
+    derivation: String,
+    parent_id: Option<Uuid>,
+    build_id: Uuid,
+    path_info: PathInfo,
 ) -> Result<()> {
-    let mut store = state
-        .nix_store_pool
-        .acquire()
+    let references: Vec<String> = path_info
+        .references
+        .iter()
+        .map(|r| strip_nix_store_prefix(r))
+        .collect();
+
+    // Find which references already have completed build records in the DB.
+    let db_builds = find_builds(Arc::clone(state), organization_id, references.clone(), true)
         .await
-        .context("Failed to acquire nix store connection for dependency traversal")?;
+        .context("find existing builds for references")?;
 
-    let mut dependencies = dependencies
-        .into_iter()
-        .map(|d| (d, None, Uuid::new_v4()))
-        .collect::<Vec<(String, Option<Uuid>, Uuid)>>();
+    // Classify each reference into one of three buckets.
+    let mut new_refs: Vec<(String, Option<Uuid>, Uuid)> = Vec::new();
+    let mut check_avail: Vec<MBuild> = Vec::new();
 
-    let mut pending: Vec<(String, Uuid)> = Vec::new();
-    let mut pending_paths: HashSet<String> = HashSet::new();
-    let mut reused_build_ids: HashSet<Uuid> = HashSet::new();
-
-    while let Some((dependency, dependency_id, build_id)) = dependencies.pop() {
-        debug!(
-            derivation = %dependency,
-            build_id = %build_id,
-            parent_dependency_id = ?dependency_id,
-            "Processing derivation"
-        );
-
-        let path_info = get_pathinfo(nix_store_path(&dependency), &mut *store)
-            .await
-            .context("Failed to get derivation info")?
-            .context("Derivation not found in Nix store")?;
-
-        // Strip /nix/store/ prefix from references so they match the format stored in the DB.
-        let stripped_references: Vec<String> = path_info
-            .references
-            .iter()
-            .map(|r| strip_nix_store_prefix(r))
-            .collect();
-
-        // TODO: can be optimized by also using Aborted and Failed builds.
-        let already_exists = find_builds(
-            Arc::clone(&state),
-            organization_id,
-            stripped_references.clone(),
-            true,
-        )
-        .await
-        .context("Failed to find existing builds")?;
-
-        let mut references = stripped_references
-            .into_iter()
-            .map(|d| (d, Some(build_id), Uuid::new_v4()))
-            .collect::<Vec<(String, Option<Uuid>, Uuid)>>();
-
-        let mut check_availability: Vec<MBuild> = Vec::new();
-
-        references.retain(|d| {
-            let d_path = d.0.clone();
-
-            let in_builds = acc.builds.iter().any(|b| b.derivation_path == d_path)
-                || pending_paths.contains(&d_path);
-            let in_exists = already_exists.iter().find(|b| b.derivation_path == d_path);
-            let in_dependencies = dependencies.iter().any(|(path, _, _)| *path == d_path);
-
-            if in_builds || in_dependencies {
-                let d_id = if let Some(b) = acc.builds.iter().find(|b| b.derivation_path == d_path)
-                {
-                    b.id
-                } else if let Some((_, id)) = pending.iter().find(|(p, _)| *p == d_path) {
-                    *id
-                } else {
-                    match dependencies.iter().find(|(path, _, _)| *path == d_path) {
-                        Some((_, _, id)) => *id,
-                        None => {
-                            error!("Dependency not found for path: {}", d_path);
-                            return false;
-                        }
-                    }
-                };
-
-                let dep = MBuildDependency {
-                    id: Uuid::new_v4(),
-                    build: build_id,
-                    dependency: d_id,
-                };
-
-                debug!(build = %build_id, dependency = %d_id, "Creating dependency");
-
-                acc.dependencies.push(dep);
-
-                false
-            } else if let Some(in_exists) = in_exists {
-                check_availability.push(in_exists.clone());
-                true
-            } else {
-                true
-            }
-        });
-
-        for b in check_availability {
-            references.retain(|(d, _, _)| *d != b.derivation_path);
-
-            let in_store = match get_missing_builds(vec![b.derivation_path.clone()], &mut *store).await {
-                Ok(missing) => missing.is_empty(),
-                Err(e) => {
-                    debug!(error = %format!("{:#}", e), path = %b.derivation_path, "Failed to check store presence, treating as missing");
-                    false
-                }
-            };
-
-            if in_store {
-                // Already in the store — mark as Completed and reuse.
-                let dep = MBuildDependency {
-                    id: Uuid::new_v4(),
-                    build: build_id,
-                    dependency: b.id,
-                };
-
-                trace!(build = %build_id, dependency = %b.id, "Reusing existing build (in store)");
-
-                let mut abuild: ABuild = b.clone().into();
-                if b.status != BuildStatus::Completed {
-                    abuild.status = Set(BuildStatus::Completed);
-                }
-
-                abuild.evaluation = Set(evaluation.id);
-                abuild
-                    .save(&state.db)
-                    .await
-                    .context("Failed to save build status")?;
-
-                acc.dependencies.push(dep);
-            } else {
-                // Not in nix store — clone the failed/aborted build as a fresh record so
-                // its history is preserved. Sub-dependencies are re-traversed under the
-                // new ID via the BFS queue.
-                // Use Created (not Queued) so the scheduler cannot pick this build up
-                // before the new dependency records are bulk-inserted (race condition fix).
-                let new_build_id = Uuid::new_v4();
-                let now = Utc::now().naive_utc();
-                let abuild = ABuild {
-                    id: Set(new_build_id),
-                    evaluation: Set(evaluation.id),
-                    derivation_path: Set(b.derivation_path.clone()),
-                    architecture: Set(b.architecture.clone()),
-                    status: Set(BuildStatus::Created),
-                    server: Set(None),
-                    log_id: Set(Some(new_build_id)),
-                    build_time_ms: Set(None),
-                    created_at: Set(now),
-                    updated_at: Set(now),
-                };
-
-                abuild
-                    .insert(&state.db)
-                    .await
-                    .context("Failed to insert cloned build")?;
-
-                // Copy build features from the original build to the new one.
-                let old_features = EBuildFeature::find()
-                    .filter(CBuildFeature::Build.eq(b.id))
-                    .all(&state.db)
-                    .await
-                    .context("Failed to query build features for cloning")?;
-
-                for feat in old_features {
-                    let af = ABuildFeature {
-                        id: Set(Uuid::new_v4()),
-                        build: Set(new_build_id),
-                        feature: Set(feat.feature),
-                    };
-                    af.insert(&state.db)
-                        .await
-                        .context("Failed to copy build feature")?;
-                }
-
-                reused_build_ids.insert(new_build_id);
-
-                references.push((b.derivation_path.clone(), Some(build_id), new_build_id));
-
-                trace!(old_build = %b.id, new_build = %new_build_id, "Cloned failed/aborted build as new record for re-evaluation");
-            }
-        }
-
-        let not_missing = match get_missing_builds(vec![dependency.clone()], &mut *store).await {
-            Ok(missing) => missing.is_empty(),
-            Err(e) => {
-                debug!(error = %format!("{:#}", e), path = %dependency, "Failed to check store presence, treating as missing");
-                false
-            }
-        };
-
-        if not_missing {
-            add_existing_build(
-                Arc::clone(&state),
-                dependency.clone(),
-                evaluation.id,
-                build_id,
-            )
-            .await?;
-
-            debug!(
-                build_id = %build_id,
-                derivation_path = %dependency,
-                "Skipping package - already in store"
-            );
-        } else {
-            pending.push((dependency.clone(), build_id));
-            pending_paths.insert(dependency.clone());
-            dependencies.extend(references);
-        };
-
-        if let Some(d_id) = dependency_id {
-            let dep = MBuildDependency {
+    for ref_path in references {
+        if let Some(known_id) = resolve_known_build_id(&ref_path, acc, pending_builds, queue) {
+            // Already tracked — just record the dependency edge.
+            debug!(build = %build_id, dependency = %known_id, "Dependency edge to known build");
+            acc.dependencies.push(MBuildDependency {
                 id: Uuid::new_v4(),
-                build: d_id,
-                dependency: build_id,
-            };
-
-            debug!(build = %d_id, dependency = %build_id, "Creating parent dependency");
-
-            acc.dependencies.push(dep);
+                build: build_id,
+                dependency: known_id,
+            });
+        } else if let Some(existing) = db_builds.iter().find(|b| b.derivation_path == ref_path) {
+            // Exists in DB — need to verify it is still in the Nix store.
+            check_avail.push(existing.clone());
+        } else {
+            // Completely new derivation.
+            new_refs.push((ref_path, Some(build_id), Uuid::new_v4()));
         }
     }
 
-    // Spawn concurrent tasks to query architecture and features for all pending builds.
+    // Single batched store-presence check for all check_avail paths + this derivation.
+    let paths_to_check: Vec<String> = check_avail
+        .iter()
+        .map(|b| b.derivation_path.clone())
+        .chain(std::iter::once(derivation.clone()))
+        .collect();
+
+    let missing: HashSet<String> = {
+        let mut store = state
+            .nix_store_pool
+            .acquire()
+            .await
+            .context("acquire store for missing-check")?;
+        get_missing_builds(paths_to_check, &mut *store)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect()
+    };
+
+    // Resolve each DB-existing reference against the store result.
+    for existing in check_avail {
+        if missing.contains(&existing.derivation_path) {
+            // Evicted — clone as a fresh build so its sub-deps are re-traversed.
+            let new_id = clone_failed_build(state, evaluation, &existing, cloned_ids).await?;
+            new_refs.push((existing.derivation_path, Some(build_id), new_id));
+        } else {
+            // Still present — reuse and record the dependency edge.
+            reuse_existing_build(state, evaluation, &existing, build_id, acc).await?;
+        }
+    }
+
+    // Decide fate of the current derivation.
+    if missing.contains(&derivation) {
+        // Needs building — add to pending and extend the queue with its new references.
+        pending_builds.push((derivation.clone(), build_id));
+        pending_paths.insert(derivation.clone());
+        queue.extend(new_refs);
+    } else {
+        // Already in the store — record as completed; no further traversal needed.
+        add_existing_build(Arc::clone(state), derivation.clone(), evaluation.id, build_id).await?;
+        debug!(build_id = %build_id, path = %derivation, "Skipping — already in store");
+    }
+
+    // Record the parent → this dependency edge.
+    if let Some(pid) = parent_id {
+        debug!(build = %pid, dependency = %build_id, "Parent dependency edge");
+        acc.dependencies.push(MBuildDependency {
+            id: Uuid::new_v4(),
+            build: pid,
+            dependency: build_id,
+        });
+    }
+
+    Ok(())
+}
+
+/// After the BFS, collects architecture and feature metadata for all pending builds
+/// in parallel and pushes them into the accumulator.
+async fn finalize_pending_builds(
+    state: &Arc<ServerState>,
+    acc: &mut EvaluationAccumulator,
+    evaluation: &MEvaluation,
+    pending_builds: &[(String, Uuid)],
+    cloned_ids: &HashSet<Uuid>,
+) -> Result<()> {
     type FeaturesResult = Result<(Uuid, String, entity::server::Architecture, Vec<String>)>;
-    let handles: Vec<JoinHandle<FeaturesResult>> = pending
+
+    let handles: Vec<JoinHandle<FeaturesResult>> = pending_builds
         .iter()
         .map(|(path, build_id)| {
             let p = path.clone();
@@ -390,64 +365,120 @@ pub(super) async fn query_all_dependencies(
             tokio::task::spawn(async move {
                 let (arch, features) = get_features(p.as_str())
                     .await
-                    .with_context(|| {
-                        format!("Failed to get build features for derivation: {}", p)
-                    })?;
+                    .with_context(|| format!("get_features for {}", p))?;
                 Ok((id, p, arch, features))
             })
         })
         .collect();
 
     for handle in handles {
-        let (build_id, path, system, features) =
+        let (build_id, path, arch, features) =
             handle.await.context("get_features task panicked")??;
 
-        if reused_build_ids.contains(&build_id) {
-            // Already inserted into DB during BFS — skip re-insertion.
+        if cloned_ids.contains(&build_id) {
+            // Already inserted into DB during BFS — skip.
             continue;
         }
 
-        if let Err(e) = add_features(Arc::clone(&state), features, Some(build_id), None).await {
+        if let Err(e) = add_features(Arc::clone(state), features, Some(build_id), None).await {
             error!(error = %e, "Failed to add features for build");
         }
 
-        // TODO: add better derivation check
-        let build = if path.ends_with(".drv") {
-            MBuild {
-                id: build_id,
-                evaluation: evaluation.id,
-                derivation_path: path,
-                architecture: system,
-                status: BuildStatus::Created,
-                server: None,
-                log_id: Some(build_id),
-                build_time_ms: None,
-                created_at: Utc::now().naive_utc(),
-                updated_at: Utc::now().naive_utc(),
-            }
+        let status = if path.ends_with(".drv") {
+            BuildStatus::Created
         } else {
-            MBuild {
-                id: build_id,
-                evaluation: evaluation.id,
-                derivation_path: path,
-                architecture: system,
-                status: BuildStatus::Completed,
-                server: None,
-                log_id: Some(build_id),
-                build_time_ms: None,
-                created_at: Utc::now().naive_utc(),
-                updated_at: Utc::now().naive_utc(),
-            }
+            BuildStatus::Completed
         };
 
-        debug!(
-            build_id = %build.id,
-            derivation_path = %build.derivation_path,
-            "Creating build"
-        );
-
-        acc.builds.push(build);
+        debug!(build_id = %build_id, path = %path, "Registering pending build");
+        acc.builds.push(MBuild {
+            id: build_id,
+            evaluation: evaluation.id,
+            derivation_path: path,
+            architecture: arch,
+            status,
+            server: None,
+            log_id: Some(build_id),
+            build_time_ms: None,
+            created_at: Utc::now().naive_utc(),
+            updated_at: Utc::now().naive_utc(),
+        });
     }
+
+    Ok(())
+}
+
+/// BFS traversal over a build's dependency graph.
+///
+/// All derivations in the current frontier have their `get_pathinfo` calls issued
+/// concurrently via [`FuturesUnordered`]. Results are processed sequentially as they
+/// arrive so deduplication structures stay consistent across a batch. Within each
+/// node, store-presence checks are batched into a single `get_missing_builds` call.
+///
+/// New builds start as `Created` (not `Queued`) so the scheduler cannot pick them
+/// up before the bulk dependency insert completes.
+pub(super) async fn query_all_dependencies(
+    state: Arc<ServerState>,
+    acc: &mut EvaluationAccumulator,
+    evaluation: &MEvaluation,
+    organization_id: Uuid,
+    dependencies: Vec<String>,
+) -> Result<()> {
+    // Work queue: (derivation_path, parent_build_id, this_build_id)
+    let mut queue: Vec<(String, Option<Uuid>, Uuid)> = dependencies
+        .into_iter()
+        .map(|d| (d, None, Uuid::new_v4()))
+        .collect();
+
+    let mut pending_builds: Vec<(String, Uuid)> = Vec::new();
+    let mut pending_paths: HashSet<String> = HashSet::new();
+    let mut cloned_ids: HashSet<Uuid> = HashSet::new();
+
+    while !queue.is_empty() {
+        // Drain the current frontier and fire all get_pathinfo calls concurrently.
+        // FuturesUnordered is used (not tokio::spawn) so pool guards don't need Send.
+        // Results arrive in completion order; deduplication state is updated
+        // immediately so later results in the same batch see prior work.
+        let mut tasks: FuturesUnordered<_> = queue
+            .drain(..)
+            .map(|(dep, parent_id, build_id)| {
+                let state = Arc::clone(&state);
+                async move {
+                    let mut store = state
+                        .nix_store_pool
+                        .acquire()
+                        .await
+                        .context("acquire store for pathinfo")?;
+                    let info = get_pathinfo(nix_store_path(&dep), &mut *store)
+                        .await
+                        .context("get_pathinfo")?
+                        .with_context(|| format!("derivation not found in Nix store: {}", dep))?;
+                    anyhow::Ok((dep, parent_id, build_id, info))
+                }
+            })
+            .collect();
+
+        while let Some(result) = tasks.next().await {
+            let (derivation, parent_id, build_id, path_info) = result?;
+            process_node(
+                &state,
+                acc,
+                evaluation,
+                organization_id,
+                &mut queue,
+                &mut pending_builds,
+                &mut pending_paths,
+                &mut cloned_ids,
+                derivation,
+                parent_id,
+                build_id,
+                path_info,
+            )
+            .await?;
+        }
+    }
+
+    finalize_pending_builds(&state, acc, evaluation, &pending_builds, &cloned_ids).await?;
 
     Ok(())
 }
