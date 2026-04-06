@@ -34,6 +34,9 @@
                     {{ org.role }}
                   </span>
                 }
+                @if (org.public) {
+                  <span class="role-badge public-badge">Public</span>
+                }
                 @if (org.running_evaluations && org.running_evaluations > 0) {
                   <span class="activity-badge">
                     <span class="material-symbols-outlined spinning">sync</span>
@@ -61,12 +64,12 @@
 
   @if (publicLoading()) {
     <app-loading-spinner message="Loading public organizations..." />
-  } @else if (publicOrgs().length > 0) {
+  } @else if (filteredPublicOrgs.length > 0) {
     <div class="section-header discover-header">
       <h2>Discover Public Organizations</h2>
     </div>
     <div class="org-grid">
-      @for (org of publicOrgs(); track org.id) {
+      @for (org of filteredPublicOrgs; track org.id) {
         <a [routerLink]="['/organization', org.name]" class="org-card">
           <div class="org-icon">
             <span class="material-symbols-outlined">public</span>

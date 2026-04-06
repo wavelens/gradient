@@ -9,6 +9,7 @@ use crate::input::load_secret_bytes;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
 use chrono::Utc;
+use entity::organization_cache::CacheSubscriptionMode;
 use entity::*;
 use password_auth::generate_hash;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
@@ -92,8 +93,30 @@ pub struct StateCache {
     pub signing_key_file: String,
     #[serde(default)]
     pub organizations: Vec<String>,
+    #[serde(default)]
+    pub upstreams: Vec<StateUpstream>,
     pub public: bool,
     pub created_by: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum StateUpstream {
+    Internal {
+        cache_name: String,
+        display_name: Option<String>,
+        #[serde(default = "default_upstream_mode")]
+        mode: CacheSubscriptionMode,
+    },
+    External {
+        display_name: String,
+        url: String,
+        public_key: String,
+    },
+}
+
+fn default_upstream_mode() -> CacheSubscriptionMode {
+    CacheSubscriptionMode::ReadWrite
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -868,6 +891,9 @@ async fn apply_caches(
             cache_id
         };
 
+        // Apply upstream caches
+        apply_cache_upstreams(db, cache_id, &state_cache.name, &state_cache.upstreams).await?;
+
         // Create organization_cache associations
         for org_name in &state_cache.organizations {
             let org_id = org_map.get(org_name).ok_or_else(|| {
@@ -901,6 +927,74 @@ async fn apply_caches(
         }
     }
 
+    Ok(())
+}
+
+async fn apply_cache_upstreams(
+    db: &DatabaseConnection,
+    cache_id: Uuid,
+    cache_name: &str,
+    upstreams: &[StateUpstream],
+) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::types::*;
+    use sea_orm::*;
+
+    // Replace all upstreams for this cache with the state-declared ones.
+    ECacheUpstream::delete_many()
+        .filter(CCacheUpstream::Cache.eq(cache_id))
+        .exec(db)
+        .await?;
+
+    if upstreams.is_empty() {
+        return Ok(());
+    }
+
+    // Build a name→id lookup for internal upstream resolution.
+    let cache_lookup: HashMap<String, Uuid> = ECache::find()
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|c| (c.name, c.id))
+        .collect();
+
+    for upstream in upstreams {
+        let record = match upstream {
+            StateUpstream::Internal { cache_name: upstream_cache_name, display_name, mode } => {
+                let upstream_id = *cache_lookup.get(upstream_cache_name).ok_or_else(|| {
+                    format!(
+                        "Cache '{}' not found for upstream of cache '{}'",
+                        upstream_cache_name, cache_name
+                    )
+                })?;
+                let name = display_name.clone().unwrap_or_else(|| upstream_cache_name.clone());
+                ACacheUpstream {
+                    id: Set(Uuid::new_v4()),
+                    cache: Set(cache_id),
+                    display_name: Set(name),
+                    mode: Set(mode.clone()),
+                    upstream_cache: Set(Some(upstream_id)),
+                    url: Set(None),
+                    public_key: Set(None),
+                }
+            }
+            StateUpstream::External { display_name, url, public_key } => ACacheUpstream {
+                id: Set(Uuid::new_v4()),
+                cache: Set(cache_id),
+                display_name: Set(display_name.clone()),
+                mode: Set(CacheSubscriptionMode::ReadOnly),
+                upstream_cache: Set(None),
+                url: Set(Some(url.clone())),
+                public_key: Set(Some(public_key.clone())),
+            },
+        };
+        record.insert(db).await?;
+    }
+
+    tracing::debug!(
+        "Applied {} upstreams to cache '{}'",
+        upstreams.len(),
+        cache_name
+    );
     Ok(())
 }
 

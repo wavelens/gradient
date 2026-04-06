@@ -164,6 +164,7 @@ pub(super) async fn query_all_dependencies(
         .acquire()
         .await
         .context("Failed to acquire nix store connection for dependency traversal")?;
+
     let mut dependencies = dependencies
         .into_iter()
         .map(|d| (d, None, Uuid::new_v4()))
@@ -263,6 +264,7 @@ pub(super) async fn query_all_dependencies(
                     false
                 }
             };
+
             if in_store {
                 // Already in the store — mark as Completed and reuse.
                 let dep = MBuildDependency {

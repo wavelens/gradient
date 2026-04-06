@@ -84,8 +84,6 @@ fn get_client(
         format!("{}/api/v1/{}", config.server_url, endpoint),
     );
 
-    client = client.header("Content-Type", "application/json");
-
     if !login {
         return Ok(client);
     }

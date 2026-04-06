@@ -11,12 +11,15 @@ use serde::{Deserialize, Serialize};
 pub struct CacheResponse {
     pub id: String,
     pub name: String,
-    pub active: bool,
     pub display_name: String,
     pub description: String,
+    pub active: bool,
     pub priority: i32,
+    pub public_key: String,
+    pub public: bool,
     pub created_by: String,
     pub created_at: String,
+    pub managed: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

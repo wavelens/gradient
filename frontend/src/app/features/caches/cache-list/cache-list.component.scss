@@ -156,7 +156,14 @@
 }
 
 .discover-header {
-  margin-bottom: $spacing-md;
+  margin-top: $spacing-xxl;
+  margin-bottom: $spacing-lg;
+
+  h2 {
+    font-size: $font-size-xl;
+    color: $text-primary;
+    margin: 0;
+  }
 }
 
 .visibility-select {

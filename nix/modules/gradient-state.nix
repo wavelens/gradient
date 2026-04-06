@@ -5,6 +5,45 @@
  */
 
 { lib, ... }: with lib; let
+  upstreamType = types.submodule {
+    options = {
+      type = mkOption {
+        type = types.enum [ "internal" "external" ];
+        description = "Type of upstream: internal (another Gradient cache) or external (Nix binary cache URL)";
+      };
+
+      cache_name = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "Name of the internal Gradient cache to use as upstream (required for internal type)";
+      };
+
+      display_name = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "Display name for the upstream (optional for internal, required for external)";
+      };
+
+      mode = mkOption {
+        type = types.enum [ "ReadWrite" "ReadOnly" "WriteOnly" ];
+        default = "ReadWrite";
+        description = "Access mode for internal upstreams (ignored for external, which is always ReadOnly)";
+      };
+
+      url = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "URL of the external Nix binary cache (required for external type)";
+      };
+
+      public_key = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "Public key of the external Nix binary cache (required for external type)";
+      };
+    };
+  };
+
   userType = types.submodule ({ config, ... }: {
     options = {
       username = mkOption {
@@ -245,6 +284,27 @@
         type = types.listOf types.str;
         default = [ ];
         description = "List of organization names that can use this cache";
+      };
+
+      upstreams = mkOption {
+        type = types.listOf upstreamType;
+        default = [ ];
+        description = "List of upstream caches (internal Gradient caches or external Nix binary caches) to use as substituters";
+        example = literalExpression ''
+          [
+            {
+              type = "external";
+              display_name = "cache.nixos.org";
+              url = "https://cache.nixos.org";
+              public_key = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=";
+            }
+            {
+              type = "internal";
+              cache_name = "other-cache";
+              mode = "ReadOnly";
+            }
+          ]
+        '';
       };
 
       public = mkOption {

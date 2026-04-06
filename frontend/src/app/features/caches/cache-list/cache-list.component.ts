@@ -154,4 +154,9 @@ export class CacheListComponent implements OnInit, OnDestroy {
   get inactiveCaches() {
     return this.caches().filter((c) => !c.active);
   }
+
+  get filteredPublicCaches(): Cache[] {
+    const ownedIds = new Set(this.caches().map((c) => c.id));
+    return this.publicCaches().filter((c) => !ownedIds.has(c.id));
+  }
 }

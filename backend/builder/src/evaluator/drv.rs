@@ -31,7 +31,7 @@ pub struct DerivationOutput {
 pub struct Derivation {
     pub outputs: Vec<DerivationOutput>,
     /// Map of `.drv` path → set of output names required from it.
-    pub input_derivations: Vec<(String, Vec<String>)>,
+    pub input_derivations: Vec<InputDrv>,
     /// Plain store paths (not derivations) needed at build time.
     pub input_sources: Vec<String>,
     pub system: String,
@@ -91,9 +91,9 @@ fn parse_outputs(s: &str) -> Result<(Vec<DerivationOutput>, &str)> {
     let mut outputs = Vec::new();
     loop {
         s = s.trim_start();
-        if s.starts_with(']') { return Ok((outputs, &s[1..])); }
+        if let Some(r) = s.strip_prefix(']') { return Ok((outputs, r)); }
         if let Some(r) = s.strip_prefix(',') { s = r.trim_start(); }
-        if s.starts_with(']') { return Ok((outputs, &s[1..])); }
+        if let Some(r) = s.strip_prefix(']') { return Ok((outputs, r)); }
 
         s = s.strip_prefix('(').ok_or_else(|| anyhow!("expected '(' for output entry"))?;
         let (name, r)      = parse_string(s)?; s = comma(r)?;
@@ -105,16 +105,18 @@ fn parse_outputs(s: &str) -> Result<(Vec<DerivationOutput>, &str)> {
     }
 }
 
+type InputDrv = (String, Vec<String>);
+
 /// Parses `[("/nix/store/hash.drv",["out","dev"]),...]`.
-fn parse_input_drvs(s: &str) -> Result<(Vec<(String, Vec<String>)>, &str)> {
+fn parse_input_drvs(s: &str) -> Result<(Vec<InputDrv>, &str)> {
     let s = s.trim_start();
     let mut s = s.strip_prefix('[').ok_or_else(|| anyhow!("expected '[' for inputDrvs"))?;
     let mut drvs = Vec::new();
     loop {
         s = s.trim_start();
-        if s.starts_with(']') { return Ok((drvs, &s[1..])); }
+        if let Some(r) = s.strip_prefix(']') { return Ok((drvs, r)); }
         if let Some(r) = s.strip_prefix(',') { s = r.trim_start(); }
-        if s.starts_with(']') { return Ok((drvs, &s[1..])); }
+        if let Some(r) = s.strip_prefix(']') { return Ok((drvs, r)); }
 
         s = s.strip_prefix('(').ok_or_else(|| anyhow!("expected '(' for inputDrv entry"))?;
         let (path, r) = parse_string(s)?; s = comma(r)?;
@@ -131,9 +133,9 @@ fn parse_string_list(s: &str) -> Result<(Vec<String>, &str)> {
     let mut items = Vec::new();
     loop {
         s = s.trim_start();
-        if s.starts_with(']') { return Ok((items, &s[1..])); }
+        if let Some(r) = s.strip_prefix(']') { return Ok((items, r)); }
         if let Some(r) = s.strip_prefix(',') { s = r.trim_start(); }
-        if s.starts_with(']') { return Ok((items, &s[1..])); }
+        if let Some(r) = s.strip_prefix(']') { return Ok((items, r)); }
         let (item, r) = parse_string(s)?;
         s = r;
         items.push(item);
@@ -147,9 +149,9 @@ fn parse_env(s: &str) -> Result<(HashMap<String, String>, &str)> {
     let mut map = HashMap::new();
     loop {
         s = s.trim_start();
-        if s.starts_with(']') { return Ok((map, &s[1..])); }
+        if let Some(r) = s.strip_prefix(']') { return Ok((map, r)); }
         if let Some(r) = s.strip_prefix(',') { s = r.trim_start(); }
-        if s.starts_with(']') { return Ok((map, &s[1..])); }
+        if let Some(r) = s.strip_prefix(']') { return Ok((map, r)); }
 
         s = s.strip_prefix('(').ok_or_else(|| anyhow!("expected '(' for env entry"))?;
         let (key, r)   = parse_string(s)?; s = comma(r)?;

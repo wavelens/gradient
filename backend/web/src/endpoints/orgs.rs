@@ -137,11 +137,10 @@ pub async fn get(
             .all(&state.db)
             .await?;
         for eval in running {
-            if let Some(project_id) = eval.project {
-                if let Some(&org_id) = project_to_org.get(&project_id) {
+            if let Some(project_id) = eval.project
+                && let Some(&org_id) = project_to_org.get(&project_id) {
                     *running_per_org.entry(org_id).or_insert(0) += 1;
                 }
-            }
         }
     }
 

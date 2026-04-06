@@ -26,6 +26,7 @@ use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
+type EvaluationOutput = (Vec<MBuild>, Vec<MBuildDependency>, Vec<Uuid>, Vec<(String, String)>);
 
 use dependencies::{add_existing_build, find_builds, query_all_dependencies, EvaluationAccumulator};
 use flake::get_flake_derivations;
@@ -38,7 +39,7 @@ use super::scheduler::{update_evaluation_status, update_evaluation_status_with_e
 pub async fn evaluate(
     state: Arc<ServerState>,
     evaluation: &MEvaluation,
-) -> Result<(Vec<MBuild>, Vec<MBuildDependency>, Vec<Uuid>, Vec<(String, String)>)> {
+) -> Result<EvaluationOutput> {
     info!("Starting evaluation");
     update_evaluation_status(
         Arc::clone(&state),

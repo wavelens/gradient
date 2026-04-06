@@ -129,6 +129,11 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
     this.nameCheck$.next(name);
   }
 
+  get filteredPublicOrgs(): Organization[] {
+    const ownedIds = new Set(this.organizations().map((o) => o.id));
+    return this.publicOrgs().filter((o) => !ownedIds.has(o.id));
+  }
+
   createOrganization(): void {
     if (!this.newOrg.name || !this.newOrg.display_name) {
       return;

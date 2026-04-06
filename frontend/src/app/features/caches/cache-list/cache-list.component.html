@@ -37,6 +37,9 @@
                     Priority: {{ cache.priority }}
                   </span>
                   <span class="status-badge active">Active</span>
+                  @if (cache.public) {
+                    <span class="status-badge public-badge">Public</span>
+                  }
                 </div>
               </div>
               <div class="cache-arrow">
@@ -67,6 +70,9 @@
                     Priority: {{ cache.priority }}
                   </span>
                   <span class="status-badge inactive">Inactive</span>
+                  @if (cache.public) {
+                    <span class="status-badge public-badge">Public</span>
+                  }
                 </div>
               </div>
               <div class="cache-arrow">
@@ -93,32 +99,32 @@
   <!-- Public Caches -->
   @if (publicLoading()) {
     <app-loading-spinner message="Loading public caches..." />
-  } @else if (publicCaches().length > 0) {
-    <div class="section">
-      <h2 class="discover-header">Discover Public Caches</h2>
-      <div class="cache-grid">
-        @for (cache of publicCaches(); track cache.id) {
-          <a [routerLink]="['/caches', cache.name]" class="cache-card">
-            <div class="cache-icon">
-              <span class="material-symbols-outlined">public</span>
+  } @else if (filteredPublicCaches.length > 0) {
+    <div class="discover-header">
+      <h2>Discover Public Caches</h2>
+    </div>
+    <div class="cache-grid">
+      @for (cache of filteredPublicCaches; track cache.id) {
+        <a [routerLink]="['/caches', cache.name]" class="cache-card">
+          <div class="cache-icon">
+            <span class="material-symbols-outlined">public</span>
+          </div>
+          <div class="cache-content">
+            <h3>{{ cache.display_name }}</h3>
+            <p class="text-secondary">{{ cache.description || 'No description' }}</p>
+            <div class="cache-meta">
+              <span class="meta-item">
+                <span class="material-symbols-outlined">sort</span>
+                Priority: {{ cache.priority }}
+              </span>
+              <span class="status-badge public-badge">Public</span>
             </div>
-            <div class="cache-content">
-              <h3>{{ cache.display_name }}</h3>
-              <p class="text-secondary">{{ cache.description || 'No description' }}</p>
-              <div class="cache-meta">
-                <span class="meta-item">
-                  <span class="material-symbols-outlined">sort</span>
-                  Priority: {{ cache.priority }}
-                </span>
-                <span class="status-badge public-badge">Public</span>
-              </div>
-            </div>
-            <div class="cache-arrow">
-              <span class="material-symbols-outlined">arrow_forward</span>
-            </div>
-          </a>
-        }
-      </div>
+          </div>
+          <div class="cache-arrow">
+            <span class="material-symbols-outlined">arrow_forward</span>
+          </div>
+        </a>
+      }
     </div>
   }
 </div>
