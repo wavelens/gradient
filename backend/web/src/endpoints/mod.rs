@@ -5,6 +5,7 @@
 */
 
 pub mod auth;
+pub mod badges;
 pub mod builds;
 pub mod caches;
 pub mod commits;

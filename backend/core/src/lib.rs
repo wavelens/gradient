@@ -21,7 +21,6 @@ pub mod state;
 pub mod types;
 pub mod webhooks;
 
-use clap::Parser;
 use database::connect_db;
 use log_storage::FileLogStorage;
 use email::EmailService;
@@ -35,10 +34,9 @@ use types::*;
 use webhooks::ReqwestWebhookClient;
 
 pub async fn init_state(
+    cli: Cli,
     derivation_resolver: Arc<dyn evaluator::DerivationResolver>,
 ) -> Arc<ServerState> {
-    let cli = Cli::parse();
-
     println!("Starting Gradient Server on {}:{}", cli.ip, cli.port);
     println!("State file configured: {:?}", cli.state_file);
 

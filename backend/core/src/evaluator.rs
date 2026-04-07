@@ -6,9 +6,10 @@
 
 //! Trait abstraction over the Nix derivation evaluator.
 //!
-//! Production impls live in the `builder` crate (`NixCApiResolver`) and wrap
-//! the embedded Nix C API. Tests in any crate can substitute the in-memory
-//! `FakeDerivationResolver` from `test-support`.
+//! Production impl lives in the `builder` crate (`WorkerPoolResolver`) and
+//! drives a pool of long-lived eval-worker subprocesses, each hosting one
+//! persistent embedded Nix C API evaluator. Tests in any crate can substitute
+//! the in-memory `FakeDerivationResolver` from `test-support`.
 
 use crate::derivation::Derivation;
 use anyhow::Result;

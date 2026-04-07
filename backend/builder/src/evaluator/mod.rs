@@ -8,9 +8,11 @@ mod dependencies;
 mod flake;
 mod nix_commands;
 mod nix_eval;
-mod resolver;
+mod worker;
+mod worker_pool;
 
-pub use resolver::NixCApiResolver;
+pub use worker::run_eval_worker;
+pub use worker_pool::WorkerPoolResolver;
 
 use anyhow::{Context, Result};
 use gradient_core::input::{parse_evaluation_wildcard, repository_url_to_nix, vec_to_hex};
@@ -112,9 +114,9 @@ pub async fn evaluate(
         let (derivation, _references) = match derivation_result {
             Ok((d, r)) => (d, r),
             Err(e) => {
-                let error_msg = e.to_string();
+                let error_msg = format!("{:#}", e);
                 warn!(
-                    error = %e,
+                    error = %error_msg,
                     derivation = %derivation_string,
                     "Derivation failed, skipping broken package"
                 );

@@ -16,6 +16,8 @@ Apr 07 02:19:20 hydra gradient-server[3983247]: 2026-04-07T00:19:20.349867Z  WAR
 
 but it works with the command, why?
 
+
+
 Long-lived worker pool over a pipe (fast, slightly more code)
 
   Spawn N persistent eval-worker children at startup. Each speaks a tiny line-delimited JSON protocol over stdin/stdout. The parent has a Pool<EvalWorker> (just

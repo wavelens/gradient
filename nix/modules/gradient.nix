@@ -7,6 +7,8 @@
 { lib, pkgs, config, ... }: let
   cfg = config.services.gradient;
 
+  logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
+
   stateJsonFile = pkgs.writers.writeJSON "gradient-state.json" cfg.state;
   userPasswordFiles = lib.mapAttrsToList (_: user: "gradient_user_${user.username}_password:${user.password_file}") cfg.state.users;
   orgPrivateKeyFiles = lib.mapAttrsToList (_: org: "gradient_org_${org.name}_private_key:${org.private_key_file}") cfg.state.organizations;
@@ -201,10 +203,42 @@ in {
           default = 24;
         };
 
+        evalWorkers = lib.mkOption {
+          description = "Number of Nix evaluator workers";
+          type = lib.types.ints.positive;
+          default = 1;
+        };
+
         logLevel = lib.mkOption {
-          description = "Log level for the application.";
-          type = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
-          default = "info";
+          description = ''
+            Log levels. `default` is the global level; `builder`, `cache` and
+            `web` override per component (null inherits from `default`).
+          '';
+          default = { };
+          type = lib.types.submodule {
+            options = {
+              default = lib.mkOption {
+                description = "Default log level for the application.";
+                type = logLevelType;
+                default = "info";
+              };
+              builder = lib.mkOption {
+                description = "Log level for the builder service. Null inherits from default.";
+                type = lib.types.nullOr logLevelType;
+                default = null;
+              };
+              cache = lib.mkOption {
+                description = "Log level for the cache service. Null inherits from default.";
+                type = lib.types.nullOr logLevelType;
+                default = null;
+              };
+              web = lib.mkOption {
+                description = "Log level for the web service. Null inherits from default.";
+                type = lib.types.nullOr logLevelType;
+                default = null;
+              };
+            };
+          };
         };
 
         deleteState = lib.mkOption {
@@ -298,12 +332,20 @@ in {
           GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
           GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
           GRADIENT_MAX_NIXDAEMON_CONNECTIONS = toString cfg.settings.maxNixdaemonConnections;
-          GRADIENT_LOG_LEVEL = cfg.settings.logLevel;
+          GRADIENT_EVAL_WORKERS = toString cfg.settings.evalWorkers;
+          GRADIENT_LOG_LEVEL = cfg.settings.logLevel.default;
+        } // lib.optionalAttrs (cfg.settings.logLevel.builder != null) {
+          GRADIENT_BUILDER_LOG_LEVEL = cfg.settings.logLevel.builder;
+        } // lib.optionalAttrs (cfg.settings.logLevel.cache != null) {
+          GRADIENT_CACHE_LOG_LEVEL = cfg.settings.logLevel.cache;
+        } // lib.optionalAttrs (cfg.settings.logLevel.web != null) {
+          GRADIENT_WEB_LOG_LEVEL = cfg.settings.logLevel.web;
+        } // {
           GRADIENT_DELETE_STATE = lib.boolToString cfg.settings.deleteState;
           GRADIENT_NAR_TTL_HOURS = toString cfg.settings.cacheTtlHours;
           GRADIENT_STATE_FILE = "%d/gradient_state";
           GRADIENT_CREDENTIALS_DIR = "%d";
-          RUST_LOG = cfg.settings.logLevel;
+          RUST_LOG = cfg.settings.logLevel.default;
         } // lib.optionalAttrs cfg.oidc.enable {
           GRADIENT_OIDC_CLIENT_ID = cfg.oidc.clientId;
           GRADIENT_OIDC_CLIENT_SECRET_FILE = "%d/gradient_oidc_client_secret";

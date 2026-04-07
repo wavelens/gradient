@@ -9,7 +9,7 @@ use gradient_core::consts::FLAKE_START;
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, error};
 
-use super::nix_eval::{escape_nix_str, NixEvaluator};
+use super::nix_eval::{NixEvaluator, escape_nix_str};
 
 /// Splits a Nix attribute path on `.`, respecting double-quoted segments.
 /// `packages.x86_64-linux."python3.12".*` → `["packages", "x86_64-linux", "\"python3.12\"", "*"]`
@@ -39,8 +39,15 @@ fn split_attr_path(path: &str) -> Vec<String> {
 /// paths (e.g. `packages.x86_64-linux.hello`).
 ///
 /// Synchronous — must run inside `spawn_blocking`.
-pub(super) fn discover_derivations(repository: &str, wildcards: &[String]) -> Result<Vec<String>> {
-    let evaluator = NixEvaluator::new()?;
+///
+/// The evaluator is borrowed (not constructed) so the caller can reuse one
+/// `NixEvaluator` per process. Creating multiple evaluators inside the same
+/// process touches libnix global state and hangs.
+pub(super) fn discover_derivations(
+    evaluator: &NixEvaluator,
+    repository: &str,
+    wildcards: &[String],
+) -> Result<Vec<String>> {
     let escaped_repo = escape_nix_str(repository);
 
     let mut all_derivations: HashSet<String> = HashSet::new();

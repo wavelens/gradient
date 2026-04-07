@@ -27,8 +27,19 @@ use uuid::Uuid;
 #[derive(Parser, Debug)]
 #[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient-server", author = "Wavelens", version, about, long_about = None)]
 pub struct Cli {
+    /// Default log level for the whole binary. Per-component overrides:
+    /// `--builder-log-level`, `--cache-log-level`, `--web-log-level`.
     #[arg(long, env = "GRADIENT_LOG_LEVEL", default_value = "info")]
     pub log_level: String,
+    /// Log level for the `builder` crate. Defaults to `--log-level`.
+    #[arg(long, env = "GRADIENT_BUILDER_LOG_LEVEL")]
+    pub builder_log_level: Option<String>,
+    /// Log level for the `cache` crate. Defaults to `--log-level`.
+    #[arg(long, env = "GRADIENT_CACHE_LOG_LEVEL")]
+    pub cache_log_level: Option<String>,
+    /// Log level for the `web` crate. Defaults to `--log-level`.
+    #[arg(long, env = "GRADIENT_WEB_LOG_LEVEL")]
+    pub web_log_level: Option<String>,
     #[arg(long, env = "GRADIENT_IP", default_value = "127.0.0.1")]
     pub ip: String,
     #[arg(long, env = "GRADIENT_PORT", value_parser = port_in_range, default_value_t = 3000)]
@@ -109,6 +120,13 @@ pub struct Cli {
     pub keep_evaluations: usize,
     #[arg(long, env = "GRADIENT_MAX_NIXDAEMON_CONNECTIONS", value_parser = greater_than_zero::<usize>, default_value = "8")]
     pub max_nixdaemon_connections: usize,
+    /// Number of long-lived Nix evaluator worker subprocesses to keep around.
+    /// Each worker hosts one persistent embedded `NixEvaluator`, paying the
+    /// libnix init cost only once. Must be at least `1`: in-process evaluation
+    /// is unsafe because the Nix C API `EvalState` is not thread-safe and the
+    /// embedded Boehm GC conflicts with Tokio's signal handling.
+    #[arg(long, env = "GRADIENT_EVAL_WORKERS", value_parser = greater_than_zero::<usize>, default_value = "1")]
+    pub eval_workers: usize,
     /// TTL in hours for non-entry-point NAR cache files. When a cached NAR has not been
     /// fetched within this many hours it is removed from disk and garbage-collected from
     /// the nix store (entry-point packages with GC roots are never touched).

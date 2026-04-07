@@ -246,6 +246,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/projects/{organization}/{project}/entry-point-downloads",
             get(projects::get_entry_point_download),
         )
+        .route(
+            "/projects/{organization}/{project}/badge",
+            get(badges::get_project_badge),
+        )
         .route("/evals/{evaluation}", get(evals::get_evaluation))
         .route(
             "/evals/{evaluation}/builds",

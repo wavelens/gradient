@@ -1380,6 +1380,77 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /projects/{organization}/{project}/badge:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    get:
+      tags: [projects]
+      summary: Project status badge (SVG)
+      description: |-
+        Returns a shields.io-compatible SVG badge reflecting the project's latest
+        evaluation status. Designed to be embedded in GitHub READMEs, Grafana
+        dashboards, or any tool that renders SVG images from a URL.
+
+        **Badge colours:**
+        | Status | Colour | Label |
+        |--------|--------|-------|
+        | No evaluation yet | grey | `unknown` |
+        | Queued / Evaluating / Building | blue | `queued` / `evaluating` / `building` |
+        | Completed, all entry-point builds passed | green | `passing` |
+        | Completed, some entry-point builds failed | amber | `partial` |
+        | Failed | red | `failing` |
+        | Aborted | yellow | `aborted` |
+
+        **Authentication:**
+        - **Public organisations** — no credentials required. Embed the URL directly.
+        - **Private organisations** — supply `?token=GRADxxxx` (API key) or a JWT so the
+          image can be fetched by external services without a session cookie.
+
+        Responses include `Cache-Control: no-cache` so badge aggregator CDNs always
+        fetch the live status rather than serving a stale image.
+      operationId: getProjectBadge
+      security: []
+      parameters:
+        - name: style
+          in: query
+          required: false
+          description: Visual style of the badge.
+          schema:
+            type: string
+            enum: [flat, flat-square]
+            default: flat
+        - name: label
+          in: query
+          required: false
+          description: Left-side label text.
+          schema:
+            type: string
+            default: build
+            example: build
+        - name: token
+          in: query
+          required: false
+          description: |-
+            API key (`GRADxxxx`) or JWT for private organisations.
+            Embed in the image URL so external tools can fetch the badge without
+            interactive authentication.
+          schema:
+            type: string
+            example: "GRADabcdefghijklmnopqrstuvwxyz0123456789..."
+      responses:
+        '200':
+          description: SVG badge image.
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Evaluations ──────────────────────────────────────────────────────────────
 
   /evals/{evaluation}:

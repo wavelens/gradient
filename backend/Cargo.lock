@@ -803,6 +803,7 @@ dependencies = [
  "nix-daemon",
  "sea-orm",
  "sentry",
+ "serde",
  "serde_json",
  "test-support",
  "thiserror 2.0.18",

@@ -11,6 +11,9 @@ use gradient_core::types::Cli;
 pub fn test_cli() -> Cli {
     Cli {
         log_level: "error".into(),
+        builder_log_level: None,
+        cache_log_level: None,
+        web_log_level: None,
         ip: "127.0.0.1".into(),
         port: 3000,
         serve_url: "http://127.0.0.1:3000".into(),
@@ -47,6 +50,7 @@ pub fn test_cli() -> Cli {
         delete_state: true,
         keep_evaluations: 30,
         max_nixdaemon_connections: 2,
+        eval_workers: 1,
         nar_ttl_hours: 0,
     }
 }
