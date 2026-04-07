@@ -40,15 +40,54 @@
 
     <!-- Stats -->
     <div class="section">
-      <h2>Traffic &amp; Storage</h2>
+      <h2>Storage</h2>
       @if (statsLoading()) {
         <app-loading-spinner message="Loading stats..." />
       } @else {
         <div class="stat-cards">
           <div class="stat-card">
-            <span class="stat-label">Total stored</span>
+            <span class="stat-label">Packages stored</span>
+            <span class="stat-value">{{ stats()?.total_packages ?? 0 }}</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Compressed stored</span>
             <span class="stat-value">{{ formatBytes(stats()?.total_bytes ?? 0) }}</span>
           </div>
+        </div>
+
+        <div class="chart-card">
+          <div class="window-tabs">
+            @for (w of windows; track w.key) {
+              <button class="window-tab" [class.active]="activeWindow() === w.key" (click)="activeWindow.set(w.key)">
+                {{ w.label }}
+              </button>
+            }
+          </div>
+          <apx-chart
+            [series]="storageChartOptions().series"
+            [chart]="storageChartOptions().chart"
+            [theme]="storageChartOptions().theme"
+            [stroke]="storageChartOptions().stroke"
+            [fill]="storageChartOptions().fill"
+            [colors]="storageChartOptions().colors"
+            [xaxis]="storageChartOptions().xaxis"
+            [yaxis]="storageChartOptions().yaxis"
+            [grid]="storageChartOptions().grid"
+            [tooltip]="storageChartOptions().tooltip"
+            [legend]="storageChartOptions().legend!"
+            [dataLabels]="storageChartOptions().dataLabels!"
+          />
+        </div>
+      }
+    </div>
+
+    <!-- Traffic -->
+    <div class="section">
+      <h2>Traffic</h2>
+      @if (statsLoading()) {
+        <app-loading-spinner message="Loading stats..." />
+      } @else {
+        <div class="stat-cards">
           <div class="stat-card">
             <span class="stat-label">Requests (last hour)</span>
             <span class="stat-value">{{ $any(stats()?.hours | slice:-1)[0]?.requests ?? 0 }}</span>

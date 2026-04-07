@@ -26,8 +26,19 @@ export interface CacheMetricPoint {
   requests: number;
 }
 
+export interface StorageMetricPoint {
+  time: string;
+  packages: number;
+  bytes: number;
+}
+
 export interface CacheStats {
   total_bytes: number;
+  total_packages: number;
+  storage_minutes: StorageMetricPoint[];
+  storage_hours: StorageMetricPoint[];
+  storage_days: StorageMetricPoint[];
+  storage_weeks: StorageMetricPoint[];
   minutes: CacheMetricPoint[];
   hours: CacheMetricPoint[];
   days: CacheMetricPoint[];

@@ -28,9 +28,28 @@ pub struct CacheMetricPoint {
 }
 
 #[derive(Serialize)]
+pub struct StorageMetricPoint {
+    pub time: String,
+    /// Packages added to the cache in this bucket.
+    pub packages: i64,
+    /// Compressed bytes added in this bucket.
+    pub bytes: i64,
+}
+
+#[derive(Serialize)]
 pub struct CacheStatsResponse {
     /// Total compressed bytes of all NARs cached by this cache.
     pub total_bytes: i64,
+    /// Total number of packages (signed build outputs) in this cache.
+    pub total_packages: i64,
+    /// Packages/bytes added per minute for the last 60 minutes.
+    pub storage_minutes: Vec<StorageMetricPoint>,
+    /// Packages/bytes added per hour for the last 24 hours.
+    pub storage_hours: Vec<StorageMetricPoint>,
+    /// Packages/bytes added per day for the last 30 days.
+    pub storage_days: Vec<StorageMetricPoint>,
+    /// Packages/bytes added per week for the last 12 weeks.
+    pub storage_weeks: Vec<StorageMetricPoint>,
     /// Traffic bucketed by minute for the last 60 minutes.
     pub minutes: Vec<CacheMetricPoint>,
     /// Traffic bucketed by hour for the last 24 hours.
@@ -132,6 +151,57 @@ async fn aggregate_traffic(
     Ok(points)
 }
 
+async fn aggregate_storage(
+    db: &sea_orm::DatabaseConnection,
+    cache_id: Uuid,
+    trunc_unit: &str,
+    back_interval: &str,
+) -> Result<Vec<StorageMetricPoint>, WebError> {
+    let sql = format!(
+        r#"SELECT gs.period,
+                  COALESCE(COUNT(bos.id),      0)::bigint AS packages,
+                  COALESCE(SUM(bo.file_size),  0)::bigint AS bytes
+           FROM generate_series(
+               date_trunc('{trunc_unit}', NOW() AT TIME ZONE 'UTC') - INTERVAL '{back_interval}',
+               date_trunc('{trunc_unit}', NOW() AT TIME ZONE 'UTC'),
+               INTERVAL '1 {trunc_unit}'
+           ) AS gs(period)
+           LEFT JOIN build_output_signature bos
+               ON date_trunc('{trunc_unit}', bos.created_at) = gs.period
+              AND bos.cache = $1
+           LEFT JOIN build_output bo ON bo.id = bos.build_output
+           GROUP BY gs.period
+           ORDER BY gs.period"#,
+        trunc_unit = trunc_unit,
+        back_interval = back_interval,
+    );
+
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            &sql,
+            [sea_orm::Value::Uuid(Some(Box::new(cache_id)))],
+        ))
+        .await
+        .map_err(WebError::from)?;
+
+    let points = rows
+        .into_iter()
+        .filter_map(|row| {
+            let time: NaiveDateTime = row.try_get("", "period").ok()?;
+            let packages: i64 = row.try_get("", "packages").unwrap_or(0);
+            let bytes: i64 = row.try_get("", "bytes").unwrap_or(0);
+            Some(StorageMetricPoint {
+                time: time.to_string(),
+                packages,
+                bytes,
+            })
+        })
+        .collect();
+
+    Ok(points)
+}
+
 pub async fn get_cache_stats(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -148,14 +218,15 @@ pub async fn get_cache_stats(
         }
     }
 
-    // Total compressed bytes stored for this cache (sum of file_size of all signed outputs).
+    // Total compressed bytes and package count for this cache.
     let total_row = state
         .db
         .query_one(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            r#"SELECT COALESCE(SUM(bo.file_size), 0)::bigint AS total
-               FROM build_output bo
-               JOIN build_output_signature bos ON bos.build_output = bo.id
+            r#"SELECT COALESCE(SUM(bo.file_size), 0)::bigint AS total_bytes,
+                      COUNT(bos.id)::bigint               AS total_packages
+               FROM build_output_signature bos
+               JOIN build_output bo ON bo.id = bos.build_output
                WHERE bos.cache = $1"#,
             [sea_orm::Value::Uuid(Some(Box::new(cache.id)))],
         ))
@@ -164,20 +235,35 @@ pub async fn get_cache_stats(
 
     let total_bytes: i64 = total_row
         .as_ref()
-        .and_then(|row| row.try_get::<i64>("", "total").ok())
+        .and_then(|row| row.try_get::<i64>("", "total_bytes").ok())
         .unwrap_or(0);
 
-    let (minutes, hours, days, weeks) = tokio::try_join!(
-        aggregate_traffic(&state.db, cache.id, "minute", "59 minutes"),
-        aggregate_traffic(&state.db, cache.id, "hour", "23 hours"),
-        aggregate_traffic(&state.db, cache.id, "day", "29 days"),
-        aggregate_traffic(&state.db, cache.id, "week", "11 weeks"),
-    )?;
+    let total_packages: i64 = total_row
+        .as_ref()
+        .and_then(|row| row.try_get::<i64>("", "total_packages").ok())
+        .unwrap_or(0);
+
+    let (storage_minutes, storage_hours, storage_days, storage_weeks, minutes, hours, days, weeks) =
+        tokio::try_join!(
+            aggregate_storage(&state.db, cache.id, "minute", "59 minutes"),
+            aggregate_storage(&state.db, cache.id, "hour", "23 hours"),
+            aggregate_storage(&state.db, cache.id, "day", "29 days"),
+            aggregate_storage(&state.db, cache.id, "week", "11 weeks"),
+            aggregate_traffic(&state.db, cache.id, "minute", "59 minutes"),
+            aggregate_traffic(&state.db, cache.id, "hour", "23 hours"),
+            aggregate_traffic(&state.db, cache.id, "day", "29 days"),
+            aggregate_traffic(&state.db, cache.id, "week", "11 weeks"),
+        )?;
 
     Ok(Json(BaseResponse {
         error: false,
         message: CacheStatsResponse {
             total_bytes,
+            total_packages,
+            storage_minutes,
+            storage_hours,
+            storage_days,
+            storage_weeks,
             minutes,
             hours,
             days,

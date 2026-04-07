@@ -179,7 +179,6 @@ in {
 
       s3 = {
         enable = lib.mkEnableOption "S3 storage for NAR cache files";
-
         bucket = lib.mkOption {
           description = "S3 bucket name for NAR cache storage";
           type = lib.types.str;
@@ -250,12 +249,12 @@ in {
         };
 
         logLevel = lib.mkOption {
+          default = { };
           description = ''
             Log levels. `default` is the global level; `builder`, `cache` and
             `web` override per component (null inherits from `default`).
           '';
 
-          default = { };
           type = lib.types.submodule {
             options = {
               default = lib.mkOption {
@@ -263,16 +262,19 @@ in {
                 type = logLevelType;
                 default = "info";
               };
+
               builder = lib.mkOption {
                 description = "Log level for the builder service. Null inherits from default";
                 type = lib.types.nullOr logLevelType;
                 default = null;
               };
+
               cache = lib.mkOption {
                 description = "Log level for the cache service. Null inherits from default";
                 type = lib.types.nullOr logLevelType;
                 default = null;
               };
+
               web = lib.mkOption {
                 description = "Log level for the web service. Null inherits from default";
                 type = lib.types.nullOr logLevelType;

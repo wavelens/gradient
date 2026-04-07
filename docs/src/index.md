@@ -12,7 +12,7 @@
 - **REST API** — full API with API-key and JWT authentication
 - **Streaming Logs** — real-time log streaming for running builds
 - **OAuth2 / OIDC** — integrated single-sign-on support
-- **Binary Cache** — built-in Nix store cache served over HTTP
+- **Binary Cache** — built-in Nix store cache with S3 storage backend support
 - **Remote Builds** — build Nix derivations on remote machines without a local Nix install
 - **Pull Deployment** — deploy NixOS configurations by pulling from the Gradient server
 - **Dependency Graph** — interactive visualization of Nix build dependency trees
