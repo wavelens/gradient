@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::NamedTempFile;
 use thiserror::Error;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, info, instrument, warn};
 
 use super::input::{check_repository_url_is_ssh, vec_to_hex};
 use super::types::*;
@@ -183,7 +183,7 @@ pub async fn check_project_updates(
     })? {
         Ok(hash) => hash,
         Err(e) => {
-            error!(error = %e, "Failed to get remote HEAD ref");
+            warn!(error = %e, "Failed to get remote HEAD ref, will retry next cycle");
             return Ok((false, vec![]));
         }
     };

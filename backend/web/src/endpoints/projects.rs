@@ -749,6 +749,128 @@ pub async fn post_project_transfer(
     Ok(Json(res))
 }
 
+/// Build an [`EvaluationSummary`] for a single evaluation row.
+async fn evaluation_to_summary(
+    state: &Arc<ServerState>,
+    evaluation: MEvaluation,
+) -> Result<EvaluationSummary, WebError> {
+    let commit_hash = ECommit::find_by_id(evaluation.commit)
+        .one(&state.db)
+        .await?
+        .map(|c| vec_to_hex(&c.hash))
+        .unwrap_or_default();
+
+    let total_builds = EBuild::find()
+        .filter(CBuild::Evaluation.eq(evaluation.id))
+        .count(&state.db)
+        .await? as i64;
+
+    let failed_builds = EBuild::find()
+        .filter(
+            Condition::all()
+                .add(CBuild::Evaluation.eq(evaluation.id))
+                .add(CBuild::Status.eq(BuildStatus::Failed)),
+        )
+        .count(&state.db)
+        .await? as i64;
+
+    let ep_builds: Vec<Uuid> = EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.eq(evaluation.id))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|ep| ep.build)
+        .collect();
+
+    let (completed_entry_points, failed_entry_points, total_entry_points) = if ep_builds.is_empty() {
+        (0i64, 0i64, 0i64)
+    } else {
+        let completed = EBuild::find()
+            .filter(CBuild::Id.is_in(ep_builds.clone()))
+            .filter(CBuild::Status.eq(BuildStatus::Completed))
+            .count(&state.db)
+            .await? as i64;
+        let failed = EBuild::find()
+            .filter(CBuild::Id.is_in(ep_builds.clone()))
+            .filter(CBuild::Status.eq(BuildStatus::Failed))
+            .count(&state.db)
+            .await? as i64;
+        (completed, failed, ep_builds.len() as i64)
+    };
+
+    let entry_point_diff = if let Some(prev_id) = evaluation.previous {
+        let prev_count = EEntryPoint::find()
+            .filter(CEntryPoint::Evaluation.eq(prev_id))
+            .count(&state.db)
+            .await? as i64;
+        Some(total_entry_points - prev_count)
+    } else {
+        None
+    };
+
+    Ok(EvaluationSummary {
+        id: evaluation.id,
+        commit: commit_hash,
+        status: evaluation.status,
+        total_builds,
+        failed_builds,
+        completed_entry_points,
+        failed_entry_points,
+        entry_point_diff,
+        created_at: evaluation.created_at,
+        updated_at: evaluation.updated_at,
+    })
+}
+
+/// `GET /projects/{organization}/{project}/evaluations`
+///
+/// Returns the `keep_evaluations` most recent evaluations for the project,
+/// newest first. Identical access rules as other project endpoints.
+pub async fn get_project_evaluations(
+    state: State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Path((organization, project)): Path<(String, String)>,
+) -> WebResult<Json<BaseResponse<Vec<EvaluationSummary>>>> {
+    let organization = get_any_organization_by_name(state.0.clone(), organization)
+        .await?
+        .ok_or_else(|| WebError::not_found("Project"))?;
+
+    if !organization.public {
+        match &maybe_user {
+            Some(user) => {
+                if !user_is_org_member(&state.0, user.id, organization.id).await? {
+                    return Err(WebError::not_found("Project"));
+                }
+            }
+            None => return Err(WebError::not_found("Project")),
+        }
+    }
+
+    let project = EProject::find()
+        .filter(CProject::Organization.eq(organization.id))
+        .filter(CProject::Name.eq(project))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Project"))?;
+
+    let evaluations = EEvaluation::find()
+        .filter(CEvaluation::Project.eq(project.id))
+        .order_by_desc(CEvaluation::CreatedAt)
+        .limit(project.keep_evaluations as u64)
+        .all(&state.db)
+        .await?;
+
+    let mut summaries = Vec::with_capacity(evaluations.len());
+    for evaluation in evaluations {
+        summaries.push(evaluation_to_summary(&state.0, evaluation).await?);
+    }
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: summaries,
+    }))
+}
+
 pub async fn get_project_details(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -785,79 +907,9 @@ pub async fn get_project_details(
         .all(&state.db)
         .await?;
 
-    let mut evaluation_summaries = Vec::new();
-
+    let mut evaluation_summaries = Vec::with_capacity(evaluations.len());
     for evaluation in evaluations {
-        let commit_hash = ECommit::find_by_id(evaluation.commit)
-            .one(&state.db)
-            .await?
-            .map(|c| vec_to_hex(&c.hash))
-            .unwrap_or_default();
-
-        // Count total builds for this evaluation
-        let total_builds = EBuild::find()
-            .filter(CBuild::Evaluation.eq(evaluation.id))
-            .count(&state.db)
-            .await?;
-
-        // Count failed builds for this evaluation
-        let failed_builds = EBuild::find()
-            .filter(
-                Condition::all()
-                    .add(CBuild::Evaluation.eq(evaluation.id))
-                    .add(CBuild::Status.eq(BuildStatus::Failed)),
-            )
-            .count(&state.db)
-            .await?;
-
-        // Get entry point build IDs for this evaluation
-        let ep_builds: Vec<Uuid> = EEntryPoint::find()
-            .filter(CEntryPoint::Evaluation.eq(evaluation.id))
-            .all(&state.db)
-            .await?
-            .into_iter()
-            .map(|ep| ep.build)
-            .collect();
-
-        let (completed_entry_points, failed_entry_points, total_entry_points) = if ep_builds.is_empty() {
-            (0i64, 0i64, 0i64)
-        } else {
-            let completed = EBuild::find()
-                .filter(CBuild::Id.is_in(ep_builds.clone()))
-                .filter(CBuild::Status.eq(BuildStatus::Completed))
-                .count(&state.db)
-                .await? as i64;
-            let failed = EBuild::find()
-                .filter(CBuild::Id.is_in(ep_builds.clone()))
-                .filter(CBuild::Status.eq(BuildStatus::Failed))
-                .count(&state.db)
-                .await? as i64;
-            (completed, failed, ep_builds.len() as i64)
-        };
-
-        // Compute diff against previous evaluation's entry point count
-        let entry_point_diff = if let Some(prev_id) = evaluation.previous {
-            let prev_count = EEntryPoint::find()
-                .filter(CEntryPoint::Evaluation.eq(prev_id))
-                .count(&state.db)
-                .await? as i64;
-            Some(total_entry_points - prev_count)
-        } else {
-            None
-        };
-
-        evaluation_summaries.push(EvaluationSummary {
-            id: evaluation.id,
-            commit: commit_hash,
-            status: evaluation.status,
-            total_builds: total_builds as i64,
-            failed_builds: failed_builds as i64,
-            completed_entry_points,
-            failed_entry_points,
-            entry_point_diff,
-            created_at: evaluation.created_at,
-            updated_at: evaluation.updated_at,
-        });
+        evaluation_summaries.push(evaluation_to_summary(&state.0, evaluation).await?);
     }
 
     let can_edit = match &maybe_user {

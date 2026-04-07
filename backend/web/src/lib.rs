@@ -227,6 +227,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             get(projects::get_project),
         )
         .route(
+            "/projects/{organization}/{project}/evaluations",
+            get(projects::get_project_evaluations),
+        )
+        .route(
             "/projects/{organization}/{project}/details",
             get(projects::get_project_details),
         )

@@ -1096,6 +1096,37 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /projects/{organization}/{project}/evaluations:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    get:
+      tags: [projects]
+      summary: List recent evaluations
+      description: Returns the `keep_evaluations` most recent evaluations for the project, newest first.
+      operationId: getProjectEvaluations
+      security:
+        - {}
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of evaluation summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: boolean
+                    example: false
+                  message:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EvaluationSummary'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /projects/{organization}/{project}/details:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'

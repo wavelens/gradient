@@ -295,6 +295,14 @@ pub async fn post_build_log(
             }
 
             if build.status != entity::build::BuildStatus::Building {
+                // One extra read: catches log lines flushed between our read
+                // above and the status transition being committed.
+                let final_log = state.log_storage.read(build.log_id.unwrap_or(build_id)).await.unwrap_or_default();
+                let final_chunk = final_log[last_offset..].to_string();
+                if !final_chunk.is_empty() {
+                    sent_any = true;
+                    yield final_chunk;
+                }
                 if !sent_any {
                     yield "".to_string();
                 }
