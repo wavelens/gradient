@@ -58,47 +58,47 @@ in {
       };
 
       domain = lib.mkOption {
-        description = "Domain under which Gradient is being served.";
+        description = "Domain under which Gradient is being served";
         type = lib.types.str;
         example = "gradient.example.com";
       };
 
       baseDir = lib.mkOption {
-        description = "Base directory for Gradient.";
+        description = "Base directory for Gradient";
         type = lib.types.path;
         default = "/var/lib/gradient";
       };
 
       listenAddr = lib.mkOption {
-        description = "IP address on which Gradient listens.";
+        description = "IP address on which Gradient listens";
         type = lib.types.str;
         default = "127.0.0.1";
       };
 
       port = lib.mkOption {
-        description = "Port on which Gradient listens.";
+        description = "Port on which Gradient listens";
         type = lib.types.port;
         default = 3000;
       };
 
       jwtSecretFile = lib.mkOption {
-        description = "Secret key file used to sign JWTs.";
+        description = "Secret key file used to sign JWTs";
         type = lib.types.path;
       };
 
       cryptSecretFile = lib.mkOption {
-        description = "Database encryption password file.";
+        description = "Database encryption password file";
         type = lib.types.path;
       };
 
       databaseUrl = lib.mkOption {
-        description = "URL of the database to use.";
+        description = "URL of the database to use";
         type = lib.types.str;
         default = "postgresql://localhost/gradient?host=/run/postgresql";
       };
 
       databaseUrlFile = lib.mkOption {
-        description = "URL-file of the database to use.";
+        description = "URL-file of the database to use";
         type = lib.types.path;
         default = pkgs.writeText "database_url" cfg.databaseUrl;
         defaultText = lib.literalExpression "pkgs.writeText \"database_url\" config.services.gradient.databaseUrl;";
@@ -111,30 +111,30 @@ in {
 
       oidc = {
         enable = lib.mkEnableOption "OIDC";
-        required = lib.mkEnableOption "OIDC requirement for registration.";
+        required = lib.mkEnableOption "OIDC requirement for registration";
         clientId = lib.mkOption {
-          description = "Client ID for OIDC.";
+          description = "Client ID for OIDC";
           type = lib.types.str;
         };
 
         clientSecretFile = lib.mkOption {
-          description = "Client secret file for OIDC.";
+          description = "Client secret file for OIDC";
           type = lib.types.path;
         };
 
         scopes = lib.mkOption {
-          description = "Scopes for OIDC.";
+          description = "Scopes for OIDC";
           type = lib.types.listOf lib.types.str;
           default = ["openid" "email" "profile"];
         };
 
         discoveryUrl = lib.mkOption {
-          description = "Discovery URL for OIDC.";
+          description = "Discovery URL for OIDC";
           type = lib.types.str;
         };
 
         iconUrl = lib.mkOption {
-          description = "Icon URL for OIDC provider.";
+          description = "Icon URL for OIDC provider";
           type = lib.types.nullOr lib.types.str;
           default = null;
         };
@@ -177,28 +177,68 @@ in {
         };
       };
 
+      s3 = {
+        enable = lib.mkEnableOption "S3 storage for NAR cache files";
+
+        bucket = lib.mkOption {
+          description = "S3 bucket name for NAR cache storage";
+          type = lib.types.str;
+          default = "";
+        };
+
+        region = lib.mkOption {
+          description = "AWS region for the S3 bucket";
+          type = lib.types.str;
+          default = "us-east-1";
+        };
+
+        endpoint = lib.mkOption {
+          description = "Custom S3-compatible endpoint URL (e.g. for MinIO or Cloudflare R2). Null uses the default AWS endpoint";
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+        };
+
+        accessKeyId = lib.mkOption {
+          description = "AWS access key ID. Null falls back to instance credentials or environment variables";
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+        };
+
+        secretAccessKeyFile = lib.mkOption {
+          description = "File containing the AWS secret access key. Null falls back to instance credentials";
+          type = lib.types.nullOr lib.types.path;
+          default = null;
+        };
+
+        prefix = lib.mkOption {
+          description = "Key prefix within the S3 bucket (e.g. \"gradient/\"). Leave empty to store at the bucket root";
+          type = lib.types.str;
+          default = "";
+        };
+      };
+
       settings = {
         enableRegistration = lib.mkEnableOption "registration. Users must be registered via OIDC." // { default = true; };
         maxConcurrentEvaluations = lib.mkOption {
-          description = "Maximum number of concurrent evaluations.";
+          description = "Maximum number of concurrent evaluations";
           type = lib.types.ints.positive;
           default = 1;
         };
 
         maxConcurrentBuilds = lib.mkOption {
-          description = "Maximum number of concurrent builds.";
+          description = "Maximum number of concurrent builds";
           type = lib.types.ints.positive;
           default = 100;
         };
 
         keepEvaluations = lib.mkOption {
-          description = "Amount of evaluations to keep in the database and cache.";
+          description = "Amount of evaluations to keep in the database and cache";
           type = lib.types.ints.positive;
           default = 5;
         };
 
         maxNixdaemonConnections = lib.mkOption {
-          description = "Maximum number of simultaneous local Nix daemon connections in the connection pool.";
+          description = "Maximum number of simultaneous local Nix daemon connections in the connection pool";
           type = lib.types.ints.positive;
           default = 24;
         };
@@ -219,22 +259,22 @@ in {
           type = lib.types.submodule {
             options = {
               default = lib.mkOption {
-                description = "Default log level for the application.";
+                description = "Default log level for the application";
                 type = logLevelType;
                 default = "info";
               };
               builder = lib.mkOption {
-                description = "Log level for the builder service. Null inherits from default.";
+                description = "Log level for the builder service. Null inherits from default";
                 type = lib.types.nullOr logLevelType;
                 default = null;
               };
               cache = lib.mkOption {
-                description = "Log level for the cache service. Null inherits from default.";
+                description = "Log level for the cache service. Null inherits from default";
                 type = lib.types.nullOr logLevelType;
                 default = null;
               };
               web = lib.mkOption {
-                description = "Log level for the web service. Null inherits from default.";
+                description = "Log level for the web service. Null inherits from default";
                 type = lib.types.nullOr logLevelType;
                 default = null;
               };
@@ -243,14 +283,14 @@ in {
         };
 
         deleteState = lib.mkOption {
-          description = "Delete all state (users, organizations, caches) if not manged anymore by state.";
+          description = "Delete all state (users, organizations, caches) if not manged anymore by state";
           type = lib.types.bool;
           default = true;
         };
 
         cacheTtlHours = lib.mkOption {
-          description = "TTL in hours for non-entry-point cached NAR files. 0 disables GC.";
-          type = lib.types.ints.positive;
+          description = "TTL in hours for cached NAR files that have not been fetched recently. 0 disables TTL-based GC";
+          type = lib.types.ints.unsigned;
           default = 336;
         };
       };
@@ -310,6 +350,8 @@ in {
             "gradient_oidc_client_secret:${cfg.oidc.clientSecretFile}"
           ] ++ lib.optional cfg.email.enable [
             "gradient_email_smtp_password:${cfg.email.smtpPasswordFile}"
+          ] ++ lib.optionals (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) [
+            "gradient_s3_secret_access_key:${cfg.s3.secretAccessKeyFile}"
           ] ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles;
         };
 
@@ -363,6 +405,16 @@ in {
           GRADIENT_EMAIL_FROM_ADDRESS = cfg.email.fromAddress;
           GRADIENT_EMAIL_FROM_NAME = cfg.email.fromName;
           GRADIENT_EMAIL_ENABLE_TLS = lib.boolToString cfg.email.enableTls;
+        } // lib.optionalAttrs cfg.s3.enable {
+          GRADIENT_S3_BUCKET = cfg.s3.bucket;
+          GRADIENT_S3_REGION = cfg.s3.region;
+          GRADIENT_S3_PREFIX = cfg.s3.prefix;
+        } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.endpoint != null) {
+          GRADIENT_S3_ENDPOINT = cfg.s3.endpoint;
+        } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.accessKeyId != null) {
+          GRADIENT_S3_ACCESS_KEY_ID = cfg.s3.accessKeyId;
+        } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) {
+          GRADIENT_S3_SECRET_ACCESS_KEY_FILE = "%d/gradient_s3_secret_access_key";
         };
       };
     };

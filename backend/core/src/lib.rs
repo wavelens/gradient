@@ -13,6 +13,7 @@ pub mod executer;
 pub mod gc;
 pub mod input;
 pub mod log_storage;
+pub mod nar_storage;
 pub mod nix_flake;
 pub mod permission;
 pub mod pool;
@@ -25,6 +26,7 @@ use database::connect_db;
 use email::EmailService;
 use executer::SshBuildExecutor;
 use log_storage::FileLogStorage;
+use nar_storage::NarStore;
 use pool::LocalNixStoreProvider;
 use sources::Libgit2Prefetcher;
 use state::load_and_apply_state;
@@ -95,6 +97,43 @@ pub async fn init_state(
 
     let build_executor: Arc<dyn executer::BuildExecutor> = Arc::new(SshBuildExecutor::new());
 
+    let nar_storage = if let Some(ref bucket) = cli.s3_bucket {
+        let secret = cli
+            .s3_secret_access_key_file
+            .as_deref()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .map(|s| s.trim().to_string());
+
+        match NarStore::s3(
+            bucket,
+            &cli.s3_region,
+            cli.s3_endpoint.as_deref(),
+            cli.s3_access_key_id.as_deref(),
+            secret.as_deref(),
+            &cli.s3_prefix,
+        ) {
+            Ok(store) => {
+                println!("NAR storage: S3 bucket '{}'", bucket);
+                store
+            }
+            Err(e) => {
+                eprintln!("Failed to initialize S3 NAR storage: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        match NarStore::local(&cli.base_path) {
+            Ok(store) => {
+                println!("NAR storage: local ({})", cli.base_path);
+                store
+            }
+            Err(e) => {
+                eprintln!("Failed to initialize local NAR storage: {}", e);
+                std::process::exit(1);
+            }
+        }
+    };
+
     Arc::new(ServerState {
         db,
         cli,
@@ -106,5 +145,6 @@ pub async fn init_state(
         flake_prefetcher,
         derivation_resolver,
         build_executor,
+        nar_storage,
     })
 }

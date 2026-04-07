@@ -17,8 +17,7 @@ use core::database::{get_any_cache_by_name, get_cache_by_name};
 use core::executer::strip_nix_store_prefix;
 use core::input::{check_index_name, validate_display_name};
 use core::sources::{
-    format_cache_key, format_cache_public_key, generate_signing_key,
-    get_cache_nar_compressed_location, get_cache_nar_location, get_hash_from_url,
+    format_cache_key, format_cache_public_key, generate_signing_key, get_hash_from_url,
     get_path_from_build_output,
 };
 use core::types::*;
@@ -30,7 +29,6 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::process::Command;
 use tracing::error;
 use uuid::Uuid;
 
@@ -637,12 +635,8 @@ async fn cleanup_nars_for_orgs(state: Arc<ServerState>, org_ids: Vec<Uuid>) {
             .unwrap_or_default();
 
         for output in outputs {
-            if let Ok(nar_path) =
-                get_cache_nar_location(state.cli.base_path.clone(), output.hash.clone())
-                && let Err(e) = tokio::fs::remove_file(&nar_path).await
-                && e.kind() != std::io::ErrorKind::NotFound
-            {
-                error!(error = %e, path = %nar_path, "Failed to remove NAR file");
+            if let Err(e) = state.nar_storage.delete(&output.hash).await {
+                error!(error = %e, hash = %output.hash, "Failed to remove NAR from storage");
             }
 
             let mut active = output.into_active_model();
@@ -1438,96 +1432,9 @@ pub async fn nar(
         }
     };
 
-    let nar_file_path = get_cache_nar_location(state.cli.base_path.clone(), effective_hash.clone())
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: format!("Failed to get cache location: {}", e),
-                }),
-            )
-        })?;
-
-    let compressed_nar_path =
-        get_cache_nar_compressed_location(state.cli.base_path.clone(), effective_hash.clone())
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(BaseResponse {
-                        error: true,
-                        message: format!("Failed to get compressed cache location: {}", e),
-                    }),
-                )
-            })?;
-
-    let compressed = if tokio::fs::metadata(&compressed_nar_path).await.is_ok() {
-        // Compressed NAR already cached on disk — serve directly.
-        tokio::fs::read(&compressed_nar_path).await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: format!("Failed to read compressed NAR: {}", e),
-                }),
-            )
-        })?
-    } else if tokio::fs::metadata(&nar_file_path).await.is_ok() {
-        // Entry-point: raw NAR on disk — compress on the fly (no disk write needed,
-        // entry-points are GC-rooted and always available).
-        let nar_bytes = tokio::fs::read(&nar_file_path).await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: format!("Failed to read NAR file: {}", e),
-                }),
-            )
-        })?;
-        tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_bytes, 3))
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(BaseResponse {
-                        error: true,
-                        message: format!("Compression task panicked: {}", e),
-                    }),
-                )
-            })?
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(BaseResponse {
-                        error: true,
-                        message: format!("Failed to compress NAR: {}", e),
-                    }),
-                )
-            })?
-    } else {
-        // Non-entry-point: pack from the nix store on the fly.
-        let maybe_output = EBuildOutput::find()
-            .filter(
-                Condition::all()
-                    .add(CBuildOutput::IsCached.eq(true))
-                    .add(CBuildOutput::Hash.eq(effective_hash.clone())),
-            )
-            .one(&state.db)
-            .await
-            .map_err(WebError::from)
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(BaseResponse {
-                        error: true,
-                        message: format!("Database error: {}", e),
-                    }),
-                )
-            })?;
-
-        let pack_path = if let Some(ref bo) = maybe_output {
-            get_path_from_build_output(bo.clone())
-        } else {
+    let compressed = match state.nar_storage.get(&effective_hash).await {
+        Ok(Some(data)) => data,
+        Ok(None) => {
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(BaseResponse {
@@ -1535,66 +1442,16 @@ pub async fn nar(
                     message: "Path not found".to_string(),
                 }),
             ));
-        };
-
-        let output = Command::new(state.cli.binpath_nix.clone())
-            .arg("nar")
-            .arg("pack")
-            .arg(&pack_path)
-            .output()
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(BaseResponse {
-                        error: true,
-                        message: format!("Failed to pack NAR: {}", e),
-                    }),
-                )
-            })?;
-
-        if !output.status.success() {
+        }
+        Err(e) => {
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(BaseResponse {
                     error: true,
-                    message: "nix nar pack failed".to_string(),
+                    message: format!("Failed to read NAR: {}", e),
                 }),
             ));
         }
-
-        let nar_bytes = output.stdout;
-        let compressed_path_clone = compressed_nar_path.clone();
-        let compressed = tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_bytes, 6))
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(BaseResponse {
-                        error: true,
-                        message: format!("Compression task panicked: {}", e),
-                    }),
-                )
-            })?
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(BaseResponse {
-                        error: true,
-                        message: format!("Failed to compress NAR: {}", e),
-                    }),
-                )
-            })?;
-
-        // Persist compressed NAR so future requests skip the pack step.
-        let to_write = compressed.clone();
-        tokio::spawn(async move {
-            if let Err(e) = tokio::fs::write(&compressed_path_clone, &to_write).await {
-                tracing::warn!(error = %e, path = %compressed_path_clone, "Failed to write compressed NAR cache");
-            }
-        });
-
-        compressed
     };
 
     let bytes_len = compressed.len() as i64;

@@ -9,6 +9,7 @@ use super::evaluator::DerivationResolver;
 use super::executer::BuildExecutor;
 use super::input::{greater_than_zero, port_in_range};
 use super::log_storage::LogStorage;
+use super::nar_storage::NarStore;
 use super::pool::NixStoreProvider;
 use super::sources::FlakePrefetcher;
 use super::webhooks::WebhookClient;
@@ -127,12 +128,31 @@ pub struct Cli {
     /// embedded Boehm GC conflicts with Tokio's signal handling.
     #[arg(long, env = "GRADIENT_EVAL_WORKERS", value_parser = greater_than_zero::<usize>, default_value = "1")]
     pub eval_workers: usize,
-    /// TTL in hours for non-entry-point NAR cache files. When a cached NAR has not been
-    /// fetched within this many hours it is removed from disk and garbage-collected from
-    /// the nix store (entry-point packages with GC roots are never touched).
+    /// TTL in hours for cached NAR files that have not been fetched recently.
+    /// When expired the NAR is removed from storage and its GC root is deleted.
     /// Set to 0 to disable (default).
     #[arg(long, env = "GRADIENT_NAR_TTL_HOURS", default_value_t = 0)]
     pub nar_ttl_hours: u64,
+
+    // ── S3 / object-storage options ──────────────────────────────────────────
+    /// S3 bucket name. When set, NARs are stored in S3 instead of local disk.
+    #[arg(long, env = "GRADIENT_S3_BUCKET")]
+    pub s3_bucket: Option<String>,
+    /// AWS region for the S3 bucket.
+    #[arg(long, env = "GRADIENT_S3_REGION", default_value = "us-east-1")]
+    pub s3_region: String,
+    /// Custom S3-compatible endpoint URL (MinIO, Cloudflare R2, …).
+    #[arg(long, env = "GRADIENT_S3_ENDPOINT")]
+    pub s3_endpoint: Option<String>,
+    /// AWS access key ID. Falls back to instance credentials when absent.
+    #[arg(long, env = "GRADIENT_S3_ACCESS_KEY_ID")]
+    pub s3_access_key_id: Option<String>,
+    /// File containing the AWS secret access key.
+    #[arg(long, env = "GRADIENT_S3_SECRET_ACCESS_KEY_FILE")]
+    pub s3_secret_access_key_file: Option<String>,
+    /// Key prefix within the S3 bucket (e.g. "gradient/").
+    #[arg(long, env = "GRADIENT_S3_PREFIX", default_value = "")]
+    pub s3_prefix: String,
 }
 
 #[derive(Debug)]
@@ -147,6 +167,7 @@ pub struct ServerState {
     pub flake_prefetcher: Arc<dyn FlakePrefetcher>,
     pub derivation_resolver: Arc<dyn DerivationResolver>,
     pub build_executor: Arc<dyn BuildExecutor>,
+    pub nar_storage: NarStore,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

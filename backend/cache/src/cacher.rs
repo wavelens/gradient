@@ -6,10 +6,7 @@
 
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
-use core::sources::{
-    clear_key, format_cache_key, get_cache_nar_compressed_location, get_cache_nar_location,
-    get_hash_from_path, get_path_from_build_output, write_key,
-};
+use core::sources::{clear_key, format_cache_key, get_hash_from_path, get_path_from_build_output, write_key};
 use core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -224,22 +221,13 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         sign_build_output(Arc::clone(&state), cache, build_output.clone()).await;
     }
 
-    let is_entry_point = EEntryPoint::find()
-        .filter(CEntryPoint::Build.eq(build.id))
-        .one(&state.db)
-        .await
-        .unwrap_or(None)
-        .is_some();
-
     info!(
         hash = %build_output.hash,
         package = %build_output.package,
-        is_entry_point,
         "Caching build output"
     );
 
-    let pack_result =
-        pack_build_output(Arc::clone(&state), build_output.clone(), is_entry_point).await;
+    let pack_result = pack_build_output(Arc::clone(&state), build_output.clone()).await;
 
     let (file_hash, file_size) = match pack_result {
         Ok(result) => result,
@@ -416,7 +404,6 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
 pub async fn pack_build_output(
     state: Arc<ServerState>,
     build_output: MBuildOutput,
-    is_entry_point: bool,
 ) -> Result<(String, u32)> {
     let path = get_path_from_build_output(build_output);
 
@@ -437,16 +424,7 @@ pub async fn pack_build_output(
     }
 
     let nar_data = pack_output.stdout;
-    // Keep a copy for on-disk persistence (entry-point builds only).
-    let nar_data_for_disk = if is_entry_point {
-        nar_data.clone()
-    } else {
-        vec![]
-    };
 
-    // Compress in memory to compute file_hash / file_size — no disk writes.
-    // Must use the same level (3) as the web handler uses when serving, so that
-    // the narinfo FileHash matches the bytes clients actually receive.
     let compressed_data = tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_data, 6))
         .await
         .context("Compression task panicked")?
@@ -455,16 +433,11 @@ pub async fn pack_build_output(
     let file_size = compressed_data.len() as u32;
     let file_hash = nix_base32_sha256(&compressed_data);
 
-    // Only persist the raw NAR to disk for entry-point builds;
-    // non-entry-point NARs are compressed on the fly when served
-    if is_entry_point {
-        let nar_location = get_cache_nar_location(state.cli.base_path.clone(), path_hash)
-            .context("Failed to get NAR file location")?;
-
-        tokio::fs::write(&nar_location, &nar_data_for_disk)
-            .await
-            .context("Failed to write entry-point NAR to disk")?;
-    }
+    state
+        .nar_storage
+        .put(&path_hash, compressed_data)
+        .await
+        .context("Failed to store compressed NAR")?;
 
     Ok((format!("sha256:{}", file_hash), file_size))
 }
@@ -528,12 +501,11 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
             .await
             .context("Failed to update build output")?;
 
-        let file_location = get_cache_nar_location(state.cli.base_path.clone(), hash.clone())
-            .context("Failed to get cache NAR location")?;
-        if std::fs::metadata(&file_location).is_ok() {
-            std::fs::remove_file(&file_location)
-                .with_context(|| format!("Failed to remove cached file {}", file_location))?;
-        }
+        state
+            .nar_storage
+            .delete(&hash)
+            .await
+            .with_context(|| format!("Failed to remove cached NAR for {}", hash))?;
 
         let signatures = EBuildOutputSignature::find()
             .filter(CBuildOutputSignature::BuildOutput.eq(build_output.id))
@@ -592,18 +564,16 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         return Ok(());
     }
 
-    // Find non-entry-point outputs that haven't been fetched within the TTL.
+    // Find cached outputs that haven't been fetched within the TTL.
     let rows = state
         .db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"SELECT bo.id, bo.hash, bo.package
                FROM build_output bo
-               JOIN build b ON b.id = bo.build
                WHERE bo.is_cached = true
                  AND bo.last_fetched_at IS NOT NULL
-                 AND bo.last_fetched_at < NOW() AT TIME ZONE 'UTC' - ($1 * INTERVAL '1 hour')
-                 AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.build = b.id)"#,
+                 AND bo.last_fetched_at < NOW() AT TIME ZONE 'UTC' - ($1 * INTERVAL '1 hour')"#,
             [sea_orm::Value::BigInt(Some(ttl_hours as i64))],
         ))
         .await
@@ -624,13 +594,9 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         };
         let store_path = format!("/nix/store/{}-{}", hash, package);
 
-        // 1. Delete the compressed NAR cache file (best-effort).
-        if let Ok(zst_path) =
-            get_cache_nar_compressed_location(state.cli.base_path.clone(), hash.clone())
-            && let Err(e) = tokio::fs::remove_file(&zst_path).await
-            && e.kind() != std::io::ErrorKind::NotFound
-        {
-            warn!(error = %e, path = %zst_path, "Failed to remove stale compressed NAR");
+        // 1. Delete the compressed NAR from storage (best-effort).
+        if let Err(e) = state.nar_storage.delete(&hash).await {
+            warn!(error = %e, hash = %hash, "Failed to remove stale compressed NAR");
         }
 
         // 2. Remove the GC root so the path is no longer pinned by us.
@@ -674,7 +640,12 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
 }
 
 pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()> {
-    let cache_dir = format!("{}/nars", state.cli.base_path);
+    // Orphan cleanup requires local directory scanning; skip for S3 storage.
+    let Some(base_path) = state.nar_storage.local_base() else {
+        return Ok(());
+    };
+
+    let cache_dir = format!("{}/nars", base_path);
 
     if !std::path::Path::new(&cache_dir).exists() {
         return Ok(());
@@ -691,8 +662,10 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
                 let subentry = subentry.context("Failed to read subdirectory entry")?;
                 let file_path = subentry.path();
 
-                if file_path.extension().and_then(|s| s.to_str()) == Some("nar")
-                    && let Some(hash_part) = file_path.file_stem().and_then(|s| s.to_str())
+                // Match `{hash_suffix}.nar.zst` — extension is "zst", stem is "{hash_suffix}.nar"
+                if file_path.extension().and_then(|s| s.to_str()) == Some("zst")
+                    && let Some(stem) = file_path.file_stem().and_then(|s| s.to_str())
+                    && let Some(hash_part) = stem.strip_suffix(".nar")
                 {
                     let parent_dir = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
                     let full_hash = format!("{}{}", parent_dir, hash_part);
@@ -716,7 +689,6 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
         }
     }
 
-    // Remove orphaned files
     for file_path in orphaned_files {
         if let Err(e) = std::fs::remove_file(&file_path) {
             error!(file_path = ?file_path, error = %e, "Failed to remove orphaned cache file");

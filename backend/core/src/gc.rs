@@ -14,7 +14,6 @@ use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::sources::get_cache_nar_location;
 use crate::types::*;
 
 pub async fn remove_gcroot(state: &Arc<ServerState>, hash: &str, package: &str) {
@@ -106,13 +105,6 @@ pub async fn gc_project_evaluations(
             .context("GC: failed to query builds")?;
 
         for build in &builds {
-            let is_ep = EEntryPoint::find()
-                .filter(CEntryPoint::Build.eq(build.id))
-                .one(&state.db)
-                .await
-                .context("GC: failed to check entry point")?
-                .is_some();
-
             // Remove the build log.
             let log_path = format!("{}/logs/{}.log", state.cli.base_path, build.id);
             if let Err(e) = tokio::fs::remove_file(&log_path).await
@@ -130,20 +122,9 @@ pub async fn gc_project_evaluations(
                 .context("GC: failed to query build outputs")?;
 
             for output in &outputs {
-                if is_ep {
-                    remove_gcroot(&state, &output.hash, &output.package).await;
-                }
-                match get_cache_nar_location(state.cli.base_path.clone(), output.hash.clone()) {
-                    Ok(nar_path) => {
-                        if let Err(e) = tokio::fs::remove_file(&nar_path).await
-                            && e.kind() != std::io::ErrorKind::NotFound
-                        {
-                            warn!(error = %e, path = %nar_path, "GC: failed to remove NAR file");
-                        }
-                    }
-                    Err(e) => {
-                        warn!(error = %e, hash = %output.hash, "GC: failed to resolve NAR path")
-                    }
+                remove_gcroot(&state, &output.hash, &output.package).await;
+                if let Err(e) = state.nar_storage.delete(&output.hash).await {
+                    warn!(error = %e, hash = %output.hash, "GC: failed to remove NAR");
                 }
             }
         }
