@@ -5,6 +5,10 @@
 [Demo Instance](https://gradient.wavelens.io/api/v1/health)
 [API Docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml)
 
+<p align="center">
+  <a href="https://gradient.wavelens.io/organization/gradient/project/gradient"><img src="https://gradient.wavelens.io/api/v1/projects/gradient/gradient/badge" alt="Gradient"></a>
+</p>
+
 Gradient is a web-based Nix-based Continuous Integration (CI) system.
 
 > [!IMPORTANT]
