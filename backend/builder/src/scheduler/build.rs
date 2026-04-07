@@ -411,10 +411,16 @@ async fn requeue_build(state: Arc<ServerState>, build: MBuild) -> MBuild {
 /// (no non-Completed dependencies). Loops until a suitable build is found.
 async fn get_next_build(state: Arc<ServerState>) -> MBuild {
     loop {
+        // Order ready-to-run builds by direct dependency count (descending)
+        // so that integration builds — the ones that pulled in the largest
+        // amount of work to become ready — start first. Tie-break by
+        // `updated_at ASC` so older builds still drain before newer ones.
         let builds_sql = sea_orm::Statement::from_string(
             sea_orm::DbBackend::Postgres,
             r#"
-                SELECT * FROM public.build b
+                SELECT b.*
+                FROM public.build b
+                LEFT JOIN public.build_dependency bd ON bd.build = b.id
                 WHERE NOT EXISTS (
                     SELECT 1
                     FROM public.build_dependency d
@@ -422,7 +428,8 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                     WHERE d.build = b.id AND dep.status != 3
                 )
                 AND b.status = 1
-                ORDER BY b.updated_at ASC
+                GROUP BY b.id
+                ORDER BY COUNT(bd.dependency) DESC, b.updated_at ASC
             "#,
         );
 

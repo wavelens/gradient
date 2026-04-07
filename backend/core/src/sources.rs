@@ -436,6 +436,19 @@ pub async fn prefetch_flake(
         })?;
 
         debug!("Cloned repository to {:?} at rev {}", temp_path, rev);
+
+        // Lock the flake via the Nix C API. This drives libfetchers in-process,
+        // which fetches every transitive input (including private git+ssh ones,
+        // because we surface the org SSH key via GIT_SSH_COMMAND inside
+        // `lock_flake_with_ssh_key`) into /nix/store before evaluation runs.
+        crate::nix_flake::lock_flake_with_ssh_key(&temp_path, &private_key).map_err(|e| {
+            SourceError::NixFlakeArchiveFailed {
+                stderr: e.to_string(),
+            }
+        })?;
+
+        debug!("Locked flake and prefetched inputs for {:?}", temp_path);
+
         Ok::<(), SourceError>(())
     })
     .await

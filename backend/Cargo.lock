@@ -1105,6 +1105,7 @@ dependencies = [
  "lettre",
  "migration",
  "mockall",
+ "nix-bindings",
  "nix-daemon",
  "password-auth",
  "rand 0.9.2",

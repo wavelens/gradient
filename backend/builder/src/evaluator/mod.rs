@@ -11,7 +11,7 @@ mod nix_commands;
 mod nix_eval;
 
 pub use drv::Derivation;
-pub use nix_commands::{get_derivation, get_derivation_cmd, get_features};
+pub use nix_commands::{get_derivation, get_derivation_path, get_features};
 
 use anyhow::{Context, Result};
 use core::executer::*;
@@ -20,7 +20,7 @@ use core::sources::prefetch_flake;
 use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
-use futures::stream::{self, StreamExt};
+use nix_eval::NixEvaluator;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use std::sync::Arc;
 use tracing::{debug, error, info, instrument, warn};
@@ -99,21 +99,80 @@ pub async fn evaluate(
     let mut failed_derivations: Vec<(String, String)> = vec![];
     let total_derivations = all_derivations.len();
 
-    // Resolve all derivation paths in parallel — each `nix path-info --derivation` call
-    // is independent and CPU-bound, so running them concurrently uses all available cores.
-    let concurrency = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    // Resolve all derivation paths via the embedded Nix evaluator. The
+    // evaluator is created once and shared across worker threads — `EvalState`
+    // is `Send + Sync` per nix_bindings, so concurrent `eval_from_string`
+    // calls on the same instance are safe. Workers run inside a single
+    // `spawn_blocking` task so signal-blocked Tokio worker threads never
+    // touch the Nix C API / Boehm GC.
+    let nix_repo_for_eval = nix_repository.clone();
     let resolved: Vec<ResolvedDerivation> =
-        stream::iter(all_derivations.into_iter())
-            .map(|derivation_string| {
-                let path = format!("{}#{}", nix_repository, derivation_string);
-                async move {
-                    let result = get_derivation_cmd(&path).await;
-                    (derivation_string, result)
+        tokio::task::spawn_blocking(move || -> Vec<ResolvedDerivation> {
+            let evaluator = match NixEvaluator::new() {
+                Ok(e) => Arc::new(e),
+                Err(e) => {
+                    let err_str = e.to_string();
+                    return all_derivations
+                        .into_iter()
+                        .map(|d| {
+                            (
+                                d,
+                                Err(anyhow::anyhow!(
+                                    "failed to initialize nix evaluator: {}",
+                                    err_str
+                                )),
+                            )
+                        })
+                        .collect();
                 }
-            })
-            .buffer_unordered(concurrency)
-            .collect()
-            .await;
+            };
+
+            let n_workers = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+                .min(all_derivations.len().max(1));
+
+            // Round-robin partition keeps chunk sizes balanced even when
+            // per-derivation evaluation cost varies wildly.
+            let mut chunks: Vec<Vec<(usize, String)>> =
+                (0..n_workers).map(|_| Vec::new()).collect();
+            for (idx, d) in all_derivations.into_iter().enumerate() {
+                chunks[idx % n_workers].push((idx, d));
+            }
+
+            let mut indexed: Vec<(usize, ResolvedDerivation)> = std::thread::scope(|scope| {
+                let handles: Vec<_> = chunks
+                    .into_iter()
+                    .map(|chunk| {
+                        let evaluator = Arc::clone(&evaluator);
+                        let nix_repo = nix_repo_for_eval.clone();
+                        scope.spawn(move || {
+                            chunk
+                                .into_iter()
+                                .map(|(idx, derivation_string)| {
+                                    let result = get_derivation_path(
+                                        &evaluator,
+                                        &nix_repo,
+                                        &derivation_string,
+                                    );
+                                    (idx, (derivation_string, result))
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                    })
+                    .collect();
+
+                handles
+                    .into_iter()
+                    .flat_map(|h| h.join().expect("derivation resolver worker panicked"))
+                    .collect()
+            });
+
+            indexed.sort_by_key(|(idx, _)| *idx);
+            indexed.into_iter().map(|(_, r)| r).collect()
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("derivation resolver task panicked: {}", e))?;
 
     // Process resolved derivations sequentially (store and acc require exclusive access).
     for (derivation_string, derivation_result) in resolved {

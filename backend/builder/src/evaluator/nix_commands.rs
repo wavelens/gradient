@@ -7,39 +7,27 @@
 use anyhow::Context;
 use core::executer::{nix_store_path, strip_nix_store_prefix};
 use entity::server::Architecture;
-use tokio::process::Command;
 
-/// Resolves a flake output path to its store derivation path.
+use super::nix_eval::{escape_nix_str, NixEvaluator};
+
+/// Resolves a flake attribute path to its store derivation path using the
+/// embedded Nix evaluator.
 ///
-/// `path` must be of the form `"flake_ref#attr.path"`, e.g.
-/// `"path:/tmp/abc#packages.x86_64-linux.hello"`.
-pub async fn get_derivation_cmd(path: &str) -> anyhow::Result<(String, Vec<String>)> {
-    let (flake_ref, attr_path) = path
-        .split_once('#')
-        .with_context(|| format!("path '{}' does not contain '#'", path))?;
-
+/// **Synchronous**: must run inside `tokio::task::spawn_blocking`.
+pub fn get_derivation_path(
+    evaluator: &NixEvaluator,
+    flake_ref: &str,
+    attr_path: &str,
+) -> anyhow::Result<(String, Vec<String>)> {
     let expr = format!(
         "toString (builtins.getFlake \"{}\").{}.drvPath",
-        super::nix_eval::escape_nix_str(flake_ref),
+        escape_nix_str(flake_ref),
         attr_path,
     );
 
-    let output = Command::new("nix")
-        .args(["eval", "--json", "--expr", &expr])
-        .output()
-        .await
-        .context("failed to spawn nix")?;
-
-    if !output.status.success() {
-        anyhow::bail!(
-            "nix eval drvPath failed for '{}': {}",
-            path,
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-
-    let drv_path: String = serde_json::from_slice(&output.stdout)
-        .context("failed to parse nix eval output")?;
+    let drv_path = evaluator
+        .eval_string(&expr)
+        .with_context(|| format!("nix eval drvPath failed for '{}#{}'", flake_ref, attr_path))?;
 
     Ok((strip_nix_store_prefix(&drv_path), vec![]))
 }

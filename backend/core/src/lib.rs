@@ -11,6 +11,7 @@ pub mod executer;
 pub mod gc;
 pub mod input;
 pub mod log_storage;
+pub mod nix_flake;
 pub mod permission;
 pub mod pool;
 pub mod sources;

@@ -17,6 +17,7 @@ chrono           = { workspace = true }
 entity           = { workspace = true }
 futures          = { workspace = true }
 migration        = { workspace = true }
+nix-bindings     = { workspace = true }
 nix-daemon       = { workspace = true }
 rand             = { workspace = true }
 sea-orm          = { workspace = true }
