@@ -21,7 +21,7 @@ use std::io::{BufRead, Write};
 
 use super::flake::discover_derivations;
 use super::nix_commands::get_derivation_path;
-use super::nix_eval::NixEvaluator;
+use super::nix_eval::{NixEvaluator, escape_nix_str};
 
 /// Request from parent → worker. One JSON object per line on the worker's stdin.
 #[derive(Debug, Serialize, Deserialize)]
@@ -38,6 +38,9 @@ pub enum EvalRequest {
         repository: String,
         attrs: Vec<String>,
     },
+    /// Query the attribute names of a single path inside a flake. Used by the
+    /// parent to fan out wildcard expansion across workers in parallel.
+    AttrNames { repository: String, path: String },
     /// Ask the worker to exit cleanly. Parent uses this on graceful shutdown.
     Shutdown,
 }
@@ -48,6 +51,7 @@ pub enum EvalRequest {
 pub enum EvalResponse {
     ListOk { attrs: Vec<String> },
     ResolveOk { items: Vec<ResolvedItem> },
+    AttrNamesOk { keys: Vec<String> },
     Err { message: String },
 }
 
@@ -166,6 +170,32 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                     }
                 }
                 EvalResponse::ResolveOk { items }
+            }
+            EvalRequest::AttrNames { repository, path } => {
+                let Some(ev) = evaluator.as_ref() else {
+                    write_response(
+                        &mut writer,
+                        &EvalResponse::Err {
+                            message: "evaluator not initialized".to_string(),
+                        },
+                    )?;
+                    continue;
+                };
+                let expr = if path.is_empty() {
+                    format!("(builtins.getFlake \"{}\")", escape_nix_str(&repository))
+                } else {
+                    format!(
+                        "(builtins.getFlake \"{}\").{}",
+                        escape_nix_str(&repository),
+                        path
+                    )
+                };
+                match ev.attr_names(&expr) {
+                    Ok(keys) => EvalResponse::AttrNamesOk { keys },
+                    Err(e) => EvalResponse::Err {
+                        message: format!("{:#}", e),
+                    },
+                }
             }
         };
 
