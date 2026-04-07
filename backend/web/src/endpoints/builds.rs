@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::authorization::{decode_download_token, encode_download_token, MaybeUser};
+use crate::authorization::{MaybeUser, decode_download_token, encode_download_token};
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use async_stream::stream;
@@ -270,7 +270,12 @@ pub async fn post_build_log(
     // Capture current log length so the stream only delivers new content,
     // avoiding duplication of what the client already received via GET.
     let log_key = build.log_id.unwrap_or(build_id);
-    let initial_offset = state.log_storage.read(log_key).await.unwrap_or_default().len();
+    let initial_offset = state
+        .log_storage
+        .read(log_key)
+        .await
+        .unwrap_or_default()
+        .len();
 
     let stream = stream! {
         let mut last_offset: usize = initial_offset;
@@ -312,8 +317,12 @@ pub async fn post_build_log(
     };
 
     let mut response = StreamBodyAs::json_nl(stream).into_response();
-    response.headers_mut().insert("X-Accel-Buffering", HeaderValue::from_static("no"));
-    response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    response
+        .headers_mut()
+        .insert("X-Accel-Buffering", HeaderValue::from_static("no"));
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
     Ok(response)
 }
 
@@ -634,14 +643,18 @@ pub async fn get_build_download_token(
         EProject::find_by_id(project_id)
             .one(&state.db)
             .await?
-            .ok_or_else(|| WebError::InternalServerError("Evaluation data inconsistency".to_string()))?
+            .ok_or_else(|| {
+                WebError::InternalServerError("Evaluation data inconsistency".to_string())
+            })?
             .organization
     } else {
         EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
             .await?
-            .ok_or_else(|| WebError::InternalServerError("Direct build data inconsistency".to_string()))?
+            .ok_or_else(|| {
+                WebError::InternalServerError("Direct build data inconsistency".to_string())
+            })?
             .organization
     };
 
@@ -652,7 +665,10 @@ pub async fn get_build_download_token(
     let token = encode_download_token(State(Arc::clone(&state)), build_id)
         .map_err(|_| WebError::failed_to_generate_token())?;
 
-    Ok(Json(BaseResponse { error: false, message: token }))
+    Ok(Json(BaseResponse {
+        error: false,
+        message: token,
+    }))
 }
 
 pub async fn get_build_download(
@@ -706,7 +722,9 @@ pub async fn get_build_download(
     let organization = EOrganization::find_by_id(organization_id)
         .one(&state.db)
         .await?
-        .ok_or_else(|| WebError::InternalServerError("Organization data inconsistency".to_string()))?;
+        .ok_or_else(|| {
+            WebError::InternalServerError("Organization data inconsistency".to_string())
+        })?;
 
     if let Some(token_str) = query.token {
         let claims = decode_download_token(State(Arc::clone(&state)), token_str)
@@ -856,7 +874,6 @@ pub async fn get_build_download(
     Err(WebError::not_found("File"))
 }
 
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DirectBuildInfo {
     pub id: String,
@@ -992,7 +1009,6 @@ async fn authorize_build_opt(
 
     Ok(())
 }
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DependencyNode {

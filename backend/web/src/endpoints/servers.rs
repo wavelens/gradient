@@ -16,7 +16,9 @@ use core::input::{check_index_name, validate_display_name};
 use core::sources::decrypt_ssh_private_key;
 use core::types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -93,12 +95,21 @@ pub async fn get(
 
     let items: ListResponse = raw
         .iter()
-        .map(|s| ListItem { id: s.id, name: s.name.clone(), managed: s.managed })
+        .map(|s| ListItem {
+            id: s.id,
+            name: s.name.clone(),
+            managed: s.managed,
+        })
         .collect();
 
     Ok(Json(BaseResponse {
         error: false,
-        message: Paginated { items, total, page, per_page },
+        message: Paginated {
+            items,
+            total,
+            page,
+            per_page,
+        },
     }))
 }
 
@@ -802,19 +813,22 @@ pub async fn post_server_check_connection(
         }
     };
 
-    let (private_key, public_key) =
-        match decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization.clone(), &state.cli.serve_url) {
-            Ok(keys) => keys,
-            Err(e) => {
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(BaseResponse {
-                        error: true,
-                        message: format!("Failed to decrypt SSH private key: {}", e),
-                    }),
-                ));
-            }
-        };
+    let (private_key, public_key) = match decrypt_ssh_private_key(
+        state.cli.crypt_secret_file.clone(),
+        organization.clone(),
+        &state.cli.serve_url,
+    ) {
+        Ok(keys) => keys,
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to decrypt SSH private key: {}", e),
+                }),
+            ));
+        }
+    };
 
     let server_id = server.id;
     match connect(server, None, public_key, private_key).await {

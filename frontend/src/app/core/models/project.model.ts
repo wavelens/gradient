@@ -82,8 +82,10 @@ export interface Evaluation {
 
 export type EvaluationStatus =
   | 'Queued'
-  | 'Evaluating'
+  | 'EvaluatingFlake'
+  | 'EvaluatingDerivation'
   | 'Building'
+  | 'Waiting'
   | 'Completed'
   | 'Failed'
   | 'Aborted';

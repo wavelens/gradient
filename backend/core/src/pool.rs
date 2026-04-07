@@ -108,9 +108,7 @@ impl NixStoreProvider for LocalNixStoreProvider {
         match tokio::fs::remove_file(&gcroot_path).await {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => {
-                Err(anyhow::Error::from(e).context(format!("remove gcroot {}", gcroot_path)))
-            }
+            Err(e) => Err(anyhow::Error::from(e).context(format!("remove gcroot {}", gcroot_path))),
         }
     }
 

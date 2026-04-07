@@ -81,7 +81,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     Completed: 4,
   };
 
-  private readonly statusesWithBuilds = new Set<EvaluationStatus>(['Building', 'Completed', 'Failed', 'Aborted']);
+  private readonly statusesWithBuilds = new Set<EvaluationStatus>(['Building', 'Waiting', 'Completed', 'Failed', 'Aborted']);
 
   loadEntryPoints(project?: ProjectDetail): void {
     // When the newest eval is Queued/Evaluating it has no builds yet — fall back to
@@ -151,7 +151,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   }
 
   isRunningStatus(status: EvaluationStatus): boolean {
-    return status === 'Queued' || status === 'Evaluating' || status === 'Building';
+    return status === 'Queued' || status === 'EvaluatingFlake' || status === 'EvaluatingDerivation' || status === 'Building' || status === 'Waiting';
   }
 
   isBuildRunning(status: BuildStatus): boolean {
@@ -224,7 +224,8 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       case 'Completed': return 'status-success';
       case 'Failed': return 'status-danger';
       case 'Aborted': return 'status-secondary';
-      case 'Queued': case 'Evaluating': case 'Building': return 'status-running';
+      case 'Waiting': return 'status-warning';
+      case 'Queued': case 'EvaluatingFlake': case 'EvaluatingDerivation': case 'Building': return 'status-running';
       default: return '';
     }
   }
@@ -235,8 +236,16 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       case 'Failed': return 'error';
       case 'Aborted': return 'cancel';
       case 'Queued': return 'schedule';
-      case 'Evaluating': case 'Building': return 'sync';
+      case 'Waiting': return 'pause_circle';
+      case 'EvaluatingFlake': case 'EvaluatingDerivation': case 'Building': return 'sync';
       default: return 'help';
+    }
+  }
+
+  getStatusLabel(status: EvaluationStatus): string {
+    switch (status) {
+      case 'EvaluatingFlake': case 'EvaluatingDerivation': return 'Evaluating';
+      default: return status;
     }
   }
 }

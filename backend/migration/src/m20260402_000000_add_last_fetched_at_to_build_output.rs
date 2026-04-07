@@ -16,7 +16,11 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(BuildOutput::Table)
-                    .add_column(ColumnDef::new(BuildOutput::LastFetchedAt).date_time().null())
+                    .add_column(
+                        ColumnDef::new(BuildOutput::LastFetchedAt)
+                            .date_time()
+                            .null(),
+                    )
                     .to_owned(),
             )
             .await

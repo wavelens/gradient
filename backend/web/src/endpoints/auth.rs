@@ -170,11 +170,15 @@ pub async fn post_basic_login(
         .map_err(|_| WebError::failed_to_update_user())?;
 
     let cookie = jwt_cookie(&token, body.remember_me);
-    let res = BaseResponse { error: false, message: token };
+    let res = BaseResponse {
+        error: false,
+        message: token,
+    };
     let mut response = Json(res).into_response();
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_str(&cookie).map_err(|_| WebError::InternalServerError("Bad cookie".to_string()))?,
+        HeaderValue::from_str(&cookie)
+            .map_err(|_| WebError::InternalServerError("Bad cookie".to_string()))?,
     );
     Ok(response)
 }
@@ -293,7 +297,10 @@ pub async fn post_logout(_state: State<Arc<ServerState>>) -> WebResult<Response>
 }
 
 fn jwt_cookie(token: &str, remember_me: bool) -> String {
-    let base = format!("jwt_token={}; HttpOnly; Secure; SameSite=Strict; Path=/", token);
+    let base = format!(
+        "jwt_token={}; HttpOnly; Secure; SameSite=Strict; Path=/",
+        token
+    );
     if remember_me {
         format!("{}; Max-Age=2592000", base) // 30 days
     } else {

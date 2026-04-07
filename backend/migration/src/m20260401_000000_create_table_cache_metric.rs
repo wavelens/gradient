@@ -17,9 +17,18 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(CacheMetric::Table)
                     .if_not_exists()
-                    .col(ColumnDef::new(CacheMetric::Id).uuid().not_null().primary_key())
+                    .col(
+                        ColumnDef::new(CacheMetric::Id)
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
                     .col(ColumnDef::new(CacheMetric::Cache).uuid().not_null())
-                    .col(ColumnDef::new(CacheMetric::BucketTime).date_time().not_null())
+                    .col(
+                        ColumnDef::new(CacheMetric::BucketTime)
+                            .date_time()
+                            .not_null(),
+                    )
                     .col(
                         ColumnDef::new(CacheMetric::BytesSent)
                             .big_integer()

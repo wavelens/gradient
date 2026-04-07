@@ -17,13 +17,16 @@ use core::database::{get_any_cache_by_name, get_cache_by_name};
 use core::executer::nix_store_path;
 use core::input::{check_index_name, validate_display_name};
 use core::sources::{
-    format_cache_key, format_cache_public_key, generate_signing_key, get_cache_nar_compressed_location,
-    get_cache_nar_location, get_hash_from_url, get_path_from_build_output,
+    format_cache_key, format_cache_public_key, generate_signing_key,
+    get_cache_nar_compressed_location, get_cache_nar_location, get_hash_from_url,
+    get_path_from_build_output,
 };
 use core::types::*;
 use entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -37,7 +40,9 @@ async fn try_authenticate_basic(headers: &HeaderMap, state: &Arc<ServerState>) -
     let auth = headers.get(axum::http::header::AUTHORIZATION)?;
     let val = auth.to_str().ok()?;
     let encoded = val.strip_prefix("Basic ")?;
-    let decoded = base64::engine::general_purpose::STANDARD.decode(encoded).ok()?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
     let creds = String::from_utf8(decoded).ok()?;
     let password = creds.split_once(':').map(|(_, p)| p)?.to_string();
     let token_data = decode_jwt(State(Arc::clone(state)), password).await.ok()?;
@@ -257,7 +262,9 @@ async fn get_nar_by_hash(
         nar_hash,
         nar_size: pathinfo.nar_size,
         references,
-        deriver: pathinfo.deriver.map(|deriver| nix_store_path(deriver.as_str())),
+        deriver: pathinfo
+            .deriver
+            .map(|deriver| nix_store_path(deriver.as_str())),
         sig,
         ca: pathinfo.ca,
     })
@@ -269,7 +276,10 @@ pub async fn get_cache_name_available(
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
     if check_index_name(&name).is_err() {
-        return Ok(Json(BaseResponse { error: false, message: false }));
+        return Ok(Json(BaseResponse {
+            error: false,
+            message: false,
+        }));
     }
     let exists = ECache::find()
         .filter(CCache::Name.eq(name.as_str()))
@@ -293,7 +303,10 @@ pub async fn get(
         .all(&state.db)
         .await?;
 
-    let org_ids: Vec<Uuid> = org_memberships.into_iter().map(|m| m.organization).collect();
+    let org_ids: Vec<Uuid> = org_memberships
+        .into_iter()
+        .map(|m| m.organization)
+        .collect();
 
     // Find cache IDs subscribed by those orgs
     let org_cache_ids: Vec<Uuid> = if org_ids.is_empty() {
@@ -624,7 +637,8 @@ async fn cleanup_nars_for_orgs(state: Arc<ServerState>, org_ids: Vec<Uuid>) {
             .unwrap_or_default();
 
         for output in outputs {
-            if let Ok(nar_path) = get_cache_nar_location(state.cli.base_path.clone(), output.hash.clone())
+            if let Ok(nar_path) =
+                get_cache_nar_location(state.cli.base_path.clone(), output.hash.clone())
                 && let Err(e) = tokio::fs::remove_file(&nar_path).await
                 && e.kind() != std::io::ErrorKind::NotFound
             {
@@ -1041,7 +1055,10 @@ pub async fn get_cache_netrc(
         .unwrap_or("localhost")
         .to_string();
 
-    let netrc = format!("machine {}\nlogin gradient\npassword GRAD{}\n", host, raw_key);
+    let netrc = format!(
+        "machine {}\nlogin gradient\npassword GRAD{}\n",
+        host, raw_key
+    );
 
     Ok(Json(BaseResponse {
         error: false,
@@ -1246,7 +1263,9 @@ pub async fn path(
 
     require_cache_auth(&headers, &state, &cache).await?;
 
-    if let Ok(path_info) = get_nar_by_hash(Arc::clone(&state), cache.clone(), path_hash.clone()).await {
+    if let Ok(path_info) =
+        get_nar_by_hash(Arc::clone(&state), cache.clone(), path_hash.clone()).await
+    {
         return Response::builder()
             .status(StatusCode::OK)
             .header(
@@ -1274,11 +1293,19 @@ pub async fn path(
 
     let http_client = reqwest::Client::new();
     for upstream in upstreams {
-        let Some(ref base_url) = upstream.url else { continue };
+        let Some(ref base_url) = upstream.url else {
+            continue;
+        };
         let narinfo_url = format!("{}/{}.narinfo", base_url.trim_end_matches('/'), path_hash);
-        let Ok(resp) = http_client.get(&narinfo_url).send().await else { continue };
-        if !resp.status().is_success() { continue; }
-        let Ok(body) = resp.text().await else { continue };
+        let Ok(resp) = http_client.get(&narinfo_url).send().await else {
+            continue;
+        };
+        if !resp.status().is_success() {
+            continue;
+        }
+        let Ok(body) = resp.text().await else {
+            continue;
+        };
         // Rewrite the URL: field to proxy through our upstream_nar endpoint.
         let rewritten = body
             .lines()
@@ -1290,7 +1317,8 @@ pub async fn path(
                 }
             })
             .collect::<Vec<_>>()
-            .join("\n") + "\n";
+            .join("\n")
+            + "\n";
         return Response::builder()
             .status(StatusCode::OK)
             .header(
@@ -1458,8 +1486,24 @@ pub async fn nar(
         })?;
         tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_bytes, 3))
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Compression task panicked: {}", e) })))?
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Failed to compress NAR: {}", e) })))?
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: format!("Compression task panicked: {}", e),
+                    }),
+                )
+            })?
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: format!("Failed to compress NAR: {}", e),
+                    }),
+                )
+            })?
     } else {
         // Non-entry-point: pack from the nix store on the fly.
         let maybe_output = EBuildOutput::find()
@@ -1521,11 +1565,26 @@ pub async fn nar(
 
         let nar_bytes = output.stdout;
         let compressed_path_clone = compressed_nar_path.clone();
-        let compressed =
-            tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_bytes, 6))
-                .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Compression task panicked: {}", e) })))?
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Failed to compress NAR: {}", e) })))?;
+        let compressed = tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_bytes, 6))
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: format!("Compression task panicked: {}", e),
+                    }),
+                )
+            })?
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(BaseResponse {
+                        error: true,
+                        message: format!("Failed to compress NAR: {}", e),
+                    }),
+                )
+            })?;
 
         // Persist compressed NAR so future requests skip the pack step.
         let to_write = compressed.clone();
@@ -1595,12 +1654,34 @@ pub async fn upstream_nar(
         .await
     {
         Ok(Some(c)) => c,
-        Ok(None) => return Err((StatusCode::NOT_FOUND, Json(BaseResponse { error: true, message: "Cache not found".to_string() }))),
-        Err(e) => return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Database error: {}", e) }))),
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Cache not found".to_string(),
+                }),
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
+                }),
+            ));
+        }
     };
 
     if !cache.active {
-        return Err((StatusCode::BAD_REQUEST, Json(BaseResponse { error: true, message: "Cache is disabled".to_string() })));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: "Cache is disabled".to_string(),
+            }),
+        ));
     }
 
     require_cache_auth(&headers, &state, &cache).await?;
@@ -1609,33 +1690,83 @@ pub async fn upstream_nar(
         .filter(CCacheUpstream::Cache.eq(cache.id))
         .one(&state.db)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Database error: {}", e) })))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, Json(BaseResponse { error: true, message: "Upstream not found".to_string() })))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Database error: {}", e),
+                }),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(BaseResponse {
+                    error: true,
+                    message: "Upstream not found".to_string(),
+                }),
+            )
+        })?;
 
-    let base_url = upstream.url.ok_or_else(|| (StatusCode::BAD_REQUEST, Json(BaseResponse { error: true, message: "Not an external upstream".to_string() })))?;
+    let base_url = upstream.url.ok_or_else(|| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(BaseResponse {
+                error: true,
+                message: "Not an external upstream".to_string(),
+            }),
+        )
+    })?;
 
     let nar_url = format!("{}/{}", base_url.trim_end_matches('/'), path);
     let http_client = reqwest::Client::new();
-    let resp = http_client
-        .get(&nar_url)
-        .send()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, Json(BaseResponse { error: true, message: format!("Upstream request failed: {}", e) })))?;
+    let resp = http_client.get(&nar_url).send().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(BaseResponse {
+                error: true,
+                message: format!("Upstream request failed: {}", e),
+            }),
+        )
+    })?;
 
     if !resp.status().is_success() {
-        return Err((StatusCode::NOT_FOUND, Json(BaseResponse { error: true, message: "Not found in upstream".to_string() })));
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(BaseResponse {
+                error: true,
+                message: "Not found in upstream".to_string(),
+            }),
+        ));
     }
 
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, Json(BaseResponse { error: true, message: format!("Failed to read upstream response: {}", e) })))?;
+    let bytes = resp.bytes().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(BaseResponse {
+                error: true,
+                message: format!("Failed to read upstream response: {}", e),
+            }),
+        )
+    })?;
 
     Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, HeaderValue::from_static("application/x-nix-nar"))
+        .header(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/x-nix-nar"),
+        )
         .body(Body::from(bytes))
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(BaseResponse { error: true, message: format!("Failed to build response: {}", e) })))
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(BaseResponse {
+                    error: true,
+                    message: format!("Failed to build response: {}", e),
+                }),
+            )
+        })
 }
 
 // ── Nix helpers ───────────────────────────────────────────────────────────────
@@ -1661,24 +1792,25 @@ fn nix32_encode(bytes: &[u8]) -> String {
 fn normalize_nar_hash(hash: &str) -> String {
     // SRI format: sha256-<base64>
     if let Some(b64) = hash.strip_prefix("sha256-")
-        && let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) {
-            return format!("sha256:{}", nix32_encode(&bytes));
-        }
+        && let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64)
+    {
+        return format!("sha256:{}", nix32_encode(&bytes));
+    }
     // Already in nix32 format: sha256:<nix32>
     if hash.starts_with("sha256:") {
         return hash.to_string();
     }
     // Raw hex (64 chars = 32 bytes SHA-256)
-    if hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit())
+    if hash.len() == 64
+        && hash.chars().all(|c| c.is_ascii_hexdigit())
         && let Ok(bytes) = (0..32)
             .map(|i| u8::from_str_radix(&hash[i * 2..i * 2 + 2], 16))
             .collect::<Result<Vec<u8>, _>>()
-        {
-            return format!("sha256:{}", nix32_encode(&bytes));
-        }
+    {
+        return format!("sha256:{}", nix32_encode(&bytes));
+    }
     hash.to_string()
 }
-
 
 // ── Upstream caches ───────────────────────────────────────────────────────────
 
@@ -1735,7 +1867,10 @@ pub async fn get_cache_upstreams(
         })
         .collect();
 
-    Ok(Json(BaseResponse { error: false, message: upstreams }))
+    Ok(Json(BaseResponse {
+        error: false,
+        message: upstreams,
+    }))
 }
 
 pub async fn put_cache_upstream(
@@ -1749,12 +1884,18 @@ pub async fn put_cache_upstream(
         .ok_or_else(|| WebError::not_found("Cache"))?;
 
     let record = match body {
-        AddUpstreamRequest::Internal { cache_name, display_name, mode } => {
+        AddUpstreamRequest::Internal {
+            cache_name,
+            display_name,
+            mode,
+        } => {
             let upstream = get_cache_by_name(state.0.clone(), user.id, cache_name.clone())
                 .await?
                 .ok_or_else(|| WebError::not_found("Upstream cache"))?;
             if upstream.id == cache.id {
-                return Err(WebError::BadRequest("A cache cannot be its own upstream".to_string()));
+                return Err(WebError::BadRequest(
+                    "A cache cannot be its own upstream".to_string(),
+                ));
             }
             let name = display_name.unwrap_or_else(|| upstream.display_name.clone());
             ACacheUpstream {
@@ -1767,21 +1908,26 @@ pub async fn put_cache_upstream(
                 public_key: Set(None),
             }
         }
-        AddUpstreamRequest::External { display_name, url, public_key } => {
-            ACacheUpstream {
-                id: Set(Uuid::new_v4()),
-                cache: Set(cache.id),
-                display_name: Set(display_name),
-                mode: Set(CacheSubscriptionMode::ReadOnly),
-                upstream_cache: Set(None),
-                url: Set(Some(url)),
-                public_key: Set(Some(public_key)),
-            }
-        }
+        AddUpstreamRequest::External {
+            display_name,
+            url,
+            public_key,
+        } => ACacheUpstream {
+            id: Set(Uuid::new_v4()),
+            cache: Set(cache.id),
+            display_name: Set(display_name),
+            mode: Set(CacheSubscriptionMode::ReadOnly),
+            upstream_cache: Set(None),
+            url: Set(Some(url)),
+            public_key: Set(Some(public_key)),
+        },
     };
 
     let inserted = record.insert(&state.db).await?;
-    Ok(Json(BaseResponse { error: false, message: inserted.id }))
+    Ok(Json(BaseResponse {
+        error: false,
+        message: inserted.id,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1829,7 +1975,10 @@ pub async fn patch_cache_upstream(
 
     active.update(&state.db).await?;
 
-    Ok(Json(BaseResponse { error: false, message: "Upstream updated".to_string() }))
+    Ok(Json(BaseResponse {
+        error: false,
+        message: "Upstream updated".to_string(),
+    }))
 }
 
 pub async fn delete_cache_upstream(
@@ -1850,5 +1999,8 @@ pub async fn delete_cache_upstream(
     let active: ACacheUpstream = record.into();
     active.delete(&state.db).await?;
 
-    Ok(Json(BaseResponse { error: false, message: "Upstream removed".to_string() }))
+    Ok(Json(BaseResponse {
+        error: false,
+        message: "Upstream removed".to_string(),
+    }))
 }

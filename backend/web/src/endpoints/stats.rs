@@ -11,11 +11,11 @@ use axum::{Extension, Json};
 use chrono::{NaiveDateTime, Timelike, Utc};
 use core::database::get_any_cache_by_name;
 use core::types::*;
+use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
     QueryFilter, Statement,
 };
-use sea_orm::ActiveValue::Set;
 use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -169,9 +169,9 @@ pub async fn get_cache_stats(
 
     let (minutes, hours, days, weeks) = tokio::try_join!(
         aggregate_traffic(&state.db, cache.id, "minute", "59 minutes"),
-        aggregate_traffic(&state.db, cache.id, "hour",   "23 hours"),
-        aggregate_traffic(&state.db, cache.id, "day",    "29 days"),
-        aggregate_traffic(&state.db, cache.id, "week",   "11 weeks"),
+        aggregate_traffic(&state.db, cache.id, "hour", "23 hours"),
+        aggregate_traffic(&state.db, cache.id, "day", "29 days"),
+        aggregate_traffic(&state.db, cache.id, "week", "11 weeks"),
     )?;
 
     Ok(Json(BaseResponse {

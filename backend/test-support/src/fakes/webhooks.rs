@@ -53,13 +53,7 @@ impl RecordingWebhookClient {
 
 #[async_trait]
 impl WebhookClient for RecordingWebhookClient {
-    async fn deliver(
-        &self,
-        url: &str,
-        signature: &str,
-        event: &str,
-        body: String,
-    ) -> Result<u16> {
+    async fn deliver(&self, url: &str, signature: &str, event: &str, body: String) -> Result<u16> {
         self.calls.lock().unwrap().push(RecordedWebhookCall {
             url: url.to_string(),
             signature: signature.to_string(),

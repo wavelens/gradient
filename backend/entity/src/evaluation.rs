@@ -15,14 +15,18 @@ pub enum EvaluationStatus {
     #[sea_orm(num_value = 0)]
     Queued,
     #[sea_orm(num_value = 1)]
-    Evaluating,
+    EvaluatingFlake,
     #[sea_orm(num_value = 2)]
-    Building,
+    EvaluatingDerivation,
     #[sea_orm(num_value = 3)]
-    Completed,
+    Building,
     #[sea_orm(num_value = 4)]
-    Failed,
+    Waiting,
     #[sea_orm(num_value = 5)]
+    Completed,
+    #[sea_orm(num_value = 6)]
+    Failed,
+    #[sea_orm(num_value = 7)]
     Aborted,
 }
 

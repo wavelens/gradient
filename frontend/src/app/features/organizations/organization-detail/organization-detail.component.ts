@@ -120,7 +120,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
   }
 
   isRunningStatus(status: EvaluationStatus): boolean {
-    return status === 'Queued' || status === 'Evaluating' || status === 'Building';
+    return status === 'Queued' || status === 'EvaluatingFlake' || status === 'EvaluatingDerivation' || status === 'Building' || status === 'Waiting';
   }
 
   getEvalStatusClass(status: EvaluationStatus): string {
@@ -128,6 +128,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
       case 'Completed': return 'status-success';
       case 'Failed': return 'status-danger';
       case 'Aborted': return 'status-secondary';
+      case 'Waiting': return 'status-warning';
       default: return 'status-running';
     }
   }
@@ -138,8 +139,14 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
       case 'Failed': return 'error';
       case 'Aborted': return 'cancel';
       case 'Queued': return 'schedule';
+      case 'Waiting': return 'pause_circle';
       default: return 'sync';
     }
+  }
+
+  getEvalStatusLabel(status: EvaluationStatus): string {
+    if (status === 'EvaluatingFlake' || status === 'EvaluatingDerivation') return 'Evaluating';
+    return status;
   }
 
   get wildcardInvalid(): boolean {

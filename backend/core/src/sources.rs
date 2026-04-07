@@ -110,9 +110,7 @@ fn ls_remote_head(
         git2::Remote::create_detached(url).map_err(|e| SourceError::GitCommand(e.to_string()))?;
 
     let mut callbacks = RemoteCallbacks::new();
-    callbacks.certificate_check(|_cert, _valid| {
-        Ok(git2::CertificateCheckStatus::CertificateOk)
-    });
+    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificateOk));
     if let (Some(priv_key), Some(pub_key)) = (private_key, public_key) {
         let priv_key = priv_key.to_string();
         let pub_key = pub_key.to_string();
@@ -208,8 +206,10 @@ pub async fn check_project_updates(
             })?;
 
         if evaluation.status == EvaluationStatus::Queued
-            || evaluation.status == EvaluationStatus::Evaluating
+            || evaluation.status == EvaluationStatus::EvaluatingFlake
+            || evaluation.status == EvaluationStatus::EvaluatingDerivation
             || evaluation.status == EvaluationStatus::Building
+            || evaluation.status == EvaluationStatus::Waiting
         {
             debug!(status = ?evaluation.status, "Evaluation already in progress, skipping");
             return Ok((false, remote_hash));
@@ -275,9 +275,8 @@ pub async fn get_commit_info(
 
     tokio::task::spawn_blocking(move || {
         let mut callbacks = RemoteCallbacks::new();
-        callbacks.certificate_check(|_cert, _valid| {
-            Ok(git2::CertificateCheckStatus::CertificateOk)
-        });
+        callbacks
+            .certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificateOk));
         if let Some((private_key, public_key)) = ssh_creds {
             callbacks.credentials(move |_url, username_from_url, _allowed| {
                 git2::Cred::ssh_key_from_memory(
@@ -451,9 +450,8 @@ async fn prefetch_flake_inner(
 
     tokio::task::spawn_blocking(move || {
         let mut callbacks = RemoteCallbacks::new();
-        callbacks.certificate_check(|_cert, _valid| {
-            Ok(git2::CertificateCheckStatus::CertificateOk)
-        });
+        callbacks
+            .certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificateOk));
         let priv_key = private_key.clone();
         let pub_key = public_key.clone();
         callbacks.credentials(move |_url, username_from_url, _allowed| {
@@ -475,11 +473,12 @@ async fn prefetch_flake_inner(
                 stderr: e.message().to_string(),
             })?;
 
-        let oid =
-            git2::Oid::from_str(&rev).map_err(|_| SourceError::GitOutputParsing)?;
-        let commit = repo.find_commit(oid).map_err(|e| SourceError::GitCommandFailed {
-            stderr: e.message().to_string(),
-        })?;
+        let oid = git2::Oid::from_str(&rev).map_err(|_| SourceError::GitOutputParsing)?;
+        let commit = repo
+            .find_commit(oid)
+            .map_err(|e| SourceError::GitCommandFailed {
+                stderr: e.message().to_string(),
+            })?;
         let tree = commit.tree().map_err(|e| SourceError::GitCommandFailed {
             stderr: e.message().to_string(),
         })?;
@@ -490,9 +489,10 @@ async fn prefetch_flake_inner(
             .map_err(|e| SourceError::GitCommandFailed {
                 stderr: e.message().to_string(),
             })?;
-        repo.set_head_detached(oid).map_err(|e| SourceError::GitCommandFailed {
-            stderr: e.message().to_string(),
-        })?;
+        repo.set_head_detached(oid)
+            .map_err(|e| SourceError::GitCommandFailed {
+                stderr: e.message().to_string(),
+            })?;
 
         debug!("Cloned repository to {:?} at rev {}", temp_path, rev);
 
@@ -511,7 +511,9 @@ async fn prefetch_flake_inner(
         Ok::<(), SourceError>(())
     })
     .await
-    .map_err(|e| SourceError::GitExecution { error: e.to_string() })??;
+    .map_err(|e| SourceError::GitExecution {
+        error: e.to_string(),
+    })??;
 
     Ok(Some(temp_dir))
 }
@@ -625,7 +627,10 @@ pub fn format_public_key(organization: MOrganization, serve_url: &str) -> String
         .split('/')
         .next()
         .unwrap_or(serve_url);
-    format!("{} {}-{}", organization.public_key, hostname, organization.name)
+    format!(
+        "{} {}-{}",
+        organization.public_key, hostname, organization.name
+    )
 }
 
 /// Returns `(encrypted_private_key, public_key_b64)`.
@@ -744,8 +749,8 @@ pub fn sign_narinfo_fingerprint(
             reason: format!("Failed to base64-decode signing key: {}", e),
         })?;
 
-    let secret_key = SecretKey::from_slice(&key_bytes)
-        .map_err(|_| SourceError::KeyPairConversion)?;
+    let secret_key =
+        SecretKey::from_slice(&key_bytes).map_err(|_| SourceError::KeyPairConversion)?;
 
     // Nix fingerprint uses full store paths for references, sorted lexicographically.
     let mut full_refs: Vec<String> = references
@@ -841,7 +846,10 @@ pub fn get_cache_nar_location(base_path: String, hash: String) -> Result<String,
 
 /// Returns the on-disk path for a compressed (zstd) NAR cache file.
 /// Used for non-entry-point builds that are cached on first serve.
-pub fn get_cache_nar_compressed_location(base_path: String, hash: String) -> Result<String, SourceError> {
+pub fn get_cache_nar_compressed_location(
+    base_path: String,
+    hash: String,
+) -> Result<String, SourceError> {
     let hash_hex = hash.as_str();
     std::fs::create_dir_all(format!("{}/nars/{}", base_path, &hash_hex[0..2])).map_err(|e| {
         SourceError::FileRead {

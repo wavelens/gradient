@@ -97,7 +97,7 @@
       <div class="info-bar">
         <div class="info-bar-left">
           <div class="info-metric">
-            <span class="status-badge status-{{ eval.status.toLowerCase() }}">{{ eval.status }}</span>
+            <span class="status-badge status-{{ eval.status.toLowerCase() }}">{{ getStatusLabel(eval.status) }}</span>
           </div>
           <div class="info-metric">
             <span class="metric-label">Duration</span>
@@ -155,11 +155,17 @@
 
       <!-- Log area -->
       <div class="log-area">
-        @if (eval.status === 'Evaluating') {
+        @if (eval.status === 'EvaluatingFlake' || eval.status === 'EvaluatingDerivation') {
           <div class="evaluating-hint">
             <span class="material-symbols-outlined evaluating-icon">manage_search</span>
             <span class="evaluating-title">Evaluating</span>
             <span class="evaluating-sub">Discovering builds from the Nix flake&hellip;</span>
+          </div>
+        } @else if (eval.status === 'Waiting') {
+          <div class="queued-hint">
+            <span class="material-symbols-outlined queued-icon">pause_circle</span>
+            <span class="queued-title">Waiting for Servers</span>
+            <span class="queued-sub">No build servers are currently available. Evaluation will resume when a server comes online&hellip;</span>
           </div>
         } @else if (eval.status === 'Queued') {
           <div class="queued-hint">

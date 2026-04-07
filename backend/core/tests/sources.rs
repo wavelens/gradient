@@ -43,16 +43,23 @@ fn nar_compressed_location_has_zst_extension() {
 #[test]
 fn generate_ssh_key_produces_valid_ed25519_keypair() {
     let mut secret_file = NamedTempFile::new().unwrap();
-    let encoded = base64::engine::general_purpose::STANDARD.encode(b"this_is_a_test_secret_key_32chars");
+    let encoded =
+        base64::engine::general_purpose::STANDARD.encode(b"this_is_a_test_secret_key_32chars");
     secret_file.write_all(encoded.as_bytes()).unwrap();
 
-    let (private_key, public_key) = generate_ssh_key(secret_file.path().to_str().unwrap().to_string()).unwrap();
+    let (private_key, public_key) =
+        generate_ssh_key(secret_file.path().to_str().unwrap().to_string()).unwrap();
 
     assert!(!private_key.is_empty());
-    assert!(public_key.starts_with("ssh-ed25519 "), "public key should be OpenSSH ed25519 format");
+    assert!(
+        public_key.starts_with("ssh-ed25519 "),
+        "public key should be OpenSSH ed25519 format"
+    );
 
     // private key must be base64-decodable (it is stored encrypted)
-    base64::engine::general_purpose::STANDARD.decode(&private_key).unwrap();
+    base64::engine::general_purpose::STANDARD
+        .decode(&private_key)
+        .unwrap();
 }
 
 #[test]

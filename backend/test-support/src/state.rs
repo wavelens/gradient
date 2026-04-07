@@ -33,8 +33,7 @@ pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
         webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         flake_prefetcher: Arc::new(FakeFlakePrefetcher::new()) as Arc<dyn FlakePrefetcher>,
-        derivation_resolver: Arc::new(FakeDerivationResolver::new())
-            as Arc<dyn DerivationResolver>,
+        derivation_resolver: Arc::new(FakeDerivationResolver::new()) as Arc<dyn DerivationResolver>,
         build_executor: Arc::new(FakeBuildExecutor::new()) as Arc<dyn BuildExecutor>,
     })
 }

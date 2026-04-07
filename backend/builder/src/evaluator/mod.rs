@@ -15,19 +15,27 @@ pub use worker::run_eval_worker;
 pub use worker_pool::WorkerPoolResolver;
 
 use anyhow::{Context, Result};
-use gradient_core::input::{parse_evaluation_wildcard, repository_url_to_nix, vec_to_hex};
-use gradient_core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
+use gradient_core::input::{parse_evaluation_wildcard, repository_url_to_nix, vec_to_hex};
+use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use std::sync::Arc;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
-type EvaluationOutput = (Vec<MBuild>, Vec<MBuildDependency>, Vec<(Uuid, String)>, Vec<(String, String)>, Vec<(Uuid, Vec<String>)>);
+type EvaluationOutput = (
+    Vec<MBuild>,
+    Vec<MBuildDependency>,
+    Vec<(Uuid, String)>,
+    Vec<(String, String)>,
+    Vec<(Uuid, Vec<String>)>,
+);
 
-use dependencies::{add_existing_build, find_builds, query_all_dependencies, EvaluationAccumulator};
 use super::scheduler::{update_evaluation_status, update_evaluation_status_with_error};
+use dependencies::{
+    EvaluationAccumulator, add_existing_build, find_builds, query_all_dependencies,
+};
 
 /// Evaluates a flake repository, discovering all matching derivations and building the dependency
 /// graph. Returns accumulated builds, dependency edges, and the IDs of the top-level entry-point
@@ -41,7 +49,7 @@ pub async fn evaluate(
     update_evaluation_status(
         Arc::clone(&state),
         evaluation.clone(),
-        EvaluationStatus::Evaluating,
+        EvaluationStatus::EvaluatingFlake,
     )
     .await;
 
@@ -98,6 +106,13 @@ pub async fn evaluate(
         return Ok((vec![], vec![], vec![], vec![], vec![]));
     }
 
+    update_evaluation_status(
+        Arc::clone(&state),
+        evaluation.clone(),
+        EvaluationStatus::EvaluatingDerivation,
+    )
+    .await;
+
     let mut acc = EvaluationAccumulator::new();
     let mut failed_derivations: Vec<(String, String)> = vec![];
     let total_derivations = all_derivations.len();
@@ -142,7 +157,9 @@ pub async fn evaluate(
             )
             .await
             {
-                Ok(build) => acc.entry_point_build_ids.push((build.id, derivation_string.clone())),
+                Ok(build) => acc
+                    .entry_point_build_ids
+                    .push((build.id, derivation_string.clone())),
                 Err(e) => error!(error = %e, "Failed to add existing build"),
             }
 
@@ -153,21 +170,28 @@ pub async fn evaluate(
 
         if already_exists {
             if let Some(existing) = acc.builds.iter().find(|b| b.derivation_path == derivation) {
-                acc.entry_point_build_ids.push((existing.id, derivation_string.clone()));
+                acc.entry_point_build_ids
+                    .push((existing.id, derivation_string.clone()));
             }
             debug!(derivation = %derivation, "Skipping package - already in current evaluation");
             continue;
         }
 
-        let existing_builds =
-            find_builds(Arc::clone(&state), organization_id, vec![derivation.clone()], true).await?;
+        let existing_builds = find_builds(
+            Arc::clone(&state),
+            organization_id,
+            vec![derivation.clone()],
+            true,
+        )
+        .await?;
         if let Some(existing) = existing_builds.first() {
             let missing = state
                 .nix_store
                 .query_missing_paths(vec![existing.derivation_path.clone()])
                 .await?;
             if missing.is_empty() {
-                acc.entry_point_build_ids.push((existing.id, derivation_string.clone()));
+                acc.entry_point_build_ids
+                    .push((existing.id, derivation_string.clone()));
                 debug!(derivation = %derivation, "Skipping package - already exists in DB and store");
                 continue;
             }
@@ -188,7 +212,8 @@ pub async fn evaluate(
 
         // The root build is the first one pushed during this call.
         if let Some(root) = acc.builds.get(entry_point_idx) {
-            acc.entry_point_build_ids.push((root.id, derivation_string.clone()));
+            acc.entry_point_build_ids
+                .push((root.id, derivation_string.clone()));
         }
 
         debug!(derivation = %derivation, "Successfully processed package");
@@ -220,7 +245,13 @@ pub async fn evaluate(
     let mut seen = std::collections::HashSet::new();
     acc.entry_point_build_ids.retain(|(id, _)| seen.insert(*id));
 
-    Ok((acc.builds, acc.dependencies, acc.entry_point_build_ids, failed_derivations, acc.pending_features))
+    Ok((
+        acc.builds,
+        acc.dependencies,
+        acc.entry_point_build_ids,
+        failed_derivations,
+        acc.pending_features,
+    ))
 }
 
 /// Runs evaluation for a direct (non-repository) build using a local temp directory as the flake
@@ -239,7 +270,13 @@ pub async fn evaluate_direct(
     let evaluation_result = evaluate(Arc::clone(&state), &direct_evaluation).await;
 
     match evaluation_result {
-        Ok((builds, dependencies, _entry_point_build_ids, _failed_derivations, pending_features)) => {
+        Ok((
+            builds,
+            dependencies,
+            _entry_point_build_ids,
+            _failed_derivations,
+            pending_features,
+        )) => {
             info!(
                 build_count = builds.len(),
                 dependency_count = dependencies.len(),
@@ -266,7 +303,14 @@ pub async fn evaluate_direct(
             }
 
             for (build_id, features) in pending_features {
-                if let Err(e) = gradient_core::database::add_features(Arc::clone(&state), features, Some(build_id), None).await {
+                if let Err(e) = gradient_core::database::add_features(
+                    Arc::clone(&state),
+                    features,
+                    Some(build_id),
+                    None,
+                )
+                .await
+                {
                     error!(error = %e, build_id = %build_id, "Failed to add features for direct build");
                 }
             }

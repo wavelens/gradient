@@ -49,7 +49,10 @@ impl FakeDerivationResolver {
     }
 
     pub fn with_derivation(self, drv_path: impl Into<String>, drv: Derivation) -> Self {
-        self.derivations.lock().unwrap().insert(drv_path.into(), drv);
+        self.derivations
+            .lock()
+            .unwrap()
+            .insert(drv_path.into(), drv);
         self
     }
 

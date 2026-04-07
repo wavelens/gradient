@@ -21,15 +21,14 @@
 
 use anyhow::{Context as _, Result};
 use nix_bindings::sys::{
-    self, EvalState, Store, ValueType_NIX_TYPE_ATTRS, ValueType_NIX_TYPE_STRING,
-    nix_alloc_value, nix_c_context, nix_c_context_create, nix_c_context_free,
-    nix_err_NIX_OK, nix_err_msg, nix_eval_state_build, nix_eval_state_builder_free,
-    nix_eval_state_builder_load, nix_eval_state_builder_new, nix_expr_eval_from_string,
-    nix_flake_settings, nix_flake_settings_add_to_eval_state_builder,
-    nix_flake_settings_free, nix_flake_settings_new, nix_get_attrs_size,
-    nix_get_attr_byidx, nix_get_string, nix_get_type, nix_libexpr_init,
-    nix_libstore_init, nix_libutil_init, nix_state_free, nix_store_free,
-    nix_store_open, nix_value, nix_value_force,
+    self, EvalState, Store, ValueType_NIX_TYPE_ATTRS, ValueType_NIX_TYPE_STRING, nix_alloc_value,
+    nix_c_context, nix_c_context_create, nix_c_context_free, nix_err_NIX_OK, nix_err_msg,
+    nix_eval_state_build, nix_eval_state_builder_free, nix_eval_state_builder_load,
+    nix_eval_state_builder_new, nix_expr_eval_from_string, nix_flake_settings,
+    nix_flake_settings_add_to_eval_state_builder, nix_flake_settings_free, nix_flake_settings_new,
+    nix_get_attr_byidx, nix_get_attrs_size, nix_get_string, nix_get_type, nix_libexpr_init,
+    nix_libstore_init, nix_libutil_init, nix_state_free, nix_store_free, nix_store_open, nix_value,
+    nix_value_force,
 };
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_uint, c_void};
@@ -142,8 +141,7 @@ impl NixEvaluator {
             let mut names = Vec::with_capacity(n as usize);
             for i in 0..n {
                 let mut name_ptr: *const c_char = ptr::null();
-                let _attr =
-                    nix_get_attr_byidx(self.ctx, value, self.state, i, &mut name_ptr);
+                let _attr = nix_get_attr_byidx(self.ctx, value, self.state, i, &mut name_ptr);
                 if !name_ptr.is_null() {
                     names.push(CStr::from_ptr(name_ptr).to_string_lossy().into_owned());
                 }
@@ -222,11 +220,7 @@ impl Drop for NixEvaluator {
 // Helpers
 // ---------------------------------------------------------------------------
 
-unsafe extern "C" fn string_receiver(
-    start: *const c_char,
-    n: c_uint,
-    user_data: *mut c_void,
-) {
+unsafe extern "C" fn string_receiver(start: *const c_char, n: c_uint, user_data: *mut c_void) {
     unsafe {
         let bytes = std::slice::from_raw_parts(start as *const u8, n as usize);
         let buf = &mut *(user_data as *mut String);

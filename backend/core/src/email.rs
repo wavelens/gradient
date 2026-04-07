@@ -103,7 +103,6 @@ impl EmailService {
             enabled: true,
         })
     }
-
 }
 
 #[async_trait]

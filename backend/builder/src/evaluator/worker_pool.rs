@@ -82,7 +82,10 @@ impl EvalWorker {
             .write_all(&bytes)
             .await
             .context("writing to eval worker stdin")?;
-        self.stdin.flush().await.context("flushing eval worker stdin")?;
+        self.stdin
+            .flush()
+            .await
+            .context("flushing eval worker stdin")?;
 
         self.line.clear();
         let n = self
@@ -124,7 +127,6 @@ impl EvalWorker {
             _ => anyhow::bail!("eval worker: unexpected response to Resolve"),
         }
     }
-
 }
 
 impl std::fmt::Debug for EvalWorker {
@@ -220,11 +222,11 @@ impl DerefMut for PooledEvalWorker {
 impl Drop for PooledEvalWorker {
     fn drop(&mut self) {
         if let Some(worker) = self.worker.take() {
-            if self.healthy {
-                if let Ok(mut idle) = self.idle.lock() {
-                    idle.push(worker);
-                    return;
-                }
+            if self.healthy
+                && let Ok(mut idle) = self.idle.lock()
+            {
+                idle.push(worker);
+                return;
             }
             // Unhealthy or poisoned mutex: drop the worker. `kill_on_drop`
             // ensures the child does not linger.
@@ -308,8 +310,7 @@ impl DerivationResolver for WorkerPoolResolver {
                 let repository = repository.clone();
                 async move {
                     let mut worker = pool.acquire().await?;
-                    let attrs_only: Vec<String> =
-                        chunk.iter().map(|(_, a)| a.clone()).collect();
+                    let attrs_only: Vec<String> = chunk.iter().map(|(_, a)| a.clone()).collect();
                     let items = match worker.resolve(repository, attrs_only).await {
                         Ok(v) => v,
                         Err(e) => {
@@ -334,9 +335,9 @@ impl DerivationResolver for WorkerPoolResolver {
                             let result = match (item.drv_path, item.error) {
                                 (Some(drv), _) => Ok((drv, item.references)),
                                 (None, Some(msg)) => Err(anyhow::anyhow!(msg)),
-                                (None, None) => Err(anyhow::anyhow!(
-                                    "eval worker returned empty result"
-                                )),
+                                (None, None) => {
+                                    Err(anyhow::anyhow!("eval worker returned empty result"))
+                                }
                             };
                             (idx, (attr, result))
                         })
@@ -375,11 +376,9 @@ impl DerivationResolver for WorkerPoolResolver {
         }
         let drv = self.get_derivation(drv_path.clone()).await?;
         let features = drv.required_system_features();
-        let system: Architecture = drv
-            .system
-            .as_str()
-            .try_into()
-            .map_err(|e| anyhow::anyhow!("{} has invalid system architecture: {:?}", drv_path, e))?;
+        let system: Architecture = drv.system.as_str().try_into().map_err(|e| {
+            anyhow::anyhow!("{} has invalid system architecture: {:?}", drv_path, e)
+        })?;
         Ok((system, features))
     }
 }

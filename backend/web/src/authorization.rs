@@ -44,7 +44,11 @@ pub struct Cliams {
 }
 
 fn token_from_cookie(req: &Request) -> Option<String> {
-    let cookie_header = req.headers().get(axum::http::header::COOKIE)?.to_str().ok()?;
+    let cookie_header = req
+        .headers()
+        .get(axum::http::header::COOKIE)?
+        .to_str()
+        .ok()?;
     cookie_header
         .split(';')
         .map(str::trim)
@@ -182,8 +186,12 @@ pub fn encode_download_token(
     let iat = now.timestamp() as usize;
     let claim = DownloadClaims { iat, exp, build_id };
     let secret = load_secret(&state.cli.jwt_secret_file);
-    encode(&Header::default(), &claim, &EncodingKey::from_secret(secret.as_ref()))
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    encode(
+        &Header::default(),
+        &claim,
+        &EncodingKey::from_secret(secret.as_ref()),
+    )
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 pub async fn decode_download_token(

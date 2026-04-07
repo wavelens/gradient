@@ -5,11 +5,11 @@
  */
 
 use chrono::Utc;
-use gradient_core::sources::*;
-use gradient_core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use futures::stream::{self, StreamExt};
+use gradient_core::sources::*;
+use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, JoinType, QueryFilter,
@@ -22,10 +22,10 @@ use tokio::time;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
-use crate::evaluator::evaluate;
 use super::status::{
     update_build_status, update_evaluation_status, update_evaluation_status_with_error,
 };
+use crate::evaluator::evaluate;
 
 pub async fn schedule_evaluation_loop(state: Arc<ServerState>) {
     let _guard = if state.cli.report_errors {
@@ -71,7 +71,8 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 _ => {}
             }
 
-            let (builds, dependencies, entry_point_build_ids, failed_derivations, pending_features) = builds;
+            let (builds, dependencies, entry_point_build_ids, failed_derivations, pending_features) =
+                builds;
             let active_builds = builds
                 .iter()
                 .map(|b| b.clone().into_active_model())
@@ -141,7 +142,14 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
 
             // Insert build features now that builds are in the DB (FK satisfied).
             for (build_id, features) in pending_features {
-                if let Err(e) = gradient_core::database::add_features(Arc::clone(&state), features, Some(build_id), None).await {
+                if let Err(e) = gradient_core::database::add_features(
+                    Arc::clone(&state),
+                    features,
+                    Some(build_id),
+                    None,
+                )
+                .await
+                {
                     error!(error = %e, build_id = %build_id, "Failed to add features for build");
                 }
             }
@@ -262,7 +270,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             Ok(projects) => projects,
             Err(e) => {
                 error!(error = %e, "Failed to query projects for evaluation");
-                time::sleep(Duration::from_secs(5)).await;
+                time::sleep(Duration::from_secs(60)).await;
                 continue;
             }
         };
@@ -428,8 +436,10 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             .filter(
                 Condition::any()
                     .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Evaluating))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Building)),
+                    .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingFlake))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingDerivation))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Building))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Waiting)),
             )
             .one(&state.db)
             .await
@@ -518,7 +528,9 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         let gc_project_id = project.id;
         let gc_keep = project.keep_evaluations as usize;
         tokio::spawn(async move {
-            if let Err(e) = gradient_core::gc::gc_project_evaluations(gc_state, gc_project_id, gc_keep).await {
+            if let Err(e) =
+                gradient_core::gc::gc_project_evaluations(gc_state, gc_project_id, gc_keep).await
+            {
                 tracing::error!(error = %e, project_id = %gc_project_id, "GC: per-project evaluation GC failed");
             }
         });
@@ -545,4 +557,3 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         return new_evaluation;
     }
 }
-

@@ -11,7 +11,9 @@ use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use chrono::Utc;
 use core::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_WRITE_ID};
-use core::database::{get_any_cache_by_name, get_any_organization_by_name, get_organization_by_name};
+use core::database::{
+    get_any_cache_by_name, get_any_organization_by_name, get_organization_by_name,
+};
 use core::input::{check_index_name, validate_display_name};
 use core::sources::{format_public_key, generate_ssh_key};
 use core::types::*;
@@ -63,7 +65,10 @@ pub async fn get_org_name_available(
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
     if check_index_name(&name).is_err() {
-        return Ok(Json(BaseResponse { error: false, message: false }));
+        return Ok(Json(BaseResponse {
+            error: false,
+            message: false,
+        }));
     }
     let exists = EOrganization::find()
         .filter(COrganization::Name.eq(name.as_str()))
@@ -121,7 +126,10 @@ pub async fn get(
         .all(&state.db)
         .await?;
     let project_ids: Vec<Uuid> = projects.iter().map(|p| p.id).collect();
-    let project_to_org: HashMap<Uuid, Uuid> = projects.into_iter().map(|p| (p.id, p.organization)).collect();
+    let project_to_org: HashMap<Uuid, Uuid> = projects
+        .into_iter()
+        .map(|p| (p.id, p.organization))
+        .collect();
 
     let mut running_per_org: HashMap<Uuid, i64> = HashMap::new();
     if !project_ids.is_empty() {
@@ -131,16 +139,19 @@ pub async fn get(
             .filter(
                 Condition::any()
                     .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Evaluating))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Building)),
+                    .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingFlake))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingDerivation))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Building))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Waiting)),
             )
             .all(&state.db)
             .await?;
         for eval in running {
             if let Some(project_id) = eval.project
-                && let Some(&org_id) = project_to_org.get(&project_id) {
-                    *running_per_org.entry(org_id).or_insert(0) += 1;
-                }
+                && let Some(&org_id) = project_to_org.get(&project_id)
+            {
+                *running_per_org.entry(org_id).or_insert(0) += 1;
+            }
         }
     }
 
@@ -163,7 +174,12 @@ pub async fn get(
 
     Ok(Json(BaseResponse {
         error: false,
-        message: Paginated { items, total, page, per_page },
+        message: Paginated {
+            items,
+            total,
+            page,
+            per_page,
+        },
     }))
 }
 
@@ -245,7 +261,12 @@ pub async fn get_public_organizations(
 
     Ok(Json(BaseResponse {
         error: false,
-        message: Paginated { items, total, page, per_page },
+        message: Paginated {
+            items,
+            total,
+            page,
+            per_page,
+        },
     }))
 }
 
@@ -706,7 +727,10 @@ pub async fn get_organization_subscribe(
         }
     }
 
-    Ok(Json(BaseResponse { error: false, message: subscribed }))
+    Ok(Json(BaseResponse {
+        error: false,
+        message: subscribed,
+    }))
 }
 
 pub async fn post_organization_subscribe_cache(
@@ -760,7 +784,9 @@ pub async fn post_organization_subscribe_cache(
         .await?;
 
     if already.is_some() {
-        return Err(WebError::already_exists("Organization already subscribed to Cache"));
+        return Err(WebError::already_exists(
+            "Organization already subscribed to Cache",
+        ));
     }
 
     let mode = body
@@ -776,7 +802,10 @@ pub async fn post_organization_subscribe_cache(
     .insert(&state.db)
     .await?;
 
-    Ok(Json(BaseResponse { error: false, message: "Cache subscribed".to_string() }))
+    Ok(Json(BaseResponse {
+        error: false,
+        message: "Cache subscribed".to_string(),
+    }))
 }
 
 pub async fn delete_organization_subscribe_cache(
@@ -826,5 +855,8 @@ pub async fn delete_organization_subscribe_cache(
     let active: AOrganizationCache = record.into();
     active.delete(&state.db).await?;
 
-    Ok(Json(BaseResponse { error: false, message: "Cache unsubscribed".to_string() }))
+    Ok(Json(BaseResponse {
+        error: false,
+        message: "Cache unsubscribed".to_string(),
+    }))
 }

@@ -6,16 +6,15 @@
 
 use anyhow::Context;
 use chrono::Utc;
-use gradient_core::executer::*;
-use gradient_core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use entity::server::Architecture;
+use gradient_core::executer::*;
+use gradient_core::types::*;
 use nix_daemon::{BasicDerivation, DerivationOutput};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter,
-    QuerySelect,
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QuerySelect,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -27,7 +26,7 @@ use uuid::Uuid;
 
 use super::status::{
     check_evaluation_status, update_build_status, update_build_status_recursivly,
-    update_evaluation_status_with_error,
+    update_evaluation_status,
 };
 
 type OutputInfo = HashMap<String, (Option<String>, Option<String>, Option<String>)>;
@@ -64,16 +63,34 @@ async fn parse_derivation_file(
         .outputs
         .into_iter()
         .map(|o| {
-            let path = if o.path.is_empty() { None } else { Some(o.path) };
-            let hash_algo = if o.hash_algo.is_empty() { None } else { Some(o.hash_algo) };
-            let hash = if o.hash.is_empty() { None } else { Some(o.hash) };
+            let path = if o.path.is_empty() {
+                None
+            } else {
+                Some(o.path)
+            };
+            let hash_algo = if o.hash_algo.is_empty() {
+                None
+            } else {
+                Some(o.hash_algo)
+            };
+            let hash = if o.hash.is_empty() {
+                None
+            } else {
+                Some(o.hash)
+            };
             (o.name, (path, hash_algo, hash))
         })
         .collect();
 
     let input_srcs: HashSet<String> = drv.input_sources.into_iter().collect();
 
-    Ok((drv.builder, drv.args, drv.environment, input_srcs, output_info))
+    Ok((
+        drv.builder,
+        drv.args,
+        drv.environment,
+        input_srcs,
+        output_info,
+    ))
 }
 
 /// Constructs a `BasicDerivation` for submission to the remote Nix daemon by combining
@@ -151,6 +168,9 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
             }
         }
 
+        // After each cycle, reconcile Waiting ↔ Building based on server availability.
+        update_waiting_evaluations(Arc::clone(&state)).await;
+
         if !added_schedule {
             debug!("No builds scheduled this cycle, waiting 5 seconds");
             interval.tick().await;
@@ -205,22 +225,22 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         debug!(index = i, dependency = %dep, "Dependency order");
     }
 
-    let derivation =
-        match create_basic_derivation(&state, &build, &mut local_daemon, dependencies.clone())
-            .await
-        {
-            Ok(derivation) => derivation,
-            Err(e) => {
-                error!(error = %e, "Failed to create basic derivation");
-                update_build_status_recursivly(
-                    Arc::clone(&state),
-                    build.clone(),
-                    BuildStatus::Aborted,
-                )
+    let derivation = match create_basic_derivation(
+        &state,
+        &build,
+        &mut local_daemon,
+        dependencies.clone(),
+    )
+    .await
+    {
+        Ok(derivation) => derivation,
+        Err(e) => {
+            error!(error = %e, "Failed to create basic derivation");
+            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Aborted)
                 .await;
-                return;
-            }
-        };
+            return;
+        }
+    };
 
     // Drop the local daemon before calling the executor: the SSH executor
     // will acquire its own local store connection internally.
@@ -603,34 +623,14 @@ async fn reserve_available_server(
     };
 
     if servers.is_empty() {
-        let build =
-            update_build_status_recursivly(state.clone(), build.clone(), BuildStatus::Aborted)
-                .await;
-        warn!(build_id = %build.id, "Aborted build - no servers found");
-
-        // Update evaluation with error message about no servers
-        let evaluation = match EEvaluation::find_by_id(build.evaluation)
-            .one(&state.db)
-            .await
-        {
-            Ok(Some(eval)) => eval,
-            Ok(None) => {
-                error!(evaluation_id = %build.evaluation, "Evaluation not found for server error update");
-                return None;
-            }
-            Err(e) => {
-                error!(error = %e, evaluation_id = %build.evaluation, "Failed to query evaluation for server error update");
-                return None;
-            }
-        };
-
-        update_evaluation_status_with_error(
-            state,
-            evaluation,
-            EvaluationStatus::Aborted,
-            format!("No servers available to build {}. Please ensure at least one server is configured and active for the required architecture.", build.derivation_path).to_string(),
-        ).await;
-
+        // No server matches the required arch/features — leave the build Queued
+        // so the scheduler retries. The evaluation will be moved to Waiting by
+        // `update_waiting_evaluations` once all schedulable builds have run.
+        debug!(
+            build_id = %build.id,
+            derivation = %build.derivation_path,
+            "No matching server available, leaving build queued"
+        );
         return None;
     }
 
@@ -673,6 +673,93 @@ async fn reserve_available_server(
     }
 
     None
+}
+
+/// Reconciles `Building ↔ Waiting` evaluation states each scheduler tick.
+///
+/// - `Building` evaluation with queued builds but no active servers in the org → `Waiting`
+/// - `Waiting` evaluation whose org now has at least one active server → `Building`
+async fn update_waiting_evaluations(state: Arc<ServerState>) {
+    let evals = match EEvaluation::find()
+        .filter(
+            Condition::any()
+                .add(CEvaluation::Status.eq(EvaluationStatus::Building))
+                .add(CEvaluation::Status.eq(EvaluationStatus::Waiting)),
+        )
+        .all(&state.db)
+        .await
+    {
+        Ok(e) => e,
+        Err(e) => {
+            warn!(error = %e, "Failed to query evaluations for waiting reconciliation");
+            return;
+        }
+    };
+
+    for eval in evals {
+        let org_id = if let Some(project_id) = eval.project {
+            match EProject::find_by_id(project_id).one(&state.db).await {
+                Ok(Some(p)) => p.organization,
+                Ok(None) => continue,
+                Err(e) => {
+                    warn!(error = %e, evaluation_id = %eval.id, "Failed to query project for waiting check");
+                    continue;
+                }
+            }
+        } else {
+            match EDirectBuild::find()
+                .filter(CDirectBuild::Evaluation.eq(eval.id))
+                .one(&state.db)
+                .await
+            {
+                Ok(Some(db)) => db.organization,
+                Ok(None) => continue,
+                Err(e) => {
+                    warn!(error = %e, evaluation_id = %eval.id, "Failed to query direct build for waiting check");
+                    continue;
+                }
+            }
+        };
+
+        let has_active_servers = match EServer::find()
+            .filter(
+                Condition::all()
+                    .add(CServer::Organization.eq(org_id))
+                    .add(CServer::Active.eq(true)),
+            )
+            .one(&state.db)
+            .await
+        {
+            Ok(s) => s.is_some(),
+            Err(e) => {
+                warn!(error = %e, evaluation_id = %eval.id, "Failed to query servers for waiting check");
+                continue;
+            }
+        };
+
+        if eval.status == EvaluationStatus::Building && !has_active_servers {
+            let has_queued = match EBuild::find()
+                .filter(CBuild::Evaluation.eq(eval.id))
+                .filter(CBuild::Status.eq(BuildStatus::Queued))
+                .one(&state.db)
+                .await
+            {
+                Ok(b) => b.is_some(),
+                Err(e) => {
+                    warn!(error = %e, evaluation_id = %eval.id, "Failed to query queued builds for waiting check");
+                    continue;
+                }
+            };
+
+            if has_queued {
+                info!(evaluation_id = %eval.id, "No active servers in org, moving evaluation to Waiting");
+                update_evaluation_status(Arc::clone(&state), eval, EvaluationStatus::Waiting).await;
+            }
+        } else if eval.status == EvaluationStatus::Waiting && has_active_servers {
+            info!(evaluation_id = %eval.id, "Servers now available, resuming evaluation to Building");
+            update_evaluation_status(Arc::clone(&state), eval, EvaluationStatus::Building).await;
+        }
+    }
 }
 
 /// Returns the direct dependency builds of a build (one level, not recursive).

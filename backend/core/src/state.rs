@@ -250,8 +250,13 @@ impl StateConfiguration {
             }
 
             for arch in &server.architectures {
-                if !["x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"]
-                    .contains(&arch.as_str())
+                if ![
+                    "x86_64-linux",
+                    "aarch64-linux",
+                    "x86_64-darwin",
+                    "aarch64-darwin",
+                ]
+                .contains(&arch.as_str())
                 {
                     errors.push(ValidationError {
                         field: format!("servers.{}.architectures", server.name),
@@ -880,14 +885,20 @@ async fn apply_cache_upstreams(
 
     for upstream in upstreams {
         let record = match upstream {
-            StateUpstream::Internal { cache_name: upstream_cache_name, display_name, mode } => {
+            StateUpstream::Internal {
+                cache_name: upstream_cache_name,
+                display_name,
+                mode,
+            } => {
                 let upstream_id = *cache_lookup.get(upstream_cache_name).ok_or_else(|| {
                     format!(
                         "Cache '{}' not found for upstream of cache '{}'",
                         upstream_cache_name, cache_name
                     )
                 })?;
-                let name = display_name.clone().unwrap_or_else(|| upstream_cache_name.clone());
+                let name = display_name
+                    .clone()
+                    .unwrap_or_else(|| upstream_cache_name.clone());
                 ACacheUpstream {
                     id: Set(Uuid::new_v4()),
                     cache: Set(cache_id),
@@ -898,7 +909,11 @@ async fn apply_cache_upstreams(
                     public_key: Set(None),
                 }
             }
-            StateUpstream::External { display_name, url, public_key } => ACacheUpstream {
+            StateUpstream::External {
+                display_name,
+                url,
+                public_key,
+            } => ACacheUpstream {
                 id: Set(Uuid::new_v4()),
                 cache: Set(cache_id),
                 display_name: Set(display_name.clone()),

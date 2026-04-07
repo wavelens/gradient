@@ -80,8 +80,10 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
         .filter(
             Condition::any()
                 .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
-                .add(CEvaluation::Status.eq(EvaluationStatus::Evaluating))
-                .add(CEvaluation::Status.eq(EvaluationStatus::Building)),
+                .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingFlake))
+                .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingDerivation))
+                .add(CEvaluation::Status.eq(EvaluationStatus::Building))
+                .add(CEvaluation::Status.eq(EvaluationStatus::Waiting)),
         )
         .all(db)
         .await?;

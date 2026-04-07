@@ -22,9 +22,9 @@ pub mod types;
 pub mod webhooks;
 
 use database::connect_db;
-use log_storage::FileLogStorage;
 use email::EmailService;
 use executer::SshBuildExecutor;
+use log_storage::FileLogStorage;
 use pool::LocalNixStoreProvider;
 use sources::Libgit2Prefetcher;
 use state::load_and_apply_state;

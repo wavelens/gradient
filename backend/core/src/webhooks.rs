@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::input::load_secret_bytes;
+use crate::types::*;
 use anyhow::Result;
 use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose};
-use crate::input::load_secret_bytes;
-use crate::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use hmac::{Hmac, KeyInit, Mac};
@@ -27,13 +27,7 @@ type HmacSha256 = Hmac<Sha256>;
 pub trait WebhookClient: Send + Sync + std::fmt::Debug + 'static {
     /// POST `body` to `url` with the given signature/event headers.
     /// Returns the HTTP status code on success.
-    async fn deliver(
-        &self,
-        url: &str,
-        signature: &str,
-        event: &str,
-        body: String,
-    ) -> Result<u16>;
+    async fn deliver(&self, url: &str, signature: &str, event: &str, body: String) -> Result<u16>;
 }
 
 /// Production `WebhookClient` backed by `reqwest`.
@@ -53,13 +47,7 @@ impl ReqwestWebhookClient {
 
 #[async_trait]
 impl WebhookClient for ReqwestWebhookClient {
-    async fn deliver(
-        &self,
-        url: &str,
-        signature: &str,
-        event: &str,
-        body: String,
-    ) -> Result<u16> {
+    async fn deliver(&self, url: &str, signature: &str, event: &str, body: String) -> Result<u16> {
         let resp = self
             .client
             .post(url)
@@ -110,8 +98,11 @@ pub async fn fire_evaluation_webhook(
 ) {
     let event = match status {
         EvaluationStatus::Queued => "evaluation.queued",
-        EvaluationStatus::Evaluating => "evaluation.started",
+        EvaluationStatus::EvaluatingFlake | EvaluationStatus::EvaluatingDerivation => {
+            "evaluation.started"
+        }
         EvaluationStatus::Building => "evaluation.building",
+        EvaluationStatus::Waiting => "evaluation.waiting",
         EvaluationStatus::Completed => "evaluation.completed",
         EvaluationStatus::Failed => "evaluation.failed",
         EvaluationStatus::Aborted => "evaluation.aborted",
@@ -242,7 +233,10 @@ async fn fire_webhooks(
             continue;
         }
 
-        let plaintext_secret = match decrypt_webhook_secret(&state.cli.crypt_secret_file, &webhook.secret) {
+        let plaintext_secret = match decrypt_webhook_secret(
+            &state.cli.crypt_secret_file,
+            &webhook.secret,
+        ) {
             Ok(s) => s,
             Err(e) => {
                 error!(error = %e, webhook_id = %webhook.id, "Failed to decrypt webhook secret; skipping delivery");

@@ -13,9 +13,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use chrono::Utc;
 use core::consts::*;
-use core::database::{
-    get_any_organization_by_name, get_organization_by_name, get_project_by_name,
-};
+use core::database::{get_any_organization_by_name, get_organization_by_name, get_project_by_name};
 use core::input::{check_index_name, valid_evaluation_wildcard, validate_display_name, vec_to_hex};
 use core::sources::check_project_updates;
 use core::types::*;
@@ -148,7 +146,10 @@ pub async fn get_project_name_available(
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
     if check_index_name(&name).is_err() {
-        return Ok(Json(BaseResponse { error: false, message: false }));
+        return Ok(Json(BaseResponse {
+            error: false,
+            message: false,
+        }));
     }
     let org = get_any_organization_by_name(state.0.clone(), organization)
         .await?
@@ -219,7 +220,9 @@ pub async fn get(
     let items: Vec<ProjectResponse> = raw
         .into_iter()
         .map(|p| {
-            let last_evaluation_status = p.last_evaluation.and_then(|id| eval_status_map.get(&id).cloned());
+            let last_evaluation_status = p
+                .last_evaluation
+                .and_then(|id| eval_status_map.get(&id).cloned());
             ProjectResponse {
                 id: p.id,
                 organization: p.organization,
@@ -243,7 +246,12 @@ pub async fn get(
 
     Ok(Json(BaseResponse {
         error: false,
-        message: Paginated { items, total, page, per_page },
+        message: Paginated {
+            items,
+            total,
+            page,
+            per_page,
+        },
     }))
 }
 
@@ -463,7 +471,9 @@ pub async fn patch_project(
 
     if let Some(keep) = body.keep_evaluations {
         if keep < 1 {
-            return Err(WebError::BadRequest("keep_evaluations must be at least 1".to_string()));
+            return Err(WebError::BadRequest(
+                "keep_evaluations must be at least 1".to_string(),
+            ));
         }
         let global_max = state.cli.keep_evaluations as i32;
         if global_max > 0 && keep > global_max {
@@ -634,8 +644,10 @@ pub async fn post_project_evaluate(
             })?;
 
         if evaluation.status == EvaluationStatus::Queued
-            || evaluation.status == EvaluationStatus::Evaluating
+            || evaluation.status == EvaluationStatus::EvaluatingFlake
+            || evaluation.status == EvaluationStatus::EvaluatingDerivation
             || evaluation.status == EvaluationStatus::Building
+            || evaluation.status == EvaluationStatus::Waiting
         {
             return Err(WebError::BadRequest(
                 "Evaluation already in progress".to_string(),
@@ -782,7 +794,8 @@ async fn evaluation_to_summary(
         .map(|ep| ep.build)
         .collect();
 
-    let (completed_entry_points, failed_entry_points, total_entry_points) = if ep_builds.is_empty() {
+    let (completed_entry_points, failed_entry_points, total_entry_points) = if ep_builds.is_empty()
+    {
         (0i64, 0i64, 0i64)
     } else {
         let completed = EBuild::find()
@@ -1113,8 +1126,7 @@ pub async fn get_project_metrics(
     let mut points = Vec::new();
 
     for evaluation in evaluations {
-        let eval_time_ms = (evaluation.updated_at - evaluation.created_at)
-            .num_milliseconds();
+        let eval_time_ms = (evaluation.updated_at - evaluation.created_at).num_milliseconds();
 
         // Sum build durations for all completed builds
         let builds = EBuild::find()
@@ -1278,7 +1290,11 @@ pub async fn get_entry_point_metrics(
             .all(&state.db)
             .await?;
         let output_total: i64 = outputs.iter().filter_map(|o| o.file_size).sum();
-        let output_size_bytes = if output_total > 0 { Some(output_total) } else { None };
+        let output_size_bytes = if output_total > 0 {
+            Some(output_total)
+        } else {
+            None
+        };
 
         let build_time_ms = build.build_time_ms.or_else(|| {
             if build.status == BuildStatus::Completed {
@@ -1315,7 +1331,9 @@ pub async fn get_entry_point_metrics(
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(build.id);
         while let Some(id) = queue.pop_front() {
-            if !visited.insert(id) { continue; }
+            if !visited.insert(id) {
+                continue;
+            }
             if let Some(deps) = dep_map.get(&id) {
                 for &dep in deps {
                     if !visited.contains(&dep) {
@@ -1332,7 +1350,11 @@ pub async fn get_entry_point_metrics(
             .all(&state.db)
             .await?;
         let closure_total: i64 = closure_outputs.iter().filter_map(|o| o.file_size).sum();
-        let closure_size_bytes = if closure_total > 0 { Some(closure_total) } else { None };
+        let closure_size_bytes = if closure_total > 0 {
+            Some(closure_total)
+        } else {
+            None
+        };
 
         points.push(EntryPointMetricPoint {
             evaluation_id: evaluation.id,
@@ -1502,7 +1524,7 @@ pub async fn get_entry_point_download(
                             Err(_) => {
                                 return Err(WebError::InternalServerError(
                                     "Failed to read file".to_string(),
-                                ))
+                                ));
                             }
                         }
                     }

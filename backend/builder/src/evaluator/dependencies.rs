@@ -6,11 +6,11 @@
 
 use anyhow::{Context, Result};
 use chrono::Utc;
+use entity::build::BuildStatus;
+use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_core::database::add_features;
 use gradient_core::executer::*;
 use gradient_core::types::*;
-use entity::build::BuildStatus;
-use futures::stream::{FuturesUnordered, StreamExt};
 use nix_daemon::PathInfo;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
@@ -20,7 +20,6 @@ use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, trace};
 use uuid::Uuid;
-
 
 /// Accumulates builds, dependency edges, entry-point IDs, and deferred features across
 /// derivation processing. Features are deferred because `build_feature` has a FK to `build`,
@@ -110,16 +109,14 @@ pub(super) async fn add_existing_build(
         error!(error = %e, "Failed to add features for build");
     }
 
-    let outputs = state
-        .nix_store
-        .get_build_outputs(derivation.clone())
-        .await;
+    let outputs = state.nix_store.get_build_outputs(derivation.clone()).await;
 
     if let Ok(outputs) = outputs {
         for output in outputs {
-            let has_artefacts = tokio::fs::metadata(
-                format!("{}/nix-support/hydra-build-products", output.path)
-            ).await.is_ok();
+            let has_artefacts =
+                tokio::fs::metadata(format!("{}/nix-support/hydra-build-products", output.path))
+                    .await
+                    .is_ok();
 
             let abuild_output = ABuildOutput {
                 id: Set(Uuid::new_v4()),
@@ -159,8 +156,18 @@ fn resolve_known_build_id(
         .iter()
         .find(|b| b.derivation_path == path)
         .map(|b| b.id)
-        .or_else(|| pending_builds.iter().find(|(p, _)| p == path).map(|(_, id)| *id))
-        .or_else(|| queue.iter().find(|(p, _, _)| p == path).map(|(_, _, id)| *id))
+        .or_else(|| {
+            pending_builds
+                .iter()
+                .find(|(p, _)| p == path)
+                .map(|(_, id)| *id)
+        })
+        .or_else(|| {
+            queue
+                .iter()
+                .find(|(p, _, _)| p == path)
+                .map(|(_, _, id)| *id)
+        })
 }
 
 /// Clones a failed or aborted build into a fresh `Created` record for re-evaluation.
@@ -329,7 +336,13 @@ async fn process_node(
         queue.extend(new_refs);
     } else {
         // Already in the store — record as completed; no further traversal needed.
-        add_existing_build(Arc::clone(state), derivation.clone(), evaluation.id, build_id).await?;
+        add_existing_build(
+            Arc::clone(state),
+            derivation.clone(),
+            evaluation.id,
+            build_id,
+        )
+        .await?;
         debug!(build_id = %build_id, path = %derivation, "Skipping — already in store");
     }
 

@@ -5,11 +5,13 @@
  */
 
 use chrono::Utc;
-use gradient_core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
+use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
+};
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use tracing::{debug, error};
@@ -43,8 +45,12 @@ pub async fn update_build_status(
             let webhook_state = Arc::clone(&state);
             let webhook_build = updated_build.clone();
             tokio::spawn(async move {
-                gradient_core::webhooks::fire_build_webhook(webhook_state, webhook_build, webhook_status)
-                    .await;
+                gradient_core::webhooks::fire_build_webhook(
+                    webhook_state,
+                    webhook_build,
+                    webhook_status,
+                )
+                .await;
             });
             updated_build
         }
@@ -96,7 +102,10 @@ pub(super) async fn update_build_status_recursivly(
             condition = condition.add(CBuild::Id.eq(*dependency));
         }
 
-        let status_condition = if status == BuildStatus::Aborted || status == BuildStatus::DependencyFailed || status == BuildStatus::Failed {
+        let status_condition = if status == BuildStatus::Aborted
+            || status == BuildStatus::DependencyFailed
+            || status == BuildStatus::Failed
+        {
             Condition::any()
                 .add(CBuild::Status.eq(BuildStatus::Created))
                 .add(CBuild::Status.eq(BuildStatus::Queued))
@@ -120,11 +129,12 @@ pub(super) async fn update_build_status_recursivly(
 
         // Update dependent builds and add them to the queue for further processing.
         // Dependents of a failed build get DependencyFailed (they didn't fail themselves).
-        let propagated_status = if status == BuildStatus::Failed || status == BuildStatus::DependencyFailed {
-            BuildStatus::DependencyFailed
-        } else {
-            status.clone()
-        };
+        let propagated_status =
+            if status == BuildStatus::Failed || status == BuildStatus::DependencyFailed {
+                BuildStatus::DependencyFailed
+            } else {
+                status.clone()
+            };
         for dependent_build in dependent_builds {
             update_build_status(
                 Arc::clone(&state),
@@ -281,7 +291,10 @@ pub(super) async fn check_evaluation_status(state: Arc<ServerState>, evaluation_
         EvaluationStatus::Completed
     } else if !in_progress && statuses.contains(&BuildStatus::Failed) {
         EvaluationStatus::Failed
-    } else if !in_progress && (statuses.contains(&BuildStatus::Aborted) || statuses.contains(&BuildStatus::DependencyFailed)) {
+    } else if !in_progress
+        && (statuses.contains(&BuildStatus::Aborted)
+            || statuses.contains(&BuildStatus::DependencyFailed))
+    {
         EvaluationStatus::Aborted
     } else {
         return;

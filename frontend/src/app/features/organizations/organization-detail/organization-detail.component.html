@@ -40,7 +40,7 @@
                       <span class="material-symbols-outlined" [class.spinning]="isRunningStatus(project.last_evaluation_status)">
                         {{ getEvalStatusIcon(project.last_evaluation_status) }}
                       </span>
-                      {{ project.last_evaluation_status }}
+                      {{ getEvalStatusLabel(project.last_evaluation_status) }}
                     </span>
                   }
                 </div>

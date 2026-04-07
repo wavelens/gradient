@@ -49,8 +49,8 @@ pub fn lock_flake_with_ssh_key(
     let _guard = FLAKE_LOCK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
     // Write the SSH key to a temp file with mode 0600.
-    let key_file = NamedTempFile::with_suffix(".key")
-        .map_err(|e| FlakeLockError::KeyFile(e.to_string()))?;
+    let key_file =
+        NamedTempFile::with_suffix(".key").map_err(|e| FlakeLockError::KeyFile(e.to_string()))?;
     fs::set_permissions(key_file.path(), fs::Permissions::from_mode(0o600))
         .map_err(|e| FlakeLockError::KeyFile(e.to_string()))?;
     fs::write(key_file.path(), ssh_private_key.as_bytes())
@@ -85,7 +85,9 @@ unsafe fn lock_flake_inner(flake_dir: &Path) -> Result<(), FlakeLockError> {
     unsafe {
         let ctx = nix_c_context_create();
         if ctx.is_null() {
-            return Err(FlakeLockError::Nix("nix_c_context_create returned null".into()));
+            return Err(FlakeLockError::Nix(
+                "nix_c_context_create returned null".into(),
+            ));
         }
 
         // Use a scope-guard pattern via Drop is verbose with raw pointers; use
@@ -139,8 +141,7 @@ unsafe fn lock_flake_inner(flake_dir: &Path) -> Result<(), FlakeLockError> {
                 }
 
                 let state_result = (|| -> Result<(), FlakeLockError> {
-                    let parse_flags =
-                        nix_flake_reference_parse_flags_new(ctx, flake_settings);
+                    let parse_flags = nix_flake_reference_parse_flags_new(ctx, flake_settings);
                     if parse_flags.is_null() {
                         return Err(nix_error(ctx, "nix_flake_reference_parse_flags_new"));
                     }

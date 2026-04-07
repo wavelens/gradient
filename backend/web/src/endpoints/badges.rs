@@ -97,7 +97,7 @@ fn char_width(c: char) -> u32 {
 /// Total text width of `s` in whole pixels (rounded up).
 fn text_width_px(s: &str) -> u32 {
     let tenths: u32 = s.chars().map(char_width).sum();
-    (tenths + 9) / 10 // ceil
+    tenths.div_ceil(10)
 }
 
 /// Render a shields.io-compatible flat SVG badge.
@@ -111,7 +111,7 @@ fn render_badge(label: &str, message: &str, color: &str, style: BadgeStyle) -> S
     let total = lw + rw;
 
     // Text anchors in the SVG's 10× scaled coordinate space.
-    let lx = lw * 5;            // centre of left half
+    let lx = lw * 5; // centre of left half
     let rx = lw * 10 + rw * 5; // centre of right half
 
     // Text "printed length" in the 10× space (for textLength attribute).
@@ -136,9 +136,7 @@ fn render_badge(label: &str, message: &str, color: &str, style: BadgeStyle) -> S
     };
 
     let gradient_rect = match style {
-        BadgeStyle::Flat => format!(
-            "<rect width=\"{total}\" height=\"20\" fill=\"url(#s)\"/>"
-        ),
+        BadgeStyle::Flat => format!("<rect width=\"{total}\" height=\"20\" fill=\"url(#s)\"/>"),
         BadgeStyle::FlatSquare => String::new(),
     };
 
@@ -146,7 +144,7 @@ fn render_badge(label: &str, message: &str, color: &str, style: BadgeStyle) -> S
         format!("<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"{total}\" height=\"20\" role=\"img\" aria-label=\"{label}: {message}\">"),
         format!("<title>{label}: {message}</title>"),
         format!("<defs>{gradient_defs}<clipPath id=\"r\"><rect width=\"{total}\" height=\"20\" rx=\"{rx_attr}\" fill=\"#fff\"/></clipPath></defs>"),
-        format!("<g clip-path=\"url(#r)\">"),
+        "<g clip-path=\"url(#r)\">".to_string(),
         format!("<rect width=\"{lw}\" height=\"20\" fill=\"#555\"/>"),
         format!("<rect x=\"{lw}\" width=\"{rw}\" height=\"20\" fill=\"{color}\"/>"),
         gradient_rect,
@@ -171,19 +169,49 @@ struct BadgeContent {
 
 fn badge_for_status(status: Option<EvaluationStatus>, has_failed_builds: bool) -> BadgeContent {
     match status {
-        None => BadgeContent { message: "unknown", color: "9f9f9f" },
-        Some(EvaluationStatus::Queued) => BadgeContent { message: "queued", color: "007ec6" },
-        Some(EvaluationStatus::Evaluating) => BadgeContent { message: "evaluating", color: "007ec6" },
-        Some(EvaluationStatus::Building) => BadgeContent { message: "building", color: "007ec6" },
-        Some(EvaluationStatus::Completed) => {
-            if has_failed_builds {
-                BadgeContent { message: "partial", color: "e8a317" }
-            } else {
-                BadgeContent { message: "passing", color: "4c1" }
+        None => BadgeContent {
+            message: "unknown",
+            color: "9f9f9f",
+        },
+        Some(EvaluationStatus::Queued) => BadgeContent {
+            message: "queued",
+            color: "007ec6",
+        },
+        Some(EvaluationStatus::EvaluatingFlake) | Some(EvaluationStatus::EvaluatingDerivation) => {
+            BadgeContent {
+                message: "evaluating",
+                color: "007ec6",
             }
         }
-        Some(EvaluationStatus::Failed) => BadgeContent { message: "failing", color: "e05d44" },
-        Some(EvaluationStatus::Aborted) => BadgeContent { message: "aborted", color: "dfb317" },
+        Some(EvaluationStatus::Building) => BadgeContent {
+            message: "building",
+            color: "007ec6",
+        },
+        Some(EvaluationStatus::Waiting) => BadgeContent {
+            message: "waiting",
+            color: "dfb317",
+        },
+        Some(EvaluationStatus::Completed) => {
+            if has_failed_builds {
+                BadgeContent {
+                    message: "partial",
+                    color: "e8a317",
+                }
+            } else {
+                BadgeContent {
+                    message: "passing",
+                    color: "4c1",
+                }
+            }
+        }
+        Some(EvaluationStatus::Failed) => BadgeContent {
+            message: "failing",
+            color: "e05d44",
+        },
+        Some(EvaluationStatus::Aborted) => BadgeContent {
+            message: "aborted",
+            color: "dfb317",
+        },
     }
 }
 
@@ -207,10 +235,9 @@ pub async fn get_project_badge(
 
     // Resolve caller identity from ?token= or existing session.
     let resolved_user: Option<MUser> = if let Some(tok) = params.token {
-        let token_data =
-            crate::authorization::decode_jwt(State(Arc::clone(&state)), tok)
-                .await
-                .map_err(|_| WebError::Unauthorized("Invalid token".to_string()))?;
+        let token_data = crate::authorization::decode_jwt(State(Arc::clone(&state)), tok)
+            .await
+            .map_err(|_| WebError::Unauthorized("Invalid token".to_string()))?;
         EUser::find_by_id(token_data.claims.id)
             .one(&state.db)
             .await?
@@ -239,9 +266,7 @@ pub async fn get_project_badge(
 
     // Determine badge content from the last evaluation.
     let (status, has_failed_builds) = if let Some(eval_id) = project.last_evaluation {
-        let eval = EEvaluation::find_by_id(eval_id)
-            .one(&state.db)
-            .await?;
+        let eval = EEvaluation::find_by_id(eval_id).one(&state.db).await?;
 
         let has_failed = match &eval {
             Some(e) if e.status == EvaluationStatus::Completed => {

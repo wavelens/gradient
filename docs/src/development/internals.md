@@ -4,7 +4,7 @@ Key functions inside each crate.
 
 ## Evaluation Pipeline
 
-`builder::scheduler::schedule_evaluation_loop` polls for queued evaluations every 5 seconds, up to `max_concurrent_evaluations` concurrent tasks.
+`builder::scheduler::schedule_evaluation_loop` polls for queued evaluations every 60 seconds, up to `max_concurrent_evaluations` concurrent tasks.
 
 For each evaluation, `schedule_evaluation` runs:
 
@@ -68,7 +68,7 @@ Queued → Evaluating → Building → Completed | Failed | Aborted
 
 ## Build Dispatcher
 
-`schedule_build_loop` polls for queued builds every 5 seconds, up to `max_concurrent_builds` concurrent tasks.
+`schedule_build_loop` polls for queued builds every 60 seconds, up to `max_concurrent_builds` concurrent tasks.
 
 **Server selection** (`reserve_available_server`)
 

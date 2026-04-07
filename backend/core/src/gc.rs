@@ -56,8 +56,10 @@ pub async fn gc_project_evaluations(
             !matches!(
                 e.status,
                 EvaluationStatus::Queued
-                    | EvaluationStatus::Evaluating
+                    | EvaluationStatus::EvaluatingFlake
+                    | EvaluationStatus::EvaluatingDerivation
                     | EvaluationStatus::Building
+                    | EvaluationStatus::Waiting
             )
         })
         .cloned()
@@ -75,14 +77,14 @@ pub async fn gc_project_evaluations(
 
     // Break the linked list: NULL out `previous` on the oldest surviving evaluation so that
     // deleting the old evaluations does not cascade into the surviving chain.
-    if let Some(oldest_surviving) = all_evals[..keep].last() {
-        if oldest_surviving.previous.is_some() {
-            let mut a: AEvaluation = oldest_surviving.clone().into_active_model();
-            a.previous = Set(None);
-            a.update(&state.db)
-                .await
-                .context("GC: failed to unlink oldest surviving evaluation")?;
-        }
+    if let Some(oldest_surviving) = all_evals[..keep].last()
+        && oldest_surviving.previous.is_some()
+    {
+        let mut a: AEvaluation = oldest_surviving.clone().into_active_model();
+        a.previous = Set(None);
+        a.update(&state.db)
+            .await
+            .context("GC: failed to unlink oldest surviving evaluation")?;
     }
 
     // NULL out previous/next on every evaluation being deleted so cascade between
@@ -113,10 +115,10 @@ pub async fn gc_project_evaluations(
 
             // Remove the build log.
             let log_path = format!("{}/logs/{}.log", state.cli.base_path, build.id);
-            if let Err(e) = tokio::fs::remove_file(&log_path).await {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    warn!(error = %e, path = %log_path, "GC: failed to remove build log");
-                }
+            if let Err(e) = tokio::fs::remove_file(&log_path).await
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                warn!(error = %e, path = %log_path, "GC: failed to remove build log");
             }
 
             // Remove cached NAR files and GC root symlinks for each build output.
@@ -133,13 +135,15 @@ pub async fn gc_project_evaluations(
                 }
                 match get_cache_nar_location(state.cli.base_path.clone(), output.hash.clone()) {
                     Ok(nar_path) => {
-                        if let Err(e) = tokio::fs::remove_file(&nar_path).await {
-                            if e.kind() != std::io::ErrorKind::NotFound {
-                                warn!(error = %e, path = %nar_path, "GC: failed to remove NAR file");
-                            }
+                        if let Err(e) = tokio::fs::remove_file(&nar_path).await
+                            && e.kind() != std::io::ErrorKind::NotFound
+                        {
+                            warn!(error = %e, path = %nar_path, "GC: failed to remove NAR file");
                         }
                     }
-                    Err(e) => warn!(error = %e, hash = %output.hash, "GC: failed to resolve NAR path"),
+                    Err(e) => {
+                        warn!(error = %e, hash = %output.hash, "GC: failed to resolve NAR path")
+                    }
                 }
             }
         }
@@ -159,16 +163,15 @@ pub async fn gc_project_evaluations(
             .await
             .context("GC: failed to check commit references")?;
 
-        if still_referenced.is_none() {
-            if let Some(c) = ECommit::find_by_id(commit_id)
+        if still_referenced.is_none()
+            && let Some(c) = ECommit::find_by_id(commit_id)
                 .one(&state.db)
                 .await
                 .context("GC: failed to query commit")?
-            {
-                let ac: ACommit = c.into_active_model();
-                if let Err(e) = ac.delete(&state.db).await {
-                    warn!(error = %e, commit_id = %commit_id, "GC: failed to delete orphaned commit");
-                }
+        {
+            let ac: ACommit = c.into_active_model();
+            if let Err(e) = ac.delete(&state.db).await {
+                warn!(error = %e, commit_id = %commit_id, "GC: failed to delete orphaned commit");
             }
         }
     }

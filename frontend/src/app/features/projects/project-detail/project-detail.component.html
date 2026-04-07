@@ -128,7 +128,7 @@
                   {{ ep.created_at + 'Z' | date: 'MMM d, y HH:mm' }}
                 </span>
                 <span class="status-badge" [class]="getStatusClass(ep.evaluation_status)">
-                  {{ ep.evaluation_status }}
+                  {{ getStatusLabel(ep.evaluation_status) }}
                 </span>
               </div>
             </div>
@@ -160,7 +160,7 @@
                     </a>
                   </h3>
                   <span class="status-badge" [class]="getStatusClass(evaluation.status)">
-                    {{ evaluation.status }}
+                    {{ getStatusLabel(evaluation.status) }}
                   </span>
                 </div>
                 <div class="build-stats build-stats--grid">

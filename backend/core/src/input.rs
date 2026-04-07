@@ -66,7 +66,9 @@ pub enum InputError {
     DisplayNameEmpty,
     #[error("Display name cannot exceed 100 characters")]
     DisplayNameTooLong,
-    #[error("Display name can only contain letters, numbers, spaces, apostrophes, dots, dashes, and underscores")]
+    #[error(
+        "Display name can only contain letters, numbers, spaces, apostrophes, dots, dashes, and underscores"
+    )]
     DisplayNameInvalidCharacters,
     #[error("Display name cannot start or end with spaces")]
     DisplayNameInvalidStartEnd,

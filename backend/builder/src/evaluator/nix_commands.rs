@@ -7,7 +7,7 @@
 use anyhow::Context;
 use gradient_core::executer::strip_nix_store_prefix;
 
-use super::nix_eval::{escape_nix_str, NixEvaluator};
+use super::nix_eval::{NixEvaluator, escape_nix_str};
 
 /// Resolves a flake attribute path to its store derivation path using the
 /// embedded Nix evaluator.

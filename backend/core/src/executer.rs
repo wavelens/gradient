@@ -249,7 +249,10 @@ pub async fn get_missing_builds(pool: &NixStorePool, paths: Vec<String>) -> Resu
     }
 
     // Single batched validity check for all collected output paths.
-    let mut store = pool.acquire().await.context("acquire store for valid paths")?;
+    let mut store = pool
+        .acquire()
+        .await
+        .context("acquire store for valid paths")?;
     let valid_paths = store
         .query_valid_paths(output_paths.values().clone(), true)
         .result()
@@ -517,14 +520,10 @@ impl BuildExecutor for SshBuildExecutor {
         .context("Failed to copy build dependencies to server")?;
 
         let build_start = Instant::now();
-        let (build, daemon_result) = execute_build(
-            &build,
-            derivation,
-            &mut server_daemon,
-            Arc::clone(&state),
-        )
-        .await
-        .context("Failed to execute build on server")?;
+        let (build, daemon_result) =
+            execute_build(&build, derivation, &mut server_daemon, Arc::clone(&state))
+                .await
+                .context("Failed to execute build on server")?;
         let elapsed = build_start.elapsed();
 
         if !daemon_result.error_msg.is_empty() {
@@ -566,12 +565,10 @@ impl BuildExecutor for SshBuildExecutor {
                 }
             };
 
-            let has_artefacts = tokio::fs::metadata(format!(
-                "{}/nix-support/hydra-build-products",
-                store_path
-            ))
-            .await
-            .is_ok();
+            let has_artefacts =
+                tokio::fs::metadata(format!("{}/nix-support/hydra-build-products", store_path))
+                    .await
+                    .is_ok();
 
             let nar_size = match get_pathinfo(store_path.clone(), &mut local_daemon).await {
                 Ok(Some(info)) => Some(info.nar_size as i64),

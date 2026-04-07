@@ -196,7 +196,9 @@ pub async fn delete_keys(
         .ok_or_else(|| WebError::not_found("API-Key"))?;
 
     if api_key.managed {
-        return Err(WebError::Forbidden("Cannot delete a state-managed API key.".to_string()));
+        return Err(WebError::Forbidden(
+            "Cannot delete a state-managed API key.".to_string(),
+        ));
     }
 
     let aapi_key: AApi = api_key.into();

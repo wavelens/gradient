@@ -55,9 +55,10 @@ pub(super) fn discover_derivations(
 
     let wildcards_ref: Vec<&str> = wildcards.iter().map(|s| s.as_str()).collect();
 
-    'outer: for w in wildcards_ref.iter().map(|w| {
-        split_attr_path(&format!("{}.#", w))
-    }) {
+    'outer: for w in wildcards_ref
+        .iter()
+        .map(|w| split_attr_path(&format!("{}.#", w)))
+    {
         for (it, t) in w.iter().enumerate() {
             if t.contains("*") || t.contains("#") {
                 let mut type_check = false;
@@ -156,10 +157,7 @@ pub(super) fn discover_derivations(
                         continue;
                     }
 
-                    let expr = format!(
-                        "(builtins.getFlake \"{}\").{}",
-                        escaped_repo, current_key
-                    );
+                    let expr = format!("(builtins.getFlake \"{}\").{}", escaped_repo, current_key);
                     debug!(expr = %expr, "evaluating flake attribute");
 
                     let keys = match evaluator.attr_names(&expr) {

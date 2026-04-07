@@ -11,7 +11,7 @@
 //! Derive([outputs],[inputDrvs],[inputSrcs],"system","builder",[args],[("KEY","VALUE"),...])
 //! ```
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 
 /// A single output of a derivation, e.g. `("out", "/nix/store/hash-foo", "", "")`.
@@ -46,7 +46,12 @@ impl Derivation {
     pub fn required_system_features(&self) -> Vec<String> {
         self.environment
             .get("requiredSystemFeatures")
-            .map(|v| v.split_whitespace().filter(|f| !f.is_empty()).map(|f| f.to_string()).collect())
+            .map(|v| {
+                v.split_whitespace()
+                    .filter(|f| !f.is_empty())
+                    .map(|f| f.to_string())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 }
@@ -56,7 +61,9 @@ impl Derivation {
 /// Parses a double-quoted ATerm string. Returns `(value, remaining_input)`.
 fn parse_string(s: &str) -> Result<(String, &str)> {
     let s = s.trim_start();
-    let s = s.strip_prefix('"').ok_or_else(|| anyhow!("expected '\"'"))?;
+    let s = s
+        .strip_prefix('"')
+        .ok_or_else(|| anyhow!("expected '\"'"))?;
     let mut result = String::new();
     let mut iter = s.char_indices();
     loop {
@@ -75,11 +82,12 @@ fn parse_string(s: &str) -> Result<(String, &str)> {
     }
 }
 
-
 /// Advances past optional leading whitespace and one comma. Returns the rest.
 fn comma(s: &str) -> Result<&str> {
     let s = s.trim_start();
-    s.strip_prefix(',').ok_or_else(|| anyhow!("expected ','")).map(|r| r.trim_start())
+    s.strip_prefix(',')
+        .ok_or_else(|| anyhow!("expected ','"))
+        .map(|r| r.trim_start())
 }
 
 // ── Field parsers ─────────────────────────────────────────────────────────────
@@ -87,21 +95,42 @@ fn comma(s: &str) -> Result<&str> {
 /// Parses `[("name","path","algo","hash"),...]`.
 fn parse_outputs(s: &str) -> Result<(Vec<DerivationOutput>, &str)> {
     let s = s.trim_start();
-    let mut s = s.strip_prefix('[').ok_or_else(|| anyhow!("expected '[' for outputs"))?;
+    let mut s = s
+        .strip_prefix('[')
+        .ok_or_else(|| anyhow!("expected '[' for outputs"))?;
     let mut outputs = Vec::new();
     loop {
         s = s.trim_start();
-        if let Some(r) = s.strip_prefix(']') { return Ok((outputs, r)); }
-        if let Some(r) = s.strip_prefix(',') { s = r.trim_start(); }
-        if let Some(r) = s.strip_prefix(']') { return Ok((outputs, r)); }
+        if let Some(r) = s.strip_prefix(']') {
+            return Ok((outputs, r));
+        }
+        if let Some(r) = s.strip_prefix(',') {
+            s = r.trim_start();
+        }
+        if let Some(r) = s.strip_prefix(']') {
+            return Ok((outputs, r));
+        }
 
-        s = s.strip_prefix('(').ok_or_else(|| anyhow!("expected '(' for output entry"))?;
-        let (name, r)      = parse_string(s)?; s = comma(r)?;
-        let (path, r)      = parse_string(s)?; s = comma(r)?;
-        let (hash_algo, r) = parse_string(s)?; s = comma(r)?;
-        let (hash, r)      = parse_string(s)?; s = r.trim_start();
-        s = s.strip_prefix(')').ok_or_else(|| anyhow!("expected ')' to close output entry"))?;
-        outputs.push(DerivationOutput { name, path, hash_algo, hash });
+        s = s
+            .strip_prefix('(')
+            .ok_or_else(|| anyhow!("expected '(' for output entry"))?;
+        let (name, r) = parse_string(s)?;
+        s = comma(r)?;
+        let (path, r) = parse_string(s)?;
+        s = comma(r)?;
+        let (hash_algo, r) = parse_string(s)?;
+        s = comma(r)?;
+        let (hash, r) = parse_string(s)?;
+        s = r.trim_start();
+        s = s
+            .strip_prefix(')')
+            .ok_or_else(|| anyhow!("expected ')' to close output entry"))?;
+        outputs.push(DerivationOutput {
+            name,
+            path,
+            hash_algo,
+            hash,
+        });
     }
 }
 
@@ -110,18 +139,32 @@ type InputDrv = (String, Vec<String>);
 /// Parses `[("/nix/store/hash.drv",["out","dev"]),...]`.
 fn parse_input_drvs(s: &str) -> Result<(Vec<InputDrv>, &str)> {
     let s = s.trim_start();
-    let mut s = s.strip_prefix('[').ok_or_else(|| anyhow!("expected '[' for inputDrvs"))?;
+    let mut s = s
+        .strip_prefix('[')
+        .ok_or_else(|| anyhow!("expected '[' for inputDrvs"))?;
     let mut drvs = Vec::new();
     loop {
         s = s.trim_start();
-        if let Some(r) = s.strip_prefix(']') { return Ok((drvs, r)); }
-        if let Some(r) = s.strip_prefix(',') { s = r.trim_start(); }
-        if let Some(r) = s.strip_prefix(']') { return Ok((drvs, r)); }
+        if let Some(r) = s.strip_prefix(']') {
+            return Ok((drvs, r));
+        }
+        if let Some(r) = s.strip_prefix(',') {
+            s = r.trim_start();
+        }
+        if let Some(r) = s.strip_prefix(']') {
+            return Ok((drvs, r));
+        }
 
-        s = s.strip_prefix('(').ok_or_else(|| anyhow!("expected '(' for inputDrv entry"))?;
-        let (path, r) = parse_string(s)?; s = comma(r)?;
-        let (outputs, r) = parse_string_list(s)?; s = r.trim_start();
-        s = s.strip_prefix(')').ok_or_else(|| anyhow!("expected ')' to close inputDrv entry"))?;
+        s = s
+            .strip_prefix('(')
+            .ok_or_else(|| anyhow!("expected '(' for inputDrv entry"))?;
+        let (path, r) = parse_string(s)?;
+        s = comma(r)?;
+        let (outputs, r) = parse_string_list(s)?;
+        s = r.trim_start();
+        s = s
+            .strip_prefix(')')
+            .ok_or_else(|| anyhow!("expected ')' to close inputDrv entry"))?;
         drvs.push((path, outputs));
     }
 }
@@ -129,13 +172,21 @@ fn parse_input_drvs(s: &str) -> Result<(Vec<InputDrv>, &str)> {
 /// Parses `["str1","str2",...]` into a `Vec<String>`.
 fn parse_string_list(s: &str) -> Result<(Vec<String>, &str)> {
     let s = s.trim_start();
-    let mut s = s.strip_prefix('[').ok_or_else(|| anyhow!("expected '[' for string list"))?;
+    let mut s = s
+        .strip_prefix('[')
+        .ok_or_else(|| anyhow!("expected '[' for string list"))?;
     let mut items = Vec::new();
     loop {
         s = s.trim_start();
-        if let Some(r) = s.strip_prefix(']') { return Ok((items, r)); }
-        if let Some(r) = s.strip_prefix(',') { s = r.trim_start(); }
-        if let Some(r) = s.strip_prefix(']') { return Ok((items, r)); }
+        if let Some(r) = s.strip_prefix(']') {
+            return Ok((items, r));
+        }
+        if let Some(r) = s.strip_prefix(',') {
+            s = r.trim_start();
+        }
+        if let Some(r) = s.strip_prefix(']') {
+            return Ok((items, r));
+        }
         let (item, r) = parse_string(s)?;
         s = r;
         items.push(item);
@@ -145,18 +196,32 @@ fn parse_string_list(s: &str) -> Result<(Vec<String>, &str)> {
 /// Parses the environment list `[("KEY","VALUE"),...]` into a `HashMap`.
 fn parse_env(s: &str) -> Result<(HashMap<String, String>, &str)> {
     let s = s.trim_start();
-    let mut s = s.strip_prefix('[').ok_or_else(|| anyhow!("expected '[' for env list"))?;
+    let mut s = s
+        .strip_prefix('[')
+        .ok_or_else(|| anyhow!("expected '[' for env list"))?;
     let mut map = HashMap::new();
     loop {
         s = s.trim_start();
-        if let Some(r) = s.strip_prefix(']') { return Ok((map, r)); }
-        if let Some(r) = s.strip_prefix(',') { s = r.trim_start(); }
-        if let Some(r) = s.strip_prefix(']') { return Ok((map, r)); }
+        if let Some(r) = s.strip_prefix(']') {
+            return Ok((map, r));
+        }
+        if let Some(r) = s.strip_prefix(',') {
+            s = r.trim_start();
+        }
+        if let Some(r) = s.strip_prefix(']') {
+            return Ok((map, r));
+        }
 
-        s = s.strip_prefix('(').ok_or_else(|| anyhow!("expected '(' for env entry"))?;
-        let (key, r)   = parse_string(s)?; s = comma(r)?;
-        let (value, r) = parse_string(s)?; s = r.trim_start();
-        s = s.strip_prefix(')').ok_or_else(|| anyhow!("expected ')' to close env entry"))?;
+        s = s
+            .strip_prefix('(')
+            .ok_or_else(|| anyhow!("expected '(' for env entry"))?;
+        let (key, r) = parse_string(s)?;
+        s = comma(r)?;
+        let (value, r) = parse_string(s)?;
+        s = r.trim_start();
+        s = s
+            .strip_prefix(')')
+            .ok_or_else(|| anyhow!("expected ')' to close env entry"))?;
         map.insert(key, value);
     }
 }
@@ -173,15 +238,29 @@ pub fn parse_drv(content: &[u8]) -> Result<Derivation> {
         .strip_prefix("Derive(")
         .ok_or_else(|| anyhow!("not a derivation file: does not start with 'Derive('"))?;
 
-    let (outputs, r)          = parse_outputs(s)?;       s = comma(r)?;
-    let (input_derivations, r) = parse_input_drvs(s)?;   s = comma(r)?;
-    let (input_sources, r)    = parse_string_list(s)?;   s = comma(r)?;
-    let (system, r)           = parse_string(s)?;        s = comma(r)?;
-    let (builder, r)          = parse_string(s)?;        s = comma(r)?;
-    let (args, r)             = parse_string_list(s)?;   s = comma(r)?;
-    let (environment, _)      = parse_env(s)?;
+    let (outputs, r) = parse_outputs(s)?;
+    s = comma(r)?;
+    let (input_derivations, r) = parse_input_drvs(s)?;
+    s = comma(r)?;
+    let (input_sources, r) = parse_string_list(s)?;
+    s = comma(r)?;
+    let (system, r) = parse_string(s)?;
+    s = comma(r)?;
+    let (builder, r) = parse_string(s)?;
+    s = comma(r)?;
+    let (args, r) = parse_string_list(s)?;
+    s = comma(r)?;
+    let (environment, _) = parse_env(s)?;
 
-    Ok(Derivation { outputs, input_derivations, input_sources, system, builder, args, environment })
+    Ok(Derivation {
+        outputs,
+        input_derivations,
+        input_sources,
+        system,
+        builder,
+        args,
+        environment,
+    })
 }
 
 #[cfg(test)]

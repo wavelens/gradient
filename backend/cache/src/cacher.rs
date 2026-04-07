@@ -57,7 +57,9 @@ pub async fn cache_loop(state: Arc<ServerState>) {
         None
     };
 
-    let concurrency = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let concurrency = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
     let mut interval = time::interval(Duration::from_secs(5));
     let mut cleanup_counter = 0;
     const CLEANUP_INTERVAL: u32 = 720;
@@ -436,17 +438,19 @@ pub async fn pack_build_output(
 
     let nar_data = pack_output.stdout;
     // Keep a copy for on-disk persistence (entry-point builds only).
-    let nar_data_for_disk = if is_entry_point { nar_data.clone() } else { vec![] };
+    let nar_data_for_disk = if is_entry_point {
+        nar_data.clone()
+    } else {
+        vec![]
+    };
 
     // Compress in memory to compute file_hash / file_size — no disk writes.
     // Must use the same level (3) as the web handler uses when serving, so that
     // the narinfo FileHash matches the bytes clients actually receive.
-    let compressed_data = tokio::task::spawn_blocking(move || {
-        zstd::bulk::compress(&nar_data, 6)
-    })
-    .await
-    .context("Compression task panicked")?
-    .context("Failed to compress NAR data")?;
+    let compressed_data = tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_data, 6))
+        .await
+        .context("Compression task panicked")?
+        .context("Failed to compress NAR data")?;
 
     let file_size = compressed_data.len() as u32;
     let file_hash = nix_base32_sha256(&compressed_data);
@@ -567,8 +571,7 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
         if keep == 0 {
             continue;
         }
-        if let Err(e) =
-            core::gc::gc_project_evaluations(Arc::clone(&state), project.id, keep).await
+        if let Err(e) = core::gc::gc_project_evaluations(Arc::clone(&state), project.id, keep).await
         {
             warn!(error = %e, project_id = %project.id, "Evaluation GC failed for project");
         }
@@ -622,7 +625,8 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         let store_path = format!("/nix/store/{}-{}", hash, package);
 
         // 1. Delete the compressed NAR cache file (best-effort).
-        if let Ok(zst_path) = get_cache_nar_compressed_location(state.cli.base_path.clone(), hash.clone())
+        if let Ok(zst_path) =
+            get_cache_nar_compressed_location(state.cli.base_path.clone(), hash.clone())
             && let Err(e) = tokio::fs::remove_file(&zst_path).await
             && e.kind() != std::io::ErrorKind::NotFound
         {
@@ -654,9 +658,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         };
 
         // 4. Mark is_cached = false only if the store path was actually deleted.
-        if store_deleted
-            && let Ok(Some(bo)) = EBuildOutput::find_by_id(id).one(&state.db).await
-        {
+        if store_deleted && let Ok(Some(bo)) = EBuildOutput::find_by_id(id).one(&state.db).await {
             let mut active = bo.into_active_model();
             active.is_cached = Set(false);
             active.file_hash = Set(None);
