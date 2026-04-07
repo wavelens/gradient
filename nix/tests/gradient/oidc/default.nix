@@ -48,8 +48,8 @@
             };
 
             settings = {
+              logLevel.default = "debug";
               enableRegistration = false;
-              logLevel = "warn";
             };
           };
 

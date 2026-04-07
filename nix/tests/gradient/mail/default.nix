@@ -50,8 +50,8 @@
             };
 
             settings = {
+              logLevel.default = "debug";
               enableRegistration = true;
-              logLevel = "debug";
             };
           };
 

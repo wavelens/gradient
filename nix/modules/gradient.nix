@@ -214,6 +214,7 @@ in {
             Log levels. `default` is the global level; `builder`, `cache` and
             `web` override per component (null inherits from `default`).
           '';
+
           default = { };
           type = lib.types.submodule {
             options = {

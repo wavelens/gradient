@@ -33,7 +33,7 @@
         <div class="eval-status-row">
           <span class="eval-status-badge status-{{ eval.status.toLowerCase() }}">
             <span class="dot"></span>
-            {{ eval.status }}
+            {{ getStatusLabel(eval.status) }}
           </span>
           <span class="builds-count">{{ completedBuilds() }}/{{ builds().length }}</span>
         </div>
