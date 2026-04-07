@@ -13,9 +13,7 @@ use gradient_core::executer::*;
 use gradient_core::types::*;
 use nix_daemon::{BasicDerivation, DerivationOutput};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QuerySelect,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -150,10 +148,14 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
 
     loop {
         let mut added_schedule = false;
+        let mut skipped: HashSet<Uuid> = HashSet::new();
         current_schedules.retain(|schedule: &JoinHandle<()>| !schedule.is_finished());
 
         while current_schedules.len() < state.cli.max_concurrent_builds {
-            let build = get_next_build(Arc::clone(&state)).await;
+            let build = match get_next_build(Arc::clone(&state), &skipped).await {
+                Some(b) => b,
+                None => break,
+            };
             debug!(build_id = %build.id, derivation = %build.derivation_path, "Processing build from queue");
 
             if let Some((build, server)) =
@@ -164,7 +166,10 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
                 current_schedules.push(schedule);
                 added_schedule = true;
             } else {
-                break;
+                // No server matched / claim failed — try the next queued build
+                // this tick instead of blocking the head of the queue.
+                skipped.insert(build.id);
+                continue;
             }
         }
 
@@ -328,19 +333,19 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
     }
 }
 
-/// Waits for the next build that has all dependencies completed and returns it.
+/// Returns the next ready-to-run build that is not in `skip`, or `None` if none is available.
 ///
 /// Uses a raw SQL query to efficiently find builds whose dependency graph is fully satisfied
-/// (no non-Completed dependencies). Loops until a suitable build is found.
-async fn get_next_build(state: Arc<ServerState>) -> MBuild {
-    loop {
-        // Order ready-to-run builds by direct dependency count (descending)
-        // so that integration builds — the ones that pulled in the largest
-        // amount of work to become ready — start first. Tie-break by
-        // `updated_at ASC` so older builds still drain before newer ones.
-        let builds_sql = sea_orm::Statement::from_string(
-            sea_orm::DbBackend::Postgres,
-            r#"
+/// (no non-Completed dependencies). Returns `None` immediately if nothing is schedulable —
+/// the outer scheduler loop owns the retry interval.
+async fn get_next_build(state: Arc<ServerState>, skip: &HashSet<Uuid>) -> Option<MBuild> {
+    // Order ready-to-run builds by direct dependency count (descending)
+    // so that integration builds — the ones that pulled in the largest
+    // amount of work to become ready — start first. Tie-break by
+    // `updated_at ASC` so older builds still drain before newer ones.
+    let builds_sql = sea_orm::Statement::from_string(
+        sea_orm::DbBackend::Postgres,
+        r#"
                 SELECT b.*
                 FROM public.build b
                 LEFT JOIN public.build_dependency bd ON bd.build = b.id
@@ -354,166 +359,107 @@ async fn get_next_build(state: Arc<ServerState>) -> MBuild {
                 GROUP BY b.id
                 ORDER BY COUNT(bd.dependency) DESC, b.updated_at ASC
             "#,
-        );
+    );
 
-        let builds = match EBuild::find().from_raw_sql(builds_sql).all(&state.db).await {
-            Ok(builds) => builds,
+    let builds = match EBuild::find().from_raw_sql(builds_sql).all(&state.db).await {
+        Ok(builds) => builds,
+        Err(e) => {
+            error!(error = %e, "Failed to query queued builds");
+            return None;
+        }
+    };
+
+    debug!(build_count = builds.len(), "Found queued builds");
+
+    for build in builds {
+        if skip.contains(&build.id) {
+            continue;
+        }
+        let evaluation = match EEvaluation::find_by_id(build.evaluation)
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(eval)) => eval,
+            Ok(None) => {
+                error!(evaluation_id = %build.evaluation, "Evaluation not found for build");
+                continue;
+            }
             Err(e) => {
-                error!(error = %e, "Failed to query queued builds");
-                time::sleep(Duration::from_secs(5)).await;
+                error!(error = %e, evaluation_id = %build.evaluation, "Failed to query evaluation for build");
                 continue;
             }
         };
 
-        debug!(build_count = builds.len(), "Found queued builds");
-
-        for build in builds {
-            let evaluation = match EEvaluation::find_by_id(build.evaluation)
-                .one(&state.db)
-                .await
-            {
-                Ok(Some(eval)) => eval,
+        let project = if let Some(project_id) = evaluation.project {
+            match EProject::find_by_id(project_id).one(&state.db).await {
+                Ok(Some(p)) => Some(p),
                 Ok(None) => {
-                    error!(evaluation_id = %build.evaluation, "Evaluation not found for build");
+                    error!(project_id = %project_id, "Project not found for evaluation");
                     continue;
                 }
                 Err(e) => {
-                    error!(error = %e, evaluation_id = %build.evaluation, "Failed to query evaluation for build");
+                    error!(error = %e, project_id = %project_id, "Failed to query project for evaluation");
                     continue;
                 }
-            };
+            }
+        } else {
+            None
+        };
 
-            let project = if let Some(project_id) = evaluation.project {
-                match EProject::find_by_id(project_id).one(&state.db).await {
-                    Ok(Some(p)) => Some(p),
-                    Ok(None) => {
-                        error!(project_id = %project_id, "Project not found for evaluation");
-                        continue;
-                    }
-                    Err(e) => {
-                        error!(error = %e, project_id = %project_id, "Failed to query project for evaluation");
-                        continue;
-                    }
-                }
-            } else {
-                None
-            };
-
-            let organization_id = if let Some(project) = &project {
-                project.organization
-            } else {
-                // Direct build - get organization from DirectBuild record
-                match EDirectBuild::find()
-                    .filter(CDirectBuild::Evaluation.eq(evaluation.id))
-                    .one(&state.db)
-                    .await
-                {
-                    Ok(Some(direct_build)) => direct_build.organization,
-                    Ok(None) => {
-                        error!(evaluation_id = %evaluation.id, "Direct build not found for evaluation");
-                        continue;
-                    }
-                    Err(e) => {
-                        error!(error = %e, evaluation_id = %evaluation.id, "Failed to query direct build for evaluation");
-                        continue;
-                    }
-                }
-            };
-
-            let has_servers = match EServer::find()
-                .filter(
-                    Condition::all()
-                        .add(CServer::Active.eq(true))
-                        .add(CServer::Organization.eq(organization_id)),
-                )
+        let organization_id = if let Some(project) = &project {
+            project.organization
+        } else {
+            // Direct build - get organization from DirectBuild record
+            match EDirectBuild::find()
+                .filter(CDirectBuild::Evaluation.eq(evaluation.id))
                 .one(&state.db)
                 .await
             {
-                Ok(server_opt) => server_opt.is_some(),
+                Ok(Some(direct_build)) => direct_build.organization,
+                Ok(None) => {
+                    error!(evaluation_id = %evaluation.id, "Direct build not found for evaluation");
+                    continue;
+                }
                 Err(e) => {
-                    error!(error = %e, "Failed to query servers for organization");
-                    false // Assume no servers on error
-                }
-            };
-
-            if !has_servers {
-                // For direct builds, allow local execution instead of aborting
-                if evaluation.project.is_none() {
-                    debug!(build_id = %build.id, "No servers available, but this is a direct build - will try local execution");
-                    return build; // Return for local execution
-                } else {
-                    update_build_status_recursivly(Arc::clone(&state), build, BuildStatus::Aborted)
-                        .await;
+                    error!(error = %e, evaluation_id = %evaluation.id, "Failed to query direct build for evaluation");
                     continue;
                 }
             }
+        };
 
-            let raw_deps = match EBuildDependency::find()
-                .filter(CBuildDependency::Build.eq(build.id))
-                .all(&state.db)
-                .await
-            {
-                Ok(deps) => deps,
-                Err(e) => {
-                    error!(error = %e, build_id = %build.id, "Failed to query raw dependencies for debug");
-                    continue;
-                }
-            };
-
-            debug!(
-                build_id = %build.id,
-                derivation_path = %build.derivation_path,
-                raw_dependency_count = raw_deps.len(),
-                "Raw dependency records"
-            );
-
-            for dep in &raw_deps {
-                debug!(build = %dep.build, dependency = %dep.dependency, "Raw dependency");
+        let has_servers = match EServer::find()
+            .filter(
+                Condition::all()
+                    .add(CServer::Active.eq(true))
+                    .add(CServer::Organization.eq(organization_id)),
+            )
+            .one(&state.db)
+            .await
+        {
+            Ok(server_opt) => server_opt.is_some(),
+            Err(e) => {
+                error!(error = %e, "Failed to query servers for organization");
+                false // Assume no servers on error
             }
+        };
 
-            let dependencies = match get_build_dependencies(Arc::clone(&state), &build).await {
-                Ok(deps) => deps,
-                Err(_) => {
-                    error!(build_id = %build.id, "Failed to get dependencies for debug");
-                    continue;
-                }
-            };
-
-            debug!(
-                build_id = %build.id,
-                derivation_path = %build.derivation_path,
-                resolved_dependency_count = dependencies.len(),
-                "Resolved dependencies"
-            );
-
-            for dep in &dependencies {
-                debug!(
-                    dependency_id = %dep.id,
-                    derivation_path = %dep.derivation_path,
-                    status = ?dep.status,
-                    "Dependency status"
-                );
-            }
-
-            if dependencies.is_empty() {
-                debug!("No dependencies found - build ready to execute");
+        if !has_servers {
+            // For direct builds, allow local execution instead of aborting
+            if evaluation.project.is_none() {
+                debug!(build_id = %build.id, "No servers available, but this is a direct build - will try local execution");
+                return Some(build); // Return for local execution
             } else {
-                let completed_deps = dependencies
-                    .iter()
-                    .filter(|d| d.status == BuildStatus::Completed)
-                    .count();
-                debug!(
-                    completed = completed_deps,
-                    total = dependencies.len(),
-                    "Dependency completion status"
-                );
+                // No active servers in org — leave the build queued; the
+                // evaluation will be reconciled to Waiting by
+                // `update_waiting_evaluations`.
+                continue;
             }
-
-            return build;
         }
 
-        time::sleep(Duration::from_secs(5)).await;
+        return Some(build);
     }
+
+    None
 }
 
 /// Finds an available server for the build's architecture and required features, atomically
@@ -582,36 +528,13 @@ async fn reserve_available_server(
         }
     };
 
-    let cond = Condition::all()
-        .add(CServer::Organization.eq(organization_id))
-        .add(CServer::Active.eq(true));
-
-    let mut cond = if build.architecture != Architecture::BUILTIN {
-        cond.add(CServerArchitecture::Architecture.eq(build.architecture.clone()))
-    } else {
-        cond
-    };
-
-    for feature in features {
-        cond = cond.add(CServerFeature::Feature.eq(feature));
-    }
-
-    let servers = match EServer::find()
-        .join_rev(
-            JoinType::InnerJoin,
-            EServerFeature::belongs_to(entity::server::Entity)
-                .from(CServerFeature::Server)
-                .to(CServer::Id)
-                .into(),
+    // Step 1: candidate servers — active + in the right org.
+    let candidate_servers = match EServer::find()
+        .filter(
+            Condition::all()
+                .add(CServer::Organization.eq(organization_id))
+                .add(CServer::Active.eq(true)),
         )
-        .join_rev(
-            JoinType::InnerJoin,
-            EServerArchitecture::belongs_to(entity::server::Entity)
-                .from(CServerArchitecture::Server)
-                .to(CServer::Id)
-                .into(),
-        )
-        .filter(cond)
         .all(&state.db)
         .await
     {
@@ -621,6 +544,74 @@ async fn reserve_available_server(
             return None;
         }
     };
+
+    // Step 2: filter by architecture (skipped for BUILTIN builds).
+    let arch_ok_ids: HashSet<Uuid> = if build.architecture != Architecture::BUILTIN
+        && !candidate_servers.is_empty()
+    {
+        let mut id_cond = Condition::any();
+        for s in &candidate_servers {
+            id_cond = id_cond.add(CServerArchitecture::Server.eq(s.id));
+        }
+        match EServerArchitecture::find()
+            .filter(
+                Condition::all()
+                    .add(id_cond)
+                    .add(CServerArchitecture::Architecture.eq(build.architecture.clone())),
+            )
+            .all(&state.db)
+            .await
+        {
+            Ok(rows) => rows.into_iter().map(|r| r.server).collect(),
+            Err(e) => {
+                error!(error = %e, "Failed to query server architectures");
+                return None;
+            }
+        }
+    } else {
+        candidate_servers.iter().map(|s| s.id).collect()
+    };
+
+    // Step 3: filter by features — server must have ALL required features.
+    let feature_ok_ids: HashSet<Uuid> = if features.is_empty() {
+        arch_ok_ids.clone()
+    } else if arch_ok_ids.is_empty() {
+        HashSet::new()
+    } else {
+        let mut id_cond = Condition::any();
+        for id in &arch_ok_ids {
+            id_cond = id_cond.add(CServerFeature::Server.eq(*id));
+        }
+        let mut feat_cond = Condition::any();
+        for f in &features {
+            feat_cond = feat_cond.add(CServerFeature::Feature.eq(*f));
+        }
+        let rows = match EServerFeature::find()
+            .filter(Condition::all().add(id_cond).add(feat_cond))
+            .all(&state.db)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                error!(error = %e, "Failed to query server features");
+                return None;
+            }
+        };
+        let mut count_per_server: HashMap<Uuid, usize> = HashMap::new();
+        for row in rows {
+            *count_per_server.entry(row.server).or_insert(0) += 1;
+        }
+        count_per_server
+            .into_iter()
+            .filter(|(_, c)| *c >= features.len())
+            .map(|(id, _)| id)
+            .collect()
+    };
+
+    let servers: Vec<MServer> = candidate_servers
+        .into_iter()
+        .filter(|s| feature_ok_ids.contains(&s.id))
+        .collect();
 
     if servers.is_empty() {
         // No server matches the required arch/features — leave the build Queued

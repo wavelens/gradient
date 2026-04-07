@@ -1260,23 +1260,18 @@ pub async fn get_entry_point_metrics(
         .await?
         .ok_or_else(|| WebError::not_found("Project"))?;
 
-    let evaluations = EEvaluation::find()
-        .filter(CEvaluation::Project.eq(project.id))
-        .filter(CEvaluation::Status.eq(EvaluationStatus::Completed))
-        .order_by_desc(CEvaluation::CreatedAt)
+    let entry_points = EEntryPoint::find()
+        .filter(CEntryPoint::Project.eq(project.id))
+        .filter(CEntryPoint::Eval.eq(&params.eval))
+        .order_by_desc(CEntryPoint::CreatedAt)
         .limit(project.keep_evaluations as u64)
         .all(&state.db)
         .await?;
 
     let mut points = Vec::new();
 
-    for evaluation in evaluations {
-        let Some(ep) = EEntryPoint::find()
-            .filter(CEntryPoint::Evaluation.eq(evaluation.id))
-            .filter(CEntryPoint::Eval.eq(&params.eval))
-            .one(&state.db)
-            .await?
-        else {
+    for ep in entry_points {
+        let Some(evaluation) = EEvaluation::find_by_id(ep.evaluation).one(&state.db).await? else {
             continue;
         };
 

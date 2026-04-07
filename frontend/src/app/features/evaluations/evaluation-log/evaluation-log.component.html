@@ -13,7 +13,7 @@
     <span class="material-symbols-outlined">error</span>
     <h2>Evaluation not found</h2>
   </div>
-} @else if (evaluation(); as eval) {
+} @else if (evaluation(); as ev) {
   <div class="eval-layout">
 
     <!-- ── Sidebar ──────────────────────────────────────────────── -->
@@ -21,9 +21,9 @@
 
       <div class="sidebar-breadcrumb">
         <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgName }}</a>
-        @if (eval.project_name) {
+        @if (ev.project_name) {
           <span class="breadcrumb-sep">/</span>
-          <a [routerLink]="['/organization', orgName, 'project', eval.project_name]" class="breadcrumb-link">{{ eval.project_name }}</a>
+          <a [routerLink]="['/organization', orgName, 'project', ev.project_name]" class="breadcrumb-link">{{ ev.project_name }}</a>
         }
         <span class="breadcrumb-sep">/</span>
         <span class="breadcrumb-cur">Evaluation</span>
@@ -31,9 +31,9 @@
 
       <div class="overview-block">
         <div class="eval-status-row">
-          <span class="eval-status-badge status-{{ eval.status.toLowerCase() }}">
+          <span class="eval-status-badge status-{{ ev.status.toLowerCase() }}">
             <span class="dot"></span>
-            {{ getStatusLabel(eval.status) }}
+            {{ getStatusLabel(ev.status) }}
           </span>
           <span class="builds-count">{{ completedBuilds() }}/{{ builds().length }}</span>
         </div>
@@ -97,13 +97,13 @@
       <div class="info-bar">
         <div class="info-bar-left">
           <div class="info-metric">
-            <span class="status-badge status-{{ eval.status.toLowerCase() }}">{{ getStatusLabel(eval.status) }}</span>
+            <span class="status-badge status-{{ ev.status.toLowerCase() }}">{{ getStatusLabel(ev.status) }}</span>
           </div>
           <div class="info-metric">
             <span class="metric-label">Duration</span>
             <span class="metric-value">{{ duration() }}</span>
           </div>
-          @if (eval.status === 'Building' && (buildingCount() > 0 || queuedCount() > 0)) {
+          @if (ev.status === 'Building' && (buildingCount() > 0 || queuedCount() > 0)) {
             <div class="info-metric">
               <span class="metric-label">Queue</span>
               @if (buildingCount() > 0) {
@@ -119,19 +119,19 @@
           }
           <div class="info-metric">
             <span class="metric-label">Triggered</span>
-            <span class="metric-value">{{ eval.created_at + 'Z' | date: 'MMM d, HH:mm' }}</span>
+            <span class="metric-value">{{ ev.created_at + 'Z' | date: 'MMM d, HH:mm' }}</span>
           </div>
           <div class="info-metric">
             <span class="metric-label">Commit</span>
-            <code class="commit-hash">{{ (eval.commit || '').slice(0, 8) }}</code>
+            <code class="commit-hash">{{ (ev.commit || '').slice(0, 8) }}</code>
           </div>
           <div class="info-metric nav-btns">
             <button pButton icon="pi pi-arrow-left" severity="secondary" size="small"
-              [disabled]="!eval.previous"
-              (click)="eval.previous && navigateToEvaluation(eval.previous)"></button>
+              [disabled]="!ev.previous"
+              (click)="ev.previous && navigateToEvaluation(ev.previous)"></button>
             <button pButton icon="pi pi-arrow-right" severity="secondary" size="small"
-              [disabled]="!eval.next"
-              (click)="eval.next && navigateToEvaluation(eval.next)"></button>
+              [disabled]="!ev.next"
+              (click)="ev.next && navigateToEvaluation(ev.next)"></button>
           </div>
         </div>
         <div class="info-bar-right">
@@ -143,31 +143,31 @@
       </div>
 
       <!-- Error banner -->
-      @if (eval.error) {
+      @if (ev.error) {
         <div class="message-banner error">
           <span class="material-symbols-outlined">error</span>
           <div>
             <strong>Evaluation failed</strong>
-            <pre class="error-text">{{ eval.error }}</pre>
+            <pre class="error-text">{{ ev.error }}</pre>
           </div>
         </div>
       }
 
       <!-- Log area -->
       <div class="log-area">
-        @if (eval.status === 'EvaluatingFlake' || eval.status === 'EvaluatingDerivation') {
+        @if (ev.status === 'EvaluatingFlake' || ev.status === 'EvaluatingDerivation') {
           <div class="evaluating-hint">
             <span class="material-symbols-outlined evaluating-icon">manage_search</span>
             <span class="evaluating-title">Evaluating</span>
             <span class="evaluating-sub">Discovering builds from the Nix flake&hellip;</span>
           </div>
-        } @else if (eval.status === 'Waiting') {
+        } @else if (ev.status === 'Waiting') {
           <div class="queued-hint">
             <span class="material-symbols-outlined queued-icon">pause_circle</span>
             <span class="queued-title">Waiting for Servers</span>
             <span class="queued-sub">No build servers are currently available. Evaluation will resume when a server comes online&hellip;</span>
           </div>
-        } @else if (eval.status === 'Queued') {
+        } @else if (ev.status === 'Queued') {
           <div class="queued-hint">
             <span class="material-symbols-outlined queued-icon">hourglass_empty</span>
             <span class="queued-title">Waiting in Queue</span>

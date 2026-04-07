@@ -14,7 +14,7 @@ use axum::{Extension, Json};
 use base64::Engine;
 use chrono::{NaiveDateTime, Utc};
 use core::database::{get_any_cache_by_name, get_cache_by_name};
-use core::executer::nix_store_path;
+use core::executer::strip_nix_store_prefix;
 use core::input::{check_index_name, validate_display_name};
 use core::sources::{
     format_cache_key, format_cache_public_key, generate_signing_key,
@@ -264,7 +264,7 @@ async fn get_nar_by_hash(
         references,
         deriver: pathinfo
             .deriver
-            .map(|deriver| nix_store_path(deriver.as_str())),
+            .map(|deriver| strip_nix_store_prefix(deriver.as_str())),
         sig,
         ca: pathinfo.ca,
     })
