@@ -13,7 +13,7 @@ use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 use core::consts::*;
-use core::email::{EmailService, generate_verification_token};
+use core::email::generate_verification_token;
 use core::input::{validate_display_name, validate_password, validate_username};
 use core::types::*;
 use email_address::EmailAddress;
@@ -83,10 +83,6 @@ pub async fn post_basic_register(
         return Err(WebError::already_exists("User"));
     }
 
-    let email_service = EmailService::new(&state.cli).await.map_err(|e| {
-        WebError::InternalServerError(format!("Failed to initialize email service: {}", e))
-    })?;
-
     let (email_verified, verification_token, verification_expires) =
         if state.cli.email_enabled && state.cli.email_require_verification {
             let token = generate_verification_token();
@@ -115,7 +111,8 @@ pub async fn post_basic_register(
     if state.cli.email_enabled
         && state.cli.email_require_verification
         && let Some(ref token) = verification_token
-        && let Err(e) = email_service
+        && let Err(e) = state
+            .email
             .send_verification_email(&body.email, &body.name, token, &state.cli.serve_url)
             .await
     {
@@ -411,10 +408,6 @@ pub async fn post_resend_verification(
         ));
     }
 
-    let email_service = EmailService::new(&state.cli).await.map_err(|e| {
-        WebError::InternalServerError(format!("Failed to initialize email service: {}", e))
-    })?;
-
     let verification_token = generate_verification_token();
     let verification_expires = Utc::now().naive_utc() + chrono::Duration::hours(24);
 
@@ -424,7 +417,8 @@ pub async fn post_resend_verification(
 
     user_active.update(&state.db).await?;
 
-    if let Err(e) = email_service
+    if let Err(e) = state
+        .email
         .send_verification_email(
             &user.email,
             &user.name,

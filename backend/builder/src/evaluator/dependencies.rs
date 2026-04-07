@@ -6,9 +6,9 @@
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use core::database::add_features;
-use core::executer::*;
-use core::types::*;
+use gradient_core::database::add_features;
+use gradient_core::executer::*;
+use gradient_core::types::*;
 use entity::build::BuildStatus;
 use futures::stream::{FuturesUnordered, StreamExt};
 use nix_daemon::PathInfo;
@@ -21,7 +21,6 @@ use tokio::task::JoinHandle;
 use tracing::{debug, error, trace};
 use uuid::Uuid;
 
-use super::nix_commands::get_features;
 
 /// Accumulates builds, dependency edges, entry-point IDs, and deferred features across
 /// derivation processing. Features are deferred because `build_feature` has a FK to `build`,
@@ -84,7 +83,10 @@ pub(super) async fn add_existing_build(
     evaluation_id: Uuid,
     build_id: Uuid,
 ) -> Result<MBuild> {
-    let (system, features) = get_features(derivation.as_str()).await?;
+    let (system, features) = state
+        .derivation_resolver
+        .get_features(derivation.clone())
+        .await?;
 
     let abuild = ABuild {
         id: Set(build_id),
@@ -108,14 +110,10 @@ pub(super) async fn add_existing_build(
         error!(error = %e, "Failed to add features for build");
     }
 
-    let mut local_store = state
-        .nix_store_pool
-        .acquire()
-        .await
-        .context("Failed to acquire local store")?;
-
-    let full_derivation = core::executer::nix_store_path(&derivation);
-    let outputs = core::executer::get_build_outputs_from_derivation(full_derivation, &mut *local_store).await;
+    let outputs = state
+        .nix_store
+        .get_build_outputs(derivation.clone())
+        .await;
 
     if let Ok(outputs) = outputs {
         for output in outputs {
@@ -303,7 +301,9 @@ async fn process_node(
         .chain(std::iter::once(derivation.clone()))
         .collect();
 
-    let missing: HashSet<String> = get_missing_builds(&state.nix_store_pool, paths_to_check)
+    let missing: HashSet<String> = state
+        .nix_store
+        .query_missing_paths(paths_to_check)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -362,8 +362,10 @@ async fn finalize_pending_builds(
         .map(|(path, build_id)| {
             let p = path.clone();
             let id = *build_id;
+            let resolver = Arc::clone(&state.derivation_resolver);
             tokio::task::spawn(async move {
-                let (arch, features) = get_features(p.as_str())
+                let (arch, features) = resolver
+                    .get_features(p.clone())
                     .await
                     .with_context(|| format!("get_features for {}", p))?;
                 Ok((id, p, arch, features))
@@ -456,13 +458,9 @@ pub(super) async fn query_all_dependencies(
             .map(|(dep, parent_id, build_id)| {
                 let state = Arc::clone(&state);
                 async move {
-                    let mut store = state
-                        .nix_store_pool
-                        .acquire()
-                        .await
-                        .context("acquire store for pathinfo")?;
-
-                    let info = get_pathinfo(nix_store_path(&dep), &mut *store)
+                    let info = state
+                        .nix_store
+                        .query_pathinfo(dep.clone())
                         .await
                         .context("get_pathinfo")?
                         .with_context(|| format!("derivation not found in Nix store: {}", dep))?;

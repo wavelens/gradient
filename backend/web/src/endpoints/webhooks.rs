@@ -309,25 +309,16 @@ pub async fn post_webhook_test(
         .map_err(|e| WebError::InternalServerError(format!("Failed to decrypt webhook secret: {}", e)))?;
     let signature = core::webhooks::sign_webhook_payload(&plaintext_secret, &body_str);
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| WebError::InternalServerError(e.to_string()))?;
-
-    let resp = client
-        .post(&webhook.url)
-        .header("Content-Type", "application/json")
-        .header("X-Gradient-Signature", signature)
-        .header("X-Gradient-Event", "ping")
-        .body(body_str)
-        .send()
+    let status = state
+        .webhooks
+        .deliver(&webhook.url, &signature, "ping", body_str)
         .await
         .map_err(|e| WebError::InternalServerError(format!("Webhook delivery failed: {}", e)))?;
 
-    if !resp.status().is_success() {
+    if !(200..300).contains(&status) {
         return Err(WebError::InternalServerError(format!(
             "Webhook endpoint returned status {}",
-            resp.status()
+            status
         )));
     }
 

@@ -804,6 +804,7 @@ dependencies = [
  "sea-orm",
  "sentry",
  "serde_json",
+ "test-support",
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
@@ -881,6 +882,7 @@ dependencies = [
  "sentry",
  "serde_json",
  "sha2 0.11.0",
+ "test-support",
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
@@ -1091,6 +1093,7 @@ version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-ssh2-lite",
+ "async-trait",
  "base64",
  "chrono",
  "clap",
@@ -1118,6 +1121,7 @@ dependencies = [
  "sha2 0.11.0",
  "ssh-key",
  "tempfile",
+ "test-support",
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
@@ -5427,6 +5431,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 
 [[package]]
+name = "test-support"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "core",
+ "entity",
+ "futures",
+ "nix-daemon",
+ "password-auth",
+ "sea-orm",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6141,6 +6162,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "test-support",
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",

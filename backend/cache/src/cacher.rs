@@ -11,7 +11,6 @@ use core::sources::{
     get_hash_from_path, get_path_from_build_output, write_key,
 };
 use core::types::*;
-use nix_daemon::{Progress, Store};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseBackend, EntityTrait,
@@ -20,41 +19,32 @@ use sea_orm::{
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::fs::symlink;
 use tokio::process::Command;
 use tokio::time;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-const GCROOTS_DIR: &str = "/nix/var/nix/gcroots/gradient";
+/// Symlink name used for the GC root pinning a given build output.
+fn gcroot_name(hash: &str, package: &str) -> String {
+    format!("{}-{}", hash, package)
+}
 
-async fn create_gcroot(hash: &str, package: &str) {
-    let gcroot_path = format!("{}/{}-{}", GCROOTS_DIR, hash, package);
+async fn create_gcroot(state: &Arc<ServerState>, hash: &str, package: &str) {
     let store_path = format!("/nix/store/{}-{}", hash, package);
-
-    if let Err(e) = tokio::fs::create_dir_all(GCROOTS_DIR).await {
-        warn!(error = %e, "Failed to create GC roots directory");
-        return;
-    }
-
-    // Remove stale symlink if present before (re-)creating.
-    let _ = tokio::fs::remove_file(&gcroot_path).await;
-
-    if let Err(e) = symlink(&store_path, &gcroot_path).await {
-        warn!(error = %e, path = %gcroot_path, "Failed to create GC root symlink");
+    let name = gcroot_name(hash, package);
+    if let Err(e) = state.nix_store.add_gcroot(name.clone(), store_path).await {
+        warn!(error = %e, name = %name, "Failed to create GC root");
     } else {
-        debug!(path = %gcroot_path, "Created GC root symlink");
+        debug!(name = %name, "Created GC root");
     }
 }
 
-async fn remove_gcroot(hash: &str, package: &str) {
-    let gcroot_path = format!("{}/{}-{}", GCROOTS_DIR, hash, package);
-    if let Err(e) = tokio::fs::remove_file(&gcroot_path).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            warn!(error = %e, path = %gcroot_path, "Failed to remove GC root symlink");
-        }
+async fn remove_gcroot(state: &Arc<ServerState>, hash: &str, package: &str) {
+    let name = gcroot_name(hash, package);
+    if let Err(e) = state.nix_store.remove_gcroot(name.clone()).await {
+        warn!(error = %e, name = %name, "Failed to remove GC root");
     } else {
-        debug!(path = %gcroot_path, "Removed GC root symlink");
+        debug!(name = %name, "Removed GC root");
     }
 }
 
@@ -191,22 +181,16 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
 
     let path = get_path_from_build_output(build_output.clone());
 
-    let local_store = core::executer::get_local_store(Some(organization.clone())).await;
-    if let Ok(mut local_store) = local_store {
-        let path_exists = local_store
-            .query_pathinfo(path.clone())
-            .result()
-            .await
-            .unwrap_or(None)
-            .is_some();
-
-        if !path_exists {
+    match state.nix_store.query_pathinfo(path.clone()).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
             warn!(path = %path, "Path not found in local store, skipping cache");
             return;
         }
-    } else {
-        error!(path = %path, "Failed to connect to local store, skipping cache");
-        return;
+        Err(e) => {
+            error!(error = %e, path = %path, "Failed to query local store, skipping cache");
+            return;
+        }
     }
 
     let cache_ids: Vec<Uuid> = match EOrganizationCache::find()
@@ -274,7 +258,7 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         return;
     }
 
-    create_gcroot(&build_output.hash, &build_output.package).await;
+    create_gcroot(&state, &build_output.hash, &build_output.package).await;
 }
 
 pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_output: MBuildOutput) {
@@ -646,36 +630,25 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         }
 
         // 2. Remove the GC root so the path is no longer pinned by us.
-        remove_gcroot(&hash, &package).await;
+        remove_gcroot(&state, &hash, &package).await;
 
         // 3. Try to delete from the nix store. This will fail if the path is still
         //    reachable from another GC root (e.g. dependency of a live entry-point),
         //    which is intentional — we only free what is truly unreachable.
-        let nix_bin = state.cli.binpath_nix.clone();
-        let sp_clone = store_path.clone();
-        let delete_result = Command::new(&nix_bin)
-            .arg("store")
-            .arg("delete")
-            .arg(&sp_clone)
-            .output()
-            .await;
-
-        let store_deleted = match delete_result {
-            Ok(out) => {
-                if out.status.success() {
-                    info!(store_path = %store_path, "GC'd stale NAR from nix store");
-                    true
-                } else {
-                    debug!(
-                        store_path = %store_path,
-                        stderr = %String::from_utf8_lossy(&out.stderr),
-                        "nix store delete skipped (path still referenced)"
-                    );
-                    false
-                }
+        let store_deleted = match state.nix_store.delete_path(store_path.clone()).await {
+            Ok(true) => {
+                info!(store_path = %store_path, "GC'd stale NAR from nix store");
+                true
+            }
+            Ok(false) => {
+                debug!(
+                    store_path = %store_path,
+                    "nix store delete skipped (path still referenced)"
+                );
+                false
             }
             Err(e) => {
-                warn!(error = %e, store_path = %store_path, "Failed to run nix store delete");
+                warn!(error = %e, store_path = %store_path, "Failed to delete from nix store");
                 false
             }
         };

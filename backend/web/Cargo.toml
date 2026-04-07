@@ -47,6 +47,7 @@ tower-http    = { version = "0.6", features = ["cors", "trace"] }
 url           = "2.5"
 
 [dev-dependencies]
-axum-test  = "19.1"
-tokio-test = { workspace = true }
-tower      = "0.5"
+axum-test    = "19.1"
+test-support = { workspace = true }
+tokio-test   = { workspace = true }
+tower        = "0.5"

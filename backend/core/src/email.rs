@@ -4,15 +4,39 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::types::{Cli, ServerState};
+use crate::types::Cli;
 use anyhow::{Context, Result, bail};
+use async_trait::async_trait;
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
-use std::sync::Arc;
 use tokio::fs;
 use tracing::info;
 
+/// Outbound email delivery. Production impl is `EmailService` (SMTP via lettre);
+/// tests use an in-memory recorder.
+#[async_trait]
+pub trait EmailSender: Send + Sync + std::fmt::Debug + 'static {
+    fn is_enabled(&self) -> bool;
+
+    async fn send_verification_email(
+        &self,
+        to_email: &str,
+        to_name: &str,
+        verification_token: &str,
+        base_url: &str,
+    ) -> Result<()>;
+
+    async fn send_password_reset_email(
+        &self,
+        to_email: &str,
+        to_name: &str,
+        reset_token: &str,
+        base_url: &str,
+    ) -> Result<()>;
+}
+
+#[derive(Debug)]
 pub struct EmailService {
     transport: Option<SmtpTransport>,
     from_address: String,
@@ -80,11 +104,15 @@ impl EmailService {
         })
     }
 
-    pub fn is_enabled(&self) -> bool {
+}
+
+#[async_trait]
+impl EmailSender for EmailService {
+    fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    pub async fn send_verification_email(
+    async fn send_verification_email(
         &self,
         to_email: &str,
         to_name: &str,
@@ -170,7 +198,7 @@ impl EmailService {
         Ok(())
     }
 
-    pub async fn send_password_reset_email(
+    async fn send_password_reset_email(
         &self,
         to_email: &str,
         to_name: &str,
@@ -257,8 +285,4 @@ impl EmailService {
 pub fn generate_verification_token() -> String {
     let token: [u8; 32] = rand::random();
     hex::encode(token)
-}
-
-pub async fn create_email_service(state: Arc<ServerState>) -> Result<EmailService> {
-    EmailService::new(&state.cli).await
 }

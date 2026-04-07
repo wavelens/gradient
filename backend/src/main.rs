@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use builder::evaluator::NixCApiResolver;
+use gradient_core::evaluator::DerivationResolver;
 use gradient_core::init_state;
 use std::sync::Arc;
 use tracing::info;
@@ -38,7 +40,8 @@ pub fn main() -> std::io::Result<()> {
 }
 
 async fn run() -> std::io::Result<()> {
-    let state = init_state().await;
+    let derivation_resolver: Arc<dyn DerivationResolver> = Arc::new(NixCApiResolver::new());
+    let state = init_state(derivation_resolver).await;
 
     // Initialize logging with the configured level
     init_logging(&state.cli.log_level);

@@ -13,6 +13,7 @@ path = "src/lib.rs"
 [dependencies]
 # Workspace dependencies
 anyhow           = { workspace = true }
+async-trait      = { workspace = true }
 chrono           = { workspace = true }
 entity           = { workspace = true }
 futures          = { workspace = true }
@@ -49,5 +50,6 @@ ssh-key          = { version = "0.6", features = ["ed25519"] }
 tempfile         = "3.27"
 
 [dev-dependencies]
-mockall    = { workspace = true }
-tokio-test = { workspace = true }
+mockall      = { workspace = true }
+test-support = { workspace = true }
+tokio-test   = { workspace = true }

@@ -17,14 +17,10 @@ use uuid::Uuid;
 use crate::sources::get_cache_nar_location;
 use crate::types::*;
 
-const GCROOTS_DIR: &str = "/nix/var/nix/gcroots/gradient";
-
-pub async fn remove_gcroot(hash: &str, package: &str) {
-    let gcroot_path = format!("{}/{}-{}", GCROOTS_DIR, hash, package);
-    if let Err(e) = tokio::fs::remove_file(&gcroot_path).await {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            warn!(error = %e, path = %gcroot_path, "Failed to remove GC root symlink");
-        }
+pub async fn remove_gcroot(state: &Arc<ServerState>, hash: &str, package: &str) {
+    let name = format!("{}-{}", hash, package);
+    if let Err(e) = state.nix_store.remove_gcroot(name.clone()).await {
+        warn!(error = %e, name = %name, "Failed to remove GC root");
     }
 }
 
@@ -133,7 +129,7 @@ pub async fn gc_project_evaluations(
 
             for output in &outputs {
                 if is_ep {
-                    remove_gcroot(&output.hash, &output.package).await;
+                    remove_gcroot(&state, &output.hash, &output.package).await;
                 }
                 match get_cache_nar_location(state.cli.base_path.clone(), output.hash.clone()) {
                     Ok(nar_path) => {

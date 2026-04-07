@@ -5,8 +5,13 @@
  */
 
 use super::input::{greater_than_zero, port_in_range};
+use super::email::EmailSender;
+use super::evaluator::DerivationResolver;
+use super::executer::BuildExecutor;
 use super::log_storage::LogStorage;
-use super::pool::NixStorePool;
+use super::pool::NixStoreProvider;
+use super::sources::FlakePrefetcher;
+use super::webhooks::WebhookClient;
 use clap::Parser;
 use entity::*;
 use nix_daemon::nix::DaemonStore;
@@ -117,8 +122,13 @@ pub struct ServerState {
     pub db: DatabaseConnection,
     pub cli: Cli,
     pub log_storage: Arc<dyn LogStorage>,
-    pub nix_store_pool: NixStorePool,
-    pub web_nix_store_pool: NixStorePool,
+    pub nix_store: Arc<dyn NixStoreProvider>,
+    pub web_nix_store: Arc<dyn NixStoreProvider>,
+    pub webhooks: Arc<dyn WebhookClient>,
+    pub email: Arc<dyn EmailSender>,
+    pub flake_prefetcher: Arc<dyn FlakePrefetcher>,
+    pub derivation_resolver: Arc<dyn DerivationResolver>,
+    pub build_executor: Arc<dyn BuildExecutor>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

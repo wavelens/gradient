@@ -6,9 +6,8 @@
 
 use anyhow::Context;
 use chrono::Utc;
-use core::executer::*;
-use core::sources::*;
-use core::types::*;
+use gradient_core::executer::*;
+use gradient_core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use entity::server::Architecture;
@@ -20,7 +19,7 @@ use sea_orm::{
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time;
 use tracing::{debug, error, info, instrument, warn};
@@ -36,6 +35,7 @@ type OutputInfo = HashMap<String, (Option<String>, Option<String>, Option<String
 /// Parses a `.drv` file directly and extracts the builder, args, env, input sources,
 /// and per-output path/hash info needed to construct a `BasicDerivation`.
 async fn parse_derivation_file(
+    state: &Arc<ServerState>,
     derivation_path: &str,
 ) -> anyhow::Result<(
     String,
@@ -54,7 +54,9 @@ async fn parse_derivation_file(
         ));
     }
 
-    let drv = crate::evaluator::get_derivation(derivation_path)
+    let drv = state
+        .derivation_resolver
+        .get_derivation(derivation_path.to_string())
         .await
         .with_context(|| format!("Failed to parse derivation file: {}", derivation_path))?;
 
@@ -77,12 +79,13 @@ async fn parse_derivation_file(
 /// Constructs a `BasicDerivation` for submission to the remote Nix daemon by combining
 /// parsed derivation data with the resolved dependency output paths.
 async fn create_basic_derivation(
+    state: &Arc<ServerState>,
     build: &MBuild,
     _local_daemon: &mut LocalNixStore,
     dependencies: Vec<String>,
 ) -> anyhow::Result<BasicDerivation> {
     let (builder, args, env, input_srcs, output_info) =
-        parse_derivation_file(&build.derivation_path)
+        parse_derivation_file(state, &build.derivation_path)
             .await
             .context("Failed to parse derivation file")?;
 
@@ -183,54 +186,6 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         }
     };
 
-    let (private_key, public_key) =
-        match decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization, &state.cli.serve_url) {
-            Ok(keys) => keys,
-            Err(e) => {
-                error!(error = %e, "Failed to decrypt SSH private key");
-                return;
-            }
-        };
-
-    let mut server_deamon = connect(
-        server.clone(),
-        None,
-        public_key.clone(),
-        private_key.clone(),
-    )
-    .await;
-
-    for _ in 1..3 {
-        if server_deamon.is_ok() {
-            break;
-        };
-
-        time::sleep(Duration::from_secs(5)).await;
-        server_deamon = connect(
-            server.clone(),
-            None,
-            public_key.clone(),
-            private_key.clone(),
-        )
-        .await;
-    }
-
-    let mut server_daemon = if let Ok(daemon) = server_deamon {
-        daemon
-    } else {
-        error!("Failed to connect to server after retries");
-        requeue_build(state, build.clone()).await;
-        return;
-    };
-
-    info!("Connected to server successfully");
-
-    let mut aserver: AServer = server.clone().into();
-    aserver.last_connection_at = Set(Utc::now().naive_utc());
-    if let Err(e) = aserver.update(&state.db).await {
-        warn!(error = %e, "Failed to update server last_connection_at");
-    }
-
     let dependencies =
         match get_build_dependencies_sorted(Arc::clone(&state), &mut local_daemon, &build).await {
             Ok(deps) => deps,
@@ -243,21 +198,15 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
 
     info!(
         dependency_count = dependencies.len(),
-        "Copying dependencies in order"
+        "Resolved build dependencies"
     );
 
     for (i, dep) in dependencies.iter().enumerate() {
         debug!(index = i, dependency = %dep, "Dependency order");
     }
 
-    if let Err(e) = copy_builds(dependencies.clone(), &mut local_daemon, &mut server_daemon, false).await {
-        error!(error = %e, "Failed to copy build dependencies");
-        update_build_status(Arc::clone(&state), build.clone(), BuildStatus::Failed).await;
-        return;
-    }
-
     let derivation =
-        match create_basic_derivation(&build, &mut local_daemon, dependencies)
+        match create_basic_derivation(&state, &build, &mut local_daemon, dependencies.clone())
             .await
         {
             Ok(derivation) => derivation,
@@ -273,75 +222,59 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
             }
         };
 
+    // Drop the local daemon before calling the executor: the SSH executor
+    // will acquire its own local store connection internally.
+    drop(local_daemon);
+
     let mut build_outputs: Vec<ABuildOutput> = vec![];
 
-    let build_start = Instant::now();
+    let exec_result = state
+        .build_executor
+        .execute(
+            Arc::clone(&state),
+            server.clone(),
+            organization.clone(),
+            build.clone(),
+            derivation,
+            dependencies,
+        )
+        .await;
 
-    match execute_build(&build, derivation, &mut server_daemon, Arc::clone(&state)).await {
-        Ok((build_returned, result)) => {
-            build = build_returned;
+    match exec_result {
+        Ok(result) => {
+            // Successful connection happened inside `execute`; record it.
+            let mut aserver: AServer = server.clone().into();
+            aserver.last_connection_at = Set(Utc::now().naive_utc());
+            if let Err(e) = aserver.update(&state.db).await {
+                warn!(error = %e, "Failed to update server last_connection_at");
+            }
+
             let status = if result.error_msg.is_empty() {
-                let build_results = result.built_outputs;
-                let copy_results = build_results
-                    .values()
-                    .map(|realisation| format!("/nix/store/{}", realisation.out_path))
-                    .collect::<Vec<String>>();
-
-                if let Err(e) = copy_builds(copy_results, &mut server_daemon, &mut local_daemon, true).await {
-                    error!(error = %e, "Failed to copy build results");
-                    update_build_status(Arc::clone(&state), build.clone(), BuildStatus::Failed)
-                        .await;
-                    return;
-                }
-
-                for (build_output_name, realisation) in build_results {
-                    let (build_output_hash, build_output_package) =
-                        match get_hash_from_path(format!("/nix/store/{}", realisation.out_path)) {
-                            Ok(path_info) => path_info,
-                            Err(e) => {
-                                error!(error = %e, "Failed to get hash from path");
-                                continue;
-                            }
-                        };
-
-                    let output_path = format!("/nix/store/{}", realisation.out_path);
-                    let has_artefacts = tokio::fs::metadata(
-                        format!("{}/nix-support/hydra-build-products", output_path)
-                    ).await.is_ok();
-
-                    let file_size = match get_pathinfo(output_path.clone(), &mut local_daemon).await {
-                        Ok(Some(info)) => Some(info.nar_size as i64),
-                        _ => None,
-                    };
-
+                for output in result.outputs {
                     build_outputs.push(ABuildOutput {
                         id: Set(Uuid::new_v4()),
                         build: Set(build.id),
-                        name: Set(build_output_name),
-                        output: Set(output_path),
-                        hash: Set(build_output_hash),
-                        package: Set(build_output_package),
+                        name: Set(output.name),
+                        output: Set(output.store_path),
+                        hash: Set(output.hash),
+                        package: Set(output.package),
                         file_hash: Set(None),
-                        file_size: Set(file_size),
+                        file_size: Set(output.nar_size),
                         is_cached: Set(false),
-                        has_artefacts: Set(has_artefacts),
+                        has_artefacts: Set(output.has_artefacts),
                         ca: Set(None),
                         created_at: Set(Utc::now().naive_utc()),
                         last_fetched_at: Set(None),
                     });
                 }
-
                 BuildStatus::Completed
             } else {
-                if !result.error_msg.is_empty() {
-                    error!(path = %build.derivation_path, error = %result.error_msg, "Build failed");
-                }
-
+                error!(path = %build.derivation_path, error = %result.error_msg, "Build failed");
                 BuildStatus::Failed
             };
 
             if status == BuildStatus::Completed {
-                build.build_time_ms = Some(build_start.elapsed().as_millis() as i64);
+                build.build_time_ms = Some(result.elapsed.as_millis() as i64);
             }
 
             let updated_build = if status == BuildStatus::Failed {
@@ -354,7 +287,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         }
 
         Err(e) => {
-            error!(error = %e, "Failed to execute build");
+            error!(error = %e, "Build executor failed");
             update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed)
                 .await;
         }
@@ -371,36 +304,6 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                 error!(error = %e, "Failed to insert build outputs");
                 break;
             }
-        }
-    }
-}
-
-async fn requeue_build(state: Arc<ServerState>, build: MBuild) -> MBuild {
-    let build_entity = match EBuild::find_by_id(build.id).one(&state.db).await {
-        Ok(Some(b)) => b,
-        Ok(None) => {
-            error!(build_id = %build.id, "Build not found for requeueing");
-            return build;
-        }
-        Err(e) => {
-            error!(error = %e, build_id = %build.id, "Failed to query build for requeueing");
-            return build;
-        }
-    };
-
-    let mut active_build: ABuild = build_entity.into();
-    active_build.status = Set(BuildStatus::Queued);
-    active_build.server = Set(None);
-    active_build.updated_at = Set(Utc::now().naive_utc());
-
-    match active_build.update(&state.db).await {
-        Ok(updated_build) => {
-            info!(build_id = %updated_build.id, "Requeueing build");
-            updated_build
-        }
-        Err(e) => {
-            error!(error = %e, build_id = %build.id, "Failed to update build for requeueing");
-            build
         }
     }
 }
@@ -838,7 +741,7 @@ async fn get_build_dependencies_sorted(
             })?
             .values().cloned().collect::<Vec<String>>();
 
-            let missing = get_missing_builds(&state.nix_store_pool, deps.clone()).await
+            let missing = state.nix_store.query_missing_paths(deps.clone()).await
             .map_err(|e| {
                 error!(error = %e, derivation_path = %dependency.derivation_path, "Failed to get missing builds for dependency");
                 "Failed to get missing builds for dependency".to_string()

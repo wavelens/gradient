@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use anyhow::Result;
+use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose};
 use crate::input::load_secret_bytes;
 use crate::types::*;
@@ -13,10 +15,63 @@ use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use sha2::Sha256;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{error, warn};
 use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
+
+/// HTTP delivery for webhook payloads. Production impl uses `reqwest`; tests
+/// can substitute an in-memory recorder.
+#[async_trait]
+pub trait WebhookClient: Send + Sync + std::fmt::Debug + 'static {
+    /// POST `body` to `url` with the given signature/event headers.
+    /// Returns the HTTP status code on success.
+    async fn deliver(
+        &self,
+        url: &str,
+        signature: &str,
+        event: &str,
+        body: String,
+    ) -> Result<u16>;
+}
+
+/// Production `WebhookClient` backed by `reqwest`.
+#[derive(Debug)]
+pub struct ReqwestWebhookClient {
+    client: reqwest::Client,
+}
+
+impl ReqwestWebhookClient {
+    pub fn new() -> Result<Self> {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?;
+        Ok(Self { client })
+    }
+}
+
+#[async_trait]
+impl WebhookClient for ReqwestWebhookClient {
+    async fn deliver(
+        &self,
+        url: &str,
+        signature: &str,
+        event: &str,
+        body: String,
+    ) -> Result<u16> {
+        let resp = self
+            .client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("X-Gradient-Signature", signature)
+            .header("X-Gradient-Event", event)
+            .body(body)
+            .send()
+            .await?;
+        Ok(resp.status().as_u16())
+    }
+}
 
 /// Encrypts `plaintext_secret` with the server crypt key and returns a base64-encoded ciphertext.
 pub fn encrypt_webhook_secret(crypt_secret_file: &str, plaintext: &str) -> Result<String, String> {
@@ -163,17 +218,6 @@ async fn fire_webhooks(
         return;
     }
 
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            error!(error = %e, "Failed to build reqwest client for webhook delivery");
-            return;
-        }
-    };
-
     let body = serde_json::json!({
         "event": event,
         "data": payload,
@@ -207,21 +251,17 @@ async fn fire_webhooks(
         };
         let signature = sign_webhook_payload(&plaintext_secret, &body_str);
 
-        let result = client
-            .post(&webhook.url)
-            .header("Content-Type", "application/json")
-            .header("X-Gradient-Signature", signature)
-            .header("X-Gradient-Event", event.as_str())
-            .body(body_str.clone())
-            .send()
+        let result = state
+            .webhooks
+            .deliver(&webhook.url, &signature, event.as_str(), body_str.clone())
             .await;
 
         match result {
-            Ok(resp) if !resp.status().is_success() => {
+            Ok(status) if !(200..300).contains(&status) => {
                 warn!(
                     webhook_id = %webhook.id,
                     url = %webhook.url,
-                    status = %resp.status(),
+                    status = status,
                     "Webhook delivery returned non-success status"
                 );
             }

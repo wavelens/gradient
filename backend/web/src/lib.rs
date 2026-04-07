@@ -24,19 +24,20 @@ use core::types::ServerState;
 use endpoints::*;
 use std::sync::Arc;
 
-pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
-    let server_url = format!("{}:{}", state.cli.ip.clone(), state.cli.port.clone());
-    let serve_url = state.cli.serve_url.clone().try_into().map_err(|e| {
-        tracing::error!("Invalid serve URL: {}", e);
-        std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid serve URL")
-    })?;
-
-    let debug_url = format!("http://{}:8000", state.cli.ip.clone())
+/// Build the Axum router with all routes and middleware layered on.
+///
+/// Extracted from `serve_web` so integration tests can drive the router via
+/// `axum_test::TestServer` without binding a real TCP port.
+pub fn create_router(state: Arc<ServerState>) -> Router {
+    let serve_url: http::HeaderValue = state
+        .cli
+        .serve_url
+        .clone()
         .try_into()
-        .map_err(|e| {
-            tracing::error!("Invalid debug URL: {}", e);
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid debug URL")
-        })?;
+        .expect("invalid serve_url");
+    let debug_url: http::HeaderValue = format!("http://{}:8000", state.cli.ip.clone())
+        .try_into()
+        .expect("invalid debug_url");
 
     let cors_allow_origin = AllowOrigin::list(vec![serve_url, debug_url]);
 
@@ -311,11 +312,15 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             .route("/cache/{cache}/nar/{path}", get(caches::nar));
     }
 
-    let app = app
-        .fallback(handle_404)
+    app.fallback(handle_404)
         .layer(cors)
         .layer(trace)
-        .with_state(state);
+        .with_state(state)
+}
+
+pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
+    let server_url = format!("{}:{}", state.cli.ip.clone(), state.cli.port.clone());
+    let app = create_router(Arc::clone(&state));
 
     let listener = tokio::net::TcpListener::bind(&server_url)
         .await

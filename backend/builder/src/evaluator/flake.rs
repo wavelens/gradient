@@ -5,10 +5,8 @@
  */
 
 use anyhow::Result;
-use core::consts::FLAKE_START;
-use core::types::*;
+use gradient_core::consts::FLAKE_START;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use tracing::{debug, error};
 
 use super::nix_eval::{escape_nix_str, NixEvaluator};
@@ -39,33 +37,9 @@ fn split_attr_path(path: &str) -> Vec<String> {
 
 /// Expands wildcard patterns against a flake's attribute tree and returns all matching derivation
 /// paths (e.g. `packages.x86_64-linux.hello`).
-pub(super) async fn get_flake_derivations(
-    _state: Arc<ServerState>,
-    repository: String,
-    wildcards: Vec<&str>,
-    _organization: MOrganization,
-) -> Result<Vec<String>> {
-    // Expand a bare `*` into `*.*` and `*.*.*` so that derivations at depth 2
-    // (e.g. formatter.x86_64-linux) and depth 3 (e.g. packages.x86_64-linux.hello) are
-    // both discovered.
-    let expanded: Vec<String> = wildcards
-        .iter()
-        .flat_map(|&w| {
-            if w == "*" {
-                vec!["*.*".to_string(), "*.*.*".to_string()]
-            } else {
-                vec![w.to_string()]
-            }
-        })
-        .collect();
-
-    tokio::task::spawn_blocking(move || discover_derivations(&repository, &expanded))
-        .await
-        .map_err(|e| anyhow::anyhow!("evaluator task panicked: {}", e))?
-}
-
-/// Synchronous inner loop — must run inside `spawn_blocking`.
-fn discover_derivations(repository: &str, wildcards: &[String]) -> Result<Vec<String>> {
+///
+/// Synchronous — must run inside `spawn_blocking`.
+pub(super) fn discover_derivations(repository: &str, wildcards: &[String]) -> Result<Vec<String>> {
     let evaluator = NixEvaluator::new()?;
     let escaped_repo = escape_nix_str(repository);
 

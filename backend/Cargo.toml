@@ -8,7 +8,7 @@ description = "Nix-based Continuous Integration System"
 repository = "https://github.com/wavelens/gradient"
 
 [workspace]
-members = [".", "core", "builder", "web", "cache", "entity", "migration", "nix-daemon"]
+members = [".", "core", "builder", "web", "cache", "entity", "migration", "nix-daemon", "test-support"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -19,6 +19,7 @@ core      = { path = "core", package = "core" }
 entity    = { path = "entity" }
 migration = { path = "migration" }
 nix-daemon = { path = "nix-daemon" }
+test-support = { path = "test-support" }
 web       = { path = "web" }
 
 # External

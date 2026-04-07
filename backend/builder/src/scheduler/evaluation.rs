@@ -5,8 +5,8 @@
  */
 
 use chrono::Utc;
-use core::sources::*;
-use core::types::*;
+use gradient_core::sources::*;
+use gradient_core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use futures::stream::{self, StreamExt};
@@ -141,7 +141,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
 
             // Insert build features now that builds are in the DB (FK satisfied).
             for (build_id, features) in pending_features {
-                if let Err(e) = core::database::add_features(Arc::clone(&state), features, Some(build_id), None).await {
+                if let Err(e) = gradient_core::database::add_features(Arc::clone(&state), features, Some(build_id), None).await {
                     error!(error = %e, build_id = %build_id, "Failed to add features for build");
                 }
             }
@@ -518,7 +518,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         let gc_project_id = project.id;
         let gc_keep = project.keep_evaluations as usize;
         tokio::spawn(async move {
-            if let Err(e) = core::gc::gc_project_evaluations(gc_state, gc_project_id, gc_keep).await {
+            if let Err(e) = gradient_core::gc::gc_project_evaluations(gc_state, gc_project_id, gc_keep).await {
                 tracing::error!(error = %e, project_id = %gc_project_id, "GC: per-project evaluation GC failed");
             }
         });

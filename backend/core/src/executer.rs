@@ -6,23 +6,25 @@
 
 use anyhow::{Context, Result};
 use async_ssh2_lite::{AsyncSession, TokioTcpStream};
+use async_trait::async_trait;
 use futures::stream::{FuturesUnordered, StreamExt};
 use nix_daemon::nix::DaemonStore;
 use nix_daemon::{self, BasicDerivation, BuildMode, BuildResult, PathInfo, Progress, Store};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
     process::Command,
-    time::Instant,
+    time::{self, Instant},
 };
-use tracing::{error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 
 use super::pool::NixStorePool;
 
 use super::input;
-use super::sources::get_hash_from_path;
+use super::sources::{decrypt_ssh_private_key, get_hash_from_path};
 use super::types::*;
 
 pub async fn connect(
@@ -391,4 +393,206 @@ pub async fn get_build_outputs_from_derivation<A: AsyncReadExt + AsyncWriteExt +
     }
 
     Ok(outputs)
+}
+
+/// One realised output of a build, populated by `BuildExecutor::execute`.
+#[derive(Debug, Clone)]
+pub struct ExecutedBuildOutput {
+    /// Output name (`out`, `dev`, ...).
+    pub name: String,
+    /// Full `/nix/store/...` path of the realised output.
+    pub store_path: String,
+    /// `<hash>-<package>` portion of the store path.
+    pub hash: String,
+    pub package: String,
+    /// NAR size as reported by the local store after copying back.
+    pub nar_size: Option<i64>,
+    /// `true` if `<output>/nix-support/hydra-build-products` exists.
+    pub has_artefacts: bool,
+}
+
+/// End-to-end result of running one build on a remote server.
+#[derive(Debug, Clone)]
+pub struct BuildExecutionResult {
+    /// Empty on success; non-empty when the daemon reported a build failure.
+    pub error_msg: String,
+    /// Realised outputs (empty on failure).
+    pub outputs: Vec<ExecutedBuildOutput>,
+    /// Wall-clock time spent inside `execute_build`.
+    pub elapsed: Duration,
+}
+
+/// Executes builds on remote build servers via SSH-tunneled Nix daemon
+/// connections. The trait abstraction lets tests substitute a deterministic
+/// fake instead of touching real SSH/daemon infrastructure.
+#[async_trait]
+pub trait BuildExecutor: Send + Sync + std::fmt::Debug + 'static {
+    /// Run `build` on `server`. Connects to the remote daemon, copies the
+    /// dependency closure, executes the derivation while streaming logs into
+    /// `state.log_storage`, copies output paths back into the local store,
+    /// and resolves per-output metadata.
+    ///
+    /// Build *infrastructure* failures (SSH connect, copy, decrypt) return
+    /// `Err`. *Build* failures reported by the daemon (`error_msg` non-empty)
+    /// are returned as `Ok(BuildExecutionResult { error_msg, .. })` so that
+    /// callers can distinguish between "could not run" and "ran and failed".
+    async fn execute(
+        &self,
+        state: Arc<ServerState>,
+        server: MServer,
+        organization: MOrganization,
+        build: MBuild,
+        derivation: BasicDerivation,
+        dependencies: Vec<String>,
+    ) -> Result<BuildExecutionResult>;
+}
+
+/// Production [`BuildExecutor`] backed by SSH + the embedded Nix daemon
+/// protocol. Connects with up to 3 attempts before giving up.
+#[derive(Debug, Default)]
+pub struct SshBuildExecutor;
+
+impl SshBuildExecutor {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl BuildExecutor for SshBuildExecutor {
+    async fn execute(
+        &self,
+        state: Arc<ServerState>,
+        server: MServer,
+        organization: MOrganization,
+        build: MBuild,
+        derivation: BasicDerivation,
+        dependencies: Vec<String>,
+    ) -> Result<BuildExecutionResult> {
+        let mut local_daemon = get_local_store(Some(organization.clone()))
+            .await
+            .context("Failed to acquire local nix store for build")?;
+
+        let (private_key, public_key) = decrypt_ssh_private_key(
+            state.cli.crypt_secret_file.clone(),
+            organization.clone(),
+            &state.cli.serve_url,
+        )
+        .context("Failed to decrypt SSH private key for server")?;
+
+        let mut server_daemon_result = connect(
+            server.clone(),
+            None,
+            public_key.clone(),
+            private_key.clone(),
+        )
+        .await;
+
+        for _ in 1..3 {
+            if server_daemon_result.is_ok() {
+                break;
+            }
+            time::sleep(Duration::from_secs(5)).await;
+            server_daemon_result = connect(
+                server.clone(),
+                None,
+                public_key.clone(),
+                private_key.clone(),
+            )
+            .await;
+        }
+
+        let mut server_daemon =
+            server_daemon_result.context("Failed to connect to server after retries")?;
+
+        info!(server_id = %server.id, "Connected to build server");
+
+        copy_builds(
+            dependencies.clone(),
+            &mut local_daemon,
+            &mut server_daemon,
+            false,
+        )
+        .await
+        .context("Failed to copy build dependencies to server")?;
+
+        let build_start = Instant::now();
+        let (build, daemon_result) = execute_build(
+            &build,
+            derivation,
+            &mut server_daemon,
+            Arc::clone(&state),
+        )
+        .await
+        .context("Failed to execute build on server")?;
+        let elapsed = build_start.elapsed();
+
+        if !daemon_result.error_msg.is_empty() {
+            warn!(
+                build_id = %build.id,
+                error = %daemon_result.error_msg,
+                "Remote build reported failure"
+            );
+            return Ok(BuildExecutionResult {
+                error_msg: daemon_result.error_msg,
+                outputs: vec![],
+                elapsed,
+            });
+        }
+
+        let copy_back: Vec<String> = daemon_result
+            .built_outputs
+            .values()
+            .map(|r| format!("/nix/store/{}", r.out_path))
+            .collect();
+
+        copy_builds(
+            copy_back.clone(),
+            &mut server_daemon,
+            &mut local_daemon,
+            true,
+        )
+        .await
+        .context("Failed to copy build outputs back to local store")?;
+
+        let mut outputs = Vec::with_capacity(daemon_result.built_outputs.len());
+        for (name, realisation) in daemon_result.built_outputs {
+            let store_path = format!("/nix/store/{}", realisation.out_path);
+            let (hash, package) = match get_hash_from_path(store_path.clone()) {
+                Ok(hp) => hp,
+                Err(e) => {
+                    error!(error = %e, path = %store_path, "Failed to parse output path");
+                    continue;
+                }
+            };
+
+            let has_artefacts = tokio::fs::metadata(format!(
+                "{}/nix-support/hydra-build-products",
+                store_path
+            ))
+            .await
+            .is_ok();
+
+            let nar_size = match get_pathinfo(store_path.clone(), &mut local_daemon).await {
+                Ok(Some(info)) => Some(info.nar_size as i64),
+                _ => None,
+            };
+
+            debug!(name = %name, path = %store_path, "Recorded built output");
+            outputs.push(ExecutedBuildOutput {
+                name,
+                store_path,
+                hash,
+                package,
+                nar_size,
+                has_artefacts,
+            });
+        }
+
+        Ok(BuildExecutionResult {
+            error_msg: String::new(),
+            outputs,
+            elapsed,
+        })
+    }
 }

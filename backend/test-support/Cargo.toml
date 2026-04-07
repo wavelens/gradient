@@ -1,0 +1,24 @@
+[package]
+name = "test-support"
+version = "1.0.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0"
+authors = ["Wavelens GmbH <info@wavelens.io>"]
+
+[lib]
+name = "test_support"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow           = { workspace = true }
+async-trait      = { workspace = true }
+chrono           = { workspace = true }
+nix-daemon       = { workspace = true }
+gradient-core    = { path = "../core", package = "core" }
+entity           = { workspace = true }
+futures          = { workspace = true }
+sea-orm          = { workspace = true }
+tokio            = { workspace = true }
+uuid             = { workspace = true }
+password-auth    = "1.0"

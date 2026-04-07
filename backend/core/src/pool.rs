@@ -4,13 +4,130 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use nix_daemon::PathInfo;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-use super::executer::get_local_store;
+use super::executer::{
+    BuildOutputInfo, get_build_outputs_from_derivation, get_local_store, get_missing_builds,
+    get_pathinfo, nix_store_path,
+};
 use super::types::LocalNixStore;
+
+const GCROOTS_DIR: &str = "/nix/var/nix/gcroots/gradient";
+
+/// High-level abstraction over a pool of Nix daemon connections.
+///
+/// Production impl is `LocalNixStoreProvider` (below) which delegates to
+/// `NixStorePool` + the existing free functions in `core::executer`.
+/// Tests use `test_support::fakes::FakeNixStoreProvider`.
+#[async_trait]
+pub trait NixStoreProvider: Send + Sync + std::fmt::Debug + 'static {
+    /// Returns the subset of `paths` (derivation paths or store paths) that
+    /// are NOT currently present in the store.
+    async fn query_missing_paths(&self, paths: Vec<String>) -> Result<Vec<String>>;
+
+    /// Returns the `PathInfo` for a single store path, or `None` if the path
+    /// is not valid.
+    async fn query_pathinfo(&self, path: String) -> Result<Option<PathInfo>>;
+
+    /// Enumerates the outputs of a derivation along with their path-info.
+    async fn get_build_outputs(&self, derivation_path: String) -> Result<Vec<BuildOutputInfo>>;
+
+    /// Creates a GC root pinning `store_path`. Production impl writes a
+    /// symlink under `/nix/var/nix/gcroots/gradient/<name>`.
+    async fn add_gcroot(&self, name: String, store_path: String) -> Result<()>;
+
+    /// Removes a GC root previously created via `add_gcroot`. A missing root
+    /// is not an error.
+    async fn remove_gcroot(&self, name: String) -> Result<()>;
+
+    /// Best-effort deletion of `store_path` from the local Nix store.
+    /// Returns `true` if the path was actually deleted, `false` if it could
+    /// not be deleted because it is still reachable from a GC root.
+    async fn delete_path(&self, store_path: String) -> Result<bool>;
+}
+
+/// Production `NixStoreProvider` backed by a `NixStorePool` of real Nix daemon
+/// connections.
+#[derive(Debug)]
+pub struct LocalNixStoreProvider {
+    pool: NixStorePool,
+}
+
+impl LocalNixStoreProvider {
+    pub fn new(max: usize) -> Self {
+        Self {
+            pool: NixStorePool::new(max),
+        }
+    }
+}
+
+#[async_trait]
+impl NixStoreProvider for LocalNixStoreProvider {
+    async fn query_missing_paths(&self, paths: Vec<String>) -> Result<Vec<String>> {
+        get_missing_builds(&self.pool, paths).await
+    }
+
+    async fn query_pathinfo(&self, path: String) -> Result<Option<PathInfo>> {
+        let mut store = self
+            .pool
+            .acquire()
+            .await
+            .context("acquire store for pathinfo")?;
+        get_pathinfo(nix_store_path(&path), &mut *store).await
+    }
+
+    async fn get_build_outputs(&self, derivation_path: String) -> Result<Vec<BuildOutputInfo>> {
+        let mut store = self
+            .pool
+            .acquire()
+            .await
+            .context("acquire store for build outputs")?;
+        get_build_outputs_from_derivation(nix_store_path(&derivation_path), &mut *store).await
+    }
+
+    async fn add_gcroot(&self, name: String, store_path: String) -> Result<()> {
+        let gcroot_path = format!("{}/{}", GCROOTS_DIR, name);
+        tokio::fs::create_dir_all(GCROOTS_DIR)
+            .await
+            .with_context(|| format!("create GC roots dir {}", GCROOTS_DIR))?;
+        // Remove a stale symlink (best-effort) before re-creating.
+        let _ = tokio::fs::remove_file(&gcroot_path).await;
+        tokio::fs::symlink(&store_path, &gcroot_path)
+            .await
+            .with_context(|| format!("create gcroot symlink {}", gcroot_path))?;
+        Ok(())
+    }
+
+    async fn remove_gcroot(&self, name: String) -> Result<()> {
+        let gcroot_path = format!("{}/{}", GCROOTS_DIR, name);
+        match tokio::fs::remove_file(&gcroot_path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => {
+                Err(anyhow::Error::from(e).context(format!("remove gcroot {}", gcroot_path)))
+            }
+        }
+    }
+
+    async fn delete_path(&self, store_path: String) -> Result<bool> {
+        // The Nix daemon does not expose a `delete-path` operation, so shell
+        // out to `nix store delete`. The path is left alive (and we return
+        // `false`) when it is still reachable from a GC root.
+        let output = tokio::process::Command::new("nix")
+            .arg("store")
+            .arg("delete")
+            .arg(&store_path)
+            .output()
+            .await
+            .with_context(|| format!("spawn nix store delete {}", store_path))?;
+        Ok(output.status.success())
+    }
+}
 
 /// Connection pool for local Nix daemon connections (Unix socket / subprocess).
 ///

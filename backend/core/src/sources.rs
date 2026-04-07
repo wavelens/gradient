@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use anyhow::Result;
+use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose};
 use ed25519_compact::{KeyPair, SecretKey};
 use entity::evaluation::EvaluationStatus;
@@ -16,6 +18,7 @@ use ssh_key::{
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::NamedTempFile;
 use thiserror::Error;
@@ -362,17 +365,73 @@ fn parse_nix_git_url(nix_url: &str) -> Result<(String, String), SourceError> {
 ///
 /// For **SSH repositories** the repo is cloned via libgit2 (using in-memory
 /// SSH credentials) and the checked-out working tree is returned so that the
+/// Result of a successful prefetch. Owns the temporary clone directory so the
+/// caller keeps it alive for as long as the path is used.
+#[derive(Debug)]
+pub struct PrefetchedFlake {
+    _dir: tempfile::TempDir,
+    pub path: PathBuf,
+}
+
+impl PrefetchedFlake {
+    pub fn from_tempdir(dir: tempfile::TempDir) -> Self {
+        let path = dir.path().to_path_buf();
+        Self { _dir: dir, path }
+    }
+}
+
+/// Prefetches a flake repository for evaluation. Production impl uses libgit2
+/// + the Nix C API to clone SSH repos and lock their inputs into the store;
+/// tests can substitute a fake that returns `None` or a stub directory.
+#[async_trait]
+pub trait FlakePrefetcher: Send + Sync + std::fmt::Debug + 'static {
+    async fn prefetch(
+        &self,
+        crypt_secret_file: String,
+        serve_url: String,
+        repository: String,
+        organization: MOrganization,
+    ) -> Result<Option<PrefetchedFlake>>;
+}
+
+/// Production `FlakePrefetcher` backed by libgit2 + the Nix C API.
+#[derive(Debug, Default)]
+pub struct Libgit2Prefetcher;
+
+impl Libgit2Prefetcher {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl FlakePrefetcher for Libgit2Prefetcher {
+    async fn prefetch(
+        &self,
+        crypt_secret_file: String,
+        serve_url: String,
+        repository: String,
+        organization: MOrganization,
+    ) -> Result<Option<PrefetchedFlake>> {
+        prefetch_flake_inner(crypt_secret_file, serve_url, repository, organization)
+            .await
+            .map(|opt| opt.map(PrefetchedFlake::from_tempdir))
+            .map_err(|e| anyhow::anyhow!("{}", e))
+    }
+}
+
 /// caller can pass `path:<dir>` to the Nix C API, which avoids any further
 /// SSH interaction.
 ///
 /// For **HTTPS repositories** `None` is returned; the Nix evaluator will
 /// fetch the flake on demand via `builtins.getFlake`.
-#[instrument(skip(state, organization), fields(repository = %repository))]
-pub async fn prefetch_flake(
-    state: Arc<ServerState>,
+#[instrument(skip(organization), fields(repository = %repository))]
+async fn prefetch_flake_inner(
+    crypt_secret_file: String,
+    serve_url: String,
     repository: String,
     organization: MOrganization,
-) -> Result<Option<tempfile::TempDir>, SourceError> {
+) -> std::result::Result<Option<tempfile::TempDir>, SourceError> {
     if !check_repository_url_is_ssh(&repository) {
         debug!("HTTPS repository – skipping git clone, nix will fetch on demand");
         return Ok(None);
@@ -381,7 +440,7 @@ pub async fn prefetch_flake(
     debug!("SSH repository – cloning via libgit2: {}", repository);
 
     let (private_key, public_key) =
-        decrypt_ssh_private_key(state.cli.crypt_secret_file.clone(), organization, &state.cli.serve_url)?;
+        decrypt_ssh_private_key(crypt_secret_file, organization, &serve_url)?;
 
     let (git_url, rev) = parse_nix_git_url(&repository)?;
 

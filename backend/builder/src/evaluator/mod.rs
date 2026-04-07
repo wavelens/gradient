@@ -5,32 +5,26 @@
  */
 
 mod dependencies;
-mod drv;
 mod flake;
 mod nix_commands;
 mod nix_eval;
+mod resolver;
 
-pub use drv::Derivation;
-pub use nix_commands::{get_derivation, get_derivation_path, get_features};
+pub use resolver::NixCApiResolver;
 
 use anyhow::{Context, Result};
-use core::executer::*;
-use core::input::{parse_evaluation_wildcard, repository_url_to_nix, vec_to_hex};
-use core::sources::prefetch_flake;
-use core::types::*;
+use gradient_core::input::{parse_evaluation_wildcard, repository_url_to_nix, vec_to_hex};
+use gradient_core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
-use nix_eval::NixEvaluator;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use std::sync::Arc;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
-type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
 type EvaluationOutput = (Vec<MBuild>, Vec<MBuildDependency>, Vec<(Uuid, String)>, Vec<(String, String)>, Vec<(Uuid, Vec<String>)>);
 
 use dependencies::{add_existing_build, find_builds, query_all_dependencies, EvaluationAccumulator};
-use flake::get_flake_derivations;
 use super::scheduler::{update_evaluation_status, update_evaluation_status_with_error};
 
 /// Evaluates a flake repository, discovering all matching derivations and building the dependency
@@ -67,28 +61,35 @@ pub async fn evaluate(
         repository_url_to_nix(&evaluation.repository, vec_to_hex(&commit.hash).as_str())
             .context("Failed to convert repository URL to Nix format")?;
 
-    let _local_dir = prefetch_flake(Arc::clone(&state), repository.clone(), organization.clone())
+    let _local_dir = state
+        .flake_prefetcher
+        .prefetch(
+            state.cli.crypt_secret_file.clone(),
+            state.cli.serve_url.clone(),
+            repository.clone(),
+            organization.clone(),
+        )
         .await
         .context("Failed to prefetch flake")?;
 
     // For SSH repos the flake was cloned locally; use the path: URL so the Nix
     // C API never needs SSH credentials.  For HTTPS repos use the original URL.
     let nix_repository = match _local_dir.as_ref() {
-        Some(dir) => format!("path:{}", dir.path().display()),
+        Some(prefetched) => format!("path:{}", prefetched.path.display()),
         None => repository.clone(),
     };
 
-    let wildcards = parse_evaluation_wildcard(evaluation.wildcard.as_str())
-        .context("Failed to parse evaluation wildcard")?;
+    let wildcards: Vec<String> = parse_evaluation_wildcard(evaluation.wildcard.as_str())
+        .context("Failed to parse evaluation wildcard")?
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
 
-    let all_derivations = get_flake_derivations(
-        Arc::clone(&state),
-        nix_repository.clone(),
-        wildcards,
-        organization.clone(),
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("Failed to evaluate: {}", e))?;
+    let all_derivations = state
+        .derivation_resolver
+        .list_flake_derivations(nix_repository.clone(), wildcards)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to evaluate: {}", e))?;
 
     if all_derivations.is_empty() {
         warn!("No derivations found for evaluation");
@@ -99,80 +100,11 @@ pub async fn evaluate(
     let mut failed_derivations: Vec<(String, String)> = vec![];
     let total_derivations = all_derivations.len();
 
-    // Resolve all derivation paths via the embedded Nix evaluator. The
-    // evaluator is created once and shared across worker threads — `EvalState`
-    // is `Send + Sync` per nix_bindings, so concurrent `eval_from_string`
-    // calls on the same instance are safe. Workers run inside a single
-    // `spawn_blocking` task so signal-blocked Tokio worker threads never
-    // touch the Nix C API / Boehm GC.
-    let nix_repo_for_eval = nix_repository.clone();
-    let resolved: Vec<ResolvedDerivation> =
-        tokio::task::spawn_blocking(move || -> Vec<ResolvedDerivation> {
-            let evaluator = match NixEvaluator::new() {
-                Ok(e) => Arc::new(e),
-                Err(e) => {
-                    let err_str = e.to_string();
-                    return all_derivations
-                        .into_iter()
-                        .map(|d| {
-                            (
-                                d,
-                                Err(anyhow::anyhow!(
-                                    "failed to initialize nix evaluator: {}",
-                                    err_str
-                                )),
-                            )
-                        })
-                        .collect();
-                }
-            };
-
-            let n_workers = std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4)
-                .min(all_derivations.len().max(1));
-
-            // Round-robin partition keeps chunk sizes balanced even when
-            // per-derivation evaluation cost varies wildly.
-            let mut chunks: Vec<Vec<(usize, String)>> =
-                (0..n_workers).map(|_| Vec::new()).collect();
-            for (idx, d) in all_derivations.into_iter().enumerate() {
-                chunks[idx % n_workers].push((idx, d));
-            }
-
-            let mut indexed: Vec<(usize, ResolvedDerivation)> = std::thread::scope(|scope| {
-                let handles: Vec<_> = chunks
-                    .into_iter()
-                    .map(|chunk| {
-                        let evaluator = Arc::clone(&evaluator);
-                        let nix_repo = nix_repo_for_eval.clone();
-                        scope.spawn(move || {
-                            chunk
-                                .into_iter()
-                                .map(|(idx, derivation_string)| {
-                                    let result = get_derivation_path(
-                                        &evaluator,
-                                        &nix_repo,
-                                        &derivation_string,
-                                    );
-                                    (idx, (derivation_string, result))
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                    })
-                    .collect();
-
-                handles
-                    .into_iter()
-                    .flat_map(|h| h.join().expect("derivation resolver worker panicked"))
-                    .collect()
-            });
-
-            indexed.sort_by_key(|(idx, _)| *idx);
-            indexed.into_iter().map(|(_, r)| r).collect()
-        })
+    let resolved = state
+        .derivation_resolver
+        .resolve_derivation_paths(nix_repository.clone(), all_derivations)
         .await
-        .map_err(|e| anyhow::anyhow!("derivation resolver task panicked: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to resolve derivation paths: {}", e))?;
 
     // Process resolved derivations sequentially (store and acc require exclusive access).
     for (derivation_string, derivation_result) in resolved {
@@ -191,7 +123,10 @@ pub async fn evaluate(
             }
         };
 
-        let missing = get_missing_builds(&state.nix_store_pool, vec![derivation.clone()]).await?;
+        let missing = state
+            .nix_store
+            .query_missing_paths(vec![derivation.clone()])
+            .await?;
 
         if missing.is_empty() {
             debug!(derivation = %derivation, "Skipping package - already in store");
@@ -225,7 +160,10 @@ pub async fn evaluate(
         let existing_builds =
             find_builds(Arc::clone(&state), organization_id, vec![derivation.clone()], true).await?;
         if let Some(existing) = existing_builds.first() {
-            let missing = get_missing_builds(&state.nix_store_pool, vec![existing.derivation_path.clone()]).await?;
+            let missing = state
+                .nix_store
+                .query_missing_paths(vec![existing.derivation_path.clone()])
+                .await?;
             if missing.is_empty() {
                 acc.entry_point_build_ids.push((existing.id, derivation_string.clone()));
                 debug!(derivation = %derivation, "Skipping package - already exists in DB and store");
@@ -326,7 +264,7 @@ pub async fn evaluate_direct(
             }
 
             for (build_id, features) in pending_features {
-                if let Err(e) = core::database::add_features(Arc::clone(&state), features, Some(build_id), None).await {
+                if let Err(e) = gradient_core::database::add_features(Arc::clone(&state), features, Some(build_id), None).await {
                     error!(error = %e, build_id = %build_id, "Failed to add features for direct build");
                 }
             }

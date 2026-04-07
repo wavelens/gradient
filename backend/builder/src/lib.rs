@@ -7,7 +7,7 @@
 pub mod evaluator;
 pub mod scheduler;
 
-use core::types::ServerState;
+use gradient_core::types::ServerState;
 use std::sync::Arc;
 
 pub async fn start_builder(state: Arc<ServerState>) -> std::io::Result<()> {

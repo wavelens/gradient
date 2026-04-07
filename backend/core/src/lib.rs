@@ -6,7 +6,9 @@
 
 pub mod consts;
 pub mod database;
+pub mod derivation;
 pub mod email;
+pub mod evaluator;
 pub mod executer;
 pub mod gc;
 pub mod input;
@@ -22,13 +24,19 @@ pub mod webhooks;
 use clap::Parser;
 use database::connect_db;
 use log_storage::FileLogStorage;
-use pool::NixStorePool;
+use email::EmailService;
+use executer::SshBuildExecutor;
+use pool::LocalNixStoreProvider;
+use sources::Libgit2Prefetcher;
 use state::load_and_apply_state;
 use std::path::Path;
 use std::sync::Arc;
 use types::*;
+use webhooks::ReqwestWebhookClient;
 
-pub async fn init_state() -> Arc<ServerState> {
+pub async fn init_state(
+    derivation_resolver: Arc<dyn evaluator::DerivationResolver>,
+) -> Arc<ServerState> {
     let cli = Cli::parse();
 
     println!("Starting Gradient Server on {}:{}", cli.ip, cli.port);
@@ -63,14 +71,42 @@ pub async fn init_state() -> Arc<ServerState> {
         }
     };
 
-    let nix_store_pool = NixStorePool::new(cli.max_nixdaemon_connections);
-    let web_nix_store_pool = NixStorePool::new(1);
+    let nix_store: Arc<dyn pool::NixStoreProvider> =
+        Arc::new(LocalNixStoreProvider::new(cli.max_nixdaemon_connections));
+    let web_nix_store: Arc<dyn pool::NixStoreProvider> = Arc::new(LocalNixStoreProvider::new(1));
+
+    let webhook_client = match ReqwestWebhookClient::new() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to build webhook HTTP client: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let webhooks: Arc<dyn webhooks::WebhookClient> = Arc::new(webhook_client);
+
+    let email_service = match EmailService::new(&cli).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Failed to initialize email service: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let email: Arc<dyn email::EmailSender> = Arc::new(email_service);
+
+    let flake_prefetcher: Arc<dyn sources::FlakePrefetcher> = Arc::new(Libgit2Prefetcher::new());
+
+    let build_executor: Arc<dyn executer::BuildExecutor> = Arc::new(SshBuildExecutor::new());
 
     Arc::new(ServerState {
         db,
         cli,
         log_storage: Arc::new(log_storage),
-        nix_store_pool,
-        web_nix_store_pool,
+        nix_store,
+        web_nix_store,
+        webhooks,
+        email,
+        flake_prefetcher,
+        derivation_resolver,
+        build_executor,
     })
 }
