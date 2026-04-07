@@ -98,13 +98,18 @@ pub async fn init_state(
     let build_executor: Arc<dyn executer::BuildExecutor> = Arc::new(SshBuildExecutor::new());
 
     let nar_storage = if let Some(ref bucket) = cli.s3_bucket {
-        let secret = cli
-            .s3_secret_access_key_file
-            .as_deref()
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .map(|s| s.trim().to_string());
+        let secret = match cli.s3_secret_access_key_file.as_deref() {
+            Some(path) => match std::fs::read_to_string(path) {
+                Ok(s) => Some(s.trim().to_string()),
+                Err(e) => {
+                    eprintln!("Failed to read S3 secret access key file '{}': {}", path, e);
+                    std::process::exit(1);
+                }
+            },
+            None => None,
+        };
 
-        match NarStore::s3(
+        let store = match NarStore::s3(
             bucket,
             &cli.s3_region,
             cli.s3_endpoint.as_deref(),
@@ -112,15 +117,23 @@ pub async fn init_state(
             secret.as_deref(),
             &cli.s3_prefix,
         ) {
-            Ok(store) => {
-                println!("NAR storage: S3 bucket '{}'", bucket);
-                store
-            }
+            Ok(s) => s,
             Err(e) => {
                 eprintln!("Failed to initialize S3 NAR storage: {}", e);
                 std::process::exit(1);
             }
+        };
+        if let Err(e) = store.ping().await {
+            eprintln!("S3 NAR storage unreachable (bucket '{}'): {:#}", bucket, e);
+            std::process::exit(1);
         }
+        println!(
+            "NAR storage: S3 bucket '{}', access_key_id={:?}, secret_loaded={}",
+            bucket,
+            cli.s3_access_key_id.as_deref(),
+            secret.is_some(),
+        );
+        store
     } else {
         match NarStore::local(&cli.base_path) {
             Ok(store) => {

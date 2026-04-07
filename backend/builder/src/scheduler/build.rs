@@ -285,6 +285,7 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                         package: Set(output.package),
                         file_hash: Set(None),
                         file_size: Set(output.nar_size),
+                        nar_size: Set(None),
                         is_cached: Set(false),
                         has_artefacts: Set(output.has_artefacts),
                         ca: Set(None),

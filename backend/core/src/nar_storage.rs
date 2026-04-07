@@ -51,7 +51,10 @@ impl NarStore {
             .with_region(region);
 
         if let Some(ep) = endpoint {
-            builder = builder.with_endpoint(ep).with_allow_http(true);
+            builder = builder
+                .with_endpoint(ep)
+                .with_virtual_hosted_style_request(false)
+                .with_allow_http(true);
         }
         if let Some(key) = access_key_id {
             builder = builder.with_access_key_id(key);
@@ -82,6 +85,19 @@ impl NarStore {
             &hash[..2],
             &hash[2..]
         ))
+    }
+
+    /// Verify the storage backend is reachable. Returns `Ok(())` when the
+    /// underlying store responds (even with NotFound), or an error when the
+    /// server cannot be reached at all (network error, 502, auth failure, …).
+    pub async fn ping(&self) -> Result<()> {
+        let probe = Path::from(format!("{}__gradient_ping__", self.prefix));
+        match self.inner.head(&probe).await {
+            Ok(_)
+            | Err(object_store::Error::NotFound { .. })
+            | Err(object_store::Error::PermissionDenied { .. }) => Ok(()),
+            Err(e) => Err(e).context("Storage backend unreachable"),
+        }
     }
 
     pub async fn put(&self, hash: &str, data: Vec<u8>) -> Result<()> {

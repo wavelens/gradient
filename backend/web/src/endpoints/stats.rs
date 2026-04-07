@@ -40,6 +40,8 @@ pub struct StorageMetricPoint {
 pub struct CacheStatsResponse {
     /// Total compressed bytes of all NARs cached by this cache.
     pub total_bytes: i64,
+    /// Total uncompressed NAR bytes of all packages cached by this cache.
+    pub total_nar_bytes: i64,
     /// Total number of packages (signed build outputs) in this cache.
     pub total_packages: i64,
     /// Packages/bytes added per minute for the last 60 minutes.
@@ -224,7 +226,8 @@ pub async fn get_cache_stats(
         .query_one(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"SELECT COALESCE(SUM(bo.file_size), 0)::bigint AS total_bytes,
-                      COUNT(bos.id)::bigint               AS total_packages
+                      COALESCE(SUM(bo.nar_size),  0)::bigint AS total_nar_bytes,
+                      COUNT(bos.id)::bigint                   AS total_packages
                FROM build_output_signature bos
                JOIN build_output bo ON bo.id = bos.build_output
                WHERE bos.cache = $1"#,
@@ -236,6 +239,11 @@ pub async fn get_cache_stats(
     let total_bytes: i64 = total_row
         .as_ref()
         .and_then(|row| row.try_get::<i64>("", "total_bytes").ok())
+        .unwrap_or(0);
+
+    let total_nar_bytes: i64 = total_row
+        .as_ref()
+        .and_then(|row| row.try_get::<i64>("", "total_nar_bytes").ok())
         .unwrap_or(0);
 
     let total_packages: i64 = total_row
@@ -259,6 +267,7 @@ pub async fn get_cache_stats(
         error: false,
         message: CacheStatsResponse {
             total_bytes,
+            total_nar_bytes,
             total_packages,
             storage_minutes,
             storage_hours,

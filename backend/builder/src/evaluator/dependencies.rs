@@ -127,6 +127,7 @@ pub(super) async fn add_existing_build(
                 package: Set(output.package),
                 file_hash: Set(None),
                 file_size: Set(None),
+                nar_size: Set(None),
                 is_cached: Set(false),
                 has_artefacts: Set(has_artefacts),
                 ca: Set(output.ca),

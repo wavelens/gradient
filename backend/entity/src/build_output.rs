@@ -21,6 +21,7 @@ pub struct Model {
     pub package: String,
     pub file_hash: Option<String>,
     pub file_size: Option<i64>,
+    pub nar_size: Option<i64>,
     pub is_cached: bool,
     pub has_artefacts: bool,
     pub ca: Option<String>,

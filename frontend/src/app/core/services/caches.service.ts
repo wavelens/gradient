@@ -34,6 +34,7 @@ export interface StorageMetricPoint {
 
 export interface CacheStats {
   total_bytes: number;
+  total_nar_bytes: number;
   total_packages: number;
   storage_minutes: StorageMetricPoint[];
   storage_hours: StorageMetricPoint[];

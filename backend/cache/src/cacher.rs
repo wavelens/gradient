@@ -229,10 +229,10 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
 
     let pack_result = pack_build_output(Arc::clone(&state), build_output.clone()).await;
 
-    let (file_hash, file_size) = match pack_result {
+    let (file_hash, file_size, nar_size) = match pack_result {
         Ok(result) => result,
         Err(e) => {
-            error!(error = %e, "Failed to pack build output");
+            error!(error = %e, hash = %build_output.hash, "Failed to pack build output: {:#}", e);
             return;
         }
     };
@@ -241,6 +241,7 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
 
     abuild_output.file_hash = Set(Some(file_hash));
     abuild_output.file_size = Set(Some(file_size as i64));
+    abuild_output.nar_size = Set(Some(nar_size as i64));
     abuild_output.is_cached = Set(true);
 
     if let Err(e) = abuild_output.update(&state.db).await {
@@ -404,7 +405,7 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
 pub async fn pack_build_output(
     state: Arc<ServerState>,
     build_output: MBuildOutput,
-) -> Result<(String, u32)> {
+) -> Result<(String, u32, u64)> {
     let path = get_path_from_build_output(build_output);
 
     let (path_hash, _path_package) =
@@ -424,6 +425,7 @@ pub async fn pack_build_output(
     }
 
     let nar_data = pack_output.stdout;
+    let nar_size = nar_data.len() as u64;
 
     let compressed_data = tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_data, 6))
         .await
@@ -439,7 +441,7 @@ pub async fn pack_build_output(
         .await
         .context("Failed to store compressed NAR")?;
 
-    Ok((format!("sha256:{}", file_hash), file_size))
+    Ok((format!("sha256:{}", file_hash), file_size, nar_size))
 }
 
 /// Compute SHA-256 of `data` and return it encoded in Nix's base-32 alphabet.

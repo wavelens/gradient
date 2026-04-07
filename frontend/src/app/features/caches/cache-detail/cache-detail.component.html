@@ -50,6 +50,10 @@
             <span class="stat-value">{{ stats()?.total_packages ?? 0 }}</span>
           </div>
           <div class="stat-card">
+            <span class="stat-label">Uncompressed size</span>
+            <span class="stat-value">{{ formatBytes(stats()?.total_nar_bytes ?? 0) }}</span>
+          </div>
+          <div class="stat-card">
             <span class="stat-label">Compressed stored</span>
             <span class="stat-value">{{ formatBytes(stats()?.total_bytes ?? 0) }}</span>
           </div>

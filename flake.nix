@@ -19,6 +19,8 @@
       config = { allowUnfree = true; };
     };
 
+    nixVersion = pkgs.nixVersions.nix_2_34;
+
     rustEnv = with pkgs.rustPackages; [
       clippy
     ];
@@ -38,7 +40,7 @@
       buildInputs = [
         stdenv.cc.cc.lib
         pam
-        nixVersions.nix_2_32
+        nixVersion
       ];
 
       packages = [
@@ -66,7 +68,7 @@
       ];
 
       nativeBuildInputs = [
-        nixVersions.nix_2_32.dev
+        nixVersion.dev
         pkg-config
         glibc.dev
       ];
