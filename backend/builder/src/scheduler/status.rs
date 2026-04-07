@@ -52,6 +52,25 @@ pub async fn update_build_status(
                 )
                 .await;
             });
+
+            // Finalize the build log on terminal state transitions so backends
+            // like S3 can upload the local file to remote storage.
+            if matches!(
+                updated_build.status,
+                BuildStatus::Completed
+                    | BuildStatus::Failed
+                    | BuildStatus::Aborted
+                    | BuildStatus::DependencyFailed
+            ) {
+                let log_state = Arc::clone(&state);
+                let log_id = updated_build.log_id.unwrap_or(updated_build.id);
+                tokio::spawn(async move {
+                    if let Err(e) = log_state.log_storage.finalize(log_id).await {
+                        error!(error = %e, build_id = %log_id, "Failed to finalize build log");
+                    }
+                });
+            }
+
             updated_build
         }
         Err(e) => {

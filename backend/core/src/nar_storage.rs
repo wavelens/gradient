@@ -21,6 +21,19 @@ pub struct NarStore {
 }
 
 impl NarStore {
+    /// Returns a clone of the underlying object store so callers (e.g. log storage)
+    /// can share the same connection.
+    pub fn inner(&self) -> Arc<dyn ObjectStore> {
+        Arc::clone(&self.inner)
+    }
+
+    /// Returns the prefix used by this store (empty for local).
+    pub fn prefix(&self) -> &str {
+        &self.prefix
+    }
+}
+
+impl NarStore {
     /// Create a local-disk-backed store rooted at `base_path`.
     pub fn local(base_path: &str) -> Result<Self> {
         std::fs::create_dir_all(base_path)

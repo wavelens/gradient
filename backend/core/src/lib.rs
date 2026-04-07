@@ -25,7 +25,7 @@ pub mod webhooks;
 use database::connect_db;
 use email::EmailService;
 use executer::SshBuildExecutor;
-use log_storage::FileLogStorage;
+use log_storage::{FileLogStorage, S3LogStorage};
 use nar_storage::NarStore;
 use pool::LocalNixStoreProvider;
 use sources::Libgit2Prefetcher;
@@ -63,7 +63,7 @@ pub async fn init_state(
         std::process::exit(1);
     }
 
-    let log_storage = match FileLogStorage::new(Path::new(&cli.base_path)).await {
+    let local_log_storage = match FileLogStorage::new(Path::new(&cli.base_path)).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Failed to initialize log storage: {}", e);
@@ -127,11 +127,12 @@ pub async fn init_state(
             eprintln!("S3 NAR storage unreachable (bucket '{}'): {:#}", bucket, e);
             std::process::exit(1);
         }
-        println!(
-            "NAR storage: S3 bucket '{}', access_key_id={:?}, secret_loaded={}",
-            bucket,
-            cli.s3_access_key_id.as_deref(),
-            secret.is_some(),
+        println!("NAR storage: S3 bucket '{}'", bucket);
+        tracing::debug!(
+            bucket = %bucket,
+            access_key_id = ?cli.s3_access_key_id.as_deref(),
+            secret_loaded = secret.is_some(),
+            "S3 NAR storage initialized",
         );
         store
     } else {
@@ -147,10 +148,21 @@ pub async fn init_state(
         }
     };
 
+    let log_storage: Arc<dyn log_storage::LogStorage> = if cli.s3_bucket.is_some() {
+        println!("Log storage: S3 (with local cache)");
+        Arc::new(S3LogStorage::new(
+            local_log_storage,
+            nar_storage.inner(),
+            nar_storage.prefix(),
+        ))
+    } else {
+        Arc::new(local_log_storage)
+    };
+
     Arc::new(ServerState {
         db,
         cli,
-        log_storage: Arc::new(log_storage),
+        log_storage,
         nix_store,
         web_nix_store,
         webhooks,

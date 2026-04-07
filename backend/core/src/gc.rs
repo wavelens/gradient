@@ -105,12 +105,10 @@ pub async fn gc_project_evaluations(
             .context("GC: failed to query builds")?;
 
         for build in &builds {
-            // Remove the build log.
-            let log_path = format!("{}/logs/{}.log", state.cli.base_path, build.id);
-            if let Err(e) = tokio::fs::remove_file(&log_path).await
-                && e.kind() != std::io::ErrorKind::NotFound
-            {
-                warn!(error = %e, path = %log_path, "GC: failed to remove build log");
+            // Remove the build log from all backing stores (local + S3).
+            let log_id = build.log_id.unwrap_or(build.id);
+            if let Err(e) = state.log_storage.delete(log_id).await {
+                warn!(error = %e, build_id = %log_id, "GC: failed to remove build log");
             }
 
             // Remove cached NAR files and GC root symlinks for each build output.

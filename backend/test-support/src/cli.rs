@@ -52,5 +52,11 @@ pub fn test_cli() -> Cli {
         max_nixdaemon_connections: 2,
         eval_workers: 1,
         nar_ttl_hours: 0,
+        s3_bucket: None,
+        s3_region: "us-east-1".into(),
+        s3_endpoint: None,
+        s3_access_key_id: None,
+        s3_secret_access_key_file: None,
+        s3_prefix: String::new(),
     }
 }

@@ -20,4 +20,7 @@ impl LogStorage for NoopLogStorage {
     fn read<'a>(&'a self, _build_id: Uuid) -> BoxFuture<'a, Result<String>> {
         Box::pin(async { Ok(String::new()) })
     }
+    fn delete<'a>(&'a self, _build_id: Uuid) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async { Ok(()) })
+    }
 }

@@ -30,7 +30,7 @@ in rustPlatform.buildRustPackage {
 
   buildInputs = [
     git
-    nixVersions.nix_2_32
+    nixVersions.nix_2_34
     openssl
   ];
 
