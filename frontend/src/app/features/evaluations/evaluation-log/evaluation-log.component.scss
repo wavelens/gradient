@@ -546,6 +546,13 @@
   border-left: 3px solid transparent;
   transition: background $transition-fast, border-color $transition-fast;
 
+  .evaluation-label {
+    flex: 1;
+    font-size: $font-size-sm;
+    color: $text-primary;
+    font-weight: 500;
+  }
+
   &:hover {
     background: rgba(#fff, 0.04);
     border-left-color: rgba(#fff, 0.12);

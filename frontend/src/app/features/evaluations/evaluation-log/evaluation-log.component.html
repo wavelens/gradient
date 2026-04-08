@@ -39,31 +39,29 @@
         </div>
       </div>
 
-      @if (messages().length > 0) {
-        <div class="sidebar-section-header">Evaluation</div>
-        <div
-          class="evaluation-messages-item"
-          [class.selected]="selectedSection() === 'messages'"
-          (click)="selectEvaluationSection()"
-          (keydown.enter)="selectEvaluationSection()"
-          tabindex="0"
-          role="option"
-          [attr.aria-selected]="selectedSection() === 'messages'"
-        >
-          @if (errorMessages().length > 0) {
-            <span class="msg-badge msg-badge--error">
-              <span class="material-symbols-outlined">error</span>
-              {{ errorMessages().length }}
-            </span>
-          }
-          @if (warningMessages().length > 0) {
-            <span class="msg-badge msg-badge--warning">
-              <span class="material-symbols-outlined">warning</span>
-              {{ warningMessages().length }}
-            </span>
-          }
-        </div>
-      }
+      <div
+        class="evaluation-messages-item"
+        [class.selected]="selectedSection() === 'messages'"
+        (click)="selectEvaluationSection()"
+        (keydown.enter)="selectEvaluationSection()"
+        tabindex="0"
+        role="option"
+        [attr.aria-selected]="selectedSection() === 'messages'"
+      >
+        <span class="evaluation-label">Evaluation</span>
+        @if (errorMessages().length > 0) {
+          <span class="msg-badge msg-badge--error">
+            <span class="material-symbols-outlined">error</span>
+            {{ errorMessages().length }}
+          </span>
+        }
+        @if (warningMessages().length > 0) {
+          <span class="msg-badge msg-badge--warning">
+            <span class="material-symbols-outlined">warning</span>
+            {{ warningMessages().length }}
+          </span>
+        }
+      </div>
 
       <div class="builds-list-header">Builds</div>
 
