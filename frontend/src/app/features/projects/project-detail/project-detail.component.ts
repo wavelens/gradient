@@ -79,6 +79,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     Failed: 2,
     Aborted: 3,
     Completed: 4,
+    Substituted: 4,
   };
 
   private readonly statusesWithBuilds = new Set<EvaluationStatus>(['Building', 'Waiting', 'Completed', 'Failed', 'Aborted']);

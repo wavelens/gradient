@@ -799,7 +799,11 @@ async fn evaluation_to_summary(
     } else {
         let completed = EBuild::find()
             .filter(CBuild::Id.is_in(ep_builds.clone()))
-            .filter(CBuild::Status.eq(BuildStatus::Completed))
+            .filter(
+                Condition::any()
+                    .add(CBuild::Status.eq(BuildStatus::Completed))
+                    .add(CBuild::Status.eq(BuildStatus::Substituted)),
+            )
             .count(&state.db)
             .await? as i64;
         let failed = EBuild::find()
@@ -1480,7 +1484,7 @@ pub async fn get_entry_point_download(
         .await?
         .ok_or_else(|| WebError::not_found("Build"))?;
 
-    if build.status != BuildStatus::Completed {
+    if build.status != BuildStatus::Completed && build.status != BuildStatus::Substituted {
         return Err(WebError::not_found("File"));
     }
 
@@ -1489,6 +1493,19 @@ pub async fn get_entry_point_download(
         .filter(CDerivationOutput::Derivation.eq(build.derivation))
         .all(&state.db)
         .await?;
+
+    for output in &build_outputs {
+        // Substituted builds may not have their output paths realised on the
+        // gradient-server's local store yet. Ensure the path exists before
+        // reading hydra-build-products.
+        if let Err(e) = state.web_nix_store.ensure_path(output.output.clone()).await {
+            tracing::warn!(
+                error = format!("{:#}", e),
+                path = %output.output,
+                "Failed to ensure output path is realised"
+            );
+        }
+    }
 
     for output in build_outputs {
         let hydra_products_path = format!("{}/nix-support/hydra-build-products", output.output);

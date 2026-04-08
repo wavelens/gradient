@@ -724,10 +724,144 @@ async fn reserve_available_server(
     None
 }
 
+/// Returns `true` if at least one queued build in `eval_id` can be scheduled
+/// on some active server in `org_id` (matching architecture + all required
+/// features). Returns `false` if there are no queued builds at all.
+async fn any_queued_build_schedulable(
+    state: &Arc<ServerState>,
+    eval_id: Uuid,
+    org_id: Uuid,
+) -> bool {
+    let queued = match EBuild::find()
+        .filter(CBuild::Evaluation.eq(eval_id))
+        .filter(CBuild::Status.eq(BuildStatus::Queued))
+        .all(&state.db)
+        .await
+    {
+        Ok(b) => b,
+        Err(e) => {
+            warn!(error = %e, evaluation_id = %eval_id, "Failed to query queued builds for schedulability");
+            return true; // fail-safe: don't flip to Waiting on transient error
+        }
+    };
+
+    if queued.is_empty() {
+        return false;
+    }
+
+    let active_servers = match EServer::find()
+        .filter(
+            Condition::all()
+                .add(CServer::Organization.eq(org_id))
+                .add(CServer::Active.eq(true)),
+        )
+        .all(&state.db)
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(error = %e, "Failed to query active servers for schedulability");
+            return true;
+        }
+    };
+
+    if active_servers.is_empty() {
+        return false;
+    }
+
+    for b in queued {
+        let derivation = match EDerivation::find_by_id(b.derivation).one(&state.db).await {
+            Ok(Some(d)) => d,
+            _ => continue,
+        };
+
+        // BUILTIN builds can run anywhere with an active server.
+        if derivation.architecture == Architecture::BUILTIN {
+            return true;
+        }
+
+        // Servers whose architecture matches the derivation.
+        let mut arch_ids = HashSet::new();
+        let mut id_cond = Condition::any();
+        for s in &active_servers {
+            id_cond = id_cond.add(CServerArchitecture::Server.eq(s.id));
+        }
+        match EServerArchitecture::find()
+            .filter(
+                Condition::all()
+                    .add(id_cond)
+                    .add(CServerArchitecture::Architecture.eq(derivation.architecture.clone())),
+            )
+            .all(&state.db)
+            .await
+        {
+            Ok(rows) => {
+                for r in rows {
+                    arch_ids.insert(r.server);
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to query server architectures for schedulability");
+                return true;
+            }
+        }
+
+        if arch_ids.is_empty() {
+            continue;
+        }
+
+        let features: Vec<Uuid> = match EDerivationFeature::find()
+            .filter(CDerivationFeature::Derivation.eq(derivation.id))
+            .all(&state.db)
+            .await
+        {
+            Ok(f) => f.into_iter().map(|f| f.feature).collect(),
+            Err(e) => {
+                warn!(error = %e, "Failed to query derivation features for schedulability");
+                return true;
+            }
+        };
+
+        if features.is_empty() {
+            return true;
+        }
+
+        let mut srv_cond = Condition::any();
+        for id in &arch_ids {
+            srv_cond = srv_cond.add(CServerFeature::Server.eq(*id));
+        }
+        let mut feat_cond = Condition::any();
+        for f in &features {
+            feat_cond = feat_cond.add(CServerFeature::Feature.eq(*f));
+        }
+        let rows = match EServerFeature::find()
+            .filter(Condition::all().add(srv_cond).add(feat_cond))
+            .all(&state.db)
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                warn!(error = %e, "Failed to query server features for schedulability");
+                return true;
+            }
+        };
+        let mut count_per_server: HashMap<Uuid, usize> = HashMap::new();
+        for row in rows {
+            *count_per_server.entry(row.server).or_insert(0) += 1;
+        }
+        if count_per_server.values().any(|c| *c >= features.len()) {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Reconciles `Building ↔ Waiting` evaluation states each scheduler tick.
 ///
-/// - `Building` evaluation with queued builds but no active servers in the org → `Waiting`
-/// - `Waiting` evaluation whose org now has at least one active server → `Building`
+/// - `Building` evaluation with queued builds but no server matches their
+///   architecture/features → `Waiting`
+/// - `Waiting` evaluation whose org now has at least one matching server → `Building`
 async fn update_waiting_evaluations(state: Arc<ServerState>) {
     let evals = match EEvaluation::find()
         .filter(
@@ -770,23 +904,12 @@ async fn update_waiting_evaluations(state: Arc<ServerState>) {
             }
         };
 
-        let has_active_servers = match EServer::find()
-            .filter(
-                Condition::all()
-                    .add(CServer::Organization.eq(org_id))
-                    .add(CServer::Active.eq(true)),
-            )
-            .one(&state.db)
-            .await
-        {
-            Ok(s) => s.is_some(),
-            Err(e) => {
-                warn!(error = %e, evaluation_id = %eval.id, "Failed to query servers for waiting check");
-                continue;
-            }
-        };
+        let schedulable = any_queued_build_schedulable(&state, eval.id, org_id).await;
 
-        if eval.status == EvaluationStatus::Building && !has_active_servers {
+        if eval.status == EvaluationStatus::Building && !schedulable {
+            // Only flip to Waiting if there are still queued builds — an eval
+            // with zero queued builds is either done or about to be resolved
+            // by `check_evaluation_status`.
             let has_queued = match EBuild::find()
                 .filter(CBuild::Evaluation.eq(eval.id))
                 .filter(CBuild::Status.eq(BuildStatus::Queued))
@@ -801,11 +924,11 @@ async fn update_waiting_evaluations(state: Arc<ServerState>) {
             };
 
             if has_queued {
-                info!(evaluation_id = %eval.id, "No active servers in org, moving evaluation to Waiting");
+                info!(evaluation_id = %eval.id, "No schedulable server for queued builds, moving evaluation to Waiting");
                 update_evaluation_status(Arc::clone(&state), eval, EvaluationStatus::Waiting).await;
             }
-        } else if eval.status == EvaluationStatus::Waiting && has_active_servers {
-            info!(evaluation_id = %eval.id, "Servers now available, resuming evaluation to Building");
+        } else if eval.status == EvaluationStatus::Waiting && schedulable {
+            info!(evaluation_id = %eval.id, "Matching server now available, resuming evaluation to Building");
             update_evaluation_status(Arc::clone(&state), eval, EvaluationStatus::Building).await;
         }
     }

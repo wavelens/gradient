@@ -27,7 +27,9 @@ pub async fn update_build_status(
     }
 
     if (status == BuildStatus::Aborted || status == BuildStatus::DependencyFailed)
-        && (build.status == BuildStatus::Completed || build.status == BuildStatus::Failed)
+        && (build.status == BuildStatus::Completed
+            || build.status == BuildStatus::Substituted
+            || build.status == BuildStatus::Failed)
     {
         return build;
     }

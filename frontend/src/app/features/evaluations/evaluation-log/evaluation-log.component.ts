@@ -63,7 +63,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private initialBuildId: string | null = null;
 
   completedBuilds = computed(() =>
-    this.builds().filter(b => b.status === 'Completed').length
+    this.builds().filter(b => b.status === 'Completed' || b.status === 'Substituted').length
   );
 
   queuedCount = computed(() =>
@@ -146,6 +146,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     Aborted: 3,
     DependencyFailed: 3,
     Completed: 4,
+    Substituted: 4,
   };
 
   private sortBuilds(builds: BuildItem[]): BuildItem[] {
