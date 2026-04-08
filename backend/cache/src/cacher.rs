@@ -426,13 +426,18 @@ pub async fn pack_derivation_output(
     let nar_data = pack_output.stdout;
     let nar_size = nar_data.len() as u64;
 
-    let compressed_data = tokio::task::spawn_blocking(move || zstd::bulk::compress(&nar_data, 6))
-        .await
-        .context("Compression task panicked")?
-        .context("Failed to compress NAR data")?;
+    // Compress and hash on a blocking thread — both are CPU-bound and would
+    // otherwise peg a tokio worker for the duration of large NARs.
+    let (compressed_data, file_hash) = tokio::task::spawn_blocking(move || {
+        let compressed = zstd::bulk::compress(&nar_data, 6)?;
+        let hash = nix_base32_sha256(&compressed);
+        Ok::<_, std::io::Error>((compressed, hash))
+    })
+    .await
+    .context("Compression task panicked")?
+    .context("Failed to compress NAR data")?;
 
     let file_size = compressed_data.len() as u32;
-    let file_hash = nix_base32_sha256(&compressed_data);
 
     state
         .nar_storage
