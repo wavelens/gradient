@@ -13,7 +13,7 @@ use gradient_core::executer::*;
 use gradient_core::types::*;
 use nix_daemon::{BasicDerivation, DerivationOutput};
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
@@ -333,7 +333,17 @@ pub async fn schedule_build(
             };
 
             if status == BuildStatus::Completed {
-                build.build_time_ms = Some(result.elapsed.as_millis() as i64);
+                // Persist the build_time_ms before update_build_status runs.
+                // `into_active_model()` marks the mutated field as `Unchanged`,
+                // so mutating the Model in place would not reach the DB.
+                let mut a = build.clone().into_active_model();
+                a.build_time_ms = Set(Some(result.elapsed.as_millis() as i64));
+                match a.update(&state.db).await {
+                    Ok(updated) => build = updated,
+                    Err(e) => {
+                        error!(error = %e, build_id = %build.id, "Failed to persist build_time_ms");
+                    }
+                }
             }
 
             let updated_build = if status == BuildStatus::Failed {
