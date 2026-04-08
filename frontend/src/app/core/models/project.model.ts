@@ -66,6 +66,15 @@ export interface ProjectDetail {
   can_edit: boolean;
 }
 
+export interface EvaluationMessage {
+  id: string;
+  level: 'Error' | 'Warning' | 'Notice';
+  message: string;
+  source?: string;
+  created_at: string;
+  entry_points: string[];
+}
+
 export interface Evaluation {
   id: string;
   project?: string;
@@ -77,7 +86,8 @@ export interface Evaluation {
   previous?: string;
   next?: string;
   created_at: string;
-  error?: string;
+  error_count: number;
+  warning_count: number;
 }
 
 export type EvaluationStatus =

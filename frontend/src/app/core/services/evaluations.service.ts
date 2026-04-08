@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { Evaluation } from '@core/models';
+import { Evaluation, EvaluationMessage } from '@core/models';
 
 export interface DependencyNode {
   id: string;
@@ -51,6 +51,10 @@ export class EvaluationsService {
 
   getEvaluation(id: string): Observable<Evaluation> {
     return this.api.get<Evaluation>(`evals/${id}`);
+  }
+
+  getEvaluationMessages(evalId: string): Observable<EvaluationMessage[]> {
+    return this.api.get<EvaluationMessage[]>(`evals/${evalId}/messages`);
   }
 
   abortEvaluation(id: string): Observable<string> {

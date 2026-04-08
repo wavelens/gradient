@@ -219,29 +219,55 @@ pub async fn update_evaluation_status(
     }
 }
 
+/// Records an error-level `evaluation_message` row and transitions the evaluation status.
+///
+/// `source` identifies where the error originated — e.g. `"flake-prefetch"`,
+/// `"nix-eval"`, `"nix-eval:packages.x86_64-linux.hello"`, `"db-insert"`.
 pub async fn update_evaluation_status_with_error(
     state: Arc<ServerState>,
     evaluation: MEvaluation,
     status: EvaluationStatus,
     error_message: String,
+    source: Option<String>,
 ) -> MEvaluation {
-    if status == evaluation.status && evaluation.error.as_ref() == Some(&error_message) {
-        return evaluation;
+    debug!(evaluation_id = %evaluation.id, status = ?status, error = %error_message, ?source, "Updating evaluation status with error");
+
+    let msg = AEvaluationMessage {
+        id: Set(Uuid::new_v4()),
+        evaluation: Set(evaluation.id),
+        level: Set(MessageLevel::Error),
+        message: Set(error_message),
+        source: Set(source),
+        created_at: Set(Utc::now().naive_utc()),
+    };
+    if let Err(e) = EEvaluationMessage::insert(msg).exec(&state.db).await {
+        error!(error = %e, evaluation_id = %evaluation.id, "Failed to insert evaluation_message");
     }
 
-    debug!(evaluation_id = %evaluation.id, status = ?status, error = %error_message, "Updating evaluation status with error");
+    update_evaluation_status(state, evaluation, status).await
+}
 
-    let mut active_evaluation: AEvaluation = evaluation.clone().into_active_model();
-    active_evaluation.status = Set(status);
-    active_evaluation.error = Set(Some(error_message));
-    active_evaluation.updated_at = Set(Utc::now().naive_utc());
-
-    match active_evaluation.update(&state.db).await {
-        Ok(updated_eval) => updated_eval,
-        Err(e) => {
-            error!(error = %e, evaluation_id = %evaluation.id, "Failed to update evaluation status with error");
-            evaluation
-        }
+/// Inserts a single `evaluation_message` row without changing the evaluation status.
+///
+/// Use for partial failures (e.g. one attr path failed to evaluate) where the
+/// evaluation as a whole continues.
+pub async fn record_evaluation_message(
+    state: &Arc<ServerState>,
+    evaluation_id: Uuid,
+    level: MessageLevel,
+    message: String,
+    source: Option<String>,
+) {
+    let msg = AEvaluationMessage {
+        id: Set(Uuid::new_v4()),
+        evaluation: Set(evaluation_id),
+        level: Set(level),
+        message: Set(message),
+        source: Set(source),
+        created_at: Set(Utc::now().naive_utc()),
+    };
+    if let Err(e) = EEvaluationMessage::insert(msg).exec(&state.db).await {
+        error!(error = %e, %evaluation_id, "Failed to insert evaluation_message");
     }
 }
 

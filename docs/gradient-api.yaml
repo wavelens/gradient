@@ -1586,6 +1586,39 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /evals/{evaluation}/messages:
+    parameters:
+      - $ref: '#/components/parameters/EvaluationId'
+    get:
+      tags: [evals]
+      summary: List evaluation messages
+      description: |-
+        Returns all structured messages (errors, warnings, notices) recorded during
+        the evaluation. Each message carries a `level`, a human-readable `message`,
+        and an optional `source` tag that identifies where the message originated
+        (e.g. `"flake-prefetch"`, `"nix-eval"`, `"nix-eval:<attr>"`, `"db-insert"`).
+        Messages scoped to specific entry points list their entry-point UUIDs in
+        the `entry_points` array; evaluation-wide messages have an empty array.
+      operationId: listEvaluationMessages
+      responses:
+        '200':
+          description: Message list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/EvaluationMessage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ── Builds ───────────────────────────────────────────────────────────────────
 
   /builds:
@@ -3475,16 +3508,48 @@ components:
           format: uuid
           nullable: true
           description: Next evaluation in the chain
-        error:
-          type: string
-          nullable: true
-          description: Error message if evaluation failed
+        error_count:
+          type: integer
+          description: Number of error-level messages recorded during evaluation
+        warning_count:
+          type: integer
+          description: Number of warning-level messages recorded during evaluation
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    EvaluationMessage:
+      type: object
+      required: [id, level, message, created_at, entry_points]
+      properties:
+        id:
+          type: string
+          format: uuid
+        level:
+          type: string
+          enum: [Error, Warning, Notice]
+          description: Severity level of the message
+        message:
+          type: string
+          description: Human-readable message text
+        source:
+          type: string
+          nullable: true
+          description: |
+            Origin tag identifying where the message came from.
+            Examples: `"flake-prefetch"`, `"nix-eval"`, `"nix-eval:packages.x86_64-linux.hello"`, `"db-insert"`, `"direct-eval"`.
+        created_at:
+          type: string
+          format: date-time
+        entry_points:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Entry-point UUIDs this message is attributed to; empty = evaluation-wide
 
     MakeEvaluationRequest:
       type: object

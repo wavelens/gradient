@@ -39,6 +39,32 @@
         </div>
       </div>
 
+      @if (messages().length > 0) {
+        <div class="sidebar-section-header">Evaluation</div>
+        <div
+          class="evaluation-messages-item"
+          [class.selected]="selectedSection() === 'messages'"
+          (click)="selectEvaluationSection()"
+          (keydown.enter)="selectEvaluationSection()"
+          tabindex="0"
+          role="option"
+          [attr.aria-selected]="selectedSection() === 'messages'"
+        >
+          @if (errorMessages().length > 0) {
+            <span class="msg-badge msg-badge--error">
+              <span class="material-symbols-outlined">error</span>
+              {{ errorMessages().length }}
+            </span>
+          }
+          @if (warningMessages().length > 0) {
+            <span class="msg-badge msg-badge--warning">
+              <span class="material-symbols-outlined">warning</span>
+              {{ warningMessages().length }}
+            </span>
+          }
+        </div>
+      }
+
       <div class="builds-list-header">Builds</div>
 
       @if (visibleBuilds().length === 0) {
@@ -142,20 +168,32 @@
         </div>
       </div>
 
-      <!-- Error banner -->
-      @if (ev.error) {
-        <div class="message-banner error">
-          <span class="material-symbols-outlined">error</span>
-          <div>
-            <strong>Evaluation failed</strong>
-            <pre class="error-text">{{ ev.error }}</pre>
-          </div>
-        </div>
-      }
-
       <!-- Log area -->
       <div class="log-area">
-        @if (ev.status === 'EvaluatingFlake' || ev.status === 'EvaluatingDerivation') {
+        @if (selectedSection() === 'messages') {
+          <div class="messages-panel">
+            <div class="messages-panel-header">Evaluation Messages</div>
+            @if (messages().length === 0) {
+              <div class="no-messages">No messages</div>
+            } @else {
+              <div class="messages-list">
+                @for (msg of messages(); track msg.id) {
+                  <div class="message-item message-item--{{ msg.level.toLowerCase() }}">
+                    <span class="material-symbols-outlined message-icon">
+                      {{ msg.level === 'Error' ? 'error' : msg.level === 'Warning' ? 'warning' : 'info' }}
+                    </span>
+                    <div class="message-body">
+                      @if (msg.source) {
+                        <span class="message-source">{{ msg.source }}</span>
+                      }
+                      <pre class="message-text">{{ msg.message }}</pre>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        } @else if (ev.status === 'EvaluatingFlake' || ev.status === 'EvaluatingDerivation') {
           <div class="evaluating-hint">
             <span class="material-symbols-outlined evaluating-icon">manage_search</span>
             <span class="evaluating-title">Evaluating</span>

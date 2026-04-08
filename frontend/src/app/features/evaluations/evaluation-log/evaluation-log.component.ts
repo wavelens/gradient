@@ -21,7 +21,7 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { interval, Subscription } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
 import { EvaluationsService, BuildItem } from '@core/services/evaluations.service';
-import { Evaluation } from '@core/models';
+import { Evaluation, EvaluationMessage } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { ButtonModule } from 'primeng/button';
@@ -47,7 +47,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   loading = signal(true);
   evaluation = signal<Evaluation | null>(null);
   builds = signal<BuildItem[]>([]);
+  messages = signal<EvaluationMessage[]>([]);
   selectedBuildId = signal<string | null>(null);
+  selectedSection = signal<'messages' | null>(null);
   logHtml = signal<SafeHtml>('');
   logLoading = signal(true);
   aborting = signal(false);
@@ -77,6 +79,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   );
 
   visibleBuilds = signal<BuildItem[]>([]);
+
+  errorMessages = computed(() => this.messages().filter(m => m.level === 'Error'));
+  warningMessages = computed(() => this.messages().filter(m => m.level === 'Warning'));
 
   private pollSub?: Subscription;
   private durationInterval?: ReturnType<typeof setInterval>;
@@ -120,10 +125,17 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         this.evaluation.set(evaluation);
         this.loading.set(false);
         this.loadBuilds();
+        this.loadMessages();
         this.startDurationTimer(evaluation);
         this.startPollingIfRunning(evaluation.status);
       },
       error: () => this.loading.set(false),
+    });
+  }
+
+  loadMessages(): void {
+    this.evalService.getEvaluationMessages(this.evaluationId).subscribe({
+      next: (msgs) => this.messages.set(msgs),
     });
   }
 
@@ -249,6 +261,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
             this.stopPolling();
             this.stopDurationTimer();
             this.loadBuilds(); // final update
+            this.loadMessages(); // pick up any messages recorded during eval
           }
         },
       });
@@ -261,7 +274,21 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   // ── Build selection & log loading ──────────────────────────────────────────
 
+  selectEvaluationSection(): void {
+    this.selectedSection.set('messages');
+    this.selectedBuildId.set(null);
+    this.stopActiveStream();
+    this.logLines = [];
+    this.logHtml.set('');
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { build: null },
+      replaceUrl: true,
+    });
+  }
+
   selectBuild(build: BuildItem, isUserAction = false): void {
+    this.selectedSection.set(null);
     if (this.selectedBuildId() === build.id) return;
 
     this.userPickedBuild = isUserAction;
@@ -649,6 +676,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.stopDurationTimer();
     this.stopActiveStream();
     this.selectedBuildId.set(null);
+    this.selectedSection.set(null);
+    this.messages.set([]);
     this.logLines = [];
     this.logHtml.set('');
     this.evaluationId = id;

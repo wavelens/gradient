@@ -689,7 +689,6 @@ pub async fn post_project_evaluate(
         next: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
-        error: Set(None),
     };
     let evaluation = aevaluation.insert(&state.db).await?;
 

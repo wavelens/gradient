@@ -104,12 +104,16 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   private timerInterval?: ReturnType<typeof setInterval>;
 
   ngOnInit(): void {
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.buildId = this.route.snapshot.paramMap.get('buildId') || '';
     this.loadGraph();
   }
 
   ngOnDestroy(): void {
+    document.documentElement.style.overflow = '';
+    document.body.style.overflow = '';
     this.pollSub?.unsubscribe();
     if (this.timerInterval) clearInterval(this.timerInterval);
   }
@@ -585,23 +589,28 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
 
   nodeColor(status: string): string {
     switch (status) {
-      case 'Completed': return '#22c55e';
-      case 'Failed':    return '#ef4444';
-      case 'Building':  return '#3b82f6';
-      case 'Queued':    return '#eab308';
-      case 'Aborted':   return '#6b7280';
-      case 'Created':   return '#6b7280';
-      default:          return '#abb0b4';
+      case 'Completed':         return '#22c55e';
+      case 'Substituted':       return '#22c55e';
+      case 'Failed':            return '#ef4444';
+      case 'Building':          return '#3b82f6';
+      case 'Queued':            return '#eab308';
+      case 'Aborted':           return '#6b7280';
+      case 'DependencyFailed':  return '#6b7280';
+      case 'Created':           return '#6b7280';
+      default:                  return '#abb0b4';
     }
   }
 
   statusClass(status: string): string {
     switch (status) {
-      case 'Completed':               return 'status-success';
-      case 'Failed':                  return 'status-danger';
-      case 'Aborted':                 return 'status-neutral';
-      case 'Building': case 'Queued': return 'status-running';
-      default:                        return '';
+      case 'Completed':
+      case 'Substituted':       return 'status-success';
+      case 'Failed':            return 'status-danger';
+      case 'Aborted':
+      case 'DependencyFailed':  return 'status-neutral';
+      case 'Building':
+      case 'Queued':            return 'status-running';
+      default:                  return '';
     }
   }
 

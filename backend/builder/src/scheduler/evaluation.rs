@@ -7,6 +7,7 @@
 use chrono::Utc;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
+use entity::evaluation_message::MessageLevel;
 use futures::stream::{self, StreamExt};
 use gradient_core::sources::*;
 use gradient_core::types::*;
@@ -23,7 +24,8 @@ use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
 use super::status::{
-    update_build_status, update_evaluation_status, update_evaluation_status_with_error,
+    record_evaluation_message, update_build_status, update_evaluation_status,
+    update_evaluation_status_with_error,
 };
 use crate::evaluator::evaluate;
 
@@ -107,6 +109,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                             evaluation,
                             EvaluationStatus::Failed,
                             format!("Failed to insert derivations: {}", e),
+                            Some("db-insert".to_string()),
                         )
                         .await;
                         return;
@@ -156,6 +159,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                             evaluation,
                             EvaluationStatus::Failed,
                             format!("Failed to insert builds: {}", e),
+                            Some("db-insert".to_string()),
                         )
                         .await;
                         return;
@@ -214,23 +218,18 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 .await
                 .unwrap_or_default();
 
-            // Persist any partial evaluation failures so they're visible in the UI.
+            // Persist per-attr evaluation failures as individual evaluation_message rows.
             if !failed_derivations.is_empty() {
-                let error_msg = format!(
-                    "{} package(s) failed to evaluate:\n{}",
-                    failed_derivations.len(),
-                    failed_derivations
-                        .iter()
-                        .map(|(d, e)| format!("  - {}: {}", d, e))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                );
-                warn!(%error_msg, "Partial evaluation failure — some derivations skipped");
-                let mut active: AEvaluation = evaluation.clone().into_active_model();
-                active.error = Set(Some(error_msg));
-                active.updated_at = Set(Utc::now().naive_utc());
-                if let Err(e) = active.update(&state.db).await {
-                    error!(error = %e, "Failed to persist partial evaluation error");
+                warn!(count = failed_derivations.len(), "Partial evaluation failure — some derivations skipped");
+                for (attr, err_msg) in &failed_derivations {
+                    record_evaluation_message(
+                        &state,
+                        evaluation.id,
+                        MessageLevel::Error,
+                        err_msg.clone(),
+                        Some(format!("nix-eval:{}", attr)),
+                    )
+                    .await;
                 }
             }
 
@@ -255,11 +254,21 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
 
         Err(e) => {
             error!(error = %format!("{:#}", e), "Failed to evaluate");
+            // Determine source from the error message prefix set by evaluate().
+            let source = {
+                let msg = format!("{}", e);
+                if msg.contains("prefetch") || msg.contains("fetch") {
+                    Some("flake-prefetch".to_string())
+                } else {
+                    Some("nix-eval".to_string())
+                }
+            };
             update_evaluation_status_with_error(
                 Arc::clone(&state),
                 evaluation,
                 EvaluationStatus::Failed,
                 format!("{}", e),
+                source,
             )
             .await;
         }
@@ -388,7 +397,6 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
                                 next: None,
                                 created_at: Utc::now().naive_utc(),
                                 updated_at: Utc::now().naive_utc(),
-                                error: None,
                             },
                             commit_hash,
                         ))
@@ -534,7 +542,6 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
             next: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
-            error: Set(None),
         };
 
         let new_evaluation = match new_evaluation.insert(&state.db).await {

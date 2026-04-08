@@ -350,6 +350,7 @@ pub async fn evaluate_direct(
                 evaluation,
                 EvaluationStatus::Failed,
                 format!("Direct evaluation failed: {}", e),
+                Some("direct-eval".to_string()),
             )
             .await;
 

@@ -256,6 +256,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route("/evals/{evaluation}", get(evals::get_evaluation))
         .route(
+            "/evals/{evaluation}/messages",
+            get(evals::get_evaluation_messages),
+        )
+        .route(
             "/evals/{evaluation}/builds",
             get(evals::get_evaluation_builds),
         )

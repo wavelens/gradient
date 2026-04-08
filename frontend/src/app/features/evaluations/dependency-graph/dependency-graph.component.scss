@@ -10,8 +10,9 @@
 :host {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 65px);
+  flex: 1;
   overflow: hidden;
+  min-height: 0;
 }
 
 .graph-page {

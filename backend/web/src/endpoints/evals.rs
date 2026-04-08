@@ -14,7 +14,7 @@ use axum_streams::StreamBodyAs;
 use builder::scheduler::abort_evaluation;
 use core::input::vec_to_hex;
 use core::types::*;
-use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, Condition, EntityTrait, Order, QueryFilter, QueryOrder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -48,7 +48,18 @@ pub struct EvaluationResponse {
     pub previous: Option<Uuid>,
     pub next: Option<Uuid>,
     pub created_at: chrono::NaiveDateTime,
-    pub error: Option<String>,
+    pub error_count: u64,
+    pub warning_count: u64,
+}
+
+#[derive(Serialize, Debug)]
+pub struct EvaluationMessageResponse {
+    pub id: Uuid,
+    pub level: entity::evaluation_message::MessageLevel,
+    pub message: String,
+    pub source: Option<String>,
+    pub created_at: chrono::NaiveDateTime,
+    pub entry_points: Vec<Uuid>,
 }
 
 /// `/nix/store/hash-name-version.drv` → `name-version`
@@ -123,6 +134,19 @@ pub async fn get_evaluation(
         .map(|c| vec_to_hex(&c.hash))
         .unwrap_or_default();
 
+    let all_messages = EEvaluationMessage::find()
+        .filter(CEvaluationMessage::Evaluation.eq(evaluation.id))
+        .all(&state.db)
+        .await?;
+    let error_count = all_messages
+        .iter()
+        .filter(|m| m.level == entity::evaluation_message::MessageLevel::Error)
+        .count() as u64;
+    let warning_count = all_messages
+        .iter()
+        .filter(|m| m.level == entity::evaluation_message::MessageLevel::Warning)
+        .count() as u64;
+
     let res = BaseResponse {
         error: false,
         message: EvaluationResponse {
@@ -136,7 +160,8 @@ pub async fn get_evaluation(
             previous: evaluation.previous,
             next: evaluation.next,
             created_at: evaluation.created_at,
-            error: evaluation.error,
+            error_count,
+            warning_count,
         },
     };
 
@@ -467,4 +492,94 @@ pub async fn post_evaluation_builds(
     };
 
     Ok(StreamBodyAs::json_nl(stream))
+}
+
+/// `GET /evals/{evaluation}/messages`
+///
+/// Returns all `evaluation_message` rows for an evaluation, each annotated with
+/// the list of `entry_point` UUIDs the message is attached to (empty = evaluation-scoped).
+pub async fn get_evaluation_messages(
+    state: State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Path(evaluation_id): Path<Uuid>,
+) -> WebResult<Json<BaseResponse<Vec<EvaluationMessageResponse>>>> {
+    let evaluation = EEvaluation::find_by_id(evaluation_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Evaluation"))?;
+
+    let organization_id = if let Some(project_id) = evaluation.project {
+        EProject::find_by_id(project_id)
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| WebError::InternalServerError("Evaluation data inconsistency".to_string()))?
+            .organization
+    } else {
+        EDirectBuild::find()
+            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
+            .one(&state.db)
+            .await?
+            .ok_or_else(|| WebError::InternalServerError("Direct build data inconsistency".to_string()))?
+            .organization
+    };
+    let organization = EOrganization::find_by_id(organization_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::InternalServerError("Organization data inconsistency".to_string()))?;
+
+    let can_access = if organization.public {
+        true
+    } else {
+        match &maybe_user {
+            Some(user) => user_is_org_member(&state, user.id, organization.id).await?,
+            None => false,
+        }
+    };
+    if !can_access {
+        return Err(WebError::not_found("Evaluation"));
+    }
+
+    let messages = EEvaluationMessage::find()
+        .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
+        .order_by(CEvaluationMessage::CreatedAt, Order::Asc)
+        .all(&state.db)
+        .await?;
+
+    let msg_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
+
+    // Fetch all entry_point_message join rows for these messages in one query.
+    let ep_rows = if msg_ids.is_empty() {
+        vec![]
+    } else {
+        EEntryPointMessage::find()
+            .filter(CEntryPointMessage::Message.is_in(msg_ids))
+            .all(&state.db)
+            .await?
+    };
+
+    // Build a map: message_id → [entry_point_id]
+    let mut ep_map: std::collections::HashMap<Uuid, Vec<Uuid>> = std::collections::HashMap::new();
+    for row in ep_rows {
+        ep_map.entry(row.message).or_default().push(row.entry_point);
+    }
+
+    let result: Vec<EvaluationMessageResponse> = messages
+        .into_iter()
+        .map(|m| {
+            let entry_points = ep_map.get(&m.id).cloned().unwrap_or_default();
+            EvaluationMessageResponse {
+                id: m.id,
+                level: m.level,
+                message: m.message,
+                source: m.source,
+                created_at: m.created_at,
+                entry_points,
+            }
+        })
+        .collect();
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: result,
+    }))
 }

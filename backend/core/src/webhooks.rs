@@ -128,7 +128,6 @@ pub async fn fire_evaluation_webhook(
         "project_id": evaluation.project,
         "repository": evaluation.repository,
         "status": event,
-        "error": evaluation.error,
     });
 
     fire_webhooks(state, org_id, event.to_string(), payload).await;
