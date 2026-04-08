@@ -5,10 +5,12 @@
  */
 
 use anyhow::{Context, Result};
+use chrono::{Duration as ChronoDuration, Utc};
 use entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
+    QueryFilter, QueryOrder, Statement,
 };
 use std::sync::Arc;
 use tracing::{info, warn};
@@ -106,24 +108,11 @@ pub async fn gc_project_evaluations(
 
         for build in &builds {
             // Remove the build log from all backing stores (local + S3).
+            // NAR files and GC roots are owned by `derivation_output` /
+            // `cache_derivation` and are cleaned up by the derivation GC pass.
             let log_id = build.log_id.unwrap_or(build.id);
             if let Err(e) = state.log_storage.delete(log_id).await {
                 warn!(error = %e, build_id = %log_id, "GC: failed to remove build log");
-            }
-
-            // Remove cached NAR files and GC root symlinks for each build output.
-            let outputs = EBuildOutput::find()
-                .filter(CBuildOutput::Build.eq(build.id))
-                .filter(CBuildOutput::IsCached.eq(true))
-                .all(&state.db)
-                .await
-                .context("GC: failed to query build outputs")?;
-
-            for output in &outputs {
-                remove_gcroot(&state, &output.hash, &output.package).await;
-                if let Err(e) = state.nar_storage.delete(&output.hash).await {
-                    warn!(error = %e, hash = %output.hash, "GC: failed to remove NAR");
-                }
             }
         }
 
@@ -156,5 +145,93 @@ pub async fn gc_project_evaluations(
     }
 
     info!(project_id = %project_id, deleted = to_delete.len(), "Per-project evaluation GC done");
+    Ok(())
+}
+
+/// Derivation GC pass: deletes `derivation` rows that have no remaining `build` rows
+/// pointing at them and whose grace period has expired. The grace lets rapid
+/// re-evaluations reuse recent derivations without re-inserting.
+///
+/// For each orphan it:
+///   1. Removes any `cache_derivation` rows (FK cascade also removes them, but doing it
+///      explicitly lets us delete the NAR files first).
+///   2. Removes the GC root for each `derivation_output`.
+///   3. Deletes the derivation row — FK cascade cleans up outputs / dep edges / features /
+///      signatures.
+pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) -> Result<()> {
+    let cutoff = Utc::now().naive_utc() - ChronoDuration::hours(grace_hours.max(0));
+
+    // Find candidate derivations: no build rows, created before the cutoff.
+    // Use raw SQL: SeaORM doesn't have a clean LEFT JOIN ... IS NULL builder.
+    let rows = state
+        .db
+        .query_all(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"SELECT d.id
+               FROM derivation d
+               LEFT JOIN build b ON b.derivation = d.id
+               WHERE b.id IS NULL
+                 AND d.created_at < $1"#,
+            [sea_orm::Value::ChronoDateTime(Some(Box::new(cutoff)))],
+        ))
+        .await
+        .context("Failed to query orphan derivations")?;
+
+    let drv_ids: Vec<Uuid> = rows
+        .iter()
+        .filter_map(|r| r.try_get::<Uuid>("", "id").ok())
+        .collect();
+
+    if drv_ids.is_empty() {
+        return Ok(());
+    }
+
+    info!(count = drv_ids.len(), "Running orphan derivation GC");
+
+    for drv_id in drv_ids {
+        // 1. Cache presence rows + their NAR files.
+        let cache_rows = ECacheDerivation::find()
+            .filter(CCacheDerivation::Derivation.eq(drv_id))
+            .all(&state.db)
+            .await
+            .context("Failed to query cache_derivation rows")?;
+
+        let outputs = EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.eq(drv_id))
+            .all(&state.db)
+            .await
+            .context("Failed to query derivation outputs")?;
+
+        for cache_row in cache_rows {
+            // Once we drop the row, the (cache, derivation) pairing is gone.
+            // FK cascade will also remove it on derivation delete, but doing it here
+            // lets us first remove the NAR files.
+            for o in &outputs {
+                if let Err(e) = state.nar_storage.delete(&o.hash).await {
+                    warn!(error = %e, hash = %o.hash, "GC: failed to remove NAR file");
+                }
+            }
+            let _ = cache_row.into_active_model().delete(&state.db).await;
+        }
+
+        // 2. Remove GC roots for each output.
+        for o in &outputs {
+            remove_gcroot(&state, &o.hash, &o.package).await;
+        }
+
+        // 3. Delete the derivation row. FK cascade removes outputs / dep edges /
+        //    features / signatures.
+        if let Some(d) = EDerivation::find_by_id(drv_id)
+            .one(&state.db)
+            .await
+            .context("GC: failed to load derivation")?
+        {
+            let a: ADerivation = d.into_active_model();
+            if let Err(e) = a.delete(&state.db).await {
+                warn!(error = %e, drv_id = %drv_id, "GC: failed to delete orphan derivation");
+            }
+        }
+    }
+
     Ok(())
 }

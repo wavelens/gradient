@@ -6,14 +6,16 @@
 
 pub mod api;
 pub mod build;
-pub mod build_dependency;
-pub mod build_feature;
-pub mod build_output;
-pub mod build_output_signature;
 pub mod cache;
+pub mod cache_derivation;
 pub mod cache_metric;
 pub mod cache_upstream;
 pub mod commit;
+pub mod derivation;
+pub mod derivation_dependency;
+pub mod derivation_feature;
+pub mod derivation_output;
+pub mod derivation_output_signature;
 pub mod direct_build;
 pub mod entry_point;
 pub mod evaluation;

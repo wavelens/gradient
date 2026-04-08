@@ -58,25 +58,51 @@ Key entities and their relationships:
 
 ```
 organization
-  ├── server[]           build machines
-  ├── cache[]            binary caches (via subscription)
+  ├── server[]                 build machines
+  ├── cache[]                  binary caches (via subscription)
+  ├── derivation[]             immutable per-org "what to build" records
+  │     ├── derivation_output[]         (one per Nix output: out, dev, doc, ...)
+  │     ├── derivation_dependency[]     (edges: derivation → dependency)
+  │     └── derivation_feature[]
   └── project[]
         └── evaluation[]
               ├── commit
-              ├── build[]
-              │     ├── build_dependency[] (edges: build → dependency)
-              │     └── build_output[]
-              └── entry_point[]  (root builds for this evaluation)
+              ├── build[]                (one per attempt at a derivation)
+              └── entry_point[]          (top-level builds for this eval)
 ```
 
-The `build_dependency` table is a directed edge table: `build → dependency` means the `dependency` derivation must be built before `build`.
+The `build` row is the "attempt" — it carries `status`, `server`, `log_id`,
+`build_time_ms`. Everything immutable about the derivation (path, architecture,
+outputs, dep graph, required features) lives on `derivation` and is shared across
+every evaluation that touches it. A rebuild on failure inserts a new `build` row
+on the same `derivation`; the old `build`'s `log_id` is preserved.
+
+`derivation_dependency` is a directed edge table: `derivation → dependency` means
+the `dependency` derivation must be built before `derivation`. The graph is stored
+once per derivation, not once per evaluation, so metrics over closures are correct
+without cross-eval fallbacks. A second evaluation that hits a derivation already
+present in the DB inserts a fresh `build` row (status `Substituted` if the path
+is in the local store) without re-walking the closure.
+
+`cache_derivation` (cache, derivation) records that a cache holds the **complete
+closure** of a derivation. The cacher only inserts a row once every output of the
+derivation is `is_cached = true` AND every transitive dependency already has a
+matching `cache_derivation` row for the same cache. This means cache delivery is
+a single DB lookup instead of a per-output filesystem probe.
 
 ### `builder`
 
 Two independent polling loops run concurrently via `tokio::spawn`:
 
-- `schedule_evaluation_loop` — picks up queued evaluations, runs `nix eval`, and populates `build` and `build_dependency` rows.
-- `schedule_build_loop` — picks up queued builds, selects a server, copies inputs via SSH, executes the build over the Nix daemon wire protocol, and copies outputs back.
+- `schedule_evaluation_loop` — picks up queued evaluations, runs `nix eval`,
+  upserts `derivation` / `derivation_output` / `derivation_dependency` rows
+  (skipping the closure walk for derivations whose dep edges are already
+  populated), and inserts one `build` row per closure member for the current
+  evaluation.
+- `schedule_build_loop` — picks up `Queued` builds, joins each to its
+  `derivation` for the path/architecture, selects a server, copies inputs via
+  SSH, executes the build over the Nix daemon wire protocol, and updates the
+  matching `derivation_output` rows on success (instead of inserting fresh ones).
 
 See [Internals](internals.md) for algorithm details.
 

@@ -140,6 +140,7 @@ pub async fn fire_build_webhook(state: Arc<ServerState>, build: MBuild, status: 
         BuildStatus::Building => "build.started",
         BuildStatus::Completed => "build.completed",
         BuildStatus::Failed => "build.failed",
+        BuildStatus::Substituted => "build.substituted",
         BuildStatus::Created | BuildStatus::Aborted | BuildStatus::DependencyFailed => return,
     };
 
@@ -148,10 +149,18 @@ pub async fn fire_build_webhook(state: Arc<ServerState>, build: MBuild, status: 
         None => return,
     };
 
+    // Look up the derivation path for the webhook payload (best-effort).
+    let derivation_path = EDerivation::find_by_id(build.derivation)
+        .one(&state.db)
+        .await
+        .ok()
+        .flatten()
+        .map(|d| d.derivation_path);
+
     let payload = serde_json::json!({
         "build_id": build.id,
         "evaluation_id": build.evaluation,
-        "derivation_path": build.derivation_path,
+        "derivation_path": derivation_path,
         "status": event,
     });
 

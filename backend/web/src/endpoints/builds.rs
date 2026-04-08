@@ -103,13 +103,25 @@ pub async fn get_build(
         return Err(WebError::not_found("Build"));
     }
 
-    let build_outputs = EBuildOutput::find()
-        .filter(CBuildOutput::Build.eq(build_id))
+    let derivation = EDerivation::find_by_id(build.derivation)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| {
+            tracing::error!(
+                "Derivation {} not found for build {}",
+                build.derivation,
+                build_id
+            );
+            WebError::InternalServerError("Build data inconsistency".to_string())
+        })?;
+
+    let derivation_outputs = EDerivationOutput::find()
+        .filter(CDerivationOutput::Derivation.eq(derivation.id))
         .all(&state.db)
         .await?;
 
     let mut outputs = HashMap::new();
-    for output in build_outputs {
+    for output in derivation_outputs {
         outputs.insert(output.name, output.output);
     }
 
@@ -117,8 +129,8 @@ pub async fn get_build(
         id: build.id,
         evaluation: build.evaluation,
         status: build.status,
-        derivation_path: build.derivation_path,
-        architecture: build.architecture,
+        derivation_path: derivation.derivation_path,
+        architecture: derivation.architecture,
         server: build.server,
         output: outputs,
         created_at: build.created_at,
@@ -549,9 +561,9 @@ pub async fn get_build_downloads(
         return Err(WebError::not_found("Build"));
     }
 
-    // Get build outputs to find the nix store paths
-    let build_outputs = EBuildOutput::find()
-        .filter(CBuildOutput::Build.eq(build_id))
+    // Get derivation outputs to find the nix store paths
+    let build_outputs = EDerivationOutput::find()
+        .filter(CDerivationOutput::Derivation.eq(build.derivation))
         .all(&state.db)
         .await?;
 
@@ -744,9 +756,9 @@ pub async fn get_build_download(
         }
     }
 
-    // Get build outputs to find the file
-    let build_outputs = EBuildOutput::find()
-        .filter(CBuildOutput::Build.eq(build_id))
+    // Get derivation outputs to find the file
+    let build_outputs = EDerivationOutput::find()
+        .filter(CDerivationOutput::Derivation.eq(build.derivation))
         .all(&state.db)
         .await?;
 
@@ -1041,33 +1053,44 @@ pub async fn get_build_dependencies(
 ) -> WebResult<Json<BaseResponse<Vec<DependencyNode>>>> {
     authorize_build_opt(&state, &maybe_user, build_id).await?;
 
-    let dep_rows = EBuildDependency::find()
-        .filter(CBuildDependency::Build.eq(build_id))
+    let build = EBuild::find_by_id(build_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Build"))?;
+
+    let dep_edges = EDerivationDependency::find()
+        .filter(CDerivationDependency::Derivation.eq(build.derivation))
         .all(&state.db)
         .await?;
 
-    let dep_ids: Vec<Uuid> = dep_rows.iter().map(|d| d.dependency).collect();
+    let dep_drv_ids: Vec<Uuid> = dep_edges.iter().map(|d| d.dependency).collect();
 
-    let dep_builds = if dep_ids.is_empty() {
-        vec![]
-    } else {
-        EBuild::find()
-            .filter(CBuild::Id.is_in(dep_ids))
+    let mut nodes: Vec<DependencyNode> = Vec::new();
+    if !dep_drv_ids.is_empty() {
+        let dep_builds = EBuild::find()
+            .filter(CBuild::Evaluation.eq(build.evaluation))
+            .filter(CBuild::Derivation.is_in(dep_drv_ids.clone()))
             .all(&state.db)
-            .await?
-    };
-
-    let nodes: Vec<DependencyNode> = dep_builds
-        .iter()
-        .map(|b| DependencyNode {
-            id: b.id,
-            name: extract_drv_name(&b.derivation_path),
-            path: b.derivation_path.clone(),
-            status: format!("{:?}", b.status),
-            created_at: b.created_at,
-            updated_at: b.updated_at,
-        })
-        .collect();
+            .await?;
+        let dep_drvs = EDerivation::find()
+            .filter(CDerivation::Id.is_in(dep_drv_ids))
+            .all(&state.db)
+            .await?;
+        let drv_by_id: HashMap<Uuid, MDerivation> =
+            dep_drvs.into_iter().map(|d| (d.id, d)).collect();
+        for b in dep_builds {
+            if let Some(drv) = drv_by_id.get(&b.derivation) {
+                nodes.push(DependencyNode {
+                    id: b.id,
+                    name: extract_drv_name(&drv.derivation_path),
+                    path: drv.derivation_path.clone(),
+                    status: format!("{:?}", b.status),
+                    created_at: b.created_at,
+                    updated_at: b.updated_at,
+                });
+            }
+        }
+    }
 
     Ok(Json(BaseResponse {
         error: false,
@@ -1083,12 +1106,18 @@ pub async fn get_build_graph(
 ) -> WebResult<Json<BaseResponse<BuildGraph>>> {
     authorize_build_opt(&state, &maybe_user, build_id).await?;
 
-    let mut visited: HashSet<Uuid> = HashSet::new();
+    let root_build = EBuild::find_by_id(build_id)
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Build"))?;
+    let evaluation_id = root_build.evaluation;
+
+    let mut visited_builds: HashSet<Uuid> = HashSet::new();
     let mut nodes: Vec<DependencyNode> = Vec::new();
     let mut edges: Vec<DependencyEdge> = Vec::new();
     let mut queue: VecDeque<Vec<Uuid>> = VecDeque::new();
 
-    visited.insert(build_id);
+    visited_builds.insert(build_id);
     queue.push_back(vec![build_id]);
 
     while let Some(batch) = queue.pop_front() {
@@ -1096,39 +1125,70 @@ pub async fn get_build_graph(
             break;
         }
 
-        // Fetch all builds in this batch
+        // Fetch builds in batch + their derivations
         let builds = EBuild::find()
             .filter(CBuild::Id.is_in(batch.clone()))
             .all(&state.db)
             .await?;
 
-        for build in builds {
-            nodes.push(DependencyNode {
-                id: build.id,
-                name: extract_drv_name(&build.derivation_path),
-                path: build.derivation_path.clone(),
-                status: format!("{:?}", build.status),
-                created_at: build.created_at,
-                updated_at: build.updated_at,
-            });
+        let drv_ids: Vec<Uuid> = builds.iter().map(|b| b.derivation).collect();
+        let drvs = EDerivation::find()
+            .filter(CDerivation::Id.is_in(drv_ids.clone()))
+            .all(&state.db)
+            .await?;
+        let drv_by_id: HashMap<Uuid, MDerivation> = drvs.into_iter().map(|d| (d.id, d)).collect();
+
+        for build in &builds {
+            if let Some(drv) = drv_by_id.get(&build.derivation) {
+                nodes.push(DependencyNode {
+                    id: build.id,
+                    name: extract_drv_name(&drv.derivation_path),
+                    path: drv.derivation_path.clone(),
+                    status: format!("{:?}", build.status),
+                    created_at: build.created_at,
+                    updated_at: build.updated_at,
+                });
+            }
         }
 
-        // Fetch all dependency edges for this batch
-        let dep_rows = EBuildDependency::find()
-            .filter(CBuildDependency::Build.is_in(batch))
+        // Walk derivation_dependency for all derivations in this batch
+        let dep_rows = EDerivationDependency::find()
+            .filter(CDerivationDependency::Derivation.is_in(drv_ids))
             .all(&state.db)
             .await?;
 
+        let dep_drv_ids: Vec<Uuid> = dep_rows.iter().map(|e| e.dependency).collect();
+        if dep_drv_ids.is_empty() {
+            continue;
+        }
+
+        // Resolve dependent derivations back to builds in the same evaluation.
+        let dep_builds = EBuild::find()
+            .filter(CBuild::Evaluation.eq(evaluation_id))
+            .filter(CBuild::Derivation.is_in(dep_drv_ids))
+            .all(&state.db)
+            .await?;
+        let build_by_drv: HashMap<Uuid, Uuid> =
+            dep_builds.iter().map(|b| (b.derivation, b.id)).collect();
+
+        // Map (parent_drv → parent_build_id) for the current batch.
+        let parent_build_by_drv: HashMap<Uuid, Uuid> =
+            builds.iter().map(|b| (b.derivation, b.id)).collect();
+
         let mut next_batch: Vec<Uuid> = Vec::new();
-        for dep in dep_rows {
-            // Edge: dependency → build (dep is built before build)
+        for edge in dep_rows {
+            let Some(&parent_build_id) = parent_build_by_drv.get(&edge.derivation) else {
+                continue;
+            };
+            let Some(&dep_build_id) = build_by_drv.get(&edge.dependency) else {
+                continue;
+            };
             edges.push(DependencyEdge {
-                source: dep.dependency,
-                target: dep.build,
+                source: dep_build_id,
+                target: parent_build_id,
             });
-            if !visited.contains(&dep.dependency) {
-                visited.insert(dep.dependency);
-                next_batch.push(dep.dependency);
+            if visited_builds.insert(dep_build_id) {
+                next_batch.push(dep_build_id);
             }
         }
 

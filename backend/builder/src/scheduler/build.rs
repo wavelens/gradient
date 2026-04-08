@@ -95,12 +95,12 @@ async fn parse_derivation_file(
 /// parsed derivation data with the resolved dependency output paths.
 async fn create_basic_derivation(
     state: &Arc<ServerState>,
-    build: &MBuild,
+    derivation: &MDerivation,
     _local_daemon: &mut LocalNixStore,
     dependencies: Vec<String>,
 ) -> anyhow::Result<BasicDerivation> {
     let (builder, args, env, input_srcs, output_info) =
-        parse_derivation_file(state, &build.derivation_path)
+        parse_derivation_file(state, &derivation.derivation_path)
             .await
             .context("Failed to parse derivation file")?;
 
@@ -125,7 +125,7 @@ async fn create_basic_derivation(
     Ok(BasicDerivation {
         outputs,
         input_srcs: input_srcs.into_iter().collect(),
-        platform: build.architecture.to_string(),
+        platform: derivation.architecture.to_string(),
         builder,
         args,
         env, // env now contains __json if structured attrs exist
@@ -152,17 +152,22 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
         current_schedules.retain(|schedule: &JoinHandle<()>| !schedule.is_finished());
 
         while current_schedules.len() < state.cli.max_concurrent_builds {
-            let build = match get_next_build(Arc::clone(&state), &skipped).await {
+            let (build, derivation) = match get_next_build(Arc::clone(&state), &skipped).await {
                 Some(b) => b,
                 None => break,
             };
-            debug!(build_id = %build.id, derivation = %build.derivation_path, "Processing build from queue");
+            debug!(build_id = %build.id, derivation = %derivation.derivation_path, "Processing build from queue");
 
             if let Some((build, server)) =
-                reserve_available_server(Arc::clone(&state), &build).await
+                reserve_available_server(Arc::clone(&state), &build, &derivation).await
             {
                 info!(server_id = %server.id, build_id = %build.id, "Reserving server for build");
-                let schedule = tokio::spawn(schedule_build(Arc::clone(&state), build, server));
+                let schedule = tokio::spawn(schedule_build(
+                    Arc::clone(&state),
+                    build,
+                    derivation.clone(),
+                    server,
+                ));
                 current_schedules.push(schedule);
                 added_schedule = true;
             } else {
@@ -183,8 +188,13 @@ pub async fn schedule_build_loop(state: Arc<ServerState>) {
     }
 }
 
-#[instrument(skip(state), fields(build_id = %build.id, server_id = %server.id, derivation_path = %build.derivation_path))]
-pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: MServer) {
+#[instrument(skip(state, derivation), fields(build_id = %build.id, server_id = %server.id, derivation_path = %derivation.derivation_path))]
+pub async fn schedule_build(
+    state: Arc<ServerState>,
+    mut build: MBuild,
+    derivation: MDerivation,
+    server: MServer,
+) {
     info!("Executing build");
 
     let organization = match EOrganization::find_by_id(server.organization)
@@ -230,28 +240,26 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
         debug!(index = i, dependency = %dep, "Dependency order");
     }
 
-    let derivation = match create_basic_derivation(
-        &state,
-        &build,
-        &mut local_daemon,
-        dependencies.clone(),
-    )
-    .await
-    {
-        Ok(derivation) => derivation,
-        Err(e) => {
-            error!(error = %e, "Failed to create basic derivation");
-            update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Aborted)
+    let basic_derivation =
+        match create_basic_derivation(&state, &derivation, &mut local_daemon, dependencies.clone())
+            .await
+        {
+            Ok(d) => d,
+            Err(e) => {
+                error!(error = %e, "Failed to create basic derivation");
+                update_build_status_recursivly(
+                    Arc::clone(&state),
+                    build.clone(),
+                    BuildStatus::Aborted,
+                )
                 .await;
-            return;
-        }
-    };
+                return;
+            }
+        };
 
     // Drop the local daemon before calling the executor: the SSH executor
     // will acquire its own local store connection internally.
     drop(local_daemon);
-
-    let mut build_outputs: Vec<ABuildOutput> = vec![];
 
     let exec_result = state
         .build_executor
@@ -260,7 +268,8 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
             server.clone(),
             organization.clone(),
             build.clone(),
-            derivation,
+            derivation.derivation_path.clone(),
+            basic_derivation,
             dependencies,
         )
         .await;
@@ -275,27 +284,51 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
             }
 
             let status = if result.error_msg.is_empty() {
+                // Update the already-existing derivation_output rows with
+                // the sizes/hashes we just observed. Insert any rows that
+                // were discovered for the first time on this build.
                 for output in result.outputs {
-                    build_outputs.push(ABuildOutput {
+                    let existing = EDerivationOutput::find()
+                        .filter(CDerivationOutput::Derivation.eq(derivation.id))
+                        .filter(CDerivationOutput::Name.eq(output.name.clone()))
+                        .one(&state.db)
+                        .await
+                        .unwrap_or(None);
+
+                    if let Some(row) = existing {
+                        let mut a: ADerivationOutput = row.into();
+                        a.output = Set(output.store_path);
+                        a.hash = Set(output.hash);
+                        a.package = Set(output.package);
+                        a.file_size = Set(output.nar_size);
+                        a.has_artefacts = Set(output.has_artefacts);
+                        if let Err(e) = a.update(&state.db).await {
+                            error!(error = %e, "Failed to update derivation_output after build");
+                        }
+                    } else if let Err(e) = (ADerivationOutput {
                         id: Set(Uuid::new_v4()),
-                        build: Set(build.id),
+                        derivation: Set(derivation.id),
                         name: Set(output.name),
                         output: Set(output.store_path),
                         hash: Set(output.hash),
                         package: Set(output.package),
+                        ca: Set(None),
                         file_hash: Set(None),
                         file_size: Set(output.nar_size),
                         nar_size: Set(None),
                         is_cached: Set(false),
                         has_artefacts: Set(output.has_artefacts),
-                        ca: Set(None),
                         created_at: Set(Utc::now().naive_utc()),
-                        last_fetched_at: Set(None),
-                    });
+                    })
+                    .insert(&state.db)
+                    .await
+                    {
+                        error!(error = %e, "Failed to insert derivation_output after build");
+                    }
                 }
                 BuildStatus::Completed
             } else {
-                error!(path = %build.derivation_path, error = %result.error_msg, "Build failed");
+                error!(path = %derivation.derivation_path, error = %result.error_msg, "Build failed");
                 BuildStatus::Failed
             };
 
@@ -318,20 +351,6 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
                 .await;
         }
     };
-
-    if !build_outputs.is_empty() {
-        // Insert build outputs in batches to avoid PostgreSQL parameter limits
-        const OUTPUT_BATCH_SIZE: usize = 1000;
-        for chunk in build_outputs.chunks(OUTPUT_BATCH_SIZE) {
-            if let Err(e) = EBuildOutput::insert_many(chunk.to_vec())
-                .exec(&state.db)
-                .await
-            {
-                error!(error = %e, "Failed to insert build outputs");
-                break;
-            }
-        }
-    }
 }
 
 /// Returns the next ready-to-run build that is not in `skip`, or `None` if none is available.
@@ -339,7 +358,14 @@ pub async fn schedule_build(state: Arc<ServerState>, mut build: MBuild, server: 
 /// Uses a raw SQL query to efficiently find builds whose dependency graph is fully satisfied
 /// (no non-Completed dependencies). Returns `None` immediately if nothing is schedulable —
 /// the outer scheduler loop owns the retry interval.
-async fn get_next_build(state: Arc<ServerState>, skip: &HashSet<Uuid>) -> Option<MBuild> {
+async fn get_next_build(
+    state: Arc<ServerState>,
+    skip: &HashSet<Uuid>,
+) -> Option<(MBuild, MDerivation)> {
+    // A build is ready when every derivation_dependency edge of its
+    // derivation resolves, in the same evaluation, to a build whose
+    // status is Completed or Substituted (status 3 or 7).
+    //
     // Order ready-to-run builds by direct dependency count (descending)
     // so that integration builds — the ones that pulled in the largest
     // amount of work to become ready — start first. Tie-break by
@@ -349,16 +375,21 @@ async fn get_next_build(state: Arc<ServerState>, skip: &HashSet<Uuid>) -> Option
         r#"
                 SELECT b.*
                 FROM public.build b
-                LEFT JOIN public.build_dependency bd ON bd.build = b.id
-                WHERE NOT EXISTS (
+                LEFT JOIN public.derivation_dependency dd
+                    ON dd.derivation = b.derivation
+                WHERE b.status = 1
+                AND NOT EXISTS (
                     SELECT 1
-                    FROM public.build_dependency d
-                    JOIN public.build dep ON d.dependency = dep.id
-                    WHERE d.build = b.id AND dep.status != 3
+                    FROM public.derivation_dependency dep_edge
+                    LEFT JOIN public.build dep_build
+                        ON dep_build.derivation = dep_edge.dependency
+                        AND dep_build.evaluation = b.evaluation
+                    WHERE dep_edge.derivation = b.derivation
+                        AND (dep_build.id IS NULL
+                            OR (dep_build.status != 3 AND dep_build.status != 7))
                 )
-                AND b.status = 1
                 GROUP BY b.id
-                ORDER BY COUNT(bd.dependency) DESC, b.updated_at ASC
+                ORDER BY COUNT(dd.dependency) DESC, b.updated_at ASC
             "#,
     );
 
@@ -444,11 +475,27 @@ async fn get_next_build(state: Arc<ServerState>, skip: &HashSet<Uuid>) -> Option
             }
         };
 
+        // Load the joined derivation row.
+        let derivation = match EDerivation::find_by_id(build.derivation)
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(d)) => d,
+            Ok(None) => {
+                error!(build_id = %build.id, "Derivation not found for build");
+                continue;
+            }
+            Err(e) => {
+                error!(error = %e, build_id = %build.id, "Failed to query derivation for build");
+                continue;
+            }
+        };
+
         if !has_servers {
             // For direct builds, allow local execution instead of aborting
             if evaluation.project.is_none() {
                 debug!(build_id = %build.id, "No servers available, but this is a direct build - will try local execution");
-                return Some(build); // Return for local execution
+                return Some((build, derivation));
             } else {
                 // No active servers in org — leave the build queued; the
                 // evaluation will be reconciled to Waiting by
@@ -457,7 +504,7 @@ async fn get_next_build(state: Arc<ServerState>, skip: &HashSet<Uuid>) -> Option
             }
         }
 
-        return Some(build);
+        return Some((build, derivation));
     }
 
     None
@@ -468,9 +515,10 @@ async fn get_next_build(state: Arc<ServerState>, skip: &HashSet<Uuid>) -> Option
 async fn reserve_available_server(
     state: Arc<ServerState>,
     build: &MBuild,
+    derivation: &MDerivation,
 ) -> Option<(MBuild, MServer)> {
-    let features = match EBuildFeature::find()
-        .filter(CBuildFeature::Build.eq(build.id))
+    let features = match EDerivationFeature::find()
+        .filter(CDerivationFeature::Derivation.eq(derivation.id))
         .all(&state.db)
         .await
     {
@@ -479,7 +527,7 @@ async fn reserve_available_server(
             .map(|f| f.feature)
             .collect::<Vec<Uuid>>(),
         Err(e) => {
-            error!(error = %e, build_id = %build.id, "Failed to query build features");
+            error!(error = %e, build_id = %build.id, "Failed to query derivation features");
             Vec::new()
         }
     };
@@ -547,31 +595,30 @@ async fn reserve_available_server(
     };
 
     // Step 2: filter by architecture (skipped for BUILTIN builds).
-    let arch_ok_ids: HashSet<Uuid> = if build.architecture != Architecture::BUILTIN
-        && !candidate_servers.is_empty()
-    {
-        let mut id_cond = Condition::any();
-        for s in &candidate_servers {
-            id_cond = id_cond.add(CServerArchitecture::Server.eq(s.id));
-        }
-        match EServerArchitecture::find()
-            .filter(
-                Condition::all()
-                    .add(id_cond)
-                    .add(CServerArchitecture::Architecture.eq(build.architecture.clone())),
-            )
-            .all(&state.db)
-            .await
-        {
-            Ok(rows) => rows.into_iter().map(|r| r.server).collect(),
-            Err(e) => {
-                error!(error = %e, "Failed to query server architectures");
-                return None;
+    let arch_ok_ids: HashSet<Uuid> =
+        if derivation.architecture != Architecture::BUILTIN && !candidate_servers.is_empty() {
+            let mut id_cond = Condition::any();
+            for s in &candidate_servers {
+                id_cond = id_cond.add(CServerArchitecture::Server.eq(s.id));
             }
-        }
-    } else {
-        candidate_servers.iter().map(|s| s.id).collect()
-    };
+            match EServerArchitecture::find()
+                .filter(
+                    Condition::all()
+                        .add(id_cond)
+                        .add(CServerArchitecture::Architecture.eq(derivation.architecture.clone())),
+                )
+                .all(&state.db)
+                .await
+            {
+                Ok(rows) => rows.into_iter().map(|r| r.server).collect(),
+                Err(e) => {
+                    error!(error = %e, "Failed to query server architectures");
+                    return None;
+                }
+            }
+        } else {
+            candidate_servers.iter().map(|s| s.id).collect()
+        };
 
     // Step 3: filter by features — server must have ALL required features.
     let feature_ok_ids: HashSet<Uuid> = if features.is_empty() {
@@ -620,7 +667,7 @@ async fn reserve_available_server(
         // `update_waiting_evaluations` once all schedulable builds have run.
         debug!(
             build_id = %build.id,
-            derivation = %build.derivation_path,
+            derivation = %derivation.derivation_path,
             "No matching server available, leaving build queued"
         );
         return None;
@@ -754,41 +801,59 @@ async fn update_waiting_evaluations(state: Arc<ServerState>) {
     }
 }
 
-/// Returns the direct dependency builds of a build (one level, not recursive).
+/// Returns the direct dependencies of a build as `(build, derivation)` pairs
+/// belonging to the same evaluation. Walks `derivation_dependency` from the
+/// build's derivation and joins back to builds of the current evaluation.
 async fn get_build_dependencies(
     state: Arc<ServerState>,
     build: &MBuild,
-) -> Result<Vec<MBuild>, String> {
-    let dependencies = match EBuildDependency::find()
-        .filter(CBuildDependency::Build.eq(build.id))
+) -> Result<Vec<(MBuild, MDerivation)>, String> {
+    let edges = match EDerivationDependency::find()
+        .filter(CDerivationDependency::Derivation.eq(build.derivation))
         .all(&state.db)
         .await
     {
-        Ok(deps) => deps
-            .into_iter()
-            .map(|d| d.dependency)
-            .collect::<Vec<Uuid>>(),
+        Ok(e) => e,
         Err(e) => {
-            error!(error = %e, build_id = %build.id, "Failed to query build dependencies");
-            return Err("Failed to query build dependencies".to_string());
+            error!(error = %e, build_id = %build.id, "Failed to query derivation dependencies");
+            return Err("Failed to query derivation dependencies".to_string());
         }
     };
 
-    let mut condition = Condition::any();
-
-    for dependency in dependencies {
-        condition = condition.add(CBuild::Id.eq(dependency));
+    if edges.is_empty() {
+        return Ok(vec![]);
     }
 
-    let builds = match EBuild::find().filter(condition).all(&state.db).await {
-        Ok(builds) => builds,
-        Err(e) => {
-            error!(error = %e, "Failed to query builds for dependencies");
-            return Err("Failed to query builds for dependencies".to_string());
-        }
-    };
+    let mut out = Vec::with_capacity(edges.len());
+    for edge in edges {
+        let dep_build = match EBuild::find()
+            .filter(CBuild::Evaluation.eq(build.evaluation))
+            .filter(CBuild::Derivation.eq(edge.dependency))
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(b)) => b,
+            Ok(None) => continue,
+            Err(e) => {
+                error!(error = %e, "Failed to query dependency build");
+                return Err("Failed to query dependency build".to_string());
+            }
+        };
+        let dep_derivation = match EDerivation::find_by_id(edge.dependency)
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(d)) => d,
+            Ok(None) => continue,
+            Err(e) => {
+                error!(error = %e, "Failed to query dependency derivation");
+                return Err("Failed to query dependency derivation".to_string());
+            }
+        };
+        out.push((dep_build, dep_derivation));
+    }
 
-    Ok(builds)
+    Ok(out)
 }
 
 /// Resolves a build's dependencies to a flat list of already-built store paths,
@@ -798,9 +863,7 @@ async fn get_build_dependencies_sorted(
     local_store: &mut LocalNixStore,
     build: &MBuild,
 ) -> Result<Vec<String>, String> {
-    let bdependencies_direct: Vec<MBuild> = match get_build_dependencies(Arc::clone(&state), build)
-        .await
-    {
+    let direct = match get_build_dependencies(Arc::clone(&state), build).await {
         Ok(deps) => deps,
         Err(e) => {
             error!(error = %e, build_id = %build.id, "Failed to get build dependencies for sorting");
@@ -809,22 +872,27 @@ async fn get_build_dependencies_sorted(
     };
 
     let mut dependencies = HashSet::new();
-    for dependency in &bdependencies_direct {
-        let dep_full_path = nix_store_path(&dependency.derivation_path);
-        let output_map = if dependency.derivation_path.ends_with(".drv") {
-            // TODO: find better way to get correct dependencies
-            let mut deps = get_output_paths(dep_full_path.clone(), local_store).await
-            .map_err(|e| {
-                error!(error = %e, derivation_path = %dependency.derivation_path, "Failed to get output path for dependency");
-                "Failed to get output path for dependency".to_string()
-            })?
-            .values().cloned().collect::<Vec<String>>();
+    for (_dep_build, dep_derivation) in &direct {
+        let dep_full_path = nix_store_path(&dep_derivation.derivation_path);
+        let output_map = if dep_derivation.derivation_path.ends_with(".drv") {
+            let mut deps = get_output_paths(dep_full_path.clone(), local_store)
+                .await
+                .map_err(|e| {
+                    error!(error = %e, derivation_path = %dep_derivation.derivation_path, "Failed to get output path for dependency");
+                    "Failed to get output path for dependency".to_string()
+                })?
+                .values()
+                .cloned()
+                .collect::<Vec<String>>();
 
-            let missing = state.nix_store.query_missing_paths(deps.clone()).await
-            .map_err(|e| {
-                error!(error = %e, derivation_path = %dependency.derivation_path, "Failed to get missing builds for dependency");
-                "Failed to get missing builds for dependency".to_string()
-            })?;
+            let missing = state
+                .nix_store
+                .query_missing_paths(deps.clone())
+                .await
+                .map_err(|e| {
+                    error!(error = %e, derivation_path = %dep_derivation.derivation_path, "Failed to get missing builds for dependency");
+                    "Failed to get missing builds for dependency".to_string()
+                })?;
 
             deps.retain(|d| !missing.contains(d));
             deps

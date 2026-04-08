@@ -824,8 +824,8 @@ pub fn get_hash_from_path(path: String) -> Result<(String, String), SourceError>
     Ok((hash, package))
 }
 
-pub fn get_path_from_build_output(build_output: MBuildOutput) -> String {
-    format!("/nix/store/{}-{}", build_output.hash, build_output.package)
+pub fn get_path_from_derivation_output(output: MDerivationOutput) -> String {
+    format!("/nix/store/{}-{}", output.hash, output.package)
 }
 
 pub fn get_cache_nar_location(base_path: String, hash: String) -> Result<String, SourceError> {

@@ -90,35 +90,41 @@ pub(super) async fn update_build_status_recursivly(
     build: MBuild,
     status: BuildStatus,
 ) -> MBuild {
+    let evaluation_id = build.evaluation;
     let mut queue = VecDeque::new();
     let mut processed = HashSet::new();
-    queue.push_back(build.id);
+    // Each queued entry is (build_id, derivation_id).
+    queue.push_back((build.id, build.derivation));
 
-    while let Some(current_build_id) = queue.pop_front() {
-        if processed.contains(&current_build_id) {
+    while let Some((current_build_id, current_derivation_id)) = queue.pop_front() {
+        if !processed.insert(current_build_id) {
             continue;
         }
-        processed.insert(current_build_id);
 
-        let dependencies = match EBuildDependency::find()
-            .filter(CBuildDependency::Dependency.eq(current_build_id))
+        // Walk reverse derivation_dependency edges: which derivations
+        // depend on `current_derivation_id`?
+        let reverse_edges = match EDerivationDependency::find()
+            .filter(CDerivationDependency::Dependency.eq(current_derivation_id))
             .all(&state.db)
             .await
         {
-            Ok(deps) => deps.into_iter().map(|d| d.build).collect::<Vec<Uuid>>(),
+            Ok(edges) => edges,
             Err(e) => {
-                error!(error = %e, build_id = %current_build_id, "Failed to query build dependencies for update");
+                error!(error = %e, %current_derivation_id, "Failed to query reverse derivation_dependency");
                 continue;
             }
         };
 
-        if dependencies.is_empty() {
+        if reverse_edges.is_empty() {
             continue;
         }
 
-        let mut condition = Condition::any();
-        for dependency in &dependencies {
-            condition = condition.add(CBuild::Id.eq(*dependency));
+        // Map back to builds of the same evaluation.
+        let dependent_derivation_ids: Vec<Uuid> =
+            reverse_edges.into_iter().map(|e| e.derivation).collect();
+        let mut dep_build_cond = Condition::any();
+        for did in &dependent_derivation_ids {
+            dep_build_cond = dep_build_cond.add(CBuild::Derivation.eq(*did));
         }
 
         let status_condition = if status == BuildStatus::Aborted
@@ -134,7 +140,8 @@ pub(super) async fn update_build_status_recursivly(
         };
 
         let dependent_builds = match EBuild::find()
-            .filter(condition)
+            .filter(CBuild::Evaluation.eq(evaluation_id))
+            .filter(dep_build_cond)
             .filter(status_condition)
             .all(&state.db)
             .await
@@ -155,13 +162,15 @@ pub(super) async fn update_build_status_recursivly(
                 status.clone()
             };
         for dependent_build in dependent_builds {
+            let dep_id = dependent_build.id;
+            let dep_drv = dependent_build.derivation;
             update_build_status(
                 Arc::clone(&state),
-                dependent_build.clone(),
+                dependent_build,
                 propagated_status.clone(),
             )
             .await;
-            queue.push_back(dependent_build.id);
+            queue.push_back((dep_id, dep_drv));
         }
     }
 
@@ -306,7 +315,10 @@ pub(super) async fn check_evaluation_status(state: Arc<ServerState>, evaluation_
         )
     });
 
-    let status = if statuses.iter().all(|s| *s == BuildStatus::Completed) {
+    let status = if statuses
+        .iter()
+        .all(|s| matches!(s, BuildStatus::Completed | BuildStatus::Substituted))
+    {
         EvaluationStatus::Completed
     } else if !in_progress && statuses.contains(&BuildStatus::Failed) {
         EvaluationStatus::Failed

@@ -6,7 +6,9 @@
 
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
-use core::sources::{clear_key, format_cache_key, get_hash_from_path, get_path_from_build_output, write_key};
+use core::sources::{
+    clear_key, format_cache_key, get_hash_from_path, get_path_from_derivation_output, write_key,
+};
 use core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -14,6 +16,7 @@ use sea_orm::{
     IntoActiveModel, QueryFilter, QueryOrder, QuerySelect, Statement,
 };
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::process::Command;
@@ -21,7 +24,7 @@ use tokio::time;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-/// Symlink name used for the GC root pinning a given build output.
+/// Symlink name used for the GC root pinning a given derivation output.
 fn gcroot_name(hash: &str, package: &str) -> String {
     format!("{}-{}", hash, package)
 }
@@ -62,12 +65,11 @@ pub async fn cache_loop(state: Arc<ServerState>) {
     const CLEANUP_INTERVAL: u32 = 720;
 
     loop {
-        let builds = get_next_build_outputs(Arc::clone(&state), concurrency).await;
+        let outputs = get_next_uncached_derivation_outputs(Arc::clone(&state), concurrency).await;
 
-        if builds.is_empty() {
+        if outputs.is_empty() {
             interval.tick().await;
 
-            // Periodically run cleanup
             cleanup_counter += 1;
             if cleanup_counter >= CLEANUP_INTERVAL {
                 cleanup_counter = 0;
@@ -81,20 +83,28 @@ pub async fn cache_loop(state: Arc<ServerState>) {
                 } else {
                     info!("Evaluation GC completed successfully");
                 }
-                if state.cli.nar_ttl_hours > 0 {
-                    if let Err(e) = cleanup_stale_cached_nars(Arc::clone(&state)).await {
-                        error!(error = %e, "NAR TTL GC failed");
-                    } else {
-                        info!("NAR TTL GC completed successfully");
-                    }
+                if let Err(e) = core::gc::gc_orphan_derivations(
+                    Arc::clone(&state),
+                    state.cli.keep_orphan_derivations_hours,
+                )
+                .await
+                {
+                    error!(error = %e, "Derivation GC failed");
+                } else {
+                    info!("Derivation GC completed successfully");
+                }
+                if state.cli.nar_ttl_hours > 0
+                    && let Err(e) = cleanup_stale_cached_nars(Arc::clone(&state)).await
+                {
+                    error!(error = %e, "NAR TTL GC failed");
                 }
             }
         } else {
-            let tasks: Vec<_> = builds
+            let tasks: Vec<_> = outputs
                 .into_iter()
-                .map(|build| {
+                .map(|output| {
                     let s = Arc::clone(&state);
-                    tokio::spawn(async move { cache_build_output(s, build).await })
+                    tokio::spawn(async move { cache_derivation_output(s, output).await })
                 })
                 .collect();
             for task in tasks {
@@ -104,72 +114,33 @@ pub async fn cache_loop(state: Arc<ServerState>) {
     }
 }
 
-pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOutput) {
-    let build = match EBuild::find_by_id(build_output.build).one(&state.db).await {
-        Ok(Some(b)) => b,
-        Ok(None) => {
-            error!("Build not found: {}", build_output.build);
-            return;
-        }
-        Err(e) => {
-            error!(error = %e, "Failed to query build");
-            return;
-        }
-    };
-
-    let evaluation = match EEvaluation::find_by_id(build.evaluation)
+/// Caches a single derivation output to all caches subscribed by its owning organisation.
+///
+/// After all outputs of a derivation are `is_cached = true` and the closure is fully
+/// cached, the caller (driven from `cache_loop`) records a `cache_derivation` row.
+pub async fn cache_derivation_output(state: Arc<ServerState>, output: MDerivationOutput) {
+    let derivation = match EDerivation::find_by_id(output.derivation)
         .one(&state.db)
         .await
     {
-        Ok(Some(e)) => e,
+        Ok(Some(d)) => d,
         Ok(None) => {
-            error!("Evaluation not found: {}", build.evaluation);
+            error!("Derivation not found: {}", output.derivation);
             return;
         }
         Err(e) => {
-            error!(error = %e, "Failed to query evaluation");
+            error!(error = %e, "Failed to query derivation");
             return;
         }
     };
 
-    let organization_id = if let Some(project_id) = evaluation.project {
-        let project = match EProject::find_by_id(project_id).one(&state.db).await {
-            Ok(Some(p)) => p,
-            Ok(None) => {
-                error!("Project not found: {}", project_id);
-                return;
-            }
-            Err(e) => {
-                error!(error = %e, "Failed to query project");
-                return;
-            }
-        };
-        project.organization
-    } else {
-        match EDirectBuild::find()
-            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
-            .one(&state.db)
-            .await
-        {
-            Ok(Some(d)) => d.organization,
-            Ok(None) => {
-                error!("Direct build not found for evaluation: {}", evaluation.id);
-                return;
-            }
-            Err(e) => {
-                error!(error = %e, "Failed to query direct build");
-                return;
-            }
-        }
-    };
-
-    let organization = match EOrganization::find_by_id(organization_id)
+    let organization = match EOrganization::find_by_id(derivation.organization)
         .one(&state.db)
         .await
     {
         Ok(Some(o)) => o,
         Ok(None) => {
-            error!("Organization not found: {}", organization_id);
+            error!("Organization not found: {}", derivation.organization);
             return;
         }
         Err(e) => {
@@ -178,7 +149,7 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         }
     };
 
-    let path = get_path_from_build_output(build_output.clone());
+    let path = get_path_from_derivation_output(output.clone());
 
     match state.nix_store.query_pathinfo(path.clone()).await {
         Ok(Some(_)) => {}
@@ -217,52 +188,121 @@ pub async fn cache_build_output(state: Arc<ServerState>, build_output: MBuildOut
         }
     };
 
-    for cache in active_caches {
-        sign_build_output(Arc::clone(&state), cache, build_output.clone()).await;
+    for cache in &active_caches {
+        sign_derivation_output(Arc::clone(&state), cache.clone(), output.clone()).await;
     }
 
     info!(
-        hash = %build_output.hash,
-        package = %build_output.package,
-        "Caching build output"
+        hash = %output.hash,
+        package = %output.package,
+        "Caching derivation output"
     );
 
-    let pack_result = pack_build_output(Arc::clone(&state), build_output.clone()).await;
+    let pack_result = pack_derivation_output(Arc::clone(&state), output.clone()).await;
 
     let (file_hash, file_size, nar_size) = match pack_result {
         Ok(result) => result,
         Err(e) => {
-            error!(error = %e, hash = %build_output.hash, "Failed to pack build output: {:#}", e);
+            error!(error = %e, hash = %output.hash, "Failed to pack derivation output: {:#}", e);
             return;
         }
     };
 
-    let mut abuild_output = build_output.clone().into_active_model();
+    let mut active = output.clone().into_active_model();
+    active.file_hash = Set(Some(file_hash));
+    active.file_size = Set(Some(file_size as i64));
+    active.nar_size = Set(Some(nar_size as i64));
+    active.is_cached = Set(true);
 
-    abuild_output.file_hash = Set(Some(file_hash));
-    abuild_output.file_size = Set(Some(file_size as i64));
-    abuild_output.nar_size = Set(Some(nar_size as i64));
-    abuild_output.is_cached = Set(true);
-
-    if let Err(e) = abuild_output.update(&state.db).await {
-        error!(error = %e, "Failed to update build output cache status");
+    if let Err(e) = active.update(&state.db).await {
+        error!(error = %e, "Failed to update derivation output cache status");
         return;
     }
 
-    create_gcroot(&state, &build_output.hash, &build_output.package).await;
+    create_gcroot(&state, &output.hash, &output.package).await;
+
+    // After updating, check whether this derivation's full closure is now
+    // available in any of the caches. If so, record the cache_derivation row.
+    for cache in &active_caches {
+        if let Err(e) =
+            try_record_cache_derivation(Arc::clone(&state), cache.id, derivation.id).await
+        {
+            warn!(error = %e, cache_id = %cache.id, drv_id = %derivation.id,
+                "Failed to record cache_derivation");
+        }
+    }
 }
 
-pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_output: MBuildOutput) {
-    let path = get_path_from_build_output(build_output.clone());
+/// If every output of `derivation_id` is cached AND every transitive dependency already
+/// has a `cache_derivation` row for `cache_id`, insert the row for this derivation.
+async fn try_record_cache_derivation(
+    state: Arc<ServerState>,
+    cache_id: Uuid,
+    derivation_id: Uuid,
+) -> Result<()> {
+    // 1. All outputs of this derivation cached?
+    let any_uncached = EDerivationOutput::find()
+        .filter(CDerivationOutput::Derivation.eq(derivation_id))
+        .filter(CDerivationOutput::IsCached.eq(false))
+        .one(&state.db)
+        .await?
+        .is_some();
+    if any_uncached {
+        return Ok(());
+    }
+
+    // 2. Every direct dependency has a cache_derivation row for this cache.
+    let dep_edges = EDerivationDependency::find()
+        .filter(CDerivationDependency::Derivation.eq(derivation_id))
+        .all(&state.db)
+        .await?;
+    for edge in dep_edges {
+        let present = ECacheDerivation::find()
+            .filter(CCacheDerivation::Cache.eq(cache_id))
+            .filter(CCacheDerivation::Derivation.eq(edge.dependency))
+            .one(&state.db)
+            .await?
+            .is_some();
+        if !present {
+            return Ok(());
+        }
+    }
+
+    // 3. Already recorded?
+    let already = ECacheDerivation::find()
+        .filter(CCacheDerivation::Cache.eq(cache_id))
+        .filter(CCacheDerivation::Derivation.eq(derivation_id))
+        .one(&state.db)
+        .await?
+        .is_some();
+    if already {
+        return Ok(());
+    }
+
+    let row = ACacheDerivation {
+        id: Set(Uuid::new_v4()),
+        cache: Set(cache_id),
+        derivation: Set(derivation_id),
+        cached_at: Set(Utc::now().naive_utc()),
+        last_fetched_at: Set(None),
+    };
+    row.insert(&state.db).await?;
+    debug!(cache_id = %cache_id, derivation_id = %derivation_id, "Recorded cache_derivation");
+    Ok(())
+}
+
+pub async fn sign_derivation_output(
+    state: Arc<ServerState>,
+    cache: MCache,
+    output: MDerivationOutput,
+) {
+    let path = get_path_from_derivation_output(output.clone());
     let secret_key = match format_cache_key(
         state.cli.crypt_secret_file.clone(),
         cache.clone(),
         state.cli.serve_url.clone(),
     ) {
-        Ok(key) => {
-            debug!("Found secret key for cache '{}'", cache.name);
-            key
-        }
+        Ok(key) => key,
         Err(e) => {
             error!("Failed to format cache key: {}", e);
             return;
@@ -277,7 +317,7 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
         }
     };
 
-    let output = match Command::new(state.cli.binpath_nix.clone())
+    let sign_output = match Command::new(state.cli.binpath_nix.clone())
         .arg("store")
         .arg("sign")
         .arg("-k")
@@ -285,133 +325,92 @@ pub async fn sign_build_output(state: Arc<ServerState>, cache: MCache, build_out
         .arg(path.clone())
         .output()
         .await
-        .map_err(|e| e.to_string())
     {
-        Ok(output) => output,
+        Ok(o) => o,
         Err(e) => {
             error!(error = %e, "Error while executing nix store sign command");
             return;
         }
     };
 
-    if !output.status.success() {
+    if !sign_output.status.success() {
         error!(
             "Could not sign path with nix store sign. Exit code: {:?}, stderr: {}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stderr)
+            sign_output.status.code(),
+            String::from_utf8_lossy(&sign_output.stderr)
         );
         return;
     }
-
-    debug!("Successfully signed path: {}", path);
 
     if let Err(e) = clear_key(key_file) {
         error!(error = %e, "Failed to clear cache key file");
     }
 
-    let nix_cmd = ["path-info", "--sigs", &path];
-    debug!(
-        "Running command: {} {}",
-        state.cli.binpath_nix,
-        nix_cmd.join(" ")
-    );
-
-    let output = match Command::new(state.cli.binpath_nix.clone())
+    let info_output = match Command::new(state.cli.binpath_nix.clone())
         .arg("path-info")
         .arg("--sigs")
         .arg(path.clone())
         .output()
         .await
-        .map_err(|e| e.to_string())
     {
-        Ok(output) => output,
+        Ok(o) => o,
         Err(e) => {
             error!(error = %e, "Error while executing nix path-info --sigs command");
             return;
         }
     };
 
-    if !output.status.success() {
+    if !info_output.status.success() {
         error!(
             "Could not get path info with nix path-info. Exit code: {:?}, stderr: {}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stderr)
+            info_output.status.code(),
+            String::from_utf8_lossy(&info_output.stderr)
         );
         return;
     }
 
-    let signatures = String::from_utf8_lossy(&output.stdout).to_string();
-    debug!(
-        "Signature output for cache '{}': {}",
-        cache.name, signatures
-    );
-
+    let signatures = String::from_utf8_lossy(&info_output.stdout).to_string();
     let cache_identifier = secret_key.split(':').next().unwrap_or(&cache.name);
-    debug!(
-        "Looking for cache identifier '{}' in signatures",
-        cache_identifier
-    );
 
     let mut signature = String::new();
-    for mut line in signatures.split(" ") {
-        line = line.trim();
-        debug!("Checking signature line: '{}'", line);
-        if let Some(sig_part) = line.split_whitespace().last() {
-            debug!("Found signature part: '{}'", sig_part);
-            if sig_part.starts_with(&format!("{}:", cache_identifier)) {
-                if let Some(actual_sig) = sig_part.split(':').nth(1) {
-                    signature = actual_sig.trim().to_string();
-                    debug!("Extracted signature: {}", signature);
-                    break;
-                }
-            } else {
-                debug!(
-                    "Signature part doesn't start with '{}:': {}",
-                    cache_identifier, sig_part
-                );
-            }
+    for line in signatures.split(' ') {
+        let line = line.trim();
+        if let Some(sig_part) = line.split_whitespace().last()
+            && sig_part.starts_with(&format!("{}:", cache_identifier))
+            && let Some(actual_sig) = sig_part.split(':').nth(1)
+        {
+            signature = actual_sig.trim().to_string();
+            break;
         }
     }
 
     if signature.is_empty() {
-        error!(
-            "No signature found for cache '{}' in output. Lines checked:",
-            cache.name
-        );
-        for (i, line) in signatures.split(" ").enumerate() {
-            error!("  Line {}: {}", i + 1, line.trim());
-        }
+        error!("No signature found for cache '{}' in output", cache.name);
         return;
     }
 
-    let build_path_signature = ABuildOutputSignature {
+    let row = ADerivationOutputSignature {
         id: Set(Uuid::new_v4()),
-        build_output: Set(build_output.id),
+        derivation_output: Set(output.id),
         cache: Set(cache.id),
         signature: Set(signature),
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    if let Err(e) = build_path_signature.insert(&state.db).await {
-        error!(error = %e, "Failed to insert build output signature");
-    } else {
-        debug!(
-            "Successfully inserted signature for build output {}",
-            build_output.id
-        );
+    if let Err(e) = row.insert(&state.db).await {
+        error!(error = %e, "Failed to insert derivation output signature");
     }
 }
 
-pub async fn pack_build_output(
+pub async fn pack_derivation_output(
     state: Arc<ServerState>,
-    build_output: MBuildOutput,
+    output: MDerivationOutput,
 ) -> Result<(String, u32, u64)> {
-    let path = get_path_from_build_output(build_output);
+    let path = get_path_from_derivation_output(output);
 
     let (path_hash, _path_package) =
-        get_hash_from_path(path.clone()).context("Failed to parse build output path")?;
+        get_hash_from_path(path.clone()).context("Failed to parse derivation output path")?;
 
-    // Pack the NAR into memory
     let pack_output = Command::new(state.cli.binpath_nix.clone())
         .arg("nar")
         .arg("pack")
@@ -445,13 +444,10 @@ pub async fn pack_build_output(
 }
 
 /// Compute SHA-256 of `data` and return it encoded in Nix's base-32 alphabet.
-///
-/// Nix base-32 uses the alphabet `0123456789abcdfghijklmnpqrsvwxyz` (no e/o/t/u)
-/// and encodes 5 bits per character, most-significant group first.
 fn nix_base32_sha256(data: &[u8]) -> String {
     const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
     let hash: [u8; 32] = Sha256::digest(data).into();
-    let len = (hash.len() * 8 - 1) / 5 + 1; // 52 for SHA-256
+    let len = (hash.len() * 8 - 1) / 5 + 1;
     let mut out = String::with_capacity(len);
     for n in (0..len).rev() {
         let b = n * 5;
@@ -465,43 +461,55 @@ fn nix_base32_sha256(data: &[u8]) -> String {
     out
 }
 
-async fn get_next_build_outputs(state: Arc<ServerState>, limit: usize) -> Vec<MBuildOutput> {
-    EBuildOutput::find()
-        .filter(CBuildOutput::IsCached.eq(false))
-        .order_by_asc(CBuildOutput::CreatedAt)
+async fn get_next_uncached_derivation_outputs(
+    state: Arc<ServerState>,
+    limit: usize,
+) -> Vec<MDerivationOutput> {
+    EDerivationOutput::find()
+        .filter(CDerivationOutput::IsCached.eq(false))
+        .order_by_asc(CDerivationOutput::CreatedAt)
         .limit(limit as u64)
         .all(&state.db)
         .await
         .unwrap_or_else(|e| {
-            error!(error = %e, "Failed to query next build outputs");
+            error!(error = %e, "Failed to query next derivation outputs");
             vec![]
         })
 }
 
+/// Invalidates a path's cached state across all caches:
+///   - removes its NAR file from storage
+///   - clears `is_cached` / `file_hash` / `file_size` on all matching outputs
+///   - deletes any `cache_derivation` rows for the owning derivation
+///   - walks reverse dependency edges and deletes `cache_derivation` rows for
+///     every transitive dependent in the same cache (their closures are now
+///     incomplete). Their NAR files stay; only the closure assertion is revoked.
 pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) -> Result<()> {
     let (hash, package) = get_hash_from_path(path.clone())
         .with_context(|| format!("Failed to parse path {}", path))?;
 
-    let build_outputs = EBuildOutput::find()
+    let outputs = EDerivationOutput::find()
         .filter(
             Condition::all()
-                .add(CBuildOutput::Hash.eq(hash.clone()))
-                .add(CBuildOutput::Package.eq(package.clone()))
-                .add(CBuildOutput::IsCached.eq(true)),
+                .add(CDerivationOutput::Hash.eq(hash.clone()))
+                .add(CDerivationOutput::Package.eq(package.clone()))
+                .add(CDerivationOutput::IsCached.eq(true)),
         )
         .all(&state.db)
         .await
-        .context("Database error while finding build outputs")?;
+        .context("Database error while finding derivation outputs")?;
 
-    for build_output in build_outputs {
-        let mut abuild_output = build_output.clone().into_active_model();
-        abuild_output.is_cached = Set(false);
-        abuild_output.file_hash = Set(None);
-        abuild_output.file_size = Set(None);
-        abuild_output
+    for output in outputs {
+        let derivation_id = output.derivation;
+
+        let mut active = output.clone().into_active_model();
+        active.is_cached = Set(false);
+        active.file_hash = Set(None);
+        active.file_size = Set(None);
+        active
             .update(&state.db)
             .await
-            .context("Failed to update build output")?;
+            .context("Failed to update derivation output")?;
 
         state
             .nar_storage
@@ -509,11 +517,11 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
             .await
             .with_context(|| format!("Failed to remove cached NAR for {}", hash))?;
 
-        let signatures = EBuildOutputSignature::find()
-            .filter(CBuildOutputSignature::BuildOutput.eq(build_output.id))
+        let signatures = EDerivationOutputSignature::find()
+            .filter(CDerivationOutputSignature::DerivationOutput.eq(output.id))
             .all(&state.db)
             .await
-            .context("Failed to find build output signatures")?;
+            .context("Failed to find derivation output signatures")?;
 
         for signature in signatures {
             let asignature = signature.into_active_model();
@@ -523,17 +531,58 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
                 .context("Failed to delete signature")?;
         }
 
+        // Drop cache_derivation rows for this derivation in every cache,
+        // plus walk reverse derivation_dependency edges and remove rows for
+        // every dependent (its closure is no longer complete).
+        revoke_cache_derivation_closure(&state, derivation_id).await?;
+
         info!(path = %path, "Invalidated cache for path");
     }
 
     Ok(())
 }
 
-/// Runs per-project evaluation GC for all projects that have `keep_evaluations > 0`.
-///
-/// Uses each project's own `keep_evaluations` as the retention limit.  The global
-/// `GRADIENT_KEEP_EVALUATIONS` CLI value acts only as a cap enforced at write time
-/// (see `patch_project`); this function does not re-enforce it.
+/// Walks reverse `derivation_dependency` edges starting at `derivation_id` and removes
+/// all `cache_derivation` rows touching the visited derivations across every cache.
+async fn revoke_cache_derivation_closure(
+    state: &Arc<ServerState>,
+    derivation_id: Uuid,
+) -> Result<()> {
+    let mut visited: HashSet<Uuid> = HashSet::new();
+    let mut frontier = vec![derivation_id];
+    visited.insert(derivation_id);
+
+    while !frontier.is_empty() {
+        let edges = EDerivationDependency::find()
+            .filter(CDerivationDependency::Dependency.is_in(frontier.clone()))
+            .all(&state.db)
+            .await
+            .context("Failed to walk reverse derivation_dependency")?;
+        frontier.clear();
+        for edge in edges {
+            if visited.insert(edge.derivation) {
+                frontier.push(edge.derivation);
+            }
+        }
+    }
+
+    let drv_ids: Vec<Uuid> = visited.into_iter().collect();
+    let cache_rows = ECacheDerivation::find()
+        .filter(CCacheDerivation::Derivation.is_in(drv_ids))
+        .all(&state.db)
+        .await
+        .context("Failed to query cache_derivation rows")?;
+
+    for row in cache_rows {
+        let active = row.into_active_model();
+        if let Err(e) = active.delete(&state.db).await {
+            warn!(error = %e, "Failed to delete cache_derivation row");
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
     let projects = EProject::find()
         .all(&state.db)
@@ -554,86 +603,71 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
     Ok(())
 }
 
-/// Garbage-collects non-entry-point cached NARs whose `last_fetched_at` is older than
-/// `GRADIENT_NAR_TTL_HOURS`. For each stale output:
-///   1. Deletes the on-disk compressed NAR (`.nar.zst`).
-///   2. Attempts `nix store delete` to free nix store space (skipped silently if the path
-///      is still reachable from a GC root, e.g. as a dependency of an entry-point).
-///   3. Marks `is_cached = false` only when the nix store deletion succeeds.
+/// Cache NAR TTL pass: deletes `cache_derivation` rows whose `last_fetched_at` is older
+/// than `nar_ttl_hours`. For each expired row, deletes the NAR file from storage and
+/// drops the row. The derivation and its outputs stay (other caches may still hold them).
 pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
     let ttl_hours = state.cli.nar_ttl_hours;
     if ttl_hours == 0 {
         return Ok(());
     }
 
-    // Find cached outputs that haven't been fetched within the TTL.
     let rows = state
         .db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            r#"SELECT bo.id, bo.hash, bo.package
-               FROM build_output bo
-               WHERE bo.is_cached = true
-                 AND bo.last_fetched_at IS NOT NULL
-                 AND bo.last_fetched_at < NOW() AT TIME ZONE 'UTC' - ($1 * INTERVAL '1 hour')"#,
+            r#"SELECT cd.id, cd.cache, cd.derivation
+               FROM cache_derivation cd
+               WHERE cd.last_fetched_at IS NOT NULL
+                 AND cd.last_fetched_at < NOW() AT TIME ZONE 'UTC' - ($1 * INTERVAL '1 hour')"#,
             [sea_orm::Value::BigInt(Some(ttl_hours as i64))],
         ))
         .await
-        .context("Failed to query stale cached NARs")?;
+        .context("Failed to query stale cache_derivation rows")?;
 
     for row in rows {
-        let id: uuid::Uuid = match row.try_get("", "id") {
+        let cd_id: Uuid = match row.try_get("", "id") {
             Ok(v) => v,
             Err(_) => continue,
         };
-        let hash: String = match row.try_get("", "hash") {
+        let drv_id: Uuid = match row.try_get("", "derivation") {
             Ok(v) => v,
             Err(_) => continue,
         };
-        let package: String = match row.try_get("", "package") {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let store_path = format!("/nix/store/{}-{}", hash, package);
 
-        // 1. Delete the compressed NAR from storage (best-effort).
-        if let Err(e) = state.nar_storage.delete(&hash).await {
-            warn!(error = %e, hash = %hash, "Failed to remove stale compressed NAR");
+        // Find the outputs of the derivation; remove their NAR files (if no other
+        // cache_derivation row keeps them alive).
+        let outputs = EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.eq(drv_id))
+            .all(&state.db)
+            .await
+            .unwrap_or_default();
+
+        // Drop the cache_derivation row first; revocation of dependents follows.
+        if let Some(cd) = ECacheDerivation::find_by_id(cd_id)
+            .one(&state.db)
+            .await
+            .ok()
+            .flatten()
+        {
+            let _ = cd.into_active_model().delete(&state.db).await;
         }
 
-        // 2. Remove the GC root so the path is no longer pinned by us.
-        remove_gcroot(&state, &hash, &package).await;
-
-        // 3. Try to delete from the nix store. This will fail if the path is still
-        //    reachable from another GC root (e.g. dependency of a live entry-point),
-        //    which is intentional — we only free what is truly unreachable.
-        let store_deleted = match state.nix_store.delete_path(store_path.clone()).await {
-            Ok(true) => {
-                info!(store_path = %store_path, "GC'd stale NAR from nix store");
-                true
-            }
-            Ok(false) => {
-                debug!(
-                    store_path = %store_path,
-                    "nix store delete skipped (path still referenced)"
-                );
-                false
-            }
-            Err(e) => {
-                warn!(error = %e, store_path = %store_path, "Failed to delete from nix store");
-                false
-            }
-        };
-
-        // 4. Mark is_cached = false only if the store path was actually deleted.
-        if store_deleted && let Ok(Some(bo)) = EBuildOutput::find_by_id(id).one(&state.db).await {
-            let mut active = bo.into_active_model();
-            active.is_cached = Set(false);
-            active.file_hash = Set(None);
-            active.file_size = Set(None);
-            active.last_fetched_at = Set(None);
-            if let Err(e) = active.update(&state.db).await {
-                warn!(error = %e, id = %id, "Failed to mark build_output as uncached after GC");
+        // Best-effort: NAR file is shared by every cache for this output, so only
+        // delete when no cache_derivation row remains for the derivation.
+        let still_held = ECacheDerivation::find()
+            .filter(CCacheDerivation::Derivation.eq(drv_id))
+            .one(&state.db)
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        if !still_held {
+            for o in &outputs {
+                if let Err(e) = state.nar_storage.delete(&o.hash).await {
+                    warn!(error = %e, hash = %o.hash, "Failed to remove stale compressed NAR");
+                }
+                remove_gcroot(&state, &o.hash, &o.package).await;
             }
         }
     }
@@ -642,7 +676,6 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
 }
 
 pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()> {
-    // Orphan cleanup requires local directory scanning; skip for S3 storage.
     let Some(base_path) = state.nar_storage.local_base() else {
         return Ok(());
     };
@@ -664,7 +697,6 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
                 let subentry = subentry.context("Failed to read subdirectory entry")?;
                 let file_path = subentry.path();
 
-                // Match `{hash_suffix}.nar.zst` — extension is "zst", stem is "{hash_suffix}.nar"
                 if file_path.extension().and_then(|s| s.to_str()) == Some("zst")
                     && let Some(stem) = file_path.file_stem().and_then(|s| s.to_str())
                     && let Some(hash_part) = stem.strip_suffix(".nar")
@@ -672,18 +704,18 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
                     let parent_dir = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
                     let full_hash = format!("{}{}", parent_dir, hash_part);
 
-                    let build_output_exists = EBuildOutput::find()
+                    let exists = EDerivationOutput::find()
                         .filter(
                             Condition::all()
-                                .add(CBuildOutput::Hash.eq(full_hash.clone()))
-                                .add(CBuildOutput::IsCached.eq(true)),
+                                .add(CDerivationOutput::Hash.eq(full_hash.clone()))
+                                .add(CDerivationOutput::IsCached.eq(true)),
                         )
                         .one(&state.db)
                         .await
-                        .context("Failed to check if build output exists")?
+                        .context("Failed to check if derivation output exists")?
                         .is_some();
 
-                    if !build_output_exists {
+                    if !exists {
                         orphaned_files.push(file_path);
                     }
                 }

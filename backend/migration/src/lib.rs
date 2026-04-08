@@ -47,6 +47,7 @@ mod m20260405_000003_add_keep_evaluations_to_project;
 mod m20260406_000001_add_eval_to_entry_point;
 mod m20260407_000000_renumber_evaluation_status;
 mod m20260407_000001_add_nar_size_to_build_output;
+mod m20260408_000000_split_build_into_derivation;
 
 pub struct Migrator;
 
@@ -95,6 +96,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260406_000001_add_eval_to_entry_point::Migration),
             Box::new(m20260407_000000_renumber_evaluation_status::Migration),
             Box::new(m20260407_000001_add_nar_size_to_build_output::Migration),
+            Box::new(m20260408_000000_split_build_into_derivation::Migration),
         ]
     }
 }

@@ -24,18 +24,26 @@ use std::sync::Arc;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
+/// Output tuple returned by `evaluate`:
+///  - builds to insert
+///  - newly-created derivations to insert
+///  - newly-created derivation_output rows to insert
+///  - newly-created derivation_dependency edges to insert
+///  - entry-point (build_id, wildcard) pairs
+///  - failed derivations: (drv, error_msg)
+///  - pending features: (derivation_id, feature_names)
 type EvaluationOutput = (
     Vec<MBuild>,
-    Vec<MBuildDependency>,
+    Vec<MDerivation>,
+    Vec<ADerivationOutput>,
+    Vec<MDerivationDependency>,
     Vec<(Uuid, String)>,
     Vec<(String, String)>,
     Vec<(Uuid, Vec<String>)>,
 );
 
 use super::scheduler::{update_evaluation_status, update_evaluation_status_with_error};
-use dependencies::{
-    EvaluationAccumulator, add_existing_build, find_builds, query_all_dependencies,
-};
+use dependencies::{EvaluationAccumulator, find_derivation, query_all_dependencies};
 
 /// Evaluates a flake repository, discovering all matching derivations and building the dependency
 /// graph. Returns accumulated builds, dependency edges, and the IDs of the top-level entry-point
@@ -103,7 +111,7 @@ pub async fn evaluate(
 
     if all_derivations.is_empty() {
         warn!("No derivations found for evaluation");
-        return Ok((vec![], vec![], vec![], vec![], vec![]));
+        return Ok((vec![], vec![], vec![], vec![], vec![], vec![], vec![]));
     }
 
     update_evaluation_status(
@@ -125,8 +133,7 @@ pub async fn evaluate(
 
     // Process resolved derivations sequentially (store and acc require exclusive access).
     for (derivation_string, derivation_result) in resolved {
-        // TODO: use nix api
-        let (derivation, _references) = match derivation_result {
+        let (derivation_path, _references) = match derivation_result {
             Ok((d, r)) => (d, r),
             Err(e) => {
                 let error_msg = format!("{:#}", e);
@@ -140,83 +147,39 @@ pub async fn evaluate(
             }
         };
 
-        let missing = state
-            .nix_store
-            .query_missing_paths(vec![derivation.clone()])
-            .await?;
-
-        if missing.is_empty() {
-            debug!(derivation = %derivation, "Skipping package - already in store");
-
-            let build_id = Uuid::new_v4();
-            match add_existing_build(
-                Arc::clone(&state),
-                derivation.clone(),
-                evaluation.id,
-                build_id,
-            )
-            .await
-            {
-                Ok(build) => acc
-                    .entry_point_build_ids
-                    .push((build.id, derivation_string.clone())),
-                Err(e) => error!(error = %e, "Failed to add existing build"),
-            }
-
+        // Fast-path: if the derivation row already exists and we already
+        // materialised a build for it in this evaluation, just attach the
+        // entry point.
+        let existing_derivation =
+            find_derivation(&state, organization_id, &derivation_path).await?;
+        if let Some(ref d) = existing_derivation
+            && let Some(existing) = acc.builds.iter().find(|b| b.derivation == d.id)
+        {
+            acc.entry_point_build_ids
+                .push((existing.id, derivation_string.clone()));
+            debug!(derivation = %derivation_path, "Skipping — already in current evaluation");
             continue;
         }
 
-        let already_exists = acc.builds.iter().any(|b| b.derivation_path == derivation);
+        info!(derivation = %derivation_path, "Walking derivation closure");
 
-        if already_exists {
-            if let Some(existing) = acc.builds.iter().find(|b| b.derivation_path == derivation) {
-                acc.entry_point_build_ids
-                    .push((existing.id, derivation_string.clone()));
-            }
-            debug!(derivation = %derivation, "Skipping package - already in current evaluation");
-            continue;
-        }
-
-        let existing_builds = find_builds(
-            Arc::clone(&state),
-            organization_id,
-            vec![derivation.clone()],
-            true,
-        )
-        .await?;
-        if let Some(existing) = existing_builds.first() {
-            let missing = state
-                .nix_store
-                .query_missing_paths(vec![existing.derivation_path.clone()])
-                .await?;
-            if missing.is_empty() {
-                acc.entry_point_build_ids
-                    .push((existing.id, derivation_string.clone()));
-                debug!(derivation = %derivation, "Skipping package - already exists in DB and store");
-                continue;
-            }
-            debug!(derivation = %derivation, "Completed build found in DB but missing from nix store, re-evaluating");
-        }
-
-        info!(derivation = %derivation, "Creating build");
-
-        let entry_point_idx = acc.builds.len();
+        let before_builds = acc.builds.len();
         query_all_dependencies(
             Arc::clone(&state),
             &mut acc,
             evaluation,
             organization_id,
-            vec![derivation.clone()],
+            vec![derivation_path.clone()],
         )
         .await?;
 
         // The root build is the first one pushed during this call.
-        if let Some(root) = acc.builds.get(entry_point_idx) {
+        if let Some(root) = acc.builds.get(before_builds) {
             acc.entry_point_build_ids
                 .push((root.id, derivation_string.clone()));
         }
 
-        debug!(derivation = %derivation, "Successfully processed package");
+        debug!(derivation = %derivation_path, "Successfully processed package");
     }
 
     if acc.builds.is_empty() && !failed_derivations.is_empty() {
@@ -247,7 +210,9 @@ pub async fn evaluate(
 
     Ok((
         acc.builds,
-        acc.dependencies,
+        acc.new_derivations,
+        acc.new_derivation_outputs,
+        acc.new_derivation_dependencies,
         acc.entry_point_build_ids,
         failed_derivations,
         acc.pending_features,
@@ -272,28 +237,64 @@ pub async fn evaluate_direct(
     match evaluation_result {
         Ok((
             builds,
-            dependencies,
+            new_derivations,
+            new_derivation_outputs,
+            new_derivation_dependencies,
             _entry_point_build_ids,
             _failed_derivations,
             pending_features,
         )) => {
             info!(
                 build_count = builds.len(),
-                dependency_count = dependencies.len(),
+                derivation_count = new_derivations.len(),
+                dependency_count = new_derivation_dependencies.len(),
                 "Direct evaluation completed successfully"
             );
 
+            const BATCH_SIZE: usize = 1000;
+
+            // Insert derivations first — builds FK into derivation.
+            if !new_derivations.is_empty() {
+                let active: Vec<ADerivation> = new_derivations
+                    .iter()
+                    .map(|d| d.clone().into_active_model())
+                    .collect();
+                for chunk in active.chunks(BATCH_SIZE) {
+                    EDerivation::insert_many(chunk.to_vec())
+                        .exec(&state.db)
+                        .await
+                        .context("Failed to insert derivations")?;
+                }
+            }
+
+            if !new_derivation_outputs.is_empty() {
+                for chunk in new_derivation_outputs.chunks(BATCH_SIZE) {
+                    EDerivationOutput::insert_many(chunk.to_vec())
+                        .exec(&state.db)
+                        .await
+                        .context("Failed to insert derivation outputs")?;
+                }
+            }
+
+            if !new_derivation_dependencies.is_empty() {
+                let active: Vec<ADerivationDependency> = new_derivation_dependencies
+                    .iter()
+                    .map(|d| d.clone().into_active_model())
+                    .collect();
+                for chunk in active.chunks(BATCH_SIZE) {
+                    EDerivationDependency::insert_many(chunk.to_vec())
+                        .exec(&state.db)
+                        .await
+                        .context("Failed to insert derivation dependencies")?;
+                }
+            }
+
+            // Builds go last: they FK into the just-inserted derivations.
             let active_builds = builds
                 .iter()
                 .map(|b| b.clone().into_active_model())
                 .collect::<Vec<ABuild>>();
-            let active_dependencies = dependencies
-                .iter()
-                .map(|d| d.clone().into_active_model())
-                .collect::<Vec<ABuildDependency>>();
-
             if !active_builds.is_empty() {
-                const BATCH_SIZE: usize = 1000;
                 for chunk in active_builds.chunks(BATCH_SIZE) {
                     EBuild::insert_many(chunk.to_vec())
                         .exec(&state.db)
@@ -302,26 +303,16 @@ pub async fn evaluate_direct(
                 }
             }
 
-            for (build_id, features) in pending_features {
+            for (derivation_id, features) in pending_features {
                 if let Err(e) = gradient_core::database::add_features(
                     Arc::clone(&state),
                     features,
-                    Some(build_id),
+                    Some(derivation_id),
                     None,
                 )
                 .await
                 {
-                    error!(error = %e, build_id = %build_id, "Failed to add features for direct build");
-                }
-            }
-
-            if !active_dependencies.is_empty() {
-                const BATCH_SIZE: usize = 1000;
-                for chunk in active_dependencies.chunks(BATCH_SIZE) {
-                    EBuildDependency::insert_many(chunk.to_vec())
-                        .exec(&state.db)
-                        .await
-                        .context("Failed to insert dependencies")?;
+                    error!(error = %e, %derivation_id, "Failed to add features for direct derivation");
                 }
             }
 

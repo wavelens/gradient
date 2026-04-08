@@ -86,6 +86,7 @@ impl BuildExecutor for FakeBuildExecutor {
         server: MServer,
         organization: MOrganization,
         build: MBuild,
+        _derivation_path: String,
         _derivation: BasicDerivation,
         dependencies: Vec<String>,
     ) -> Result<BuildExecutionResult> {

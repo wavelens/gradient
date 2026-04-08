@@ -311,9 +311,8 @@ in {
         wantedBy = [ "multi-user.target" ];
         after = [
           "network.target"
-          "postgresql.target"
           "systemd-tmpfiles-setup.service"
-        ];
+        ] ++ lib.optional cfg.configurePostgres "postgresql.target";
 
         path = [
           cfg.packages.nix

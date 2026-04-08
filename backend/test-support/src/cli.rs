@@ -49,6 +49,7 @@ pub fn test_cli() -> Cli {
         state_file: None,
         delete_state: true,
         keep_evaluations: 30,
+        keep_orphan_derivations_hours: 24,
         max_nixdaemon_connections: 2,
         eval_workers: 1,
         nar_ttl_hours: 0,

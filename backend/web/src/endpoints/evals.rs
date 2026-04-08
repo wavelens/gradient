@@ -262,31 +262,51 @@ pub async fn get_evaluation_builds(
         .all(&state.db)
         .await?;
 
-    let build_ids: Vec<Uuid> = builds.iter().map(|b| b.id).collect();
+    let drv_ids: Vec<Uuid> = builds.iter().map(|b| b.derivation).collect();
 
-    let has_artefacts_map: HashMap<Uuid, bool> = if build_ids.is_empty() {
+    let derivations: HashMap<Uuid, MDerivation> = if drv_ids.is_empty() {
         HashMap::new()
     } else {
-        EBuildOutput::find()
-            .filter(CBuildOutput::Build.is_in(build_ids))
-            .filter(CBuildOutput::HasArtefacts.eq(true))
+        EDerivation::find()
+            .filter(CDerivation::Id.is_in(drv_ids.clone()))
             .all(&state.db)
             .await?
             .into_iter()
-            .map(|o| (o.build, true))
+            .map(|d| (d.id, d))
             .collect()
+    };
+
+    // has_artefacts is per-derivation: any output of the derivation has artefacts.
+    let has_artefacts_map: HashMap<Uuid, bool> = if drv_ids.is_empty() {
+        HashMap::new()
+    } else {
+        let mut m: HashMap<Uuid, bool> = HashMap::new();
+        let outputs = EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.is_in(drv_ids))
+            .filter(CDerivationOutput::HasArtefacts.eq(true))
+            .all(&state.db)
+            .await?;
+        for o in outputs {
+            m.insert(o.derivation, true);
+        }
+        m
     };
 
     let builds: Vec<BuildItem> = builds
         .iter()
-        .filter(|b| b.derivation_path.ends_with(".drv"))
-        .map(|b| BuildItem {
-            id: b.id,
-            name: b.derivation_path.clone(),
-            status: format!("{:?}", b.status),
-            has_artefacts: *has_artefacts_map.get(&b.id).unwrap_or(&false),
-            updated_at: b.updated_at,
-            build_time_ms: b.build_time_ms,
+        .filter_map(|b| {
+            let drv = derivations.get(&b.derivation)?;
+            if !drv.derivation_path.ends_with(".drv") {
+                return None;
+            }
+            Some(BuildItem {
+                id: b.id,
+                name: drv.derivation_path.clone(),
+                status: format!("{:?}", b.status),
+                has_artefacts: *has_artefacts_map.get(&b.derivation).unwrap_or(&false),
+                updated_at: b.updated_at,
+                build_time_ms: b.build_time_ms,
+            })
         })
         .collect();
 
@@ -365,7 +385,11 @@ pub async fn post_evaluation_builds(
         };
 
         for build in past_builds {
-            let name = drv_display_name(&build.derivation_path);
+            let drv_path = match EDerivation::find_by_id(build.derivation).one(&state.db).await {
+                Ok(Some(d)) => d.derivation_path,
+                _ => String::new(),
+            };
+            let name = drv_display_name(&drv_path);
             let log = state.log_storage.read(build.log_id.unwrap_or(build.id)).await.unwrap_or_default();
             last_logs.insert(build.id, log.len());
 
@@ -419,7 +443,11 @@ pub async fn post_evaluation_builds(
             }
 
             for build in builds {
-                let name = drv_display_name(&build.derivation_path);
+                let drv_path = match EDerivation::find_by_id(build.derivation).one(&state.db).await {
+                    Ok(Some(d)) => d.derivation_path,
+                    _ => String::new(),
+                };
+                let name = drv_display_name(&drv_path);
                 let log = state.log_storage.read(build.log_id.unwrap_or(build.id)).await.unwrap_or_default();
                 let last_offset = *last_logs.get(&build.id).unwrap_or(&0);
                 let log_new = log[last_offset..].to_string();

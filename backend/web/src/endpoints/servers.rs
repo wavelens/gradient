@@ -554,12 +554,12 @@ pub async fn patch_server(
                 .count(&state.db)
                 .await
                 .unwrap_or(1);
-            let still_used_by_build = EBuildFeature::find()
-                .filter(CBuildFeature::Feature.eq(fid))
+            let still_used_by_derivation = EDerivationFeature::find()
+                .filter(CDerivationFeature::Feature.eq(fid))
                 .count(&state.db)
                 .await
                 .unwrap_or(1);
-            if still_used_by_server == 0 && still_used_by_build == 0 {
+            if still_used_by_server == 0 && still_used_by_derivation == 0 {
                 let _ = EFeature::delete_by_id(fid).exec(&state.db).await;
             }
         }

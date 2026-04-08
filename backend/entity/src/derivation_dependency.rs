@@ -9,30 +9,30 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
-#[sea_orm(table_name = "build_dependency")]
+#[sea_orm(table_name = "derivation_dependency")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
-    pub build: Uuid,
+    pub derivation: Uuid,
     pub dependency: Uuid,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter)]
 pub enum Relation {
-    Build,
+    Derivation,
     Dependency,
 }
 
 impl RelationTrait for Relation {
     fn def(&self) -> RelationDef {
         match self {
-            Self::Build => Entity::belongs_to(super::build::Entity)
-                .from(Column::Build)
-                .to(super::build::Column::Id)
+            Self::Derivation => Entity::belongs_to(super::derivation::Entity)
+                .from(Column::Derivation)
+                .to(super::derivation::Column::Id)
                 .into(),
-            Self::Dependency => Entity::belongs_to(super::build::Entity)
+            Self::Dependency => Entity::belongs_to(super::derivation::Entity)
                 .from(Column::Dependency)
-                .to(super::build::Column::Id)
+                .to(super::derivation::Column::Id)
                 .into(),
         }
     }

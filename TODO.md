@@ -5,4 +5,5 @@
  - Base (Default) Servers (for all orgs), configured only in state
  - if git link is http(s) make link clickable
  - move Evaluation errors to Entrypoint
+ - when new git commit is detected, add it as queued (dont wait for the current evaluation to finish), abort the previous build if it is still running
 

@@ -26,6 +26,11 @@ pub enum BuildStatus {
     Aborted,
     #[sea_orm(num_value = 6)]
     DependencyFailed,
+    /// The derivation was already present in the Nix store at evaluation
+    /// time; no actual work was performed in this evaluation. Distinct from
+    /// `Completed` (which means "we ran the build and it succeeded").
+    #[sea_orm(num_value = 7)]
+    Substituted,
 }
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
@@ -34,9 +39,8 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
     pub evaluation: Uuid,
+    pub derivation: Uuid,
     pub status: BuildStatus,
-    pub derivation_path: String,
-    pub architecture: super::server::Architecture,
     pub server: Option<Uuid>,
     pub log_id: Option<Uuid>,
     pub build_time_ms: Option<i64>,
@@ -53,21 +57,17 @@ pub enum Relation {
     )]
     Evaluation,
     #[sea_orm(
+        belongs_to = "super::derivation::Entity",
+        from = "Column::Derivation",
+        to = "super::derivation::Column::Id"
+    )]
+    Derivation,
+    #[sea_orm(
         belongs_to = "super::server::Entity",
         from = "Column::Server",
         to = "super::server::Column::Id"
     )]
     Server,
-}
-
-impl Related<super::build::Entity> for Entity {
-    fn to() -> RelationDef {
-        super::build_dependency::Relation::Dependency.def()
-    }
-
-    fn via() -> Option<RelationDef> {
-        Some(super::build_dependency::Relation::Build.def().rev())
-    }
 }
 
 impl ActiveModelBehavior for ActiveModel {}

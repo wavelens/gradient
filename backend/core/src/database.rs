@@ -148,7 +148,7 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
 pub async fn add_features(
     state: Arc<ServerState>,
     features: Vec<String>,
-    build_id: Option<Uuid>,
+    derivation_id: Option<Uuid>,
     server_id: Option<Uuid>,
 ) -> Result<()> {
     for f in features {
@@ -172,17 +172,17 @@ pub async fn add_features(
                 .context("Failed to insert feature")?
         };
 
-        if let Some(b_id) = build_id {
-            let abuild_feature = ABuildFeature {
+        if let Some(d_id) = derivation_id {
+            let aderivation_feature = ADerivationFeature {
                 id: Set(Uuid::new_v4()),
-                build: Set(b_id),
+                derivation: Set(d_id),
                 feature: Set(feature.id),
             };
 
-            abuild_feature
+            aderivation_feature
                 .insert(&state.db)
                 .await
-                .context("Failed to insert build feature")?;
+                .context("Failed to insert derivation feature")?;
         }
 
         if let Some(s_id) = server_id {

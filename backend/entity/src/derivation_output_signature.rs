@@ -10,33 +10,30 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
-#[sea_orm(table_name = "build_output")]
+#[sea_orm(table_name = "derivation_output_signature")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: Uuid,
-    pub build: Uuid,
-    pub name: String,
-    pub output: String,
-    pub hash: String,
-    pub package: String,
-    pub file_hash: Option<String>,
-    pub file_size: Option<i64>,
-    pub nar_size: Option<i64>,
-    pub is_cached: bool,
-    pub has_artefacts: bool,
-    pub ca: Option<String>,
+    pub derivation_output: Uuid,
+    pub cache: Uuid,
+    pub signature: String,
     pub created_at: NaiveDateTime,
-    pub last_fetched_at: Option<NaiveDateTime>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::build::Entity",
-        from = "Column::Build",
-        to = "super::build::Column::Id"
+        belongs_to = "super::derivation_output::Entity",
+        from = "Column::DerivationOutput",
+        to = "super::derivation_output::Column::Id"
     )]
-    Build,
+    DerivationOutput,
+    #[sea_orm(
+        belongs_to = "super::cache::Entity",
+        from = "Column::Cache",
+        to = "super::cache::Column::Id"
+    )]
+    Cache,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -81,19 +81,20 @@ pub async fn init_session(
     Ok(())
 }
 
-#[instrument(skip(remote_store, state), fields(build_id = %build.id, derivation_path = %build.derivation_path))]
+#[instrument(skip(remote_store, state), fields(build_id = %build.id, derivation_path = %derivation_path))]
 pub async fn execute_build(
     build: &MBuild,
+    derivation_path: &str,
     derivation: BasicDerivation,
     remote_store: &mut NixStore,
     state: Arc<ServerState>,
 ) -> anyhow::Result<(MBuild, BuildResult)> {
     info!("Executing build");
 
-    let derivation_path = get_builds_path(vec![&build]).first().unwrap().to_string();
+    let store_path = nix_store_path(derivation_path);
     let build = build.clone();
 
-    let mut prog = remote_store.build_derivation(derivation_path, derivation, BuildMode::Normal);
+    let mut prog = remote_store.build_derivation(store_path, derivation, BuildMode::Normal);
 
     const FLUSH_INTERVAL_MS: u128 = 1000;
     const FLUSH_THRESHOLD_BYTES: usize = 64 * 1024;
@@ -336,10 +337,10 @@ pub fn strip_nix_store_prefix(path: &str) -> String {
     path.strip_prefix("/nix/store/").unwrap_or(path).to_string()
 }
 
-pub fn get_builds_path(builds: Vec<&MBuild>) -> Vec<String> {
-    builds
+pub fn get_derivation_paths(derivations: &[MDerivation]) -> Vec<String> {
+    derivations
         .iter()
-        .map(|build| nix_store_path(&build.derivation_path))
+        .map(|d| nix_store_path(&d.derivation_path))
         .collect()
 }
 
@@ -429,6 +430,7 @@ pub struct BuildExecutionResult {
 /// connections. The trait abstraction lets tests substitute a deterministic
 /// fake instead of touching real SSH/daemon infrastructure.
 #[async_trait]
+#[allow(clippy::too_many_arguments)]
 pub trait BuildExecutor: Send + Sync + std::fmt::Debug + 'static {
     /// Run `build` on `server`. Connects to the remote daemon, copies the
     /// dependency closure, executes the derivation while streaming logs into
@@ -445,6 +447,7 @@ pub trait BuildExecutor: Send + Sync + std::fmt::Debug + 'static {
         server: MServer,
         organization: MOrganization,
         build: MBuild,
+        derivation_path: String,
         derivation: BasicDerivation,
         dependencies: Vec<String>,
     ) -> Result<BuildExecutionResult>;
@@ -469,6 +472,7 @@ impl BuildExecutor for SshBuildExecutor {
         server: MServer,
         organization: MOrganization,
         build: MBuild,
+        derivation_path: String,
         derivation: BasicDerivation,
         dependencies: Vec<String>,
     ) -> Result<BuildExecutionResult> {
@@ -520,10 +524,15 @@ impl BuildExecutor for SshBuildExecutor {
         .context("Failed to copy build dependencies to server")?;
 
         let build_start = Instant::now();
-        let (build, daemon_result) =
-            execute_build(&build, derivation, &mut server_daemon, Arc::clone(&state))
-                .await
-                .context("Failed to execute build on server")?;
+        let (build, daemon_result) = execute_build(
+            &build,
+            &derivation_path,
+            derivation,
+            &mut server_daemon,
+            Arc::clone(&state),
+        )
+        .await
+        .context("Failed to execute build on server")?;
         let elapsed = build_start.elapsed();
 
         if !daemon_result.error_msg.is_empty() {

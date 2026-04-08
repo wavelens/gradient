@@ -26,7 +26,7 @@ use sea_orm::{
     QuerySelect,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::fs;
 use uuid::Uuid;
@@ -1025,24 +1025,39 @@ pub async fn get_project_entry_points(
         .await?;
     let build_map: HashMap<Uuid, MBuild> = builds.into_iter().map(|b| (b.id, b)).collect();
 
-    let completed_ids: Vec<Uuid> = entry_points
-        .iter()
-        .filter_map(|ep| build_map.get(&ep.build))
-        .filter(|b| b.status == BuildStatus::Completed)
-        .map(|b| b.id)
-        .collect();
-
-    let has_artefacts_map: HashMap<Uuid, bool> = if completed_ids.is_empty() {
+    let drv_ids: Vec<Uuid> = build_map.values().map(|b| b.derivation).collect();
+    let derivations: HashMap<Uuid, MDerivation> = if drv_ids.is_empty() {
         HashMap::new()
     } else {
-        EBuildOutput::find()
-            .filter(CBuildOutput::Build.is_in(completed_ids))
-            .filter(CBuildOutput::HasArtefacts.eq(true))
+        EDerivation::find()
+            .filter(CDerivation::Id.is_in(drv_ids.clone()))
             .all(&state.db)
             .await?
             .into_iter()
-            .map(|o| (o.build, true))
+            .map(|d| (d.id, d))
             .collect()
+    };
+
+    let completed_drv_ids: Vec<Uuid> = entry_points
+        .iter()
+        .filter_map(|ep| build_map.get(&ep.build))
+        .filter(|b| b.status == BuildStatus::Completed || b.status == BuildStatus::Substituted)
+        .map(|b| b.derivation)
+        .collect();
+
+    let has_artefacts_map: HashMap<Uuid, bool> = if completed_drv_ids.is_empty() {
+        HashMap::new()
+    } else {
+        let mut m: HashMap<Uuid, bool> = HashMap::new();
+        let outputs = EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.is_in(completed_drv_ids))
+            .filter(CDerivationOutput::HasArtefacts.eq(true))
+            .all(&state.db)
+            .await?;
+        for o in outputs {
+            m.insert(o.derivation, true);
+        }
+        m
     };
 
     let mut summaries = Vec::new();
@@ -1051,14 +1066,18 @@ pub async fn get_project_entry_points(
             Some(b) => b,
             None => continue,
         };
+        let drv = match derivations.get(&build.derivation) {
+            Some(d) => d,
+            None => continue,
+        };
         summaries.push(EntryPointSummary {
             id: ep.id,
             build_id: build.id,
-            derivation_path: build.derivation_path.clone(),
+            derivation_path: drv.derivation_path.clone(),
             eval: ep.eval.clone(),
             build_status: build.status.clone(),
-            has_artefacts: *has_artefacts_map.get(&build.id).unwrap_or(&false),
-            architecture: build.architecture.clone(),
+            has_artefacts: *has_artefacts_map.get(&build.derivation).unwrap_or(&false),
+            architecture: drv.architecture.clone(),
             evaluation_id: evaluation.id,
             evaluation_status: evaluation.status.clone(),
             created_at: ep.created_at,
@@ -1134,16 +1153,9 @@ pub async fn get_project_metrics(
             .all(&state.db)
             .await?;
 
-        let build_time_total_ms: i64 = builds
-            .iter()
-            .filter(|b| b.status == BuildStatus::Completed)
-            .map(|b| {
-                b.build_time_ms
-                    .unwrap_or_else(|| (b.updated_at - b.created_at).num_milliseconds())
-            })
-            .sum();
-
-        let total_build_count = builds.len() as i64;
+        // Only sum actual build times; substituted builds have build_time_ms = None
+        // and should not contribute (they had no build cost).
+        let build_time_total_ms: i64 = builds.iter().filter_map(|b| b.build_time_ms).sum();
 
         // Entry points for this evaluation
         let ep_build_ids: Vec<Uuid> = EEntryPoint::find()
@@ -1154,28 +1166,59 @@ pub async fn get_project_metrics(
             .map(|ep| ep.build)
             .collect();
 
-        let entry_point_count = ep_build_ids.len() as i64;
-        let dependencies_count = total_build_count - entry_point_count;
+        // Resolve entry-point builds to their derivations.
+        let ep_drv_ids: Vec<Uuid> = if ep_build_ids.is_empty() {
+            vec![]
+        } else {
+            EBuild::find()
+                .filter(CBuild::Id.is_in(ep_build_ids.clone()))
+                .all(&state.db)
+                .await?
+                .into_iter()
+                .map(|b| b.derivation)
+                .collect()
+        };
 
-        // Output size: file_size of entry-point build outputs only
-        let output_size_bytes = if ep_build_ids.is_empty() {
+        let entry_point_count = ep_drv_ids.len() as i64;
+
+        // BFS over derivation_dependency — graph is authoritative across evals.
+        let mut all_reachable: HashSet<Uuid> = ep_drv_ids.iter().cloned().collect();
+        let mut frontier: Vec<Uuid> = ep_drv_ids.clone();
+        while !frontier.is_empty() {
+            let edges = EDerivationDependency::find()
+                .filter(CDerivationDependency::Derivation.is_in(frontier.clone()))
+                .all(&state.db)
+                .await?;
+            frontier.clear();
+            for edge in edges {
+                if all_reachable.insert(edge.dependency) {
+                    frontier.push(edge.dependency);
+                }
+            }
+        }
+        let dependencies_count = (all_reachable.len() as i64) - entry_point_count;
+
+        // Output size: file_size of entry-point derivation outputs only
+        let output_size_bytes = if ep_drv_ids.is_empty() {
             None
         } else {
-            let outputs = EBuildOutput::find()
-                .filter(CBuildOutput::Build.is_in(ep_build_ids))
+            let outputs = EDerivationOutput::find()
+                .filter(CDerivationOutput::Derivation.is_in(ep_drv_ids))
                 .all(&state.db)
                 .await?;
             let total: i64 = outputs.iter().filter_map(|o| o.file_size).sum();
             if total > 0 { Some(total) } else { None }
         };
 
-        // Closure size: file_size of ALL build outputs in this evaluation
-        let all_build_ids: Vec<Uuid> = builds.iter().map(|b| b.id).collect();
-        let closure_size_bytes = if all_build_ids.is_empty() {
+        // Closure size: file_size of outputs of all reachable derivations
+        let closure_size_bytes = if all_reachable.is_empty() {
             None
         } else {
-            let outputs = EBuildOutput::find()
-                .filter(CBuildOutput::Build.is_in(all_build_ids))
+            let outputs = EDerivationOutput::find()
+                .filter(
+                    CDerivationOutput::Derivation
+                        .is_in(all_reachable.into_iter().collect::<Vec<_>>()),
+                )
                 .all(&state.db)
                 .await?;
             let total: i64 = outputs.iter().filter_map(|o| o.file_size).sum();
@@ -1271,7 +1314,10 @@ pub async fn get_entry_point_metrics(
     let mut points = Vec::new();
 
     for ep in entry_points {
-        let Some(evaluation) = EEvaluation::find_by_id(ep.evaluation).one(&state.db).await? else {
+        let Some(evaluation) = EEvaluation::find_by_id(ep.evaluation)
+            .one(&state.db)
+            .await?
+        else {
             continue;
         };
 
@@ -1279,9 +1325,9 @@ pub async fn get_entry_point_metrics(
             continue;
         };
 
-        // Output size: only this build's outputs
-        let outputs = EBuildOutput::find()
-            .filter(CBuildOutput::Build.eq(build.id))
+        // Output size: only this derivation's outputs
+        let outputs = EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.eq(build.derivation))
             .all(&state.db)
             .await?;
         let output_total: i64 = outputs.iter().filter_map(|o| o.file_size).sum();
@@ -1291,57 +1337,31 @@ pub async fn get_entry_point_metrics(
             None
         };
 
-        let build_time_ms = build.build_time_ms.or_else(|| {
-            if build.status == BuildStatus::Completed {
-                Some((build.updated_at - build.created_at).num_milliseconds())
-            } else {
-                None
-            }
-        });
+        // Substituted builds have build_time_ms = None; leave as null rather than
+        // falling back to (updated_at - created_at) which gives ~0 ms.
+        let build_time_ms = build.build_time_ms;
 
-        // Closure size + dependency count: BFS over this evaluation's dep graph
-        let all_eval_build_ids: Vec<Uuid> = EBuild::find()
-            .filter(CBuild::Evaluation.eq(evaluation.id))
-            .all(&state.db)
-            .await?
-            .into_iter()
-            .map(|b| b.id)
-            .collect();
-
-        let dep_edges = if all_eval_build_ids.is_empty() {
-            vec![]
-        } else {
-            EBuildDependency::find()
-                .filter(CBuildDependency::Build.is_in(all_eval_build_ids))
+        // BFS over derivation_dependency.
+        let mut visited: HashSet<Uuid> = HashSet::new();
+        let mut frontier = vec![build.derivation];
+        visited.insert(build.derivation);
+        while !frontier.is_empty() {
+            let edges = EDerivationDependency::find()
+                .filter(CDerivationDependency::Derivation.is_in(frontier.clone()))
                 .all(&state.db)
-                .await?
-        };
-
-        let mut dep_map: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
-        for edge in &dep_edges {
-            dep_map.entry(edge.build).or_default().push(edge.dependency);
-        }
-
-        let mut visited = std::collections::HashSet::new();
-        let mut queue = std::collections::VecDeque::new();
-        queue.push_back(build.id);
-        while let Some(id) = queue.pop_front() {
-            if !visited.insert(id) {
-                continue;
-            }
-            if let Some(deps) = dep_map.get(&id) {
-                for &dep in deps {
-                    if !visited.contains(&dep) {
-                        queue.push_back(dep);
-                    }
+                .await?;
+            frontier.clear();
+            for edge in edges {
+                if visited.insert(edge.dependency) {
+                    frontier.push(edge.dependency);
                 }
             }
         }
 
         let dependencies_count = (visited.len() as i64).saturating_sub(1);
 
-        let closure_outputs = EBuildOutput::find()
-            .filter(CBuildOutput::Build.is_in(visited.into_iter().collect::<Vec<_>>()))
+        let closure_outputs = EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.is_in(visited.into_iter().collect::<Vec<_>>()))
             .all(&state.db)
             .await?;
         let closure_total: i64 = closure_outputs.iter().filter_map(|o| o.file_size).sum();
@@ -1465,9 +1485,9 @@ pub async fn get_entry_point_download(
         return Err(WebError::not_found("File"));
     }
 
-    // Walk build outputs, locate the file via hydra-build-products.
-    let build_outputs = EBuildOutput::find()
-        .filter(CBuildOutput::Build.eq(build.id))
+    // Walk derivation outputs, locate the file via hydra-build-products.
+    let build_outputs = EDerivationOutput::find()
+        .filter(CDerivationOutput::Derivation.eq(build.derivation))
         .all(&state.db)
         .await?;
 

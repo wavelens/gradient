@@ -18,7 +18,7 @@ use core::executer::strip_nix_store_prefix;
 use core::input::{check_index_name, validate_display_name};
 use core::sources::{
     format_cache_key, format_cache_public_key, generate_signing_key, get_hash_from_url,
-    get_path_from_build_output,
+    get_path_from_derivation_output,
 };
 use core::types::*;
 use entity::organization_cache::CacheSubscriptionMode;
@@ -144,46 +144,25 @@ async fn get_nar_by_hash(
     cache: MCache,
     hash: String,
 ) -> Result<NixPathInfo, WebError> {
-    let build_output = EBuildOutput::find()
+    let build_output = EDerivationOutput::find()
         .filter(
             Condition::all()
-                .add(CBuildOutput::IsCached.eq(true))
-                .add(CBuildOutput::Hash.eq(hash.clone())),
+                .add(CDerivationOutput::IsCached.eq(true))
+                .add(CDerivationOutput::Hash.eq(hash.clone())),
         )
         .one(&state.db)
         .await
         .map_err(WebError::from)?
         .ok_or_else(|| WebError::not_found("Path"))?;
 
-    // Verify the build was produced by an org that subscribes to this cache.
-    let build = EBuild::find_by_id(build_output.build)
+    // Verify the derivation belongs to an org that subscribes to this cache.
+    let derivation = EDerivation::find_by_id(build_output.derivation)
         .one(&state.db)
         .await
         .map_err(WebError::from)?
         .ok_or_else(|| WebError::not_found("Path"))?;
 
-    let evaluation = EEvaluation::find_by_id(build.evaluation)
-        .one(&state.db)
-        .await
-        .map_err(WebError::from)?
-        .ok_or_else(|| WebError::not_found("Path"))?;
-
-    let organization_id = if let Some(project_id) = evaluation.project {
-        let project = EProject::find_by_id(project_id)
-            .one(&state.db)
-            .await
-            .map_err(WebError::from)?
-            .ok_or_else(|| WebError::not_found("Path"))?;
-        project.organization
-    } else {
-        let direct_build = EDirectBuild::find()
-            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
-            .one(&state.db)
-            .await
-            .map_err(WebError::from)?
-            .ok_or_else(|| WebError::not_found("Path"))?;
-        direct_build.organization
-    };
+    let organization_id = derivation.organization;
 
     let subscribed = EOrganizationCache::find()
         .filter(
@@ -200,18 +179,18 @@ async fn get_nar_by_hash(
         return Err(WebError::not_found("Path"));
     }
 
-    let build_output_signature = EBuildOutputSignature::find()
+    let build_output_signature = EDerivationOutputSignature::find()
         .filter(
             Condition::all()
-                .add(CBuildOutputSignature::Cache.eq(cache.id))
-                .add(CBuildOutputSignature::BuildOutput.eq(build_output.clone().id)),
+                .add(CDerivationOutputSignature::Cache.eq(cache.id))
+                .add(CDerivationOutputSignature::DerivationOutput.eq(build_output.clone().id)),
         )
         .one(&state.db)
         .await
         .map_err(WebError::from)?
         .ok_or_else(|| WebError::not_found("Signature"))?;
 
-    let path = get_path_from_build_output(build_output.clone());
+    let path = get_path_from_derivation_output(build_output.clone());
 
     let pathinfo = state
         .web_nix_store
@@ -597,38 +576,20 @@ async fn cleanup_nars_for_orgs(state: Arc<ServerState>, org_ids: Vec<Uuid>) {
             continue;
         }
 
-        let project_ids: Vec<Uuid> = EProject::find()
-            .filter(CProject::Organization.eq(org_id))
+        let derivation_ids: Vec<Uuid> = EDerivation::find()
+            .filter(CDerivation::Organization.eq(org_id))
             .all(&state.db)
             .await
             .unwrap_or_default()
             .into_iter()
-            .map(|p| p.id)
+            .map(|d| d.id)
             .collect();
 
-        let eval_ids: Vec<Uuid> = EEvaluation::find()
-            .filter(CEvaluation::Project.is_in(project_ids))
-            .all(&state.db)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|e| e.id)
-            .collect();
-
-        let build_ids: Vec<Uuid> = EBuild::find()
-            .filter(CBuild::Evaluation.is_in(eval_ids))
-            .all(&state.db)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|b| b.id)
-            .collect();
-
-        let outputs = EBuildOutput::find()
+        let outputs = EDerivationOutput::find()
             .filter(
                 Condition::all()
-                    .add(CBuildOutput::Build.is_in(build_ids))
-                    .add(CBuildOutput::IsCached.eq(true)),
+                    .add(CDerivationOutput::Derivation.is_in(derivation_ids))
+                    .add(CDerivationOutput::IsCached.eq(true)),
             )
             .all(&state.db)
             .await
@@ -642,7 +603,7 @@ async fn cleanup_nars_for_orgs(state: Arc<ServerState>, org_ids: Vec<Uuid>) {
             let mut active = output.into_active_model();
             active.is_cached = Set(false);
             if let Err(e) = active.update(&state.db).await {
-                error!(error = %e, "Failed to update build_output is_cached flag");
+                error!(error = %e, "Failed to update derivation_output is_cached flag");
             }
         }
     }
@@ -1406,11 +1367,11 @@ pub async fn nar(
     // The URL uses the file hash (nix32 of compressed content).
     // Resolve it to the store hash so we can locate the on-disk NAR or pack path.
     let effective_hash = {
-        let by_file = EBuildOutput::find()
+        let by_file = EDerivationOutput::find()
             .filter(
                 Condition::all()
-                    .add(CBuildOutput::IsCached.eq(true))
-                    .add(CBuildOutput::FileHash.eq(format!("sha256:{}", path_hash))),
+                    .add(CDerivationOutput::IsCached.eq(true))
+                    .add(CDerivationOutput::FileHash.eq(format!("sha256:{}", path_hash))),
             )
             .one(&state.db)
             .await
@@ -1461,10 +1422,11 @@ pub async fn nar(
         super::stats::record_nar_traffic(state_for_metric, cache_id, bytes_len).await;
     });
 
-    // Update last_fetched_at for the served build_output (fire-and-forget).
+    // Update last_fetched_at on the cache_derivation row for this (cache, derivation) pair.
     {
         let state_for_fetch = Arc::clone(&state.0);
         let hash = effective_hash.clone();
+        let cache_id = cache.id;
         tokio::spawn(async move {
             use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
             let now = chrono::Utc::now().naive_utc();
@@ -1472,9 +1434,13 @@ pub async fn nar(
                 .db
                 .execute(Statement::from_sql_and_values(
                     DatabaseBackend::Postgres,
-                    "UPDATE build_output SET last_fetched_at = $1 WHERE hash = $2 AND is_cached = true",
+                    "UPDATE cache_derivation SET last_fetched_at = $1 \
+                     WHERE cache = $2 AND derivation IN ( \
+                         SELECT derivation FROM derivation_output WHERE hash = $3 AND is_cached = true \
+                     )",
                     [
                         sea_orm::Value::ChronoDateTimeUtc(Some(Box::new(chrono::DateTime::from_naive_utc_and_offset(now, chrono::Utc)))),
+                        sea_orm::Value::Uuid(Some(Box::new(cache_id))),
                         sea_orm::Value::String(Some(Box::new(hash))),
                     ],
                 ))

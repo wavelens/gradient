@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use tokio::time;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
 use super::status::{
@@ -71,34 +71,84 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 _ => {}
             }
 
-            let (builds, dependencies, entry_point_build_ids, failed_derivations, pending_features) =
-                builds;
+            let (
+                builds,
+                new_derivations,
+                new_derivation_outputs,
+                new_derivation_dependencies,
+                entry_point_build_ids,
+                failed_derivations,
+                pending_features,
+            ) = builds;
+
+            info!(
+                build_count = builds.len(),
+                new_derivation_count = new_derivations.len(),
+                dependency_count = new_derivation_dependencies.len(),
+                "Created builds + derivations"
+            );
+
+            const BATCH_SIZE: usize = 1000;
+
+            // 1. Derivations first (builds + derivation_output FK into it).
+            if !new_derivations.is_empty() {
+                let active: Vec<ADerivation> = new_derivations
+                    .iter()
+                    .map(|d| d.clone().into_active_model())
+                    .collect();
+                for chunk in active.chunks(BATCH_SIZE) {
+                    if let Err(e) = EDerivation::insert_many(chunk.to_vec())
+                        .exec(&state.db)
+                        .await
+                    {
+                        error!(error = %e, "Failed to insert derivations");
+                        update_evaluation_status_with_error(
+                            Arc::clone(&state),
+                            evaluation,
+                            EvaluationStatus::Failed,
+                            format!("Failed to insert derivations: {}", e),
+                        )
+                        .await;
+                        return;
+                    }
+                }
+            }
+
+            // 2. Derivation outputs.
+            if !new_derivation_outputs.is_empty() {
+                for chunk in new_derivation_outputs.chunks(BATCH_SIZE) {
+                    if let Err(e) = EDerivationOutput::insert_many(chunk.to_vec())
+                        .exec(&state.db)
+                        .await
+                    {
+                        error!(error = %e, "Failed to insert derivation outputs");
+                    }
+                }
+            }
+
+            // 3. Derivation dependency edges.
+            if !new_derivation_dependencies.is_empty() {
+                let active: Vec<ADerivationDependency> = new_derivation_dependencies
+                    .iter()
+                    .map(|d| d.clone().into_active_model())
+                    .collect();
+                for chunk in active.chunks(BATCH_SIZE) {
+                    if let Err(e) = EDerivationDependency::insert_many(chunk.to_vec())
+                        .exec(&state.db)
+                        .await
+                    {
+                        error!(error = %e, "Failed to insert derivation dependencies");
+                    }
+                }
+            }
+
+            // 4. Builds (FK into derivation).
             let active_builds = builds
                 .iter()
                 .map(|b| b.clone().into_active_model())
                 .collect::<Vec<ABuild>>();
-            let active_dependencies = dependencies
-                .iter()
-                .map(|d| d.clone().into_active_model())
-                .collect::<Vec<ABuildDependency>>();
-
-            info!(
-                build_count = builds.len(),
-                dependency_count = dependencies.len(),
-                "Created builds and dependencies"
-            );
-
-            for build in &builds {
-                debug!(build_id = %build.id, derivation_path = %build.derivation_path, "Created build");
-            }
-
-            for dep in &dependencies {
-                debug!(build = %dep.build, dependency = %dep.dependency, "Created dependency");
-            }
-
             if !active_builds.is_empty() {
-                const BUILD_BATCH_SIZE: usize = 1000;
-                for chunk in active_builds.chunks(BUILD_BATCH_SIZE) {
+                for chunk in active_builds.chunks(BATCH_SIZE) {
                     if let Err(e) = EBuild::insert_many(chunk.to_vec()).exec(&state.db).await {
                         error!(error = %e, "Failed to insert builds");
                         update_evaluation_status_with_error(
@@ -113,44 +163,17 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 }
             }
 
-            if !active_dependencies.is_empty() {
-                const BATCH_SIZE: usize = 1000;
-                for chunk in active_dependencies.chunks(BATCH_SIZE) {
-                    if let Err(e) = EBuildDependency::insert_many(chunk.to_vec())
-                        .exec(&state.db)
-                        .await
-                    {
-                        error!(error = %e, "Failed to insert build dependencies");
-                        update_evaluation_status_with_error(
-                            Arc::clone(&state),
-                            evaluation,
-                            EvaluationStatus::Failed,
-                            format!("Failed to insert build dependencies: {}", e),
-                        )
-                        .await;
-                        return;
-                    }
-                }
-
-                debug!(
-                    count = dependencies.len(),
-                    "Successfully inserted build dependencies into database"
-                );
-            } else {
-                debug!("No dependencies to insert for evaluation");
-            }
-
-            // Insert build features now that builds are in the DB (FK satisfied).
-            for (build_id, features) in pending_features {
+            // 5. Derivation features (FK satisfied now).
+            for (derivation_id, features) in pending_features {
                 if let Err(e) = gradient_core::database::add_features(
                     Arc::clone(&state),
                     features,
-                    Some(build_id),
+                    Some(derivation_id),
                     None,
                 )
                 .await
                 {
-                    error!(error = %e, build_id = %build_id, "Failed to add features for build");
+                    error!(error = %e, %derivation_id, "Failed to add features for derivation");
                 }
             }
 

@@ -318,7 +318,8 @@ impl WorkerPoolResolver {
                     let prefix = frag[0].clone();
                     match self.fetch_attr_names(repository, &prefix).await {
                         Ok(systems) => {
-                            let matched = match_pattern(&frag[1], systems.iter().map(String::as_str));
+                            let matched =
+                                match_pattern(&frag[1], systems.iter().map(String::as_str));
                             if matched.is_empty() {
                                 out.push(frag.join("."));
                                 continue;
@@ -350,7 +351,10 @@ impl WorkerPoolResolver {
     /// marks it dead on protocol failure.
     async fn fetch_attr_names(&self, repository: &str, path: &str) -> Result<Vec<String>> {
         let mut worker = self.pool.acquire().await?;
-        match worker.attr_names(repository.to_string(), path.to_string()).await {
+        match worker
+            .attr_names(repository.to_string(), path.to_string())
+            .await
+        {
             Ok(v) => Ok(v),
             Err(e) => {
                 worker.mark_dead();

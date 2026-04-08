@@ -31,36 +31,67 @@ Expands the evaluation wildcard (e.g. `packages.x86_64-linux`) into a list of fu
 
 **4. Build dependency graph** (`query_all_dependencies`)
 
-For each top-level derivation an iterative stack-based traversal is performed (not recursive, to avoid stack overflow on deep trees):
+The BFS walks **derivations**, not builds. The build table is only the
+per-evaluation attempt log; the dep graph lives on `derivation_dependency` and is
+shared across every evaluation that ever touches a derivation path.
 
 ```
-stack = [(root_drv, parent_id=None, new_uuid)]
+queue = [(root_drv_path, parent_derivation_id=None) for each root]
 
-while stack is not empty:
-    pop (path, parent_id, build_id)
-    references = get_pathinfo(path, local_store).references
+while queue not empty:
+    (drv_path, parent) = queue.pop_front()
 
-    for each ref:
-        if already in all_builds or stack → record edge, skip
-        if already in DB and in local store → mark Completed, record edge
-        if already in DB but missing → re-queue, record edge
-        else → push onto stack with (ref, build_id, new_uuid)
+    if seen this drv_path in this eval → reuse derivation_id
+    elif EDerivation::find(org, drv_path) is Some → reuse, was_new = false
+    else → query nix store for outputs + features, push new MDerivation,
+            push ADerivationOutput rows, was_new = true
 
-    create MBuild for path (status=Queued)
-    if parent_id != None → create MBuildDependency(build=parent, dependency=build_id)
+    if parent is Some → push MDerivationDependency(parent → derivation_id)
+
+    in_store = nix_store.query_missing_paths([drv_path]).is_empty()
+    push MBuild(eval, derivation_id,
+                status = if in_store { Substituted } else { Created })
+
+    if was_new:
+        # Walk references via QueryPathInfo and recurse on each.
+        for ref in nix_store.query_pathinfo(drv_path).references:
+            queue.push_back((ref, derivation_id))
+    elif derivation already has derivation_dependency edges in DB:
+        # The closure is authoritative — walk it locally and materialise a
+        # fresh MBuild for every member, but do NOT re-fetch references.
+        for d in load_closure(derivation_id):
+            queue.materialise(d)  # build row only
+    else:
+        # Existing derivation that was previously stored as a leaf. Treat as
+        # a leaf again; the next from-scratch eval will pick up its deps.
 ```
 
-Deduplication is O(1) via a hash-set of seen derivation paths. References come directly from the Nix daemon's `QueryPathInfo` response.
+Deduplication is per derivation path (per organisation): a second evaluation
+that hits the same path reuses the existing `derivation` row and inserts only
+new `build` rows. Substituted builds skip the scheduler entirely and never
+acquire a server.
 
 **5. Batch insert**
 
-Builds and dependencies are bulk-inserted in chunks of 1 000 rows to stay within PostgreSQL's parameter limit. Entry points (top-level build UUIDs) are recorded in the `entry_point` table.
+Derivations, outputs, dependency edges, and builds are bulk-inserted in chunks
+of 1 000 rows in FK order: `derivation` → `derivation_output` →
+`derivation_dependency` → `build`. Entry points (top-level build UUIDs) are
+recorded in the `entry_point` table after builds are persisted.
 
 **6. Status transitions**
 
 ```
-Queued → Evaluating → Building → Completed | Failed | Aborted
+build:       Created → Queued → Building → Completed | Failed
+                                         ↘ Substituted (already in store)
+                                         ↘ Aborted | DependencyFailed
+evaluation:  Queued → EvaluatingFlake → EvaluatingDerivation → Building
+                                                            → Completed | Failed | Aborted
 ```
+
+`Substituted` is distinct from `Completed`: it means the derivation was already
+in the local Nix store at evaluation time and never ran on a builder
+(`build_time_ms` and `server` stay `None`, `log_id` stays `None`). It is treated
+as a successful terminal state by `check_evaluation_status` and the scheduler.
 
 `update_evaluation_status` and `update_evaluation_status_with_error` write the new status and optional error string atomically.
 
@@ -72,21 +103,44 @@ Queued → Evaluating → Building → Completed | Failed | Aborted
 
 **Server selection** (`reserve_available_server`)
 
-Finds an active server whose:
-- `architectures` set includes the build's `architecture`
-- `features` set satisfies the derivation's required features
+`get_next_build` joins `build → derivation` so the picker sees the architecture
+and required features without re-resolving them. A build is eligible only when
+**every** dependent derivation already has a `build` row in the same evaluation
+with status `Completed` (3) or `Substituted` (7) — enforced via a `NOT EXISTS`
+subquery against `derivation_dependency`.
 
-The first matching server is reserved by atomically setting `build.server = server.id` and `build.status = Building`.
+Once a build is picked, it is matched to an active server whose:
+- `architectures` set includes the **derivation's** `architecture`
+- `features` set satisfies the **derivation's** required features
+  (`derivation_feature` table)
+
+The first matching server is reserved by atomically setting `build.server =
+server.id` and `build.status = Building`.
 
 **Build execution** (`schedule_build`)
 
 1. Decrypt SSH private key for the organization.
-2. Open SSH connection via `core::executer::connect` (wraps `russh`). Retries up to 3 times with 5-second waits.
-3. Resolve sorted dependency order: `get_build_dependencies_sorted` queries `build_dependency` edges and does a topological sort. Dependencies are copied to the remote server first, in order.
-4. Copy inputs: send `AddToStoreNar` commands over the Nix daemon wire protocol through the SSH tunnel.
-5. Build: send `BuildDerivation` with a `BasicDerivation` constructed from the `.drv` file. Env vars, builder path, args, and output paths are parsed from `nix derivation show --json`. Structured attributes (`structuredAttrs`) are serialized as `__json` in the env, matching Nix C++ behaviour.
-6. Copy outputs back: receive `AddToStoreNar` responses, write NARs to disk, update `build_output` rows with store paths.
-7. On failure: `update_build_status_recursivly` aborts all dependent builds.
+2. Open SSH connection via `core::executer::connect` (wraps `russh`). Retries
+   up to 3 times with 5-second waits.
+3. Resolve sorted dependency order: `get_build_dependencies_sorted` walks
+   `derivation_dependency` from `build.derivation`, resolves each edge to a
+   `(build, derivation)` pair in the same evaluation, and topologically sorts
+   them. Dependencies are copied to the remote server first, in order.
+4. Copy inputs: send `AddToStoreNar` commands over the Nix daemon wire protocol
+   through the SSH tunnel.
+5. Build: send `BuildDerivation` with a `BasicDerivation` constructed from the
+   `.drv` file. Env vars, builder path, args, and output paths are parsed from
+   `nix derivation show --json`. Structured attributes (`structuredAttrs`) are
+   serialized as `__json` in the env, matching Nix C++ behaviour.
+6. Copy outputs back: receive `AddToStoreNar` responses, write NARs to disk,
+   then **update** the existing `derivation_output` rows (matched by
+   `(derivation, name)`) with the resolved hashes / sizes / `has_artefacts`.
+   Output metadata is therefore populated **once per derivation**, never
+   re-inserted on subsequent evaluations.
+7. On failure: `update_build_status_recursivly` walks reverse
+   `derivation_dependency` edges, restricted to the current evaluation, and
+   marks every dependent build as `DependencyFailed`. The originally failing
+   build is set to `Failed`.
 
 **Log streaming**
 
@@ -122,32 +176,39 @@ Each cache has a dedicated Ed25519 signing key encrypted in the database (using 
 
 **Narinfo** (`GET /cache/{cache}/{hash}.narinfo`)
 
-Constructs a `NixPathInfo` response by querying `build_output` + `build_output_signature`, calling `QueryPathInfo` on the local store for NAR size/hash/references, and converting the NAR hash from hex to Nix's base-32 encoding via `nix hash convert`.
+Constructs a `NixPathInfo` response by querying `derivation_output` + `derivation_output_signature`, calling `QueryPathInfo` on the local store for NAR size/hash/references, and converting the NAR hash from hex to Nix's base-32 encoding via `nix hash convert`. Sizes/hashes are read directly from the `derivation_output` row — they were populated once when the derivation was first built and are reused on every subsequent narinfo request.
+
+**Closure presence** (`cache_derivation`)
+
+The cacher maintains the invariant: a `cache_derivation(cache, derivation)` row exists iff every `derivation_output` of `derivation` has `is_cached = true` AND every transitive dependency of `derivation` has its own `cache_derivation` row for the same cache. After caching an output, `try_record_cache_derivation` checks both conditions and inserts the row when they hold; otherwise the next caching pass picks it up. Invalidation walks reverse `derivation_dependency` edges in `revoke_cache_derivation_closure` and deletes every dependent's `cache_derivation` row for the affected cache, since their closure assertion no longer holds.
+
+This makes "is the full closure of build B available in cache C" a single DB lookup against `cache_derivation` instead of a per-output filesystem probe.
 
 ---
 
 ## Dependency Graph API
 
-`GET /builds/{build}/graph` — BFS from the requested build, capped at 500 nodes:
+`GET /builds/{build}/graph` — BFS from the requested build, capped at 500 nodes. The graph is stored on derivations, so the BFS walks `derivation_dependency` and resolves each visited derivation back to a `build` row in the same evaluation for UI display:
 
 ```
-visited = {build_id}
-queue = [[build_id]]
+root_drv = build.derivation
+visited_drvs = {root_drv}
+queue = [[root_drv]]
 
 while queue not empty and nodes.len() < 500:
     batch = queue.pop_front()
-    fetch builds in batch
-    fetch build_dependency edges where build IN batch
+    fetch derivation_dependency edges where derivation IN batch
+    resolve dep drv ids → builds in the same evaluation as the requested build
 
     for each edge:
-        if dep not in visited:
-            visited.add(dep)
-            next_batch.push(dep)
+        if edge.dependency not in visited_drvs:
+            visited_drvs.add(edge.dependency)
+            next_batch.push(edge.dependency)
 
     if next_batch not empty: queue.push(next_batch)
 ```
 
-Edges are `source → target` where `source` must be built before `target`, matching the `build_dependency` table's `(build, dependency)` semantics inverted: the returned `DependencyEdge { source: dep.dependency, target: dep.build }`.
+Returned `DependencyEdge { source, target }` are still build IDs — `source` is the dependency's build and `target` is the dependent's build, so `source` must be built before `target`. Because edges are stored once per derivation pair (not per evaluation), the same lookup serves every evaluation that touches those derivations, and the resolved build IDs reflect the current evaluation's attempt rows.
 
 Batching the BFS (one DB round-trip per level) keeps the query count proportional to graph depth rather than node count.
 
