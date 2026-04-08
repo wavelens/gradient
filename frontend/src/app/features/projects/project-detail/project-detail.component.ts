@@ -164,7 +164,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
 
   getBuildStatusClass(status: BuildStatus): string {
     switch (status) {
-      case 'Completed': return 'status-success';
+      case 'Completed': case 'Substituted': return 'status-success';
       case 'Failed': return 'status-danger';
       case 'Aborted': case 'DependencyFailed': return 'status-secondary';
       case 'Queued': case 'Building': return 'status-running';
@@ -174,7 +174,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
 
   getBuildStatusIcon(status: BuildStatus): string {
     switch (status) {
-      case 'Completed': return 'check_circle';
+      case 'Completed': case 'Substituted': return 'check_circle';
       case 'Failed': return 'error';
       case 'Aborted': case 'DependencyFailed': return 'cancel';
       case 'Queued': return 'schedule';

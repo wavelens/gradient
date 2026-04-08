@@ -20,6 +20,7 @@ export type BuildStatus =
   | 'Queued'
   | 'Building'
   | 'Completed'
+  | 'Substituted'
   | 'Failed'
   | 'Aborted'
   | 'DependencyFailed';

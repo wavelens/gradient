@@ -6,4 +6,5 @@
  - if git link is http(s) make link clickable
  - move Evaluation errors to Entrypoint
  - when new git commit is detected, add it as queued (dont wait for the current evaluation to finish), abort the previous build if it is still running
+ - pack_derivation_output is reading stdout to memory, but would be better to stream
 
