@@ -282,7 +282,7 @@
       # Wait for evaluation to complete and test cache functionality
       builder.sleep(150)
       print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM build;\"'"))
-      print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM build_dependency;\"'"))
+      print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM derivation_dependency;\"'"))
       builder.sleep(470)
 
       # Check if builds are cached properly

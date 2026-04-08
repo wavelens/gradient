@@ -10,7 +10,7 @@
 :host {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  height: calc(100vh - 65px);
   overflow: hidden;
   min-height: 0;
 }

@@ -89,8 +89,8 @@
                   </span>
                   <a
                     [class.graph-icon-link]="true"
-                    [class.disabled]="ep.build_status !== 'Completed' || !ep.has_artefacts"
-                    [routerLink]="ep.build_status === 'Completed' && ep.has_artefacts ? ['/organization', orgName, 'artefacts', ep.build_id] : null"
+                    [class.disabled]="(ep.build_status !== 'Completed' && ep.build_status !== 'Substituted') || !ep.has_artefacts"
+                    [routerLink]="(ep.build_status === 'Completed' || ep.build_status === 'Substituted') && ep.has_artefacts ? ['/organization', orgName, 'artefacts', ep.build_id] : null"
                     [queryParams]="{ project: projectName }"
                     title="View build artefacts"
                   >

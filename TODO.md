@@ -7,4 +7,5 @@
  - move Evaluation errors to Entrypoint
  - when new git commit is detected, add it as queued (dont wait for the current evaluation to finish), abort the previous build if it is still running
  - pack_derivation_output is reading stdout to memory, but would be better to stream
+ - disko image builder for unit test store: nix run .#diskoImage-qemu in libretoy
 

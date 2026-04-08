@@ -126,4 +126,9 @@ impl NixStoreProvider for FakeNixStoreProvider {
         self.deleted.lock().unwrap().push(store_path);
         Ok(!undeletable)
     }
+
+    async fn ensure_path(&self, store_path: String) -> Result<()> {
+        self.present.lock().unwrap().insert(store_path);
+        Ok(())
+    }
 }

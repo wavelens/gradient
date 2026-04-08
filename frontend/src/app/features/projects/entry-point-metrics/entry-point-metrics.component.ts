@@ -74,7 +74,9 @@ export class EntryPointMetricsComponent implements OnInit {
 
     this.projectsService.getEntryPointMetrics(this.orgName, this.projectName, evalParam).subscribe({
       next: (data: EntryPointMetricsResponse) => {
-        this.points.set(data.points);
+        // Substituted builds didn't actually run on a server in this evaluation,
+        // so their build time / sizes are not meaningful trend data points.
+        this.points.set(data.points.filter((p) => p.build_status !== 'Substituted'));
         this.keepEvaluations.set(data.keep_evaluations);
         this.loading.set(false);
       },

@@ -261,7 +261,7 @@
 
       print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM organization_cache;\"'"))
       print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM cache;\"'"))
-      print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM build_output_signature;\"'"))
+      print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM derivation_output_signature;\"'"))
       # TODO: Investigate why the folder is not created
       # print(server.succeed("${lib.getExe pkgs.tree} /var/lib/gradient/nars/"))
       print(client.succeed("${lib.getExe pkgs.curl} http://server/cache/main/nix-cache-info -i --fail"))

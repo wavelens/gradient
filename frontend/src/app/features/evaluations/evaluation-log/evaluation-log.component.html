@@ -90,7 +90,7 @@
               @if (getBuildElapsed(build)) {
                 <span class="build-elapsed" [class.build-elapsed--running]="build.status === 'Building'">{{ getBuildElapsed(build) }}</span>
               }
-              @if (build.status === 'Completed' && build.has_artefacts) {
+              @if ((build.status === 'Completed' || build.status === 'Substituted') && build.has_artefacts) {
                 <a
                   class="build-dl-link"
                   [routerLink]="['/organization', orgName, 'artefacts', build.id]"

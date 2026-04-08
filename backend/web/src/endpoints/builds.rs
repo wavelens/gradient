@@ -569,6 +569,17 @@ pub async fn get_build_downloads(
     let mut products = Vec::new();
 
     for output in build_outputs {
+        // Substituted builds may have only the metadata locally; lazily realise
+        // the output path so the hydra-build-products file becomes readable.
+        if let Err(e) = state.web_nix_store.ensure_path(output.output.clone()).await {
+            tracing::warn!(
+                build_id = %build_id,
+                output_path = %output.output,
+                error = %format!("{:#}", e),
+                "Failed to ensure output path is realised"
+            );
+        }
+
         let hydra_products_path = format!("{}/nix-support/hydra-build-products", output.output);
 
         tracing::debug!(
@@ -768,6 +779,17 @@ pub async fn get_build_download(
     );
 
     for output in build_outputs {
+        // Substituted builds may have only the metadata locally; lazily realise
+        // the output path so the hydra-build-products file becomes readable.
+        if let Err(e) = state.web_nix_store.ensure_path(output.output.clone()).await {
+            tracing::warn!(
+                build_id = %build_id,
+                output_path = %output.output,
+                error = %format!("{:#}", e),
+                "Failed to ensure output path is realised"
+            );
+        }
+
         let hydra_products_path = format!("{}/nix-support/hydra-build-products", output.output);
 
         tracing::debug!(

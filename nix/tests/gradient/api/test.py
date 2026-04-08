@@ -7,6 +7,7 @@ import json
 start_all()
 
 machine.wait_for_unit("gradient-server.service")
+machine.wait_for_open_port(3000)
 
 with subtest("check nix"):
     machine.succeed("nix --version")

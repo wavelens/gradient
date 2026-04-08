@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use nix_daemon::PathInfo;
+use nix_daemon::{PathInfo, Progress, Store};
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -49,6 +49,12 @@ pub trait NixStoreProvider: Send + Sync + std::fmt::Debug + 'static {
     /// Returns `true` if the path was actually deleted, `false` if it could
     /// not be deleted because it is still reachable from a GC root.
     async fn delete_path(&self, store_path: String) -> Result<bool>;
+
+    /// Ensures `store_path` is present in the local Nix store, substituting
+    /// it from configured binary caches if it is missing. Used by the
+    /// download endpoint to lazily realise outputs of `Substituted` builds
+    /// whose data was never copied to the gradient-server's local store.
+    async fn ensure_path(&self, store_path: String) -> Result<()>;
 }
 
 /// Production `NixStoreProvider` backed by a `NixStorePool` of real Nix daemon
@@ -124,6 +130,19 @@ impl NixStoreProvider for LocalNixStoreProvider {
             .await
             .with_context(|| format!("spawn nix store delete {}", store_path))?;
         Ok(output.status.success())
+    }
+
+    async fn ensure_path(&self, store_path: String) -> Result<()> {
+        let mut store = self
+            .pool
+            .acquire()
+            .await
+            .context("acquire store for ensure_path")?;
+        store
+            .ensure_path(nix_store_path(&store_path))
+            .result()
+            .await
+            .with_context(|| format!("ensure_path {}", store_path))
     }
 }
 
