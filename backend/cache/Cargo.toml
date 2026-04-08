@@ -17,10 +17,10 @@ chrono     = { workspace = true }
 core       = { workspace = true }
 entity     = { workspace = true }
 nix-daemon = { workspace = true }
+ring       = { workspace = true }
 sea-orm    = { workspace = true }
 sentry     = { workspace = true }
 serde_json = { workspace = true }
-sha2       = { workspace = true }
 thiserror  = { workspace = true }
 tokio      = { workspace = true, features = ["process"] }
 tracing    = { workspace = true }

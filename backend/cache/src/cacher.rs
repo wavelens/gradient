@@ -15,7 +15,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseBackend, EntityTrait,
     IntoActiveModel, QueryFilter, QueryOrder, QuerySelect, Statement,
 };
-use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -449,9 +448,16 @@ pub async fn pack_derivation_output(
 }
 
 /// Compute SHA-256 of `data` and return it encoded in Nix's base-32 alphabet.
+///
+/// Uses `ring`'s SHA-256, which dispatches at runtime to the fastest
+/// implementation available on the host CPU (SHA-NI on modern x86,
+/// ARMv8 crypto extensions on aarch64, AVX2 on older x86, scalar
+/// fallback otherwise). This avoids the `sha2` crate's pure-rust
+/// software path on CPUs without SHA-NI.
 fn nix_base32_sha256(data: &[u8]) -> String {
     const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
-    let hash: [u8; 32] = Sha256::digest(data).into();
+    let digest = ring::digest::digest(&ring::digest::SHA256, data);
+    let hash: &[u8] = digest.as_ref();
     let len = (hash.len() * 8 - 1) / 5 + 1;
     let mut out = String::with_capacity(len);
     for n in (0..len).rev() {
