@@ -37,7 +37,7 @@
                 <div class="project-meta">
                   @if (project.last_evaluation_status) {
                     <span class="eval-status-badge" [class]="getEvalStatusClass(project.last_evaluation_status)">
-                      <span class="material-symbols-outlined" [class.spinning]="isRunningStatus(project.last_evaluation_status)">
+                      <span class="material-symbols-outlined" [class.spinning]="isRunningStatus(project.last_evaluation_status) && project.last_evaluation_status !== 'Waiting'">
                         {{ getEvalStatusIcon(project.last_evaluation_status) }}
                       </span>
                       {{ getEvalStatusLabel(project.last_evaluation_status) }}

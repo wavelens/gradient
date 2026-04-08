@@ -317,7 +317,7 @@ pub async fn get_evaluation_builds(
         m
     };
 
-    let builds: Vec<BuildItem> = builds
+    let mut builds: Vec<BuildItem> = builds
         .iter()
         .filter_map(|b| {
             let drv = derivations.get(&b.derivation)?;
@@ -334,6 +334,30 @@ pub async fn get_evaluation_builds(
             })
         })
         .collect();
+
+    // Sort by status (Building → Queued → Failed → Aborted/DependencyFailed →
+    // Completed/Substituted), then by display name. Must match the client-side
+    // ordering in `evaluation-log.component.ts::buildStatusOrder`.
+    fn status_rank(status: &str) -> u32 {
+        match status {
+            "Building" => 0,
+            "Queued" => 1,
+            "Failed" => 2,
+            "Aborted" | "DependencyFailed" => 3,
+            "Completed" | "Substituted" => 4,
+            _ => 99,
+        }
+    }
+    fn display_name(path: &str) -> &str {
+        let filename = path.rsplit('/').next().unwrap_or(path);
+        let stripped = filename.strip_suffix(".drv").unwrap_or(filename);
+        stripped.split_once('-').map(|(_, rest)| rest).unwrap_or(stripped)
+    }
+    builds.sort_by(|a, b| {
+        status_rank(&a.status)
+            .cmp(&status_rank(&b.status))
+            .then_with(|| display_name(&a.name).cmp(display_name(&b.name)))
+    });
 
     let res = BaseResponse {
         error: false,

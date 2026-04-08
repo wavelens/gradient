@@ -313,67 +313,94 @@ impl WorkerPoolResolver {
         repository: &str,
         wildcards: Vec<String>,
     ) -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
+        // Stage 1: expand first-segment wildcards against FLAKE_START into a
+        // flat list of attr-path segment vectors.
+        let mut stage1: Vec<Vec<String>> = Vec::new();
         for w in wildcards {
             let segs = split_attr_path(&w);
             if segs.is_empty() {
-                out.push(w);
+                stage1.push(vec![w]);
                 continue;
             }
 
-            // Stage 1: expand first-segment wildcards against FLAKE_START.
-            let stage1: Vec<Vec<String>> = if segs[0].contains('*') {
+            if segs[0].contains('*') {
                 let prefixes = match_pattern(&segs[0], FLAKE_START.iter().copied());
                 if prefixes.is_empty() {
-                    vec![segs.clone()]
+                    stage1.push(segs);
                 } else {
-                    prefixes
-                        .into_iter()
-                        .map(|p| {
-                            let mut v = vec![p];
-                            v.extend_from_slice(&segs[1..]);
-                            v
-                        })
-                        .collect()
+                    for p in prefixes {
+                        let mut v = vec![p];
+                        v.extend_from_slice(&segs[1..]);
+                        stage1.push(v);
+                    }
                 }
             } else {
-                vec![segs.clone()]
-            };
+                stage1.push(segs);
+            }
+        }
 
-            // Stage 2: for each first-stage fragment of shape <prefix>.*.<rest>,
-            // discover the systems under <prefix> and fan out one wildcard per
-            // matching system.
-            for frag in stage1 {
-                if frag.len() >= 3 && frag[1].contains('*') && !frag[0].contains('*') {
-                    let prefix = frag[0].clone();
-                    match self.fetch_attr_names(repository, &prefix).await {
-                        Ok(systems) => {
-                            let matched =
-                                match_pattern(&frag[1], systems.iter().map(String::as_str));
-                            if matched.is_empty() {
-                                out.push(frag.join("."));
-                                continue;
-                            }
-                            for sys in matched {
-                                let mut v = vec![frag[0].clone(), quote_if_needed(&sys)];
-                                v.extend_from_slice(&frag[2..]);
-                                out.push(v.join("."));
-                            }
-                        }
-                        Err(e) => {
-                            debug!(prefix = %prefix, error = %e, "system discovery failed; falling back to single-wildcard fragment");
-                            out.push(frag.join("."));
-                        }
+        // Stage 2: for each fragment of shape <prefix>.*.<rest>, discover the
+        // systems under <prefix> and fan one wildcard out per matching system.
+        // The `fetch_attr_names` calls run concurrently so independent
+        // prefixes (e.g. packages / checks / devShells) don't serialize on a
+        // single worker round-trip each.
+        let mut discovery_tasks: FuturesUnordered<_> = FuturesUnordered::new();
+        let mut passthrough: Vec<(usize, Vec<String>)> = Vec::new();
+
+        for (idx, frag) in stage1.into_iter().enumerate() {
+            if frag.len() >= 3 && frag[1].contains('*') && !frag[0].contains('*') {
+                let prefix = frag[0].clone();
+                let repository = repository.to_string();
+                discovery_tasks.push(async move {
+                    let result = self.fetch_attr_names(&repository, &prefix).await;
+                    (idx, frag, result)
+                });
+            } else {
+                passthrough.push((idx, vec![frag.join(".")]));
+            }
+        }
+
+        let mut discovered: Vec<(usize, Vec<String>)> = Vec::new();
+        while let Some((idx, frag, result)) = discovery_tasks.next().await {
+            match result {
+                Ok(systems) => {
+                    let matched = match_pattern(&frag[1], systems.iter().map(String::as_str));
+                    if matched.is_empty() {
+                        discovered.push((idx, vec![frag.join(".")]));
+                        continue;
                     }
-                } else {
-                    out.push(frag.join("."));
+                    let expanded: Vec<String> = matched
+                        .into_iter()
+                        .map(|sys| {
+                            let mut v = vec![frag[0].clone(), quote_if_needed(&sys)];
+                            v.extend_from_slice(&frag[2..]);
+                            v.join(".")
+                        })
+                        .collect();
+                    discovered.push((idx, expanded));
+                }
+                Err(e) => {
+                    debug!(prefix = %frag[0], error = %e, "system discovery failed; falling back to single-wildcard fragment");
+                    discovered.push((idx, vec![frag.join(".")]));
                 }
             }
         }
 
-        // De-duplicate while preserving the original order.
+        // Re-merge by original fragment index so output order is deterministic.
+        let mut merged: Vec<(usize, Vec<String>)> =
+            passthrough.into_iter().chain(discovered).collect();
+        merged.sort_by_key(|(i, _)| *i);
+
+        // De-duplicate while preserving order.
         let mut seen = HashSet::new();
-        out.retain(|w| seen.insert(w.clone()));
+        let mut out: Vec<String> = Vec::new();
+        for (_, items) in merged {
+            for item in items {
+                if seen.insert(item.clone()) {
+                    out.push(item);
+                }
+            }
+        }
         out
     }
 
