@@ -346,7 +346,7 @@ pub async fn schedule_build(
         }
 
         Err(e) => {
-            error!(error = %e, "Build executor failed");
+            error!(error = format!("{:#}", e), "Build executor failed");
             update_build_status_recursivly(Arc::clone(&state), build.clone(), BuildStatus::Failed)
                 .await;
         }

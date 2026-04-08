@@ -190,33 +190,82 @@ pub async fn update_evaluation_status(
         return evaluation;
     }
 
+    // Never step away from a terminal state. This is both a local check
+    // (if the in-memory row is already terminal) and an atomic DB guard
+    // via the filtered update_many below — so a concurrent abort cannot
+    // be clobbered by an in-flight evaluator.
+    if matches!(
+        evaluation.status,
+        EvaluationStatus::Aborted | EvaluationStatus::Failed | EvaluationStatus::Completed
+    ) {
+        return evaluation;
+    }
+
     debug!(evaluation_id = %evaluation.id, status = ?status, "Updating evaluation status");
 
-    let mut active_evaluation: AEvaluation = evaluation.clone().into_active_model();
-
     let webhook_status = status.clone();
-    active_evaluation.status = Set(status);
-    active_evaluation.updated_at = Set(Utc::now().naive_utc());
+    let now = Utc::now().naive_utc();
 
-    match active_evaluation.update(&state.db).await {
-        Ok(updated_eval) => {
-            let webhook_state = Arc::clone(&state);
-            let webhook_eval = updated_eval.clone();
-            tokio::spawn(async move {
-                gradient_core::webhooks::fire_evaluation_webhook(
-                    webhook_state,
-                    webhook_eval,
-                    webhook_status,
-                )
-                .await;
-            });
-            updated_eval
+    let update_result = EEvaluation::update_many()
+        .col_expr(
+            CEvaluation::Status,
+            sea_orm::sea_query::Expr::value(status.clone()),
+        )
+        .col_expr(
+            CEvaluation::UpdatedAt,
+            sea_orm::sea_query::Expr::value(now),
+        )
+        .filter(CEvaluation::Id.eq(evaluation.id))
+        .filter(
+            Condition::all()
+                .add(CEvaluation::Status.ne(EvaluationStatus::Aborted))
+                .add(CEvaluation::Status.ne(EvaluationStatus::Failed))
+                .add(CEvaluation::Status.ne(EvaluationStatus::Completed)),
+        )
+        .exec(&state.db)
+        .await;
+
+    match update_result {
+        Ok(res) if res.rows_affected == 0 => {
+            // Row was concurrently transitioned to a terminal state —
+            // honor it and return the fresh value instead of clobbering.
+            return EEvaluation::find_by_id(evaluation.id)
+                .one(&state.db)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(evaluation);
         }
         Err(e) => {
             error!(error = %e, evaluation_id = %evaluation.id, "Failed to update evaluation status");
-            evaluation
+            return evaluation;
         }
+        Ok(_) => {}
     }
+
+    let updated_eval = EEvaluation::find_by_id(evaluation.id)
+        .one(&state.db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| {
+            let mut e = evaluation.clone();
+            e.status = status;
+            e.updated_at = now;
+            e
+        });
+
+    let webhook_state = Arc::clone(&state);
+    let webhook_eval = updated_eval.clone();
+    tokio::spawn(async move {
+        gradient_core::webhooks::fire_evaluation_webhook(
+            webhook_state,
+            webhook_eval,
+            webhook_status,
+        )
+        .await;
+    });
+    updated_eval
 }
 
 /// Records an error-level `evaluation_message` row and transitions the evaluation status.
@@ -230,6 +279,16 @@ pub async fn update_evaluation_status_with_error(
     error_message: String,
     source: Option<String>,
 ) -> MEvaluation {
+    // If the evaluation is already in a terminal state (e.g. it was
+    // aborted while we were running), don't record a spurious error or
+    // overwrite the status — just return the current row.
+    if matches!(
+        evaluation.status,
+        EvaluationStatus::Aborted | EvaluationStatus::Failed | EvaluationStatus::Completed
+    ) {
+        return evaluation;
+    }
+
     debug!(evaluation_id = %evaluation.id, status = ?status, error = %error_message, ?source, "Updating evaluation status with error");
 
     let msg = AEvaluationMessage {

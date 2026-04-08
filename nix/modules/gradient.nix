@@ -248,6 +248,30 @@ in {
           default = 1;
         };
 
+        maxEvaluationsPerWorker = lib.mkOption {
+          description = ''
+            Recycle an eval-worker subprocess after it has served this
+            many list/resolve calls. Nix's Boehm GC never releases
+            memory back to the OS, so long-lived workers grow
+            monotonically; this cap bounds RSS growth by forcing a
+            respawn. Set to 0 to disable recycling.
+          '';
+          type = lib.types.ints.unsigned;
+          default = 20;
+        };
+
+        evalClosureParallelism = lib.mkOption {
+          description = ''
+            Number of top-level derivations whose dependency closure is
+            walked in parallel during the EvaluatingDerivation phase.
+            Each walker issues DB and Nix-store queries concurrently, so
+            raising this reduces evaluation latency at the cost of DB
+            pool / nix-daemon pressure.
+          '';
+          type = lib.types.ints.positive;
+          default = 8;
+        };
+
         logLevel = lib.mkOption {
           default = { };
           description = ''
@@ -377,6 +401,8 @@ in {
           GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
           GRADIENT_MAX_NIXDAEMON_CONNECTIONS = toString cfg.settings.maxNixdaemonConnections;
           GRADIENT_EVAL_WORKERS = toString cfg.settings.evalWorkers;
+          GRADIENT_MAX_EVALUATIONS_PER_WORKER = toString cfg.settings.maxEvaluationsPerWorker;
+          GRADIENT_EVAL_CLOSURE_PARALLELISM = toString cfg.settings.evalClosureParallelism;
           GRADIENT_LOG_LEVEL = cfg.settings.logLevel.default;
         } // lib.optionalAttrs (cfg.settings.logLevel.builder != null) {
           GRADIENT_BUILDER_LOG_LEVEL = cfg.settings.logLevel.builder;

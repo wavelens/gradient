@@ -1459,6 +1459,17 @@ paths:
             type: string
             default: build
             example: build
+        - name: eval
+          in: query
+          required: false
+          description: |-
+            Nix attribute path of a specific entry point, e.g. `packages."x86_64-linux".hello`.
+            When provided the badge reflects that entry point's build status from the most
+            recent completed evaluation instead of the overall project status.
+            URL-encode `"` as `%22` when constructing static links.
+          schema:
+            type: string
+            example: 'packages."x86_64-linux".hello'
         - name: token
           in: query
           required: false

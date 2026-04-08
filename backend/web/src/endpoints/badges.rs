@@ -14,6 +14,7 @@
 //! Supported query parameters:
 //! - `style`: `flat` (default) or `flat-square`
 //! - `label`: left-hand label text (default `"build"`)
+//! - `eval`: UUID of a specific evaluation to use instead of the project's latest
 //! - `token`: API key or JWT for private organisations
 
 use axum::extract::{Path, Query, State};
@@ -21,7 +22,7 @@ use axum::response::{IntoResponse, Response};
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use http::{StatusCode, header};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -41,6 +42,10 @@ pub struct BadgeParams {
     /// Left-side label. Defaults to `"build"`.
     #[serde(default = "default_label")]
     pub label: String,
+    /// Nix attribute path of a specific entry point (e.g. `packages."x86_64-linux".hello`).
+    /// When set the badge reflects that entry point's build status from the latest completed
+    /// evaluation instead of the overall project status.
+    pub eval: Option<String>,
     /// API key (`GRADxxxx`) or JWT for accessing a private organisation badge
     /// without a session. Embed in the image URL so external services (GitHub
     /// README, Grafana, …) can fetch it without interactive login.
@@ -264,13 +269,54 @@ pub async fn get_project_badge(
         .await?
         .ok_or_else(|| WebError::not_found("Project"))?;
 
-    // Determine badge content from the last evaluation.
-    let (status, has_failed_builds) = if let Some(eval_id) = project.last_evaluation {
+    // Determine badge content.
+    let (status, has_failed_builds) = if let Some(ref eval_attr) = params.eval {
+        // ?eval specified: find the most recent completed evaluation and look up
+        // the matching entry point's build status.
+        let evaluation = EEvaluation::find()
+            .filter(CEvaluation::Project.eq(project.id))
+            .filter(CEvaluation::Status.eq(EvaluationStatus::Completed))
+            .order_by_desc(CEvaluation::CreatedAt)
+            .one(&state.db)
+            .await?;
+
+        match evaluation {
+            None => (None, false),
+            Some(ev) => {
+                let ep = EEntryPoint::find()
+                    .filter(CEntryPoint::Evaluation.eq(ev.id))
+                    .filter(CEntryPoint::Eval.eq(eval_attr.as_str()))
+                    .one(&state.db)
+                    .await?;
+
+                match ep {
+                    None => (None, false),
+                    Some(ep) => {
+                        let build = EBuild::find_by_id(ep.build).one(&state.db).await?;
+                        let build_status = build.map(|b| b.status);
+                        let (eval_status, has_failed) = match build_status {
+                            Some(BuildStatus::Completed) | Some(BuildStatus::Substituted) => {
+                                (EvaluationStatus::Completed, false)
+                            }
+                            Some(BuildStatus::Failed) => (EvaluationStatus::Failed, true),
+                            Some(BuildStatus::Aborted) | Some(BuildStatus::DependencyFailed) => {
+                                (EvaluationStatus::Aborted, false)
+                            }
+                            Some(BuildStatus::Building) => (EvaluationStatus::Building, false),
+                            Some(BuildStatus::Queued) => (EvaluationStatus::Queued, false),
+                            _ => (EvaluationStatus::Queued, false),
+                        };
+                        (Some(eval_status), has_failed)
+                    }
+                }
+            }
+        }
+    } else if let Some(eval_id) = project.last_evaluation {
+        // No ?eval: use the overall project last evaluation status.
         let eval = EEvaluation::find_by_id(eval_id).one(&state.db).await?;
 
         let has_failed = match &eval {
             Some(e) if e.status == EvaluationStatus::Completed => {
-                // Check whether any entry-point build failed.
                 let ep_build_ids: Vec<uuid::Uuid> = EEntryPoint::find()
                     .filter(CEntryPoint::Evaluation.eq(e.id))
                     .all(&state.db)

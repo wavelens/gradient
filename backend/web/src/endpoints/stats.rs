@@ -168,10 +168,10 @@ async fn aggregate_storage(
                date_trunc('{trunc_unit}', NOW() AT TIME ZONE 'UTC'),
                INTERVAL '1 {trunc_unit}'
            ) AS gs(period)
-           LEFT JOIN build_output_signature bos
+           LEFT JOIN derivation_output_signature bos
                ON date_trunc('{trunc_unit}', bos.created_at) = gs.period
               AND bos.cache = $1
-           LEFT JOIN build_output bo ON bo.id = bos.build_output
+           LEFT JOIN derivation_output bo ON bo.id = bos.derivation_output
            GROUP BY gs.period
            ORDER BY gs.period"#,
         trunc_unit = trunc_unit,
@@ -228,8 +228,8 @@ pub async fn get_cache_stats(
             r#"SELECT COALESCE(SUM(bo.file_size), 0)::bigint AS total_bytes,
                       COALESCE(SUM(bo.nar_size),  0)::bigint AS total_nar_bytes,
                       COUNT(bos.id)::bigint                   AS total_packages
-               FROM build_output_signature bos
-               JOIN build_output bo ON bo.id = bos.build_output
+               FROM derivation_output_signature bos
+               JOIN derivation_output bo ON bo.id = bos.derivation_output
                WHERE bos.cache = $1"#,
             [sea_orm::Value::Uuid(Some(Box::new(cache.id)))],
         ))

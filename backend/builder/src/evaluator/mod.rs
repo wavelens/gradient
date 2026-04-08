@@ -17,11 +17,13 @@ pub use worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
+use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_core::input::{parse_evaluation_wildcard, repository_url_to_nix, vec_to_hex};
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
-use std::sync::Arc;
-use tracing::{debug, error, info, instrument, warn};
+use std::sync::{Arc, Mutex as StdMutex};
+use tokio::sync::Semaphore;
+use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
 /// Output tuple returned by `evaluate`:
@@ -43,7 +45,7 @@ type EvaluationOutput = (
 );
 
 use super::scheduler::{update_evaluation_status, update_evaluation_status_with_error};
-use dependencies::{EvaluationAccumulator, find_derivation, query_all_dependencies};
+use dependencies::{SharedAccumulator, query_all_dependencies};
 
 /// Evaluates a flake repository, discovering all matching derivations and building the dependency
 /// graph. Returns accumulated builds, dependency edges, and the IDs of the top-level entry-point
@@ -121,8 +123,10 @@ pub async fn evaluate(
     )
     .await;
 
-    let mut acc = EvaluationAccumulator::new();
-    let mut failed_derivations: Vec<(String, String)> = vec![];
+    let shared = Arc::new(SharedAccumulator::new());
+    let failed_derivations: Arc<StdMutex<Vec<(String, String)>>> =
+        Arc::new(StdMutex::new(Vec::new()));
+    let fatal_error: Arc<StdMutex<Option<anyhow::Error>>> = Arc::new(StdMutex::new(None));
     let total_derivations = all_derivations.len();
 
     let resolved = state
@@ -131,58 +135,89 @@ pub async fn evaluate(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to resolve derivation paths: {}", e))?;
 
-    // Process resolved derivations sequentially (store and acc require exclusive access).
-    for (derivation_string, derivation_result) in resolved {
-        let (derivation_path, _references) = match derivation_result {
-            Ok((d, r)) => (d, r),
-            Err(e) => {
-                let error_msg = format!("{:#}", e);
-                warn!(
-                    error = %error_msg,
-                    derivation = %derivation_string,
-                    "Derivation failed, skipping broken package"
-                );
-                failed_derivations.push((derivation_string.clone(), error_msg));
-                continue;
+    // Fan the top-level closures out across a bounded pool of walkers.
+    // Each walker's BFS runs concurrently; the SharedAccumulator
+    // serialises the find-or-create of every derivation via per-path
+    // OnceCells, so two walkers seeing the same transitive dep produce
+    // exactly one `MDerivation` row.
+    let parallelism = state.cli.eval_closure_parallelism.max(1);
+    let semaphore = Arc::new(Semaphore::new(parallelism));
+
+    let mut tasks: FuturesUnordered<_> = resolved
+        .into_iter()
+        .map(|(derivation_string, derivation_result)| {
+            let state = Arc::clone(&state);
+            let shared = Arc::clone(&shared);
+            let failed = Arc::clone(&failed_derivations);
+            let fatal = Arc::clone(&fatal_error);
+            let semaphore = Arc::clone(&semaphore);
+            let evaluation = evaluation.clone();
+            async move {
+                let _permit = semaphore.acquire_owned().await.ok();
+
+                let derivation_path = match derivation_result {
+                    Ok((d, _refs)) => d,
+                    Err(e) => {
+                        let error_msg = format!("{:#}", e);
+                        warn!(
+                            error = %error_msg,
+                            derivation = %derivation_string,
+                            "Derivation failed, skipping broken package"
+                        );
+                        failed.lock().unwrap().push((derivation_string, error_msg));
+                        return;
+                    }
+                };
+
+                info!(derivation = %derivation_path, "Walking derivation closure");
+
+                let result = query_all_dependencies(
+                    Arc::clone(&state),
+                    Arc::clone(&shared),
+                    &evaluation,
+                    organization_id,
+                    vec![derivation_path.clone()],
+                )
+                .await;
+
+                match result {
+                    Ok(()) => {
+                        if let Some(root_build_id) = shared.lookup_build_for_path(&derivation_path)
+                        {
+                            shared.push_entry_point(root_build_id, derivation_string);
+                        }
+                    }
+                    Err(e) => {
+                        error!(error = %e, derivation = %derivation_path, "Closure walk failed");
+                        // Preserve the first fatal so the outer caller can
+                        // surface it like the old sequential code did.
+                        let mut slot = fatal.lock().unwrap();
+                        if slot.is_none() {
+                            *slot = Some(e);
+                        }
+                    }
+                }
             }
-        };
+        })
+        .collect();
 
-        // Fast-path: if the derivation row already exists and we already
-        // materialised a build for it in this evaluation, just attach the
-        // entry point.
-        let existing_derivation =
-            find_derivation(&state, organization_id, &derivation_path).await?;
-        if let Some(ref d) = existing_derivation
-            && let Some(existing) = acc.builds.iter().find(|b| b.derivation == d.id)
-        {
-            acc.entry_point_build_ids
-                .push((existing.id, derivation_string.clone()));
-            debug!(derivation = %derivation_path, "Skipping — already in current evaluation");
-            continue;
-        }
+    while tasks.next().await.is_some() {}
 
-        info!(derivation = %derivation_path, "Walking derivation closure");
-
-        let before_builds = acc.builds.len();
-        query_all_dependencies(
-            Arc::clone(&state),
-            &mut acc,
-            evaluation,
-            organization_id,
-            vec![derivation_path.clone()],
-        )
-        .await?;
-
-        // The root build is the first one pushed during this call.
-        if let Some(root) = acc.builds.get(before_builds) {
-            acc.entry_point_build_ids
-                .push((root.id, derivation_string.clone()));
-        }
-
-        debug!(derivation = %derivation_path, "Successfully processed package");
+    if let Some(e) = fatal_error.lock().unwrap().take() {
+        return Err(e);
     }
 
-    if acc.builds.is_empty() && !failed_derivations.is_empty() {
+    let (
+        builds,
+        new_derivations,
+        new_derivation_outputs,
+        new_derivation_dependencies,
+        mut entry_point_build_ids,
+        pending_features,
+    ) = Arc::clone(&shared).into_parts();
+    let failed_derivations = std::mem::take(&mut *failed_derivations.lock().unwrap());
+
+    if builds.is_empty() && !failed_derivations.is_empty() {
         let error_summary = if failed_derivations.len() == total_derivations {
             format!(
                 "All {} derivations failed during evaluation",
@@ -206,16 +241,16 @@ pub async fn evaluate(
     }
 
     let mut seen = std::collections::HashSet::new();
-    acc.entry_point_build_ids.retain(|(id, _)| seen.insert(*id));
+    entry_point_build_ids.retain(|(id, _)| seen.insert(*id));
 
     Ok((
-        acc.builds,
-        acc.new_derivations,
-        acc.new_derivation_outputs,
-        acc.new_derivation_dependencies,
-        acc.entry_point_build_ids,
+        builds,
+        new_derivations,
+        new_derivation_outputs,
+        new_derivation_dependencies,
+        entry_point_build_ids,
         failed_derivations,
-        acc.pending_features,
+        pending_features,
     ))
 }
 

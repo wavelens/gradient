@@ -128,6 +128,22 @@ pub struct Cli {
     /// embedded Boehm GC conflicts with Tokio's signal handling.
     #[arg(long, env = "GRADIENT_EVAL_WORKERS", value_parser = greater_than_zero::<usize>, default_value = "1")]
     pub eval_workers: usize,
+    /// Recycle an eval-worker subprocess after it has served this many
+    /// `list` / `resolve` calls. Nix's Boehm GC never releases memory
+    /// back to the OS, so long-lived workers grow monotonically; this
+    /// cap bounds RSS growth by forcing a respawn. Set to 0 to disable.
+    #[arg(
+        long,
+        env = "GRADIENT_MAX_EVALUATIONS_PER_WORKER",
+        default_value = "20"
+    )]
+    pub max_evaluations_per_worker: usize,
+    /// Number of top-level derivations whose closure BFS runs in parallel
+    /// during the `EvaluatingDerivation` phase. Each walker issues DB
+    /// and Nix-store queries concurrently, so raising this reduces
+    /// evaluation latency at the cost of DB pool / nix-daemon pressure.
+    #[arg(long, env = "GRADIENT_EVAL_CLOSURE_PARALLELISM", value_parser = greater_than_zero::<usize>, default_value = "8")]
+    pub eval_closure_parallelism: usize,
     /// TTL in hours for cached NAR files that have not been fetched recently.
     /// When expired the NAR is removed from storage and its GC root is deleted.
     /// Set to 0 to disable (default).

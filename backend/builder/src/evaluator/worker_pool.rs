@@ -50,6 +50,11 @@ pub struct EvalWorker {
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     line: String,
+    /// Number of `list` / `resolve` calls served since spawn. The pool
+    /// uses this to recycle the subprocess after a configurable number
+    /// of evaluations so Nix's Boehm-GC-allocated memory (which is
+    /// never released back to the OS) cannot grow unbounded.
+    evaluations_served: usize,
 }
 
 impl EvalWorker {
@@ -71,6 +76,7 @@ impl EvalWorker {
             stdin,
             stdout,
             line: String::new(),
+            evaluations_served: 0,
         })
     }
 
@@ -102,6 +108,7 @@ impl EvalWorker {
     }
 
     async fn list(&mut self, repository: String, wildcards: Vec<String>) -> Result<Vec<String>> {
+        self.evaluations_served += 1;
         match self
             .request(&EvalRequest::List {
                 repository,
@@ -120,6 +127,7 @@ impl EvalWorker {
         repository: String,
         attrs: Vec<String>,
     ) -> Result<Vec<ResolvedItem>> {
+        self.evaluations_served += 1;
         match self
             .request(&EvalRequest::Resolve { repository, attrs })
             .await?
@@ -159,15 +167,23 @@ pub struct EvalWorkerPool {
     idle: Arc<Mutex<Vec<EvalWorker>>>,
     semaphore: Arc<Semaphore>,
     max: usize,
+    /// Recycle an `EvalWorker` subprocess after it has served this many
+    /// `list` / `resolve` calls. Nix's Boehm GC never shrinks the
+    /// process heap, so long-lived workers grow monotonically; killing
+    /// and respawning the subprocess is the only reliable way to
+    /// release evaluation memory back to the OS. `0` disables
+    /// recycling.
+    max_evaluations_per_worker: usize,
 }
 
 impl EvalWorkerPool {
-    pub fn new(max: usize) -> Self {
+    pub fn new(max: usize, max_evaluations_per_worker: usize) -> Self {
         let max = max.max(1);
         Self {
             idle: Arc::new(Mutex::new(Vec::new())),
             semaphore: Arc::new(Semaphore::new(max)),
             max,
+            max_evaluations_per_worker,
         }
     }
 
@@ -195,6 +211,7 @@ impl EvalWorkerPool {
             worker: Some(worker),
             idle: Arc::clone(&self.idle),
             healthy: true,
+            max_evaluations_per_worker: self.max_evaluations_per_worker,
             _permit: permit,
         })
     }
@@ -209,6 +226,7 @@ pub struct PooledEvalWorker {
     worker: Option<EvalWorker>,
     idle: Arc<Mutex<Vec<EvalWorker>>>,
     healthy: bool,
+    max_evaluations_per_worker: usize,
     _permit: OwnedSemaphorePermit,
 }
 
@@ -235,6 +253,18 @@ impl DerefMut for PooledEvalWorker {
 impl Drop for PooledEvalWorker {
     fn drop(&mut self) {
         if let Some(worker) = self.worker.take() {
+            // Recycle after the configured eval count to reclaim
+            // Boehm-GC memory held by the subprocess.
+            let overused = self.max_evaluations_per_worker > 0
+                && worker.evaluations_served >= self.max_evaluations_per_worker;
+            if overused {
+                debug!(
+                    evaluations = worker.evaluations_served,
+                    "recycling eval worker (max evaluations reached)"
+                );
+                drop(worker);
+                return;
+            }
             if self.healthy
                 && let Ok(mut idle) = self.idle.lock()
             {
@@ -260,9 +290,9 @@ pub struct WorkerPoolResolver {
 }
 
 impl WorkerPoolResolver {
-    pub fn new(workers: usize) -> Self {
+    pub fn new(workers: usize, max_evaluations_per_worker: usize) -> Self {
         Self {
-            pool: Arc::new(EvalWorkerPool::new(workers)),
+            pool: Arc::new(EvalWorkerPool::new(workers, max_evaluations_per_worker)),
         }
     }
 

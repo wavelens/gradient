@@ -52,6 +52,8 @@ pub fn test_cli() -> Cli {
         keep_orphan_derivations_hours: 24,
         max_nixdaemon_connections: 2,
         eval_workers: 1,
+        max_evaluations_per_worker: 0,
+        eval_closure_parallelism: 1,
         nar_ttl_hours: 0,
         s3_bucket: None,
         s3_region: "us-east-1".into(),

@@ -72,8 +72,10 @@ async fn run() -> std::io::Result<()> {
     // Drive a pool of long-lived eval-worker subprocesses (one persistent
     // `NixEvaluator` each). Each worker is single-threaded, isolating the
     // thread-unsafe Nix C API and avoiding Boehm GC ↔ Tokio conflicts.
-    let derivation_resolver: Arc<dyn DerivationResolver> =
-        Arc::new(WorkerPoolResolver::new(cli.eval_workers));
+    let derivation_resolver: Arc<dyn DerivationResolver> = Arc::new(WorkerPoolResolver::new(
+        cli.eval_workers,
+        cli.max_evaluations_per_worker,
+    ));
 
     let state = init_state(cli, derivation_resolver).await;
 

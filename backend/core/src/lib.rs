@@ -28,6 +28,7 @@ use executer::SshBuildExecutor;
 use log_storage::{FileLogStorage, S3LogStorage};
 use nar_storage::NarStore;
 use pool::LocalNixStoreProvider;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, ActiveModelTrait, ActiveValue::Set, IntoActiveModel};
 use sources::Libgit2Prefetcher;
 use state::load_and_apply_state;
 use std::path::Path;
@@ -61,6 +62,35 @@ pub async fn init_state(
     {
         eprintln!("Failed to load state configuration: {}", e);
         std::process::exit(1);
+    }
+
+    // Cap keep_evaluations on all projects that exceed the configured maximum.
+    if cli.keep_evaluations > 0 {
+        let max = cli.keep_evaluations as i32;
+        let over_limit = EProject::find()
+            .filter(CProject::KeepEvaluations.gt(max))
+            .all(&db)
+            .await;
+
+        match over_limit {
+            Ok(projects) => {
+                let count = projects.len();
+                for project in projects {
+                    let mut active = project.into_active_model();
+                    active.keep_evaluations = Set(max);
+                    if let Err(e) = active.update(&db).await {
+                        eprintln!("Failed to cap keep_evaluations for project: {}", e);
+                    }
+                }
+                if count > 0 {
+                    println!(
+                        "Capped keep_evaluations to {} on {} project(s)",
+                        max, count
+                    );
+                }
+            }
+            Err(e) => eprintln!("Failed to query projects for keep_evaluations cap: {}", e),
+        }
     }
 
     let local_log_storage = match FileLogStorage::new(Path::new(&cli.base_path)).await {
