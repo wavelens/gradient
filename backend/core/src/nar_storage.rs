@@ -5,7 +5,7 @@
  */
 
 use anyhow::{Context, Result};
-use object_store::{ObjectStore, PutPayload, path::Path};
+use object_store::{ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
 pub use object_store::{MultipartUpload, WriteMultipart};
 use std::sync::Arc;
 

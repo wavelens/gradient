@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 use futures::future::BoxFuture;
-use object_store::{ObjectStore, PutPayload, path::Path as ObjectPath};
+use object_store::{ObjectStore, ObjectStoreExt as _, PutPayload, path::Path as ObjectPath};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs::{self, OpenOptions};

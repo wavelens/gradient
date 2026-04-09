@@ -55,6 +55,18 @@ enum CreationState {
     ExistingInDB,
 }
 
+type DerivationCell = OnceCell<(Uuid, CreationState)>;
+
+/// Return type of [`SharedAccumulator::into_parts`].
+type AccumulatorParts = (
+    Vec<MBuild>,
+    Vec<MDerivation>,
+    Vec<ADerivationOutput>,
+    Vec<MDerivationDependency>,
+    Vec<(Uuid, String)>,
+    Vec<(Uuid, Vec<String>)>,
+);
+
 /// Accumulates newly-created rows across derivation processing. Every
 /// field is guarded by a short-lived `std::sync::Mutex` — none are held
 /// across `.await` points. Everything is bulk-inserted by the caller
@@ -71,8 +83,7 @@ pub(super) struct SharedAccumulator {
     /// drv_path -> resolved derivation id. Single-flight via per-path
     /// `OnceCell`: concurrent tasks hitting the same path all await
     /// the same cell; only one runs `find_or_create_inner`.
-    derivation_cells:
-        StdMutex<HashMap<String, Arc<OnceCell<(Uuid, CreationState)>>>>,
+    derivation_cells: StdMutex<HashMap<String, Arc<DerivationCell>>>,
 
     /// derivation_id -> build_id registered for this evaluation.
     build_by_derivation: StdMutex<HashMap<Uuid, Uuid>>,
@@ -184,14 +195,7 @@ impl SharedAccumulator {
     /// lost.
     pub(super) fn into_parts(
         self: Arc<Self>,
-    ) -> (
-        Vec<MBuild>,
-        Vec<MDerivation>,
-        Vec<ADerivationOutput>,
-        Vec<MDerivationDependency>,
-        Vec<(Uuid, String)>,
-        Vec<(Uuid, Vec<String>)>,
-    ) {
+    ) -> AccumulatorParts {
         // We are the only remaining strong ref by the time the caller
         // drains. Even if not, cloning out of the mutexes is cheap
         // and safe.
