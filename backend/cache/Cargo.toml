@@ -13,12 +13,13 @@ path = "src/lib.rs"
 [dependencies]
 anyhow     = { workspace = true }
 async-trait = { workspace = true }
+base64     = { workspace = true }
 chrono     = { workspace = true }
 core       = { workspace = true }
 entity     = { workspace = true }
 futures    = { workspace = true }
 harmonia-nar = { workspace = true }
-nix-daemon = { workspace = true }
+harmonia-store-core = { workspace = true }
 ring       = { workspace = true }
 sea-orm    = { workspace = true }
 sentry     = { workspace = true }

@@ -8,8 +8,10 @@ use anyhow::{Context, Result};
 use async_ssh2_lite::{AsyncSession, TokioTcpStream};
 use async_trait::async_trait;
 use futures::stream::{FuturesUnordered, StreamExt};
+use harmonia_protocol::build_result::BuildResultInner;
 use harmonia_protocol::daemon_wire::types2::BuildMode;
 use harmonia_protocol::types::DaemonStore;
+use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::store_path::StorePath;
 use harmonia_store_remote::{DaemonClientBuilder, HandshakeDaemonStore as _};
 use std::collections::HashMap;
@@ -27,6 +29,9 @@ use super::pool::{ConnectionPool, PathInfo, PooledConnectionGuard, convert_valid
 use super::input;
 use super::sources::{decrypt_ssh_private_key, get_hash_from_path};
 use super::types::*;
+
+/// Re-export harmonia's BasicDerivation for use by builder/scheduler.
+pub use harmonia_store_core::derivation::BasicDerivation as HarmoniaBasicDerivation;
 
 /// A Nix daemon client over any transport. Generic over read/write halves.
 pub type GenericDaemonClient<R, W> = harmonia_store_remote::DaemonClient<R, W>;
@@ -97,14 +102,14 @@ pub async fn init_session(
     Ok(())
 }
 
-#[instrument(skip(remote_store, state), fields(build_id = %build.id, derivation_path = %derivation_path))]
+#[instrument(skip(remote_store, _state), fields(build_id = %build.id, derivation_path = %derivation_path))]
 pub async fn execute_build<R, W>(
     build: &MBuild,
     derivation_path: &str,
-    derivation: nix_daemon::BasicDerivation,
+    derivation: &BasicDerivation,
     remote_store: &mut GenericDaemonClient<R, W>,
-    state: Arc<ServerState>,
-) -> anyhow::Result<(MBuild, nix_daemon::BuildResult)>
+    _state: Arc<ServerState>,
+) -> anyhow::Result<(MBuild, harmonia_protocol::build_result::BuildResult)>
 where
     R: AsyncRead + std::fmt::Debug + Unpin + Send + 'static,
     W: AsyncWrite + std::fmt::Debug + Unpin + Send + 'static,
@@ -114,21 +119,15 @@ where
     let store_path = nix_store_path(derivation_path);
     let build = build.clone();
 
-    // Convert nix_daemon::BasicDerivation to harmonia's BasicDerivation
-    let harmonia_drv = convert_basic_derivation(&derivation)?;
     let harmonia_path = StorePath::from_base_path(strip_store_prefix(&store_path))
         .map_err(|e| anyhow::anyhow!("Invalid store path {}: {}", store_path, e))?;
 
     // For now, just await the result directly (no log streaming).
     // TODO: Use ResultLog's Stream impl to stream build logs in real time.
-    let harmonia_result = remote_store
-        .build_derivation(&harmonia_path, &harmonia_drv, BuildMode::Normal)
+    let result = remote_store
+        .build_derivation(&harmonia_path, derivation, BuildMode::Normal)
         .await
         .map_err(|e| anyhow::anyhow!("build_derivation failed: {}", e))?;
-
-    // Convert harmonia BuildResult back to nix_daemon::BuildResult for now
-    // TODO: Remove this conversion once all consumers use harmonia types
-    let result = convert_build_result_back(harmonia_result);
 
     Ok((build, result))
 }
@@ -473,7 +472,7 @@ pub trait BuildExecutor: Send + Sync + std::fmt::Debug + 'static {
         organization: MOrganization,
         build: MBuild,
         derivation_path: String,
-        derivation: nix_daemon::BasicDerivation,
+        derivation: BasicDerivation,
         dependencies: Vec<String>,
     ) -> Result<BuildExecutionResult>;
 }
@@ -497,7 +496,7 @@ impl BuildExecutor for SshBuildExecutor {
         organization: MOrganization,
         build: MBuild,
         derivation_path: String,
-        derivation: nix_daemon::BasicDerivation,
+        derivation: BasicDerivation,
         dependencies: Vec<String>,
     ) -> Result<BuildExecutionResult> {
         let mut local_daemon = get_local_store(Some(organization.clone()))
@@ -551,7 +550,7 @@ impl BuildExecutor for SshBuildExecutor {
         let (build, daemon_result) = execute_build(
             &build,
             &derivation_path,
-            derivation,
+            &derivation,
             &mut server_daemon,
             Arc::clone(&state),
         )
@@ -559,181 +558,80 @@ impl BuildExecutor for SshBuildExecutor {
         .context("Failed to execute build on server")?;
         let elapsed = build_start.elapsed();
 
-        if !daemon_result.error_msg.is_empty() {
-            warn!(
-                build_id = %build.id,
-                error = %daemon_result.error_msg,
-                "Remote build reported failure"
-            );
-            return Ok(BuildExecutionResult {
-                error_msg: daemon_result.error_msg,
-                outputs: vec![],
-                elapsed,
-            });
-        }
+        // Extract success/failure from harmonia's BuildResult
+        match &daemon_result.inner {
+            BuildResultInner::Failure(f) => {
+                let error_msg = String::from_utf8_lossy(&f.error_msg).to_string();
+                warn!(
+                    build_id = %build.id,
+                    error = %error_msg,
+                    "Remote build reported failure"
+                );
+                return Ok(BuildExecutionResult {
+                    error_msg,
+                    outputs: vec![],
+                    elapsed,
+                });
+            }
+            BuildResultInner::Success(s) => {
+                let copy_back: Vec<String> = s
+                    .built_outputs
+                    .values()
+                    .map(|r| format!("/nix/store/{}", r.out_path))
+                    .collect();
 
-        let copy_back: Vec<String> = daemon_result
-            .built_outputs
-            .values()
-            .map(|r| format!("/nix/store/{}", r.out_path))
-            .collect();
+                copy_builds(
+                    copy_back,
+                    &mut server_daemon,
+                    &mut local_daemon,
+                    true,
+                )
+                .await
+                .context("Failed to copy build outputs back to local store")?;
 
-        copy_builds(
-            copy_back.clone(),
-            &mut server_daemon,
-            &mut local_daemon,
-            true,
-        )
-        .await
-        .context("Failed to copy build outputs back to local store")?;
+                let mut outputs = Vec::with_capacity(s.built_outputs.len());
+                for (output_name, realisation) in &s.built_outputs {
+                    let store_path_str = format!("/nix/store/{}", realisation.out_path);
+                    let (hash, package) = match get_hash_from_path(store_path_str.clone()) {
+                        Ok(hp) => hp,
+                        Err(e) => {
+                            error!(error = %e, path = %store_path_str, "Failed to parse output path");
+                            continue;
+                        }
+                    };
 
-        let mut outputs = Vec::with_capacity(daemon_result.built_outputs.len());
-        for (name, realisation) in daemon_result.built_outputs {
-            let store_path_str = format!("/nix/store/{}", realisation.out_path);
-            let (hash, package) = match get_hash_from_path(store_path_str.clone()) {
-                Ok(hp) => hp,
-                Err(e) => {
-                    error!(error = %e, path = %store_path_str, "Failed to parse output path");
-                    continue;
+                    let has_artefacts =
+                        tokio::fs::metadata(format!("{}/nix-support/hydra-build-products", store_path_str))
+                            .await
+                            .is_ok();
+
+                    let sp = StorePath::from_base_path(strip_store_prefix(&store_path_str)).ok();
+                    let nar_size = if let Some(ref sp) = sp {
+                        match local_daemon.query_path_info(sp).await {
+                            Ok(Some(info)) => Some(info.nar_size as i64),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    };
+
+                    debug!(name = %output_name, path = %store_path_str, "Recorded built output");
+                    outputs.push(ExecutedBuildOutput {
+                        name: output_name.to_string(),
+                        store_path: store_path_str,
+                        hash,
+                        package,
+                        nar_size,
+                        has_artefacts,
+                    });
                 }
-            };
 
-            let has_artefacts =
-                tokio::fs::metadata(format!("{}/nix-support/hydra-build-products", store_path_str))
-                    .await
-                    .is_ok();
-
-            let sp = StorePath::from_base_path(strip_store_prefix(&store_path_str)).ok();
-            let nar_size = if let Some(ref sp) = sp {
-                match local_daemon.query_path_info(sp).await {
-                    Ok(Some(info)) => Some(info.nar_size as i64),
-                    _ => None,
-                }
-            } else {
-                None
-            };
-
-            debug!(name = %name, path = %store_path_str, "Recorded built output");
-            outputs.push(ExecutedBuildOutput {
-                name,
-                store_path: store_path_str,
-                hash,
-                package,
-                nar_size,
-                has_artefacts,
-            });
-        }
-
-        Ok(BuildExecutionResult {
-            error_msg: String::new(),
-            outputs,
-            elapsed,
-        })
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Conversion helpers (temporary — remove once nix_daemon types are fully gone)
-// ---------------------------------------------------------------------------
-
-use harmonia_store_core::derivation::{
-    BasicDerivation as HarmoniaBasicDerivation,
-    DerivationOutput as HarmoniaDerivationOutput,
-};
-
-/// Convert nix_daemon::BasicDerivation to harmonia's BasicDerivation.
-fn convert_basic_derivation(
-    drv: &nix_daemon::BasicDerivation,
-) -> Result<HarmoniaBasicDerivation> {
-    use harmonia_store_core::ByteString;
-    use harmonia_store_core::derivation::DerivationOutputs;
-    use harmonia_store_core::store_path::{StorePathName, StorePathSet};
-
-    let mut outputs = DerivationOutputs::new();
-    for (name, output) in &drv.outputs {
-        let path_str = output.path.as_deref()
-            .ok_or_else(|| anyhow::anyhow!("Output {} has no path", name))?;
-        let sp = StorePath::from_base_path(strip_store_prefix(path_str))
-            .map_err(|e| anyhow::anyhow!("Invalid output path {}: {}", path_str, e))?;
-        outputs.insert(
-            name.parse().map_err(|e| anyhow::anyhow!("Invalid output name {}: {}", name, e))?,
-            HarmoniaDerivationOutput::InputAddressed(sp),
-        );
-    }
-
-    let mut input_srcs = StorePathSet::new();
-    for src in &drv.input_srcs {
-        let sp = StorePath::from_base_path(strip_store_prefix(src))
-            .map_err(|e| anyhow::anyhow!("Invalid input src {}: {}", src, e))?;
-        input_srcs.insert(sp);
-    }
-
-    let name: StorePathName = "unknown".parse()
-        .map_err(|e| anyhow::anyhow!("Failed to parse derivation name: {}", e))?;
-
-    Ok(HarmoniaBasicDerivation {
-        name,
-        outputs,
-        inputs: input_srcs,
-        platform: ByteString::from(drv.platform.clone()),
-        builder: ByteString::from(drv.builder.clone()),
-        args: drv.args.iter().map(|a| ByteString::from(a.clone())).collect(),
-        env: drv.env.iter().map(|(k, v)| (ByteString::from(k.clone()), ByteString::from(v.clone()))).collect(),
-        structured_attrs: None,
-    })
-}
-
-/// Convert harmonia BuildResult back to nix_daemon::BuildResult.
-fn convert_build_result_back(
-    result: harmonia_protocol::daemon_wire::types2::BuildResult,
-) -> nix_daemon::BuildResult {
-    use harmonia_protocol::build_result::BuildResultInner;
-
-    match result.inner {
-        BuildResultInner::Success(s) => nix_daemon::BuildResult {
-            status: nix_daemon::BuildResultStatus::Built,
-            error_msg: String::new(),
-            times_built: result.times_built as u64,
-            is_non_deterministic: false,
-            start_time: chrono::DateTime::from_timestamp(result.start_time, 0)
-                .unwrap_or_default(),
-            stop_time: chrono::DateTime::from_timestamp(result.stop_time, 0)
-                .unwrap_or_default(),
-            cpu_user: None,
-            cpu_system: None,
-            built_outputs: s
-                .built_outputs
-                .into_iter()
-                .map(|(output_name, realisation)| {
-                    let name = output_name.to_string();
-                    (
-                        name.clone(),
-                        nix_daemon::Realisation {
-                            id: realisation.id.to_string(),
-                            out_path: realisation.out_path.to_string(),
-                            signatures: realisation.signatures.iter().map(|s| s.to_string()).collect(),
-                            dependent_realisations: realisation
-                                .dependent_realisations
-                                .iter()
-                                .map(|(k, v)| (k.to_string(), v.to_string()))
-                                .collect(),
-                        },
-                    )
+                Ok(BuildExecutionResult {
+                    error_msg: String::new(),
+                    outputs,
+                    elapsed,
                 })
-                .collect(),
-        },
-        BuildResultInner::Failure(f) => nix_daemon::BuildResult {
-            status: nix_daemon::BuildResultStatus::PermanentFailure,
-            error_msg: String::from_utf8_lossy(&f.error_msg).to_string(),
-            times_built: result.times_built as u64,
-            is_non_deterministic: f.is_non_deterministic,
-            start_time: chrono::DateTime::from_timestamp(result.start_time, 0)
-                .unwrap_or_default(),
-            stop_time: chrono::DateTime::from_timestamp(result.stop_time, 0)
-                .unwrap_or_default(),
-            cpu_user: None,
-            cpu_system: None,
-            built_outputs: HashMap::new(),
-        },
+            }
+        }
     }
 }

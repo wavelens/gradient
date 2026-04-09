@@ -6,19 +6,18 @@
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use core::sources::{
-    clear_key, format_cache_key, get_hash_from_path, get_path_from_derivation_output, write_key,
-};
+use core::sources::{format_cache_key, get_hash_from_path, get_path_from_derivation_output};
 use core::types::*;
+use harmonia_store_core::signature::{SecretKey, fingerprint_path};
+use harmonia_store_core::store_path::{StoreDir, StorePath};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseBackend, EntityTrait,
     IntoActiveModel, QueryFilter, QueryOrder, QuerySelect, Statement,
 };
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::process::Command;
 use tokio::time;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -302,7 +301,7 @@ pub async fn sign_derivation_output(
     output: MDerivationOutput,
 ) {
     let path = get_path_from_derivation_output(output.clone());
-    let secret_key = match format_cache_key(
+    let secret_key_str = match format_cache_key(
         state.cli.crypt_secret_file.clone(),
         cache.clone(),
         state.cli.serve_url.clone(),
@@ -314,69 +313,87 @@ pub async fn sign_derivation_output(
         }
     };
 
-    let key_file = match write_key(secret_key.clone()) {
-        Ok(file) => file,
+    let secret_key: SecretKey = match secret_key_str.parse() {
+        Ok(k) => k,
         Err(e) => {
-            error!(error = %e, "Failed to write cache key file");
+            error!(error = %e, "Failed to parse secret key");
             return;
         }
     };
-
-    let sign_output = match Command::new(state.cli.binpath_nix.clone())
-        .arg("store")
-        .arg("sign")
-        .arg("-k")
-        .arg(key_file.clone())
-        .arg(path.clone())
-        .output()
-        .await
-    {
-        Ok(o) => o,
-        Err(e) => {
-            error!(error = %e, "Error while executing nix store sign command");
-            return;
-        }
-    };
-
-    if !sign_output.status.success() {
-        error!(
-            "Could not sign path with nix store sign. Exit code: {:?}, stderr: {}",
-            sign_output.status.code(),
-            String::from_utf8_lossy(&sign_output.stderr)
-        );
-        return;
-    }
-
-    if let Err(e) = clear_key(key_file) {
-        error!(error = %e, "Failed to clear cache key file");
-    }
 
     let pathinfo = match state.nix_store.query_pathinfo(path.clone()).await {
         Ok(Some(info)) => info,
         Ok(None) => {
-            error!(path = %path, "Path not found after signing");
+            error!(path = %path, "Path not found in store, cannot sign");
             return;
         }
         Err(e) => {
-            error!(error = %e, "Failed to query path info after signing");
+            error!(error = %e, "Failed to query path info for signing");
             return;
         }
     };
 
-    let cache_identifier = secret_key.split(':').next().unwrap_or(&cache.name);
-
-    let mut signature = String::new();
-    for sig in &pathinfo.signatures {
-        if let Some(actual_sig) = sig.strip_prefix(&format!("{}:", cache_identifier)) {
-            signature = actual_sig.trim().to_string();
-            break;
+    // Convert SRI hash (sha256-<base64>) to nix format (sha256:<nix-base32>) for fingerprinting.
+    let nar_hash_nix = match sri_to_nix_hash(&pathinfo.nar_hash) {
+        Ok(h) => h,
+        Err(e) => {
+            error!(error = %e, "Failed to convert NAR hash format");
+            return;
         }
+    };
+
+    let store_dir = StoreDir::default();
+    let base = path
+        .strip_prefix("/nix/store/")
+        .unwrap_or(&path);
+    let store_path = match StorePath::from_base_path(base) {
+        Ok(sp) => sp,
+        Err(e) => {
+            error!(error = %e, path = %path, "Invalid store path for signing");
+            return;
+        }
+    };
+
+    let references: BTreeSet<StorePath> = pathinfo
+        .references
+        .iter()
+        .filter_map(|r| {
+            let base = r.strip_prefix("/nix/store/").unwrap_or(r);
+            StorePath::from_base_path(base).ok()
+        })
+        .collect();
+
+    let fingerprint = match fingerprint_path(
+        &store_dir,
+        &store_path,
+        nar_hash_nix.as_bytes(),
+        pathinfo.nar_size,
+        &references,
+    ) {
+        Ok(fp) => fp,
+        Err(e) => {
+            error!(error = %e, "Failed to compute fingerprint for signing");
+            return;
+        }
+    };
+
+    let sig = secret_key.sign(&fingerprint);
+    let sig_str = sig.to_string();
+
+    // Register the signature in the Nix daemon's DB.
+    if let Err(e) = state
+        .nix_store
+        .add_signatures(path.clone(), vec![sig])
+        .await
+    {
+        warn!(error = %e, "Failed to add signature to store (non-fatal)");
     }
 
-    if signature.is_empty() {
-        error!("No signature found for cache '{}' in output", cache.name);
-        return;
-    }
+    // Extract the base64 part after "name:" for DB storage.
+    let signature = sig_str
+        .find(':')
+        .map(|i| sig_str[i + 1..].to_string())
+        .unwrap_or(sig_str);
 
     let row = ADerivationOutputSignature {
         id: Set(Uuid::new_v4()),
@@ -389,6 +406,19 @@ pub async fn sign_derivation_output(
     if let Err(e) = row.insert(&state.db).await {
         error!(error = %e, "Failed to insert derivation output signature");
     }
+}
+
+/// Converts an SRI-format NAR hash (`sha256-<base64>`) to the Nix format
+/// (`sha256:<nix-base32>`) required by `fingerprint_path`.
+fn sri_to_nix_hash(sri: &str) -> Result<String> {
+    use base64::Engine as _;
+    let b64 = sri
+        .strip_prefix("sha256-")
+        .ok_or_else(|| anyhow::anyhow!("Not a sha256 SRI hash: {}", sri))?;
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .context("Invalid base64 in SRI hash")?;
+    Ok(format!("sha256:{}", nix_base32_encode(&raw)))
 }
 
 /// Streams NAR encoding → zstd compression → SHA-256 hash → multipart

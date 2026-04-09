@@ -8,6 +8,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use gradient_core::executer::BuildOutputInfo;
 use gradient_core::pool::{NixStoreProvider, PathInfo};
+use harmonia_store_core::signature::Signature;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
@@ -128,6 +129,10 @@ impl NixStoreProvider for FakeNixStoreProvider {
 
     async fn ensure_path(&self, store_path: String) -> Result<()> {
         self.present.lock().unwrap().insert(store_path);
+        Ok(())
+    }
+
+    async fn add_signatures(&self, _store_path: String, _signatures: Vec<Signature>) -> Result<()> {
         Ok(())
     }
 }

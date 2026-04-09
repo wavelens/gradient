@@ -9,12 +9,14 @@ use chrono::Utc;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use entity::server::Architecture;
+use bytes::Bytes;
 use gradient_core::executer::*;
 use gradient_core::types::*;
-use nix_daemon::{BasicDerivation, DerivationOutput};
+use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT};
+use harmonia_store_core::store_path::StorePath;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinHandle;
@@ -103,31 +105,55 @@ async fn create_basic_derivation(
             .await
             .context("Failed to parse derivation file")?;
 
-    // Build outputs from `nix derivation show` JSON. Always include the path.
-    let mut outputs = HashMap::new();
-    for (name, (json_path, hash_algo, hash)) in output_info {
-        outputs.insert(
-            name,
-            DerivationOutput {
-                path: json_path,
-                hash_algo,
-                hash,
-            },
-        );
+    // Build harmonia DerivationOutputs from parsed output info.
+    let mut outputs = BTreeMap::new();
+    for (name, (json_path, _hash_algo, _hash)) in output_info {
+        let output_name = name
+            .parse()
+            .with_context(|| format!("Invalid output name: {}", name))?;
+
+        let drv_output = if let Some(path) = json_path {
+            let sp = StorePath::from_base_path(&strip_nix_store_prefix(&path))
+                .with_context(|| format!("Invalid output store path: {}", path))?;
+            DerivationOutput::InputAddressed(sp)
+        } else {
+            DerivationOutput::Deferred
+        };
+
+        outputs.insert(output_name, drv_output);
     }
 
-    let input_srcs: HashSet<String> = dependencies
+    // Combine explicit dependencies with input sources.
+    let inputs = dependencies
         .into_iter()
         .chain(input_srcs.into_iter())
+        .filter_map(|p| {
+            let base = strip_nix_store_prefix(&nix_store_path(&p));
+            StorePath::from_base_path(&base).ok()
+        })
         .collect();
 
-    Ok(BasicDerivation {
+    // Extract derivation name from the store path (e.g. "hash-name.drv" → "name.drv").
+    let drv_base = strip_nix_store_prefix(&derivation.derivation_path);
+    let drv_name = drv_base
+        .find('-')
+        .map(|i| &drv_base[i + 1..])
+        .unwrap_or(&drv_base);
+
+    Ok(DerivationT {
+        name: drv_name
+            .parse()
+            .with_context(|| format!("Invalid derivation name: {}", drv_name))?,
         outputs,
-        input_srcs: input_srcs.into_iter().collect(),
-        platform: derivation.architecture.to_string(),
-        builder,
-        args,
-        env, // env now contains __json if structured attrs exist
+        inputs,
+        platform: Bytes::from(derivation.architecture.to_string()),
+        builder: Bytes::from(builder),
+        args: args.into_iter().map(Bytes::from).collect(),
+        env: env
+            .into_iter()
+            .map(|(k, v)| (Bytes::from(k), Bytes::from(v)))
+            .collect(),
+        structured_attrs: None,
     })
 }
 

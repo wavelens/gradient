@@ -14,7 +14,7 @@ path = "src/lib.rs"
 anyhow           = { workspace = true }
 async-trait      = { workspace = true }
 chrono           = { workspace = true }
-nix-daemon       = { workspace = true }
+harmonia-store-core = { workspace = true }
 gradient-core    = { path = "../core", package = "core" }
 entity           = { workspace = true }
 futures          = { workspace = true }

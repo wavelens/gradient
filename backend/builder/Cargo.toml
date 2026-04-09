@@ -17,8 +17,9 @@ chrono        = { workspace = true }
 gradient-core = { path = "../core", package = "core" }
 entity        = { workspace = true }
 futures       = { workspace = true }
+bytes         = { workspace = true }
+harmonia-store-core = { workspace = true }
 nix-bindings  = { workspace = true }
-nix-daemon    = { workspace = true }
 sea-orm       = { workspace = true }
 sentry        = { workspace = true }
 serde         = { workspace = true }

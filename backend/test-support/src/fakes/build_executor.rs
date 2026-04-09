@@ -8,7 +8,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use gradient_core::executer::{BuildExecutionResult, BuildExecutor, ExecutedBuildOutput};
 use gradient_core::types::{MBuild, MOrganization, MServer, ServerState};
-use nix_daemon::BasicDerivation;
+use harmonia_store_core::derivation::BasicDerivation;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use uuid::Uuid;

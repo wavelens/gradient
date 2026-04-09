@@ -23,7 +23,6 @@ harmonia-store-core   = { workspace = true }
 harmonia-store-remote = { workspace = true }
 harmonia-utils-hash  = { workspace = true }
 nix-bindings     = { workspace = true }
-nix-daemon       = { workspace = true }
 rand             = { workspace = true }
 sea-orm          = { workspace = true }
 sea-orm-migration = { workspace = true }

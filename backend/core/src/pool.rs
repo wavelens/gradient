@@ -6,7 +6,9 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use harmonia_protocol::daemon_wire::types2::GCAction;
 use harmonia_protocol::types::DaemonStore as _;
+use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::StorePath;
 use harmonia_utils_hash::fmt::CommonHash as _;
 
@@ -70,6 +72,9 @@ pub trait NixStoreProvider: Send + Sync + std::fmt::Debug + 'static {
     /// download endpoint to lazily realise outputs of `Substituted` builds
     /// whose data was never copied to the gradient-server's local store.
     async fn ensure_path(&self, store_path: String) -> Result<()>;
+
+    /// Attaches pre-computed signatures to a store path in the daemon's DB.
+    async fn add_signatures(&self, store_path: String, signatures: Vec<Signature>) -> Result<()>;
 }
 
 /// Production `NixStoreProvider` backed by harmonia's `ConnectionPool`.
@@ -147,16 +152,21 @@ impl NixStoreProvider for LocalNixStoreProvider {
     }
 
     async fn delete_path(&self, store_path: String) -> Result<bool> {
-        // Use `nix store delete` for now — harmonia's `collect_garbage(DeleteSpecific)`
-        // can replace this later.
-        let output = tokio::process::Command::new("nix")
-            .arg("store")
-            .arg("delete")
-            .arg(&store_path)
-            .output()
+        let sp = StorePath::from_base_path(strip_store_prefix(&store_path))
+            .map_err(|e| anyhow::anyhow!("Invalid store path {}: {}", store_path, e))?;
+        let mut paths_to_delete = std::collections::BTreeSet::new();
+        paths_to_delete.insert(sp);
+        let mut guard = self
+            .pool
+            .acquire()
             .await
-            .with_context(|| format!("spawn nix store delete {}", store_path))?;
-        Ok(output.status.success())
+            .map_err(|e| anyhow::anyhow!("acquire store for delete_path: {}", e))?;
+        let response = guard
+            .client()
+            .collect_garbage(GCAction::DeleteSpecific, &paths_to_delete, false, 0)
+            .await
+            .map_err(|e| anyhow::anyhow!("collect_garbage failed: {}", e))?;
+        Ok(response.bytes_freed > 0)
     }
 
     async fn ensure_path(&self, store_path: String) -> Result<()> {
@@ -172,6 +182,22 @@ impl NixStoreProvider for LocalNixStoreProvider {
             .ensure_path(&sp)
             .await
             .map_err(|e| anyhow::anyhow!("ensure_path {}: {}", store_path, e))?;
+        Ok(())
+    }
+
+    async fn add_signatures(&self, store_path: String, signatures: Vec<Signature>) -> Result<()> {
+        let sp = StorePath::from_base_path(strip_store_prefix(&store_path))
+            .map_err(|e| anyhow::anyhow!("Invalid store path {}: {}", store_path, e))?;
+        let mut guard = self
+            .pool
+            .acquire()
+            .await
+            .map_err(|e| anyhow::anyhow!("acquire store for add_signatures: {}", e))?;
+        let _: () = guard
+            .client()
+            .add_signatures(&sp, &signatures)
+            .await
+            .map_err(|e| anyhow::anyhow!("add_signatures {}: {}", store_path, e))?;
         Ok(())
     }
 }
