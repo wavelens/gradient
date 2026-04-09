@@ -4,16 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-mod dependencies;
-mod flake;
-mod nix_commands;
-mod nix_eval;
-mod worker;
-mod worker_pool;
-
-pub use worker::run_eval_worker;
-pub use worker_pool::WorkerPoolResolver;
-
 use anyhow::{Context, Result};
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
@@ -34,7 +24,8 @@ use uuid::Uuid;
 ///  - entry-point (build_id, wildcard) pairs
 ///  - failed derivations: (drv, error_msg)
 ///  - pending features: (derivation_id, feature_names)
-type EvaluationOutput = (
+///  - evaluation warnings collected from the Nix evaluator
+pub type EvaluationOutput = (
     Vec<MBuild>,
     Vec<MDerivation>,
     Vec<ADerivationOutput>,
@@ -42,10 +33,11 @@ type EvaluationOutput = (
     Vec<(Uuid, String)>,
     Vec<(String, String)>,
     Vec<(Uuid, Vec<String>)>,
+    Vec<String>,
 );
 
-use super::scheduler::{update_evaluation_status, update_evaluation_status_with_error};
-use dependencies::{SharedAccumulator, query_all_dependencies};
+use gradient_core::status::{update_evaluation_status, update_evaluation_status_with_error};
+use crate::dependencies::{SharedAccumulator, query_all_dependencies};
 
 /// Evaluates a flake repository, discovering all matching derivations and building the dependency
 /// graph. Returns accumulated builds, dependency edges, and the IDs of the top-level entry-point
@@ -56,26 +48,32 @@ pub async fn evaluate(
     evaluation: &MEvaluation,
 ) -> Result<EvaluationOutput> {
     info!("Starting evaluation");
-    update_evaluation_status(
+
+    // Fire-and-forget: the conditional update in update_evaluation_status
+    // never clobbers terminal states, so spawning without awaiting is safe.
+    // Saves one DB round-trip on the critical path.
+    tokio::spawn(update_evaluation_status(
         Arc::clone(&state),
         evaluation.clone(),
         EvaluationStatus::EvaluatingFlake,
-    )
-    .await;
+    ));
 
-    let organization_id = resolve_organization_id(Arc::clone(&state), evaluation).await?;
+    // The commit query is independent of the org resolution chain —
+    // run them concurrently to cut one DB round-trip.
+    let (org_id_result, commit_result) = tokio::join!(
+        resolve_organization_id(Arc::clone(&state), evaluation),
+        ECommit::find_by_id(evaluation.commit).one(&state.db),
+    );
+    let organization_id = org_id_result?;
+    let commit = commit_result
+        .context("Failed to query commit")?
+        .ok_or_else(|| anyhow::anyhow!("Commit not found"))?;
 
     let organization = EOrganization::find_by_id(organization_id)
         .one(&state.db)
         .await
         .context("Failed to query organization")?
         .ok_or_else(|| anyhow::anyhow!("Organization not found"))?;
-
-    let commit = ECommit::find_by_id(evaluation.commit)
-        .one(&state.db)
-        .await
-        .context("Failed to query commit")?
-        .ok_or_else(|| anyhow::anyhow!("Commit not found"))?;
 
     let repository =
         repository_url_to_nix(&evaluation.repository, vec_to_hex(&commit.hash).as_str())
@@ -105,7 +103,7 @@ pub async fn evaluate(
         .map(|s| s.to_string())
         .collect();
 
-    let all_derivations = state
+    let (all_derivations, mut eval_warnings) = state
         .derivation_resolver
         .list_flake_derivations(nix_repository.clone(), wildcards)
         .await
@@ -113,7 +111,7 @@ pub async fn evaluate(
 
     if all_derivations.is_empty() {
         warn!("No derivations found for evaluation");
-        return Ok((vec![], vec![], vec![], vec![], vec![], vec![], vec![]));
+        return Ok((vec![], vec![], vec![], vec![], vec![], vec![], vec![], eval_warnings));
     }
 
     update_evaluation_status(
@@ -129,11 +127,14 @@ pub async fn evaluate(
     let fatal_error: Arc<StdMutex<Option<anyhow::Error>>> = Arc::new(StdMutex::new(None));
     let total_derivations = all_derivations.len();
 
-    let resolved = state
+    let (resolved, resolve_warnings) = state
         .derivation_resolver
         .resolve_derivation_paths(nix_repository.clone(), all_derivations)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to resolve derivation paths: {}", e))?;
+    eval_warnings.extend(resolve_warnings);
+    eval_warnings.sort_unstable();
+    eval_warnings.dedup();
 
     // Fan the top-level closures out across a bounded pool of walkers.
     // Each walker's BFS runs concurrently; the SharedAccumulator
@@ -216,6 +217,7 @@ pub async fn evaluate(
         pending_features,
     ) = Arc::clone(&shared).into_parts();
     let failed_derivations = std::mem::take(&mut *failed_derivations.lock().unwrap());
+    let warnings = eval_warnings;
 
     if builds.is_empty() && !failed_derivations.is_empty() {
         let error_summary = if failed_derivations.len() == total_derivations {
@@ -251,6 +253,7 @@ pub async fn evaluate(
         entry_point_build_ids,
         failed_derivations,
         pending_features,
+        warnings,
     ))
 }
 
@@ -278,6 +281,7 @@ pub async fn evaluate_direct(
             _entry_point_build_ids,
             _failed_derivations,
             pending_features,
+            _warnings,
         )) => {
             info!(
                 build_count = builds.len(),
@@ -361,7 +365,7 @@ pub async fn evaluate_direct(
                 .unwrap_or_default();
 
             for build in created_builds {
-                crate::scheduler::update_build_status(
+                gradient_core::status::update_build_status(
                     Arc::clone(&state),
                     build,
                     BuildStatus::Queued,

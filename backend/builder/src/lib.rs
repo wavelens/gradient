@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub mod evaluator;
-pub mod scheduler;
+mod build;
+mod status;
+
+pub use build::{schedule_build, schedule_build_loop};
 
 use gradient_core::types::ServerState;
 use std::sync::Arc;
 
 pub async fn start_builder(state: Arc<ServerState>) -> std::io::Result<()> {
-    tokio::spawn(scheduler::schedule_evaluation_loop(Arc::clone(&state)));
-    tokio::spawn(scheduler::schedule_build_loop(Arc::clone(&state)));
+    tokio::spawn(schedule_build_loop(Arc::clone(&state)));
     Ok(())
 }

@@ -28,7 +28,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, warn};
 
-use super::worker::{EvalRequest, EvalResponse, ResolvedItem};
+use crate::worker::{EvalRequest, EvalResponse, ResolvedItem};
 
 /// Strips `/nix/store/` and returns just the hash-name component (mirrors the
 /// helper in [`super::resolver`]).
@@ -107,7 +107,11 @@ impl EvalWorker {
         serde_json::from_str(self.line.trim_end()).context("parsing eval worker response")
     }
 
-    async fn list(&mut self, repository: String, wildcards: Vec<String>) -> Result<Vec<String>> {
+    async fn list(
+        &mut self,
+        repository: String,
+        wildcards: Vec<String>,
+    ) -> Result<(Vec<String>, Vec<String>)> {
         self.evaluations_served += 1;
         match self
             .request(&EvalRequest::List {
@@ -116,7 +120,7 @@ impl EvalWorker {
             })
             .await?
         {
-            EvalResponse::ListOk { attrs } => Ok(attrs),
+            EvalResponse::ListOk { attrs, warnings } => Ok((attrs, warnings)),
             EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
             _ => anyhow::bail!("eval worker: unexpected response to List"),
         }
@@ -126,13 +130,13 @@ impl EvalWorker {
         &mut self,
         repository: String,
         attrs: Vec<String>,
-    ) -> Result<Vec<ResolvedItem>> {
+    ) -> Result<(Vec<ResolvedItem>, Vec<String>)> {
         self.evaluations_served += 1;
         match self
             .request(&EvalRequest::Resolve { repository, attrs })
             .await?
         {
-            EvalResponse::ResolveOk { items } => Ok(items),
+            EvalResponse::ResolveOk { items, warnings } => Ok((items, warnings)),
             EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
             _ => anyhow::bail!("eval worker: unexpected response to Resolve"),
         }
@@ -143,7 +147,7 @@ impl EvalWorker {
             .request(&EvalRequest::AttrNames { repository, path })
             .await?
         {
-            EvalResponse::AttrNamesOk { keys } => Ok(keys),
+            EvalResponse::AttrNamesOk { keys, .. } => Ok(keys),
             EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
             _ => anyhow::bail!("eval worker: unexpected response to AttrNames"),
         }
@@ -482,7 +486,7 @@ impl DerivationResolver for WorkerPoolResolver {
         &self,
         repository: String,
         wildcards: Vec<String>,
-    ) -> Result<Vec<String>> {
+    ) -> Result<(Vec<String>, Vec<String>)> {
         // Wildcard expansion: a bare `*` becomes
         // `*.*` and `*.*.*` so we discover both depth-2 (e.g. `formatter.<sys>`)
         // and depth-3 (e.g. `packages.<sys>.hello`) attribute paths.
@@ -502,7 +506,7 @@ impl DerivationResolver for WorkerPoolResolver {
         let fragments = self.expand_wildcards_for_pool(&repository, expanded).await;
 
         if fragments.is_empty() {
-            return Ok(vec![]);
+            return Ok((vec![], vec![]));
         }
 
         // Round-robin into one chunk per worker.
@@ -532,25 +536,31 @@ impl DerivationResolver for WorkerPoolResolver {
             .collect();
 
         let mut all: HashSet<String> = HashSet::new();
+        let mut all_warnings: Vec<String> = Vec::new();
         while let Some(chunk_result) = tasks.next().await {
             match chunk_result {
-                Ok(items) => all.extend(items),
+                Ok((items, warnings)) => {
+                    all.extend(items);
+                    all_warnings.extend(warnings);
+                }
                 Err(e) => {
                     warn!(error = %e, "eval worker list chunk failed");
                     return Err(e);
                 }
             }
         }
-        Ok(all.into_iter().collect())
+        all_warnings.sort_unstable();
+        all_warnings.dedup();
+        Ok((all.into_iter().collect(), all_warnings))
     }
 
     async fn resolve_derivation_paths(
         &self,
         repository: String,
         attrs: Vec<String>,
-    ) -> Result<Vec<ResolvedDerivation>> {
+    ) -> Result<(Vec<ResolvedDerivation>, Vec<String>)> {
         if attrs.is_empty() {
-            return Ok(vec![]);
+            return Ok((vec![], vec![]));
         }
 
         // Round-robin partition into one chunk per worker, preserving the
@@ -570,7 +580,7 @@ impl DerivationResolver for WorkerPoolResolver {
                 async move {
                     let mut worker = pool.acquire().await?;
                     let attrs_only: Vec<String> = chunk.iter().map(|(_, a)| a.clone()).collect();
-                    let items = match worker.resolve(repository, attrs_only).await {
+                    let (items, warnings) = match worker.resolve(repository, attrs_only).await {
                         Ok(v) => v,
                         Err(e) => {
                             worker.mark_dead();
@@ -601,15 +611,19 @@ impl DerivationResolver for WorkerPoolResolver {
                             (idx, (attr, result))
                         })
                         .collect();
-                    anyhow::Ok(indexed)
+                    anyhow::Ok((indexed, warnings))
                 }
             })
             .collect();
 
         let mut indexed: Vec<(usize, ResolvedDerivation)> = Vec::new();
+        let mut all_warnings: Vec<String> = Vec::new();
         while let Some(chunk_result) = tasks.next().await {
             match chunk_result {
-                Ok(items) => indexed.extend(items),
+                Ok((items, warnings)) => {
+                    indexed.extend(items);
+                    all_warnings.extend(warnings);
+                }
                 Err(e) => {
                     warn!(error = %e, "eval worker chunk failed");
                     return Err(e);
@@ -618,7 +632,9 @@ impl DerivationResolver for WorkerPoolResolver {
         }
 
         indexed.sort_by_key(|(idx, _)| *idx);
-        Ok(indexed.into_iter().map(|(_, r)| r).collect())
+        all_warnings.sort_unstable();
+        all_warnings.dedup();
+        Ok((indexed.into_iter().map(|(_, r)| r).collect(), all_warnings))
     }
 
     async fn get_derivation(&self, drv_path: String) -> Result<Derivation> {

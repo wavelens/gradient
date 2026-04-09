@@ -76,33 +76,38 @@ impl DerivationResolver for FakeDerivationResolver {
         &self,
         repository: String,
         _wildcards: Vec<String>,
-    ) -> Result<Vec<String>> {
-        Ok(self
-            .flake_attrs
-            .lock()
-            .unwrap()
-            .get(&repository)
-            .cloned()
-            .unwrap_or_default())
+    ) -> Result<(Vec<String>, Vec<String>)> {
+        Ok((
+            self.flake_attrs
+                .lock()
+                .unwrap()
+                .get(&repository)
+                .cloned()
+                .unwrap_or_default(),
+            vec![],
+        ))
     }
 
     async fn resolve_derivation_paths(
         &self,
         repository: String,
         attrs: Vec<String>,
-    ) -> Result<Vec<ResolvedDerivation>> {
+    ) -> Result<(Vec<ResolvedDerivation>, Vec<String>)> {
         let drv_paths = self.drv_paths.lock().unwrap();
-        Ok(attrs
-            .into_iter()
-            .map(|attr| {
-                let resolved = drv_paths
-                    .get(&(repository.clone(), attr.clone()))
-                    .cloned()
-                    .map(|p| (p, vec![]))
-                    .ok_or_else(|| anyhow!("no fake drv path for {}#{}", repository, attr));
-                (attr, resolved)
-            })
-            .collect())
+        Ok((
+            attrs
+                .into_iter()
+                .map(|attr| {
+                    let resolved = drv_paths
+                        .get(&(repository.clone(), attr.clone()))
+                        .cloned()
+                        .map(|p| (p, vec![]))
+                        .ok_or_else(|| anyhow!("no fake drv path for {}#{}", repository, attr));
+                    (attr, resolved)
+                })
+                .collect(),
+            vec![],
+        ))
     }
 
     async fn get_derivation(&self, drv_path: String) -> Result<Derivation> {

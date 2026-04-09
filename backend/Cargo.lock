@@ -809,14 +809,10 @@ dependencies = [
  "chrono",
  "core",
  "entity",
- "futures",
  "harmonia-store-core",
  "mockall",
- "nix-bindings",
  "sea-orm",
  "sentry",
- "serde",
- "serde_json",
  "test-support",
  "thiserror 2.0.18",
  "tokio",
@@ -1695,6 +1691,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "evaluator"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "core",
+ "entity",
+ "futures",
+ "harmonia-store-core",
+ "libc",
+ "nix-bindings",
+ "sea-orm",
+ "sentry",
+ "serde",
+ "serde_json",
+ "test-support",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "event-listener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2093,6 +2112,7 @@ dependencies = [
  "cache",
  "clap",
  "core",
+ "evaluator",
  "sentry",
  "tokio",
  "tracing",
@@ -6412,12 +6432,12 @@ dependencies = [
  "axum-streams",
  "axum-test",
  "base64",
- "builder",
  "bytes",
  "chrono",
  "core",
  "email_address",
  "entity",
+ "evaluator",
  "git-url-parse",
  "http 1.4.0",
  "http-body-util",

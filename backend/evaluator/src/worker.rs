@@ -19,9 +19,8 @@
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
 
-use super::flake::discover_derivations;
-use super::nix_commands::get_derivation_path;
-use super::nix_eval::{NixEvaluator, escape_nix_str};
+use crate::flake::{discover_derivations, get_derivation_path};
+use crate::nix_eval::{NixEvaluator, escape_nix_str};
 
 /// Request from parent → worker. One JSON object per line on the worker's stdin.
 #[derive(Debug, Serialize, Deserialize)]
@@ -49,9 +48,21 @@ pub enum EvalRequest {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum EvalResponse {
-    ListOk { attrs: Vec<String> },
-    ResolveOk { items: Vec<ResolvedItem> },
-    AttrNamesOk { keys: Vec<String> },
+    ListOk {
+        attrs: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<String>,
+    },
+    ResolveOk {
+        items: Vec<ResolvedItem>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<String>,
+    },
+    AttrNamesOk {
+        keys: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<String>,
+    },
     Err { message: String },
 }
 
@@ -134,8 +145,10 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                     )?;
                     continue;
                 };
-                match discover_derivations(ev, &repository, &wildcards) {
-                    Ok(attrs) => EvalResponse::ListOk { attrs },
+                let (result, warnings) =
+                    capture_warnings_during(|| discover_derivations(ev, &repository, &wildcards));
+                match result {
+                    Ok(attrs) => EvalResponse::ListOk { attrs, warnings },
                     Err(e) => EvalResponse::Err {
                         message: format!("{:#}", e),
                     },
@@ -152,9 +165,14 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                     continue;
                 };
 
+                let mut all_warnings = Vec::new();
                 let mut items = Vec::with_capacity(attrs.len());
                 for attr in attrs {
-                    match get_derivation_path(ev, &repository, &attr) {
+                    let (result, warnings) = capture_warnings_during(|| {
+                        get_derivation_path(ev, &repository, &attr)
+                    });
+                    all_warnings.extend(warnings);
+                    match result {
                         Ok((drv, references)) => items.push(ResolvedItem {
                             attr,
                             drv_path: Some(drv),
@@ -169,7 +187,11 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                         }),
                     }
                 }
-                EvalResponse::ResolveOk { items }
+                all_warnings.dedup();
+                EvalResponse::ResolveOk {
+                    items,
+                    warnings: all_warnings,
+                }
             }
             EvalRequest::AttrNames { repository, path } => {
                 let Some(ev) = evaluator.as_ref() else {
@@ -190,8 +212,9 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                         path
                     )
                 };
-                match ev.attr_names(&expr) {
-                    Ok(keys) => EvalResponse::AttrNamesOk { keys },
+                let (result, warnings) = capture_warnings_during(|| ev.attr_names(&expr));
+                match result {
+                    Ok(keys) => EvalResponse::AttrNamesOk { keys, warnings },
                     Err(e) => EvalResponse::Err {
                         message: format!("{:#}", e),
                     },
@@ -208,4 +231,70 @@ fn write_response<W: Write>(w: &mut W, resp: &EvalResponse) -> std::io::Result<(
     bytes.push(b'\n');
     w.write_all(&bytes)?;
     w.flush()
+}
+
+/// Runs `f` while capturing everything written to stderr (fd 2).
+///
+/// Redirects fd 2 to a pipe for the duration of `f`, then restores it.
+/// Returns the result of `f` alongside any lines from the captured output
+/// that look like Nix warnings.
+///
+/// Safe to use only from the single-threaded eval-worker subprocess
+/// (no Tokio runtime, no other threads). On non-Unix platforms (or if any
+/// fd operation fails) warnings are silently discarded.
+#[cfg(unix)]
+fn capture_warnings_during<F, T>(f: F) -> (T, Vec<String>)
+where
+    F: FnOnce() -> T,
+{
+    use std::io::Read;
+    use std::os::unix::io::FromRawFd;
+
+    // Duplicate the current stderr so we can restore it later.
+    let saved = unsafe { libc::dup(2) };
+    if saved < 0 {
+        return (f(), vec![]);
+    }
+
+    // Create a pipe: pipefd[0] = read end, pipefd[1] = write end.
+    let mut pipefd = [-1i32; 2];
+    if unsafe { libc::pipe(pipefd.as_mut_ptr()) } < 0 {
+        unsafe { libc::close(saved) };
+        return (f(), vec![]);
+    }
+
+    // Point fd 2 at the write end of the pipe and close the duplicate.
+    unsafe { libc::dup2(pipefd[1], 2) };
+    unsafe { libc::close(pipefd[1]) };
+
+    // Run the evaluation. Nix writes warnings directly to fd 2.
+    let result = f();
+
+    // Restore fd 2. After this, the pipe's write end has no open fds → EOF.
+    unsafe { libc::dup2(saved, 2) };
+    unsafe { libc::close(saved) };
+
+    // Read all captured output from the read end (returns at EOF).
+    let mut captured = String::new();
+    let mut reader = unsafe { std::fs::File::from_raw_fd(pipefd[0]) };
+    let _ = reader.read_to_string(&mut captured);
+
+    let warnings: Vec<String> = captured
+        .lines()
+        .filter(|l| {
+            let lower = l.to_ascii_lowercase();
+            lower.contains("warning:")
+        })
+        .map(|l| l.trim().to_string())
+        .collect();
+
+    (result, warnings)
+}
+
+#[cfg(not(unix))]
+fn capture_warnings_during<F, T>(f: F) -> (T, Vec<String>)
+where
+    F: FnOnce() -> T,
+{
+    (f(), vec![])
 }

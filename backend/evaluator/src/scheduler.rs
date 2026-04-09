@@ -10,6 +10,10 @@ use entity::evaluation::EvaluationStatus;
 use entity::evaluation_message::MessageLevel;
 use futures::stream::{self, StreamExt};
 use gradient_core::sources::*;
+use gradient_core::status::{
+    record_evaluation_message, update_build_status, update_evaluation_status,
+    update_evaluation_status_with_error,
+};
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -23,11 +27,7 @@ use tokio::time;
 use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
-use super::status::{
-    record_evaluation_message, update_build_status, update_evaluation_status,
-    update_evaluation_status_with_error,
-};
-use crate::evaluator::evaluate;
+use crate::eval::evaluate;
 
 pub async fn schedule_evaluation_loop(state: Arc<ServerState>) {
     let _guard = if state.cli.report_errors {
@@ -81,6 +81,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                 entry_point_build_ids,
                 failed_derivations,
                 pending_features,
+                eval_warnings,
             ) = builds;
 
             info!(
@@ -228,6 +229,20 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                         MessageLevel::Error,
                         err_msg.clone(),
                         Some(format!("nix-eval:{}", attr)),
+                    )
+                    .await;
+                }
+            }
+
+            // Persist evaluation warnings (e.g. Nix "evaluation warning: …" messages).
+            if !eval_warnings.is_empty() {
+                for warning in &eval_warnings {
+                    record_evaluation_message(
+                        &state,
+                        evaluation.id,
+                        MessageLevel::Warning,
+                        warning.clone(),
+                        Some("nix-eval".to_string()),
                     )
                     .await;
                 }

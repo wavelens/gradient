@@ -472,7 +472,7 @@ pub async fn post_direct_build(
     })?;
 
     // Schedule evaluation
-    builder::evaluator::evaluate_direct(Arc::clone(&state), evaluation.clone(), temp_dir)
+    evaluator::evaluate_direct(Arc::clone(&state), evaluation.clone(), temp_dir)
         .await
         .map_err(|e| WebError::InternalServerError(format!("Failed to start evaluation: {}", e)))?;
 

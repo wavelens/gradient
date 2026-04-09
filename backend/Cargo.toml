@@ -8,18 +8,19 @@ description = "Nix-based Continuous Integration System"
 repository = "https://github.com/wavelens/gradient"
 
 [workspace]
-members = [".", "core", "builder", "web", "cache", "entity", "migration", "test-support"]
+members = [".", "core", "evaluator", "builder", "web", "cache", "entity", "migration", "test-support"]
 resolver = "2"
 
 [workspace.dependencies]
 # Internal crates
-builder   = { path = "builder" }
-cache     = { path = "cache" }
-core      = { path = "core", package = "core" }
-entity    = { path = "entity" }
-migration = { path = "migration" }
+builder      = { path = "builder" }
+cache        = { path = "cache" }
+core         = { path = "core", package = "core" }
+entity       = { path = "entity" }
+evaluator    = { path = "evaluator" }
+migration    = { path = "migration" }
 test-support = { path = "test-support" }
-web       = { path = "web" }
+web          = { path = "web" }
 
 # External
 anyhow           = "1.0"
@@ -37,6 +38,7 @@ harmonia-utils-base-encoding = { git = "https://github.com/nix-community/harmoni
 harmonia-utils-hash    = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
 harmonia-utils-io      = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
 git2             = "0.20"
+libc             = "0.2"
 hmac             = "0.13"
 nix-bindings     = { git = "https://github.com/NotAShelf/nix-bindings" }
 mockall          = "0.14"
@@ -62,6 +64,7 @@ zstd             = "0.13"
 builder          = { workspace = true }
 cache            = { workspace = true }
 clap             = { version = "4.6", features = ["derive"] }
+evaluator        = { workspace = true }
 gradient-core    = { path = "core", package = "core" }
 sentry           = { workspace = true }
 tokio            = { workspace = true, features = ["process"] }

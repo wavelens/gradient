@@ -11,7 +11,7 @@ use async_stream::stream;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
-use builder::scheduler::abort_evaluation;
+use core::status::abort_evaluation;
 use core::input::vec_to_hex;
 use core::types::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, Order, QueryFilter, QueryOrder};

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use builder::evaluator::{WorkerPoolResolver, run_eval_worker};
 use clap::Parser;
+use evaluator::{WorkerPoolResolver, run_eval_worker};
 use gradient_core::evaluator::DerivationResolver;
 use gradient_core::init_state;
 use gradient_core::types::Cli;
@@ -102,6 +102,9 @@ async fn run() -> std::io::Result<()> {
         info!("Error reporting disabled");
         None
     };
+
+    info!("Starting evaluator service");
+    evaluator::start_evaluator(Arc::clone(&state)).await?;
 
     info!("Starting builder service");
     builder::start_builder(Arc::clone(&state)).await?;

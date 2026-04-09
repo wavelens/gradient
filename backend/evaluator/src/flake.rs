@@ -4,12 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use gradient_core::consts::FLAKE_START;
+use gradient_core::executer::strip_nix_store_prefix;
 use std::collections::{HashMap, HashSet};
 use tracing::{debug, error};
 
-use super::nix_eval::{NixEvaluator, escape_nix_str};
+use crate::nix_eval::{NixEvaluator, escape_nix_str};
 
 /// Splits a Nix attribute path on `.`, respecting double-quoted segments.
 /// `packages.x86_64-linux."python3.12".*` → `["packages", "x86_64-linux", "\"python3.12\"", "*"]`
@@ -225,4 +226,26 @@ pub(super) fn discover_derivations(
     }
 
     Ok(all_derivations.into_iter().collect())
+}
+
+/// Resolves a flake attribute path to its store derivation path using the
+/// embedded Nix evaluator.
+///
+/// **Synchronous**: must run inside `tokio::task::spawn_blocking`.
+pub(super) fn get_derivation_path(
+    evaluator: &NixEvaluator,
+    flake_ref: &str,
+    attr_path: &str,
+) -> Result<(String, Vec<String>)> {
+    let expr = format!(
+        "toString (builtins.getFlake \"{}\").{}.drvPath",
+        escape_nix_str(flake_ref),
+        attr_path,
+    );
+
+    let drv_path = evaluator
+        .eval_string(&expr)
+        .with_context(|| format!("nix eval drvPath failed for '{}#{}'", flake_ref, attr_path))?;
+
+    Ok((strip_nix_store_prefix(&drv_path), vec![]))
 }

@@ -26,19 +26,21 @@ pub type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
 #[async_trait]
 pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
     /// Discover all attribute paths matching `wildcards` in the given flake.
+    /// Returns `(attr_paths, warnings)`.
     async fn list_flake_derivations(
         &self,
         repository: String,
         wildcards: Vec<String>,
-    ) -> Result<Vec<String>>;
+    ) -> Result<(Vec<String>, Vec<String>)>;
 
     /// Resolve a batch of attribute paths into `(drv_path, references)` tuples.
     /// The result preserves the input order of `attrs`.
+    /// Returns `(resolved, warnings)`.
     async fn resolve_derivation_paths(
         &self,
         repository: String,
         attrs: Vec<String>,
-    ) -> Result<Vec<ResolvedDerivation>>;
+    ) -> Result<(Vec<ResolvedDerivation>, Vec<String>)>;
 
     /// Read and parse a `.drv` file at `drv_path`.
     async fn get_derivation(&self, drv_path: String) -> Result<Derivation>;

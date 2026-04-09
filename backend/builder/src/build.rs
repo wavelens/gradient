@@ -24,10 +24,9 @@ use tokio::time;
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
-use super::status::{
-    check_evaluation_status, update_build_status, update_build_status_recursivly,
-    update_evaluation_status,
-};
+use gradient_core::status::{update_build_status, update_evaluation_status};
+
+use crate::status::{check_evaluation_status, update_build_status_recursivly};
 
 type OutputInfo = HashMap<String, (Option<String>, Option<String>, Option<String>)>;
 
