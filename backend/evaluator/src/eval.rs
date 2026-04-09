@@ -8,7 +8,9 @@ use anyhow::{Context, Result};
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use futures::stream::{FuturesUnordered, StreamExt};
-use gradient_core::input::{parse_evaluation_wildcard, repository_url_to_nix, vec_to_hex};
+use gradient_core::input::vec_to_hex;
+use gradient_core::nix_url::NixFlakeUrl;
+use gradient_core::wildcard::Wildcard;
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -76,7 +78,7 @@ pub async fn evaluate(
         .ok_or_else(|| anyhow::anyhow!("Organization not found"))?;
 
     let repository =
-        repository_url_to_nix(&evaluation.repository, vec_to_hex(&commit.hash).as_str())
+        NixFlakeUrl::new(&evaluation.repository, &vec_to_hex(&commit.hash))
             .context("Failed to convert repository URL to Nix format")?;
 
     let _local_dir = state
@@ -84,7 +86,7 @@ pub async fn evaluate(
         .prefetch(
             state.cli.crypt_secret_file.clone(),
             state.cli.serve_url.clone(),
-            repository.clone(),
+            repository.to_string(),
             organization.clone(),
         )
         .await
@@ -94,14 +96,15 @@ pub async fn evaluate(
     // C API never needs SSH credentials.  For HTTPS repos use the original URL.
     let nix_repository = match _local_dir.as_ref() {
         Some(prefetched) => format!("path:{}", prefetched.path.display()),
-        None => repository.clone(),
+        None => repository.to_string(),
     };
 
-    let wildcards: Vec<String> = parse_evaluation_wildcard(evaluation.wildcard.as_str())
+    let wildcards: Vec<String> = evaluation
+        .wildcard
+        .parse::<Wildcard>()
         .context("Failed to parse evaluation wildcard")?
-        .into_iter()
-        .map(|s| s.to_string())
-        .collect();
+        .patterns()
+        .to_vec();
 
     let (all_derivations, mut eval_warnings) = state
         .derivation_resolver

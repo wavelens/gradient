@@ -9,7 +9,7 @@ pub mod endpoints;
 pub mod error;
 
 use axum::body::Body;
-use axum::routing::{get, patch, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Router, middleware};
 use bytes::Bytes;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
@@ -124,6 +124,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route(
             "/projects/{organization}/{project}/active",
             post(projects::post_project_active).delete(projects::delete_project_active),
+        )
+        .route(
+            "/projects/{organization}/{project}/integration",
+            delete(projects::delete_project_integration),
         )
         .route("/evals/{evaluation}", post(evals::post_evaluation))
         .route(

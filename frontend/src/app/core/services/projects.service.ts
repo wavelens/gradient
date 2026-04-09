@@ -73,6 +73,10 @@ export class ProjectsService {
     return this.api.post<string>(`projects/${organization}/${project}/transfer`, { organization: targetOrg });
   }
 
+  removeIntegration(organization: string, project: string): Observable<string> {
+    return this.api.delete<string>(`projects/${organization}/${project}/integration`);
+  }
+
   activateProject(organization: string, project: string): Observable<string> {
     return this.api.post<string>(`projects/${organization}/${project}/active`);
   }

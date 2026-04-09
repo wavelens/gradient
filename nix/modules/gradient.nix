@@ -9,11 +9,23 @@
 
   logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
 
-  stateJsonFile = pkgs.writers.writeJSON "gradient-state.json" cfg.state;
+  # Augment each project with ci_reporter_has_token so the backend knows
+  # whether to look for the systemd credential at startup.
+  augmentedProjects = lib.mapAttrs (_: proj: proj // {
+    ci_reporter_has_token = proj.ci_reporter_token_file != null;
+  }) cfg.state.projects;
+
+  stateJsonFile = pkgs.writers.writeJSON "gradient-state.json" (cfg.state // {
+    projects = augmentedProjects;
+  });
   userPasswordFiles = lib.mapAttrsToList (_: user: "gradient_user_${user.username}_password:${user.password_file}") cfg.state.users;
   orgPrivateKeyFiles = lib.mapAttrsToList (_: org: "gradient_org_${org.name}_private_key:${org.private_key_file}") cfg.state.organizations;
   cacheSigningKeyFiles = lib.mapAttrsToList (_: cache: "gradient_cache_${cache.name}_signing_key:${cache.signing_key_file}") cfg.state.caches;
   apiKeyFiles = lib.mapAttrsToList (_: api_key: "gradient_api_${api_key.name}_key:${api_key.key_file}") cfg.state.api_keys;
+  projectCiTokenFiles = lib.concatLists (lib.mapAttrsToList (_: proj:
+    lib.optional (proj.ci_reporter_token_file != null)
+      "gradient_project_${proj.name}_ci_token:${proj.ci_reporter_token_file}"
+  ) cfg.state.projects);
 in {
   # disabledModules = [
   #   "services/gradient/default.nix"
@@ -103,6 +115,14 @@ in {
         default = pkgs.writeText "database_url" cfg.databaseUrl;
         defaultText = lib.literalExpression "pkgs.writeText \"database_url\" config.services.gradient.databaseUrl;";
         example = "/etc/gradient/database_url";
+      };
+
+      frontendUrl = lib.mkOption {
+        description = "Public URL of the Gradient frontend, used in CI status report links";
+        type = lib.types.str;
+        default = "http${lib.optionalString cfg.useTls "s"}://${cfg.domain}";
+        defaultText = lib.literalExpression ''"http\${lib.optionalString config.services.gradient.useTls "s"}://\${config.services.gradient.domain}"'';
+        example = "https://gradient.example.com";
       };
 
       frontend = {
@@ -377,7 +397,8 @@ in {
             "gradient_email_smtp_password:${cfg.email.smtpPasswordFile}"
           ] ++ lib.optionals (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) [
             "gradient_s3_secret_access_key:${cfg.s3.secretAccessKeyFile}"
-          ] ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles;
+          ] ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
+            ++ projectCiTokenFiles;
         };
 
         environment = {
@@ -386,6 +407,7 @@ in {
           GRADIENT_IP = cfg.listenAddr;
           GRADIENT_PORT = toString cfg.port;
           GRADIENT_SERVE_URL = "http${lib.optionalString cfg.useTls "s"}://${cfg.domain}";
+          GRADIENT_FRONTEND_URL = cfg.frontendUrl;
           GRADIENT_BASE_PATH = cfg.baseDir;
           GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
           GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString cfg.settings.maxConcurrentEvaluations;

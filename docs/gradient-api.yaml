@@ -1281,6 +1281,32 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /projects/{organization}/{project}/integration:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    delete:
+      tags: [projects]
+      summary: Remove CI integration
+      description: >-
+        Clears the CI reporter type, URL, and token for the project, disabling
+        commit-status reporting. Use `PATCH /projects/{organization}/{project}`
+        to configure a new integration.
+      operationId: deleteProjectIntegration
+      responses:
+        '200':
+          description: Integration removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /projects/{organization}/{project}/metrics:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
@@ -3281,6 +3307,29 @@ components:
           type: integer
           minimum: 1
           description: Number of completed evaluations to retain for metrics and history
+        ci_reporter_type:
+          type: string
+          nullable: true
+          description: >-
+            CI provider identifier: `"gitea"` or `"github"`.
+            Pass an empty string to clear.
+        ci_reporter_url:
+          type: string
+          nullable: true
+          description: >-
+            Base URL of the CI host.
+            For Gitea: `https://gitea.example.com`.
+            For GitHub: omit or leave blank to use `https://api.github.com`;
+            for GitHub Enterprise Server supply the API root
+            (e.g. `https://github.example.com/api/v3`).
+            Pass an empty string to clear.
+        ci_reporter_token:
+          type: string
+          nullable: true
+          description: >-
+            API token for the CI host. Write-only — omit to keep the existing token.
+            For GitHub, use a personal access token or GitHub App installation token
+            with `repo:status` (or `statuses:write`) permission.
 
     Project:
       type: object
@@ -3308,6 +3357,14 @@ components:
         keep_evaluations:
           type: integer
           description: Number of completed evaluations retained for metrics and history
+        ci_reporter_type:
+          type: string
+          nullable: true
+          description: Active CI provider (`"gitea"` or `"github"`) or `null` if no integration is configured.
+        ci_reporter_url:
+          type: string
+          nullable: true
+          description: Base URL of the CI host. The API token is intentionally excluded from responses.
         created_by:
           type: string
           format: uuid

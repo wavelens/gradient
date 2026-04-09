@@ -20,6 +20,20 @@ Two special tokens control expansion at each level:
 
 An implicit `.#` is appended to every wildcard, so `packages.x86_64-linux.*` becomes `packages.x86_64-linux.*.#` internally.
 
+Consecutive `*` segments collapse into one — `packages.*.*` and `packages.*` are equivalent.
+
+### Exclusions
+
+Prefix a pattern with `!` to exclude matching paths from the set produced by the preceding include patterns. Exclusions are evaluated in order — each `!`-prefixed pattern removes anything it matches from the accumulated set.
+
+```
+packages.*,!packages.x86_64-linux.broken
+```
+
+The above builds all packages on all systems except `packages.x86_64-linux.broken`.
+
+Exclusion patterns must be exact paths — they cannot contain `*` or `#`.
+
 | Wildcard | Builds |
 |---|---|
 | `packages.x86_64-linux.#` | All x86\_64-linux packages |
@@ -27,6 +41,7 @@ An implicit `.#` is appended to every wildcard, so `packages.x86_64-linux.*` bec
 | `packages.*` | Packages for all systems |
 | `packages.x86_64-linux.*,checks.x86_64-linux.*` | Both |
 | `nixosConfigurations.*.config.system.build.toplevel` | All NixOS configurations |
+| `packages.*,!packages.x86_64-linux.broken` | All packages except one excluded path |
 
 ## Evaluations
 

@@ -30,6 +30,8 @@ pub enum InputError {
     InvalidCommitHashLength,
     #[error("URLs pointing to local files are not allowed")]
     LocalFileUrlNotAllowed,
+    #[error("Invalid repository URL")]
+    InvalidRepositoryUrl,
     #[error("Evaluation wildcard cannot have leading or trailing whitespace")]
     EvaluationWildcardWhitespace,
     #[error("Evaluation wildcard cannot have consecutive commas")]
@@ -40,6 +42,10 @@ pub enum InputError {
     EvaluationWildcardEmpty,
     #[error("Evaluation wildcard cannot start with a period")]
     EvaluationWildcardStartsWithPeriod,
+    #[error("Evaluation wildcard pattern cannot be a bare special character (`!`, `*`, or `#`)")]
+    EvaluationWildcardBareSpecialChar,
+    #[error("Exclusion patterns cannot contain wildcard segments (`*` or `#`)")]
+    EvaluationWildcardExclusionWildcard,
     #[error("Name cannot be empty")]
     NameEmpty,
     #[error("Name must be lowercase")]

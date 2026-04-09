@@ -6,12 +6,15 @@
 
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
+use gradient_core::ci_reporter::{CiReport, CiStatus, parse_owner_repo, reporter_for_project};
+use gradient_core::webhooks::decrypt_webhook_secret;
+use gradient_core::input::vec_to_hex;
 use gradient_core::status::update_build_status;
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
-use tracing::error;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 /// Propagates a status change through the dependent build graph.
@@ -155,7 +158,7 @@ pub(super) async fn check_evaluation_status(state: Arc<ServerState>, evaluation_
         )
     });
 
-    let status = if statuses
+    let eval_status = if statuses
         .iter()
         .all(|s| matches!(s, BuildStatus::Completed | BuildStatus::Substituted))
     {
@@ -171,5 +174,127 @@ pub(super) async fn check_evaluation_status(state: Arc<ServerState>, evaluation_
         return;
     };
 
-    gradient_core::status::update_evaluation_status(state, evaluation, status).await;
+    report_ci_completion(Arc::clone(&state), &evaluation, eval_status.clone()).await;
+    gradient_core::status::update_evaluation_status(state, evaluation, eval_status).await;
+}
+
+/// Reports a CI status for each entry point of a completed/failed evaluation.
+async fn report_ci_completion(
+    state: Arc<ServerState>,
+    evaluation: &MEvaluation,
+    eval_status: EvaluationStatus,
+) {
+    let project_id = match evaluation.project {
+        Some(id) => id,
+        None => return,
+    };
+
+    let project = match EProject::find_by_id(project_id).one(&state.db).await {
+        Ok(Some(p)) => p,
+        _ => return,
+    };
+
+    let decrypted_token = project.ci_reporter_token.as_deref().and_then(|enc| {
+        match decrypt_webhook_secret(&state.cli.crypt_secret_file, enc) {
+            Ok(t) => Some(t),
+            Err(e) => {
+                warn!(error = %e, "Failed to decrypt CI token, skipping CI reporting");
+                None
+            }
+        }
+    });
+
+    let reporter = reporter_for_project(
+        project.ci_reporter_type.as_deref(),
+        project.ci_reporter_url.as_deref(),
+        decrypted_token.as_deref(),
+    );
+
+    let commit = match ECommit::find_by_id(evaluation.commit).one(&state.db).await {
+        Ok(Some(c)) => c,
+        _ => return,
+    };
+
+    let sha = vec_to_hex(&commit.hash);
+
+    let (owner, repo) = match parse_owner_repo(&evaluation.repository) {
+        Some(pair) => pair,
+        None => {
+            warn!(repository = %evaluation.repository, "Could not parse owner/repo for CI completion report");
+            return;
+        }
+    };
+
+    let org_name = match EOrganization::find_by_id(project.organization).one(&state.db).await {
+        Ok(Some(org)) => Some(org.name),
+        _ => None,
+    };
+
+    let details_url = org_name.map(|org| {
+        format!(
+            "{}/organization/{}/log/{}",
+            state.cli.frontend_url, org, evaluation.id
+        )
+    });
+
+    let entry_points = match EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.eq(evaluation.id))
+        .all(&state.db)
+        .await
+    {
+        Ok(eps) => eps,
+        Err(e) => {
+            error!(error = %e, "Failed to query entry points for CI completion report");
+            return;
+        }
+    };
+
+    // Report the top-level "gradient" check (overall evaluation result).
+    let overall_ci_status = match eval_status {
+        EvaluationStatus::Completed => CiStatus::Success,
+        EvaluationStatus::Failed => CiStatus::Failure,
+        _ => CiStatus::Error,
+    };
+    let overall_report = CiReport {
+        owner: owner.clone(),
+        repo: repo.clone(),
+        sha: sha.clone(),
+        context: "gradient".to_string(),
+        status: overall_ci_status,
+        description: None,
+        details_url: details_url.clone(),
+    };
+    if let Err(e) = reporter.report(&overall_report).await {
+        warn!(error = %e, "CI overall completion report failed");
+    }
+
+    for ep in &entry_points {
+        // Determine per-entry-point status from its root build.
+        let ci_status = match EBuild::find_by_id(ep.build).one(&state.db).await {
+            Ok(Some(build)) => match build.status {
+                BuildStatus::Completed | BuildStatus::Substituted => CiStatus::Success,
+                BuildStatus::Failed => CiStatus::Failure,
+                _ => match eval_status {
+                    EvaluationStatus::Completed => CiStatus::Success,
+                    EvaluationStatus::Failed => CiStatus::Failure,
+                    _ => CiStatus::Error,
+                },
+            },
+            _ => CiStatus::Error,
+        };
+
+        let report = CiReport {
+            owner: owner.clone(),
+            repo: repo.clone(),
+            sha: sha.clone(),
+            context: format!("gradient/{}", ep.eval),
+            status: ci_status,
+            description: None,
+            details_url: details_url.clone(),
+        };
+
+        if let Err(e) = reporter.report(&report).await {
+            warn!(error = %e, eval = %ep.eval, "CI completion report failed");
+        }
+    }
 }

@@ -5,6 +5,7 @@
  */
 
 pub mod build_executor;
+pub mod ci_reporter;
 pub mod derivation_resolver;
 pub mod email;
 pub mod flake_prefetcher;

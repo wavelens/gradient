@@ -9,6 +9,8 @@ use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use entity::evaluation_message::MessageLevel;
 use futures::stream::{self, StreamExt};
+use gradient_core::ci_reporter::{CiReport, CiStatus, parse_owner_repo, reporter_for_project};
+use gradient_core::webhooks::decrypt_webhook_secret;
 use gradient_core::sources::*;
 use gradient_core::status::{
     record_evaluation_message, update_build_status, update_evaluation_status,
@@ -62,6 +64,20 @@ pub async fn schedule_evaluation_loop(state: Arc<ServerState>) {
 #[instrument(skip(state), fields(evaluation_id = %evaluation.id))]
 pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) {
     info!("Reviewing evaluation");
+
+    // Report the top-level "gradient" check as Running so GitHub/Gitea shows
+    // the evaluation is in progress before nix eval even starts.
+    if let Some(project_id) = evaluation.project {
+        report_ci_for_evaluation(
+            Arc::clone(&state),
+            project_id,
+            evaluation.commit,
+            &evaluation.repository,
+            evaluation.id,
+            CiStatus::Running,
+        )
+        .await;
+    }
 
     let builds = evaluate(Arc::clone(&state), &evaluation).await;
 
@@ -207,6 +223,18 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                         }
                     }
                 }
+
+                // Report one CI check per entry point (Pending — builds are now queued).
+                report_ci_for_entry_points(
+                    Arc::clone(&state),
+                    project_id,
+                    evaluation.commit,
+                    &evaluation.repository,
+                    evaluation.id,
+                    &entry_point_build_ids,
+                    CiStatus::Pending,
+                )
+                .await;
             }
 
             // Transition all Created builds for this evaluation to Queued now that
@@ -278,6 +306,18 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                     Some("nix-eval".to_string())
                 }
             };
+            // Report the top-level "gradient" check as Failure — nix eval errored out.
+            if let Some(project_id) = evaluation.project {
+                report_ci_for_evaluation(
+                    Arc::clone(&state),
+                    project_id,
+                    evaluation.commit,
+                    &evaluation.repository,
+                    evaluation.id,
+                    CiStatus::Failure,
+                )
+                .await;
+            }
             update_evaluation_status_with_error(
                 Arc::clone(&state),
                 evaluation,
@@ -600,5 +640,193 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         };
 
         return new_evaluation;
+    }
+}
+
+/// Fetches the project and commit for the evaluation, then fires one CI status
+/// report per entry point using the project's configured reporter.
+///
+/// Failures are logged and swallowed — CI reporting is best-effort.
+pub async fn report_ci_for_entry_points(
+    state: Arc<ServerState>,
+    project_id: Uuid,
+    commit_id: Uuid,
+    repository_url: &str,
+    evaluation_id: Uuid,
+    entry_points: &[(Uuid, String)],
+    status: CiStatus,
+) {
+    if entry_points.is_empty() {
+        return;
+    }
+
+    let project = match EProject::find_by_id(project_id).one(&state.db).await {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            warn!(%project_id, "Project not found for CI reporting");
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, %project_id, "Failed to query project for CI reporting");
+            return;
+        }
+    };
+
+    let decrypted_token = project.ci_reporter_token.as_deref().and_then(|enc| {
+        match decrypt_webhook_secret(&state.cli.crypt_secret_file, enc) {
+            Ok(t) => Some(t),
+            Err(e) => {
+                warn!(error = %e, "Failed to decrypt CI token, skipping CI reporting");
+                None
+            }
+        }
+    });
+
+    let reporter = reporter_for_project(
+        project.ci_reporter_type.as_deref(),
+        project.ci_reporter_url.as_deref(),
+        decrypted_token.as_deref(),
+    );
+
+    let commit = match ECommit::find_by_id(commit_id).one(&state.db).await {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            warn!(%commit_id, "Commit not found for CI reporting");
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, %commit_id, "Failed to query commit for CI reporting");
+            return;
+        }
+    };
+
+    let sha = gradient_core::input::vec_to_hex(&commit.hash);
+
+    let (owner, repo) = match parse_owner_repo(repository_url) {
+        Some(pair) => pair,
+        None => {
+            warn!(repository_url, "Could not parse owner/repo for CI reporting");
+            return;
+        }
+    };
+
+    let org_name = match EOrganization::find_by_id(project.organization).one(&state.db).await {
+        Ok(Some(org)) => Some(org.name),
+        _ => None,
+    };
+
+    let details_url = org_name.map(|org| {
+        format!(
+            "{}/organization/{}/log/{}",
+            state.cli.frontend_url, org, evaluation_id
+        )
+    });
+
+    for (_build_id, eval) in entry_points {
+        let report = CiReport {
+            owner: owner.clone(),
+            repo: repo.clone(),
+            sha: sha.clone(),
+            context: format!("gradient/{}", eval),
+            status: status.clone(),
+            description: None,
+            details_url: details_url.clone(),
+        };
+
+        if let Err(e) = reporter.report(&report).await {
+            warn!(error = %e, eval, "CI status report failed");
+        }
+    }
+}
+
+/// Reports a single `"gradient"` top-level CI status for the whole evaluation.
+///
+/// - **Running** when evaluation starts (before nix eval).
+/// - **Failure** if nix eval itself fails.
+/// - **Success / Failure / Error** when all builds finish (reported from builder).
+///
+/// Links always point to the evaluation log page.
+pub async fn report_ci_for_evaluation(
+    state: Arc<ServerState>,
+    project_id: Uuid,
+    commit_id: Uuid,
+    repository_url: &str,
+    evaluation_id: Uuid,
+    status: CiStatus,
+) {
+    let project = match EProject::find_by_id(project_id).one(&state.db).await {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            warn!(%project_id, "Project not found for CI evaluation report");
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, %project_id, "Failed to query project for CI evaluation report");
+            return;
+        }
+    };
+
+    let decrypted_token = project.ci_reporter_token.as_deref().and_then(|enc| {
+        match decrypt_webhook_secret(&state.cli.crypt_secret_file, enc) {
+            Ok(t) => Some(t),
+            Err(e) => {
+                warn!(error = %e, "Failed to decrypt CI token, skipping CI evaluation report");
+                None
+            }
+        }
+    });
+
+    let reporter = reporter_for_project(
+        project.ci_reporter_type.as_deref(),
+        project.ci_reporter_url.as_deref(),
+        decrypted_token.as_deref(),
+    );
+
+    let commit = match ECommit::find_by_id(commit_id).one(&state.db).await {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            warn!(%commit_id, "Commit not found for CI evaluation report");
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, %commit_id, "Failed to query commit for CI evaluation report");
+            return;
+        }
+    };
+
+    let sha = gradient_core::input::vec_to_hex(&commit.hash);
+
+    let (owner, repo) = match parse_owner_repo(repository_url) {
+        Some(pair) => pair,
+        None => {
+            warn!(repository_url, "Could not parse owner/repo for CI evaluation report");
+            return;
+        }
+    };
+
+    let org_name = match EOrganization::find_by_id(project.organization).one(&state.db).await {
+        Ok(Some(org)) => Some(org.name),
+        _ => None,
+    };
+
+    let details_url = org_name.map(|org| {
+        format!(
+            "{}/organization/{}/log/{}",
+            state.cli.frontend_url, org, evaluation_id
+        )
+    });
+
+    let report = CiReport {
+        owner,
+        repo,
+        sha,
+        context: "gradient".to_string(),
+        status,
+        description: None,
+        details_url,
+    };
+
+    if let Err(e) = reporter.report(&report).await {
+        warn!(error = %e, "CI evaluation status report failed");
     }
 }

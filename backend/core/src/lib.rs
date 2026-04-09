@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod ci_reporter;
 pub mod consts;
 pub mod database;
 pub mod derivation;
@@ -15,6 +16,7 @@ pub mod input;
 pub mod log_storage;
 pub mod nar_storage;
 pub mod nix_flake;
+pub mod nix_url;
 pub mod permission;
 pub mod pool;
 pub mod sources;
@@ -22,6 +24,7 @@ pub mod state;
 pub mod status;
 pub mod types;
 pub mod webhooks;
+pub mod wildcard;
 
 use database::connect_db;
 use email::EmailService;

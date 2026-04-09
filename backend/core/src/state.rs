@@ -59,6 +59,17 @@ pub struct StateProject {
     /// default of 30 for new projects). Must not exceed `GRADIENT_KEEP_EVALUATIONS` if set.
     #[serde(default)]
     pub keep_evaluations: Option<i32>,
+    /// CI reporter type: `"gitea"` or `"github"`. `None` disables CI reporting.
+    #[serde(default)]
+    pub ci_reporter_type: Option<String>,
+    /// Base URL for the CI reporter (required for Gitea; defaults to github.com for GitHub).
+    #[serde(default)]
+    pub ci_reporter_url: Option<String>,
+    /// Whether a CI reporter token credential is provided. When true, state management
+    /// reads the token from the systemd credential `gradient_project_{name}_ci_token`
+    /// (loaded via `LoadCredential`), encrypts it, and stores it in the database.
+    #[serde(default)]
+    pub ci_reporter_has_token: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -366,7 +377,7 @@ async fn apply_state_to_database(
     apply_organizations(db, &config.organizations, &config.users, crypt_secret_file).await?;
 
     // Apply projects (depends on organizations and users)
-    apply_projects(db, &config.projects, &config.users, &config.organizations).await?;
+    apply_projects(db, &config.projects, &config.users, &config.organizations, crypt_secret_file).await?;
 
     // Apply servers (depends on organizations and users)
     apply_servers(db, &config.servers, &config.users, &config.organizations).await?;
@@ -579,6 +590,7 @@ async fn apply_projects(
     state_projects: &HashMap<String, StateProject>,
     _state_users: &HashMap<String, StateUser>,
     _state_orgs: &HashMap<String, StateOrganization>,
+    crypt_secret_file: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let user_map = create_user_lookup(db).await?;
     let org_map = create_org_lookup(db).await?;
@@ -599,6 +611,49 @@ async fn apply_projects(
 
         let now = Utc::now().naive_utc();
 
+        // Encrypt CI reporter token if the credential is provided (by convention:
+        // `gradient_project_{name}_ci_token` in the systemd credentials directory).
+        let encrypted_ci_token: Option<Option<String>> =
+            if state_project.ci_reporter_has_token {
+                let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
+                    .unwrap_or_else(|_| ".".to_string());
+                let token_path = format!(
+                    "{}/gradient_project_{}_ci_token",
+                    credentials_dir, state_project.name
+                );
+                match fs::read_to_string(&token_path) {
+                    Ok(token) => {
+                        let secret = load_secret_bytes(crypt_secret_file);
+                        match crypter::encrypt_with_password(&secret, token.trim()) {
+                            Some(encrypted_bytes) => {
+                                Some(Some(general_purpose::STANDARD.encode(&encrypted_bytes)))
+                            }
+                            None => {
+                                tracing::warn!(
+                                    project = %state_project.name,
+                                    "Failed to encrypt CI reporter token, skipping"
+                                );
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            path = %token_path,
+                            project = %state_project.name,
+                            "Failed to read CI reporter token credential, skipping"
+                        );
+                        None
+                    }
+                }
+            } else if state_project.ci_reporter_type.is_some() {
+                // Type is set but no token — clear any previously stored token.
+                Some(None)
+            } else {
+                None
+            };
+
         if let Some(existing) = existing_project {
             // Update existing project
             let mut proj: project::ActiveModel = existing.into();
@@ -613,6 +668,11 @@ async fn apply_projects(
             proj.managed = Set(true);
             if let Some(keep) = state_project.keep_evaluations {
                 proj.keep_evaluations = Set(keep);
+            }
+            proj.ci_reporter_type = Set(state_project.ci_reporter_type.clone());
+            proj.ci_reporter_url = Set(state_project.ci_reporter_url.clone());
+            if let Some(token) = encrypted_ci_token {
+                proj.ci_reporter_token = Set(token);
             }
             proj.update(db).await?;
             tracing::info!("Updated managed project: {}", state_project.name);
@@ -634,6 +694,9 @@ async fn apply_projects(
                 created_at: Set(now),
                 managed: Set(true),
                 keep_evaluations: Set(state_project.keep_evaluations.unwrap_or(30)),
+                ci_reporter_type: Set(state_project.ci_reporter_type.clone()),
+                ci_reporter_url: Set(state_project.ci_reporter_url.clone()),
+                ci_reporter_token: Set(encrypted_ci_token.flatten()),
             };
             proj.insert(db).await?;
             tracing::info!("Created managed project: {}", state_project.name);

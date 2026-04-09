@@ -61,5 +61,6 @@ pub fn test_cli() -> Cli {
         s3_access_key_id: None,
         s3_secret_access_key_file: None,
         s3_prefix: String::new(),
+        frontend_url: "http://127.0.0.1:8000".into(),
     }
 }

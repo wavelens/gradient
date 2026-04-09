@@ -178,6 +178,10 @@ pub struct Cli {
     /// Key prefix within the S3 bucket (e.g. "gradient/").
     #[arg(long, env = "GRADIENT_S3_PREFIX", default_value = "")]
     pub s3_prefix: String,
+    /// Public URL of the Gradient frontend, used to build links in CI status
+    /// reports (e.g. `https://gradient.example.com`). Defaults to `serve_url`.
+    #[arg(long, env = "GRADIENT_FRONTEND_URL", default_value = "http://127.0.0.1:8000")]
+    pub frontend_url: String,
 }
 
 #[derive(Debug)]

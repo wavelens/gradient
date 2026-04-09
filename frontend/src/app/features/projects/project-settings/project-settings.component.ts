@@ -68,6 +68,23 @@ export class ProjectSettingsComponent implements OnInit {
     keep_evaluations: 30,
   };
 
+  ciProviders = [
+    { label: 'None', value: '' },
+    { label: 'Gitea', value: 'gitea' },
+    { label: 'GitHub', value: 'github' },
+  ];
+
+  ciFormData = {
+    ci_reporter_type: '',
+    ci_reporter_url: '',
+    ci_reporter_token: '',
+  };
+
+  savingCi = signal(false);
+  removingCi = signal(false);
+  ciSaveSuccess = signal(false);
+  ciErrorMessage = signal<string | null>(null);
+
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
@@ -85,6 +102,11 @@ export class ProjectSettingsComponent implements OnInit {
           repository: project.repository,
           evaluation_wildcard: project.evaluation_wildcard,
           keep_evaluations: project.keep_evaluations,
+        };
+        this.ciFormData = {
+          ci_reporter_type: project.ci_reporter_type ?? '',
+          ci_reporter_url: project.ci_reporter_url ?? '',
+          ci_reporter_token: '',
         };
         this.loading.set(false);
       },
@@ -171,6 +193,50 @@ export class ProjectSettingsComponent implements OnInit {
       error: (error) => {
         this.transferError.set(error.message || 'Failed to transfer ownership.');
         this.transferring.set(false);
+      },
+    });
+  }
+
+  saveCiSettings(): void {
+    this.savingCi.set(true);
+    this.ciErrorMessage.set(null);
+    this.ciSaveSuccess.set(false);
+
+    const patch: Record<string, string> = {
+      ci_reporter_type: this.ciFormData.ci_reporter_type,
+      ci_reporter_url: this.ciFormData.ci_reporter_url,
+    };
+    if (this.ciFormData.ci_reporter_token.trim()) {
+      patch['ci_reporter_token'] = this.ciFormData.ci_reporter_token;
+    }
+
+    this.projectsService.updateProject(this.orgName, this.projectName, patch as any).subscribe({
+      next: () => {
+        this.savingCi.set(false);
+        this.ciSaveSuccess.set(true);
+        this.ciFormData.ci_reporter_token = '';
+        this.loadProject();
+      },
+      error: (error) => {
+        this.ciErrorMessage.set(error.message || 'Failed to save integration settings.');
+        this.savingCi.set(false);
+      },
+    });
+  }
+
+  removeCiIntegration(): void {
+    this.removingCi.set(true);
+    this.ciErrorMessage.set(null);
+    this.ciSaveSuccess.set(false);
+    this.projectsService.removeIntegration(this.orgName, this.projectName).subscribe({
+      next: () => {
+        this.removingCi.set(false);
+        this.ciSaveSuccess.set(true);
+        this.loadProject();
+      },
+      error: (error) => {
+        this.ciErrorMessage.set(error.message || 'Failed to remove integration.');
+        this.removingCi.set(false);
       },
     });
   }

@@ -30,6 +30,12 @@ pub struct Model {
     pub created_at: NaiveDateTime,
     pub managed: bool,
     pub keep_evaluations: i32,
+    /// CI reporter backend: `"gitea"` or `null` (disabled).
+    pub ci_reporter_type: Option<String>,
+    /// Base URL of the CI host (e.g. `"https://gitea.example.com"`).
+    pub ci_reporter_url: Option<String>,
+    /// API token for the CI host.
+    pub ci_reporter_token: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

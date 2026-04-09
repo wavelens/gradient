@@ -178,6 +178,27 @@
         type = types.str;
         description = "Username of the user who created this project";
       };
+
+      ci_reporter_type = mkOption {
+        type = types.nullOr (types.enum [ "gitea" "github" ]);
+        default = null;
+        description = "CI reporter type. Null disables CI status reporting";
+      };
+
+      ci_reporter_url = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "Base URL for the CI reporter (required for Gitea; omit to use github.com for GitHub)";
+      };
+
+      ci_reporter_token_file = mkOption {
+        type = types.nullOr types.path;
+        default = null;
+        description = ''
+          Path to a file containing the CI reporter API token.
+          The token is loaded as a systemd credential and encrypted into the database at startup.
+        '';
+      };
     };
   });
 

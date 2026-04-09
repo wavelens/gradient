@@ -14,12 +14,14 @@ use axum::{Extension, Json};
 use chrono::Utc;
 use core::consts::*;
 use core::database::{get_any_organization_by_name, get_organization_by_name, get_project_by_name};
-use core::input::{check_index_name, valid_evaluation_wildcard, validate_display_name, vec_to_hex};
+use core::input::{check_index_name, validate_display_name, vec_to_hex};
+use core::webhooks::{decrypt_webhook_secret, encrypt_webhook_secret};
+use core::nix_url::RepositoryUrl;
+use core::wildcard::Wildcard;
 use core::sources::check_project_updates;
 use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
-use git_url_parse::GitUrl;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
@@ -49,6 +51,9 @@ pub struct ProjectResponse {
     pub managed: bool,
     pub keep_evaluations: i32,
     pub can_edit: bool,
+    pub ci_reporter_type: Option<String>,
+    // Base URL of the CI host. Token is intentionally omitted from GET responses.
+    pub ci_reporter_url: Option<String>,
 }
 
 /// Returns true if the user has Admin or Write role in the organization.
@@ -89,6 +94,9 @@ pub struct PatchProjectRequest {
     pub repository: Option<String>,
     pub evaluation_wildcard: Option<String>,
     pub keep_evaluations: Option<i32>,
+    pub ci_reporter_type: Option<String>,
+    pub ci_reporter_url: Option<String>,
+    pub ci_reporter_token: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -240,6 +248,8 @@ pub async fn get(
                 created_at: p.created_at,
                 managed: p.managed,
                 can_edit,
+                ci_reporter_type: p.ci_reporter_type,
+                ci_reporter_url: p.ci_reporter_url,
             }
         })
         .collect();
@@ -269,8 +279,9 @@ pub async fn put(
         return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
     }
 
-    GitUrl::parse(&body.repository)
-        .map_err(|_| WebError::BadRequest("Invalid Repository URL".to_string()))?;
+    body.repository
+        .parse::<RepositoryUrl>()
+        .map_err(|e| WebError::BadRequest(e.to_string()))?;
 
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
@@ -290,12 +301,10 @@ pub async fn put(
         return Err(WebError::already_exists("Project Name"));
     }
 
-    let evaluation_wildcard = body.evaluation_wildcard.trim().to_string();
-    if !valid_evaluation_wildcard(&evaluation_wildcard) {
-        return Err(WebError::BadRequest(
-            "Invalid Evaluation Wildcard".to_string(),
-        ));
-    }
+    let evaluation_wildcard = body.evaluation_wildcard.trim()
+        .parse::<Wildcard>()
+        .map_err(|e| WebError::BadRequest(e.to_string()))?
+        .to_string();
 
     let project = AProject {
         id: Set(Uuid::new_v4()),
@@ -313,6 +322,9 @@ pub async fn put(
         created_at: Set(Utc::now().naive_utc()),
         managed: Set(false),
         keep_evaluations: Set(30),
+        ci_reporter_type: Set(None),
+        ci_reporter_url: Set(None),
+        ci_reporter_token: Set(None),
     };
 
     let project = project.insert(&state.db).await?;
@@ -386,6 +398,8 @@ pub async fn get_project(
             managed: project.managed,
             keep_evaluations: project.keep_evaluations,
             can_edit,
+            ci_reporter_type: project.ci_reporter_type,
+            ci_reporter_url: project.ci_reporter_url,
         },
     }))
 }
@@ -452,20 +466,17 @@ pub async fn patch_project(
     }
 
     if let Some(repository) = body.repository {
-        GitUrl::parse(&repository)
-            .map_err(|_| WebError::BadRequest("Invalid Repository URL".to_string()))?;
-
-        aproject.repository = Set(repository.clone());
+        repository
+            .parse::<RepositoryUrl>()
+            .map_err(|e| WebError::BadRequest(e.to_string()))?;
+        aproject.repository = Set(repository);
     }
 
     if let Some(evaluation_wildcard) = body.evaluation_wildcard {
-        let evaluation_wildcard = evaluation_wildcard.trim().to_string();
-        if !valid_evaluation_wildcard(&evaluation_wildcard) {
-            return Err(WebError::BadRequest(
-                "Invalid Evaluation Wildcard".to_string(),
-            ));
-        }
-
+        let evaluation_wildcard = evaluation_wildcard.trim()
+            .parse::<Wildcard>()
+            .map_err(|e| WebError::BadRequest(e.to_string()))?
+            .to_string();
         aproject.evaluation_wildcard = Set(evaluation_wildcard);
     }
 
@@ -483,6 +494,23 @@ pub async fn patch_project(
             )));
         }
         aproject.keep_evaluations = Set(keep);
+    }
+
+    // CI reporter — treat empty string as "remove" (set to None)
+    if let Some(ci_type) = body.ci_reporter_type {
+        aproject.ci_reporter_type = Set(if ci_type.is_empty() { None } else { Some(ci_type) });
+    }
+    if let Some(ci_url) = body.ci_reporter_url {
+        aproject.ci_reporter_url = Set(if ci_url.is_empty() { None } else { Some(ci_url) });
+    }
+    if let Some(ci_token) = body.ci_reporter_token {
+        if ci_token.is_empty() {
+            aproject.ci_reporter_token = Set(None);
+        } else {
+            let encrypted = encrypt_webhook_secret(&state.cli.crypt_secret_file, &ci_token)
+                .map_err(|e| WebError::BadRequest(format!("Failed to encrypt CI token: {}", e)))?;
+            aproject.ci_reporter_token = Set(Some(encrypted));
+        }
     }
 
     aproject.force_evaluation = Set(true);
@@ -530,6 +558,44 @@ pub async fn delete_project(
     };
 
     Ok(Json(res))
+}
+
+pub async fn delete_project_integration(
+    state: State<Arc<ServerState>>,
+    Extension(user): Extension<MUser>,
+    Path((organization, project)): Path<(String, String)>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let (organization, project): (MOrganization, MProject) = get_project_by_name(
+        state.0.clone(),
+        user.id,
+        organization.clone(),
+        project.clone(),
+    )
+    .await?
+    .ok_or_else(|| WebError::not_found("Project"))?;
+
+    if !user_can_edit(&state, user.id, organization.id).await? {
+        return Err(WebError::Forbidden(
+            "You do not have permission to modify this project.".to_string(),
+        ));
+    }
+
+    if project.managed {
+        return Err(WebError::Forbidden(
+            "Cannot modify state-managed project.".to_string(),
+        ));
+    }
+
+    let mut aproject: AProject = project.into();
+    aproject.ci_reporter_type = Set(None);
+    aproject.ci_reporter_url = Set(None);
+    aproject.ci_reporter_token = Set(None);
+    aproject.update(&state.db).await?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: "Integration removed".to_string(),
+    }))
 }
 
 pub async fn post_project_active(
