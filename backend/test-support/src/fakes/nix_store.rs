@@ -7,8 +7,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use gradient_core::executer::BuildOutputInfo;
-use gradient_core::pool::NixStoreProvider;
-use nix_daemon::PathInfo;
+use gradient_core::pool::{NixStoreProvider, PathInfo};
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 

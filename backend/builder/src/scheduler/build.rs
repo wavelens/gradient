@@ -96,7 +96,6 @@ async fn parse_derivation_file(
 async fn create_basic_derivation(
     state: &Arc<ServerState>,
     derivation: &MDerivation,
-    _local_daemon: &mut LocalNixStore,
     dependencies: Vec<String>,
 ) -> anyhow::Result<BasicDerivation> {
     let (builder, args, env, input_srcs, output_info) =
@@ -241,7 +240,7 @@ pub async fn schedule_build(
     }
 
     let basic_derivation =
-        match create_basic_derivation(&state, &derivation, &mut local_daemon, dependencies.clone())
+        match create_basic_derivation(&state, &derivation, dependencies.clone())
             .await
         {
             Ok(d) => d,
@@ -993,7 +992,7 @@ async fn get_build_dependencies(
 /// filtering out any that are still missing from the local store.
 async fn get_build_dependencies_sorted(
     state: Arc<ServerState>,
-    local_store: &mut LocalNixStore,
+    local_store: &mut LocalDaemonClient,
     build: &MBuild,
 ) -> Result<Vec<String>, String> {
     let direct = match get_build_dependencies(Arc::clone(&state), build).await {

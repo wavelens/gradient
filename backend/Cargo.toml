@@ -29,8 +29,13 @@ async-trait      = "0.1"
 base64           = "0.22"
 chrono           = "0.4"
 futures          = "0.3"
-harmonia-nar      = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
-harmonia-utils-io = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-nar           = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-protocol      = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-store-core    = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-store-remote  = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-utils-base-encoding = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-utils-hash    = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-utils-io      = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
 git2             = "0.20"
 hmac             = "0.13"
 nix-bindings     = { git = "https://github.com/NotAShelf/nix-bindings" }
@@ -65,4 +70,11 @@ tracing-subscriber = { workspace = true }
 web              = { workspace = true }
 
 [patch.crates-io]
-harmonia-utils-io = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-nar             = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-protocol        = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-protocol-derive = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-store-core      = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-store-db        = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-utils-base-encoding = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-utils-hash      = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
+harmonia-utils-io        = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }

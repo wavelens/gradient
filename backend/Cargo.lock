@@ -278,7 +278,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -289,7 +289,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -863,6 +863,9 @@ name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "bytesize"
@@ -1117,6 +1120,10 @@ dependencies = [
  "futures",
  "git-url-parse",
  "git2",
+ "harmonia-protocol",
+ "harmonia-store-core",
+ "harmonia-store-remote",
+ "harmonia-utils-hash",
  "hex",
  "hmac 0.13.0",
  "lettre",
@@ -1379,6 +1386,12 @@ dependencies = [
  "quote",
  "syn 2.0.117",
 ]
+
+[[package]]
+name = "data-encoding"
+version = "2.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7a1e2f27636f116493b8b860f5546edb47c8d8f8ea73e1d2a20be88e28d1fea"
 
 [[package]]
 name = "debugid"
@@ -1666,7 +1679,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2136,6 +2149,105 @@ dependencies = [
 ]
 
 [[package]]
+name = "harmonia-protocol"
+version = "3.0.0"
+source = "git+https://github.com/nix-community/harmonia.git?tag=harmonia-v3.0.0#f0672e5b502c14d506ea5e6acca7729a16f14436"
+dependencies = [
+ "async-stream",
+ "bstr",
+ "bytes",
+ "derive_more",
+ "futures",
+ "harmonia-nar",
+ "harmonia-protocol-derive",
+ "harmonia-store-core",
+ "harmonia-utils-hash",
+ "harmonia-utils-io",
+ "libc",
+ "num_enum",
+ "pin-project-lite",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "harmonia-protocol-derive"
+version = "3.0.0"
+source = "git+https://github.com/nix-community/harmonia.git?tag=harmonia-v3.0.0#f0672e5b502c14d506ea5e6acca7729a16f14436"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "harmonia-store-core"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/nix-community/harmonia.git?tag=harmonia-v3.0.0#f0672e5b502c14d506ea5e6acca7729a16f14436"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "derive_more",
+ "harmonia-utils-base-encoding",
+ "harmonia-utils-hash",
+ "num_enum",
+ "ring",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "zerocopy",
+]
+
+[[package]]
+name = "harmonia-store-remote"
+version = "3.0.0"
+source = "git+https://github.com/nix-community/harmonia.git?tag=harmonia-v3.0.0#f0672e5b502c14d506ea5e6acca7729a16f14436"
+dependencies = [
+ "async-stream",
+ "futures",
+ "harmonia-nar",
+ "harmonia-protocol",
+ "harmonia-store-core",
+ "harmonia-utils-io",
+ "prometheus",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "harmonia-utils-base-encoding"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/nix-community/harmonia.git?tag=harmonia-v3.0.0#f0672e5b502c14d506ea5e6acca7729a16f14436"
+dependencies = [
+ "data-encoding",
+ "derive_more",
+ "serde",
+]
+
+[[package]]
+name = "harmonia-utils-hash"
+version = "0.0.0-alpha.0"
+source = "git+https://github.com/nix-community/harmonia.git?tag=harmonia-v3.0.0#f0672e5b502c14d506ea5e6acca7729a16f14436"
+dependencies = [
+ "data-encoding",
+ "derive_more",
+ "harmonia-utils-base-encoding",
+ "md5",
+ "ring",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "harmonia-utils-io"
 version = "0.0.0-alpha.0"
 source = "git+https://github.com/nix-community/harmonia.git?tag=harmonia-v3.0.0#f0672e5b502c14d506ea5e6acca7729a16f14436"
@@ -2396,7 +2508,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -2941,6 +3053,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "md5"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae960838283323069879657ca3de837e9f7bbb4c7bf6ea7f1b290d5e9476d2e0"
+
+[[package]]
 name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3159,7 +3277,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3943,6 +4061,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "prometheus"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ca5326d8d0b950a9acd87e6a3f94745394f62e4dae1b1ee22b2bc0c394af43a"
+dependencies = [
+ "cfg-if",
+ "fnv",
+ "lazy_static",
+ "memchr",
+ "parking_lot",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "ptr_meta"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3985,7 +4117,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -4023,7 +4155,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.6.3",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.60.2",
 ]
@@ -4453,7 +4585,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4512,7 +4644,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5165,7 +5297,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5589,7 +5721,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6426,7 +6558,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -7053,3 +7185,8 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "harmonia-store-db"
+version = "3.0.0"
+source = "git+https://github.com/nix-community/harmonia.git?tag=harmonia-v3.0.0#f0672e5b502c14d506ea5e6acca7729a16f14436"

@@ -15,7 +15,6 @@ use super::sources::FlakePrefetcher;
 use super::webhooks::WebhookClient;
 use clap::Parser;
 use entity::*;
-use nix_daemon::nix::DaemonStore;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
@@ -241,6 +240,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> AsyncIo for T {}
 /// underlying transport is a Unix socket, a stdio pipe, or a TCP channel.
 pub struct BoxedIo(Box<dyn AsyncIo>);
 
+impl std::fmt::Debug for BoxedIo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BoxedIo").finish_non_exhaustive()
+    }
+}
+
 impl BoxedIo {
     pub fn new(io: impl AsyncIo + 'static) -> Self {
         Self(Box::new(io))
@@ -356,10 +361,6 @@ pub struct BuildOutputPath {
 }
 
 pub type ListResponse = Vec<ListItem>;
-/// A Nix daemon store connection over any transport (Unix socket, stdio pipe, SSH channel).
-pub type NixStore = DaemonStore<BoxedIo>;
-/// Alias kept for call-sites that previously used the local-store enum.
-pub type LocalNixStore = DaemonStore<BoxedIo>;
 
 pub type EApi = api::Entity;
 pub type EBuild = build::Entity;

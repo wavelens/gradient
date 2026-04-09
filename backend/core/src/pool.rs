@@ -6,23 +6,38 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use nix_daemon::{PathInfo, Progress, Store};
-use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, Mutex};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use harmonia_protocol::types::DaemonStore as _;
+use harmonia_store_core::store_path::StorePath;
+use harmonia_utils_hash::fmt::CommonHash as _;
 
 use super::executer::{
-    BuildOutputInfo, get_build_outputs_from_derivation, get_local_store, get_missing_builds,
+    BuildOutputInfo, get_build_outputs_from_derivation, get_missing_builds,
     get_pathinfo, nix_store_path,
 };
-use super::types::LocalNixStore;
+
+pub use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
 
 const GCROOTS_DIR: &str = "/nix/var/nix/gcroots/gradient";
+
+/// Gradient's own `PathInfo` — a thin, string-based representation of the
+/// fields consumers actually need. Avoids leaking harmonia protocol types
+/// throughout the codebase.
+#[derive(Debug, Clone)]
+pub struct PathInfo {
+    pub deriver: Option<String>,
+    pub references: Vec<String>,
+    /// NAR hash in SRI format, e.g. `sha256-<base64>`.
+    pub nar_hash: String,
+    pub nar_size: u64,
+    pub ultimate: bool,
+    pub signatures: Vec<String>,
+    pub ca: Option<String>,
+}
 
 /// High-level abstraction over a pool of Nix daemon connections.
 ///
 /// Production impl is `LocalNixStoreProvider` (below) which delegates to
-/// `NixStorePool` + the existing free functions in `core::executer`.
+/// harmonia's `ConnectionPool` + the existing free functions in `core::executer`.
 /// Tests use `test_support::fakes::FakeNixStoreProvider`.
 #[async_trait]
 pub trait NixStoreProvider: Send + Sync + std::fmt::Debug + 'static {
@@ -57,18 +72,31 @@ pub trait NixStoreProvider: Send + Sync + std::fmt::Debug + 'static {
     async fn ensure_path(&self, store_path: String) -> Result<()>;
 }
 
-/// Production `NixStoreProvider` backed by a `NixStorePool` of real Nix daemon
-/// connections.
-#[derive(Debug)]
+/// Production `NixStoreProvider` backed by harmonia's `ConnectionPool`.
+#[derive(Clone)]
 pub struct LocalNixStoreProvider {
-    pool: NixStorePool,
+    pool: ConnectionPool,
+}
+
+impl std::fmt::Debug for LocalNixStoreProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalNixStoreProvider").finish_non_exhaustive()
+    }
 }
 
 impl LocalNixStoreProvider {
     pub fn new(max: usize) -> Self {
+        let config = PoolConfig {
+            max_size: max,
+            ..Default::default()
+        };
         Self {
-            pool: NixStorePool::new(max),
+            pool: ConnectionPool::new("/nix/var/nix/daemon-socket/socket", config),
         }
+    }
+
+    pub fn pool(&self) -> &ConnectionPool {
+        &self.pool
     }
 }
 
@@ -79,21 +107,21 @@ impl NixStoreProvider for LocalNixStoreProvider {
     }
 
     async fn query_pathinfo(&self, path: String) -> Result<Option<PathInfo>> {
-        let mut store = self
+        let mut guard = self
             .pool
             .acquire()
             .await
-            .context("acquire store for pathinfo")?;
-        get_pathinfo(nix_store_path(&path), &mut *store).await
+            .map_err(|e| anyhow::anyhow!("acquire store for pathinfo: {}", e))?;
+        get_pathinfo(nix_store_path(&path), &mut guard).await
     }
 
     async fn get_build_outputs(&self, derivation_path: String) -> Result<Vec<BuildOutputInfo>> {
-        let mut store = self
+        let mut guard = self
             .pool
             .acquire()
             .await
-            .context("acquire store for build outputs")?;
-        get_build_outputs_from_derivation(nix_store_path(&derivation_path), &mut *store).await
+            .map_err(|e| anyhow::anyhow!("acquire store for build outputs: {}", e))?;
+        get_build_outputs_from_derivation(nix_store_path(&derivation_path), &mut guard).await
     }
 
     async fn add_gcroot(&self, name: String, store_path: String) -> Result<()> {
@@ -119,9 +147,8 @@ impl NixStoreProvider for LocalNixStoreProvider {
     }
 
     async fn delete_path(&self, store_path: String) -> Result<bool> {
-        // The Nix daemon does not expose a `delete-path` operation, so shell
-        // out to `nix store delete`. The path is left alive (and we return
-        // `false`) when it is still reachable from a GC root.
+        // Use `nix store delete` for now — harmonia's `collect_garbage(DeleteSpecific)`
+        // can replace this later.
         let output = tokio::process::Command::new("nix")
             .arg("store")
             .arg("delete")
@@ -133,98 +160,38 @@ impl NixStoreProvider for LocalNixStoreProvider {
     }
 
     async fn ensure_path(&self, store_path: String) -> Result<()> {
-        let mut store = self
+        let sp = StorePath::from_base_path(strip_store_prefix(&store_path))
+            .map_err(|e| anyhow::anyhow!("Invalid store path {}: {}", store_path, e))?;
+        let mut guard = self
             .pool
             .acquire()
             .await
-            .context("acquire store for ensure_path")?;
-        store
-            .ensure_path(nix_store_path(&store_path))
-            .result()
+            .map_err(|e| anyhow::anyhow!("acquire store for ensure_path: {}", e))?;
+        let _: () = guard
+            .client()
+            .ensure_path(&sp)
             .await
-            .with_context(|| format!("ensure_path {}", store_path))
+            .map_err(|e| anyhow::anyhow!("ensure_path {}: {}", store_path, e))?;
+        Ok(())
     }
 }
 
-/// Connection pool for local Nix daemon connections (Unix socket / subprocess).
-///
-/// Limits the number of simultaneous open connections via a semaphore.
-/// Idle connections are reused to avoid reconnect overhead.
-pub struct NixStorePool {
-    idle: Arc<Mutex<Vec<LocalNixStore>>>,
-    semaphore: Arc<Semaphore>,
-}
-
-impl std::fmt::Debug for NixStorePool {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NixStorePool")
-            .field("available_permits", &self.semaphore.available_permits())
-            .finish()
+/// Convert harmonia's `UnkeyedValidPathInfo` into our local `PathInfo`.
+pub fn convert_valid_path_info(
+    vi: &harmonia_store_remote::UnkeyedValidPathInfo,
+) -> PathInfo {
+    PathInfo {
+        deriver: vi.deriver.as_ref().map(|d| d.to_string()),
+        references: vi.references.iter().map(|r| r.to_string()).collect(),
+        nar_hash: format!("{}", vi.nar_hash.as_sri()),
+        nar_size: vi.nar_size,
+        ultimate: vi.ultimate,
+        signatures: vi.signatures.iter().map(|s| s.to_string()).collect(),
+        ca: vi.ca.as_ref().map(|ca| ca.to_string()),
     }
 }
 
-/// A checked-out connection from `NixStorePool`.
-///
-/// Implements `DerefMut<Target = LocalNixStore>` so callers can use it
-/// as a `&mut LocalNixStore`. Returns the connection to the pool on drop.
-pub struct PooledStore {
-    store: Option<LocalNixStore>,
-    idle: Arc<Mutex<Vec<LocalNixStore>>>,
-    _permit: OwnedSemaphorePermit,
-}
-
-impl NixStorePool {
-    pub fn new(max: usize) -> Self {
-        Self {
-            idle: Arc::new(Mutex::new(Vec::new())),
-            semaphore: Arc::new(Semaphore::new(max)),
-        }
-    }
-
-    /// Acquire a connection, blocking until one is available.
-    ///
-    /// Returns an idle connection if one exists, otherwise opens a new one.
-    pub async fn acquire(&self) -> Result<PooledStore> {
-        let permit = Arc::clone(&self.semaphore)
-            .acquire_owned()
-            .await
-            .map_err(|_| anyhow::anyhow!("NixStorePool semaphore closed"))?;
-
-        let store = self.idle.lock().unwrap().pop();
-
-        let store = match store {
-            Some(s) => s,
-            None => get_local_store(None).await?,
-        };
-
-        Ok(PooledStore {
-            store: Some(store),
-            idle: Arc::clone(&self.idle),
-            _permit: permit,
-        })
-    }
-}
-
-impl Deref for PooledStore {
-    type Target = LocalNixStore;
-
-    fn deref(&self) -> &Self::Target {
-        self.store.as_ref().unwrap()
-    }
-}
-
-impl DerefMut for PooledStore {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.store.as_mut().unwrap()
-    }
-}
-
-impl Drop for PooledStore {
-    fn drop(&mut self) {
-        if let Some(store) = self.store.take()
-            && let Ok(mut idle) = self.idle.lock()
-        {
-            idle.push(store);
-        }
-    }
+/// Strips `/nix/store/` prefix, returning just the hash-name component.
+fn strip_store_prefix(path: &str) -> &str {
+    path.strip_prefix("/nix/store/").unwrap_or(path)
 }
