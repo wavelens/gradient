@@ -5,6 +5,7 @@
  */
 
 use anyhow::{Context, Result};
+use futures::StreamExt as _;
 use object_store::{ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
 pub use object_store::{MultipartUpload, WriteMultipart};
 use std::sync::Arc;
@@ -154,9 +155,32 @@ impl NarStore {
     }
 
     /// Returns the local base path when using local-disk storage; `None` for S3.
-    /// Used by the orphan-file cleanup scan which requires directory listing.
     pub fn local_base(&self) -> Option<&str> {
         self.local_base.as_deref()
+    }
+
+    /// Lists all NAR hashes currently present in the store (both local and S3).
+    /// Returns the full hash strings as stored (e.g. `"ab12cd34..."`).
+    pub async fn list_hashes(&self) -> Result<Vec<String>> {
+        let prefix = Path::from(format!("{}nars", self.prefix));
+        let mut stream = self.inner.list(Some(&prefix));
+        let mut hashes = Vec::new();
+        while let Some(item) = stream.next().await {
+            let meta = item.context("Failed to list NAR store")?;
+            // Path format: `{prefix}nars/{first2}/{rest}.nar.zst`
+            let p = meta.location.to_string();
+            if let Some(name) = p.split('/').next_back() {
+                if let Some(stem) = name.strip_suffix(".nar.zst") {
+                    // Reconstruct full hash from parent dir + stem.
+                    let parts: Vec<&str> = p.split('/').collect();
+                    if parts.len() >= 2 {
+                        let dir = parts[parts.len() - 2];
+                        hashes.push(format!("{}{}", dir, stem));
+                    }
+                }
+            }
+        }
+        Ok(hashes)
     }
 }
 

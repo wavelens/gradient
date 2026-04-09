@@ -18,6 +18,7 @@ use sea_orm::{
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Semaphore;
 use tokio::time;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -55,15 +56,16 @@ pub async fn cache_loop(state: Arc<ServerState>) {
         None
     };
 
-    let concurrency = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4);
+    let concurrency = state.cli.max_concurrent_nar_uploads;
+    let sem = Arc::new(Semaphore::new(concurrency));
     let mut interval = time::interval(Duration::from_secs(5));
     let mut cleanup_counter = 0;
     const CLEANUP_INTERVAL: u32 = 720;
 
     loop {
-        let outputs = get_next_uncached_derivation_outputs(Arc::clone(&state), concurrency).await;
+        // Fetch slightly more than the concurrency limit so we always have
+        // work queued; the semaphore caps actual in-flight uploads.
+        let outputs = get_next_uncached_derivation_outputs(Arc::clone(&state), concurrency * 2).await;
 
         if outputs.is_empty() {
             interval.tick().await;
@@ -96,13 +98,23 @@ pub async fn cache_loop(state: Arc<ServerState>) {
                 {
                     error!(error = %e, "NAR TTL GC failed");
                 }
+                if let Err(e) = validate_cached_outputs(Arc::clone(&state)).await {
+                    error!(error = %e, "Cached output validation failed");
+                }
+                if let Err(e) = sign_missing_signatures(Arc::clone(&state)).await {
+                    error!(error = %e, "Missing signature signing failed");
+                }
             }
         } else {
             let tasks: Vec<_> = outputs
                 .into_iter()
                 .map(|output| {
                     let s = Arc::clone(&state);
-                    tokio::spawn(async move { cache_derivation_output(s, output).await })
+                    let permit = Arc::clone(&sem);
+                    tokio::spawn(async move {
+                        let _guard = permit.acquire_owned().await;
+                        cache_derivation_output(s, output).await;
+                    })
                 })
                 .collect();
             for task in tasks {
@@ -149,11 +161,24 @@ pub async fn cache_derivation_output(state: Arc<ServerState>, output: MDerivatio
 
     let path = get_path_from_derivation_output(output.clone());
 
+    // Ensure the path is present locally — for substituted builds it may not
+    // have been fetched yet.
     match state.nix_store.query_pathinfo(path.clone()).await {
         Ok(Some(_)) => {}
         Ok(None) => {
-            warn!(path = %path, "Path not found in local store, skipping cache");
-            return;
+            // Try to substitute from binary caches before giving up.
+            if let Err(e) = state.nix_store.ensure_path(path.clone()).await {
+                warn!(error = %e, path = %path, "Path not in local store and substitution failed, skipping cache");
+                return;
+            }
+            // Verify it is now present.
+            match state.nix_store.query_pathinfo(path.clone()).await {
+                Ok(Some(_)) => {}
+                _ => {
+                    warn!(path = %path, "Path still not in local store after substitution, skipping cache");
+                    return;
+                }
+            }
         }
         Err(e) => {
             error!(error = %e, path = %path, "Failed to query local store, skipping cache");
@@ -533,6 +558,101 @@ fn nix_base32_sha256(data: &[u8]) -> String {
     nix_base32_encode(digest.as_ref())
 }
 
+/// Checks every `is_cached = true` output against the NAR store.
+/// Resets `is_cached = false` (and clears file metadata) for any output
+/// whose NAR file is no longer present so the cache loop will re-pack it.
+async fn validate_cached_outputs(state: Arc<ServerState>) -> Result<()> {
+    let cached = EDerivationOutput::find()
+        .filter(CDerivationOutput::IsCached.eq(true))
+        .all(&state.db)
+        .await
+        .context("Failed to query cached outputs for validation")?;
+
+    let mut reset = 0usize;
+    for output in cached {
+        match state.nar_storage.get(&output.hash).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                warn!(hash = %output.hash, package = %output.package, "NAR file missing for cached output, resetting is_cached");
+                let mut active = output.into_active_model();
+                active.is_cached = Set(false);
+                active.file_hash = Set(None);
+                active.file_size = Set(None);
+                active.nar_size = Set(None);
+                if let Err(e) = active.update(&state.db).await {
+                    error!(error = %e, "Failed to reset is_cached for missing NAR");
+                } else {
+                    reset += 1;
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, hash = %output.hash, "Failed to check NAR file presence");
+            }
+        }
+    }
+
+    if reset > 0 {
+        info!(count = reset, "Reset is_cached for outputs with missing NARs");
+    }
+    Ok(())
+}
+
+/// Signs any `is_cached = true` outputs that are missing a signature for
+/// one or more of the organization's active caches. Handles the case where
+/// a cache is added after outputs were already packed.
+async fn sign_missing_signatures(state: Arc<ServerState>) -> Result<()> {
+    let cached = EDerivationOutput::find()
+        .filter(CDerivationOutput::IsCached.eq(true))
+        .all(&state.db)
+        .await
+        .context("Failed to query cached outputs for signature check")?;
+
+    for output in cached {
+        let derivation = match EDerivation::find_by_id(output.derivation)
+            .one(&state.db)
+            .await?
+        {
+            Some(d) => d,
+            None => continue,
+        };
+
+        let cache_ids: Vec<Uuid> = match EOrganizationCache::find()
+            .filter(COrganizationCache::Organization.eq(derivation.organization))
+            .all(&state.db)
+            .await
+        {
+            Ok(ocs) => ocs.into_iter().map(|oc| oc.cache).collect(),
+            Err(_) => continue,
+        };
+
+        let active_caches = match ECache::find()
+            .filter(CCache::Id.is_in(cache_ids))
+            .filter(CCache::Active.eq(true))
+            .all(&state.db)
+            .await
+        {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        for cache in active_caches {
+            let already_signed = EDerivationOutputSignature::find()
+                .filter(CDerivationOutputSignature::DerivationOutput.eq(output.id))
+                .filter(CDerivationOutputSignature::Cache.eq(cache.id))
+                .one(&state.db)
+                .await
+                .unwrap_or(None)
+                .is_some();
+
+            if !already_signed {
+                sign_derivation_output(Arc::clone(&state), cache, output.clone()).await;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 async fn get_next_uncached_derivation_outputs(
     state: Arc<ServerState>,
     limit: usize,
@@ -748,59 +868,37 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
 }
 
 pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()> {
-    let Some(base_path) = state.nar_storage.local_base() else {
-        return Ok(());
-    };
+    let hashes = state
+        .nar_storage
+        .list_hashes()
+        .await
+        .context("Failed to list NAR store")?;
 
-    let cache_dir = format!("{}/nars", base_path);
+    let mut removed = 0usize;
+    for hash in hashes {
+        let exists = EDerivationOutput::find()
+            .filter(
+                Condition::all()
+                    .add(CDerivationOutput::Hash.eq(hash.clone()))
+                    .add(CDerivationOutput::IsCached.eq(true)),
+            )
+            .one(&state.db)
+            .await
+            .context("Failed to check derivation output")?
+            .is_some();
 
-    if !std::path::Path::new(&cache_dir).exists() {
-        return Ok(());
-    }
-
-    let mut orphaned_files = Vec::new();
-
-    for entry in std::fs::read_dir(&cache_dir).context("Failed to read cache directory")? {
-        let entry = entry.context("Failed to read directory entry")?;
-        let path = entry.path();
-
-        if path.is_dir() {
-            for subentry in std::fs::read_dir(&path).context("Failed to read subdirectory")? {
-                let subentry = subentry.context("Failed to read subdirectory entry")?;
-                let file_path = subentry.path();
-
-                if file_path.extension().and_then(|s| s.to_str()) == Some("zst")
-                    && let Some(stem) = file_path.file_stem().and_then(|s| s.to_str())
-                    && let Some(hash_part) = stem.strip_suffix(".nar")
-                {
-                    let parent_dir = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                    let full_hash = format!("{}{}", parent_dir, hash_part);
-
-                    let exists = EDerivationOutput::find()
-                        .filter(
-                            Condition::all()
-                                .add(CDerivationOutput::Hash.eq(full_hash.clone()))
-                                .add(CDerivationOutput::IsCached.eq(true)),
-                        )
-                        .one(&state.db)
-                        .await
-                        .context("Failed to check if derivation output exists")?
-                        .is_some();
-
-                    if !exists {
-                        orphaned_files.push(file_path);
-                    }
-                }
+        if !exists {
+            if let Err(e) = state.nar_storage.delete(&hash).await {
+                error!(hash = %hash, error = %e, "Failed to remove orphaned NAR");
+            } else {
+                debug!(hash = %hash, "Removed orphaned NAR");
+                removed += 1;
             }
         }
     }
 
-    for file_path in orphaned_files {
-        if let Err(e) = std::fs::remove_file(&file_path) {
-            error!(file_path = ?file_path, error = %e, "Failed to remove orphaned cache file");
-        } else {
-            debug!(file_path = ?file_path, "Removed orphaned cache file");
-        }
+    if removed > 0 {
+        info!(count = removed, "Removed orphaned NAR files");
     }
 
     Ok(())
