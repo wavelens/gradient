@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use chrono::Utc;
 use core::sources::{
     clear_key, format_cache_key, get_hash_from_path, get_path_from_derivation_output, write_key,
@@ -211,6 +211,12 @@ pub async fn cache_derivation_output(state: Arc<ServerState>, output: MDerivatio
     active.file_hash = Set(Some(file_hash));
     active.file_size = Set(Some(file_size as i64));
     active.nar_size = Set(Some(nar_size as i64));
+    info!(
+        hash = %output.hash,
+        file_size = file_size,
+        nar_size = nar_size,
+        "Packed and uploaded NAR"
+    );
     active.is_cached = Set(true);
 
     if let Err(e) = active.update(&state.db).await {
@@ -345,39 +351,23 @@ pub async fn sign_derivation_output(
         error!(error = %e, "Failed to clear cache key file");
     }
 
-    let info_output = match Command::new(state.cli.binpath_nix.clone())
-        .arg("path-info")
-        .arg("--sigs")
-        .arg(path.clone())
-        .output()
-        .await
-    {
-        Ok(o) => o,
+    let pathinfo = match state.nix_store.query_pathinfo(path.clone()).await {
+        Ok(Some(info)) => info,
+        Ok(None) => {
+            error!(path = %path, "Path not found after signing");
+            return;
+        }
         Err(e) => {
-            error!(error = %e, "Error while executing nix path-info --sigs command");
+            error!(error = %e, "Failed to query path info after signing");
             return;
         }
     };
 
-    if !info_output.status.success() {
-        error!(
-            "Could not get path info with nix path-info. Exit code: {:?}, stderr: {}",
-            info_output.status.code(),
-            String::from_utf8_lossy(&info_output.stderr)
-        );
-        return;
-    }
-
-    let signatures = String::from_utf8_lossy(&info_output.stdout).to_string();
     let cache_identifier = secret_key.split(':').next().unwrap_or(&cache.name);
 
     let mut signature = String::new();
-    for line in signatures.split(' ') {
-        let line = line.trim();
-        if let Some(sig_part) = line.split_whitespace().last()
-            && sig_part.starts_with(&format!("{}:", cache_identifier))
-            && let Some(actual_sig) = sig_part.split(':').nth(1)
-        {
+    for sig in &pathinfo.signatures {
+        if let Some(actual_sig) = sig.strip_prefix(&format!("{}:", cache_identifier)) {
             signature = actual_sig.trim().to_string();
             break;
         }
@@ -401,63 +391,92 @@ pub async fn sign_derivation_output(
     }
 }
 
+/// Streams NAR encoding → zstd compression → SHA-256 hash → multipart
+/// upload to the NAR store.  Memory usage stays bounded regardless of NAR
+/// size (one multipart part in flight at a time).
+///
+/// Uses `harmonia-nar`'s `NarByteStream` for pure-Rust NAR packing instead
+/// of shelling out to `nix nar pack`.
 pub async fn pack_derivation_output(
     state: Arc<ServerState>,
     output: MDerivationOutput,
-) -> Result<(String, u32, u64)> {
-    let path = get_path_from_derivation_output(output);
+) -> Result<(String, u64, u64)> {
+    use std::io::Write as _;
+    use futures::StreamExt;
 
-    let (path_hash, _path_package) =
+    let path = get_path_from_derivation_output(output);
+    let (path_hash, _) =
         get_hash_from_path(path.clone()).context("Failed to parse derivation output path")?;
 
-    let pack_output = Command::new(state.cli.binpath_nix.clone())
-        .arg("nar")
-        .arg("pack")
-        .arg(&path)
-        .output()
-        .await
-        .context("Failed to execute nix nar pack command")?;
+    let mut nar_stream = harmonia_nar::NarByteStream::new(path.clone().into());
 
-    if !pack_output.status.success() {
-        bail!("Nix nar pack command failed");
+    // 10 MiB parts — above S3's 5 MiB minimum, large enough to reduce
+    // round-trips, small enough to keep memory bounded.
+    const PART_SIZE: usize = 10 * 1024 * 1024;
+    let mut writer = state.nar_storage.put_streaming(&path_hash, PART_SIZE).await?;
+
+    // Streaming zstd encoder writing compressed output into a reusable Vec.
+    let mut encoder = zstd::stream::Encoder::new(Vec::with_capacity(256 * 1024), 6)
+        .context("Failed to create zstd encoder")?;
+    let mut hash_ctx = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut nar_size: u64 = 0;
+    let mut file_size: u64 = 0;
+
+    let upload_result: Result<()> = async {
+        while let Some(chunk_result) = nar_stream.next().await {
+            let chunk = chunk_result.context("NAR stream error")?;
+            nar_size += chunk.len() as u64;
+
+            // Feed uncompressed data into the encoder; compressed output
+            // accumulates in the encoder's inner Vec<u8>.
+            encoder
+                .write_all(&chunk)
+                .context("zstd compression failed")?;
+
+            // Drain any compressed output produced so far.
+            let compressed = encoder.get_mut();
+            if !compressed.is_empty() {
+                hash_ctx.update(compressed);
+                file_size += compressed.len() as u64;
+                writer.write(compressed);
+                compressed.clear();
+                writer
+                    .wait_for_capacity(PART_SIZE)
+                    .await
+                    .context("Multipart upload failed during write")?;
+            }
+        }
+
+        // Flush the encoder's internal state and collect any remaining bytes.
+        let remaining = encoder.finish().context("Failed to finish zstd encoder")?;
+        if !remaining.is_empty() {
+            hash_ctx.update(&remaining);
+            file_size += remaining.len() as u64;
+            writer.write(&remaining);
+        }
+
+        // Complete the multipart upload.
+        writer
+            .finish()
+            .await
+            .context("Failed to complete multipart upload")?;
+
+        Ok(())
     }
+    .await;
 
-    let nar_data = pack_output.stdout;
-    let nar_size = nar_data.len() as u64;
+    // If the upload failed, the WriteMultipart was dropped which aborts it.
+    upload_result?;
 
-    // Compress and hash on a blocking thread — both are CPU-bound and would
-    // otherwise peg a tokio worker for the duration of large NARs.
-    let (compressed_data, file_hash) = tokio::task::spawn_blocking(move || {
-        let compressed = zstd::bulk::compress(&nar_data, 6)?;
-        let hash = nix_base32_sha256(&compressed);
-        Ok::<_, std::io::Error>((compressed, hash))
-    })
-    .await
-    .context("Compression task panicked")?
-    .context("Failed to compress NAR data")?;
-
-    let file_size = compressed_data.len() as u32;
-
-    state
-        .nar_storage
-        .put(&path_hash, compressed_data)
-        .await
-        .context("Failed to store compressed NAR")?;
+    let digest = hash_ctx.finish();
+    let file_hash = nix_base32_encode(digest.as_ref());
 
     Ok((format!("sha256:{}", file_hash), file_size, nar_size))
 }
 
-/// Compute SHA-256 of `data` and return it encoded in Nix's base-32 alphabet.
-///
-/// Uses `ring`'s SHA-256, which dispatches at runtime to the fastest
-/// implementation available on the host CPU (SHA-NI on modern x86,
-/// ARMv8 crypto extensions on aarch64, AVX2 on older x86, scalar
-/// fallback otherwise). This avoids the `sha2` crate's pure-rust
-/// software path on CPUs without SHA-NI.
-fn nix_base32_sha256(data: &[u8]) -> String {
+/// Encode a raw hash digest in Nix's base-32 alphabet.
+fn nix_base32_encode(hash: &[u8]) -> String {
     const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
-    let digest = ring::digest::digest(&ring::digest::SHA256, data);
-    let hash: &[u8] = digest.as_ref();
     let len = (hash.len() * 8 - 1) / 5 + 1;
     let mut out = String::with_capacity(len);
     for n in (0..len).rev() {
@@ -470,6 +489,18 @@ fn nix_base32_sha256(data: &[u8]) -> String {
         out.push(CHARS[c as usize] as char);
     }
     out
+}
+
+/// Compute SHA-256 of `data` and return it encoded in Nix's base-32 alphabet.
+///
+/// Uses `ring`'s SHA-256, which dispatches at runtime to the fastest
+/// implementation available on the host CPU (SHA-NI on modern x86,
+/// ARMv8 crypto extensions on aarch64, AVX2 on older x86, scalar
+/// fallback otherwise).
+#[allow(dead_code)]
+fn nix_base32_sha256(data: &[u8]) -> String {
+    let digest = ring::digest::digest(&ring::digest::SHA256, data);
+    nix_base32_encode(digest.as_ref())
 }
 
 async fn get_next_uncached_derivation_outputs(

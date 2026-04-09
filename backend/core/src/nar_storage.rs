@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result};
 use object_store::{ObjectStore, PutPayload, path::Path};
+pub use object_store::{MultipartUpload, WriteMultipart};
 use std::sync::Arc;
 
 /// Unified NAR file storage abstraction over local disk or an S3-compatible backend.
@@ -119,6 +120,19 @@ impl NarStore {
             .await
             .context("Failed to upload NAR")?;
         Ok(())
+    }
+
+    /// Initiate a multipart upload for the NAR identified by `hash`.
+    ///
+    /// Returns a [`WriteMultipart`] configured with `chunk_size`-byte parts.
+    /// The caller writes compressed data into it, then calls `.finish().await`.
+    pub async fn put_streaming(&self, hash: &str, chunk_size: usize) -> Result<WriteMultipart> {
+        let upload = self
+            .inner
+            .put_multipart(&self.object_path(hash))
+            .await
+            .context("Failed to initiate multipart upload")?;
+        Ok(WriteMultipart::new_with_chunk_size(upload, chunk_size))
     }
 
     pub async fn get(&self, hash: &str) -> Result<Option<Vec<u8>>> {

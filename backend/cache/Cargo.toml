@@ -16,6 +16,8 @@ async-trait = { workspace = true }
 chrono     = { workspace = true }
 core       = { workspace = true }
 entity     = { workspace = true }
+futures    = { workspace = true }
+harmonia-nar = { workspace = true }
 nix-daemon = { workspace = true }
 ring       = { workspace = true }
 sea-orm    = { workspace = true }
