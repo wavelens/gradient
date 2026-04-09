@@ -319,16 +319,6 @@ in {
           type = lib.types.ints.unsigned;
           default = 336;
         };
-
-        maxConcurrentNarUploads = lib.mkOption {
-          description = ''
-            Maximum number of NAR uploads to run concurrently.
-            Each upload opens multiple S3 connections for multipart parts,
-            so keep this well below the S3 endpoint's connection limit.
-          '';
-          type = lib.types.ints.positive;
-          default = 8;
-        };
       };
     };
   };
@@ -423,7 +413,6 @@ in {
         } // {
           GRADIENT_DELETE_STATE = lib.boolToString cfg.settings.deleteState;
           GRADIENT_NAR_TTL_HOURS = toString cfg.settings.cacheTtlHours;
-          GRADIENT_MAX_CONCURRENT_NAR_UPLOADS = toString cfg.settings.maxConcurrentNarUploads;
           GRADIENT_STATE_FILE = "%d/gradient_state";
           GRADIENT_CREDENTIALS_DIR = "%d";
           RUST_LOG = cfg.settings.logLevel.default;

@@ -178,11 +178,6 @@ pub struct Cli {
     /// Key prefix within the S3 bucket (e.g. "gradient/").
     #[arg(long, env = "GRADIENT_S3_PREFIX", default_value = "")]
     pub s3_prefix: String,
-    /// Maximum number of NAR uploads to run concurrently.
-    /// Each upload opens multiple S3 connections for multipart parts,
-    /// so keep this well below the S3 connection limit.
-    #[arg(long, env = "GRADIENT_MAX_CONCURRENT_NAR_UPLOADS", value_parser = greater_than_zero::<usize>, default_value = "8")]
-    pub max_concurrent_nar_uploads: usize,
 }
 
 #[derive(Debug)]

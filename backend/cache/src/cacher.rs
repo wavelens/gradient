@@ -18,7 +18,6 @@ use sea_orm::{
 use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Semaphore;
 use tokio::time;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -56,16 +55,15 @@ pub async fn cache_loop(state: Arc<ServerState>) {
         None
     };
 
-    let concurrency = state.cli.max_concurrent_nar_uploads;
-    let sem = Arc::new(Semaphore::new(concurrency));
+    let concurrency = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
     let mut interval = time::interval(Duration::from_secs(5));
     let mut cleanup_counter = 0;
     const CLEANUP_INTERVAL: u32 = 720;
 
     loop {
-        // Fetch slightly more than the concurrency limit so we always have
-        // work queued; the semaphore caps actual in-flight uploads.
-        let outputs = get_next_uncached_derivation_outputs(Arc::clone(&state), concurrency * 2).await;
+        let outputs = get_next_uncached_derivation_outputs(Arc::clone(&state), concurrency).await;
 
         if outputs.is_empty() {
             interval.tick().await;
@@ -110,11 +108,7 @@ pub async fn cache_loop(state: Arc<ServerState>) {
                 .into_iter()
                 .map(|output| {
                     let s = Arc::clone(&state);
-                    let permit = Arc::clone(&sem);
-                    tokio::spawn(async move {
-                        let _guard = permit.acquire_owned().await;
-                        cache_derivation_output(s, output).await;
-                    })
+                    tokio::spawn(async move { cache_derivation_output(s, output).await })
                 })
                 .collect();
             for task in tasks {
@@ -495,8 +489,11 @@ pub async fn pack_derivation_output(
                 file_size += compressed.len() as u64;
                 writer.write(compressed);
                 compressed.clear();
+                // wait_for_capacity takes a max-concurrency count (not bytes).
+                // Allow up to 3 parts in flight at once for pipelining while
+                // keeping S3 connections bounded (concurrent_uploads × 3 total).
                 writer
-                    .wait_for_capacity(PART_SIZE)
+                    .wait_for_capacity(4)
                     .await
                     .context("Multipart upload failed during write")?;
             }
