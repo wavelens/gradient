@@ -50,6 +50,7 @@ mod m20260407_000001_add_nar_size_to_build_output;
 mod m20260408_000000_split_build_into_derivation;
 mod m20260408_000001_evaluation_messages;
 mod m20260409_000000_add_ci_reporter_to_project;
+mod m20260410_000000_add_fetching_evaluation_status;
 
 pub struct Migrator;
 
@@ -101,6 +102,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260408_000000_split_build_into_derivation::Migration),
             Box::new(m20260408_000001_evaluation_messages::Migration),
             Box::new(m20260409_000000_add_ci_reporter_to_project::Migration),
+            Box::new(m20260410_000000_add_fetching_evaluation_status::Migration),
         ]
     }
 }

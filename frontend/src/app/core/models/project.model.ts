@@ -94,6 +94,7 @@ export interface Evaluation {
 
 export type EvaluationStatus =
   | 'Queued'
+  | 'Fetching'
   | 'EvaluatingFlake'
   | 'EvaluatingDerivation'
   | 'Building'

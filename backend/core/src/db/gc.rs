@@ -57,6 +57,7 @@ pub async fn gc_project_evaluations(
             !matches!(
                 e.status,
                 EvaluationStatus::Queued
+                    | EvaluationStatus::Fetching
                     | EvaluationStatus::EvaluatingFlake
                     | EvaluationStatus::EvaluatingDerivation
                     | EvaluationStatus::Building

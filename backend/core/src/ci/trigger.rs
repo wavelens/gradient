@@ -27,8 +27,8 @@ pub enum TriggerError {
 /// Creates a new `Queued` evaluation for `project` at `commit_hash`.
 ///
 /// - Refuses with [`TriggerError::AlreadyInProgress`] when the project already
-///   has a running evaluation (Queued / EvaluatingFlake / EvaluatingDerivation /
-///   Building / Waiting).
+///   has a running evaluation (Queued / Fetching / EvaluatingFlake /
+///   EvaluatingDerivation / Building / Waiting).
 /// - Inserts a `Commit` row, then an `Evaluation` row with status `Queued`.
 /// - Sets `project.force_evaluation = true` and resets `last_check_at` so the
 ///   scheduler picks it up immediately on its next tick.
@@ -45,6 +45,7 @@ pub async fn trigger_evaluation(
         .filter(
             Condition::any()
                 .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
+                .add(CEvaluation::Status.eq(EvaluationStatus::Fetching))
                 .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingFlake))
                 .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingDerivation))
                 .add(CEvaluation::Status.eq(EvaluationStatus::Building))

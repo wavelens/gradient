@@ -120,7 +120,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
   }
 
   isRunningStatus(status: EvaluationStatus): boolean {
-    return status === 'Queued' || status === 'EvaluatingFlake' || status === 'EvaluatingDerivation' || status === 'Building' || status === 'Waiting';
+    return status === 'Queued' || status === 'Fetching' || status === 'EvaluatingFlake' || status === 'EvaluatingDerivation' || status === 'Building' || status === 'Waiting';
   }
 
   getEvalStatusClass(status: EvaluationStatus): string {
@@ -145,6 +145,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
   }
 
   getEvalStatusLabel(status: EvaluationStatus): string {
+    if (status === 'Fetching') return 'Fetching';
     if (status === 'EvaluatingFlake' || status === 'EvaluatingDerivation') return 'Evaluating';
     return status;
   }

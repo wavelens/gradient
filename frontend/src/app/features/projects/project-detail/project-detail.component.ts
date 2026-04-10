@@ -152,7 +152,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   }
 
   isRunningStatus(status: EvaluationStatus): boolean {
-    return status === 'Queued' || status === 'EvaluatingFlake' || status === 'EvaluatingDerivation' || status === 'Building' || status === 'Waiting';
+    return status === 'Queued' || status === 'Fetching' || status === 'EvaluatingFlake' || status === 'EvaluatingDerivation' || status === 'Building' || status === 'Waiting';
   }
 
   isBuildRunning(status: BuildStatus): boolean {
@@ -226,7 +226,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       case 'Failed': return 'status-danger';
       case 'Aborted': return 'status-secondary';
       case 'Waiting': return 'status-warning';
-      case 'Queued': case 'EvaluatingFlake': case 'EvaluatingDerivation': case 'Building': return 'status-running';
+      case 'Queued': case 'Fetching': case 'EvaluatingFlake': case 'EvaluatingDerivation': case 'Building': return 'status-running';
       default: return '';
     }
   }
@@ -238,6 +238,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       case 'Aborted': return 'cancel';
       case 'Queued': return 'schedule';
       case 'Waiting': return 'pause_circle';
+      case 'Fetching': return 'cloud_download';
       case 'EvaluatingFlake': case 'EvaluatingDerivation': case 'Building': return 'sync';
       default: return 'help';
     }
@@ -245,6 +246,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
 
   getStatusLabel(status: EvaluationStatus): string {
     switch (status) {
+      case 'Fetching': return 'Fetching';
       case 'EvaluatingFlake': case 'EvaluatingDerivation': return 'Evaluating';
       default: return status;
     }

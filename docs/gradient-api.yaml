@@ -3695,13 +3695,16 @@ components:
 
     EvaluationStatus:
       type: string
-      enum: [Queued, Evaluating, Building, Completed, Failed, Aborted]
+      enum: [Queued, Fetching, EvaluatingFlake, EvaluatingDerivation, Building, Waiting, Completed, Failed, Aborted]
       description: |-
         | Value | Meaning |
         |---|---|
         | `Queued` | Waiting to start |
-        | `Evaluating` | Running `nix eval` |
+        | `Fetching` | Prefetching the Nix flake (cloning / downloading) |
+        | `EvaluatingFlake` | Running `nix eval` on the flake |
+        | `EvaluatingDerivation` | Resolving derivation paths |
         | `Building` | Builds are in progress |
+        | `Waiting` | Waiting for build servers to become available |
         | `Completed` | All builds finished successfully |
         | `Failed` | At least one build failed |
         | `Aborted` | Cancelled by user |

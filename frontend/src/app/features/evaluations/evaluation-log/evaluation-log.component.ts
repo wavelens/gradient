@@ -183,7 +183,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         this.loadedBuildsCount = Math.max(this.builds().length, result.builds.length);
 
         const newSelected = this.selectedBuild();
-        const isEvaluating = this.evaluation()?.status === 'EvaluatingFlake' || this.evaluation()?.status === 'EvaluatingDerivation';
+        const isEvaluating = this.evaluation()?.status === 'Fetching' || this.evaluation()?.status === 'EvaluatingFlake' || this.evaluation()?.status === 'EvaluatingDerivation';
 
         // ── Build list visibility ───────────────────────────────────────────
         if (this.isInitialBuildsLoad) {
@@ -292,7 +292,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   startPollingIfRunning(status: string): void {
     this.stopPolling();
-    const running = ['Queued', 'EvaluatingFlake', 'EvaluatingDerivation', 'Building', 'Waiting'];
+    const running = ['Queued', 'Fetching', 'EvaluatingFlake', 'EvaluatingDerivation', 'Building', 'Waiting'];
     if (!running.includes(status)) return;
 
     this.pollSub = interval(5000)
@@ -623,7 +623,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.stopDurationTimer();
     this.updateDuration(evaluation);
 
-    const running = ['Queued', 'EvaluatingFlake', 'EvaluatingDerivation', 'Building', 'Waiting'];
+    const running = ['Queued', 'Fetching', 'EvaluatingFlake', 'EvaluatingDerivation', 'Building', 'Waiting'];
     if (!running.includes(evaluation.status)) return;
 
     this.durationInterval = setInterval(() => {
@@ -715,10 +715,11 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   isRunning(): boolean {
     const s = this.evaluation()?.status;
-    return s === 'Queued' || s === 'EvaluatingFlake' || s === 'EvaluatingDerivation' || s === 'Building' || s === 'Waiting';
+    return s === 'Queued' || s === 'Fetching' || s === 'EvaluatingFlake' || s === 'EvaluatingDerivation' || s === 'Building' || s === 'Waiting';
   }
 
   getStatusLabel(status: string): string {
+    if (status === 'Fetching') return 'Fetching';
     if (status === 'EvaluatingFlake' || status === 'EvaluatingDerivation') return 'Evaluating';
     return status;
   }

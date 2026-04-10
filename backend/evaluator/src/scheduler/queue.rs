@@ -212,6 +212,7 @@ pub(super) async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation 
             .filter(
                 Condition::any()
                     .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Fetching))
                     .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingFlake))
                     .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingDerivation))
                     .add(CEvaluation::Status.eq(EvaluationStatus::Building))

@@ -191,6 +191,12 @@
               </div>
             }
           </div>
+        } @else if (ev.status === 'Fetching') {
+          <div class="evaluating-hint">
+            <span class="material-symbols-outlined evaluating-icon">cloud_download</span>
+            <span class="evaluating-title">Fetching</span>
+            <span class="evaluating-sub">Prefetching the Nix flake&hellip;</span>
+          </div>
         } @else if (ev.status === 'EvaluatingFlake' || ev.status === 'EvaluatingDerivation') {
           <div class="evaluating-hint">
             <span class="material-symbols-outlined evaluating-icon">manage_search</span>

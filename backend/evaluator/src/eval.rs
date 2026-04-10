@@ -57,7 +57,7 @@ pub async fn evaluate(
     tokio::spawn(update_evaluation_status(
         Arc::clone(&state),
         evaluation.clone(),
-        EvaluationStatus::EvaluatingFlake,
+        EvaluationStatus::Fetching,
     ));
 
     // The commit query is independent of the org resolution chain —
@@ -91,6 +91,13 @@ pub async fn evaluate(
         )
         .await
         .context("Failed to prefetch flake")?;
+
+    update_evaluation_status(
+        Arc::clone(&state),
+        evaluation.clone(),
+        EvaluationStatus::EvaluatingFlake,
+    )
+    .await;
 
     // For SSH repos the flake was cloned locally; use the path: URL so the Nix
     // C API never needs SSH credentials.  For HTTPS repos use the original URL.

@@ -98,6 +98,7 @@ pub async fn fire_evaluation_webhook(
 ) {
     let event = match status {
         EvaluationStatus::Queued => "evaluation.queued",
+        EvaluationStatus::Fetching => "evaluation.started",
         EvaluationStatus::EvaluatingFlake | EvaluationStatus::EvaluatingDerivation => {
             "evaluation.started"
         }

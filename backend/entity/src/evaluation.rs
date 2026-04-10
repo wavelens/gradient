@@ -28,6 +28,8 @@ pub enum EvaluationStatus {
     Failed,
     #[sea_orm(num_value = 7)]
     Aborted,
+    #[sea_orm(num_value = 8)]
+    Fetching,
 }
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]

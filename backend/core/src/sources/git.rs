@@ -122,6 +122,7 @@ pub async fn check_project_updates(
             })?;
 
         if evaluation.status == EvaluationStatus::Queued
+            || evaluation.status == EvaluationStatus::Fetching
             || evaluation.status == EvaluationStatus::EvaluatingFlake
             || evaluation.status == EvaluationStatus::EvaluatingDerivation
             || evaluation.status == EvaluationStatus::Building

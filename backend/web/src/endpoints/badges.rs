@@ -182,6 +182,10 @@ fn badge_for_status(status: Option<EvaluationStatus>, has_failed_builds: bool) -
             message: "queued",
             color: "007ec6",
         },
+        Some(EvaluationStatus::Fetching) => BadgeContent {
+            message: "fetching",
+            color: "007ec6",
+        },
         Some(EvaluationStatus::EvaluatingFlake) | Some(EvaluationStatus::EvaluatingDerivation) => {
             BadgeContent {
                 message: "evaluating",
