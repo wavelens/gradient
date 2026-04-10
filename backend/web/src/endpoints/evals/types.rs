@@ -23,6 +23,18 @@ pub struct BuildItem {
 }
 
 #[derive(Serialize, Debug)]
+pub struct PaginatedBuilds {
+    pub builds: Vec<BuildItem>,
+    pub total: usize,
+}
+
+#[derive(Deserialize, Debug, Default)]
+pub struct BuildsQuery {
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+}
+
+#[derive(Serialize, Debug)]
 pub struct EvaluationResponse {
     pub id: Uuid,
     pub project: Option<Uuid>,

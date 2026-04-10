@@ -35,7 +35,7 @@
             <span class="dot"></span>
             {{ getStatusLabel(ev.status) }}
           </span>
-          <span class="builds-count">{{ completedBuilds() }}/{{ builds().length }}</span>
+          <span class="builds-count">{{ completedBuilds() }}/{{ totalBuildsCount() }}</span>
         </div>
       </div>
 
@@ -68,7 +68,7 @@
       @if (visibleBuilds().length === 0) {
         <div class="no-builds">No builds yet</div>
       } @else {
-        <div class="builds-list">
+        <div class="builds-list" (scroll)="onBuildsScroll($event)">
           @for (build of visibleBuilds(); track build.id; let i = $index) {
             <div
               class="build-item status-{{ build.status.toLowerCase() }}"

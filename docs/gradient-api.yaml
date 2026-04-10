@@ -1585,11 +1585,31 @@ paths:
     get:
       tags: [evals]
       summary: List evaluation builds
-      description: Returns all `.drv` builds associated with the evaluation, with their IDs, names, and statuses.
+      description: |-
+        Returns `.drv` builds associated with the evaluation, sorted by status
+        (Building → Queued → Failed → Aborted/DependencyFailed → Completed/Substituted),
+        then by display name. Supports optional `limit` and `offset` query parameters
+        for pagination.
       operationId: listEvaluationBuilds
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+          description: Maximum number of builds to return. Defaults to all.
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: Number of builds to skip (after sorting).
       responses:
         '200':
-          description: Build list
+          description: Paginated build list
           content:
             application/json:
               schema:
@@ -1598,9 +1618,15 @@ paths:
                   - type: object
                     properties:
                       message:
-                        type: array
-                        items:
-                          $ref: '#/components/schemas/BuildItem'
+                        type: object
+                        properties:
+                          builds:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/BuildItem'
+                          total:
+                            type: integer
+                            description: Total number of builds for this evaluation (before pagination).
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':

@@ -38,6 +38,11 @@ export interface BuildItem {
   build_time_ms: number | null;
 }
 
+export interface PaginatedBuilds {
+  builds: BuildItem[];
+  total: number;
+}
+
 export interface BuildProduct {
   file_type: string;
   name: string;
@@ -61,8 +66,12 @@ export class EvaluationsService {
     return this.api.post<string>(`evals/${id}`, { method: 'abort' });
   }
 
-  getBuilds(evaluationId: string): Observable<BuildItem[]> {
-    return this.api.get<BuildItem[]>(`evals/${evaluationId}/builds`);
+  getBuilds(evaluationId: string, limit?: number, offset?: number): Observable<PaginatedBuilds> {
+    const params: string[] = [];
+    if (limit !== undefined) params.push(`limit=${limit}`);
+    if (offset !== undefined) params.push(`offset=${offset}`);
+    const query = params.length > 0 ? `?${params.join('&')}` : '';
+    return this.api.get<PaginatedBuilds>(`evals/${evaluationId}/builds${query}`);
   }
 
   getBuildLog(buildId: string): Observable<string> {

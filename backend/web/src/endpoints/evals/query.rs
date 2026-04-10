@@ -7,7 +7,7 @@
 use crate::authorization::MaybeUser;
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use core::types::input::vec_to_hex;
 use core::types::*;
@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use super::types::{BuildItem, EvaluationMessageResponse, EvaluationResponse};
+use super::types::{BuildItem, BuildsQuery, EvaluationMessageResponse, EvaluationResponse, PaginatedBuilds};
 
 pub async fn get_evaluation(
     state: State<Arc<ServerState>>,
@@ -118,7 +118,8 @@ pub async fn get_evaluation_builds(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(evaluation_id): Path<Uuid>,
-) -> WebResult<Json<BaseResponse<Vec<BuildItem>>>> {
+    Query(query): Query<BuildsQuery>,
+) -> WebResult<Json<BaseResponse<PaginatedBuilds>>> {
     let evaluation = EEvaluation::find_by_id(evaluation_id)
         .one(&state.db)
         .await?
@@ -246,9 +247,17 @@ pub async fn get_evaluation_builds(
             .then_with(|| display_name(&a.name).cmp(display_name(&b.name)))
     });
 
+    let total = builds.len();
+    let offset = query.offset.unwrap_or(0).min(total);
+    let limit = query.limit.unwrap_or(total);
+    let page = builds.into_iter().skip(offset).take(limit).collect();
+
     let res = BaseResponse {
         error: false,
-        message: builds,
+        message: PaginatedBuilds {
+            builds: page,
+            total,
+        },
     };
 
     Ok(Json(res))

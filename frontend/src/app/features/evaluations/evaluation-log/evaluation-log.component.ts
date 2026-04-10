@@ -20,7 +20,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { interval, Subscription } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
-import { EvaluationsService, BuildItem } from '@core/services/evaluations.service';
+import { EvaluationsService, BuildItem, PaginatedBuilds } from '@core/services/evaluations.service';
 import { Evaluation, EvaluationMessage } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
@@ -56,6 +56,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   autoScroll = signal(true);
   showScrollBtn = signal(false);
   duration = signal('0:00');
+  totalBuildsCount = signal(0);
   private tick = signal(0);
 
   orgName = '';
@@ -95,6 +96,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private buildRevealTimer?: ReturnType<typeof setInterval>;
   private pendingLogLines: string[] = [];
   private logDrainTimer?: ReturnType<typeof setInterval>;
+  private readonly PAGE_SIZE = 200;
+  private totalBuilds = 0;
+  private loadedBuildsCount = 0;
+  private loadingMore = false;
 
   ngOnInit(): void {
     document.documentElement.style.overflow = 'hidden';
@@ -159,16 +164,30 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   loadBuilds(): void {
-    this.evalService.getBuilds(this.evaluationId).subscribe({
-      next: (builds) => {
+    // On initial load or poll: always fetch the first page to get fresh
+    // statuses for active builds (which sort to the top). The total count
+    // tells us if more pages exist for infinite scroll.
+    this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, 0).subscribe({
+      next: (result) => {
+        this.totalBuilds = result.total;
+        this.totalBuildsCount.set(result.total);
         const prevSelected = this.selectedBuild();
-        this.builds.set(this.sortBuilds(builds));
+
+        // Merge: keep any already-loaded builds beyond the first page,
+        // replace the first page with fresh data.
+        const freshIds = new Set(result.builds.map(b => b.id));
+        const beyondFirstPage = this.builds().filter(b => !freshIds.has(b.id));
+        // Only keep beyond-page builds that aren't in the fresh result
+        // (they may have changed status and moved into the first page)
+        this.builds.set(this.sortBuilds([...result.builds, ...beyondFirstPage]));
+        this.loadedBuildsCount = Math.max(this.builds().length, result.builds.length);
+
         const newSelected = this.selectedBuild();
         const isEvaluating = this.evaluation()?.status === 'EvaluatingFlake' || this.evaluation()?.status === 'EvaluatingDerivation';
 
         // ── Build list visibility ───────────────────────────────────────────
         if (this.isInitialBuildsLoad) {
-          // First load: always show everything immediately
+          // First load: show everything we have immediately
           this.visibleBuilds.set(this.builds());
           this.isInitialBuildsLoad = false;
           // Auto-select first Building build when no explicit build was requested
@@ -237,12 +256,36 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         }
 
         if (this.initialBuildId) {
-          const target = builds.find(b => b.id === this.initialBuildId);
+          const target = this.builds().find(b => b.id === this.initialBuildId);
           if (target) {
             this.initialBuildId = null;
             this.selectBuild(target, true);
           }
         }
+      },
+    });
+  }
+
+  loadMoreBuilds(): void {
+    if (this.loadingMore || this.loadedBuildsCount >= this.totalBuilds) return;
+    this.loadingMore = true;
+
+    this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, this.loadedBuildsCount).subscribe({
+      next: (result) => {
+        this.totalBuilds = result.total;
+        if (result.builds.length > 0) {
+          const existingIds = new Set(this.builds().map(b => b.id));
+          const newBuilds = result.builds.filter(b => !existingIds.has(b.id));
+          if (newBuilds.length > 0) {
+            this.builds.update(current => this.sortBuilds([...current, ...newBuilds]));
+            this.visibleBuilds.update(current => this.sortBuilds([...current, ...newBuilds]));
+          }
+          this.loadedBuildsCount += result.builds.length;
+        }
+        this.loadingMore = false;
+      },
+      error: () => {
+        this.loadingMore = false;
       },
     });
   }
@@ -544,6 +587,14 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   // ── Scroll management ───────────────────────────────────────────────────────
 
+  onBuildsScroll(event: Event): void {
+    const el = event.target as HTMLElement;
+    // Trigger loading more when within 200px of the bottom
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
+      this.loadMoreBuilds();
+    }
+  }
+
   onLogScroll(event: Event): void {
     const el = event.target as HTMLElement;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
@@ -681,6 +732,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.messages.set([]);
     this.logLines = [];
     this.logHtml.set('');
+    this.isInitialBuildsLoad = true;
+    this.totalBuilds = 0;
+    this.loadedBuildsCount = 0;
+    this.loadingMore = false;
     this.evaluationId = id;
     this.router.navigate(['/organization', this.orgName, 'log', id]);
     this.loadEvaluation();
