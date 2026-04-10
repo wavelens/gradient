@@ -92,6 +92,10 @@ tags:
     description: Binary cache management
   - name: commits
     description: Commit records
+  - name: webhooks
+    description: Outgoing webhook management (Gradient → external URLs)
+  - name: forge-webhooks
+    description: Incoming forge webhooks (external forges → Gradient push triggers)
   - name: nix-cache
     description: Nix binary cache protocol endpoints (outside /api/v1)
 
@@ -2904,6 +2908,140 @@ paths:
         '500':
           description: Webhook delivery failed
 
+  # ── Forge Webhooks (incoming) ────────────────────────────────────────────────
+
+  /orgs/{organization}/forge-webhook-secret:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+    post:
+      tags: [organizations]
+      summary: Generate or rotate forge webhook secret
+      description: |-
+        Generates a new per-organization HMAC-SHA256 secret for incoming forge webhooks
+        (Gitea, Forgejo, GitLab, or GitHub without the App). The secret is shown **once**
+        and stored encrypted; it cannot be retrieved again. Requires Admin or Write role.
+
+        Use the returned `webhook_url` as the push webhook destination in your forge.
+        The HMAC-SHA256 header name varies by forge:
+        - Gitea/Forgejo: `X-Gitea-Signature`
+        - GitLab: `X-Gitlab-Token` (plain token, not HMAC)
+        - GitHub: `X-Hub-Signature-256`
+      operationId: generateForgeWebhookSecret
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Secret generated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ForgeWebhookSecretResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /hooks/github:
+    post:
+      tags: [forge-webhooks]
+      summary: Receive GitHub App webhook
+      description: |-
+        Receives events from a configured GitHub App. Payloads are authenticated using
+        `X-Hub-Signature-256` HMAC-SHA256 verification against the configured
+        `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
+
+        **Handled events:**
+        - `push` — triggers an evaluation on any project whose repository URL matches.
+        - `installation` / `installation_repositories` — stores or clears the GitHub App
+          `installation_id` on the matching Gradient organization.
+        - `ping` — always returns 200.
+
+        This endpoint is unauthenticated (verified via HMAC signature).
+      operationId: githubAppWebhook
+      parameters:
+        - name: X-GitHub-Event
+          in: header
+          required: true
+          schema:
+            type: string
+          description: GitHub event type (e.g. `push`, `installation`, `ping`)
+        - name: X-Hub-Signature-256
+          in: header
+          required: true
+          schema:
+            type: string
+          description: HMAC-SHA256 signature of the body (`sha256=<hex>`)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: GitHub event payload (varies by event type)
+      responses:
+        '200':
+          description: Event accepted
+        '401':
+          description: Invalid HMAC signature
+        '503':
+          description: GitHub App not configured on this server
+
+  /hooks/{forge}/{org}:
+    parameters:
+      - name: forge
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [gitea, forgejo, gitlab, github]
+        description: Forge type
+      - name: org
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Gradient organization name
+    post:
+      tags: [forge-webhooks]
+      summary: Receive forge push webhook
+      description: |-
+        Receives push events from Gitea, Forgejo, GitLab, or GitHub (without the App).
+        Authenticated via the per-organization `forge_webhook_secret`.
+
+        Signature header by forge:
+        - `gitea` / `forgejo`: `X-Gitea-Signature` (HMAC-SHA256 hex)
+        - `gitlab`: `X-Gitlab-Token` (plain token comparison)
+        - `github`: `X-Hub-Signature-256` (HMAC-SHA256 `sha256=<hex>`)
+
+        On a matching push, queues an evaluation for every active project whose
+        repository URL matches the webhook payload's clone URL.
+
+        This endpoint is unauthenticated (verified via forge-specific signature).
+      operationId: forgeWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Forge push event payload
+      responses:
+        '200':
+          description: Event accepted
+        '401':
+          description: Invalid signature
+        '404':
+          description: Organization not found
+        '503':
+          description: No forge webhook secret configured for this organization
+
   # ── Nix Cache Protocol ───────────────────────────────────────────────────────
   # These endpoints live outside /api/v1. The server URL for these is the root,
   # e.g. https://gradient.example.com (no /api/v1 prefix).
@@ -4206,3 +4344,22 @@ components:
         active:
           type: boolean
           description: Enable or disable the webhook
+
+    ForgeWebhookSecretResponse:
+      type: object
+      required: [webhook_url, secret]
+      properties:
+        webhook_url:
+          type: string
+          format: uri
+          description: |-
+            The URL to configure as the push webhook destination in your forge.
+            Substitute `gitea` with the appropriate forge type in the path
+            (`forgejo`, `gitlab`, or `github`) if needed.
+          example: https://gradient.example.com/api/v1/hooks/gitea/my-org
+        secret:
+          type: string
+          description: |-
+            The HMAC-SHA256 signing secret. Shown **once** — store it immediately.
+            It is never returned again by the API.
+          example: "a1b2c3d4..."

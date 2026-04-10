@@ -7,6 +7,8 @@
 pub mod ci_reporter;
 pub mod consts;
 pub mod database;
+pub mod evaluation_trigger;
+pub mod github_app;
 pub mod derivation;
 pub mod email;
 pub mod evaluator;

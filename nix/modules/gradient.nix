@@ -197,6 +197,29 @@ in {
         };
       };
 
+      githubApp = {
+        enable = lib.mkEnableOption "GitHub App integration for webhook-triggered evaluations and CI reporting";
+
+        appId = lib.mkOption {
+          description = "GitHub App ID shown on the GitHub App settings page";
+          type = lib.types.ints.positive;
+        };
+
+        privateKeyFile = lib.mkOption {
+          description = "Path to the GitHub App RS256 private key PEM file";
+          type = lib.types.path;
+        };
+
+        webhookSecretFile = lib.mkOption {
+          description = ''
+            File containing the shared secret used to verify incoming GitHub
+            App webhook payloads. Must match the value configured on the
+            GitHub App's webhook settings page.
+          '';
+          type = lib.types.path;
+        };
+      };
+
       s3 = {
         enable = lib.mkEnableOption "S3 storage for NAR cache files";
         bucket = lib.mkOption {
@@ -397,6 +420,9 @@ in {
             "gradient_email_smtp_password:${cfg.email.smtpPasswordFile}"
           ] ++ lib.optionals (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) [
             "gradient_s3_secret_access_key:${cfg.s3.secretAccessKeyFile}"
+          ] ++ lib.optionals cfg.githubApp.enable [
+            "gradient_github_app_private_key:${cfg.githubApp.privateKeyFile}"
+            "gradient_github_app_webhook_secret:${cfg.githubApp.webhookSecretFile}"
           ] ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
             ++ projectCiTokenFiles;
         };
@@ -464,6 +490,10 @@ in {
           GRADIENT_S3_ACCESS_KEY_ID = cfg.s3.accessKeyId;
         } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) {
           GRADIENT_S3_SECRET_ACCESS_KEY_FILE = "%d/gradient_s3_secret_access_key";
+        } // lib.optionalAttrs cfg.githubApp.enable {
+          GRADIENT_GITHUB_APP_ID = toString cfg.githubApp.appId;
+          GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE = "%d/gradient_github_app_private_key";
+          GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE = "%d/gradient_github_app_webhook_secret";
         };
       };
     };

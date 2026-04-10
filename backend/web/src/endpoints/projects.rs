@@ -15,7 +15,7 @@ use chrono::Utc;
 use core::consts::*;
 use core::database::{get_any_organization_by_name, get_organization_by_name, get_project_by_name};
 use core::input::{check_index_name, validate_display_name, vec_to_hex};
-use core::webhooks::{decrypt_webhook_secret, encrypt_webhook_secret};
+use core::webhooks::encrypt_webhook_secret;
 use core::nix_url::RepositoryUrl;
 use core::wildcard::Wildcard;
 use core::sources::check_project_updates;
@@ -696,31 +696,6 @@ pub async fn post_project_evaluate(
     .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
 
-    if let Some(evaluation_id) = project.last_evaluation {
-        let evaluation: MEvaluation = EEvaluation::find_by_id(evaluation_id)
-            .one(&state.db)
-            .await?
-            .ok_or_else(|| {
-                tracing::error!(
-                    "Evaluation {} not found for project {}",
-                    evaluation_id,
-                    project.id
-                );
-                WebError::InternalServerError("Evaluation data inconsistency".to_string())
-            })?;
-
-        if evaluation.status == EvaluationStatus::Queued
-            || evaluation.status == EvaluationStatus::EvaluatingFlake
-            || evaluation.status == EvaluationStatus::EvaluatingDerivation
-            || evaluation.status == EvaluationStatus::Building
-            || evaluation.status == EvaluationStatus::Waiting
-        {
-            return Err(WebError::BadRequest(
-                "Evaluation already in progress".to_string(),
-            ));
-        }
-    }
-
     let mut project_for_check = project.clone();
     project_for_check.force_evaluation = true;
     let (_has_updates, commit_hash) = check_project_updates(Arc::clone(&state), &project_for_check)
@@ -733,37 +708,14 @@ pub async fn post_project_evaluate(
         ));
     }
 
-    let now = Utc::now().naive_utc();
-
-    let acommit = ACommit {
-        id: Set(Uuid::new_v4()),
-        message: Set(String::new()),
-        hash: Set(commit_hash),
-        author: Set(None),
-        author_name: Set(String::new()),
-    };
-    let commit = acommit.insert(&state.db).await?;
-
-    let aevaluation = AEvaluation {
-        id: Set(Uuid::new_v4()),
-        project: Set(Some(project.id)),
-        repository: Set(project.repository.clone()),
-        commit: Set(commit.id),
-        wildcard: Set(project.evaluation_wildcard.clone()),
-        status: Set(EvaluationStatus::Queued),
-        previous: Set(project.last_evaluation),
-        next: Set(None),
-        created_at: Set(now),
-        updated_at: Set(now),
-    };
-    let evaluation = aevaluation.insert(&state.db).await?;
-
-    let mut aproject: AProject = project.into();
-
-    aproject.last_check_at = Set(*NULL_TIME);
-    aproject.last_evaluation = Set(Some(evaluation.id));
-    aproject.force_evaluation = Set(true);
-    aproject.save(&state.db).await?;
+    core::evaluation_trigger::trigger_evaluation(&state.db, &project, commit_hash, None, None)
+        .await
+        .map_err(|e| match e {
+            core::evaluation_trigger::TriggerError::AlreadyInProgress => {
+                WebError::BadRequest("Evaluation already in progress".to_string())
+            }
+            core::evaluation_trigger::TriggerError::Db(db_err) => WebError::from(db_err),
+        })?;
 
     let res = BaseResponse {
         error: false,

@@ -208,6 +208,60 @@
       }
     </div>
 
+    <!-- Forge Webhooks -->
+    <div class="settings-section">
+      <h2>Forge Webhooks</h2>
+      <div class="settings-card">
+        <p class="text-secondary">
+          Generate a per-organization webhook secret. Configure your Git forge (Gitea, Forgejo, GitLab, or GitHub
+          without the App) to send push events to the displayed URL using this secret for HMAC-SHA256 verification.
+          Gradient will automatically trigger evaluations on matching projects when a push is received.
+        </p>
+        <p class="text-secondary">
+          The secret is shown <strong>once</strong> after generation. Store it securely before closing this page.
+        </p>
+        @if (forgeWebhookResult()) {
+          <div class="form-group">
+            <label>Webhook URL</label>
+            <div class="copy-row">
+              <input pInputText [value]="forgeWebhookResult()!.webhook_url" readonly class="w-full" />
+              <button pButton icon="pi pi-copy" severity="secondary" (click)="copyForgeWebhookUrl()"></button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Webhook Secret (shown once)</label>
+            <div class="copy-row">
+              <input pInputText [value]="forgeWebhookResult()!.secret" readonly class="w-full secret-field" />
+              <button pButton icon="pi pi-copy" severity="secondary" (click)="copyForgeWebhookSecret()"></button>
+            </div>
+          </div>
+          <p class="text-secondary">
+            Select the forge type that matches your setup:
+            <code>{{ forgeWebhookResult()!.webhook_url.replace('/gitea/', '/forgejo/') }}</code> for Forgejo,
+            <code>{{ forgeWebhookResult()!.webhook_url.replace('/gitea/', '/gitlab/') }}</code> for GitLab, or
+            <code>{{ forgeWebhookResult()!.webhook_url.replace('/gitea/', '/github/') }}</code> for GitHub (without App).
+          </p>
+        }
+        <div class="form-actions">
+          <button
+            pButton
+            [label]="forgeWebhookResult() ? 'Rotate Secret' : 'Generate Webhook Secret'"
+            icon="pi pi-key"
+            [severity]="forgeWebhookResult() ? 'danger' : 'primary'"
+            (click)="generateForgeWebhookSecret()"
+            [loading]="generatingForgeSecret()"
+            [disabled]="generatingForgeSecret()"
+          ></button>
+        </div>
+        @if (forgeSecretError()) {
+          <div class="message-banner error">
+            <span class="material-symbols-outlined">error</span>
+            {{ forgeSecretError() }}
+          </div>
+        }
+      </div>
+    </div>
+
     <!-- Danger Zone -->
     <div class="settings-section danger-section">
       <h2>Danger Zone</h2>

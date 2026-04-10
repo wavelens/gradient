@@ -223,6 +223,8 @@ pub async fn put(
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
         managed: Set(false),
+        github_installation_id: Set(None),
+        forge_webhook_secret: Set(None),
     };
 
     let organization = organization.insert(&state.db).await?;

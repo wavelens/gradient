@@ -26,6 +26,24 @@ impl MigrationTrait for Migration {
                     .add_column(ColumnDef::new(Project::CiReporterToken).string().null())
                     .to_owned(),
             )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Organization::Table)
+                    .add_column(
+                        ColumnDef::new(Organization::GithubInstallationId)
+                            .big_integer()
+                            .null(),
+                    )
+                    .add_column(
+                        ColumnDef::new(Organization::ForgeWebhookSecret)
+                            .text()
+                            .null(),
+                    )
+                    .to_owned(),
+            )
             .await
     }
 
@@ -39,6 +57,16 @@ impl MigrationTrait for Migration {
                     .drop_column(Project::CiReporterToken)
                     .to_owned(),
             )
+            .await?;
+
+        manager
+            .alter_table(
+                Table::alter()
+                    .table(Organization::Table)
+                    .drop_column(Organization::GithubInstallationId)
+                    .drop_column(Organization::ForgeWebhookSecret)
+                    .to_owned(),
+            )
             .await
     }
 }
@@ -49,4 +77,11 @@ enum Project {
     CiReporterType,
     CiReporterUrl,
     CiReporterToken,
+}
+
+#[derive(DeriveIden)]
+enum Organization {
+    Table,
+    GithubInstallationId,
+    ForgeWebhookSecret,
 }

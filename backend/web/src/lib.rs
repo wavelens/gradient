@@ -100,6 +100,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             post(orgs::post_organization_subscribe_cache)
                 .delete(orgs::delete_organization_subscribe_cache),
         )
+        .route(
+            "/orgs/{organization}/forge-webhook-secret",
+            post(forge_hooks::post_forge_webhook_secret),
+        )
         .route("/projects/{organization}", put(projects::put))
         .route(
             "/projects/{organization}/available",
@@ -315,7 +319,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/auth/oidc/callback", get(auth::get_oidc_callback))
         .route("/auth/logout", post(auth::post_logout))
         .route("/health", get(get_health))
-        .route("/config", get(get_config));
+        .route("/config", get(get_config))
+        // ── Incoming forge webhooks (unauthenticated, HMAC-verified) ─────────
+        .route("/hooks/github", post(forge_hooks::github_app_webhook))
+        .route("/hooks/{forge}/{org}", post(forge_hooks::forge_webhook));
 
     let mut app = Router::new().nest("/api/v1", api);
 

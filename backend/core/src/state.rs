@@ -553,6 +553,8 @@ async fn apply_organizations(
                 created_by: Set(*created_by_id),
                 created_at: Set(now),
                 managed: Set(true),
+                github_installation_id: Set(None),
+                forge_webhook_secret: Set(None),
             };
             org.insert(db).await?;
             tracing::info!("Created managed organization: {}", state_org.name);

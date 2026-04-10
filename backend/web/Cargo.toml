@@ -32,6 +32,7 @@ zstd         = { workspace = true }
 
 # Crate-specific dependencies
 axum          = { version = "0.8", features = ["multipart"] }
+hex           = "0.4"
 axum-streams  = { version = "0.25", features = ["json"] }
 bytes         = "1.11"
 email_address = "0.2"

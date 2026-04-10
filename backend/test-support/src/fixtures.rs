@@ -44,6 +44,8 @@ pub fn org() -> organization::Model {
         created_by: user_id(),
         created_at: test_date(),
         managed: false,
+        github_installation_id: None,
+        forge_webhook_secret: None,
     }
 }
 

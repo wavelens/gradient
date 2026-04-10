@@ -52,6 +52,9 @@ export class OrganizationSettingsComponent implements OnInit {
   updatingRole = signal<string | null>(null);
   sshLoading = signal(true);
   generatingSSH = signal(false);
+  generatingForgeSecret = signal(false);
+  forgeWebhookResult = signal<{ webhook_url: string; secret: string } | null>(null);
+  forgeSecretError = signal<string | null>(null);
 
   organization = signal<Organization | null>(null);
   members = signal<OrgMember[]>([]);
@@ -265,5 +268,30 @@ export class OrganizationSettingsComponent implements OnInit {
 
   copySSHKey(): void {
     navigator.clipboard.writeText(this.sshKey());
+  }
+
+  generateForgeWebhookSecret(): void {
+    this.generatingForgeSecret.set(true);
+    this.forgeSecretError.set(null);
+    this.organizationsService.generateForgeWebhookSecret(this.orgName).subscribe({
+      next: (result) => {
+        this.forgeWebhookResult.set(result);
+        this.generatingForgeSecret.set(false);
+      },
+      error: (error) => {
+        this.forgeSecretError.set(error?.error?.message || error?.message || 'Failed to generate webhook secret.');
+        this.generatingForgeSecret.set(false);
+      },
+    });
+  }
+
+  copyForgeWebhookUrl(): void {
+    const result = this.forgeWebhookResult();
+    if (result) navigator.clipboard.writeText(result.webhook_url);
+  }
+
+  copyForgeWebhookSecret(): void {
+    const result = this.forgeWebhookResult();
+    if (result) navigator.clipboard.writeText(result.secret);
   }
 }

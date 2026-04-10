@@ -10,6 +10,7 @@ pub mod builds;
 pub mod caches;
 pub mod commits;
 pub mod evals;
+pub mod forge_hooks;
 pub mod orgs;
 pub mod projects;
 pub mod servers;
