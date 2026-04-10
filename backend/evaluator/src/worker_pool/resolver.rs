@@ -4,31 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Parent-side pool of [`super::worker`] subprocesses and the
-//! [`DerivationResolver`] impl that drives them.
-//!
-//! See `worker.rs` for the protocol and the subprocess entry point. The pool
-//! itself is modelled on `gradient_core::pool::NixStorePool`: a semaphore
-//! gates the maximum number of in-flight workers, and idle workers are
-//! returned to a free list on drop. Workers are spawned lazily on demand.
-
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use entity::server::Architecture;
 use futures::stream::{FuturesUnordered, StreamExt};
-use gradient_core::types::consts::FLAKE_START;
 use gradient_core::db::{Derivation, parse_drv};
 use gradient_core::nix::{DerivationResolver, ResolvedDerivation};
+use gradient_core::types::consts::FLAKE_START;
 use std::collections::HashSet;
-use std::ops::{Deref, DerefMut};
-use std::process::Stdio;
-use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use std::sync::Arc;
 use tracing::{debug, warn};
 
-use crate::worker::{EvalRequest, EvalResponse, ResolvedItem};
+use super::pool::EvalWorkerPool;
 
 /// Strips `/nix/store/` and returns just the hash-name component (mirrors the
 /// helper in [`super::resolver`]).
@@ -40,246 +27,58 @@ fn nix_store_path(hash_name: &str) -> String {
     }
 }
 
-/// Handle to a single live eval-worker subprocess.
-///
-/// Owns the child plus its piped stdin/stdout. Each request writes one JSON
-/// line to stdin and reads one JSON line back from stdout — the protocol is
-/// strictly request/response so a single buffer is sufficient.
-pub struct EvalWorker {
-    child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
-    line: String,
-    /// Number of `list` / `resolve` calls served since spawn. The pool
-    /// uses this to recycle the subprocess after a configurable number
-    /// of evaluations so Nix's Boehm-GC-allocated memory (which is
-    /// never released back to the OS) cannot grow unbounded.
-    evaluations_served: usize,
-}
-
-impl EvalWorker {
-    /// Spawn a new worker by re-execing the current binary with `--eval-worker`.
-    async fn spawn() -> Result<Self> {
-        let exe = std::env::current_exe().context("locating current executable")?;
-        let mut child = Command::new(exe)
-            .arg("--eval-worker")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .kill_on_drop(true)
-            .spawn()
-            .context("spawning eval worker subprocess")?;
-        let stdin = child.stdin.take().context("worker stdin missing")?;
-        let stdout = BufReader::new(child.stdout.take().context("worker stdout missing")?);
-        Ok(Self {
-            child,
-            stdin,
-            stdout,
-            line: String::new(),
-            evaluations_served: 0,
-        })
-    }
-
-    /// Send one request and read one response. Errors here mean the worker is
-    /// no longer usable (the caller marks it dead so it gets discarded
-    /// instead of being returned to the pool).
-    async fn request(&mut self, req: &EvalRequest) -> Result<EvalResponse> {
-        let mut bytes = serde_json::to_vec(req).context("serializing request")?;
-        bytes.push(b'\n');
-        self.stdin
-            .write_all(&bytes)
-            .await
-            .context("writing to eval worker stdin")?;
-        self.stdin
-            .flush()
-            .await
-            .context("flushing eval worker stdin")?;
-
-        self.line.clear();
-        let n = self
-            .stdout
-            .read_line(&mut self.line)
-            .await
-            .context("reading eval worker response")?;
-        if n == 0 {
-            anyhow::bail!("eval worker closed pipe");
-        }
-        serde_json::from_str(self.line.trim_end()).context("parsing eval worker response")
-    }
-
-    async fn list(
-        &mut self,
-        repository: String,
-        wildcards: Vec<String>,
-    ) -> Result<(Vec<String>, Vec<String>)> {
-        self.evaluations_served += 1;
-        match self
-            .request(&EvalRequest::List {
-                repository,
-                wildcards,
-            })
-            .await?
-        {
-            EvalResponse::ListOk { attrs, warnings } => Ok((attrs, warnings)),
-            EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
-            _ => anyhow::bail!("eval worker: unexpected response to List"),
-        }
-    }
-
-    async fn resolve(
-        &mut self,
-        repository: String,
-        attrs: Vec<String>,
-    ) -> Result<(Vec<ResolvedItem>, Vec<String>)> {
-        self.evaluations_served += 1;
-        match self
-            .request(&EvalRequest::Resolve { repository, attrs })
-            .await?
-        {
-            EvalResponse::ResolveOk { items, warnings } => Ok((items, warnings)),
-            EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
-            _ => anyhow::bail!("eval worker: unexpected response to Resolve"),
-        }
-    }
-
-    async fn attr_names(&mut self, repository: String, path: String) -> Result<Vec<String>> {
-        match self
-            .request(&EvalRequest::AttrNames { repository, path })
-            .await?
-        {
-            EvalResponse::AttrNamesOk { keys, .. } => Ok(keys),
-            EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
-            _ => anyhow::bail!("eval worker: unexpected response to AttrNames"),
-        }
-    }
-}
-
-impl std::fmt::Debug for EvalWorker {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EvalWorker")
-            .field("pid", &self.child.id())
-            .finish()
-    }
-}
-
-/// Pool of [`EvalWorker`]s.
-///
-/// Workers are created lazily on `acquire`. Idle workers are reused; broken
-/// ones are discarded so the next `acquire` spawns a fresh replacement.
-#[derive(Debug)]
-pub struct EvalWorkerPool {
-    idle: Arc<Mutex<Vec<EvalWorker>>>,
-    semaphore: Arc<Semaphore>,
-    max: usize,
-    /// Recycle an `EvalWorker` subprocess after it has served this many
-    /// `list` / `resolve` calls. Nix's Boehm GC never shrinks the
-    /// process heap, so long-lived workers grow monotonically; killing
-    /// and respawning the subprocess is the only reliable way to
-    /// release evaluation memory back to the OS. `0` disables
-    /// recycling.
-    max_evaluations_per_worker: usize,
-}
-
-impl EvalWorkerPool {
-    pub fn new(max: usize, max_evaluations_per_worker: usize) -> Self {
-        let max = max.max(1);
-        Self {
-            idle: Arc::new(Mutex::new(Vec::new())),
-            semaphore: Arc::new(Semaphore::new(max)),
-            max,
-            max_evaluations_per_worker,
-        }
-    }
-
-    pub fn max(&self) -> usize {
-        self.max
-    }
-
-    /// Acquire a worker, blocking until one is available. Reuses an idle
-    /// worker if any, otherwise spawns a fresh subprocess.
-    pub async fn acquire(&self) -> Result<PooledEvalWorker> {
-        let permit = Arc::clone(&self.semaphore)
-            .acquire_owned()
-            .await
-            .map_err(|_| anyhow::anyhow!("EvalWorkerPool semaphore closed"))?;
-
-        let worker = self.idle.lock().unwrap().pop();
-        let worker = match worker {
-            Some(w) => w,
-            None => EvalWorker::spawn()
-                .await
-                .context("spawning fresh eval worker")?,
-        };
-
-        Ok(PooledEvalWorker {
-            worker: Some(worker),
-            idle: Arc::clone(&self.idle),
-            healthy: true,
-            max_evaluations_per_worker: self.max_evaluations_per_worker,
-            _permit: permit,
-        })
-    }
-}
-
-/// RAII handle returned by [`EvalWorkerPool::acquire`].
-///
-/// Dereferences to `&mut EvalWorker`. On drop, returns the worker to the pool
-/// if [`PooledEvalWorker::healthy`] is `true`, otherwise discards it (the
-/// child is killed by `kill_on_drop`).
-pub struct PooledEvalWorker {
-    worker: Option<EvalWorker>,
-    idle: Arc<Mutex<Vec<EvalWorker>>>,
-    healthy: bool,
-    max_evaluations_per_worker: usize,
-    _permit: OwnedSemaphorePermit,
-}
-
-impl PooledEvalWorker {
-    /// Mark this worker as broken so it won't be returned to the pool.
-    pub fn mark_dead(&mut self) {
-        self.healthy = false;
-    }
-}
-
-impl Deref for PooledEvalWorker {
-    type Target = EvalWorker;
-    fn deref(&self) -> &Self::Target {
-        self.worker.as_ref().unwrap()
-    }
-}
-
-impl DerefMut for PooledEvalWorker {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.worker.as_mut().unwrap()
-    }
-}
-
-impl Drop for PooledEvalWorker {
-    fn drop(&mut self) {
-        if let Some(worker) = self.worker.take() {
-            // Recycle after the configured eval count to reclaim
-            // Boehm-GC memory held by the subprocess.
-            let overused = self.max_evaluations_per_worker > 0
-                && worker.evaluations_served >= self.max_evaluations_per_worker;
-            if overused {
-                debug!(
-                    evaluations = worker.evaluations_served,
-                    "recycling eval worker (max evaluations reached)"
-                );
-                drop(worker);
-                return;
+/// Splits a Nix attribute path on `.`, respecting double-quoted segments.
+/// Mirror of the helper in [`super::flake`] kept here so the pool does not
+/// reach into a sibling module's private API.
+fn split_attr_path(path: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    for ch in path.chars() {
+        match ch {
+            '"' => {
+                in_quotes = !in_quotes;
+                current.push(ch);
             }
-            if self.healthy
-                && let Ok(mut idle) = self.idle.lock()
-            {
-                idle.push(worker);
-                return;
+            '.' if !in_quotes => {
+                segments.push(std::mem::take(&mut current));
             }
-            // Unhealthy or poisoned mutex: drop the worker. `kill_on_drop`
-            // ensures the child does not linger.
-            debug!("discarding eval worker (unhealthy or pool poisoned)");
-            drop(worker);
+            _ => current.push(ch),
         }
+    }
+    segments.push(current);
+    segments
+}
+
+/// Returns the entries from `candidates` matching a pattern of the form
+/// `<prefix>*<suffix>` (only one `*` supported, mirroring the limitation of
+/// [`super::flake::discover_derivations`]).
+fn match_pattern<'a, I>(pattern: &str, candidates: I) -> Vec<String>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let parts: Vec<&str> = pattern.split('*').collect();
+    if parts.len() != 2 {
+        return Vec::new();
+    }
+    let (start, end) = (parts[0], parts[1]);
+    candidates
+        .into_iter()
+        .filter(|c| c.starts_with(start) && c.ends_with(end) && c.len() >= start.len() + end.len())
+        .map(|c| c.to_string())
+        .collect()
+}
+
+/// Wrap an attribute name in `"…"` if it contains characters that are not
+/// valid in an unquoted Nix attribute path (most commonly `-` or `.`).
+fn quote_if_needed(name: &str) -> String {
+    let needs_quote = name
+        .chars()
+        .any(|c| !(c.is_ascii_alphanumeric() || c == '_'));
+    if needs_quote {
+        format!("\"{}\"", name)
+    } else {
+        name.to_string()
     }
 }
 
@@ -422,61 +221,6 @@ impl WorkerPoolResolver {
                 Err(e)
             }
         }
-    }
-}
-
-/// Splits a Nix attribute path on `.`, respecting double-quoted segments.
-/// Mirror of the helper in [`super::flake`] kept here so the pool does not
-/// reach into a sibling module's private API.
-fn split_attr_path(path: &str) -> Vec<String> {
-    let mut segments = Vec::new();
-    let mut current = String::new();
-    let mut in_quotes = false;
-    for ch in path.chars() {
-        match ch {
-            '"' => {
-                in_quotes = !in_quotes;
-                current.push(ch);
-            }
-            '.' if !in_quotes => {
-                segments.push(std::mem::take(&mut current));
-            }
-            _ => current.push(ch),
-        }
-    }
-    segments.push(current);
-    segments
-}
-
-/// Returns the entries from `candidates` matching a pattern of the form
-/// `<prefix>*<suffix>` (only one `*` supported, mirroring the limitation of
-/// [`super::flake::discover_derivations`]).
-fn match_pattern<'a, I>(pattern: &str, candidates: I) -> Vec<String>
-where
-    I: IntoIterator<Item = &'a str>,
-{
-    let parts: Vec<&str> = pattern.split('*').collect();
-    if parts.len() != 2 {
-        return Vec::new();
-    }
-    let (start, end) = (parts[0], parts[1]);
-    candidates
-        .into_iter()
-        .filter(|c| c.starts_with(start) && c.ends_with(end) && c.len() >= start.len() + end.len())
-        .map(|c| c.to_string())
-        .collect()
-}
-
-/// Wrap an attribute name in `"…"` if it contains characters that are not
-/// valid in an unquoted Nix attribute path (most commonly `-` or `.`).
-fn quote_if_needed(name: &str) -> String {
-    let needs_quote = name
-        .chars()
-        .any(|c| !(c.is_ascii_alphanumeric() || c == '_'));
-    if needs_quote {
-        format!("\"{}\"", name)
-    } else {
-        name.to_string()
     }
 }
 
