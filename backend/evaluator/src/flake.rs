@@ -5,12 +5,13 @@
  */
 
 use anyhow::{Context, Result};
-use gradient_core::consts::FLAKE_START;
 use gradient_core::executer::strip_nix_store_prefix;
-use std::collections::{HashMap, HashSet};
-use tracing::{debug, error};
+use tracing::debug;
 
 use crate::nix_eval::{NixEvaluator, escape_nix_str};
+
+/// The eval.nix expression embedded at compile time.
+const EVAL_NIX: &str = include_str!("eval.nix");
 
 /// Splits a Nix attribute path on `.`, respecting double-quoted segments.
 /// `packages.x86_64-linux."python3.12".*` → `["packages", "x86_64-linux", "\"python3.12\"", "*"]`
@@ -36,196 +37,100 @@ fn split_attr_path(path: &str) -> Vec<String> {
     segments
 }
 
-/// Expands wildcard patterns against a flake's attribute tree and returns all matching derivation
-/// paths (e.g. `packages.x86_64-linux.hello`).
+/// Converts a single dotted pattern (e.g. `packages.*."python3.12"`) into a
+/// Nix list-of-strings literal: `[ "packages" "*" "python3.12" ]`.
+///
+/// Consecutive `"*"` segments are collapsed (mirrors `Wildcard::get_eval_str`).
+fn pattern_to_nix_list(path: &str) -> String {
+    let segs = split_attr_path(path);
+    let raw_elems: Vec<String> = segs
+        .into_iter()
+        .map(|seg| {
+            let content = if seg.starts_with('"') && seg.ends_with('"') && seg.len() >= 2 {
+                seg[1..seg.len() - 1].to_string()
+            } else {
+                seg
+            };
+            format!("\"{}\"", content)
+        })
+        .collect();
+
+    let mut elems: Vec<String> = Vec::new();
+    for elem in raw_elems {
+        if elem == "\"*\"" && elems.last().is_some_and(|l| l == "\"*\"") {
+            continue;
+        }
+        elems.push(elem);
+    }
+
+    format!("[ {} ]", elems.join(" "))
+}
+
+/// Constructs a Nix `wildcard_ref` attrset expression from wildcard patterns.
+fn build_wildcard_nix_expr(wildcards: &[String]) -> String {
+    let mut includes = Vec::new();
+    let mut excludes = Vec::new();
+
+    for pattern in wildcards {
+        let (is_exclude, path) = match pattern.strip_prefix('!') {
+            Some(body) => (true, body),
+            None => (false, pattern.as_str()),
+        };
+
+        let nix_list = pattern_to_nix_list(path);
+        if is_exclude {
+            excludes.push(nix_list);
+        } else {
+            includes.push(nix_list);
+        }
+    }
+
+    format!(
+        "{{ \"include\" = [ {} ]; \"exclude\" = [ {} ]; }}",
+        includes.join(" "),
+        excludes.join(" "),
+    )
+}
+
+/// Discovers all derivation attribute paths in a flake matching the given
+/// wildcard patterns by evaluating the embedded `eval.nix` through the Nix C API.
+///
+/// ## Wildcard semantics
+///
+/// - `*` — **recursive** wildcard. Consecutive `*` segments are collapsed by
+///   [`build_wildcard_nix_expr`] before being passed to `eval.nix`, so
+///   `packages.*.*` and `packages.*` resolve identically. When `*` is the
+///   last segment the evaluator also descends one additional level into nested
+///   attrsets, which recovers the derivations that would have been found by the
+///   collapsed trailing `.*`.
+/// - `#` — **non-recursive** wildcard. Matches any attribute name at its
+///   position but stops there; only nodes with `type == "derivation"` at
+///   exactly that depth are collected. Use this when you want to target a
+///   specific nesting level without the extra descent that `*` performs.
 ///
 /// Synchronous — must run inside `spawn_blocking`.
-///
-/// The evaluator is borrowed (not constructed) so the caller can reuse one
-/// `NixEvaluator` per process. Creating multiple evaluators inside the same
-/// process touches libnix global state and hangs.
 pub(super) fn discover_derivations(
     evaluator: &NixEvaluator,
     repository: &str,
     wildcards: &[String],
 ) -> Result<Vec<String>> {
     let escaped_repo = escape_nix_str(repository);
+    let wildcard_ref = build_wildcard_nix_expr(wildcards);
+    let expr = format!(
+        "({}) \"{}\" {}",
+        EVAL_NIX, escaped_repo, wildcard_ref
+    );
 
-    let mut all_derivations: HashSet<String> = HashSet::new();
-    let mut partial_derivations: HashMap<String, HashSet<String>> = HashMap::new();
+    debug!(wildcards = ?wildcards, "discovering derivations via eval.nix");
 
-    let wildcards_ref: Vec<&str> = wildcards.iter().map(|s| s.as_str()).collect();
+    let json_str = evaluator
+        .eval_string(&expr)
+        .context("eval.nix evaluation failed")?;
 
-    'outer: for w in wildcards_ref
-        .iter()
-        .map(|w| split_attr_path(&format!("{}.#", w)))
-    {
-        for (it, t) in w.iter().enumerate() {
-            if t.contains("*") || t.contains("#") {
-                let mut type_check = false;
-                let t = if t == "#" {
-                    type_check = true;
-                    t.replace("#", "*").clone()
-                } else {
-                    t.clone()
-                };
+    let attrs: Vec<String> =
+        serde_json::from_str(&json_str).context("Failed to parse eval.nix JSON output")?;
 
-                // TODO: any number of splits
-                let key_split = t.split("*").collect::<Vec<&str>>();
-                let (key_start, key_end) = (key_split[0], key_split[1]);
-                if it == 0 {
-                    let selected_keys = FLAKE_START
-                        .map(|s| s.to_string())
-                        .to_vec()
-                        .iter()
-                        .filter(|s| {
-                            s.starts_with(key_start)
-                                && s.ends_with(key_end)
-                                && s.len() >= key_start.len() + key_end.len()
-                        })
-                        .cloned()
-                        .collect::<Vec<String>>();
-
-                    partial_derivations
-                        .entry("#".to_string())
-                        .and_modify(|s| {
-                            selected_keys.iter().for_each(|v| {
-                                s.insert(v.clone());
-                            });
-                        })
-                        .or_insert(HashSet::from_iter(selected_keys.iter().cloned()));
-                    continue;
-                }
-
-                let mut key = vec![0; it];
-                let mut run_done = false;
-                loop {
-                    let mut current_key = Vec::new();
-                    for (ik, mut k) in key.clone().into_iter().enumerate() {
-                        let val = if ik == 0 {
-                            if let Some(derivs) = partial_derivations.get("#") {
-                                derivs.iter().collect::<Vec<&String>>()
-                            } else {
-                                error!("Failed to get partial derivations for '#'");
-                                continue 'outer;
-                            }
-                        } else if w[ik].contains("*") || w[ik].contains("#") {
-                            if let Some(derivs) = partial_derivations.get(&current_key.join(".")) {
-                                derivs.iter().collect::<Vec<&String>>()
-                            } else {
-                                error!(
-                                    "Failed to get partial derivations for key: {}",
-                                    current_key.join(".")
-                                );
-                                continue 'outer;
-                            }
-                        } else {
-                            vec![&w[ik]]
-                        };
-
-                        if k >= val.len() {
-                            if ik == 0 {
-                                run_done = true;
-                                break;
-                            }
-
-                            key[ik - 1] += 1;
-                            key[ik] = 0;
-                            k = 0;
-                        }
-
-                        if let Some(v) = val.get(k) {
-                            current_key.push(v.as_str());
-                        } else {
-                            error!("Failed to get value at index {} from derivations", k);
-                            continue 'outer;
-                        }
-
-                        if ik == key.len() - 1 {
-                            key[ik] += 1;
-                        }
-                    }
-
-                    if run_done {
-                        break;
-                    }
-
-                    let current_key = current_key.join(".");
-
-                    // TODO: optimize partial_derivations by saving all keys; continue here if
-                    // all_keys contains current_key
-                    if all_derivations.contains(&current_key) {
-                        continue;
-                    }
-
-                    let expr = format!("(builtins.getFlake \"{}\").{}", escaped_repo, current_key);
-                    debug!(expr = %expr, "evaluating flake attribute");
-
-                    let keys = match evaluator.attr_names(&expr) {
-                        Ok(keys) => keys,
-                        Err(e) => {
-                            debug!(
-                                path = %current_key,
-                                error = %e,
-                                "Skipping attribute path not present in flake"
-                            );
-                            continue;
-                        }
-                    };
-
-                    if keys.contains(&"type".to_string()) && type_check {
-                        let type_expr = format!(
-                            "(builtins.getFlake \"{}\").{}.type",
-                            escaped_repo, current_key
-                        );
-                        debug!(expr = %type_expr, "evaluating type attribute");
-
-                        match evaluator.eval_string(&type_expr) {
-                            Ok(type_value) if type_value == "derivation" => {
-                                all_derivations.insert(current_key.clone());
-                                continue;
-                            }
-                            Ok(_) => {}
-                            Err(e) => {
-                                debug!(
-                                    path = %current_key,
-                                    error = %e,
-                                    "Failed to evaluate type attribute"
-                                );
-                            }
-                        }
-                    }
-
-                    let selected_keys = keys
-                        .iter()
-                        .filter(|s| {
-                            s.starts_with(key_start)
-                                && s.ends_with(key_end)
-                                && s.len() >= key_start.len() + key_end.len()
-                        })
-                        .map(|s| format!("\"{}\"", s))
-                        .collect::<Vec<String>>();
-
-                    partial_derivations
-                        .entry(current_key.clone())
-                        .and_modify(|s| {
-                            selected_keys.iter().for_each(|v| {
-                                s.insert(v.clone());
-                            });
-                        })
-                        .or_insert(HashSet::from_iter(selected_keys.iter().cloned()));
-                }
-            } else if !FLAKE_START.iter().any(|s| s == t) && it == 0 {
-                break;
-            } else if it == 0 {
-                let mut new_hashset = HashSet::new();
-                new_hashset.insert(t.to_string());
-                partial_derivations.insert("#".to_string(), new_hashset);
-            }
-        }
-    }
-
-    Ok(all_derivations.into_iter().collect())
+    Ok(attrs)
 }
 
 /// Resolves a flake attribute path to its store derivation path using the

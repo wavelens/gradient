@@ -22,6 +22,27 @@ use crate::input::InputError;
 /// `packages.*.*,!packages.x86_64-linux.broken` includes everything in
 /// `packages.*.*` except that one path.
 ///
+/// ## Wildcard segments: `*` vs `#`
+///
+/// Both `*` and `#` match any attribute name at their position, but they
+/// differ in how they handle the leaf level:
+///
+/// - `*` is **recursive**: consecutive `*` segments are collapsed before
+///   evaluation (so `packages.*.*` and `packages.*` are equivalent), and when
+///   a `*` is the last segment the evaluator descends one additional level into
+///   nested attrsets to find derivations. This is the common case for patterns
+///   like `packages.*.*` where the intermediate `*` (system) is collapsed away.
+///
+/// - `#` is **non-recursive**: it matches any attribute name at its position
+///   and checks whether that node is a derivation (`type == "derivation"`), but
+///   it does **not** descend further. Use `#` when you want to target exactly
+///   the attributes at a specific depth, e.g. `packages.x86_64-linux.#`
+///   collects only direct children of `packages.x86_64-linux` that are
+///   derivations, without walking into nested attrsets.
+///
+/// `#` is rejected as a bare pattern (the whole string) and inside exclusion
+/// patterns, but is valid as a segment within an include pattern.
+///
 /// # Rules
 ///
 /// - No leading/trailing whitespace on the whole string.
@@ -147,10 +168,12 @@ fn path_to_nix_list(path: &str) -> String {
         })
         .collect();
 
-    // Collapse consecutive `"*"` segments — `*.*` is semantically identical to `*`.
+    // Collapse consecutive `"*"` segments — `*.*` is semantically identical to `*`
+    // because `*` is recursive. `#` is non-recursive so `#.#` is NOT collapsed:
+    // each `#` targets a distinct depth level.
     let mut elems: Vec<String> = Vec::new();
     for elem in raw_elems {
-        if elem == "\"*\"" && elems.last().map_or(false, |l| l == "\"*\"") {
+        if elem == "\"*\"" && elems.last().is_some_and(|l| l == "\"*\"") {
             continue;
         }
         elems.push(elem);

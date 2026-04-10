@@ -27,7 +27,13 @@ Converts the repository URL and commit hash into a Nix flake reference:
 get_flake_derivations(state, repo_ref, wildcards, org)
 ```
 
-Expands the evaluation wildcard (e.g. `packages.x86_64-linux`) into a list of fully-qualified attribute paths, then runs `nix eval --json` to resolve each to a store path.
+Expands the evaluation wildcard into a list of fully-qualified attribute paths using an embedded Nix expression, then resolves each to a store derivation path via the Nix C API.
+
+Wildcard segments:
+
+- `*` — **recursive**: matches any attribute name and, when at the trailing position, descends one additional level to recover derivations hidden by consecutive-wildcard collapsing (`packages.*.*` and `packages.*` are equivalent).
+- `#` — **non-recursive**: matches any attribute name at exactly that depth and checks `type == "derivation"` without descending further. Use this to target a specific nesting level precisely.
+- `!prefix` — **exclusion**: removes exact paths from the collected set (wildcards in exclusions are not allowed).
 
 **4. Build dependency graph** (`query_all_dependencies`)
 

@@ -6,4 +6,5 @@
  - when new git commit is detected, add it as queued (dont wait for the current evaluation to finish), abort the previous build if it is still running
  - pack_derivation_output is reading stdout to memory, but would be better to stream
  - disko image builder for unit test store: nix run .#diskoImage-qemu in libretoy (https://github.com/nix-community/disko/blob/5ad85c82cc52264f4beddc934ba57f3789f28347/lib/make-disk-image.nix#L168)
+ - error pages - add a page for 404, 500, 502, 503, 504
 

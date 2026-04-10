@@ -39,7 +39,7 @@ pub struct BadgeParams {
     /// Shield style. `flat` (default) gives rounded corners; `flat-square` has none.
     #[serde(default = "default_style")]
     pub style: BadgeStyle,
-    /// Left-side label. Defaults to `"build"`.
+    /// Left-side label. Defaults to `"gradient"`.
     #[serde(default = "default_label")]
     pub label: String,
     /// Nix attribute path of a specific entry point (e.g. `packages."x86_64-linux".hello`).
@@ -64,7 +64,7 @@ fn default_style() -> BadgeStyle {
 }
 
 fn default_label() -> String {
-    "build".to_string()
+    "gradient".to_string()
 }
 
 // ── SVG generation ────────────────────────────────────────────────────────────

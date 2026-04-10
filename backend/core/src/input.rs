@@ -365,6 +365,7 @@ pub fn validate_username(username: &str) -> Result<(), InputError> {
         "null",
         "undefined",
     ];
+
     if reserved.contains(&username.to_lowercase().as_str()) {
         return Err(InputError::UsernameReserved);
     }

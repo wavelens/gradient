@@ -9,38 +9,48 @@
 
 ## Evaluation Wildcard
 
-The wildcard is a dot-separated Nix attribute path selecting which flake outputs to build. Multiple paths are separated by commas (no spaces). The root level is restricted to: `checks`, `packages`, `formatter`, `legacyPackages`, `nixosConfigurations`, `devShells`, `hydraJobs`.
+The wildcard is a dot-separated Nix attribute path selecting which flake outputs to build. Multiple patterns are separated by commas (no spaces). The root level is restricted to: `checks`, `packages`, `formatter`, `legacyPackages`, `nixosConfigurations`, `devShells`, `hydraJobs`.
 
-Two special tokens control expansion at each level:
+Two wildcard tokens expand attribute names at a given level:
 
 | Token | Behaviour |
 |---|---|
-| `*` | Expand all keys at this level without type-checking (recursive — children are processed further) |
-| `#` | Type-check at this level: only attributes where `type == "derivation"` are built (non-recursive) |
+| `*` | **Recursive** — matches all attribute names at this level and, at the trailing position, descends one additional level. Consecutive `*` segments collapse: `packages.*.*` and `packages.*` are equivalent. |
+| `#` | **Non-recursive** — matches all attribute names at this level but collects only those where `type == "derivation"`. Does not descend further. Use this to target a specific depth precisely. |
 
-An implicit `.#` is appended to every wildcard, so `packages.x86_64-linux.*` becomes `packages.x86_64-linux.*.#` internally.
+### `*` vs `#`
 
-Consecutive `*` segments collapse into one — `packages.*.*` and `packages.*` are equivalent.
+```
+packages.x86_64-linux.*   # finds packages.*.*.*  — recurses past x86_64-linux into each package
+packages.x86_64-linux.#   # finds packages that are derivations directly under x86_64-linux, no deeper
+```
+
+In practice `*` is the right choice for almost all flakes. Use `#` when a flake nests attrsets inside a package attribute and you do not want those nested attrs collected.
 
 ### Exclusions
 
-Prefix a pattern with `!` to exclude matching paths from the set produced by the preceding include patterns. Exclusions are evaluated in order — each `!`-prefixed pattern removes anything it matches from the accumulated set.
+Prefix a pattern with `!` to remove matching paths from the set built by the preceding include patterns.
 
 ```
 packages.*,!packages.x86_64-linux.broken
 ```
 
-The above builds all packages on all systems except `packages.x86_64-linux.broken`.
-
 Exclusion patterns must be exact paths — they cannot contain `*` or `#`.
 
-| Wildcard | Builds |
+### Examples
+
+| Wildcard | What gets built |
 |---|---|
-| `packages.x86_64-linux.#` | All x86\_64-linux packages |
-| `checks.x86_64-linux.*` | All x86\_64-linux checks |
-| `packages.*` | Packages for all systems |
-| `packages.x86_64-linux.*,checks.x86_64-linux.*` | Both |
-| `nixosConfigurations.*.config.system.build.toplevel` | All NixOS configurations |
+| `packages.x86_64-linux.#` | Every derivation directly under `packages.x86_64-linux` |
+| `packages.x86_64-linux.*` | Same, but also recurses one level deeper into nested attrsets |
+| `packages.#.#` | Every derivation at exactly depth 2 under `packages` (system → package) across all systems — first `#` expands systems, second `#` expands packages non-recursively |
+| `checks.x86_64-linux.*` | All checks for x86\_64-linux |
+| `packages.*` | Packages for every system (equivalent to `packages.*.*`) |
+| `packages.*,checks.*` | Packages and checks for every system |
+| `packages.x86_64-linux.*,checks.x86_64-linux.*` | Packages and checks for x86\_64-linux only |
+| `nixosConfigurations.#` | All NixOS system configurations |
+| `devShells.*` | All dev shells for every system |
+| `*` | Everything in all top-level output categories |
 | `packages.*,!packages.x86_64-linux.broken` | All packages except one excluded path |
 
 ## Evaluations
