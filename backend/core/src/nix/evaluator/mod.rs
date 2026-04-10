@@ -11,7 +11,7 @@
 //! persistent embedded Nix C API evaluator. Tests in any crate can substitute
 //! the in-memory `FakeDerivationResolver` from `test-support`.
 
-use crate::derivation::Derivation;
+use crate::db::Derivation;
 use anyhow::Result;
 use async_trait::async_trait;
 use entity::server::Architecture;

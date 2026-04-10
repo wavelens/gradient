@@ -81,7 +81,7 @@ pub async fn cache_loop(state: Arc<ServerState>) {
                 } else {
                     info!("Evaluation GC completed successfully");
                 }
-                if let Err(e) = core::gc::gc_orphan_derivations(
+                if let Err(e) = core::db::gc_orphan_derivations(
                     Arc::clone(&state),
                     state.cli.keep_orphan_derivations_hours,
                 )
@@ -783,7 +783,7 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
         if keep == 0 {
             continue;
         }
-        if let Err(e) = core::gc::gc_project_evaluations(Arc::clone(&state), project.id, keep).await
+        if let Err(e) = core::db::gc_project_evaluations(Arc::clone(&state), project.id, keep).await
         {
             warn!(error = %e, project_id = %project.id, "Evaluation GC failed for project");
         }

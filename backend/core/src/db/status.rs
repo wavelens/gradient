@@ -52,7 +52,7 @@ pub async fn update_build_status(
             let webhook_state = Arc::clone(&state);
             let webhook_build = updated_build.clone();
             tokio::spawn(async move {
-                crate::webhooks::fire_build_webhook(webhook_state, webhook_build, webhook_status)
+                crate::ci::fire_build_webhook(webhook_state, webhook_build, webhook_status)
                     .await;
             });
 
@@ -160,7 +160,7 @@ pub async fn update_evaluation_status(
     let webhook_state = Arc::clone(&state);
     let webhook_eval = updated_eval.clone();
     tokio::spawn(async move {
-        crate::webhooks::fire_evaluation_webhook(webhook_state, webhook_eval, webhook_status).await;
+        crate::ci::fire_evaluation_webhook(webhook_state, webhook_eval, webhook_status).await;
     });
     updated_eval
 }

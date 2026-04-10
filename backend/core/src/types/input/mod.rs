@@ -8,7 +8,7 @@ use anyhow::Result as AnyhowResult;
 use std::net::{SocketAddr, ToSocketAddrs};
 use thiserror::Error;
 
-use super::consts::*;
+use crate::types::consts::*;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum InputError {

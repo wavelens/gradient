@@ -7,7 +7,7 @@
 //! Shared logic for creating a queued evaluation from any trigger source
 //! (API endpoint, incoming forge webhook, …).
 
-use crate::consts::NULL_TIME;
+use crate::types::consts::NULL_TIME;
 use crate::types::*;
 use chrono::Utc;
 use entity::evaluation::EvaluationStatus;

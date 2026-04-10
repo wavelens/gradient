@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 use futures::future::BoxFuture;
-use gradient_core::log_storage::LogStorage;
+use gradient_core::storage::LogStorage;
 use uuid::Uuid;
 
 /// Minimal no-op log storage for tests.

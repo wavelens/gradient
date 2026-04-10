@@ -7,8 +7,8 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use entity::server::Architecture;
-use gradient_core::derivation::Derivation;
-use gradient_core::evaluator::{DerivationResolver, ResolvedDerivation};
+use gradient_core::db::Derivation;
+use gradient_core::nix::{DerivationResolver, ResolvedDerivation};
 use std::collections::HashMap;
 use std::sync::Mutex;
 

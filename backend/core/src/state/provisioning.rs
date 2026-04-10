@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::consts::BASE_ROLE_ADMIN_ID;
-use crate::input::load_secret_bytes;
+use super::{StateApiKey, StateCache, StateConfiguration, StateOrganization, StateProject, StateServer, StateUpstream, StateUser};
+use crate::types::consts::BASE_ROLE_ADMIN_ID;
+use crate::types::input::load_secret_bytes;
+use crate::types::*;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
 use chrono::Utc;
@@ -13,356 +15,12 @@ use entity::organization_cache::CacheSubscriptionMode;
 use entity::*;
 use password_auth::generate_hash;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
-use serde::{Deserialize, Serialize};
 use ssh_key::PrivateKey;
 use std::collections::HashMap;
 use std::fs;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateUser {
-    pub username: String,
-    pub name: String,
-    pub email: String,
-    pub password_file: String,
-    #[serde(default)]
-    pub email_verified: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateOrganization {
-    pub name: String,
-    pub display_name: String,
-    pub description: String,
-    pub private_key_file: String,
-    pub public: bool,
-    #[serde(default = "default_true")]
-    pub use_nix_store: bool,
-    pub created_by: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateProject {
-    pub name: String,
-    pub organization: String,
-    pub display_name: String,
-    pub description: String,
-    pub repository: String,
-    #[serde(default = "default_main")]
-    pub evaluation_wildcard: String,
-    #[serde(default = "default_true")]
-    pub active: bool,
-    #[serde(default)]
-    pub force_evaluation: bool,
-    pub created_by: String,
-    /// How many evaluations to retain per project. `None` keeps the current DB value (or the
-    /// default of 30 for new projects). Must not exceed `GRADIENT_KEEP_EVALUATIONS` if set.
-    #[serde(default)]
-    pub keep_evaluations: Option<i32>,
-    /// CI reporter type: `"gitea"` or `"github"`. `None` disables CI reporting.
-    #[serde(default)]
-    pub ci_reporter_type: Option<String>,
-    /// Base URL for the CI reporter (required for Gitea; defaults to github.com for GitHub).
-    #[serde(default)]
-    pub ci_reporter_url: Option<String>,
-    /// Whether a CI reporter token credential is provided. When true, state management
-    /// reads the token from the systemd credential `gradient_project_{name}_ci_token`
-    /// (loaded via `LoadCredential`), encrypts it, and stores it in the database.
-    #[serde(default)]
-    pub ci_reporter_has_token: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateServer {
-    pub name: String,
-    pub display_name: String,
-    pub organization: String,
-    #[serde(default = "default_true")]
-    pub active: bool,
-    pub host: String,
-    #[serde(default = "default_ssh_port")]
-    pub port: i32,
-    pub username: String,
-    #[serde(default = "default_architectures")]
-    pub architectures: Vec<String>,
-    #[serde(default)]
-    pub features: Vec<String>,
-    #[serde(default = "default_max_concurrent_builds")]
-    pub max_concurrent_builds: i32,
-    pub created_by: String,
-}
-
-fn default_max_concurrent_builds() -> i32 {
-    1
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateCache {
-    pub name: String,
-    pub display_name: String,
-    pub description: String,
-    #[serde(default = "default_true")]
-    pub active: bool,
-    #[serde(default = "default_priority")]
-    pub priority: i32,
-    pub signing_key_file: String,
-    #[serde(default)]
-    pub organizations: Vec<String>,
-    #[serde(default)]
-    pub upstreams: Vec<StateUpstream>,
-    pub public: bool,
-    pub created_by: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum StateUpstream {
-    Internal {
-        cache_name: String,
-        display_name: Option<String>,
-        #[serde(default = "default_upstream_mode")]
-        mode: CacheSubscriptionMode,
-    },
-    External {
-        display_name: String,
-        url: String,
-        public_key: String,
-    },
-}
-
-fn default_upstream_mode() -> CacheSubscriptionMode {
-    CacheSubscriptionMode::ReadWrite
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateApiKey {
-    pub name: String,
-    pub key_file: String,
-    pub owned_by: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateConfiguration {
-    #[serde(default)]
-    pub users: HashMap<String, StateUser>,
-    #[serde(default)]
-    pub organizations: HashMap<String, StateOrganization>,
-    #[serde(default)]
-    pub projects: HashMap<String, StateProject>,
-    #[serde(default)]
-    pub servers: HashMap<String, StateServer>,
-    #[serde(default)]
-    pub caches: HashMap<String, StateCache>,
-    #[serde(default)]
-    pub api_keys: HashMap<String, StateApiKey>,
-}
-
-#[derive(Debug, Clone, thiserror::Error)]
-#[error("Validation error in field '{field}': {message}")]
-pub struct ValidationError {
-    pub field: String,
-    pub message: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct ValidationResult {
-    pub errors: Vec<ValidationError>,
-    pub is_valid: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_main() -> String {
-    "main".to_string()
-}
-
-fn default_ssh_port() -> i32 {
-    22
-}
-
-fn default_architectures() -> Vec<String> {
-    vec!["x86_64-linux".to_string()]
-}
-
-fn default_priority() -> i32 {
-    10
-}
-
-impl StateConfiguration {
-    pub fn from_file(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let content = fs::read_to_string(path)?;
-        let config: StateConfiguration = serde_json::from_str(&content)?;
-        Ok(config)
-    }
-
-    pub fn validate(&self) -> ValidationResult {
-        let mut errors = Vec::new();
-
-        // Validate users
-        for user in self.users.values() {
-            if !user.email.contains('@') {
-                errors.push(ValidationError {
-                    field: format!("users.{}.email", user.username),
-                    message: "Invalid email format".to_string(),
-                });
-            }
-        }
-
-        // Validate organizations
-        for org in self.organizations.values() {
-            if !self.users.contains_key(&org.created_by) {
-                errors.push(ValidationError {
-                    field: format!("organizations.{}.created_by", org.name),
-                    message: format!("User '{}' does not exist", org.created_by),
-                });
-            }
-        }
-
-        // Validate projects
-        for project in self.projects.values() {
-            if !self.organizations.contains_key(&project.organization) {
-                errors.push(ValidationError {
-                    field: format!("projects.{}.organization", project.name),
-                    message: format!("Organization '{}' does not exist", project.organization),
-                });
-            }
-
-            if !self.users.contains_key(&project.created_by) {
-                errors.push(ValidationError {
-                    field: format!("projects.{}.created_by", project.name),
-                    message: format!("User '{}' does not exist", project.created_by),
-                });
-            }
-
-            if !project.repository.starts_with("http") && !project.repository.starts_with("git") {
-                errors.push(ValidationError {
-                    field: format!("projects.{}.repository", project.name),
-                    message: "Repository URL must start with http or git".to_string(),
-                });
-            }
-        }
-
-        // Validate servers
-        for server in self.servers.values() {
-            if !self.organizations.contains_key(&server.organization) {
-                errors.push(ValidationError {
-                    field: format!("servers.{}.organization", server.name),
-                    message: format!("Organization '{}' does not exist", server.organization),
-                });
-            }
-
-            if !self.users.contains_key(&server.created_by) {
-                errors.push(ValidationError {
-                    field: format!("servers.{}.created_by", server.name),
-                    message: format!("User '{}' does not exist", server.created_by),
-                });
-            }
-
-            for arch in &server.architectures {
-                if ![
-                    "x86_64-linux",
-                    "aarch64-linux",
-                    "x86_64-darwin",
-                    "aarch64-darwin",
-                ]
-                .contains(&arch.as_str())
-                {
-                    errors.push(ValidationError {
-                        field: format!("servers.{}.architectures", server.name),
-                        message: format!("Unknown architecture: {}", arch),
-                    });
-                }
-            }
-
-            if server.port < 1 || server.port > 65535 {
-                errors.push(ValidationError {
-                    field: format!("servers.{}.port", server.name),
-                    message: "Port must be between 1 and 65535".to_string(),
-                });
-            }
-        }
-
-        // Validate caches
-        for cache in self.caches.values() {
-            if !self.users.contains_key(&cache.created_by) {
-                errors.push(ValidationError {
-                    field: format!("caches.{}.created_by", cache.name),
-                    message: format!("User '{}' does not exist", cache.created_by),
-                });
-            }
-
-            for org_name in &cache.organizations {
-                if !self.organizations.contains_key(org_name) {
-                    errors.push(ValidationError {
-                        field: format!("caches.{}.organizations", cache.name),
-                        message: format!("Organization '{}' does not exist", org_name),
-                    });
-                }
-            }
-        }
-
-        // Validate API keys
-        for api_key in self.api_keys.values() {
-            if !self.users.contains_key(&api_key.owned_by) {
-                errors.push(ValidationError {
-                    field: format!("api_keys.{}.owned_by", api_key.name),
-                    message: format!("User '{}' does not exist", api_key.owned_by),
-                });
-            }
-        }
-
-        ValidationResult {
-            is_valid: errors.is_empty(),
-            errors,
-        }
-    }
-}
-
-pub async fn load_and_apply_state(
-    db: &DatabaseConnection,
-    state_file_path: Option<&str>,
-    crypt_secret_file: &str,
-    delete_state: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(path) = state_file_path else {
-        tracing::info!("No state file configured, skipping state management");
-        return Ok(());
-    };
-
-    println!("Loading state configuration from: {}", path);
-    tracing::info!("Loading state configuration from: {}", path);
-
-    let config = StateConfiguration::from_file(path)?;
-
-    // Validate configuration
-    let validation = config.validate();
-    if !validation.is_valid {
-        let error_messages: Vec<String> = validation
-            .errors
-            .iter()
-            .map(|e| format!("{}: {}", e.field, e.message))
-            .collect();
-
-        return Err(format!(
-            "State configuration validation failed:\n{}",
-            error_messages.join("\n")
-        )
-        .into());
-    }
-
-    println!("State configuration validated successfully");
-    tracing::info!("State configuration validated successfully");
-
-    // TODO: Apply state to database
-    // This will be implemented in the next step
-    apply_state_to_database(db, &config, crypt_secret_file, delete_state).await?;
-
-    Ok(())
-}
-
-async fn apply_state_to_database(
+pub(super) async fn apply_state_to_database(
     db: &DatabaseConnection,
     config: &StateConfiguration,
     crypt_secret_file: &str,
@@ -370,32 +28,12 @@ async fn apply_state_to_database(
 ) -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("Applying state to database");
 
-    // Apply users
     apply_users(db, &config.users).await?;
-
-    // Apply organizations (depends on users)
     apply_organizations(db, &config.organizations, &config.users, crypt_secret_file).await?;
-
-    // Apply projects (depends on organizations and users)
     apply_projects(db, &config.projects, &config.users, &config.organizations, crypt_secret_file).await?;
-
-    // Apply servers (depends on organizations and users)
     apply_servers(db, &config.servers, &config.users, &config.organizations).await?;
-
-    // Apply caches (depends on users and organizations)
-    apply_caches(
-        db,
-        &config.caches,
-        &config.users,
-        &config.organizations,
-        crypt_secret_file,
-    )
-    .await?;
-
-    // Apply API keys (depends on users)
+    apply_caches(db, &config.caches, &config.users, &config.organizations, crypt_secret_file).await?;
     apply_api_keys(db, &config.api_keys).await?;
-
-    // Unmark entities that are no longer in state
     unmark_removed_entities(db, config, delete_state).await?;
 
     println!("State applied successfully");
@@ -408,7 +46,6 @@ async fn apply_users(
     state_users: &HashMap<String, StateUser>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for state_user in state_users.values() {
-        // Read password from file using credentials directory
         let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
             .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
         let password_path = format!(
@@ -418,7 +55,6 @@ async fn apply_users(
         let password = fs::read_to_string(&password_path)
             .map_err(|e| format!("Failed to read password file {}: {}", password_path, e))?;
 
-        // Check if user exists
         let existing_user = user::Entity::find()
             .filter(user::Column::Username.eq(&state_user.username))
             .one(db)
@@ -427,7 +63,6 @@ async fn apply_users(
         let now = Utc::now().naive_utc();
 
         if let Some(existing) = existing_user {
-            // Update existing user
             let mut user: user::ActiveModel = existing.into();
             user.name = Set(state_user.name.clone());
             user.email = Set(state_user.email.clone());
@@ -437,7 +72,6 @@ async fn apply_users(
             user.update(db).await?;
             tracing::info!("Updated managed user: {}", state_user.username);
         } else {
-            // Create new user
             let user = user::ActiveModel {
                 id: Set(Uuid::new_v4()),
                 username: Set(state_user.username.clone()),
@@ -468,7 +102,6 @@ fn derive_public_key(private_key: &str) -> Result<String> {
         .to_openssh()
         .context("Failed to derive public key")?;
 
-    // Remove default comment if present (only keep algorithm and key)
     let key_parts: Vec<&str> = public_key.split_whitespace().collect();
     let cleaned_key = if key_parts.len() >= 2 {
         format!("{} {}", key_parts[0], key_parts[1])
@@ -488,7 +121,6 @@ async fn apply_organizations(
     let user_map = create_user_lookup(db).await?;
 
     for state_org in state_orgs.values() {
-        // Read private key from file using credentials directory
         let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
             .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
         let private_key_path = format!(
@@ -502,10 +134,7 @@ async fn apply_organizations(
             )
         })?;
 
-        // Derive the actual public key from the private key
         let public_key = derive_public_key(private_key.trim())?;
-
-        // Encrypt private key using crypter library
         let secret = load_secret_bytes(crypt_secret_file);
 
         let encrypted_bytes = crypter::encrypt_with_password(&secret, private_key.trim())
@@ -524,7 +153,6 @@ async fn apply_organizations(
         let now = Utc::now().naive_utc();
 
         let org_id = if let Some(existing) = existing_org {
-            // Update existing organization
             let org_id = existing.id;
             let mut org: organization::ActiveModel = existing.into();
             org.display_name = Set(state_org.display_name.clone());
@@ -539,7 +167,6 @@ async fn apply_organizations(
             tracing::info!("Updated managed organization: {}", state_org.name);
             org_id
         } else {
-            // Create new organization
             let org_id = Uuid::new_v4();
             let org = organization::ActiveModel {
                 id: Set(org_id),
@@ -561,7 +188,6 @@ async fn apply_organizations(
             org_id
         };
 
-        // Ensure the created_by user is a member of the organization with admin role
         let existing_membership = organization_user::Entity::find()
             .filter(organization_user::Column::Organization.eq(org_id))
             .filter(organization_user::Column::User.eq(*created_by_id))
@@ -613,8 +239,6 @@ async fn apply_projects(
 
         let now = Utc::now().naive_utc();
 
-        // Encrypt CI reporter token if the credential is provided (by convention:
-        // `gradient_project_{name}_ci_token` in the systemd credentials directory).
         let encrypted_ci_token: Option<Option<String>> =
             if state_project.ci_reporter_has_token {
                 let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
@@ -650,14 +274,12 @@ async fn apply_projects(
                     }
                 }
             } else if state_project.ci_reporter_type.is_some() {
-                // Type is set but no token — clear any previously stored token.
                 Some(None)
             } else {
                 None
             };
 
         if let Some(existing) = existing_project {
-            // Update existing project
             let mut proj: project::ActiveModel = existing.into();
             proj.organization = Set(*org_id);
             proj.active = Set(state_project.active);
@@ -679,7 +301,6 @@ async fn apply_projects(
             proj.update(db).await?;
             tracing::info!("Updated managed project: {}", state_project.name);
         } else {
-            // Create new project
             let proj = project::ActiveModel {
                 id: Set(Uuid::new_v4()),
                 organization: Set(*org_id),
@@ -734,7 +355,6 @@ async fn apply_servers(
         let now = Utc::now().naive_utc();
 
         if let Some(existing) = existing_server {
-            // Update existing server
             let mut serv: server::ActiveModel = existing.into();
             serv.display_name = Set(state_server.display_name.clone());
             serv.organization = Set(*org_id);
@@ -748,7 +368,6 @@ async fn apply_servers(
             serv.update(db).await?;
             tracing::info!("Updated managed server: {}", state_server.name);
         } else {
-            // Create new server
             let serv = server::ActiveModel {
                 id: Set(Uuid::new_v4()),
                 name: Set(state_server.name.clone()),
@@ -768,7 +387,6 @@ async fn apply_servers(
             tracing::info!("Created managed server: {}", state_server.name);
         }
 
-        // Handle server features and architectures
         apply_server_features(db, &state_server.name, &state_server.features).await?;
         apply_server_architectures(db, &state_server.name, &state_server.architectures).await?;
     }
@@ -787,7 +405,6 @@ async fn apply_caches(
     let org_map = create_org_lookup(db).await?;
 
     for state_cache in state_caches.values() {
-        // Read signing key from file using credentials directory
         let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
             .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
         let signing_key_path = format!(
@@ -801,7 +418,6 @@ async fn apply_caches(
             )
         })?;
 
-        // Validate that the signing key is base64 encoded and derive the public key
         let key_bytes = general_purpose::STANDARD
             .decode(signing_key.trim())
             .map_err(|e| {
@@ -819,12 +435,9 @@ async fn apply_caches(
             .into());
         }
 
-        // The last 32 bytes of the ed25519 keypair are the public key
         let public_key = general_purpose::STANDARD.encode(&key_bytes[key_bytes.len() - 32..]);
 
-        // Encrypt private key using crypter library
         let secret = load_secret_bytes(crypt_secret_file);
-
         let encrypted_bytes = crypter::encrypt_with_password(&secret, signing_key.trim())
             .ok_or_else(|| {
                 format!(
@@ -846,7 +459,6 @@ async fn apply_caches(
         let now = Utc::now().naive_utc();
 
         let cache_id = if let Some(existing) = existing_cache {
-            // Update existing cache
             let mut cache_model: cache::ActiveModel = existing.clone().into();
             cache_model.display_name = Set(state_cache.display_name.clone());
             cache_model.description = Set(state_cache.description.clone());
@@ -861,7 +473,6 @@ async fn apply_caches(
             tracing::info!("Updated managed cache: {}", state_cache.name);
             existing.id
         } else {
-            // Create new cache
             let cache_id = Uuid::new_v4();
             let cache_model = cache::ActiveModel {
                 id: Set(cache_id),
@@ -882,10 +493,8 @@ async fn apply_caches(
             cache_id
         };
 
-        // Apply upstream caches
         apply_cache_upstreams(db, cache_id, &state_cache.name, &state_cache.upstreams).await?;
 
-        // Create organization_cache associations
         for org_name in &state_cache.organizations {
             let org_id = org_map.get(org_name).ok_or_else(|| {
                 format!(
@@ -894,7 +503,6 @@ async fn apply_caches(
                 )
             })?;
 
-            // Check if association already exists
             let existing_association = organization_cache::Entity::find()
                 .filter(organization_cache::Column::Organization.eq(*org_id))
                 .filter(organization_cache::Column::Cache.eq(cache_id))
@@ -927,10 +535,6 @@ async fn apply_cache_upstreams(
     cache_name: &str,
     upstreams: &[StateUpstream],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::types::*;
-    use sea_orm::*;
-
-    // Replace all upstreams for this cache with the state-declared ones.
     ECacheUpstream::delete_many()
         .filter(CCacheUpstream::Cache.eq(cache_id))
         .exec(db)
@@ -940,7 +544,6 @@ async fn apply_cache_upstreams(
         return Ok(());
     }
 
-    // Build a name→id lookup for internal upstream resolution.
     let cache_lookup: HashMap<String, Uuid> = ECache::find()
         .all(db)
         .await?
@@ -1015,7 +618,6 @@ async fn apply_api_keys(
             .into());
         };
 
-        // Read API key from file using credentials directory
         let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
             .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
         let key_path = format!(
@@ -1025,7 +627,6 @@ async fn apply_api_keys(
         let key_value = fs::read_to_string(&key_path)
             .map_err(|e| format!("Failed to read API key file {}: {}", key_path, e))?;
 
-        // Check if API key exists
         let existing_api_key = api::Entity::find()
             .filter(api::Column::Name.eq(&state_api_key.name))
             .filter(api::Column::OwnedBy.eq(*owned_by_id))
@@ -1033,14 +634,12 @@ async fn apply_api_keys(
             .await?;
 
         if let Some(api_key_model) = existing_api_key {
-            // Update existing API key
             let mut api_key: api::ActiveModel = api_key_model.into();
             api_key.key = Set(key_value.trim().to_string());
             api_key.managed = Set(true);
             api_key.update(db).await?;
             tracing::info!("Updated managed API key: {}", state_api_key.name);
         } else {
-            // Create new API key
             let api_key_model = api::ActiveModel {
                 id: Set(Uuid::new_v4()),
                 owned_by: Set(*owned_by_id),
@@ -1063,10 +662,6 @@ async fn apply_server_features(
     server_name: &str,
     features: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::types::*;
-    use sea_orm::*;
-
-    // Find the server by name
     let server = EServer::find()
         .filter(CServer::Name.eq(server_name))
         .one(db)
@@ -1076,15 +671,12 @@ async fn apply_server_features(
         return Err(format!("Server '{}' not found", server_name).into());
     };
 
-    // Delete existing server features
     EServerFeature::delete_many()
         .filter(CServerFeature::Server.eq(server.id))
         .exec(db)
         .await?;
 
-    // Add new features
     for feature_name in features {
-        // Find or create the feature
         let feature = EFeature::find()
             .filter(CFeature::Name.eq(feature_name))
             .one(db)
@@ -1100,13 +692,11 @@ async fn apply_server_features(
             afeature.insert(db).await?
         };
 
-        // Create server-feature association
         let aserver_feature = AServerFeature {
             id: Set(Uuid::new_v4()),
             server: Set(server.id),
             feature: Set(feature.id),
         };
-
         aserver_feature.insert(db).await?;
     }
 
@@ -1123,10 +713,6 @@ async fn apply_server_architectures(
     server_name: &str,
     architectures: &[String],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::types::*;
-    use sea_orm::*;
-
-    // Find the server by name
     let server = EServer::find()
         .filter(CServer::Name.eq(server_name))
         .one(db)
@@ -1136,13 +722,11 @@ async fn apply_server_architectures(
         return Err(format!("Server '{}' not found", server_name).into());
     };
 
-    // Delete existing server architectures
     EServerArchitecture::delete_many()
         .filter(CServerArchitecture::Server.eq(server.id))
         .exec(db)
         .await?;
 
-    // Parse and validate architectures
     let parsed_architectures: Result<Vec<server::Architecture>, _> =
         architectures.iter().map(|arch| arch.parse()).collect();
 
@@ -1153,7 +737,6 @@ async fn apply_server_architectures(
         return Err("No valid architectures specified".into());
     }
 
-    // Create server architecture associations
     let server_architecture_models: Vec<AServerArchitecture> = parsed_architectures
         .into_iter()
         .map(|arch| AServerArchitecture {
@@ -1180,7 +763,6 @@ async fn unmark_removed_entities(
     config: &StateConfiguration,
     delete_state: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Create sets of managed entity names from config
     let state_usernames: std::collections::HashSet<&String> = config.users.keys().collect();
     let state_org_names: std::collections::HashSet<&String> = config.organizations.keys().collect();
     let state_project_names: std::collections::HashSet<&String> = config.projects.keys().collect();
@@ -1188,7 +770,6 @@ async fn unmark_removed_entities(
     let state_cache_names: std::collections::HashSet<&String> = config.caches.keys().collect();
     let state_api_key_names: std::collections::HashSet<&String> = config.api_keys.keys().collect();
 
-    // Unmark users not in state
     let managed_users = user::Entity::find()
         .filter(user::Column::Managed.eq(true))
         .all(db)
@@ -1209,7 +790,6 @@ async fn unmark_removed_entities(
         }
     }
 
-    // Unmark organizations not in state
     let managed_orgs = organization::Entity::find()
         .filter(organization::Column::Managed.eq(true))
         .all(db)
@@ -1232,7 +812,6 @@ async fn unmark_removed_entities(
         }
     }
 
-    // Unmark projects not in state
     let managed_projects = project::Entity::find()
         .filter(project::Column::Managed.eq(true))
         .all(db)
@@ -1255,7 +834,6 @@ async fn unmark_removed_entities(
         }
     }
 
-    // Unmark servers not in state
     let managed_servers = server::Entity::find()
         .filter(server::Column::Managed.eq(true))
         .all(db)
@@ -1278,7 +856,6 @@ async fn unmark_removed_entities(
         }
     }
 
-    // Unmark caches not in state
     let managed_caches = cache::Entity::find()
         .filter(cache::Column::Managed.eq(true))
         .all(db)
@@ -1299,7 +876,6 @@ async fn unmark_removed_entities(
         }
     }
 
-    // Unmark API keys not in state
     let managed_api_keys = api::Entity::find()
         .filter(api::Column::Managed.eq(true))
         .all(db)
@@ -1323,14 +899,14 @@ async fn unmark_removed_entities(
     Ok(())
 }
 
-async fn create_user_lookup(
+pub(super) async fn create_user_lookup(
     db: &DatabaseConnection,
 ) -> Result<HashMap<String, Uuid>, Box<dyn std::error::Error>> {
     let users = user::Entity::find().all(db).await?;
     Ok(users.into_iter().map(|u| (u.username, u.id)).collect())
 }
 
-async fn create_org_lookup(
+pub(super) async fn create_org_lookup(
     db: &DatabaseConnection,
 ) -> Result<HashMap<String, Uuid>, Box<dyn std::error::Error>> {
     let orgs = organization::Entity::find().all(db).await?;

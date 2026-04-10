@@ -9,10 +9,10 @@ use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use entity::evaluation_message::MessageLevel;
 use futures::stream::{self, StreamExt};
-use gradient_core::ci_reporter::{CiReport, CiStatus, parse_owner_repo, reporter_for_project};
-use gradient_core::webhooks::decrypt_webhook_secret;
+use gradient_core::ci::{CiReport, CiStatus, parse_owner_repo, reporter_for_project};
+use gradient_core::ci::decrypt_webhook_secret;
 use gradient_core::sources::*;
-use gradient_core::status::{
+use gradient_core::db::{
     record_evaluation_message, update_build_status, update_evaluation_status,
     update_evaluation_status_with_error,
 };
@@ -186,7 +186,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
 
             // 5. Derivation features (FK satisfied now).
             for (derivation_id, features) in pending_features {
-                if let Err(e) = gradient_core::database::add_features(
+                if let Err(e) = gradient_core::db::add_features(
                     Arc::clone(&state),
                     features,
                     Some(derivation_id),
@@ -614,7 +614,7 @@ async fn get_next_evaluation(state: Arc<ServerState>) -> MEvaluation {
         let gc_keep = project.keep_evaluations as usize;
         tokio::spawn(async move {
             if let Err(e) =
-                gradient_core::gc::gc_project_evaluations(gc_state, gc_project_id, gc_keep).await
+                gradient_core::db::gc_project_evaluations(gc_state, gc_project_id, gc_keep).await
             {
                 tracing::error!(error = %e, project_id = %gc_project_id, "GC: per-project evaluation GC failed");
             }
@@ -700,7 +700,7 @@ pub async fn report_ci_for_entry_points(
         }
     };
 
-    let sha = gradient_core::input::vec_to_hex(&commit.hash);
+    let sha = gradient_core::types::input::vec_to_hex(&commit.hash);
 
     let (owner, repo) = match parse_owner_repo(repository_url) {
         Some(pair) => pair,
@@ -794,7 +794,7 @@ pub async fn report_ci_for_evaluation(
         }
     };
 
-    let sha = gradient_core::input::vec_to_hex(&commit.hash);
+    let sha = gradient_core::types::input::vec_to_hex(&commit.hash);
 
     let (owner, repo) = match parse_owner_repo(repository_url) {
         Some(pair) => pair,

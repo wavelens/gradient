@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_core::webhooks::WebhookClient;
+use gradient_core::ci::WebhookClient;
 use std::sync::Mutex;
 
 #[derive(Debug, Clone)]

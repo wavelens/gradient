@@ -8,9 +8,9 @@ use anyhow::{Context, Result};
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use futures::stream::{FuturesUnordered, StreamExt};
-use gradient_core::input::vec_to_hex;
-use gradient_core::nix_url::NixFlakeUrl;
-use gradient_core::wildcard::Wildcard;
+use gradient_core::types::input::vec_to_hex;
+use gradient_core::nix::NixFlakeUrl;
+use gradient_core::types::wildcard::Wildcard;
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -38,7 +38,7 @@ pub type EvaluationOutput = (
     Vec<String>,
 );
 
-use gradient_core::status::{update_evaluation_status, update_evaluation_status_with_error};
+use gradient_core::db::{update_evaluation_status, update_evaluation_status_with_error};
 use crate::dependencies::{SharedAccumulator, query_all_dependencies};
 
 /// Evaluates a flake repository, discovering all matching derivations and building the dependency
@@ -346,7 +346,7 @@ pub async fn evaluate_direct(
             }
 
             for (derivation_id, features) in pending_features {
-                if let Err(e) = gradient_core::database::add_features(
+                if let Err(e) = gradient_core::db::add_features(
                     Arc::clone(&state),
                     features,
                     Some(derivation_id),
@@ -368,7 +368,7 @@ pub async fn evaluate_direct(
                 .unwrap_or_default();
 
             for build in created_builds {
-                gradient_core::status::update_build_status(
+                gradient_core::db::update_build_status(
                     Arc::clone(&state),
                     build,
                     BuildStatus::Queued,

@@ -12,12 +12,12 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use chrono::Utc;
-use core::consts::*;
-use core::database::{get_any_organization_by_name, get_organization_by_name, get_project_by_name};
-use core::input::{check_index_name, validate_display_name, vec_to_hex};
-use core::webhooks::encrypt_webhook_secret;
-use core::nix_url::RepositoryUrl;
-use core::wildcard::Wildcard;
+use core::types::consts::*;
+use core::db::{get_any_organization_by_name, get_organization_by_name, get_project_by_name};
+use core::types::input::{check_index_name, validate_display_name, vec_to_hex};
+use core::ci::encrypt_webhook_secret;
+use core::nix::RepositoryUrl;
+use core::types::wildcard::Wildcard;
 use core::sources::check_project_updates;
 use core::types::*;
 use entity::build::BuildStatus;
@@ -708,13 +708,13 @@ pub async fn post_project_evaluate(
         ));
     }
 
-    core::evaluation_trigger::trigger_evaluation(&state.db, &project, commit_hash, None, None)
+    core::ci::trigger_evaluation(&state.db, &project, commit_hash, None, None)
         .await
         .map_err(|e| match e {
-            core::evaluation_trigger::TriggerError::AlreadyInProgress => {
+            core::ci::TriggerError::AlreadyInProgress => {
                 WebError::BadRequest("Evaluation already in progress".to_string())
             }
-            core::evaluation_trigger::TriggerError::Db(db_err) => WebError::from(db_err),
+            core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
         })?;
 
     let res = BaseResponse {

@@ -4,8 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::path_utils::{nix_store_path, strip_store_prefix};
+use super::{
+    BuildExecutionResult, BuildExecutor, ExecutedBuildOutput, GenericDaemonClient,
+    LocalDaemonClient,
+};
+use crate::executer::pool::{ConnectionPool, PathInfo, PooledConnectionGuard, convert_valid_path_info};
+use crate::sources::decrypt_ssh_private_key;
+use crate::sources::get_hash_from_path;
+use crate::types::*;
 use anyhow::{Context, Result};
-use async_ssh2_lite::{AsyncSession, TokioTcpStream};
 use async_trait::async_trait;
 use futures::stream::{FuturesUnordered, StreamExt};
 use harmonia_protocol::build_result::BuildResultInner;
@@ -23,84 +31,6 @@ use tokio::{
     time::{self, Instant},
 };
 use tracing::{debug, error, info, instrument, warn};
-
-use super::pool::{ConnectionPool, PathInfo, PooledConnectionGuard, convert_valid_path_info};
-
-use super::input;
-use super::sources::{decrypt_ssh_private_key, get_hash_from_path};
-use super::types::*;
-
-/// Re-export harmonia's BasicDerivation for use by builder/scheduler.
-pub use harmonia_store_core::derivation::BasicDerivation as HarmoniaBasicDerivation;
-
-/// A Nix daemon client over any transport. Generic over read/write halves.
-pub type GenericDaemonClient<R, W> = harmonia_store_remote::DaemonClient<R, W>;
-
-/// A Nix daemon client over a Unix socket (the local daemon).
-pub type LocalDaemonClient =
-    harmonia_store_remote::DaemonClient<tokio::net::unix::OwnedReadHalf, tokio::net::unix::OwnedWriteHalf>;
-
-pub async fn connect(
-    server: MServer,
-    store_path: Option<String>,
-    public_key: String,
-    private_key: String,
-) -> anyhow::Result<GenericDaemonClient<tokio::io::ReadHalf<BoxedIo>, tokio::io::WriteHalf<BoxedIo>>> {
-    let server_addr = input::url_to_addr(server.host.as_str(), server.port)?;
-    let mut session = AsyncSession::<TokioTcpStream>::connect(server_addr, None).await?;
-
-    init_session(
-        &mut session,
-        server.username.as_str(),
-        public_key,
-        private_key,
-    )
-    .await?;
-
-    let mut channel = session.channel_session().await?;
-
-    let command = if let Some(path) = store_path {
-        format!("nix-daemon --stdio --option store {}", path)
-    } else {
-        "nix-daemon --stdio".to_string()
-    };
-
-    channel.exec(command.as_str()).await?;
-
-    let io = BoxedIo::new(channel);
-    let (reader, writer) = tokio::io::split(io);
-
-    let client = DaemonClientBuilder::new()
-        .connect(reader, writer)
-        .await
-        .map_err(|e| anyhow::anyhow!("Daemon handshake failed: {}", e))?;
-
-    Ok(client)
-}
-
-pub async fn init_session(
-    session: &mut AsyncSession<TokioTcpStream>,
-    username: &str,
-    public_key: String,
-    private_key: String,
-) -> anyhow::Result<()> {
-    session.handshake().await.map_err(|err| {
-        error!(error = ?err, "SSH handshake failed");
-        err
-    })?;
-
-    session
-        .userauth_pubkey_memory(
-            username,
-            Some(public_key.as_str()),
-            private_key.as_str(),
-            None,
-        )
-        .await?;
-    assert!(session.authenticated());
-
-    Ok(())
-}
 
 #[instrument(skip(remote_store, _state), fields(build_id = %build.id, derivation_path = %derivation_path))]
 pub async fn execute_build<R, W>(
@@ -122,8 +52,6 @@ where
     let harmonia_path = StorePath::from_base_path(strip_store_prefix(&store_path))
         .map_err(|e| anyhow::anyhow!("Invalid store path {}: {}", store_path, e))?;
 
-    // For now, just await the result directly (no log streaming).
-    // TODO: Use ResultLog's Stream impl to stream build logs in real time.
     let result = remote_store
         .build_derivation(&harmonia_path, derivation, BuildMode::Normal)
         .await
@@ -184,7 +112,6 @@ where
         let unkeyed = path_info_opt
             .ok_or_else(|| anyhow::anyhow!("Path info not found for {}", path))?;
 
-        // Construct a ValidPathInfo (keyed) from UnkeyedValidPathInfo
         let valid_info = harmonia_protocol::valid_path_info::ValidPathInfo {
             path: store_path.clone(),
             info: unkeyed,
@@ -208,7 +135,6 @@ where
 }
 
 pub async fn get_missing_builds(pool: &ConnectionPool, paths: Vec<String>) -> Result<Vec<String>> {
-    // Separate plain store paths (no daemon call needed) from .drv paths.
     let mut output_paths: HashMap<String, String> = HashMap::new();
     let mut drv_paths: Vec<String> = Vec::new();
 
@@ -220,7 +146,6 @@ pub async fn get_missing_builds(pool: &ConnectionPool, paths: Vec<String>) -> Re
         }
     }
 
-    // Resolve all .drv → output path mappings concurrently, one connection each.
     if !drv_paths.is_empty() {
         let mut tasks: FuturesUnordered<_> = drv_paths
             .into_iter()
@@ -245,7 +170,6 @@ pub async fn get_missing_builds(pool: &ConnectionPool, paths: Vec<String>) -> Re
         }
     }
 
-    // Single batched validity check for all collected output paths.
     let mut guard = pool
         .acquire()
         .await
@@ -331,36 +255,8 @@ pub async fn get_local_store(
         let _stdout = child.stdout.take();
         let _stderr = child.stderr.take();
 
-        // TODO: This returns a different type than LocalDaemonClient.
-        // The subprocess store path feature needs rework.
         anyhow::bail!("Subprocess-based store not yet supported with harmonia — use use_nix_store=true");
     }
-}
-
-/// Returns the full `/nix/store/` path for a derivation hash-name stored without prefix.
-pub fn nix_store_path(hash_name: &str) -> String {
-    if hash_name.starts_with('/') {
-        hash_name.to_string()
-    } else {
-        format!("/nix/store/{}", hash_name)
-    }
-}
-
-/// Strips the `/nix/store/` prefix from a path, returning just the hash-name component.
-pub fn strip_nix_store_prefix(path: &str) -> String {
-    path.strip_prefix("/nix/store/").unwrap_or(path).to_string()
-}
-
-/// Strips the `/nix/store/` prefix, returning a `&str` (no allocation).
-fn strip_store_prefix(path: &str) -> &str {
-    path.strip_prefix("/nix/store/").unwrap_or(path)
-}
-
-pub fn get_derivation_paths(derivations: &[MDerivation]) -> Vec<String> {
-    derivations
-        .iter()
-        .map(|d| nix_store_path(&d.derivation_path))
-        .collect()
 }
 
 pub async fn get_pathinfo(
@@ -432,51 +328,6 @@ pub async fn get_build_outputs_from_derivation(
     Ok(outputs)
 }
 
-/// One realised output of a build, populated by `BuildExecutor::execute`.
-#[derive(Debug, Clone)]
-pub struct ExecutedBuildOutput {
-    /// Output name (`out`, `dev`, ...).
-    pub name: String,
-    /// Full `/nix/store/...` path of the realised output.
-    pub store_path: String,
-    /// `<hash>-<package>` portion of the store path.
-    pub hash: String,
-    pub package: String,
-    /// NAR size as reported by the local store after copying back.
-    pub nar_size: Option<i64>,
-    /// `true` if `<output>/nix-support/hydra-build-products` exists.
-    pub has_artefacts: bool,
-}
-
-/// End-to-end result of running one build on a remote server.
-#[derive(Debug, Clone)]
-pub struct BuildExecutionResult {
-    /// Empty on success; non-empty when the daemon reported a build failure.
-    pub error_msg: String,
-    /// Realised outputs (empty on failure).
-    pub outputs: Vec<ExecutedBuildOutput>,
-    /// Wall-clock time spent inside `execute_build`.
-    pub elapsed: Duration,
-}
-
-/// Executes builds on remote build servers via SSH-tunneled Nix daemon
-/// connections. The trait abstraction lets tests substitute a deterministic
-/// fake instead of touching real SSH/daemon infrastructure.
-#[async_trait]
-#[allow(clippy::too_many_arguments)]
-pub trait BuildExecutor: Send + Sync + std::fmt::Debug + 'static {
-    async fn execute(
-        &self,
-        state: Arc<ServerState>,
-        server: MServer,
-        organization: MOrganization,
-        build: MBuild,
-        derivation_path: String,
-        derivation: BasicDerivation,
-        dependencies: Vec<String>,
-    ) -> Result<BuildExecutionResult>;
-}
-
 /// Production [`BuildExecutor`] backed by SSH + the Nix daemon protocol via harmonia.
 #[derive(Debug, Default)]
 pub struct SshBuildExecutor;
@@ -510,7 +361,7 @@ impl BuildExecutor for SshBuildExecutor {
         )
         .context("Failed to decrypt SSH private key for server")?;
 
-        let mut server_daemon_result = connect(
+        let mut server_daemon_result = super::ssh::connect(
             server.clone(),
             None,
             public_key.clone(),
@@ -523,7 +374,7 @@ impl BuildExecutor for SshBuildExecutor {
                 break;
             }
             time::sleep(Duration::from_secs(5)).await;
-            server_daemon_result = connect(
+            server_daemon_result = super::ssh::connect(
                 server.clone(),
                 None,
                 public_key.clone(),
@@ -558,7 +409,6 @@ impl BuildExecutor for SshBuildExecutor {
         .context("Failed to execute build on server")?;
         let elapsed = build_start.elapsed();
 
-        // Extract success/failure from harmonia's BuildResult
         match &daemon_result.inner {
             BuildResultInner::Failure(f) => {
                 let error_msg = String::from_utf8_lossy(&f.error_msg).to_string();

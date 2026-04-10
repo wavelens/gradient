@@ -11,7 +11,7 @@ use sea_orm::{
 };
 use std::sync::Arc;
 
-use super::types::*;
+use crate::types::*;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Permission {

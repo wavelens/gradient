@@ -117,6 +117,7 @@ enum GiteaState {
     Success,
     Error,
     Failure,
+    #[allow(dead_code)]
     Warning,
 }
 
@@ -349,7 +350,7 @@ pub fn parse_owner_repo(repository_url: &str) -> Option<(String, String)> {
 
     let path = if let Some(rest) = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).or_else(|| url.strip_prefix("git://")) {
         // https://host/owner/repo.git → "host/owner/repo.git" → take after first '/'
-        rest.splitn(2, '/').nth(1)?
+        rest.split_once('/')?.1
     } else if let Some(colon_pos) = url.find(':') {
         // git@host:owner/repo.git
         &url[colon_pos + 1..]

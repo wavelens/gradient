@@ -6,7 +6,7 @@
 
 use clap::Parser;
 use evaluator::{WorkerPoolResolver, run_eval_worker};
-use gradient_core::evaluator::DerivationResolver;
+use gradient_core::nix::DerivationResolver;
 use gradient_core::init_state;
 use gradient_core::types::Cli;
 use std::sync::Arc;

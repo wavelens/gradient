@@ -59,6 +59,12 @@ Click **Start Evaluation** on the project page. Gradient clones the repo, evalua
 
 The evaluation log page shows per-build status, combined ANSI build output, and an **Abort** button.
 
+Evaluations can also be triggered automatically:
+
+- **GitHub App** — when the App is installed, push events from GitHub trigger evaluations instantly (no polling). See [GitHub App](../configuration.md#github-app).
+- **Forge webhooks** — for Gitea, Forgejo, GitLab, or GitHub without the App, configure a per-org push webhook. See [Forge Webhooks](../configuration.md#forge-webhooks-gitea--forgejo--gitlab--github-without-app).
+- **Polling** — fallback for projects without webhook configuration; Gradient checks for new commits every 60 seconds.
+
 ## SSH Keys
 
 Each organization has one Ed25519 SSH key pair, generated automatically. The public key is shown in **Organization → Settings → SSH**.

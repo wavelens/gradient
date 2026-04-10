@@ -394,7 +394,7 @@ pub async fn post_direct_build(
 
     // Get organization
     let org =
-        core::database::get_organization_by_name(Arc::clone(&state), user.id, organization.clone())
+        core::db::get_organization_by_name(Arc::clone(&state), user.id, organization.clone())
             .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 

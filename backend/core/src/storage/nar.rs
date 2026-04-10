@@ -169,14 +169,14 @@ impl NarStore {
             let meta = item.context("Failed to list NAR store")?;
             // Path format: `{prefix}nars/{first2}/{rest}.nar.zst`
             let p = meta.location.to_string();
-            if let Some(name) = p.split('/').next_back() {
-                if let Some(stem) = name.strip_suffix(".nar.zst") {
-                    // Reconstruct full hash from parent dir + stem.
-                    let parts: Vec<&str> = p.split('/').collect();
-                    if parts.len() >= 2 {
-                        let dir = parts[parts.len() - 2];
-                        hashes.push(format!("{}{}", dir, stem));
-                    }
+            if let Some(name) = p.split('/').next_back()
+                && let Some(stem) = name.strip_suffix(".nar.zst")
+            {
+                // Reconstruct full hash from parent dir + stem.
+                let parts: Vec<&str> = p.split('/').collect();
+                if parts.len() >= 2 {
+                    let dir = parts[parts.len() - 2];
+                    hashes.push(format!("{}{}", dir, stem));
                 }
             }
         }

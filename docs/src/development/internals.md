@@ -2,6 +2,34 @@
 
 Key functions inside each crate.
 
+---
+
+## Forge Webhook Ingestion
+
+`web::endpoints::forge_hooks` handles incoming push events from external forges. All endpoints are unauthenticated and self-verify via HMAC.
+
+**GitHub App** (`POST /api/v1/hooks/github`):
+- Verifies `X-Hub-Signature-256` against `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
+- `push` → calls `core::evaluation_trigger::trigger_evaluation` for each matching project.
+- `installation` / `installation_repositories` → stores or clears `organization.github_installation_id`.
+
+**Generic forges** (`POST /api/v1/hooks/{forge}/{org}`):
+- Looks up the organization by name.
+- Decrypts `organization.forge_webhook_secret` (same `crypt_secret_file` infrastructure as SSH keys).
+- Verifies the forge-specific signature header.
+- `push` → calls `trigger_evaluation` for each matching project.
+
+**Shared trigger** (`core::evaluation_trigger::trigger_evaluation`):
+1. Checks no evaluation is already in progress (returns `TriggerError::AlreadyInProgress` if so).
+2. Inserts a `Commit` row with the push SHA.
+3. Inserts an `Evaluation` row with status `Queued`.
+4. Sets `project.force_evaluation = true` and resets `last_check_at` to the epoch.
+5. The scheduler picks it up on its next tick (≤ 60 s) via the existing pre-created `Queued` evaluation path (`evaluator/src/scheduler.rs:501`).
+
+Repository matching normalises URLs by stripping trailing `.git` and compares against all active projects.
+
+---
+
 ## Evaluation Pipeline
 
 `builder::scheduler::schedule_evaluation_loop` polls for queued evaluations every 60 seconds, up to `max_concurrent_evaluations` concurrent tasks.

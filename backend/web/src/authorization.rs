@@ -11,7 +11,7 @@ use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{Json, Response};
 use chrono::{Duration, Utc};
-use core::input::load_secret;
+use core::types::input::load_secret;
 use core::types::*;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation, decode, encode};
 use rand::Rng;

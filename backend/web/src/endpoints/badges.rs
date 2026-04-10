@@ -29,7 +29,7 @@ use std::sync::Arc;
 use crate::authorization::MaybeUser;
 use crate::endpoints::user_is_org_member;
 use crate::error::WebError;
-use core::database::get_any_organization_by_name;
+use core::db::get_any_organization_by_name;
 use core::types::*;
 
 // ── Query parameters ─────────────────────────────────────────────────────────

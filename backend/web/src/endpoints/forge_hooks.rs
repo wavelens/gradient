@@ -19,11 +19,11 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
-use core::evaluation_trigger::{TriggerError, trigger_evaluation};
-use core::github_app::{verify_gitea_signature, verify_github_signature};
-use core::input::load_secret;
+use core::ci::{TriggerError, trigger_evaluation};
+use core::ci::{verify_gitea_signature, verify_github_signature};
+use core::types::input::load_secret;
 use core::types::*;
-use core::webhooks::decrypt_webhook_secret;
+use core::ci::decrypt_webhook_secret;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::Deserialize;
@@ -456,7 +456,7 @@ pub async fn post_forge_webhook_secret(
     Path(organization): Path<String>,
 ) -> WebResult<axum::Json<BaseResponse<ForgeWebhookSecretResponse>>> {
     use super::projects::user_can_edit;
-    use core::webhooks::encrypt_webhook_secret;
+    use core::ci::encrypt_webhook_secret;
     use rand::Rng;
 
     let org = EOrganization::find()

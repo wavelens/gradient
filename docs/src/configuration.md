@@ -83,6 +83,53 @@ services.gradient.email = {
 };
 ```
 
+## GitHub App
+
+A GitHub App provides automatic webhook delivery and CI status reporting without per-project tokens. One App covers all organizations on the instance.
+
+### Setup
+
+1. Create a GitHub App at `github.com → Settings → Developer settings → GitHub Apps → New GitHub App`.
+   - **Webhook URL**: `https://gradient.example.com/api/v1/hooks/github`
+   - **Webhook secret**: generate a random value and note it
+   - **Permissions**: Repository → Commit statuses (Read & Write), Repository → Contents (Read)
+   - **Subscribe to events**: Push, Installation
+
+2. After creation note the **App ID** and download the **private key** PEM.
+
+3. Configure Gradient:
+
+```nix
+services.gradient.githubApp = {
+  enable             = true;
+  appId              = 123456;
+  privateKeyFile     = "/run/secrets/gradient-github-app-key";
+  webhookSecretFile  = "/run/secrets/gradient-github-app-webhook-secret";
+};
+```
+
+4. Install the App on each GitHub organization. Gradient auto-stores the `installation_id` from the webhook.
+
+5. Once installed, push events automatically trigger evaluations (no polling) and CI statuses are reported using the installation token instead of a per-project PAT.
+
+## Forge Webhooks (Gitea / Forgejo / GitLab / GitHub without App)
+
+For non-GitHub forges or GitHub without the App, configure a per-organization webhook secret via the UI:
+
+1. Open **Organization → Settings → Forge Webhooks** and click **Generate Webhook Secret**.
+2. Copy the displayed **Webhook URL** and **Secret**.
+3. In your forge, create a push webhook pointing to the URL, using the secret for HMAC-SHA256 signing.
+
+Forge path by type:
+
+| Forge | URL path segment | Signature header |
+|---|---|---|
+| Gitea / Forgejo | `/hooks/gitea/{org}` or `/hooks/forgejo/{org}` | `X-Gitea-Signature` |
+| GitLab | `/hooks/gitlab/{org}` | `X-Gitlab-Token` |
+| GitHub (no App) | `/hooks/github/{org}` | `X-Hub-Signature-256` |
+
+Gradient matches the incoming push payload's clone URL against active projects and queues an evaluation immediately.
+
 ## Declarative State
 
 `services.gradient.state` lets you declare users, organizations, projects, servers, caches, and API keys in Nix. Gradient reconciles this state on every startup.

@@ -18,8 +18,8 @@ use std::time::Duration;
 use tracing::log::LevelFilter;
 use uuid::Uuid;
 
-use super::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
-use super::types::*;
+use crate::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
+use crate::types::*;
 
 pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     let db_url = if let Some(file) = &cli.database_url_file {

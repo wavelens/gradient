@@ -13,9 +13,9 @@ use axum::response::Response;
 use axum::{Extension, Json};
 use base64::Engine;
 use chrono::{NaiveDateTime, Utc};
-use core::database::{get_any_cache_by_name, get_cache_by_name};
+use core::db::{get_any_cache_by_name, get_cache_by_name};
 use core::executer::strip_nix_store_prefix;
-use core::input::{check_index_name, validate_display_name};
+use core::types::input::{check_index_name, validate_display_name};
 use core::sources::{
     format_cache_key, format_cache_public_key, generate_signing_key, get_hash_from_url,
     get_path_from_derivation_output,

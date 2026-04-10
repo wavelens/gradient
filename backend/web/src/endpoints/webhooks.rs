@@ -8,9 +8,9 @@ use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::Utc;
-use core::database::get_any_organization_by_name;
+use core::db::get_any_organization_by_name;
 use core::types::*;
-use core::webhooks::{decrypt_webhook_secret, encrypt_webhook_secret};
+use core::ci::{decrypt_webhook_secret, encrypt_webhook_secret};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -311,7 +311,7 @@ pub async fn post_webhook_test(
         .map_err(|e| {
             WebError::InternalServerError(format!("Failed to decrypt webhook secret: {}", e))
         })?;
-    let signature = core::webhooks::sign_webhook_payload(&plaintext_secret, &body_str);
+    let signature = core::ci::sign_webhook_payload(&plaintext_secret, &body_str);
 
     let status = state
         .webhooks

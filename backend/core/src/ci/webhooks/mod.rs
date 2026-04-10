@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::input::load_secret_bytes;
+use crate::types::input::load_secret_bytes;
 use crate::types::*;
 use anyhow::Result;
 use async_trait::async_trait;

@@ -12,7 +12,7 @@ use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::StorePath;
 use harmonia_utils_hash::fmt::CommonHash as _;
 
-use super::executer::{
+use crate::executer::{
     BuildOutputInfo, get_build_outputs_from_derivation, get_missing_builds,
     get_pathinfo, nix_store_path,
 };

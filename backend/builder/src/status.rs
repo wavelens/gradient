@@ -6,10 +6,10 @@
 
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
-use gradient_core::ci_reporter::{CiReport, CiStatus, parse_owner_repo, reporter_for_project};
-use gradient_core::webhooks::decrypt_webhook_secret;
-use gradient_core::input::vec_to_hex;
-use gradient_core::status::update_build_status;
+use gradient_core::ci::{CiReport, CiStatus, parse_owner_repo, reporter_for_project};
+use gradient_core::ci::decrypt_webhook_secret;
+use gradient_core::types::input::vec_to_hex;
+use gradient_core::db::update_build_status;
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::collections::{HashSet, VecDeque};
@@ -175,7 +175,7 @@ pub(super) async fn check_evaluation_status(state: Arc<ServerState>, evaluation_
     };
 
     report_ci_completion(Arc::clone(&state), &evaluation, eval_status.clone()).await;
-    gradient_core::status::update_evaluation_status(state, evaluation, eval_status).await;
+    gradient_core::db::update_evaluation_status(state, evaluation, eval_status).await;
 }
 
 /// Reports a CI status for each entry point of a completed/failed evaluation.

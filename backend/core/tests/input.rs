@@ -7,7 +7,7 @@
 //! Tests for `core::input` — all pure functions, no DB or I/O needed.
 
 extern crate core as gradient_core;
-use gradient_core::input::*;
+use gradient_core::types::input::*;
 
 // ── url_to_addr ───────────────────────────────────────────────────────────────
 

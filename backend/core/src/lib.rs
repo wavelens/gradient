@@ -4,47 +4,32 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub mod ci_reporter;
-pub mod consts;
-pub mod database;
-pub mod evaluation_trigger;
-pub mod github_app;
-pub mod derivation;
-pub mod email;
-pub mod evaluator;
+pub mod ci;
+pub mod db;
 pub mod executer;
-pub mod gc;
-pub mod input;
-pub mod log_storage;
-pub mod nar_storage;
-pub mod nix_flake;
-pub mod nix_url;
-pub mod permission;
-pub mod pool;
+pub mod nix;
 pub mod sources;
 pub mod state;
-pub mod status;
+pub mod storage;
 pub mod types;
-pub mod webhooks;
-pub mod wildcard;
 
-use database::connect_db;
-use email::EmailService;
+use db::connect_db;
+use storage::EmailService;
 use executer::SshBuildExecutor;
-use log_storage::{FileLogStorage, S3LogStorage};
-use nar_storage::NarStore;
-use pool::LocalNixStoreProvider;
+use storage::{FileLogStorage, S3LogStorage};
+use storage::NarStore;
+use executer::LocalNixStoreProvider;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, ActiveModelTrait, ActiveValue::Set, IntoActiveModel};
 use sources::Libgit2Prefetcher;
 use state::load_and_apply_state;
 use std::path::Path;
 use std::sync::Arc;
 use types::*;
-use webhooks::ReqwestWebhookClient;
+use ci::ReqwestWebhookClient;
 
 pub async fn init_state(
     cli: Cli,
-    derivation_resolver: Arc<dyn evaluator::DerivationResolver>,
+    derivation_resolver: Arc<dyn nix::DerivationResolver>,
 ) -> Arc<ServerState> {
     println!("Starting Gradient Server on {}:{}", cli.ip, cli.port);
     println!("State file configured: {:?}", cli.state_file);
@@ -107,9 +92,9 @@ pub async fn init_state(
         }
     };
 
-    let nix_store: Arc<dyn pool::NixStoreProvider> =
+    let nix_store: Arc<dyn executer::NixStoreProvider> =
         Arc::new(LocalNixStoreProvider::new(cli.max_nixdaemon_connections));
-    let web_nix_store: Arc<dyn pool::NixStoreProvider> = Arc::new(LocalNixStoreProvider::new(1));
+    let web_nix_store: Arc<dyn executer::NixStoreProvider> = Arc::new(LocalNixStoreProvider::new(1));
 
     let webhook_client = match ReqwestWebhookClient::new() {
         Ok(c) => c,
@@ -118,7 +103,7 @@ pub async fn init_state(
             std::process::exit(1);
         }
     };
-    let webhooks: Arc<dyn webhooks::WebhookClient> = Arc::new(webhook_client);
+    let webhooks: Arc<dyn ci::WebhookClient> = Arc::new(webhook_client);
 
     let email_service = match EmailService::new(&cli).await {
         Ok(s) => s,
@@ -127,7 +112,7 @@ pub async fn init_state(
             std::process::exit(1);
         }
     };
-    let email: Arc<dyn email::EmailSender> = Arc::new(email_service);
+    let email: Arc<dyn storage::EmailSender> = Arc::new(email_service);
 
     let flake_prefetcher: Arc<dyn sources::FlakePrefetcher> = Arc::new(Libgit2Prefetcher::new());
 
@@ -184,7 +169,7 @@ pub async fn init_state(
         }
     };
 
-    let log_storage: Arc<dyn log_storage::LogStorage> = if cli.s3_bucket.is_some() {
+    let log_storage: Arc<dyn storage::LogStorage> = if cli.s3_bucket.is_some() {
         println!("Log storage: S3 (with local cache)");
         Arc::new(S3LogStorage::new(
             local_log_storage,

@@ -25,7 +25,7 @@ pub enum WebError {
     Database(DbErr),
     Validation(String),
     Authentication(String),
-    InputValidation(core::input::InputError),
+    InputValidation(core::types::input::InputError),
     JsonParsing(JsonRejection),
     Internal(AnyhowError),
 }
@@ -69,8 +69,8 @@ impl From<DbErr> for WebError {
     }
 }
 
-impl From<core::input::InputError> for WebError {
-    fn from(err: core::input::InputError) -> Self {
+impl From<core::types::input::InputError> for WebError {
+    fn from(err: core::types::input::InputError) -> Self {
         WebError::InputValidation(err)
     }
 }

@@ -6,7 +6,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_core::ci_reporter::{CiReport, CiReporter};
+use gradient_core::ci::{CiReport, CiReporter};
 use std::sync::Mutex;
 
 /// In-memory `CiReporter` for tests. Records every call in order.
