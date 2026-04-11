@@ -8,8 +8,10 @@ pub mod ci;
 pub mod db;
 pub mod executer;
 pub mod nix;
+pub mod repo;
 pub mod sources;
 pub mod state;
+pub mod state_machine;
 pub mod storage;
 pub mod types;
 

@@ -14,6 +14,7 @@ pub fn test_cli() -> Cli {
         builder_log_level: None,
         cache_log_level: None,
         web_log_level: None,
+        proto_log_level: None,
         ip: "127.0.0.1".into(),
         port: 3000,
         serve_url: "http://127.0.0.1:3000".into(),
@@ -66,5 +67,8 @@ pub fn test_cli() -> Cli {
         github_app_private_key_file: None,
         github_app_webhook_secret_file: None,
         quic: false,
+        max_proto_connections: 16,
+        discoverable: false,
+        federate_proto: false,
     }
 }

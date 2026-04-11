@@ -45,36 +45,25 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
     let builds = evaluate(Arc::clone(&state), &evaluation).await;
 
     match builds {
-        Ok(builds) => {
+        Ok(result) => {
             // Re-fetch to check if aborted while evaluate() was running
             match EEvaluation::find_by_id(evaluation.id).one(&state.db).await {
                 Ok(Some(current)) if current.status == EvaluationStatus::Aborted => return,
                 _ => {}
             }
 
-            let (
-                builds,
-                new_derivations,
-                new_derivation_outputs,
-                new_derivation_dependencies,
-                entry_point_build_ids,
-                failed_derivations,
-                pending_features,
-                eval_warnings,
-            ) = builds;
-
             info!(
-                build_count = builds.len(),
-                new_derivation_count = new_derivations.len(),
-                dependency_count = new_derivation_dependencies.len(),
+                build_count = result.builds.len(),
+                new_derivation_count = result.derivations.len(),
+                dependency_count = result.derivation_dependencies.len(),
                 "Created builds + derivations"
             );
 
             const BATCH_SIZE: usize = 1000;
 
             // 1. Derivations first (builds + derivation_output FK into it).
-            if !new_derivations.is_empty() {
-                let active: Vec<ADerivation> = new_derivations
+            if !result.derivations.is_empty() {
+                let active: Vec<ADerivation> = result.derivations
                     .iter()
                     .map(|d| d.clone().into_active_model())
                     .collect();
@@ -98,8 +87,8 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
             }
 
             // 2. Derivation outputs.
-            if !new_derivation_outputs.is_empty() {
-                for chunk in new_derivation_outputs.chunks(BATCH_SIZE) {
+            if !result.derivation_outputs.is_empty() {
+                for chunk in result.derivation_outputs.chunks(BATCH_SIZE) {
                     if let Err(e) = EDerivationOutput::insert_many(chunk.to_vec())
                         .exec(&state.db)
                         .await
@@ -110,8 +99,8 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
             }
 
             // 3. Derivation dependency edges.
-            if !new_derivation_dependencies.is_empty() {
-                let active: Vec<ADerivationDependency> = new_derivation_dependencies
+            if !result.derivation_dependencies.is_empty() {
+                let active: Vec<ADerivationDependency> = result.derivation_dependencies
                     .iter()
                     .map(|d| d.clone().into_active_model())
                     .collect();
@@ -126,7 +115,7 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
             }
 
             // 4. Builds (FK into derivation).
-            let active_builds = builds
+            let active_builds = result.builds
                 .iter()
                 .map(|b| b.clone().into_active_model())
                 .collect::<Vec<ABuild>>();
@@ -148,35 +137,34 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
             }
 
             // 5. Derivation features (FK satisfied now).
-            for (derivation_id, features) in pending_features {
+            for pf in result.pending_features {
                 if let Err(e) = gradient_core::db::add_features(
                     Arc::clone(&state),
-                    features,
-                    Some(derivation_id),
+                    pf.features,
+                    Some(pf.derivation_id),
                     None,
                 )
                 .await
                 {
-                    error!(error = %e, %derivation_id, "Failed to add features for derivation");
+                    error!(error = %e, derivation_id = %pf.derivation_id, "Failed to add features for derivation");
                 }
             }
 
             if let Some(project_id) = evaluation.project {
                 let now = chrono::Utc::now().naive_utc();
-                let active_entry_points = entry_point_build_ids
+                let active_entry_points = result.entry_points
                     .iter()
-                    .map(|(build_id, eval)| AEntryPoint {
+                    .map(|ep| AEntryPoint {
                         id: ActiveValue::Set(Uuid::new_v4()),
                         project: ActiveValue::Set(project_id),
                         evaluation: ActiveValue::Set(evaluation.id),
-                        build: ActiveValue::Set(*build_id),
-                        eval: ActiveValue::Set(eval.clone()),
+                        build: ActiveValue::Set(ep.build_id),
+                        eval: ActiveValue::Set(ep.wildcard.clone()),
                         created_at: ActiveValue::Set(now),
                     })
                     .collect::<Vec<AEntryPoint>>();
 
                 if !active_entry_points.is_empty() {
-                    const BATCH_SIZE: usize = 1000;
                     for chunk in active_entry_points.chunks(BATCH_SIZE) {
                         if let Err(e) = EEntryPoint::insert_many(chunk.to_vec())
                             .exec(&state.db)
@@ -187,57 +175,57 @@ pub async fn schedule_evaluation(state: Arc<ServerState>, evaluation: MEvaluatio
                     }
                 }
 
-                // Report one CI check per entry point (Pending — builds are now queued).
+                // Rebuild the (build_id, wildcard) vec for CI reporting.
+                let ep_pairs: Vec<(Uuid, String)> = result.entry_points
+                    .iter()
+                    .map(|ep| (ep.build_id, ep.wildcard.clone()))
+                    .collect();
                 report_ci_for_entry_points(
                     Arc::clone(&state),
                     project_id,
                     evaluation.commit,
                     &evaluation.repository,
                     evaluation.id,
-                    &entry_point_build_ids,
+                    &ep_pairs,
                     CiStatus::Pending,
                 )
                 .await;
             }
 
-            // Transition all Created builds for this evaluation to Queued now that
-            // their dependency records are fully inserted. This covers both newly
-            // created builds and clones of previously-failed builds.
-            let created_builds = EBuild::find()
-                .filter(CBuild::Evaluation.eq(evaluation.id))
-                .filter(CBuild::Status.eq(BuildStatus::Created))
-                .all(&state.db)
-                .await
-                .unwrap_or_default();
-
             // Persist per-attr evaluation failures as individual evaluation_message rows.
-            if !failed_derivations.is_empty() {
-                warn!(count = failed_derivations.len(), "Partial evaluation failure — some derivations skipped");
-                for (attr, err_msg) in &failed_derivations {
+            if !result.failed_derivations.is_empty() {
+                warn!(count = result.failed_derivations.len(), "Partial evaluation failure — some derivations skipped");
+                for fd in &result.failed_derivations {
                     record_evaluation_message(
                         &state,
                         evaluation.id,
                         MessageLevel::Error,
-                        err_msg.clone(),
-                        Some(format!("nix-eval:{}", attr)),
+                        fd.error.clone(),
+                        Some(format!("nix-eval:{}", fd.derivation)),
                     )
                     .await;
                 }
             }
 
             // Persist evaluation warnings (e.g. Nix "evaluation warning: …" messages).
-            if !eval_warnings.is_empty() {
-                for warning in &eval_warnings {
-                    record_evaluation_message(
-                        &state,
-                        evaluation.id,
-                        MessageLevel::Warning,
-                        warning.clone(),
-                        Some("nix-eval".to_string()),
-                    )
-                    .await;
-                }
+            for warning in &result.warnings {
+                record_evaluation_message(
+                    &state,
+                    evaluation.id,
+                    MessageLevel::Warning,
+                    warning.clone(),
+                    Some("nix-eval".to_string()),
+                )
+                .await;
             }
+
+            // Transition all Created builds to Queued now that dependency records are fully inserted.
+            let created_builds = EBuild::find()
+                .filter(CBuild::Evaluation.eq(evaluation.id))
+                .filter(CBuild::Status.eq(BuildStatus::Created))
+                .all(&state.db)
+                .await
+                .unwrap_or_default();
 
             if created_builds.is_empty() {
                 update_evaluation_status(

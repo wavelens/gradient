@@ -14,13 +14,16 @@ use rkyv::rancor::Error as RkyvError;
 use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
 
-use crate::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
+use crate::messages::{
+    CandidateScore, ClientMessage, GradientCapabilities, JobCandidate, JobUpdateKind, PROTO_VERSION,
+    ServerMessage,
+};
 
 /// Returns the axum [`Router`] that serves the `/proto` WebSocket endpoint.
 ///
 /// Merge this into the main router in `web`:
 /// ```ignore
-/// app.merge(protocol::proto_router())
+/// app.merge(proto::proto_router())
 /// ```
 pub fn proto_router() -> Router<Arc<ServerState>> {
     Router::new().route("/proto", get(ws_upgrade))
@@ -36,21 +39,22 @@ async fn ws_upgrade(
 
 /// Drives a single WebSocket connection for its lifetime.
 ///
-/// Protocol flow:
-/// 1. Client sends [`ClientMessage::InitConnection`] as a binary rkyv frame.
-/// 2. Server responds with [`ServerMessage::InitAck`] (negotiated version +
-///    capabilities) or [`ServerMessage::Error`] and closes.
-/// 3. Further message types will be added here as the protocol evolves.
+/// Protocol state machine:
+/// ```text
+/// OPEN → [discoverable check] → HANDSHAKE → [token/version check]
+///      → ACK → [optional WorkerCapabilities] → DISPATCH LOOP → CLOSED
+/// ```
 #[instrument(skip_all)]
 async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>) {
     info!("WebSocket connection opened");
 
     if !state.cli.discoverable {
-        send_error(&mut socket, 403, "server is not accepting connections".into()).await;
+        send_reject(&mut socket, 403, "server is not accepting connections".into()).await;
         return;
     }
 
     // ── Handshake ─────────────────────────────────────────────────────────────
+
     let Some(init_msg) = recv_client_msg(&mut socket).await else {
         return;
     };
@@ -67,80 +71,216 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>) {
 
     debug!(client_version, ?client_capabilities, %peer_id, "InitConnection received");
 
+    if client_version > PROTO_VERSION {
+        send_reject(
+            &mut socket,
+            400,
+            format!("unsupported protocol version {client_version}"),
+        )
+        .await;
+        return;
+    }
+
     // TODO: validate token against configured API keys.
     // Cache-only connections (public caches) may omit the token.
-    // if requires_auth(&client_capabilities) && !validate_token(&state, &token) {
-    //     send_error(&mut socket, 401, "invalid token".into()).await;
+    // let needs_auth = client_capabilities.fetch
+    //     || client_capabilities.eval
+    //     || client_capabilities.build
+    //     || client_capabilities.sign
+    //     || client_capabilities.federate;
+    // if needs_auth && !validate_token(&state, token.as_deref()) {
+    //     send_reject(&mut socket, 401, "invalid token".into()).await;
     //     return;
     // }
+    let _ = token;
 
-    if client_version > PROTO_VERSION {
-        send_error(&mut socket, 400, format!("unsupported protocol version {client_version}")).await;
-        return;
-    }
-
-    // Negotiate: intersect client-requested capabilities with what the server
-    // supports.  Each bool field is AND-ed — unknown fields added by a newer
-    // client default to false, which is safe.
     let negotiated = negotiate_capabilities(&state, client_capabilities);
 
-    let ack = ServerMessage::InitAck {
-        version: PROTO_VERSION,
-        capabilities: negotiated,
-    };
-
-    if send_server_msg(&mut socket, &ack).await.is_err() {
+    if send_server_msg(
+        &mut socket,
+        &ServerMessage::InitAck { version: PROTO_VERSION, capabilities: negotiated.clone() },
+    )
+    .await
+    .is_err()
+    {
         return;
     }
 
-    info!(client_version, "handshake complete");
+    info!(%peer_id, client_version, "handshake complete");
 
-    // ── Main message loop ─────────────────────────────────────────────────────
+    // ── Dispatch loop ─────────────────────────────────────────────────────────
+
+    // Tracks whether this peer has sent WorkerCapabilities (required before
+    // RequestJobChunk / AssignJobResponse for build-capable workers).
+    let mut worker_caps_received = false;
+
     loop {
-        match socket.recv().await {
-            Some(Ok(Message::Binary(bytes))) => {
-                match rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes) {
-                    Ok(msg) => {
-                        debug!(?msg, "received client message");
-                        match msg {
-                            ClientMessage::RequestJobList => {
-                                // TODO: query pending jobs from state, chunk and stream JobCandidate list
-                                let reply = ServerMessage::JobListChunk { candidates: vec![], is_final: true };
-                                if send_server_msg(&mut socket, &reply).await.is_err() {
-                                    break;
-                                }
-                            }
-                            _ => {
-                                // Future message types are dispatched here.
-                            }
-                        }
+        let msg = match recv_client_msg(&mut socket).await {
+            Some(m) => m,
+            None => break,
+        };
+
+        debug!(?msg, "received client message");
+
+        match msg {
+            // ── Already handled above ─────────────────────────────────────
+            ClientMessage::InitConnection { .. } => {
+                send_error(&mut socket, 400, "unexpected InitConnection".into()).await;
+                break;
+            }
+
+            // ── Worker declines the connection ────────────────────────────
+            ClientMessage::Reject { code, reason } => {
+                info!(%peer_id, code, %reason, "peer rejected connection");
+                break;
+            }
+
+            // ── Capability advertisement ──────────────────────────────────
+            ClientMessage::WorkerCapabilities { architectures, system_features, max_concurrent_builds } => {
+                debug!(
+                    %peer_id,
+                    ?architectures,
+                    ?system_features,
+                    max_concurrent_builds,
+                    "WorkerCapabilities received"
+                );
+                worker_caps_received = true;
+                // TODO: store worker capabilities in shared state for scheduler
+            }
+
+            // ── Job list snapshot ─────────────────────────────────────────
+            ClientMessage::RequestJobList => {
+                debug!(%peer_id, "RequestJobList");
+                // TODO: query pending job candidates from DB/scheduler and
+                //       stream them in chunks (e.g. 100 per message).
+                //       For now send an empty final chunk.
+                let chunk = ServerMessage::JobListChunk {
+                    candidates: vec![],
+                    is_final: true,
+                };
+                if send_server_msg(&mut socket, &chunk).await.is_err() {
+                    break;
+                }
+            }
+
+            // ── Incremental scoring ───────────────────────────────────────
+            ClientMessage::RequestJobChunk { scores, is_final } => {
+                debug!(%peer_id, count = scores.len(), is_final, "RequestJobChunk");
+                // TODO: feed scores into scheduler; it may immediately
+                //       assign a job if a score of `missing: 0` arrives.
+                //
+                // Example:
+                // if let Some(assignment) = scheduler.consider_scores(&peer_id, &scores) {
+                //     if send_server_msg(&mut socket, &ServerMessage::AssignJob {
+                //         job_id: assignment.job_id,
+                //         job: assignment.job,
+                //         timeout_secs: assignment.timeout_secs,
+                //     }).await.is_err() { break; }
+                // }
+                let _ = (scores, is_final);
+            }
+
+            // ── Job accept / reject ───────────────────────────────────────
+            ClientMessage::AssignJobResponse { job_id, accepted, reason } => {
+                if accepted {
+                    info!(%peer_id, %job_id, "job accepted");
+                    // TODO: mark job as Building in DB; start NAR transfer
+                } else {
+                    info!(%peer_id, %job_id, reason = ?reason, "job rejected by worker");
+                    // TODO: release job back to scheduler for reassignment
+                }
+            }
+
+            // ── Progress updates ──────────────────────────────────────────
+            ClientMessage::JobUpdate { job_id, update } => {
+                debug!(%peer_id, %job_id, ?update, "JobUpdate");
+                match update {
+                    JobUpdateKind::Fetching => {
+                        // TODO: evaluation.status = Fetching
                     }
-                    Err(e) => {
-                        warn!(error = %e, "failed to deserialize client message");
-                        send_error(&mut socket, 400, "malformed message".into()).await;
-                        break;
+                    JobUpdateKind::EvaluatingFlake => {
+                        // TODO: evaluation.status = EvaluatingFlake
+                    }
+                    JobUpdateKind::EvaluatingDerivations => {
+                        // TODO: evaluation.status = EvaluatingDerivation
+                    }
+                    JobUpdateKind::EvalResult { derivations, warnings } => {
+                        // TODO: insert derivation/build rows, mark Substituted,
+                        //       queue signing, push JobOffer to build workers.
+                        //       First batch sets evaluation.status = Building.
+                        let _ = (derivations, warnings);
+                    }
+                    JobUpdateKind::Building { build_id } => {
+                        // TODO: build.status = Building
+                        let _ = build_id;
+                    }
+                    JobUpdateKind::BuildOutput { build_id, outputs } => {
+                        // TODO: build.status = Completed, update derivation_output rows
+                        let _ = (build_id, outputs);
+                    }
+                    JobUpdateKind::Compressing => {
+                        // Informational — no DB status change
+                    }
+                    JobUpdateKind::Signing => {
+                        // Informational — no DB status change
                     }
                 }
             }
-            Some(Ok(Message::Close(_))) | None => {
-                debug!("connection closed by client");
-                break;
+
+            // ── Job terminal states ───────────────────────────────────────
+            ClientMessage::JobCompleted { job_id } => {
+                info!(%peer_id, %job_id, "job completed");
+                // TODO: set terminal status (Completed / Succeeded) in DB;
+                //       cascade to dependent builds; finalize log.
             }
-            Some(Ok(_)) => {
-                // Text frames, pings, pongs — ignore.
+
+            ClientMessage::JobFailed { job_id, error } => {
+                warn!(%peer_id, %job_id, %error, "job failed");
+                // TODO: set Failed in DB; cascade DependencyFailed to
+                //       downstream builds; finalize log.
             }
-            Some(Err(e)) => {
-                debug!(error = %e, "WebSocket error");
-                break;
+
+            // ── Worker draining ───────────────────────────────────────────
+            ClientMessage::Draining => {
+                info!(%peer_id, "worker draining — no new jobs will be assigned");
+                // TODO: mark peer as draining in scheduler state
+            }
+
+            // ── Log streaming ─────────────────────────────────────────────
+            ClientMessage::LogChunk { job_id, task_index, data } => {
+                debug!(%peer_id, %job_id, task_index, bytes = data.len(), "LogChunk");
+                // TODO: append to LogStorage
+                let _ = data;
+            }
+
+            // ── NAR transfer ──────────────────────────────────────────────
+            ClientMessage::NarRequest { job_id, paths } => {
+                debug!(%peer_id, %job_id, count = paths.len(), "NarRequest");
+                // TODO: look up each path in NarStore; respond with NarPush
+                //       (direct mode) or PresignedDownload (S3 mode).
+                let _ = paths;
+            }
+
+            ClientMessage::NarPush { job_id, store_path, data, offset, is_final } => {
+                debug!(%peer_id, %job_id, %store_path, offset, is_final, bytes = data.len(), "NarPush");
+                // TODO: write chunk to NarStore; on is_final, verify hash,
+                //       import into local store, record path info.
+                let _ = data;
+            }
+
+            ClientMessage::NarReady { job_id, store_path, nar_size, nar_hash } => {
+                debug!(%peer_id, %job_id, %store_path, nar_size, %nar_hash, "NarReady");
+                // TODO: record path info; add_signatures if needed.
             }
         }
     }
 
-    info!("WebSocket connection closed");
+    info!(%peer_id, "WebSocket connection closed");
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/// Receive the next binary client message, skipping text/ping/pong frames.
 async fn recv_client_msg(socket: &mut WebSocket) -> Option<ClientMessage> {
     loop {
         match socket.recv().await? {
@@ -155,7 +295,7 @@ async fn recv_client_msg(socket: &mut WebSocket) -> Option<ClientMessage> {
                 }
             }
             Ok(Message::Close(_)) => return None,
-            Ok(_) => continue,
+            Ok(_) => continue, // text frames, pings, pongs — ignore
             Err(e) => {
                 debug!(error = %e, "WebSocket recv error");
                 return None;
@@ -175,19 +315,16 @@ async fn send_server_msg(socket: &mut WebSocket, msg: &ServerMessage) -> Result<
 }
 
 async fn send_error(socket: &mut WebSocket, code: u16, message: String) {
-    let msg = ServerMessage::Error { code, message };
-    let _ = send_server_msg(socket, &msg).await;
+    let _ = send_server_msg(socket, &ServerMessage::Error { code, message }).await;
 }
 
-/// Negotiate capabilities: activate only the capabilities both sides support.
-///
-/// With a struct of bools, negotiation is just AND — if the server doesn't
-/// know about a capability it's `false` on the server side, so the result is
-/// `false` regardless of what the client requested.  Add new capabilities to
-/// [`GradientCapabilities`] and set the server's supported value here.
+async fn send_reject(socket: &mut WebSocket, code: u16, reason: String) {
+    let _ = send_server_msg(socket, &ServerMessage::Reject { code, reason }).await;
+}
+
+/// Negotiate capabilities: server-authoritative fields are set from server
+/// config; all others are AND-ed with what the client requested.
 fn negotiate_capabilities(state: &ServerState, client: GradientCapabilities) -> GradientCapabilities {
-    // `core` and `cache` are server-determined — workers cannot claim them.
-    // All other capabilities are AND-ed: the client opts in, the server confirms.
     GradientCapabilities {
         core: true,
         cache: state.cli.serve_cache,

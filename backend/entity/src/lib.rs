@@ -6,6 +6,9 @@
 
 pub mod api;
 pub mod build;
+pub mod build_machine;
+pub mod build_machine_architecture;
+pub mod build_machine_feature;
 pub mod cache;
 pub mod cache_derivation;
 pub mod cache_metric;

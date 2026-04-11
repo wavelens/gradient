@@ -18,25 +18,47 @@ use tokio::sync::Semaphore;
 use tracing::{error, info, instrument, warn};
 use uuid::Uuid;
 
-/// Output tuple returned by `evaluate`:
-///  - builds to insert
-///  - newly-created derivations to insert
-///  - newly-created derivation_output rows to insert
-///  - newly-created derivation_dependency edges to insert
-///  - entry-point (build_id, wildcard) pairs
-///  - failed derivations: (drv, error_msg)
-///  - pending features: (derivation_id, feature_names)
-///  - evaluation warnings collected from the Nix evaluator
-pub type EvaluationOutput = (
-    Vec<MBuild>,
-    Vec<MDerivation>,
-    Vec<ADerivationOutput>,
-    Vec<MDerivationDependency>,
-    Vec<(Uuid, String)>,
-    Vec<(String, String)>,
-    Vec<(Uuid, Vec<String>)>,
-    Vec<String>,
-);
+/// Named output from `evaluate`. Replaces the old 8-element tuple.
+pub struct EvaluationResult {
+    /// Build rows to insert (initially `Created`).
+    pub builds: Vec<MBuild>,
+    /// Newly-discovered `derivation` rows to insert.
+    pub derivations: Vec<MDerivation>,
+    /// Newly-discovered `derivation_output` rows to insert.
+    pub derivation_outputs: Vec<ADerivationOutput>,
+    /// New `derivation_dependency` edges to insert.
+    pub derivation_dependencies: Vec<MDerivationDependency>,
+    /// Top-level entry-point `(build_id, wildcard_string)` pairs.
+    pub entry_points: Vec<EntryPoint>,
+    /// Derivations that failed to resolve, with their error messages.
+    pub failed_derivations: Vec<FailedDerivation>,
+    /// `(derivation_id, feature_names)` pairs to persist after derivation rows are inserted.
+    pub pending_features: Vec<PendingFeature>,
+    /// Nix evaluator warnings (captured from stderr).
+    pub warnings: Vec<String>,
+}
+
+/// A top-level derivation matched by the evaluation wildcard.
+pub struct EntryPoint {
+    pub build_id: Uuid,
+    pub wildcard: String,
+}
+
+/// A derivation that failed to resolve during evaluation.
+pub struct FailedDerivation {
+    pub derivation: String,
+    pub error: String,
+}
+
+/// Required Nix system features for a derivation, to be stored after insert.
+pub struct PendingFeature {
+    pub derivation_id: Uuid,
+    pub features: Vec<String>,
+}
+
+/// Backwards-compatible type alias — prefer `EvaluationResult` in new code.
+#[deprecated(note = "use EvaluationResult")]
+pub type EvaluationOutput = EvaluationResult;
 
 use gradient_core::db::{update_evaluation_status, update_evaluation_status_with_error};
 use crate::dependencies::{SharedAccumulator, query_all_dependencies};
@@ -48,7 +70,7 @@ use crate::dependencies::{SharedAccumulator, query_all_dependencies};
 pub async fn evaluate(
     state: Arc<ServerState>,
     evaluation: &MEvaluation,
-) -> Result<EvaluationOutput> {
+) -> Result<EvaluationResult> {
     info!("Starting evaluation");
 
     // Fire-and-forget: the conditional update in update_evaluation_status
@@ -121,7 +143,16 @@ pub async fn evaluate(
 
     if all_derivations.is_empty() {
         warn!("No derivations found for evaluation");
-        return Ok((vec![], vec![], vec![], vec![], vec![], vec![], vec![], eval_warnings));
+        return Ok(EvaluationResult {
+            builds: vec![],
+            derivations: vec![],
+            derivation_outputs: vec![],
+            derivation_dependencies: vec![],
+            entry_points: vec![],
+            failed_derivations: vec![],
+            pending_features: vec![],
+            warnings: eval_warnings,
+        });
     }
 
     update_evaluation_status(
@@ -223,48 +254,41 @@ pub async fn evaluate(
         new_derivations,
         new_derivation_outputs,
         new_derivation_dependencies,
-        mut entry_point_build_ids,
+        mut raw_entry_points,
         pending_features,
     ) = Arc::clone(&shared).into_parts();
-    let failed_derivations = std::mem::take(&mut *failed_derivations.lock().unwrap());
-    let warnings = eval_warnings;
+    let raw_failed = std::mem::take(&mut *failed_derivations.lock().unwrap());
 
-    if builds.is_empty() && !failed_derivations.is_empty() {
-        let error_summary = if failed_derivations.len() == total_derivations {
-            format!(
-                "All {} derivations failed during evaluation",
-                total_derivations
-            )
+    if builds.is_empty() && !raw_failed.is_empty() {
+        let error_summary = if raw_failed.len() == total_derivations {
+            format!("All {} derivations failed during evaluation", total_derivations)
         } else {
             format!(
                 "{} out of {} derivations failed, no builds created",
-                failed_derivations.len(),
+                raw_failed.len(),
                 total_derivations
             )
         };
-
-        let detailed_errors: Vec<String> = failed_derivations
+        let detailed_errors: Vec<String> = raw_failed
             .iter()
             .map(|(deriv, error)| format!("- {}: {}", deriv, error))
             .collect();
-
-        let full_error = format!("{}:\n{}", error_summary, detailed_errors.join("\n"));
-        return Err(anyhow::anyhow!(full_error));
+        return Err(anyhow::anyhow!("{}:\n{}", error_summary, detailed_errors.join("\n")));
     }
 
     let mut seen = std::collections::HashSet::new();
-    entry_point_build_ids.retain(|(id, _)| seen.insert(*id));
+    raw_entry_points.retain(|(id, _)| seen.insert(*id));
 
-    Ok((
+    Ok(EvaluationResult {
         builds,
-        new_derivations,
-        new_derivation_outputs,
-        new_derivation_dependencies,
-        entry_point_build_ids,
-        failed_derivations,
-        pending_features,
-        warnings,
-    ))
+        derivations: new_derivations,
+        derivation_outputs: new_derivation_outputs,
+        derivation_dependencies: new_derivation_dependencies,
+        entry_points: raw_entry_points.into_iter().map(|(build_id, wildcard)| EntryPoint { build_id, wildcard }).collect(),
+        failed_derivations: raw_failed.into_iter().map(|(derivation, error)| FailedDerivation { derivation, error }).collect(),
+        pending_features: pending_features.into_iter().map(|(derivation_id, features)| PendingFeature { derivation_id, features }).collect(),
+        warnings: eval_warnings,
+    })
 }
 
 /// Runs evaluation for a direct (non-repository) build using a local temp directory as the flake
@@ -283,28 +307,19 @@ pub async fn evaluate_direct(
     let evaluation_result = evaluate(Arc::clone(&state), &direct_evaluation).await;
 
     match evaluation_result {
-        Ok((
-            builds,
-            new_derivations,
-            new_derivation_outputs,
-            new_derivation_dependencies,
-            _entry_point_build_ids,
-            _failed_derivations,
-            pending_features,
-            _warnings,
-        )) => {
+        Ok(result) => {
             info!(
-                build_count = builds.len(),
-                derivation_count = new_derivations.len(),
-                dependency_count = new_derivation_dependencies.len(),
+                build_count = result.builds.len(),
+                derivation_count = result.derivations.len(),
+                dependency_count = result.derivation_dependencies.len(),
                 "Direct evaluation completed successfully"
             );
 
             const BATCH_SIZE: usize = 1000;
 
             // Insert derivations first — builds FK into derivation.
-            if !new_derivations.is_empty() {
-                let active: Vec<ADerivation> = new_derivations
+            if !result.derivations.is_empty() {
+                let active: Vec<ADerivation> = result.derivations
                     .iter()
                     .map(|d| d.clone().into_active_model())
                     .collect();
@@ -316,8 +331,8 @@ pub async fn evaluate_direct(
                 }
             }
 
-            if !new_derivation_outputs.is_empty() {
-                for chunk in new_derivation_outputs.chunks(BATCH_SIZE) {
+            if !result.derivation_outputs.is_empty() {
+                for chunk in result.derivation_outputs.chunks(BATCH_SIZE) {
                     EDerivationOutput::insert_many(chunk.to_vec())
                         .exec(&state.db)
                         .await
@@ -325,8 +340,8 @@ pub async fn evaluate_direct(
                 }
             }
 
-            if !new_derivation_dependencies.is_empty() {
-                let active: Vec<ADerivationDependency> = new_derivation_dependencies
+            if !result.derivation_dependencies.is_empty() {
+                let active: Vec<ADerivationDependency> = result.derivation_dependencies
                     .iter()
                     .map(|d| d.clone().into_active_model())
                     .collect();
@@ -339,7 +354,7 @@ pub async fn evaluate_direct(
             }
 
             // Builds go last: they FK into the just-inserted derivations.
-            let active_builds = builds
+            let active_builds = result.builds
                 .iter()
                 .map(|b| b.clone().into_active_model())
                 .collect::<Vec<ABuild>>();
@@ -352,16 +367,16 @@ pub async fn evaluate_direct(
                 }
             }
 
-            for (derivation_id, features) in pending_features {
+            for pf in result.pending_features {
                 if let Err(e) = gradient_core::db::add_features(
                     Arc::clone(&state),
-                    features,
-                    Some(derivation_id),
+                    pf.features,
+                    Some(pf.derivation_id),
                     None,
                 )
                 .await
                 {
-                    error!(error = %e, %derivation_id, "Failed to add features for direct derivation");
+                    error!(error = %e, derivation_id = %pf.derivation_id, "Failed to add features for direct derivation");
                 }
             }
 

@@ -17,9 +17,10 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use std::sync::Arc;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use uuid::Uuid;
 
+use crate::state_machine::{BuildStateMachine, EvalStateMachine};
 use crate::types::*;
 
 pub async fn update_build_status(
@@ -27,16 +28,12 @@ pub async fn update_build_status(
     build: MBuild,
     status: BuildStatus,
 ) -> MBuild {
-    if status == build.status {
-        return build;
-    }
-
-    if (status == BuildStatus::Aborted || status == BuildStatus::DependencyFailed)
-        && (build.status == BuildStatus::Completed
-            || build.status == BuildStatus::Substituted
-            || build.status == BuildStatus::Failed)
-    {
-        return build;
+    match BuildStateMachine::validate(build.status.clone(), status.clone()) {
+        Ok(_) => {}
+        Err(e) => {
+            warn!(build_id = %build.id, error = %e, "Skipping invalid build status transition");
+            return build;
+        }
     }
 
     debug!(build_id = %build.id, status = ?status, "Updating build status");
@@ -88,19 +85,15 @@ pub async fn update_evaluation_status(
     evaluation: MEvaluation,
     status: EvaluationStatus,
 ) -> MEvaluation {
-    if status == evaluation.status {
-        return evaluation;
-    }
-
-    // Never step away from a terminal state. This is both a local check
-    // (if the in-memory row is already terminal) and an atomic DB guard
-    // via the filtered update_many below — so a concurrent abort cannot
-    // be clobbered by an in-flight evaluator.
-    if matches!(
-        evaluation.status,
-        EvaluationStatus::Aborted | EvaluationStatus::Failed | EvaluationStatus::Completed
-    ) {
-        return evaluation;
+    // The state machine validates the transition locally. The filtered update_many
+    // below also guards atomically in the DB, so concurrent aborts cannot be
+    // clobbered by an in-flight evaluator.
+    match EvalStateMachine::validate(evaluation.status.clone(), status.clone()) {
+        Ok(_) => {}
+        Err(e) => {
+            warn!(evaluation_id = %evaluation.id, error = %e, "Skipping invalid evaluation status transition");
+            return evaluation;
+        }
     }
 
     debug!(evaluation_id = %evaluation.id, status = ?status, "Updating evaluation status");

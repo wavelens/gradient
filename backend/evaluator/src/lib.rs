@@ -12,7 +12,7 @@ mod scheduler;
 pub mod worker;
 pub mod worker_pool;
 
-pub use eval::{EvaluationOutput, evaluate, evaluate_direct};
+pub use eval::{EntryPoint, EvaluationResult, FailedDerivation, PendingFeature, evaluate, evaluate_direct};
 pub use scheduler::{schedule_evaluation, schedule_evaluation_loop};
 pub use worker::run_eval_worker;
 pub use worker_pool::WorkerPoolResolver;

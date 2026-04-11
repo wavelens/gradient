@@ -305,13 +305,15 @@ A `BuildJob` carries the **full dependency chain** in topological order — the 
 
 ```mermaid
 graph LR
-    A["Build [dep₀, dep₁, ..., depₙ, target]<br/>(if build)"] --> B["Sign<br/>(if sign)"]
+    A["Build [dep₀, dep₁, ..., depₙ, target]<br/>(if build)"] --> B["Compress<br/>(if build)"]
+    B --> C["Sign<br/>(if sign)"]
 ```
 
 ```rust
 BuildJob {
     // Ordered list of derivations to build (dependencies first, target last).
     builds: Vec<BuildTask>,
+    compress: Option<CompressTask>,     // pack outputs into zstd NARs before signing
     sign: Option<SignTask>,
     // required_paths is NOT here — it was already sent in JobCandidate during the offer phase.
     // The worker cached the missing set while scoring.
@@ -320,6 +322,10 @@ BuildJob {
 BuildTask {
     build_id: Uuid,                     // DB build row ID
     drv_path: String,                   // /nix/store/xxx.drv
+}
+
+CompressTask {
+    store_paths: Vec<String>,           // outputs to compress into zstd NARs
 }
 
 SignTask {
@@ -331,6 +337,7 @@ SignTask {
 | Task | Requires | Input (from server) | Output (from worker) |
 |------|----------|---------------------|----------------------|
 | **Build** | `build` | `builds` + `required_paths` — full chain with pre-computed closure | Per-build `BuildOutput` via `JobUpdate` |
+| **Compress** | `build` | `store_paths` — outputs to pack | zstd-compressed NARs ready for upload |
 | **Sign** | `sign` | `store_paths`, signing key credential | `signatures: Vec<Signature>` — per-output Ed25519 signatures |
 
 **NAR transfer flow (zero extra round trips — worker already knows what's missing from scoring):**
@@ -350,6 +357,9 @@ sequenceDiagram
     W->>S: JobUpdate::BuildOutput { dep₀ }
     W->>S: JobUpdate::BuildOutput { dep₁ }
     W->>S: JobUpdate::BuildOutput { target }
+    W->>S: JobUpdate::Compressing
+    Note over W: packs outputs into zstd NARs
+    W->>S: JobUpdate::Signing
     W->>S: JobCompleted
 ```
 
@@ -441,6 +451,7 @@ enum JobUpdateKind {
     // BuildJob phases → BuildStatus
     Building { build_id: Uuid },                        // → Building (per derivation in chain)
     BuildOutput { build_id: Uuid, outputs: Vec<BuildOutput> }, // per-derivation result
+    Compressing,                                        // packing outputs into zstd NARs (no DB status change)
     Signing,                                            // (no DB status change)
 }
 
@@ -464,6 +475,7 @@ struct BuildOutput {
 | `EvalResult` | `evaluation` + `derivation` + `build` + `evaluation_message` | Inserts rows per batch; substituted → `Substituted` (7), rest → `Created` (0). First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. |
 | `Building` | `build` | `Building` (2) — per derivation in chain |
 | `BuildOutput` | `build` + `derivation_output` | `Completed` (3); updates output hash/size/path |
+| `Compressing` | — | No status change; informational — packing outputs into zstd NARs |
 | `Signing` | — | No status change; informational |
 
 `JobCompleted` sets the final terminal status. `JobFailed` sets `Failed` and cascades `DependencyFailed` to downstream builds.

@@ -51,6 +51,7 @@ mod m20260408_000000_split_build_into_derivation;
 mod m20260408_000001_evaluation_messages;
 mod m20260409_000000_add_ci_reporter_to_project;
 mod m20260410_000000_add_fetching_evaluation_status;
+mod m20260411_000000_rename_server_to_build_machine;
 
 pub struct Migrator;
 
@@ -103,6 +104,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260408_000001_evaluation_messages::Migration),
             Box::new(m20260409_000000_add_ci_reporter_to_project::Migration),
             Box::new(m20260410_000000_add_fetching_evaluation_status::Migration),
+            Box::new(m20260411_000000_rename_server_to_build_machine::Migration),
         ]
     }
 }

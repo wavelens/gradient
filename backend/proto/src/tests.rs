@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::messages::{ClientMessage, GradientCapabilities, JobCandidate, PROTO_VERSION, ServerMessage};
+use crate::messages::{
+    ClientMessage, FlakeJob, FlakeTask, GradientCapabilities, Job, JobCandidate, PROTO_VERSION,
+    ServerMessage,
+};
 use rkyv::rancor::Error as RkyvError;
 
 // ── Message round-trip (rkyv serialize → deserialize) ────────────────────────
@@ -115,6 +118,14 @@ fn server_draining_roundtrip() {
 fn assign_job_roundtrip() {
     let original = ServerMessage::AssignJob {
         job_id: "550e8400-e29b-41d4-a716-446655440000".into(),
+        job: Job::Flake(FlakeJob {
+            tasks: vec![FlakeTask::FetchFlake, FlakeTask::EvaluateFlake],
+            repository: "https://github.com/example/repo".into(),
+            commit: "abc123".into(),
+            wildcards: vec!["packages.*".into()],
+            timeout_secs: Some(300),
+        }),
+        timeout_secs: Some(600),
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();

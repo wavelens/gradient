@@ -456,7 +456,7 @@ in
               host = "build1.internal.acme.com";
               username = "gradient";
               architectures = [ "x86_64-linux" "aarch64-linux" ];
-              features = [ "big-parallel" ];
+              features = [ "nixos-test" "benchmark" "big-parallel" ];
               created_by = "alice";
             };
           };

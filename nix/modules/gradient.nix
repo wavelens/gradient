@@ -476,8 +476,8 @@ in {
       nginx = lib.mkIf cfg.configureNginx {
         enable = true;
         virtualHosts."${cfg.domain}" = {
-          enableACME = true;
-          forceSSL = true;
+          enableACME = cfg.useTls;
+          forceSSL = cfg.useTls;
           http2 = true;
           http3 = cfg.enableQuic;
           locations = {

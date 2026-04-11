@@ -202,7 +202,7 @@ services.gradient.state.servers = [
     host          = "build1.internal.example.com";
     username      = "gradient";
     architectures = [ "x86_64-linux" ];
-    features      = [ "big-parallel" ];
+    features      = [ "nixos-test" "benchmark" "big-parallel" ];
     created_by    = "alice";
   }
 ];

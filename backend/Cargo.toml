@@ -8,7 +8,7 @@ description = "Nix-based Continuous Integration System"
 repository = "https://github.com/wavelens/gradient"
 
 [workspace]
-members = [".", "core", "evaluator", "builder", "web", "cache", "entity", "migration", "proto", "test-support"]
+members = [".", "core", "evaluator", "builder", "web", "cache", "entity", "migration", "proto", "test-support", "worker"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -21,6 +21,7 @@ evaluator    = { path = "evaluator" }
 migration    = { path = "migration" }
 proto        = { path = "proto" }
 test-support = { path = "test-support" }
+worker       = { path = "worker" }
 web          = { path = "web" }
 
 # External
@@ -30,7 +31,8 @@ async-trait      = "0.1"
 base64           = "0.22"
 bytes            = "1.11"
 chrono           = "0.4"
-futures          = "0.3"
+futures              = "0.3"
+tokio-tungstenite    = { version = "0.27", features = ["native-tls"] }
 harmonia-nar           = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
 harmonia-protocol      = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
 harmonia-store-core    = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
