@@ -6,6 +6,7 @@
 
 pub mod consts;
 pub mod input;
+pub mod proto;
 pub mod wildcard;
 
 mod entity_aliases;
@@ -26,7 +27,7 @@ use super::storage::LogStorage;
 use super::storage::NarStore;
 use super::executer::pool::NixStoreProvider;
 use super::sources::FlakePrefetcher;
-use super::ci::webhooks::WebhookClient;
+use super::ci::webhook::WebhookClient;
 use clap::Parser;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
@@ -48,6 +49,9 @@ pub struct Cli {
     /// Log level for the `web` crate. Defaults to `--log-level`.
     #[arg(long, env = "GRADIENT_WEB_LOG_LEVEL")]
     pub web_log_level: Option<String>,
+    /// Log level for the `proto` crate. Defaults to `--log-level`.
+    #[arg(long, env = "GRADIENT_PROTO_LOG_LEVEL")]
+    pub proto_log_level: Option<String>,
     #[arg(long, env = "GRADIENT_IP", default_value = "127.0.0.1")]
     pub ip: String,
     #[arg(long, env = "GRADIENT_PORT", value_parser = port_in_range, default_value_t = 3000)]
@@ -204,6 +208,29 @@ pub struct Cli {
     /// settings page.
     #[arg(long, env = "GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE")]
     pub github_app_webhook_secret_file: Option<String>,
+
+    // ── WebSocket protocol options ────────────────────────────────────────────
+    /// Advertise HTTP/3 (QUIC) support to connecting clients.
+    /// Enabling this does NOT change the backend transport — configure nginx
+    /// with `listen 443 quic` and set the `Alt-Svc` header there.
+    /// This flag is surfaced via `GET /api/v1/config` so clients can choose
+    /// whether to attempt an HTTP/3 upgrade.
+    #[arg(long, env = "GRADIENT_QUIC", default_value = "false")]
+    pub quic: bool,
+
+    /// Maximum number of simultaneous proto WebSocket connections.
+    #[arg(long, env = "GRADIENT_MAX_PROTO_CONNECTIONS", default_value = "256")]
+    pub max_proto_connections: usize,
+
+    /// Accept incoming connections on `/proto` (workers and federated servers).
+    /// Enabled by default — disable to reject all `/proto` connections.
+    #[arg(long, env = "GRADIENT_DISCOVERABLE", default_value = "true")]
+    pub discoverable: bool,
+
+    /// Accept federated connections from other Gradient servers on `/proto`.
+    /// Requires `discoverable` to be enabled.
+    #[arg(long, env = "GRADIENT_FEDERATE_PROTO", default_value = "false")]
+    pub federate_proto: bool,
 }
 
 #[derive(Debug)]

@@ -65,5 +65,6 @@ pub fn test_cli() -> Cli {
         github_app_id: None,
         github_app_private_key_file: None,
         github_app_webhook_secret_file: None,
+        quic: false,
     }
 }

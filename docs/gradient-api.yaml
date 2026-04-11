@@ -149,6 +149,31 @@ paths:
                   oidc_enabled: false
                   registration_enabled: false
                   email_verification_enabled: false
+                  quic: false
+
+  /proto:
+    get:
+      tags: [general]
+      summary: Binary WebSocket protocol endpoint
+      description: |-
+        Upgrades the connection to a WebSocket carrying rkyv-encoded binary
+        frames. Only available when `GRADIENT_PROTO_ENABLE=true`.
+
+        **Protocol flow**
+        1. Client sends `ClientMessage::InitConnection { version, features }`.
+        2. Server responds with `ServerMessage::InitAck { version, features }`
+           containing the negotiated protocol version and activated feature flags.
+        3. Further message types will be added as the protocol evolves.
+
+        Messages are raw rkyv bytes sent as WebSocket binary frames.
+        The `/proto` endpoint is always active.
+      security: []
+      operationId: protoWebSocket
+      responses:
+        '101':
+          description: Switching Protocols — WebSocket upgrade successful
+        '404':
+          description: Protocol endpoint is disabled (`GRADIENT_PROTO_ENABLE=false`)
 
   # ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -3254,7 +3279,7 @@ components:
 
     ServerConfig:
       type: object
-      required: [oidc_enabled, registration_enabled, email_verification_enabled]
+      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic]
       properties:
         oidc_enabled:
           type: boolean
@@ -3265,7 +3290,12 @@ components:
         email_verification_enabled:
           type: boolean
           description: Whether email verification is required on registration
-
+        quic:
+          type: boolean
+          description: >-
+            Whether the server advertises HTTP/3 (QUIC) support via the reverse
+            proxy. Clients may attempt an HTTP/3 upgrade when true. Actual QUIC
+            termination is handled by nginx, not the backend.
     # ── Auth ─────────────────────────────────────────────────────────────────
 
     MakeLoginRequest:

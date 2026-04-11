@@ -1,0 +1,18 @@
+[package]
+name = "proto"
+version = "1.0.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0"
+authors = ["Wavelens GmbH <info@wavelens.io>"]
+
+[lib]
+name = "proto"
+path = "src/lib.rs"
+
+[dependencies]
+axum         = { version = "0.8", features = ["ws"] }
+gradient-core = { path = "../core", package = "core" }
+rkyv         = { workspace = true }
+tokio        = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing      = { workspace = true }

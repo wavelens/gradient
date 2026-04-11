@@ -6,11 +6,7 @@
 
 { lib, pkgs, config, ... }: let
   cfg = config.services.gradient;
-
   logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
-
-  # Augment each project with ci_reporter_has_token so the backend knows
-  # whether to look for the systemd credential at startup.
   augmentedProjects = lib.mapAttrs (_: proj: proj // {
     ci_reporter_has_token = proj.ci_reporter_token_file != null;
   }) cfg.state.projects;
@@ -18,6 +14,7 @@
   stateJsonFile = pkgs.writers.writeJSON "gradient-state.json" (cfg.state // {
     projects = augmentedProjects;
   });
+
   userPasswordFiles = lib.mapAttrsToList (_: user: "gradient_user_${user.username}_password:${user.password_file}") cfg.state.users;
   orgPrivateKeyFiles = lib.mapAttrsToList (_: org: "gradient_org_${org.name}_private_key:${org.private_key_file}") cfg.state.organizations;
   cacheSigningKeyFiles = lib.mapAttrsToList (_: cache: "gradient_cache_${cache.name}_signing_key:${cache.signing_key_file}") cfg.state.caches;
@@ -29,11 +26,13 @@
 in {
   # disabledModules = [
   #   "services/gradient/default.nix"
+  #   "services/gradient/worker.nix"
   #   "services/gradient/state.nix"
   # ];
 
   imports = [
     ./gradient-state.nix
+    ./gradient-worker.nix
   ];
 
   options = {
@@ -44,8 +43,10 @@ in {
       serveCache = lib.mkEnableOption "cache serving";
       reportErrors = lib.mkEnableOption "error reporting to Sentry";
       useTls = lib.mkEnableOption "TLS" // { default = true; };
+      enableQuic = lib.mkEnableOption "Quic support";
+      discoverable = lib.mkEnableOption "discoverable — accept incoming connections on /proto" // { default = true; };
       packages = {
-        server = lib.mkPackageOption pkgs "gradient-server" { };
+        server = lib.mkPackageOption pkgs "gradient" { };
         frontend = lib.mkPackageOption pkgs "gradient-frontend" { };
         nix = lib.mkOption {
           default = config.nix.package;
@@ -62,10 +63,10 @@ in {
         };
 
         git = lib.mkOption {
-          default = config.programs.git.package;
-          defaultText = lib.literalExpression "config.programs.git.package";
+          default = pkgs.nixVersions.git;
+          defaultText = lib.literalExpression "pkgs.nixVersions.git";
           type = lib.types.package;
-          description = "Git package to use (required by Nix when fetching git+https:// flake inputs)";
+          description = "Git package to use";
         };
       };
 
@@ -117,16 +118,19 @@ in {
         example = "/etc/gradient/database_url";
       };
 
-      frontendUrl = lib.mkOption {
-        description = "Public URL of the Gradient frontend, used in CI status report links";
-        type = lib.types.str;
-        default = "http${lib.optionalString cfg.useTls "s"}://${cfg.domain}";
-        defaultText = lib.literalExpression ''"http\${lib.optionalString config.services.gradient.useTls "s"}://\${config.services.gradient.domain}"'';
-        example = "https://gradient.example.com";
+      proto = {
+        federate = lib.mkEnableOption "federate Gradient Proto";
       };
 
       frontend = {
         enable = lib.mkEnableOption "Gradient Frontend";
+        url = lib.mkOption {
+          description = "Public URL of the Gradient frontend, used in CI status report links";
+          type = lib.types.str;
+          default = "http${lib.optionalString cfg.useTls "s"}://${cfg.domain}";
+          defaultText = lib.literalExpression ''"http\${lib.optionalString config.services.gradient.useTls "s"}://\${config.services.gradient.domain}"'';
+          example = "https://gradient.example.com";
+        };
       };
 
       oidc = {
@@ -199,7 +203,6 @@ in {
 
       githubApp = {
         enable = lib.mkEnableOption "GitHub App integration for webhook-triggered evaluations and CI reporting";
-
         appId = lib.mkOption {
           description = "GitHub App ID shown on the GitHub App settings page";
           type = lib.types.ints.positive;
@@ -261,16 +264,10 @@ in {
 
       settings = {
         enableRegistration = lib.mkEnableOption "registration. Users must be registered via OIDC." // { default = true; };
-        maxConcurrentEvaluations = lib.mkOption {
-          description = "Maximum number of concurrent evaluations";
+        maxProtoConnections = lib.mkOption {
+          description = "Maximum number of simultaneous proto WebSocket connections";
           type = lib.types.ints.positive;
-          default = 1;
-        };
-
-        maxConcurrentBuilds = lib.mkOption {
-          description = "Maximum number of concurrent builds";
-          type = lib.types.ints.positive;
-          default = 100;
+          default = 256;
         };
 
         keepEvaluations = lib.mkOption {
@@ -279,47 +276,11 @@ in {
           default = 5;
         };
 
-        maxNixdaemonConnections = lib.mkOption {
-          description = "Maximum number of simultaneous local Nix daemon connections in the connection pool";
-          type = lib.types.ints.positive;
-          default = 24;
-        };
-
-        evalWorkers = lib.mkOption {
-          description = "Number of Nix evaluator workers";
-          type = lib.types.ints.positive;
-          default = 1;
-        };
-
-        maxEvaluationsPerWorker = lib.mkOption {
-          description = ''
-            Recycle an eval-worker subprocess after it has served this
-            many list/resolve calls. Nix's Boehm GC never releases
-            memory back to the OS, so long-lived workers grow
-            monotonically; this cap bounds RSS growth by forcing a
-            respawn. Set to 0 to disable recycling.
-          '';
-          type = lib.types.ints.unsigned;
-          default = 20;
-        };
-
-        evalClosureParallelism = lib.mkOption {
-          description = ''
-            Number of top-level derivations whose dependency closure is
-            walked in parallel during the EvaluatingDerivation phase.
-            Each walker issues DB and Nix-store queries concurrently, so
-            raising this reduces evaluation latency at the cost of DB
-            pool / nix-daemon pressure.
-          '';
-          type = lib.types.ints.positive;
-          default = 8;
-        };
-
         logLevel = lib.mkOption {
           default = { };
           description = ''
-            Log levels. `default` is the global level; `builder`, `cache` and
-            `web` override per component (null inherits from `default`).
+            Log levels. `default` is the global level; `cache`, `web` and
+            `proto` override per component (null inherits from `default`).
           '';
 
           type = lib.types.submodule {
@@ -330,12 +291,6 @@ in {
                 default = "info";
               };
 
-              builder = lib.mkOption {
-                description = "Log level for the builder service. Null inherits from default";
-                type = lib.types.nullOr logLevelType;
-                default = null;
-              };
-
               cache = lib.mkOption {
                 description = "Log level for the cache service. Null inherits from default";
                 type = lib.types.nullOr logLevelType;
@@ -344,6 +299,12 @@ in {
 
               web = lib.mkOption {
                 description = "Log level for the web service. Null inherits from default";
+                type = lib.types.nullOr logLevelType;
+                default = null;
+              };
+
+              proto = lib.mkOption {
+                description = "Log level for the protocol layer. Null inherits from default";
                 type = lib.types.nullOr logLevelType;
                 default = null;
               };
@@ -367,6 +328,13 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = cfg.proto.federate -> cfg.discoverable;
+        message = "proto.federate requires discoverable to be enabled";
+      }
+    ];
+
     systemd = {
       tmpfiles.settings."10-gradient"."/nix/var/nix/gcroots/gradient".d = {
         user = "gradient";
@@ -433,11 +401,9 @@ in {
           GRADIENT_IP = cfg.listenAddr;
           GRADIENT_PORT = toString cfg.port;
           GRADIENT_SERVE_URL = "http${lib.optionalString cfg.useTls "s"}://${cfg.domain}";
-          GRADIENT_FRONTEND_URL = cfg.frontendUrl;
+          GRADIENT_FRONTEND_URL = cfg.frontend.url;
           GRADIENT_BASE_PATH = cfg.baseDir;
           GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
-          GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString cfg.settings.maxConcurrentEvaluations;
-          GRADIENT_MAX_CONCURRENT_BUILDS = toString cfg.settings.maxConcurrentBuilds;
           GRADIENT_BINPATH_NIX = lib.getExe cfg.packages.nix;
           GRADIENT_BINPATH_SSH = lib.getExe' cfg.packages.ssh "ssh";
           GRADIENT_OIDC_ENABLED = lib.boolToString cfg.oidc.enable;
@@ -447,23 +413,22 @@ in {
           GRADIENT_SERVE_CACHE = lib.boolToString cfg.serveCache;
           GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
           GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
-          GRADIENT_MAX_NIXDAEMON_CONNECTIONS = toString cfg.settings.maxNixdaemonConnections;
-          GRADIENT_EVAL_WORKERS = toString cfg.settings.evalWorkers;
-          GRADIENT_MAX_EVALUATIONS_PER_WORKER = toString cfg.settings.maxEvaluationsPerWorker;
-          GRADIENT_EVAL_CLOSURE_PARALLELISM = toString cfg.settings.evalClosureParallelism;
+          GRADIENT_MAX_PROTO_CONNECTIONS = toString cfg.settings.maxProtoConnections;
           GRADIENT_LOG_LEVEL = cfg.settings.logLevel.default;
-        } // lib.optionalAttrs (cfg.settings.logLevel.builder != null) {
-          GRADIENT_BUILDER_LOG_LEVEL = cfg.settings.logLevel.builder;
-        } // lib.optionalAttrs (cfg.settings.logLevel.cache != null) {
-          GRADIENT_CACHE_LOG_LEVEL = cfg.settings.logLevel.cache;
-        } // lib.optionalAttrs (cfg.settings.logLevel.web != null) {
-          GRADIENT_WEB_LOG_LEVEL = cfg.settings.logLevel.web;
-        } // {
+          GRADIENT_QUIC = lib.boolToString cfg.enableQuic;
+          GRADIENT_DISCOVERABLE = lib.boolToString cfg.discoverable;
+          GRADIENT_FEDERATE_PROTO = lib.boolToString cfg.proto.federate;
           GRADIENT_DELETE_STATE = lib.boolToString cfg.settings.deleteState;
           GRADIENT_NAR_TTL_HOURS = toString cfg.settings.cacheTtlHours;
           GRADIENT_STATE_FILE = "%d/gradient_state";
           GRADIENT_CREDENTIALS_DIR = "%d";
           RUST_LOG = cfg.settings.logLevel.default;
+        } // lib.optionalAttrs (cfg.settings.logLevel.cache != null) {
+          GRADIENT_CACHE_LOG_LEVEL = cfg.settings.logLevel.cache;
+        } // lib.optionalAttrs (cfg.settings.logLevel.web != null) {
+          GRADIENT_WEB_LOG_LEVEL = cfg.settings.logLevel.web;
+        } // lib.optionalAttrs (cfg.settings.logLevel.proto != null) {
+          GRADIENT_PROTO_LOG_LEVEL = cfg.settings.logLevel.proto;
         } // lib.optionalAttrs cfg.oidc.enable {
           GRADIENT_OIDC_CLIENT_ID = cfg.oidc.clientId;
           GRADIENT_OIDC_CLIENT_SECRET_FILE = "%d/gradient_oidc_client_secret";
@@ -514,6 +479,7 @@ in {
           enableACME = true;
           forceSSL = true;
           http2 = true;
+          http3 = cfg.enableQuic;
           locations = {
             "/" = lib.mkIf cfg.frontend.enable {
               root = "${cfg.packages.frontend}/share/gradient-frontend";
@@ -521,6 +487,11 @@ in {
             };
 
             "/api/" = {
+              proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
+              proxyWebsockets = true;
+            };
+
+            "/proto" = lib.mkIf cfg.discoverable {
               proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
               proxyWebsockets = true;
             };
@@ -540,6 +511,17 @@ in {
           name = "gradient";
           ensureDBOwnership = true;
         }];
+      };
+
+      gradient.workers.local = {
+        enable = lib.mkDefault true;
+        serverUrl = lib.mkDefault "ws://127.0.0.1:${toString cfg.port}/proto";
+        capabilities = {
+          fetch = lib.mkDefault true;
+          eval = lib.mkDefault true;
+          build = lib.mkDefault true;
+          sign = lib.mkDefault true;
+        };
       };
     };
 

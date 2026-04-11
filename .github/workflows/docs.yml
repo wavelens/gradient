@@ -40,7 +40,10 @@ jobs:
             cores = 2
 
       - name: Build docs
-        run: nix run nixpkgs#mkdocs -- build --strict --site-dir _site
+        run: |
+          nix-shell \
+          -p "python3.withPackages (ps: [ ps.mkdocs ps.mkdocs-mermaid2-plugin ])" \
+          --run "mkdocs build --strict --site-dir _site"
 
       - name: Upload artifact
         if: github.ref == 'refs/heads/main'

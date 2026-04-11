@@ -62,6 +62,10 @@ pub struct ServerConfig {
     pub oidc_enabled: bool,
     pub registration_enabled: bool,
     pub email_verification_enabled: bool,
+    /// Whether the server advertises HTTP/3 (QUIC) support.
+    /// Clients may attempt an HTTP/3 upgrade when this is true.
+    /// Actual HTTP/3 termination is handled by the reverse proxy (nginx).
+    pub quic: bool,
 }
 
 pub async fn get_config(
@@ -75,6 +79,7 @@ pub async fn get_config(
             registration_enabled: state.cli.enable_registration && !state.cli.oidc_required,
             email_verification_enabled: state.cli.email_enabled
                 && state.cli.email_require_verification,
+            quic: state.cli.quic,
         },
     };
 

@@ -7,9 +7,9 @@
 pub mod reporter;
 pub mod github_app;
 pub mod trigger;
-pub mod webhooks;
+pub mod webhook;
 
 pub use self::reporter::*;
 pub use self::github_app::*;
 pub use self::trigger::*;
-pub use self::webhooks::*;
+pub use self::webhook::*;

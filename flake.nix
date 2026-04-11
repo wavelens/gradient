@@ -29,11 +29,10 @@
     checks = import ./nix/tests { inherit self inputs system pkgs; };
     apps = import ./nix/vms { inherit inputs system pkgs; };
     packages = rec {
-      gradient-server = pkgs.callPackage ./nix/packages/gradient-server.nix { };
+      gradient = pkgs.callPackage ./nix/packages/gradient.nix { };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
       gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix { };
-      gradient = gradient-cli;
-      default = gradient-server;
+      default = gradient;
     };
 
     devShells.default = with pkgs; mkShell {
@@ -95,10 +94,10 @@
     };
   }) // {
     overlays = {
-      gradient-server = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-server; };
+      gradient = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient; };
       gradient-frontend = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-frontend; };
       gradient-cli = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-cli; };
-      default = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-server gradient-frontend gradient-cli; };
+      default = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient gradient-frontend gradient-cli; };
     };
 
     nixosModules = rec {

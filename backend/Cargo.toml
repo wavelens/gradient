@@ -8,7 +8,7 @@ description = "Nix-based Continuous Integration System"
 repository = "https://github.com/wavelens/gradient"
 
 [workspace]
-members = [".", "core", "evaluator", "builder", "web", "cache", "entity", "migration", "test-support"]
+members = [".", "core", "evaluator", "builder", "web", "cache", "entity", "migration", "proto", "test-support"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -19,6 +19,7 @@ core         = { path = "core", package = "core" }
 entity       = { path = "entity" }
 evaluator    = { path = "evaluator" }
 migration    = { path = "migration" }
+proto        = { path = "proto" }
 test-support = { path = "test-support" }
 web          = { path = "web" }
 
@@ -46,6 +47,7 @@ object_store     = { version = "0.13", features = ["aws"] }
 rand             = "0.9"
 reqwest          = { version = "0.13", features = ["json"] }
 ring             = "0.17"
+rkyv             = "0.8"
 sea-orm          = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-json", "with-uuid"] }
 sea-orm-migration = { version = "1.1", features = ["with-uuid", "with-chrono", "with-json", "sqlx-postgres", "runtime-tokio"] }
 sentry           = "0.47"

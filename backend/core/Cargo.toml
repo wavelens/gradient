@@ -37,6 +37,7 @@ uuid             = { workspace = true }
 hmac             = { workspace = true }
 reqwest          = { workspace = true }
 ring             = { workspace = true }
+rkyv             = { workspace = true }
 
 # Crate-specific dependencies
 async-ssh2-lite  = { version = "0.5", features = ["tokio"] }

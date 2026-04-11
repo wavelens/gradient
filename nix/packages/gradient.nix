@@ -19,7 +19,7 @@ let
   nixVersion = nixVersions.nix_2_34;
   ignoredPaths = [ ".github" "target" ];
 in rustPlatform.buildRustPackage {
-  pname = "gradient-server";
+  pname = "gradient";
   version = "1.0.0";
 
   src = lib.cleanSourceWith {

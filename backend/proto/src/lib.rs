@@ -1,0 +1,14 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+pub mod handler;
+pub mod messages;
+
+#[cfg(test)]
+mod tests;
+
+pub use handler::proto_router;
+pub use messages::{ClientMessage, PROTO_VERSION, ServerMessage};

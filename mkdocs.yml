@@ -22,7 +22,12 @@ nav:
   - Development:
     - Architecture: development/architecture.md
     - Internals: development/internals.md
+    - Proto: development/proto.md
     - Contributing: development/contributing.md
+
+plugins:
+  - search
+  - mermaid2
 
 markdown_extensions:
   - admonition
