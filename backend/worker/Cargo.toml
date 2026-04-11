@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+[package]
+name = "worker"
+version = "1.0.0"
+edition = "2024"
+publish = false
+license = "AGPL-3.0"
+authors = ["Wavelens GmbH <info@wavelens.io>"]
+description = "Gradient build worker — connects to a Gradient server via /proto and executes jobs locally"
+
+[[bin]]
+name = "gradient-worker"
+path = "src/main.rs"
+
+[dependencies]
+gradient-core     = { path = "../core", package = "core" }
+entity            = { workspace = true }
+evaluator         = { workspace = true }
+proto             = { workspace = true }
+
+anyhow            = { workspace = true }
+clap              = { version = "4.6", features = ["derive"] }
+async-trait       = { workspace = true }
+base64            = { workspace = true }
+bytes             = { workspace = true }
+futures           = { workspace = true }
+harmonia-nar           = { workspace = true }
+harmonia-protocol      = { workspace = true }
+harmonia-store-core    = { workspace = true }
+harmonia-store-remote  = { workspace = true }
+harmonia-utils-hash    = { workspace = true }
+rkyv              = { workspace = true }
+tokio             = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio-tungstenite = { workspace = true }
+tracing           = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid              = { workspace = true }
+zstd              = { workspace = true }

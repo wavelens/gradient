@@ -6,9 +6,11 @@
 
 pub mod handler;
 pub mod messages;
+pub mod scheduler;
 
 #[cfg(test)]
 mod tests;
 
 pub use handler::proto_router;
 pub use messages::{ClientMessage, PROTO_VERSION, ServerMessage};
+pub use scheduler::Scheduler;

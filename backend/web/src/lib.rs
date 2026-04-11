@@ -23,7 +23,7 @@ use tracing::Span;
 use core::types::ServerState;
 use endpoints::*;
 use std::sync::Arc;
-use proto::proto_router;
+use proto::{proto_router, Scheduler};
 
 /// Build the Axum router with all routes and middleware layered on.
 ///
@@ -325,9 +325,12 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/hooks/github", post(forge_hooks::github_app_webhook))
         .route("/hooks/{forge}/{org}", post(forge_hooks::forge_webhook));
 
+    let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+
     let mut app = Router::new()
         .nest("/api/v1", api)
-        .merge(proto_router());
+        .merge(proto_router())
+        .layer(axum::Extension(scheduler));
 
     if state.cli.serve_cache {
         app = app

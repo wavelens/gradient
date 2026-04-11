@@ -26,7 +26,7 @@ Testing stays fully mocked.
    build code, cache code. No repository/service layer. Business logic is tangled with persistence.
 
 5. **`server` entity is a build machine** — the name collides with the actual Gradient server. This
-   entity disappears entirely when builds move to workers.
+   entity disappears entirely when builds move to workers. No support for ssh based servers.
 
 6. **`SshBuildExecutor`** becomes unnecessary — workers build locally via their nix-daemon, not over
    SSH tunnels.

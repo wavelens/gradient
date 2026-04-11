@@ -319,7 +319,13 @@
 
       upstreams = mkOption {
         type = types.listOf upstreamType;
-        default = [ ];
+        default = [{
+          type = "nixpkgs";
+          display_name = "cache.nixos.org";
+          url = "https://cache.nixos.org";
+          public_key = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=";
+        }];
+
         description = "List of upstream caches (internal Gradient caches or external Nix binary caches) to use as substituters";
         example = literalExpression ''
           [
@@ -444,7 +450,7 @@ in
               display_name = "Web Application";
               description = "Main web application";
               repository = "https://github.com/acme-corp/web-app.git";
-              evaluation_wildcard = "main";
+              evaluation_wildcard = "nixosConfigurations.*.config.system.build.toplevel";
               active = true;
               created_by = "alice";
             };

@@ -11,8 +11,13 @@ name = "proto"
 path = "src/lib.rs"
 
 [dependencies]
-axum         = { version = "0.8", features = ["ws"] }
+axum          = { version = "0.8", features = ["ws"] }
 gradient-core = { path = "../core", package = "core" }
-rkyv         = { workspace = true }
-tokio        = { workspace = true, features = ["macros", "rt-multi-thread"] }
-tracing      = { workspace = true }
+entity        = { workspace = true }
+anyhow        = { workspace = true }
+chrono        = { workspace = true }
+rkyv          = { workspace = true }
+sea-orm       = { workspace = true }
+tokio         = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+tracing       = { workspace = true }
+uuid          = { workspace = true }

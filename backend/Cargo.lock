@@ -4142,11 +4142,16 @@ dependencies = [
 name = "proto"
 version = "1.0.0"
 dependencies = [
+ "anyhow",
  "axum",
+ "chrono",
  "core",
+ "entity",
  "rkyv 0.8.15",
+ "sea-orm",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -7197,9 +7202,19 @@ name = "worker"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "async-trait",
+ "base64",
+ "bytes",
  "clap",
  "core",
+ "entity",
+ "evaluator",
  "futures",
+ "harmonia-nar",
+ "harmonia-protocol",
+ "harmonia-store-core",
+ "harmonia-store-remote",
+ "harmonia-utils-hash",
  "proto",
  "rkyv 0.8.15",
  "tokio",
@@ -7207,6 +7222,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "zstd",
 ]
 
 [[package]]
