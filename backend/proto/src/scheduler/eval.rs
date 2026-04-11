@@ -19,8 +19,8 @@ use gradient_core::db::{
 };
 use gradient_core::sources::get_hash_from_path;
 use gradient_core::types::*;
-use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
-use tracing::{error, info, warn};
+use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::messages::{Architecture as ProtoArch, DiscoveredDerivation};

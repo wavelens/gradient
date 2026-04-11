@@ -69,7 +69,7 @@ pub async fn handle_build_job_completed(state: &Arc<ServerState>, build_id: Uuid
     check_evaluation_done(state, evaluation_id).await
 }
 
-pub async fn handle_build_job_failed(state: &Arc<ServerState>, build_id: Uuid, error: &str) -> Result<()> {
+pub async fn handle_build_job_failed(state: &Arc<ServerState>, build_id: Uuid, _error: &str) -> Result<()> {
     let build = match EBuild::find_by_id(build_id).one(&state.db).await? {
         Some(b) => b,
         None => { warn!(%build_id, "build not found on job_failed"); return Ok(()); }

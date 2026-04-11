@@ -326,6 +326,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/hooks/{forge}/{org}", post(forge_hooks::forge_webhook));
 
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
+    scheduler.start();
 
     let mut app = Router::new()
         .nest("/api/v1", api)

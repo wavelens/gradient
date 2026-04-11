@@ -181,6 +181,10 @@ impl JobTracker {
         orphaned
     }
 
+    pub fn contains_job(&self, job_id: &str) -> bool {
+        self.pending.contains_key(job_id) || self.active.contains_key(job_id)
+    }
+
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }

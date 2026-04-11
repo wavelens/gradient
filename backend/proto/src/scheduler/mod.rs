@@ -10,6 +10,7 @@
 //! dependency. Injected into the axum router as an `Extension<Arc<Scheduler>>`.
 
 pub mod build;
+pub mod dispatch;
 pub mod eval;
 pub mod jobs;
 pub mod worker_pool;
@@ -21,7 +22,8 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use gradient_core::types::ServerState;
+use gradient_core::types::*;
+use sea_orm::EntityTrait;
 
 use crate::messages::{
     Architecture, BuildOutput, CandidateScore, DiscoveredDerivation, GradientCapabilities,
@@ -52,6 +54,13 @@ impl Scheduler {
             worker_pool: Arc::new(RwLock::new(WorkerPool::new())),
             job_tracker: Arc::new(RwLock::new(JobTracker::new())),
         }
+    }
+
+    /// Spawn background eval/build dispatch loops.
+    ///
+    /// Call once after creating the scheduler, before serving requests.
+    pub fn start(self: &Arc<Self>) {
+        dispatch::start_dispatch_loops(Arc::clone(self));
     }
 
     // ── Worker lifecycle ──────────────────────────────────────────────────────
@@ -133,6 +142,44 @@ impl Scheduler {
     }
 
     // ── Status updates ────────────────────────────────────────────────────────
+
+    // ── Eval status transitions ───────────────────────────────────────────────
+
+    pub async fn handle_eval_status_update(
+        &self,
+        job_id: &str,
+        new_status: entity::evaluation::EvaluationStatus,
+    ) {
+        let evaluation_id = {
+            let tracker = self.job_tracker.read().await;
+            match tracker.active_job(job_id) {
+                Some(PendingJob::Eval(j)) => j.evaluation_id,
+                _ => return,
+            }
+        };
+        match EEvaluation::find_by_id(evaluation_id).one(&self.state.db).await {
+            Ok(Some(eval)) => {
+                gradient_core::db::update_evaluation_status(Arc::clone(&self.state), eval, new_status).await;
+            }
+            Ok(None) => warn!(%evaluation_id, "evaluation not found for status update"),
+            Err(e) => warn!(error = %e, %evaluation_id, "failed to fetch evaluation for status update"),
+        }
+    }
+
+    pub async fn handle_build_status_update(&self, build_id_str: &str) {
+        let build_id = match build_id_str.parse::<Uuid>() {
+            Ok(id) => id,
+            Err(_) => { warn!(%build_id_str, "invalid build_id in Building update"); return; }
+        };
+        use entity::build::BuildStatus;
+        match EBuild::find_by_id(build_id).one(&self.state.db).await {
+            Ok(Some(build)) => {
+                gradient_core::db::update_build_status(Arc::clone(&self.state), build, BuildStatus::Building).await;
+            }
+            Ok(None) => warn!(%build_id, "build not found for Building status update"),
+            Err(e) => warn!(error = %e, %build_id, "failed to fetch build for status update"),
+        }
+    }
 
     pub async fn handle_eval_result(
         &self,

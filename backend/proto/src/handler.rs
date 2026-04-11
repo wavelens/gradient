@@ -169,13 +169,22 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>, scheduler
                 debug!(%peer_id, %job_id, ?update, "JobUpdate");
                 match update {
                     JobUpdateKind::Fetching => {
-                        // TODO: evaluation.status = Fetching
+                        scheduler.handle_eval_status_update(
+                            &job_id,
+                            entity::evaluation::EvaluationStatus::Fetching,
+                        ).await;
                     }
                     JobUpdateKind::EvaluatingFlake => {
-                        // TODO: evaluation.status = EvaluatingFlake
+                        scheduler.handle_eval_status_update(
+                            &job_id,
+                            entity::evaluation::EvaluationStatus::EvaluatingFlake,
+                        ).await;
                     }
                     JobUpdateKind::EvaluatingDerivations => {
-                        // TODO: evaluation.status = EvaluatingDerivation
+                        scheduler.handle_eval_status_update(
+                            &job_id,
+                            entity::evaluation::EvaluationStatus::EvaluatingDerivation,
+                        ).await;
                     }
                     JobUpdateKind::EvalResult { derivations, warnings } => {
                         if let Err(e) = scheduler
@@ -186,8 +195,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>, scheduler
                         }
                     }
                     JobUpdateKind::Building { build_id } => {
-                        // TODO: build.status = Building
-                        let _ = build_id;
+                        scheduler.handle_build_status_update(&build_id).await;
                     }
                     JobUpdateKind::BuildOutput { build_id, outputs } => {
                         if let Err(e) = scheduler
