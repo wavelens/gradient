@@ -88,4 +88,28 @@ impl WorkerPool {
     pub fn worker_count(&self) -> usize {
         self.workers.len()
     }
+
+    pub fn all_workers(&self) -> Vec<WorkerInfo> {
+        self.workers
+            .iter()
+            .map(|(id, w)| WorkerInfo {
+                id: id.clone(),
+                architectures: w.architectures.iter().map(|a| format!("{:?}", a)).collect(),
+                system_features: w.system_features.clone(),
+                max_concurrent_builds: w.max_concurrent_builds,
+                assigned_job_count: w.assigned_jobs.len(),
+                draining: w.draining,
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WorkerInfo {
+    pub id: String,
+    pub architectures: Vec<String>,
+    pub system_features: Vec<String>,
+    pub max_concurrent_builds: u32,
+    pub assigned_job_count: usize,
+    pub draining: bool,
 }

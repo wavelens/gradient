@@ -9,23 +9,27 @@ graph LR
     N --> S[Gradient Server]
 ```
 
-Connection lifecycle: **handshake → capabilities → pull-based job loop**.
+Connection lifecycle: **handshake → auth challenge → capabilities → pull-based job loop**.
 
 ---
 
 ## Handshake
 
-The first message on every connection is `InitConnection`. The server responds with `InitAck` or `Reject` and closes.
+The first message on every connection is `InitConnection`. The server responds with either an `AuthChallenge` (listing peers that have registered this worker) or `Reject`.
 
 ```mermaid
 sequenceDiagram
     participant W as Worker
     participant S as Server
 
-    W->>S: InitConnection { version, capabilities, id, token }
-    alt accepted
-        S->>W: InitAck { version, capabilities }
-    else declined
+    W->>S: InitConnection { version, capabilities, id }
+    S->>W: AuthChallenge { peers: [A, B] }
+    W->>S: AuthResponse { tokens: {A: "xxx", B: "yyy"} }
+    alt all valid
+        S->>W: InitAck { version, capabilities, authorized_peers: [A, B] }
+    else some invalid
+        S->>W: InitAck { version, capabilities, authorized_peers: [A], failed_peers: [{B, reason}] }
+    else all invalid / no peers
         S->>W: Reject { code, reason }
     end
 ```
@@ -37,15 +41,20 @@ sequenceDiagram
     participant W as Worker
     participant S as Server
 
-    W->>S: InitConnection { version, capabilities, id, token }
-    S->>W: InitAck { version, capabilities }
+    W->>S: InitConnection { version, capabilities, id }
+    S->>W: AuthChallenge { peers: [A] }
+    W->>S: AuthResponse { tokens: {A: "xxx"} }
+    S->>W: InitAck { version, capabilities, authorized_peers: [A] }
     W->>S: Reject { code, reason }
     W-xS: close
 ```
 
 **Rejection reasons:**
+- Server rejects when no peers have registered this worker ID (unknown worker)
 - Server rejects a federated peer when `federate` is not enabled on the server
 - Server rejects a worker whose capabilities are all disabled after negotiation (nothing useful to do)
+- Server rejects a duplicate connection (same worker ID already connected)
+- Server rejects when all peer tokens fail validation
 - Worker rejects a server it does not trust (e.g. unknown server identity, policy mismatch)
 
 ### Peer Identity
@@ -57,33 +66,112 @@ InitConnection {
     version: u16,
     capabilities: GradientCapabilities,
     id: Uuid,
-    token: Option<String>,  // API key — required for workers/federation, omitted for public cache clients
 }
 ```
 
 The `id` enables:
 - **Reconnect matching** — on reconnect after server restart, the server matches the peer to its previous session and reassigns orphaned jobs immediately instead of waiting for the grace period.
+- **Duplicate detection** — the server rejects a second connection with the same `id`. One WebSocket connection per worker per server instance.
 - **Admin visibility** — the server tracks connected peers by ID for the frontend UI (list workers, their capabilities, assigned jobs, status).
 - **Logging** — all log lines and job assignments reference the peer ID for debugging.
 
-On first connection with an unknown `id`, the server creates a peer record. On reconnect with a known ID, the server resumes the session.
+On first connection with an unknown `id`, the server rejects — a worker must be registered by at least one peer before it can connect. On reconnect with a known ID, the server resumes the session.
 
-### Authentication
+---
 
-Peers authenticate via an optional API key (`token` field in `InitConnection`). Whether a token is required depends on the requested capabilities:
+## Authorization
 
-- **Public cache clients** (`cache` only) — no token needed. Anyone can pull from a public cache.
-- **Workers** (`fetch`, `eval`, `build`, `sign`) — token required. Workers receive credentials (SSH keys, signing keys) and execute privileged operations.
-- **Federation** (`federate`) — token required. Federation peers can relay jobs and NAR traffic.
+Authorization uses a challenge-response flow based on **peers**. A peer is any entity on the server that can register a worker — an **org**, a **cache**, or a **proxy**. The worker doesn't know or care what type of peer it's authenticating against — it just holds `peer_id → token` pairs.
 
-The server validates the token against its configured API keys (`gradient_api_*` credentials). If a token is required but missing or invalid, the server responds with `Reject { code: 401, reason: "invalid token" }`.
+Mutual consent: the peer registers the worker ID (peer consents), the worker holds the peer's token (worker consents).
 
-API keys are scoped — each key has an associated set of allowed capabilities. The server intersects the key's allowed capabilities with the peer's requested capabilities during negotiation. A key that only allows `build` cannot be used by a peer requesting `eval`.
+### Setup (before connection)
 
-**Key management:**
-- API keys are created via the admin API or state file (`gradient_api_*` credentials)
-- Workers receive their token via environment variable (`GRADIENT_WORKER_TOKEN`) or credential file
-- Keys can be rotated without restarting workers — the server accepts both old and new keys during a transition window
+1. A peer (org admin, cache owner, or proxy) registers a worker ID → server generates a token for that `(peer, worker_id)` pair
+2. The peer gives the token to the worker operator
+3. Worker operator adds `peer_id → token` to worker config
+
+```yaml
+# worker config
+id: "w-550e8400-e29b-41d4-a716-446655440000"
+peers:
+  peer-alpha: "tok_abc123"    # could be an org, cache, or proxy
+  peer-beta:  "tok_def456"    # worker doesn't know or care which type
+```
+
+### Auth challenge flow
+
+At connection time, the server looks up which peers have registered this worker ID and challenges for their tokens:
+
+```rust
+// Server → Worker: which peers have registered you
+AuthChallenge {
+    peers: Vec<Uuid>,          // peer IDs that registered this worker
+}
+
+// Worker → Server: here are my tokens for those peers
+AuthResponse {
+    tokens: HashMap<Uuid, String>,  // peer_id → token (only for peers the worker has tokens for)
+}
+```
+
+The server validates each token independently. The worker is authorized for every peer whose token is valid. If some tokens fail, the connection continues with the successful peers — only a total failure causes `Reject`.
+
+What authorization means depends on the peer type:
+- **Org** — worker receives jobs from that org's projects
+- **Cache** — worker can serve/pull from that cache
+- **Proxy** — worker is part of the proxy's pool
+
+### Reauth
+
+Tokens can be added or rotated without reconnecting. At any point during the connection, either side can initiate reauth:
+
+```mermaid
+sequenceDiagram
+    participant W as Worker
+    participant S as Server
+
+    Note over W,S: connection established, authorized for [A]
+    Note over S: Peer B registers worker W
+    S->>W: AuthChallenge { peers: [B] }
+    W->>S: AuthResponse { tokens: {B: "tok_new"} }
+    S->>W: AuthUpdate { authorized_peers: [A, B], failed_peers: [] }
+    Note over W,S: now authorized for [A, B]
+```
+
+Worker-initiated reauth (e.g. operator added a new peer token to config):
+
+```mermaid
+sequenceDiagram
+    participant W as Worker
+    participant S as Server
+
+    Note over W,S: connection established, authorized for [A]
+    W->>S: ReauthRequest
+    S->>W: AuthChallenge { peers: [A, C] }
+    Note right of S: Peer C registered worker W since last auth
+    W->>S: AuthResponse { tokens: {A: "tok_a", C: "tok_c"} }
+    S->>W: AuthUpdate { authorized_peers: [A, C], failed_peers: [] }
+```
+
+If a token fails during reauth, the worker keeps its existing authorizations for that peer (if any) — reauth never revokes already-granted access unless the server explicitly sends a revocation.
+
+### Connection uniqueness
+
+The server allows only **one WebSocket connection per worker ID per instance**. If a worker reconnects while its old connection is still open (e.g. network split), the server closes the old connection and accepts the new one.
+
+### Key management
+
+- Peers (org admins, cache owners, proxy operators) create worker tokens via the web API, scoped to a specific worker ID
+- Workers store tokens in config file or environment (`GRADIENT_WORKER_PEERS="peer_id:token,peer_id:token"`)
+- Keys can be rotated via reauth — no reconnect needed
+
+### Admin visibility
+
+The `GET /api/v1/workers` endpoint shows all connected workers and their status. Access is controlled by:
+
+- **Superuser users** — users with the `superuser` flag set on their account can always access the endpoint
+- **`GRADIENT_GLOBAL_STATS_PUBLIC=true`** — when set, the workers/stats endpoints are publicly visible without authentication
 
 **Version negotiation:** the server accepts any `client_version <= PROTO_VERSION`. If the client sends a higher version, the server responds with `Reject { code: 400 }`.
 
@@ -107,15 +195,17 @@ Immediately after a successful handshake, workers with `build` enabled send `Wor
 
 ```rust
 WorkerCapabilities {
-    architectures: Vec<Architecture>,   // e.g. [aarch64-linux, x86_64-linux] (native first)
-    system_features: Vec<String>,       // e.g. ["kvm", "big-parallel"]
+    system_features: Vec<String>,       // e.g. ["x86_64-linux", "kvm", "big-parallel"]
     max_concurrent_builds: u32,         // how many parallel builds this worker accepts
 }
 ```
 
+Architectures (e.g. `x86_64-linux`, `aarch64-linux`) are **not** a separate enum — they are string entries in `system_features`, the same as `kvm` or `big-parallel`. This keeps the wire format simple and allows custom/unusual platforms without code changes.
+
+When the server dispatches a build, it checks that the build's target architecture and all required system features are present in the worker's `system_features`. For example, a build targeting `aarch64-linux` with `required_features: ["kvm"]` requires a worker with both `"aarch64-linux"` and `"kvm"` in its `system_features`.
+
 **Federation proxy behavior:** a proxy with `federate` enabled connects upstream as a single worker. It **aggregates** the capabilities of all its downstream workers:
 - `GradientCapabilities` (in `InitConnection`) — OR of all downstream workers' capabilities (if any worker can build, the proxy advertises `build`)
-- `architectures` — union of all downstream workers' architectures (preference-sorted by total capacity)
 - `system_features` — union of all downstream features (sorted by total capacity)
 - `max_concurrent_builds` — sum of all downstream workers' slots
 
@@ -123,12 +213,12 @@ The upstream server sees the proxy as one powerful worker. The proxy handles int
 
 ```mermaid
 graph RL
-    A[Worker A<br/>aarch64] --> P[Proxy]
-    B[Worker B<br/>x86_64] --> P
-    P -->|"archs: [aarch64, x86_64]<br/>slots: A+B"| S[Server]
+    A[Worker A<br/>aarch64-linux] --> P[Proxy]
+    B[Worker B<br/>x86_64-linux] --> P
+    P -->|"features: [aarch64-linux, x86_64-linux, kvm]<br/>slots: A+B"| S[Server]
 ```
 
-The server uses these to match `RequestJobChunk` to queued builds — same role as the `server` entity's architecture/feature columns today. A worker that does not send capabilities will only receive `FlakeJob`s, never `BuildJob`s.
+The server uses these to match `RequestJobChunk` to queued builds. A worker that does not send capabilities will only receive `FlakeJob`s, never `BuildJob`s.
 
 ### Ephemeral Workers
 
@@ -158,6 +248,8 @@ The server treats `Draining` as "do not assign new jobs to this worker". The wor
 
 Job dispatch uses **eager push + pull-based claiming**. The server pushes job candidates to eligible workers as soon as they become available. Workers score them in the background, then claim work when they have capacity. The server assigns each job to the best-scoring worker and revokes it from the rest.
 
+Jobs are scoped to the worker's authorized peers — a worker only receives candidates from peers (orgs, caches) it has successfully authenticated against.
+
 ### Dispatch Flow
 
 ```mermaid
@@ -184,7 +276,7 @@ sequenceDiagram
 
 ### How It Works
 
-1. **`JobOffer`** (server → workers, pushed eagerly) — as soon as a job enters the queue (e.g. evaluation discovers new builds, or a build's dependencies complete), the server pushes it to all connected workers whose negotiated capabilities and advertised worker capabilities match. Each candidate includes `required_paths` so workers can score locally.
+1. **`JobOffer`** (server → workers, pushed eagerly) — as soon as a job enters the queue (e.g. evaluation discovers new builds, or a build's dependencies complete), the server pushes it to all connected workers whose negotiated capabilities and advertised system features match, and who are authorized for the job's peer (org). Each candidate includes `required_paths` so workers can score locally.
 
 2. **Workers score in the background** — on receiving `JobOffer`, the worker checks its local Nix store against each candidate's `required_paths` and caches the result. This is a fast local operation (no network I/O) and happens continuously, not on-demand.
 
@@ -255,7 +347,7 @@ graph LR
 |------|----------|---------------------|----------------------|
 | **FetchFlake** | `fetch` | `repository` (flake URL), `commit` (SHA), SSH credential | — |
 | **EvaluateFlake** | `eval` | `wildcards` (attribute patterns), `timeout` (seconds) | `attrs: Vec<String>` — discovered attribute paths |
-| **EvaluateDerivations** | `eval` | (uses attrs from previous task) | `derivations: Vec<DiscoveredDerivation>` — drv paths, outputs, closure, architecture, required features |
+| **EvaluateDerivations** | `eval` | (uses attrs from previous task) | `derivations: Vec<DiscoveredDerivation>` — drv paths, outputs, closure, required features |
 
 ```rust
 DiscoveredDerivation {
@@ -263,15 +355,15 @@ DiscoveredDerivation {
     drv_path: String,                   // /nix/store/xxx.drv
     outputs: Vec<DerivationOutput>,     // [{name: "out", path: "/nix/store/..."}]
     dependencies: Vec<String>,          // drv paths this depends on
-    architecture: Architecture,         // x86_64-linux, aarch64-linux, or Builtin
-    required_features: Vec<String>,     // Nix system features needed to build
+    system: String,                     // e.g. "x86_64-linux" — the derivation's target platform
+    required_features: Vec<String>,     // Nix system features needed to build (e.g. "kvm")
     substituted: bool,                  // all outputs already in worker's local store
 }
 ```
 
 `substituted: true` means the worker checked its local Nix store and all outputs for this derivation already exist — no build needed. The server marks these as `Substituted` (7) and they are immediately eligible for cache signing.
 
-`architecture: Builtin` means the derivation uses `builtin:fetchurl` or similar — it can run on any architecture without a matching builder.
+The `system` field is a free-form string (e.g. `"x86_64-linux"`, `"aarch64-linux"`, `"builtin"`). `"builtin"` means the derivation uses `builtin:fetchurl` or similar — it can run on any worker regardless of system features.
 
 ### Incremental Evaluation
 
@@ -377,7 +469,10 @@ If any derivation in the chain fails, the worker skips the rest and reports `Job
 
 ```rust
 enum ServerMessage {
-    InitAck { version: u16, capabilities: GradientCapabilities },
+    // Handshake + auth
+    AuthChallenge { peers: Vec<Uuid> },          // "these peers registered you — send tokens"
+    InitAck { version: u16, capabilities: GradientCapabilities, authorized_peers: Vec<Uuid>, failed_peers: Vec<FailedPeer> },
+    AuthUpdate { authorized_peers: Vec<Uuid>, failed_peers: Vec<FailedPeer> },  // reauth result
     Reject { code: u16, reason: String },       // decline connection (closes after send)
     Error { code: u16, message: String },
 
@@ -399,6 +494,7 @@ enum ServerMessage {
     PresignedDownload { job_id: Uuid, store_path: String, url: String },
 }
 
+struct FailedPeer { peer_id: Uuid, reason: String }
 enum CredentialKind { SshKey, SigningKey }
 ```
 
@@ -406,9 +502,12 @@ enum CredentialKind { SshKey, SigningKey }
 
 ```rust
 enum ClientMessage {
-    InitConnection { version: u16, capabilities: GradientCapabilities, id: Uuid, token: Option<String> },
+    // Handshake + auth
+    InitConnection { version: u16, capabilities: GradientCapabilities, id: Uuid },
+    AuthResponse { tokens: HashMap<Uuid, String> },  // peer_id → token
+    ReauthRequest,                              // ask server to re-send AuthChallenge
     Reject { code: u16, reason: String },       // decline connection after InitAck
-    WorkerCapabilities { architectures: Vec<Architecture>, system_features: Vec<String>, max_concurrent_builds: u32 },
+    WorkerCapabilities { system_features: Vec<String>, max_concurrent_builds: u32 },
     AssignJobResponse { job_id: Uuid, accepted: bool, reason: Option<String> },
 
     // Job dispatch
@@ -589,7 +688,103 @@ The server assigns jobs based on priority. Workers do not need to know the prior
 1. Dependency count descending — builds with more dependents (integration builds) start first
 2. `updated_at` ascending — older builds drain first
 
-Builds are only eligible when all dependency builds are `Completed` or `Substituted`. The server matches eligible builds to `RequestJobChunk` by architecture and required system features.
+Builds are only eligible when all dependency builds are `Completed` or `Substituted`. The server matches eligible builds to `RequestJobChunk` by checking that the build's target system and required features are all present in the worker's `system_features`.
+
+---
+
+## Federation
+
+Federation connects Gradient instances to each other. A server with `federate` enabled can connect to other servers using the same proto protocol — it authenticates using the standard challenge-response, and the remote peer (org, cache, or proxy) sees it as a single worker/cache.
+
+There is no special "proxy" type. Federation can happen in two ways:
+
+- **`gradient-proxy`** — a lightweight binary that only federates. It has no local orgs, no UI, no database. Workers authenticate to it with a simple proxy-level token. It connects to upstream servers, authenticating against their peers. The proxy **detaches** the worker↔peer relationship: all its workers serve all authorized peers. The proxy itself is a peer — it registers workers and issues them tokens.
+- **A full Gradient server** — a server with its own orgs, projects, and workers. Its orgs and caches are peers that individually control which external workers/servers get tokens, deciding what to expose.
+
+### How it works
+
+A federation peer connects to a remote server as a regular worker. A peer on the remote server (org, cache, or proxy) registers the federation peer's ID and issues a token — exactly like registering any worker:
+
+```mermaid
+sequenceDiagram
+    participant S2 as Server B
+    participant S1 as Server A
+
+    Note over S1: Org X on Server A registered Server B's ID
+    S2->>S1: InitConnection { id: server-b, capabilities: {federate, build, cache} }
+    S1->>S2: AuthChallenge { peers: [X] }
+    S2->>S1: AuthResponse { tokens: {X: "tok_x"} }
+    S1->>S2: InitAck { authorized_peers: [X] }
+    Note over S1: Org X sees Server B as a single worker/cache
+```
+
+From Org X's perspective, Server B is just one worker that happens to have a lot of capacity. Server B internally routes jobs to its own workers and serves its own caches — Org X doesn't see or control that.
+
+### `gradient-proxy`
+
+The proxy detaches authorization. Workers authenticate to the proxy (which is itself a peer), and the proxy authenticates to upstream servers against their peers. All workers behind the proxy serve all authorized upstream peers:
+
+```mermaid
+graph RL
+    W1[Worker 1] -->|"proxy token"| P[gradient-proxy]
+    W2[Worker 2] -->|"proxy token"| P
+    P -->|"Org X + Cache C tokens"| SA[Server A]
+    P -->|"Org Z token"| SB[Server B]
+```
+
+```yaml
+# gradient-proxy config
+id: "proxy-001"
+worker_token: "tok_proxy_shared"     # workers auth with this
+upstream:
+  - url: server-a.example.com
+    peers:
+      org-x:   "tok_org_x"          # Org X registered proxy-001
+      cache-c: "tok_cache_c"        # Cache C registered proxy-001
+  - url: server-b.example.com
+    peers:
+      org-z:   "tok_org_z"          # Org Z registered proxy-001
+```
+
+Org X's job arrives → proxy assigns to any available worker. Org Z's job arrives → same pool. The proxy doesn't distinguish — all workers serve all peers.
+
+### Full Gradient server as federation peer
+
+A full server's orgs and caches are independent peers. Each decides whether to register an external worker/server and issue a token:
+
+```mermaid
+graph RL
+    W1[Worker 1] -->|"auth against<br/>Server B's peers"| SB[Server B]
+    W2[Worker 2] -->|"auth against<br/>Server B's peers"| SB
+    SB -->|"auth against<br/>Server A's peers"| SA[Server A]
+```
+
+Workers authenticate against Server B's peers (its orgs and caches). Server B authenticates upstream against Server A's peers. Each peer on each server independently controls access.
+
+### Aggregation
+
+Both federation forms aggregate downstream when advertising capabilities upstream:
+- `GradientCapabilities`: OR of all downstream workers
+- `system_features`: union of all downstream workers' features
+- `max_concurrent_builds`: sum of all downstream slots
+
+The upstream server sees one peer. Internal routing is the federation peer's problem.
+
+### Cache federation
+
+Caches behind a federation peer are exposed upstream. When a remote peer's build needs a NAR, the upstream server can request it from the federation peer, which serves it from its cache or downstream workers.
+
+- **`gradient-proxy`** — exposes all downstream caches (no access control layer)
+- **Full server** — each cache is a peer that controls which external connections can access it
+
+### Access control summary
+
+| | `gradient-proxy` | Full Gradient server |
+|---|---|---|
+| Workers → peer | Proxy-level token (flat, no orgs) | Challenge-response against server's peers |
+| Peer → upstream | Challenge-response against upstream's peers | Challenge-response against upstream's peers |
+| What's exposed | Everything — all workers, all caches | Per-peer (org/cache) settings |
+| Upstream sees peer as | One worker/cache | One worker/cache |
 
 ---
 
@@ -757,10 +952,11 @@ This is distinct from a crash (unexpected disconnect) where workers reconnect im
 | Code | Meaning |
 |------|---------|
 | 400 | Malformed message or unsupported protocol version |
-| 401 | Unauthorized (worker not authenticated) |
+| 401 | Unauthorized (missing or invalid token) |
 | 403 | Capability not negotiated for this session |
 | 404 | Job not found (e.g. AbortJob for unknown job_id) |
 | 409 | Job already assigned or completed |
+| 429 | Duplicate connection (worker ID already connected) |
 | 500 | Internal server error |
 | 503 | Server shutting down — do not reconnect immediately |
 

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-pub mod ci_reporter;
-pub mod email;
-pub mod nix_store;
-pub mod webhooks;
+mod pool;
+mod resolver;
+
+pub use self::resolver::WorkerPoolResolver;

@@ -17,7 +17,7 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use evaluator::WorkerPoolResolver;
+use crate::worker_pool::WorkerPoolResolver;
 use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_core::db::parse_drv;
 use gradient_core::nix::DerivationResolver;

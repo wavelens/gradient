@@ -7,13 +7,17 @@
 mod config;
 mod connection;
 mod credentials;
+mod eval_worker;
 mod executor;
+mod flake;
 mod handshake;
 mod job;
 mod nar;
+mod nix_eval;
 mod scorer;
 mod store;
 mod worker;
+mod worker_pool;
 
 use anyhow::Result;
 use clap::Parser;
@@ -32,7 +36,7 @@ fn main() -> Result<()> {
     // Re-exec as eval subprocess when launched with the internal flag.
     // The Nix C API (Boehm GC) must run single-threaded, isolated from Tokio.
     if config.eval_worker {
-        return evaluator::run_eval_worker().map_err(anyhow::Error::from);
+        return eval_worker::run_eval_worker().map_err(anyhow::Error::from);
     }
 
     let rt = tokio::runtime::Runtime::new()?;

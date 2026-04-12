@@ -17,6 +17,7 @@ pub mod servers;
 pub mod stats;
 pub mod user;
 pub mod webhooks;
+pub mod workers;
 
 use crate::error::{WebError, WebResult};
 use axum::extract::{Json, State};

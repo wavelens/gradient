@@ -159,11 +159,8 @@ pub async fn post_direct_build(
         WebError::InternalServerError(format!("Failed to create direct build record: {}", e))
     })?;
 
-    // Schedule evaluation
-    evaluator::evaluate_direct(Arc::clone(&state), evaluation.clone(), temp_dir)
-        .await
-        .map_err(|e| WebError::InternalServerError(format!("Failed to start evaluation: {}", e)))?;
-
+    // The evaluation is now Queued; the proto scheduler's dispatch loop
+    // will pick it up and send it to an available worker within seconds.
     let res = BaseResponse {
         error: false,
         message: format!("Direct build started with evaluation ID: {}", evaluation.id),

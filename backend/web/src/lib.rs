@@ -21,7 +21,7 @@ use tower_http::trace::TraceLayer;
 use tracing::Span;
 
 use core::types::ServerState;
-use endpoints::*;
+use endpoints::{workers, *};
 use std::sync::Arc;
 use proto::{proto_router, Scheduler};
 
@@ -203,6 +203,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/servers/{organization}/{server}/active",
             post(servers::post_server_active).delete(servers::delete_server_active),
         )
+        .route("/workers", get(workers::get_workers))
         .route("/commits/{commit}", get(commits::get_commit))
         .route(
             "/webhook/{organization}",

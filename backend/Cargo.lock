@@ -803,28 +803,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "builder"
-version = "1.0.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "chrono",
- "core",
- "entity",
- "harmonia-store-core",
- "mockall",
- "sea-orm",
- "sentry",
- "test-support",
- "thiserror 2.0.18",
- "tokio",
- "tokio-test",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1719,29 +1697,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "evaluator"
-version = "1.0.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "core",
- "entity",
- "futures",
- "harmonia-store-core",
- "libc",
- "nix-bindings",
- "sea-orm",
- "sentry",
- "serde",
- "serde_json",
- "test-support",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "event-listener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2136,11 +2091,9 @@ dependencies = [
 name = "gradient-server"
 version = "1.0.0"
 dependencies = [
- "builder",
  "cache",
  "clap",
  "core",
- "evaluator",
  "sentry",
  "tokio",
  "tracing",
@@ -4149,6 +4102,7 @@ dependencies = [
  "entity",
  "rkyv 0.8.15",
  "sea-orm",
+ "serde",
  "tokio",
  "tracing",
  "uuid",
@@ -6636,7 +6590,6 @@ dependencies = [
  "core",
  "email_address",
  "entity",
- "evaluator",
  "git-url-parse",
  "hex",
  "http 1.4.0",
@@ -7208,15 +7161,18 @@ dependencies = [
  "clap",
  "core",
  "entity",
- "evaluator",
  "futures",
  "harmonia-nar",
  "harmonia-protocol",
  "harmonia-store-core",
  "harmonia-store-remote",
  "harmonia-utils-hash",
+ "libc",
+ "nix-bindings",
  "proto",
  "rkyv 0.8.15",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-tungstenite 0.27.0",
  "tracing",

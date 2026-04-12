@@ -17,6 +17,7 @@ entity        = { workspace = true }
 anyhow        = { workspace = true }
 chrono        = { workspace = true }
 rkyv          = { workspace = true }
+serde         = { workspace = true }
 sea-orm       = { workspace = true }
 tokio         = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 tracing       = { workspace = true }

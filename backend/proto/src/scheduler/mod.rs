@@ -33,6 +33,8 @@ use crate::messages::{
 use jobs::{Assignment, JobTracker, PendingBuildJob, PendingEvalJob, PendingJob};
 use worker_pool::WorkerPool;
 
+pub use worker_pool::WorkerInfo;
+
 /// The shared scheduler — clone freely (all fields are `Arc`s).
 #[derive(Clone)]
 pub struct Scheduler {
@@ -263,19 +265,44 @@ impl Scheduler {
 
     // ── Log streaming ─────────────────────────────────────────────────────────
 
-    pub async fn append_log(&self, job_id: &str, _task_index: u32, data: Vec<u8>) -> Result<()> {
-        // LogStorage::append requires a build log_id (Uuid) + &str text.
-        // For proto-initiated jobs we don't yet plumb the log_id through from
-        // the build row. Log chunks are dropped until that wiring is done.
-        // TODO: resolve log_id from active job, then call state.log_storage.append().
-        let _ = (job_id, data);
-        Ok(())
+    pub async fn append_log(&self, job_id: &str, task_index: u32, data: Vec<u8>) -> Result<()> {
+        let text = match std::str::from_utf8(&data) {
+            Ok(s) => s,
+            Err(_) => return Ok(()), // drop non-UTF-8 chunks silently
+        };
+
+        let build_id_str = {
+            let tracker = self.job_tracker.read().await;
+            match tracker.active_job(job_id) {
+                Some(PendingJob::Build(j)) => {
+                    j.job.builds.get(task_index as usize)
+                        .map(|t| t.build_id.clone())
+                }
+                _ => None,
+            }
+        };
+
+        let build_id = match build_id_str.and_then(|s| s.parse::<Uuid>().ok()) {
+            Some(id) => id,
+            None => return Ok(()), // eval job or missing task — drop
+        };
+
+        let log_id = match EBuild::find_by_id(build_id).one(&self.state.db).await? {
+            Some(b) => b.log_id.unwrap_or(b.id),
+            None => build_id,
+        };
+
+        self.state.log_storage.append(log_id, text).await
     }
 
     // ── Diagnostics ───────────────────────────────────────────────────────────
 
     pub async fn worker_count(&self) -> usize {
         self.worker_pool.read().await.worker_count()
+    }
+
+    pub async fn workers_info(&self) -> Vec<WorkerInfo> {
+        self.worker_pool.read().await.all_workers()
     }
 
     pub async fn pending_job_count(&self) -> usize {

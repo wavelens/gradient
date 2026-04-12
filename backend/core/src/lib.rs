@@ -17,22 +17,17 @@ pub mod types;
 
 use db::connect_db;
 use storage::EmailService;
-use executer::SshBuildExecutor;
 use storage::{FileLogStorage, S3LogStorage};
 use storage::NarStore;
 use executer::LocalNixStoreProvider;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, ActiveModelTrait, ActiveValue::Set, IntoActiveModel};
-use sources::Libgit2Prefetcher;
 use state::load_and_apply_state;
 use std::path::Path;
 use std::sync::Arc;
 use types::*;
 use ci::ReqwestWebhookClient;
 
-pub async fn init_state(
-    cli: Cli,
-    derivation_resolver: Arc<dyn nix::DerivationResolver>,
-) -> Arc<ServerState> {
+pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     println!("Starting Gradient Server on {}:{}", cli.ip, cli.port);
     println!("State file configured: {:?}", cli.state_file);
 
@@ -116,10 +111,6 @@ pub async fn init_state(
     };
     let email: Arc<dyn storage::EmailSender> = Arc::new(email_service);
 
-    let flake_prefetcher: Arc<dyn sources::FlakePrefetcher> = Arc::new(Libgit2Prefetcher::new());
-
-    let build_executor: Arc<dyn executer::BuildExecutor> = Arc::new(SshBuildExecutor::new());
-
     let nar_storage = if let Some(ref bucket) = cli.s3_bucket {
         let secret = match cli.s3_secret_access_key_file.as_deref() {
             Some(path) => match std::fs::read_to_string(path) {
@@ -190,9 +181,6 @@ pub async fn init_state(
         web_nix_store,
         webhooks,
         email,
-        flake_prefetcher,
-        derivation_resolver,
-        build_executor,
         nar_storage,
     })
 }

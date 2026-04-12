@@ -88,6 +88,8 @@ tags:
     description: Build details, logs, artefact downloads, and dependency graph
   - name: servers
     description: Remote Nix build server management
+  - name: workers
+    description: Connected proto workers (live status)
   - name: caches
     description: Binary cache management
   - name: commits
@@ -2250,6 +2252,33 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  # ── Workers ──────────────────────────────────────────────────────────────────
+
+  /workers:
+    get:
+      tags: [workers]
+      summary: List connected workers
+      description: Returns all workers currently connected to the server via the `/proto` WebSocket, including their capabilities and assigned job counts.
+      operationId: listWorkers
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Worker list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/WorkerInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   # ── Caches ───────────────────────────────────────────────────────────────────
 
   /caches:
@@ -3249,6 +3278,35 @@ components:
           properties:
             message:
               type: string
+
+    WorkerInfo:
+      type: object
+      required: [id, architectures, system_features, max_concurrent_builds, assigned_job_count, draining]
+      properties:
+        id:
+          type: string
+          description: Peer ID of the connected worker (set by the worker at handshake)
+        architectures:
+          type: array
+          items:
+            type: string
+          description: CPU architectures the worker can build for (e.g. `x86_64-linux`, `aarch64-linux`)
+        system_features:
+          type: array
+          items:
+            type: string
+          description: Nix system features advertised by the worker (e.g. `kvm`, `big-parallel`)
+        max_concurrent_builds:
+          type: integer
+          format: int32
+          description: Maximum number of concurrent builds the worker accepts
+        assigned_job_count:
+          type: integer
+          format: int32
+          description: Number of jobs currently assigned to this worker
+        draining:
+          type: boolean
+          description: Whether the worker is draining (no new jobs will be dispatched)
 
     ListItem:
       type: object

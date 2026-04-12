@@ -21,12 +21,9 @@ pub use self::nix_cache::*;
 pub use self::wildcard::*;
 
 use super::storage::email::EmailSender;
-use super::nix::evaluator::DerivationResolver;
-use super::executer::BuildExecutor;
 use super::storage::LogStorage;
 use super::storage::NarStore;
 use super::executer::pool::NixStoreProvider;
-use super::sources::FlakePrefetcher;
 use super::ci::webhook::WebhookClient;
 use clap::Parser;
 use sea_orm::DatabaseConnection;
@@ -242,9 +239,6 @@ pub struct ServerState {
     pub web_nix_store: Arc<dyn NixStoreProvider>,
     pub webhooks: Arc<dyn WebhookClient>,
     pub email: Arc<dyn EmailSender>,
-    pub flake_prefetcher: Arc<dyn FlakePrefetcher>,
-    pub derivation_resolver: Arc<dyn DerivationResolver>,
-    pub build_executor: Arc<dyn BuildExecutor>,
     pub nar_storage: NarStore,
 }
 

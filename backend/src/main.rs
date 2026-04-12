@@ -5,8 +5,6 @@
  */
 
 use clap::Parser;
-use evaluator::{WorkerPoolResolver, run_eval_worker};
-use gradient_core::nix::DerivationResolver;
 use gradient_core::init_state;
 use gradient_core::types::Cli;
 use std::sync::Arc;
@@ -51,13 +49,6 @@ fn init_logging(cli: &Cli) {
 }
 
 pub fn main() -> std::io::Result<()> {
-    // When invoked as a child eval worker, run the synchronous worker loop
-    // and exit. The worker speaks JSON over stdin/stdout to its parent and
-    // does not need a tokio runtime, a database, or any other server services.
-    if std::env::args().any(|a| a == "--eval-worker") {
-        return run_eval_worker();
-    }
-
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_stack_size(8 * 1024 * 1024)
@@ -68,16 +59,7 @@ pub fn main() -> std::io::Result<()> {
 
 async fn run() -> std::io::Result<()> {
     let cli = Cli::parse();
-
-    // Drive a pool of long-lived eval-worker subprocesses (one persistent
-    // `NixEvaluator` each). Each worker is single-threaded, isolating the
-    // thread-unsafe Nix C API and avoiding Boehm GC ↔ Tokio conflicts.
-    let derivation_resolver: Arc<dyn DerivationResolver> = Arc::new(WorkerPoolResolver::new(
-        cli.eval_workers,
-        cli.max_evaluations_per_worker,
-    ));
-
-    let state = init_state(cli, derivation_resolver).await;
+    let state = init_state(cli).await;
 
     // Initialize logging with the configured level
     init_logging(&state.cli);
@@ -102,12 +84,6 @@ async fn run() -> std::io::Result<()> {
         info!("Error reporting disabled");
         None
     };
-
-    info!("Starting evaluator service");
-    evaluator::start_evaluator(Arc::clone(&state)).await?;
-
-    info!("Starting builder service");
-    builder::start_builder(Arc::clone(&state)).await?;
 
     info!("Starting cache service");
     cache::start_cache(Arc::clone(&state)).await?;

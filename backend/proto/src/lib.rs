@@ -13,4 +13,4 @@ mod tests;
 
 pub use handler::proto_router;
 pub use messages::{ClientMessage, PROTO_VERSION, ServerMessage};
-pub use scheduler::Scheduler;
+pub use scheduler::{Scheduler, WorkerInfo};
