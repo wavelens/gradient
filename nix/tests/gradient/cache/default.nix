@@ -13,6 +13,7 @@
       networking.firewall.enable = false;
       virtualisation.writableStore = true;
       documentation.enable = false;
+      nix.settings.max-jobs = 0;
     };
 
     nodes = {
@@ -149,11 +150,46 @@
             directory = *
         '';
 
+        services.gradient.workers.local = {
+          capabilities.build = lib.mkForce false;
+          capabilities.sign = lib.mkForce false;
+        };
+
         systemd.tmpfiles.rules = [
           "d /var/lib/git 0755 git git"
           "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
           "L+ /var/lib/git/flake.lock 0755 git git - ${./flake_repository.lock}"
         ];
+      };
+
+      builder = { config, pkgs, lib, ... }: {
+        imports = [ ../../../modules/gradient-worker.nix ];
+
+        nix.settings = {
+          experimental-features = [
+            "nix-command"
+            "flakes"
+            "ca-derivations"
+          ];
+
+          trusted-users = [
+            "root"
+            "@wheel"
+            "gradient-worker"
+          ];
+
+          max-jobs = lib.mkForce 8;
+        };
+
+        services.gradient.workers.local = {
+          enable = true;
+          serverUrl = "ws://server/proto";
+          capabilities = {
+            eval  = true;
+            build = true;
+            sign  = true;
+          };
+        };
       };
 
       client = { config, pkgs, lib, ... }: {
@@ -166,8 +202,9 @@
     };
 
     interactive.nodes = {
-      server = import ../../modules/debug-host.nix;
-      client = import ../../modules/debug-host.nix;
+      server  = import ../../modules/debug-host.nix;
+      builder = import ../../modules/debug-host.nix;
+      client  = import ../../modules/debug-host.nix;
     };
 
     testScript = { nodes, ... }:
@@ -176,6 +213,7 @@
 
       server.wait_for_unit("gradient-server.service")
       server.sleep(5)
+      builder.wait_for_unit("gradient-worker-local.service")
 
       # Configure git
       server.succeed("${lib.getExe pkgs.git} config --global --add safe.directory '*'")

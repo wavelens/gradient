@@ -257,7 +257,7 @@
       upstreams = mkOption {
         type = types.listOf upstreamType;
         default = [{
-          type = "nixpkgs";
+          type = "external";
           display_name = "cache.nixos.org";
           url = "https://cache.nixos.org";
           public_key = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=";

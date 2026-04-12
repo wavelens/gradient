@@ -3,9 +3,9 @@
 ## Getting Started
 
 1. **Register / Log in** — `/` redirects to login automatically.
-2. **Create an organization** — organizations own servers, projects, and caches.
-3. **Add a build server** — open the organization, go to **Servers**, and add the server. Then add the organization's SSH public key to the server's `authorized_keys` (see [SSH Keys](#ssh-keys) below).
-4. **Create a project** — point it at a Git repository and set an evaluation wildcard.
+2. **Create an organization** — organizations own projects, caches, and workers.
+3. **Create a project** — point it at a Git repository and set an evaluation wildcard.
+4. **Trigger an evaluation** — the server's built-in local worker handles fetch, eval, and build automatically. Register additional workers for higher capacity or cross-architecture builds (see [Workers](#workers) below).
 
 ## Evaluation Wildcard
 
@@ -55,7 +55,7 @@ Exclusion patterns must be exact paths — they cannot contain `*` or `#`.
 
 ## Evaluations
 
-Click **Start Evaluation** on the project page. Gradient clones the repo, evaluates each wildcard match, and dispatches the resulting derivations to the configured build servers.
+Click **Start Evaluation** on the project page. Gradient clones the repo, evaluates each wildcard match, and dispatches the resulting derivations to connected workers.
 
 The evaluation log page shows per-build status, combined ANSI build output, and an **Abort** button.
 
@@ -69,9 +69,35 @@ Evaluations can also be triggered automatically:
 
 Each organization has one Ed25519 SSH key pair, generated automatically. The public key is shown in **Organization → Settings → SSH**.
 
-Add this key to:
-
-- **Build servers** — in `authorized_keys` so Gradient can connect and run builds.
-- **Git hosts** — as a deploy key if your repository is cloned over SSH.
+Add this key to your **Git hosts** as a deploy key so Gradient can clone private repositories.
 
 The key is scoped to the organization; different organizations use different keys.
+
+## Workers
+
+Build capacity is provided by `gradient-worker` processes. Each Gradient server starts a **co-located local worker** automatically — no extra setup needed for single-host deployments.
+
+For additional capacity or cross-architecture builds, deploy remote workers:
+
+1. **Register the worker** under an organization:
+
+    ```sh
+    curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"worker_id": "my-aarch64-builder"}'
+    # → {"error":false,"message":{"peer_id":"<uuid>","token":"<secret>"}}
+    ```
+
+    Store the returned `peer_id` and `token` — the token is shown only once.
+
+2. **Configure the worker** on the remote machine (see [Configuration → Workers](../configuration.md#workers) for the full NixOS module):
+
+    ```sh
+    # Write peers file:  peer_id:token
+    echo "<peer_id>:<token>" > /run/secrets/gradient-worker-peers
+    ```
+
+3. The worker connects and is visible in **Organization → Workers** in the UI and via `GET /api/v1/orgs/{org}/workers`.
+
+Workers authenticate using per-organization tokens. A worker authorized for an org receives only that org's job offers. Workers with no peers file run in **open mode** and are trusted for all jobs — suitable for the server's own local worker.

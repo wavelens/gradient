@@ -42,11 +42,12 @@ pnpm run serve
 NixOS VM tests:
 
 ```sh
-nix build .#checks.x86_64-linux.gradient-api     -L
-nix build .#checks.x86_64-linux.gradient-state   -L
-nix build .#checks.x86_64-linux.gradient-cache   -L
-nix build .#checks.x86_64-linux.gradient-oidc    -L
-nix build .#checks.x86_64-linux.gradient-remote  -L
+nix build .#checks.x86_64-linux.gradient-api       -L
+nix build .#checks.x86_64-linux.gradient-state     -L
+nix build .#checks.x86_64-linux.gradient-cache     -L
+nix build .#checks.x86_64-linux.gradient-building  -L
+nix build .#checks.x86_64-linux.gradient-oidc      -L
+nix build .#checks.x86_64-linux.gradient-remote    -L
 ```
 
 ## Workflow
@@ -65,6 +66,8 @@ nix build .#checks.x86_64-linux.gradient-remote  -L
 - New API endpoints go in `web/src/endpoints/` following the pattern: extract path/query params → check authorization → query DB → return response.
 - New database tables require a migration in `migration/src/` and an entity module in `entity/src/`.
 - Log with `tracing::{info, debug, warn, error}`, not `println!`. Add `#[instrument]` to significant async functions.
+- Update `docs/gradient-api.yaml` whenever an API endpoint is added or changed.
+- Update environment variable documentation and the corresponding `nix/modules/` files when configuration options change.
 
 ### Angular / TypeScript
 
@@ -75,5 +78,5 @@ nix build .#checks.x86_64-linux.gradient-remote  -L
 ### Nix
 
 - All packages and modules live in `nix/`.
-- New NixOS options go in `nix/modules/gradient.nix`.
+- Server options go in `nix/modules/gradient.nix`; worker options go in `nix/modules/gradient-worker.nix`.
 - New modules need a NixOS VM test in `nix/tests/`.

@@ -2,7 +2,11 @@
 
 ## Overview
 
-Gradient is a multi-crate Rust workspace. The server binary starts three concurrent async tasks:
+Gradient is a multi-crate Rust workspace with two separate binaries: **`gradient`** (the server) and **`gradient-worker`** (the build worker).
+
+### Server
+
+The server binary starts three concurrent async tasks:
 
 ```
 ┌────────────────────────────────────────┐
@@ -10,28 +14,37 @@ Gradient is a multi-crate Rust workspace. The server binary starts three concurr
 │                                        │
 │  ┌──────────────────────────────────┐  │
 │  │             Builder              │  │
-│  │  evaluation loop │ build loop    │  │
+│  │  evaluation queue │ build queue  │  │
 │  └──────────────────────────────────┘  │
 │  ┌───────────┐   ┌──────────────────┐  │
 │  │   Cache   │   │       Web        │  │
 │  │   (Axum)  │   │  (Axum /api/v1)  │  │
 │  └───────────┘   └──────────────────┘  │
+│          ┌───────────────────┐         │
+│          │  Proto Scheduler  │         │
+│          │  (WebSocket /proto│         │
+│          └───────────────────┘         │
 └────────────────────────────────────────┘
          │                    │
          └──── PostgreSQL ────┘
 ```
 
+### Worker
+
+`gradient-worker` is a standalone process that connects to the server over WebSocket at `/proto`. It handles fetch, eval, build, and sign tasks dispatched by the server's scheduler. Workers can run co-located on the server host or on separate machines.
+
 ## Crates
 
 ```
 backend/
-├── core/        Shared state, config, DB pool, utility functions
-├── entity/      SeaORM entity definitions (one module per table)
-├── migration/   SeaORM migrator
-├── builder/     Evaluator and build scheduler
-├── cache/       Nix binary cache server
-├── web/         Axum HTTP API
-└── nix-daemon/  Nix daemon wire protocol client
+├── core/         Shared state, config, DB pool, utility functions
+├── entity/       SeaORM entity definitions (one module per table)
+├── migration/    SeaORM migrator
+├── builder/      Evaluation queue and build status tracking
+├── cache/        Nix binary cache server
+├── web/          Axum HTTP API
+├── proto/        Proto protocol handler and scheduler
+└── worker/       gradient-worker binary (fetch, eval, build, sign)
 ```
 
 ### `core`
@@ -58,7 +71,7 @@ Key entities and their relationships:
 
 ```
 organization
-  ├── server[]                 build machines
+  ├── worker_registration[]    registered worker auth tokens
   ├── cache[]                  binary caches (via subscription)
   ├── derivation[]             immutable per-org "what to build" records
   │     ├── derivation_output[]         (one per Nix output: out, dev, doc, ...)
@@ -71,40 +84,38 @@ organization
               └── entry_point[]          (top-level builds for this eval)
 ```
 
-The `build` row is the "attempt" — it carries `status`, `server`, `log_id`,
-`build_time_ms`. Everything immutable about the derivation (path, architecture,
-outputs, dep graph, required features) lives on `derivation` and is shared across
-every evaluation that touches it. A rebuild on failure inserts a new `build` row
-on the same `derivation`; the old `build`'s `log_id` is preserved.
+The `build` row is the "attempt" — it carries `status`, `log_id`, and `build_time_ms`. Everything immutable about the derivation (path, architecture, outputs, dep graph, required features) lives on `derivation` and is shared across every evaluation that touches it. A rebuild on failure inserts a new `build` row on the same `derivation`.
 
-`derivation_dependency` is a directed edge table: `derivation → dependency` means
-the `dependency` derivation must be built before `derivation`. The graph is stored
-once per derivation, not once per evaluation, so metrics over closures are correct
-without cross-eval fallbacks. A second evaluation that hits a derivation already
-present in the DB inserts a fresh `build` row (status `Substituted` if the path
-is in the local store) without re-walking the closure.
+`derivation_dependency` is a directed edge table: `derivation → dependency` means the `dependency` derivation must be built before `derivation`. The graph is stored once per derivation, not once per evaluation.
 
-`cache_derivation` (cache, derivation) records that a cache holds the **complete
-closure** of a derivation. The cacher only inserts a row once every output of the
-derivation is `is_cached = true` AND every transitive dependency already has a
-matching `cache_derivation` row for the same cache. This means cache delivery is
-a single DB lookup instead of a per-output filesystem probe.
+`cache_derivation` (cache, derivation) records that a cache holds the **complete closure** of a derivation. The cacher only inserts a row once every output of the derivation is `is_cached = true` AND every transitive dependency already has a matching `cache_derivation` row for the same cache.
+
+`worker_registration` stores `(peer_id, worker_id, token_hash)` — the challenge-response auth tokens issued when a peer (org, cache, or proxy) registers a worker.
 
 ### `builder`
 
-Two independent polling loops run concurrently via `tokio::spawn`:
-
-- `schedule_evaluation_loop` — picks up queued evaluations, runs `nix eval`,
-  upserts `derivation` / `derivation_output` / `derivation_dependency` rows
-  (skipping the closure walk for derivations whose dep edges are already
-  populated), and inserts one `build` row per closure member for the current
-  evaluation.
-- `schedule_build_loop` — picks up `Queued` builds, joins each to its
-  `derivation` for the path/architecture, selects a server, copies inputs via
-  SSH, executes the build over the Nix daemon wire protocol, and updates the
-  matching `derivation_output` rows on success (instead of inserting fresh ones).
+Manages the evaluation and build queues. Jobs are dispatched to proto workers via the `Scheduler`. The builder no longer runs builds directly — it enqueues `PendingEvalJob` and `PendingBuildJob` entries that the proto scheduler delivers to connected workers.
 
 See [Internals](internals.md) for algorithm details.
+
+### `proto`
+
+Handles the WebSocket `/proto` endpoint and the scheduler that dispatches jobs to connected workers:
+
+- `handler.rs` — WebSocket lifecycle: handshake, challenge-response auth, capability negotiation, job dispatch loop
+- `scheduler/` — `WorkerPool` tracks connected workers; `JobTracker` tracks pending and active jobs; dispatch loops push `JobOffer`s to eligible workers
+- `messages/` — rkyv-serialized wire message types (`ServerMessage`, `ClientMessage`)
+
+The scheduler is injected into the Axum router as `Extension<Arc<Scheduler>>` and shared with the builder.
+
+### `worker`
+
+The `gradient-worker` binary. Connects to the server over WebSocket, performs the challenge-response handshake, and executes dispatched jobs:
+
+- `executor/eval.rs` — Nix flake evaluation (spawns evaluator subprocesses)
+- `executor/build.rs` — Nix store builds via the local daemon
+- `handshake.rs` — client-side challenge-response auth
+- `config.rs` — `WorkerConfig` parsed from env vars / CLI args
 
 ### `web`
 
@@ -113,28 +124,19 @@ Axum HTTP server. All API routes live under `/api/v1` via `Router::nest`. Auth r
 Endpoints are split by resource in `web/src/endpoints/`:
 
 ```
-auth.rs      Login, register, OIDC/OAuth2
-builds.rs    Build detail, log streaming, graph, downloads, direct build
-caches.rs    Cache CRUD + Nix cache protocol handlers
-commits.rs   Commit lookup
-evals.rs     Evaluation detail, abort, log streaming
-mod.rs       Health, config, 404 handler
-orgs.rs      Org CRUD, members, SSH key, cache subscriptions
-projects.rs  Project CRUD, entry points, evaluate trigger
-servers.rs   Server CRUD, connection test, active toggle
-user.rs      Profile, API keys, settings
+auth.rs          Login, register, OIDC/OAuth2
+builds/          Build detail, log streaming, graph, downloads, direct build
+caches.rs        Cache CRUD + Nix cache protocol handlers
+commits.rs       Commit lookup
+evals.rs         Evaluation detail, abort, log streaming
+mod.rs           Health, config, 404 handler
+orgs/            Org CRUD, members, SSH key, cache subscriptions, worker registration
+projects.rs      Project CRUD, entry points, evaluate trigger
+user.rs          Profile, API keys, settings
+workers.rs       Connected worker list (superuser / global stats)
 ```
 
 The Nix binary cache endpoints (`/cache/{cache}/…`) are registered at the root router, outside `/api/v1`, to comply with the Nix cache protocol.
-
-### `nix-daemon`
-
-A hand-written implementation of the Nix daemon binary protocol (the same protocol used by `nix-store --daemon`). Gradient uses it to:
-
-1. Query path info and missing paths on the local Nix store (during evaluation).
-2. Send `AddToStoreNar` and `BuildDerivation` commands to remote build servers over SSH.
-
-The crate supports both Unix socket connections (local daemon) and command-duplex connections (subprocess stdin/stdout, used when a socket is unavailable). The two variants are unified under `LocalNixStore`.
 
 ## Database
 

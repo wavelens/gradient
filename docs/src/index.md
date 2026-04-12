@@ -8,12 +8,12 @@
 ## Features
 
 - **Modern UI** — clean, responsive web interface built with Angular
-- **Organizations** — isolated organizations with independent servers and user access
+- **Organizations** — isolated organizations with independent workers and user access
 - **REST API** — full API with API-key and JWT authentication
 - **Streaming Logs** — real-time log streaming for running builds
 - **OAuth2 / OIDC** — integrated single-sign-on support
 - **Binary Cache** — built-in Nix store cache with S3 storage backend support
-- **Remote Builds** — build Nix derivations on remote machines without a local Nix install
+- **Proto Workers** — build Nix derivations on distributed `gradient-worker` instances over a persistent WebSocket protocol
 - **Pull Deployment** — deploy NixOS configurations by pulling from the Gradient server
 - **Dependency Graph** — interactive visualization of Nix build dependency trees
 - **Actions Integration** — GitHub App Integration and Gitlab CI Integration

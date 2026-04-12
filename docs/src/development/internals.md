@@ -24,7 +24,7 @@ Key functions inside each crate.
 2. Inserts a `Commit` row with the push SHA.
 3. Inserts an `Evaluation` row with status `Queued`.
 4. Sets `project.force_evaluation = true` and resets `last_check_at` to the epoch.
-5. The scheduler picks it up on its next tick (≤ 60 s) via the existing pre-created `Queued` evaluation path (`evaluator/src/scheduler.rs:501`).
+5. The scheduler picks it up on its next tick (≤ 60 s) via the existing pre-created `Queued` evaluation path.
 
 Repository matching normalises URLs by stripping trailing `.git` and compares against all active projects.
 
@@ -34,175 +34,70 @@ Repository matching normalises URLs by stripping trailing `.git` and compares ag
 
 `builder::scheduler::schedule_evaluation_loop` polls for queued evaluations every 60 seconds, up to `max_concurrent_evaluations` concurrent tasks.
 
-For each evaluation, `schedule_evaluation` runs:
+For each evaluation, a `PendingEvalJob` is enqueued into the proto scheduler's `JobTracker`. The scheduler dispatches it to an eligible connected worker that has the `eval` (and optionally `fetch`) capability negotiated.
 
-**1. Resolve context**
+The worker executes:
 
-Looks up the project (or `DirectBuild`) and organization. Opens a connection to the local Nix daemon (`get_local_store`), which returns a `LocalNixStore` — either a Unix socket to `/nix/var/nix/daemon-socket/socket` or a fallback command-duplex subprocess.
+**1. FetchFlake** (if `fetch` capability)
 
-**2. Fetch the flake** (`evaluator::evaluate`)
+Converts the repository URL and commit hash into a Nix flake reference: `git+https://host/repo?rev=<sha1>`, then runs `nix flake prefetch` to populate the local store. SSH credentials for private repos are delivered via the `Credential::SshKey` proto message.
 
-```
-prefetch_flake(state, repo_url_at_commit, organization)
-```
+**2. EvaluateFlake + EvaluateDerivations** (if `eval` capability)
 
-Converts the repository URL and commit hash into a Nix flake reference:
-`git+https://host/repo?rev=<sha1>`. Then runs `nix flake prefetch` to populate the local store. SSH credentials for private repos are decrypted from the database using the organization's crypt key.
-
-**3. Enumerate derivations**
-
-```
-get_flake_derivations(state, repo_ref, wildcards, org)
-```
-
-Expands the evaluation wildcard into a list of fully-qualified attribute paths using an embedded Nix expression, then resolves each to a store derivation path via the Nix C API.
+Expands the evaluation wildcard into attribute paths, resolves each to a `.drv` path via the Nix C API, and walks the dependency closure via BFS. During the walk the worker sends **incremental `EvalResult` batches** as derivations are discovered — the server inserts rows immediately without waiting for the full walk.
 
 Wildcard segments:
 
 - `*` — **recursive**: matches any attribute name and, when at the trailing position, descends one additional level to recover derivations hidden by consecutive-wildcard collapsing (`packages.*.*` and `packages.*` are equivalent).
-- `#` — **non-recursive**: matches any attribute name at exactly that depth and checks `type == "derivation"` without descending further. Use this to target a specific nesting level precisely.
-- `!prefix` — **exclusion**: removes exact paths from the collected set (wildcards in exclusions are not allowed).
+- `#` — **non-recursive**: matches any attribute name at exactly that depth and checks `type == "derivation"` without descending further.
+- `!prefix` — **exclusion**: removes exact paths from the collected set.
 
-**4. Build dependency graph** (`query_all_dependencies`)
+**3. Server-side batch insert** (on each `EvalResult` batch)
 
-The BFS walks **derivations**, not builds. The build table is only the
-per-evaluation attempt log; the dep graph lives on `derivation_dependency` and is
-shared across every evaluation that ever touches a derivation path.
+Derivations, outputs, dependency edges, and builds are bulk-inserted in chunks of 1 000 rows in FK order: `derivation` → `derivation_output` → `derivation_dependency` → `build`. Substituted builds (already in the worker's store) are inserted with status `Substituted` and immediately eligible for signing.
 
-```
-queue = [(root_drv_path, parent_derivation_id=None) for each root]
-
-while queue not empty:
-    (drv_path, parent) = queue.pop_front()
-
-    if seen this drv_path in this eval → reuse derivation_id
-    elif EDerivation::find(org, drv_path) is Some → reuse, was_new = false
-    else → query nix store for outputs + features, push new MDerivation,
-            push ADerivationOutput rows, was_new = true
-
-    if parent is Some → push MDerivationDependency(parent → derivation_id)
-
-    in_store = nix_store.query_missing_paths([drv_path]).is_empty()
-    push MBuild(eval, derivation_id,
-                status = if in_store { Substituted } else { Created })
-
-    if was_new:
-        # Walk references via QueryPathInfo and recurse on each.
-        for ref in nix_store.query_pathinfo(drv_path).references:
-            queue.push_back((ref, derivation_id))
-    elif derivation already has derivation_dependency edges in DB:
-        # The closure is authoritative — walk it locally and materialise a
-        # fresh MBuild for every member, but do NOT re-fetch references.
-        for d in load_closure(derivation_id):
-            queue.materialise(d)  # build row only
-    else:
-        # Existing derivation that was previously stored as a leaf. Treat as
-        # a leaf again; the next from-scratch eval will pick up its deps.
-```
-
-Deduplication is per derivation path (per organisation): a second evaluation
-that hits the same path reuses the existing `derivation` row and inserts only
-new `build` rows. Substituted builds skip the scheduler entirely and never
-acquire a server.
-
-**5. Batch insert**
-
-Derivations, outputs, dependency edges, and builds are bulk-inserted in chunks
-of 1 000 rows in FK order: `derivation` → `derivation_output` →
-`derivation_dependency` → `build`. Entry points (top-level build UUIDs) are
-recorded in the `entry_point` table after builds are persisted.
-
-**6. Status transitions**
+**4. Status transitions**
 
 ```
 build:       Created → Queued → Building → Completed | Failed
                                          ↘ Substituted (already in store)
                                          ↘ Aborted | DependencyFailed
-evaluation:  Queued → EvaluatingFlake → EvaluatingDerivation → Building
-                                                            → Completed | Failed | Aborted
+evaluation:  Queued → Fetching → EvaluatingFlake → EvaluatingDerivation → Building
+                                                                       → Completed | Failed | Aborted
 ```
 
-`Substituted` is distinct from `Completed`: it means the derivation was already
-in the local Nix store at evaluation time and never ran on a builder
-(`build_time_ms` and `server` stay `None`, `log_id` stays `None`). It is treated
-as a successful terminal state by `check_evaluation_status` and the scheduler.
-
-`update_evaluation_status` and `update_evaluation_status_with_error` write the new status and optional error string atomically.
+`Substituted` is distinct from `Completed`: it means the derivation was already in the local Nix store at evaluation time and never ran on a builder.
 
 ---
 
 ## Build Dispatcher
 
-`schedule_build_loop` polls for queued builds every 60 seconds, up to `max_concurrent_builds` concurrent tasks.
+The proto scheduler's dispatch loop (`proto::scheduler::dispatch`) polls for eligible builds and pushes `JobOffer` messages to connected workers with the `build` capability.
 
-**Server selection** (`reserve_available_server`)
+**Eligibility:** a build is eligible only when every dependent derivation already has a `build` row in the same evaluation with status `Completed` (3) or `Substituted` (7) — enforced via a `NOT EXISTS` subquery against `derivation_dependency`.
 
-`get_next_build` joins `build → derivation` so the picker sees the architecture
-and required features without re-resolving them. A build is eligible only when
-**every** dependent derivation already has a `build` row in the same evaluation
-with status `Completed` (3) or `Substituted` (7) — enforced via a `NOT EXISTS`
-subquery against `derivation_dependency`.
+**Worker matching:** `JobOffer` is sent to workers whose `WorkerCapabilities` include the build's target architecture and all required features from `derivation_feature`. Workers score each candidate against their local store (missing required paths) and stream scores back via `RequestJobChunk`. The server assigns to the worker with the lowest `missing` count; ties broken by fewest assigned jobs.
 
-Once a build is picked, it is matched to an active server whose:
-- `architectures` set includes the **derivation's** `architecture`
-- `features` set satisfies the **derivation's** required features
-  (`derivation_feature` table)
+**Execution** (on the worker):
+1. Receive `AssignJob` with the full dependency chain in topological order.
+2. Send `NarRequest` for missing input paths (known from scoring).
+3. Receive input NARs via `NarPush` or presigned S3 URLs.
+4. Build each derivation in order via the local Nix daemon (`build_derivation`).
+5. Stream `JobUpdate::BuildOutput` for each completed derivation.
+6. Compress outputs and send `JobUpdate::Compressing`.
+7. Sign outputs and send `JobUpdate::Signing` (if `sign` capability).
+8. Send `JobCompleted`.
 
-The first matching server is reserved by atomically setting `build.server =
-server.id` and `build.status = Building`.
+The server updates `build` and `derivation_output` rows as `JobUpdate` messages arrive, making results visible in the UI immediately.
 
-**Build execution** (`schedule_build`)
-
-1. Decrypt SSH private key for the organization.
-2. Open SSH connection via `core::executer::connect` (wraps `russh`). Retries
-   up to 3 times with 5-second waits.
-3. Resolve sorted dependency order: `get_build_dependencies_sorted` walks
-   `derivation_dependency` from `build.derivation`, resolves each edge to a
-   `(build, derivation)` pair in the same evaluation, and topologically sorts
-   them. Dependencies are copied to the remote server first, in order.
-4. Copy inputs: send `AddToStoreNar` commands over the Nix daemon wire protocol
-   through the SSH tunnel.
-5. Build: send `BuildDerivation` with a `BasicDerivation` constructed from the
-   `.drv` file. Env vars, builder path, args, and output paths are parsed from
-   `nix derivation show --json`. Structured attributes (`structuredAttrs`) are
-   serialized as `__json` in the env, matching Nix C++ behaviour.
-6. Copy outputs back: receive `AddToStoreNar` responses, write NARs to disk,
-   then **update** the existing `derivation_output` rows (matched by
-   `(derivation, name)`) with the resolved hashes / sizes / `has_artefacts`.
-   Output metadata is therefore populated **once per derivation**, never
-   re-inserted on subsequent evaluations.
-7. On failure: `update_build_status_recursivly` walks reverse
-   `derivation_dependency` edges, restricted to the current evaluation, and
-   marks every dependent build as `DependencyFailed`. The originally failing
-   build is set to `Failed`.
-
-**Log streaming**
-
-Build logs are appended to `build.log` in the database as they arrive over the SSH channel. `POST /builds/{id}/log` polls the database every 500 ms and streams new log chunks as NDJSON.
-
----
-
-## Nix Daemon Wire Protocol (`nix-daemon` crate)
-
-The crate implements the [Nix daemon protocol](https://nixos.org/manual/nix/stable/protocols/nix-archive.html) at the binary level.
-
-Key operations used:
-
-| Operation | When used |
-|---|---|
-| `QueryPathInfo` | During evaluation to get a derivation's `references` and NAR hash |
-| `QueryMissing` | Check which paths need to be built (not already in store) |
-| `AddToStoreNar` | Copy a NAR to the remote daemon store |
-| `BuildDerivation` | Execute a derivation on the remote builder |
-
-The `DaemonStore<C>` type is generic over an async read+write stream `C`, so the same code works over a local Unix socket and over an SSH channel.
+**Failure cascade:** when a build fails, the server walks reverse `derivation_dependency` edges and marks all downstream builds `DependencyFailed`. The failing build is set to `Failed`.
 
 ---
 
 ## Binary Cache
 
 **Serving a NAR**
-Nars are currently only served with ZSTD compression. Currently nars are stored in ${base_dir}/nars/[first 2 chars of hash]/[rest of the hash].nar.zst
+NARs are served with ZSTD compression. They are stored in `${base_dir}/nars/[first 2 chars of hash]/[rest of the hash].nar.zst`.
 
 **Signing**
 
@@ -242,7 +137,7 @@ while queue not empty and nodes.len() < 500:
     if next_batch not empty: queue.push(next_batch)
 ```
 
-Returned `DependencyEdge { source, target }` are still build IDs — `source` is the dependency's build and `target` is the dependent's build, so `source` must be built before `target`. Because edges are stored once per derivation pair (not per evaluation), the same lookup serves every evaluation that touches those derivations, and the resolved build IDs reflect the current evaluation's attempt rows.
+Returned `DependencyEdge { source, target }` are build IDs — `source` is the dependency's build and `target` is the dependent's build, so `source` must be built before `target`.
 
 Batching the BFS (one DB round-trip per level) keeps the query count proportional to graph depth rather than node count.
 
@@ -258,6 +153,21 @@ Batching the BFS (one DB round-trip per level) keeps the query count proportiona
 
 ---
 
+## Worker Registration & Auth
+
+Workers authenticate to the server using a challenge-response flow:
+
+1. A peer (org admin) calls `POST /api/v1/orgs/{org}/workers` with `{"worker_id": "<string>"}`.
+2. The server generates a 32-byte random token, stores `sha256(token)` in `worker_registration` with `peer_id = org.id`, and returns `{peer_id, token}`.
+3. The worker operator configures `GRADIENT_WORKER_PEERS_FILE` with `peer_id:token` pairs.
+4. On connect, the server sends `AuthChallenge { peers }` listing all org IDs that registered this worker ID.
+5. The worker responds with `AuthResponse { tokens: {peer_id: token} }`.
+6. The server validates each token by comparing `sha256(token)` against the stored hash. The worker is authorized for all peers that pass.
+
+A worker may be authorized for multiple orgs simultaneously — it sees job candidates from all its authorized peers.
+
+---
+
 ## State-Managed Resources
 
-Users, organizations, servers, and caches created by the NixOS module configuration carry `managed = true`. The API rejects mutations and deletions of these records with `403 Forbidden`. This allows declarative configuration to be the source of truth without Gradient's UI overwriting it.
+Users, organizations, and caches created by the NixOS module configuration carry `managed = true`. The API rejects mutations and deletions of these records with `403 Forbidden`. This allows declarative configuration to be the source of truth without Gradient's UI overwriting it.

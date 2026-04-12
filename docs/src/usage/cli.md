@@ -79,14 +79,6 @@ gradient project delete <name>
 gradient project eval <name>          # Trigger a new evaluation
 ```
 
-### Build Servers
-
-```sh
-gradient server list
-gradient server add
-gradient server remove <name>
-```
-
 ### Caches
 
 ```sh
@@ -124,4 +116,24 @@ gradient generate <type>
 ```
 gradient --help      Show help for any command
 gradient --version   Print CLI version
+```
+
+## Worker Management
+
+Workers are registered and managed via the REST API (not the CLI). See [API → Workers](api.md#workers) for the full reference, or use `curl`/`jq` directly:
+
+```sh
+# Register a worker under an org
+curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"worker_id": "my-builder"}'
+
+# List registered workers (and live connection status)
+curl https://gradient.example.com/api/v1/orgs/myorg/workers \
+  -H "Authorization: Bearer $TOKEN"
+
+# Remove a worker registration
+curl -X DELETE https://gradient.example.com/api/v1/orgs/myorg/workers/my-builder \
+  -H "Authorization: Bearer $TOKEN"
 ```

@@ -77,6 +77,75 @@ On errors, `error` is `true` and `message` is a string describing the problem.
 | `GET` | `/orgs/{org}/subscribe` | List subscribed caches |
 | `POST/DELETE` | `/orgs/{org}/subscribe/{cache}` | Subscribe / unsubscribe |
 
+### Workers
+
+Workers are `gradient-worker` processes that connect to the server over WebSocket to execute fetch, eval, build, and sign jobs.
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/orgs/{org}/workers` | Register a worker — returns `peer_id` + one-time `token` |
+| `GET` | `/orgs/{org}/workers` | List registered workers (merges live state) |
+| `DELETE` | `/orgs/{org}/workers/{worker_id}` | Unregister a worker |
+| `GET` | `/workers` | List all currently connected workers (superuser or `GRADIENT_GLOBAL_STATS_PUBLIC`) |
+
+**Register a worker:**
+
+```sh
+curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"worker_id": "build-01"}'
+```
+
+Response:
+
+```json
+{
+  "error": false,
+  "message": {
+    "peer_id": "550e8400-e29b-41d4-a716-446655440000",
+    "token": "a1b2c3..."
+  }
+}
+```
+
+The `token` is shown **once only** — store it immediately. On the worker, write it to the peers file:
+
+```sh
+echo "550e8400-e29b-41d4-a716-446655440000:a1b2c3..." > /run/secrets/gradient-worker-peers
+```
+
+Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.
+
+**List workers:**
+
+`GET /orgs/{org}/workers` returns registered workers merged with live connection info:
+
+```json
+{
+  "error": false,
+  "message": [
+    {
+      "worker_id": "build-01",
+      "registered_at": "2026-04-12T10:00:00Z",
+      "live": {
+        "architectures": ["x86_64-linux"],
+        "system_features": ["kvm", "big-parallel"],
+        "max_concurrent_builds": 8,
+        "assigned_job_count": 2,
+        "draining": false
+      }
+    }
+  ]
+}
+```
+
+`live` is `null` if the worker is not currently connected.
+
+**Unregister a worker:**
+
+`DELETE /orgs/{org}/workers/{worker_id}` removes the registration. The worker stays connected until it disconnects, then cannot reconnect.
+
 ### Projects
 
 | Method | Path | Description |
@@ -111,16 +180,6 @@ On errors, `error` is `true` and `message` is a string describing the problem.
 | `GET` | `/builds/{id}/dependencies` | Direct dependencies |
 | `GET` | `/builds/{id}/downloads` | List artefacts |
 | `GET` | `/builds/{id}/download/{filename}` | Download artefact |
-
-### Servers
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/servers/{org}` | List servers |
-| `PUT` | `/servers/{org}` | Add server |
-| `GET/PATCH/DELETE` | `/servers/{org}/{server}` | Get / update / delete |
-| `POST` | `/servers/{org}/{server}/check-connection` | Test SSH connection |
-| `POST/DELETE` | `/servers/{org}/{server}/active` | Enable / disable |
 
 ### Caches
 
