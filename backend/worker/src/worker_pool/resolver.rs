@@ -6,7 +6,6 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use entity::server::Architecture;
 use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_core::db::{Derivation, parse_drv};
 use gradient_core::nix::{DerivationResolver, ResolvedDerivation};
@@ -389,15 +388,12 @@ impl DerivationResolver for WorkerPoolResolver {
         parse_drv(&bytes).with_context(|| format!("Failed to parse derivation {}", drv_path))
     }
 
-    async fn get_features(&self, drv_path: String) -> Result<(Architecture, Vec<String>)> {
+    async fn get_features(&self, drv_path: String) -> Result<(String, Vec<String>)> {
         if !drv_path.ends_with(".drv") {
-            return Ok((Architecture::BUILTIN, vec![]));
+            return Ok(("builtin".to_string(), vec![]));
         }
-        let drv = self.get_derivation(drv_path.clone()).await?;
+        let drv = self.get_derivation(drv_path).await?;
         let features = drv.required_system_features();
-        let system: Architecture = drv.system.as_str().try_into().map_err(|e| {
-            anyhow::anyhow!("{} has invalid system architecture: {:?}", drv_path, e)
-        })?;
-        Ok((system, features))
+        Ok((drv.system.clone(), features))
     }
 }

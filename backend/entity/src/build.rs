@@ -62,12 +62,6 @@ pub enum Relation {
         to = "super::derivation::Column::Id"
     )]
     Derivation,
-    #[sea_orm(
-        belongs_to = "super::server::Entity",
-        from = "Column::Server",
-        to = "super::server::Column::Id"
-    )]
-    Server,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

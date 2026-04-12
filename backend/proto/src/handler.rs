@@ -56,9 +56,9 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>, scheduler
 
     let Some(init_msg) = recv_client_msg(&mut socket).await else { return };
 
-    let (client_version, client_capabilities, peer_id, token) = match init_msg {
-        ClientMessage::InitConnection { version, capabilities, id, token } => {
-            (version, capabilities, id, token)
+    let (client_version, client_capabilities, peer_id) = match init_msg {
+        ClientMessage::InitConnection { version, capabilities, id } => {
+            (version, capabilities, id)
         }
         _ => {
             send_error(&mut socket, 400, "expected InitConnection".into()).await;
@@ -78,14 +78,14 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>, scheduler
         return;
     }
 
-    // TODO: validate token against configured API keys.
-    let _ = token;
+    // ── Challenge-response auth ───────────────────────────────────────────────
 
-    let negotiated = negotiate_capabilities(&state, client_capabilities);
+    // Look up which peers have registered this worker ID.
+    let registered_peers = lookup_registered_peers(&state, &peer_id).await;
 
     if send_server_msg(
         &mut socket,
-        &ServerMessage::InitAck { version: PROTO_VERSION, capabilities: negotiated.clone() },
+        &ServerMessage::AuthChallenge { peers: registered_peers.iter().map(|(id, _)| id.clone()).collect() },
     )
     .await
     .is_err()
@@ -93,7 +93,45 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>, scheduler
         return;
     }
 
-    info!(%peer_id, client_version, "handshake complete");
+    let auth_response = match recv_client_msg(&mut socket).await {
+        Some(ClientMessage::AuthResponse { tokens }) => tokens,
+        Some(_) => {
+            send_error(&mut socket, 400, "expected AuthResponse".into()).await;
+            return;
+        }
+        None => return,
+    };
+
+    let (authorized_peers, failed_peers) =
+        validate_tokens(&registered_peers, &auth_response);
+
+    // Require at least one authorized peer unless no peers are registered
+    // (open/discoverable mode with no registrations).
+    if registered_peers.is_empty() {
+        debug!(%peer_id, "no registered peers — open connection accepted");
+    } else if authorized_peers.is_empty() {
+        send_reject(&mut socket, 401, "no valid peer tokens provided".into()).await;
+        return;
+    }
+
+    let negotiated = negotiate_capabilities(&state, client_capabilities);
+
+    if send_server_msg(
+        &mut socket,
+        &ServerMessage::InitAck {
+            version: PROTO_VERSION,
+            capabilities: negotiated.clone(),
+            authorized_peers: authorized_peers.clone(),
+            failed_peers: failed_peers.clone(),
+        },
+    )
+    .await
+    .is_err()
+    {
+        return;
+    }
+
+    info!(%peer_id, client_version, authorized = authorized_peers.len(), "handshake complete");
 
     // Register this worker in the scheduler.
     scheduler.register_worker(&peer_id, negotiated.clone()).await;
@@ -117,6 +155,40 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>, scheduler
             ClientMessage::Reject { code, reason } => {
                 info!(%peer_id, code, %reason, "peer rejected connection");
                 break;
+            }
+
+            // ── Reauth ────────────────────────────────────────────────────
+            ClientMessage::ReauthRequest => {
+                debug!(%peer_id, "ReauthRequest");
+                let registered_peers = lookup_registered_peers(&state, &peer_id).await;
+                if send_server_msg(
+                    &mut socket,
+                    &ServerMessage::AuthChallenge {
+                        peers: registered_peers.iter().map(|(id, _)| id.clone()).collect(),
+                    },
+                )
+                .await
+                .is_err()
+                {
+                    break;
+                }
+                // Await AuthResponse in the next iteration (client sends it immediately).
+            }
+
+            ClientMessage::AuthResponse { tokens } => {
+                // Mid-connection reauth response.
+                let registered_peers = lookup_registered_peers(&state, &peer_id).await;
+                let (authorized_peers, failed_peers) =
+                    validate_tokens(&registered_peers, &tokens);
+                if send_server_msg(
+                    &mut socket,
+                    &ServerMessage::AuthUpdate { authorized_peers, failed_peers },
+                )
+                .await
+                .is_err()
+                {
+                    break;
+                }
             }
 
             // ── Capability advertisement ──────────────────────────────────
@@ -303,6 +375,62 @@ async fn send_error(socket: &mut WebSocket, code: u16, message: String) {
 
 async fn send_reject(socket: &mut WebSocket, code: u16, reason: String) {
     let _ = send_server_msg(socket, &ServerMessage::Reject { code, reason }).await;
+}
+
+/// Returns `(peer_id, token_hash)` pairs for all peers that registered this worker.
+async fn lookup_registered_peers(state: &ServerState, worker_id: &str) -> Vec<(String, String)> {
+    use entity::worker_registration::{Column, Entity};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    match Entity::find()
+        .filter(Column::WorkerId.eq(worker_id))
+        .all(&state.db)
+        .await
+    {
+        Ok(rows) => rows.into_iter().map(|r| (r.peer_id.to_string(), r.token_hash)).collect(),
+        Err(e) => {
+            warn!(error = %e, %worker_id, "failed to look up registered peers");
+            vec![]
+        }
+    }
+}
+
+/// Validates `auth_tokens` (worker-supplied `(peer_id, plaintext_token)`) against
+/// `registered_peers` (`(peer_id, sha256_token_hash)`).
+///
+/// Returns `(authorized_peers, failed_peers)`.
+fn validate_tokens(
+    registered_peers: &[(String, String)],
+    auth_tokens: &[(String, String)],
+) -> (Vec<String>, Vec<crate::messages::FailedPeer>) {
+    use sha2::{Digest, Sha256};
+
+    let mut authorized = Vec::new();
+    let mut failed = Vec::new();
+
+    for (peer_id, token_hash) in registered_peers {
+        match auth_tokens.iter().find(|(pid, _)| pid == peer_id) {
+            Some((_, token)) => {
+                let digest = hex::encode(Sha256::digest(token.as_bytes()));
+                if digest == *token_hash {
+                    authorized.push(peer_id.clone());
+                } else {
+                    failed.push(crate::messages::FailedPeer {
+                        peer_id: peer_id.clone(),
+                        reason: "invalid token".into(),
+                    });
+                }
+            }
+            None => {
+                failed.push(crate::messages::FailedPeer {
+                    peer_id: peer_id.clone(),
+                    reason: "no token provided".into(),
+                });
+            }
+        }
+    }
+
+    (authorized, failed)
 }
 
 fn negotiate_capabilities(state: &ServerState, client: GradientCapabilities) -> GradientCapabilities {

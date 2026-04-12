@@ -8,13 +8,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::messages::{Architecture, GradientCapabilities};
+use crate::messages::GradientCapabilities;
 
 /// Metadata for a single connected worker.
 #[derive(Debug)]
 pub struct ConnectedWorker {
     pub capabilities: GradientCapabilities,
-    pub architectures: Vec<Architecture>,
+    pub architectures: Vec<String>,
     pub system_features: Vec<String>,
     pub max_concurrent_builds: u32,
     pub assigned_jobs: HashSet<String>,
@@ -49,7 +49,7 @@ impl WorkerPool {
     pub fn update_capabilities(
         &mut self,
         id: &str,
-        architectures: Vec<Architecture>,
+        architectures: Vec<String>,
         system_features: Vec<String>,
         max_concurrent_builds: u32,
     ) {
@@ -94,7 +94,7 @@ impl WorkerPool {
             .iter()
             .map(|(id, w)| WorkerInfo {
                 id: id.clone(),
-                architectures: w.architectures.iter().map(|a| format!("{:?}", a)).collect(),
+                architectures: w.architectures.clone(),
                 system_features: w.system_features.clone(),
                 max_concurrent_builds: w.max_concurrent_builds,
                 assigned_job_count: w.assigned_jobs.len(),

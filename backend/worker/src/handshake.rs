@@ -23,14 +23,15 @@ pub struct HandshakeResult {
     pub negotiated: GradientCapabilities,
 }
 
-/// Perform the `InitConnection` / `InitAck` handshake.
+/// Perform the full challenge-response handshake.
 ///
-/// `peer_id` — persistent UUID loaded from disk (or freshly generated on first start).
-/// `token`   — API key, read from `--token-file` if provided.
+/// `peer_id`     — persistent UUID loaded from disk (or freshly generated on first start).
+/// `peer_tokens` — `(peer_id, plaintext_token)` pairs from `GRADIENT_WORKER_PEERS`.
+/// `capabilities`— advertised capabilities.
 pub async fn perform_handshake(
     conn: &mut ProtoConnection,
     peer_id: String,
-    token: Option<String>,
+    peer_tokens: Vec<(String, String)>,
     capabilities: GradientCapabilities,
 ) -> Result<HandshakeResult> {
     debug!("sending InitConnection");
@@ -38,27 +39,62 @@ pub async fn perform_handshake(
         version: PROTO_VERSION,
         capabilities,
         id: peer_id,
-        token,
     })
     .await
     .context("failed to send InitConnection")?;
 
-    let response = conn
+    // Expect AuthChallenge.
+    let challenge = conn
+        .recv()
+        .await
+        .context("connection closed before AuthChallenge")?
+        .context("server closed the connection without responding")?;
+
+    let challenge_peers = match challenge {
+        ServerMessage::AuthChallenge { peers } => peers,
+        ServerMessage::Reject { code, reason } => {
+            bail!("server rejected connection (code {code}): {reason}");
+        }
+        other => bail!("expected AuthChallenge, got: {other:?}"),
+    };
+
+    debug!(peers = ?challenge_peers, "received AuthChallenge");
+
+    // Reply with tokens for the peers the server challenged us about.
+    let tokens: Vec<(String, String)> = peer_tokens
+        .into_iter()
+        .filter(|(pid, _)| challenge_peers.contains(pid))
+        .collect();
+
+    conn.send(ClientMessage::AuthResponse { tokens })
+        .await
+        .context("failed to send AuthResponse")?;
+
+    // Expect InitAck.
+    let ack = conn
         .recv()
         .await
         .context("connection closed before InitAck")?
         .context("server closed the connection without responding")?;
 
-    match response {
-        ServerMessage::InitAck { version, capabilities: negotiated } => {
-            info!(server_version = version, "handshake successful");
+    match ack {
+        ServerMessage::InitAck { version, capabilities: negotiated, authorized_peers, failed_peers } => {
+            info!(
+                server_version = version,
+                authorized = authorized_peers.len(),
+                failed = failed_peers.len(),
+                "handshake successful"
+            );
+            if !failed_peers.is_empty() {
+                for fp in &failed_peers {
+                    tracing::warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
+                }
+            }
             Ok(HandshakeResult { negotiated })
         }
         ServerMessage::Reject { code, reason } => {
             bail!("server rejected connection (code {code}): {reason}");
         }
-        other => {
-            bail!("unexpected message during handshake: {other:?}");
-        }
+        other => bail!("unexpected message during handshake: {other:?}"),
     }
 }

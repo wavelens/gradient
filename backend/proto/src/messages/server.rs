@@ -10,14 +10,40 @@ use rkyv::{Archive, Deserialize, Serialize};
 use super::jobs::Job;
 use super::types::{CredentialKind, JobCandidate};
 
+/// A peer that failed authentication during the challenge-response flow.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct FailedPeer {
+    pub peer_id: String,
+    pub reason: String,
+}
+
 /// Messages sent from the server to the client (worker / federated peer).
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum ServerMessage {
-    /// Successful handshake response.  Contains the negotiated capabilities.
+    /// Challenge sent after `InitConnection`.  Lists the peer IDs that have
+    /// registered this worker ID — the worker must respond with tokens for
+    /// each peer it has credentials for.
+    AuthChallenge { peers: Vec<String> },
+
+    /// Successful handshake response.  Contains the negotiated capabilities
+    /// and the set of peers this worker is now authorized for.
     InitAck {
         version: u16,
         capabilities: GradientCapabilities,
+        /// Peer IDs whose tokens were accepted.
+        authorized_peers: Vec<String>,
+        /// Peers whose tokens were missing or invalid.
+        failed_peers: Vec<FailedPeer>,
+    },
+
+    /// Sent after a mid-connection reauth completes (triggered by
+    /// [`super::client::ClientMessage::ReauthRequest`] or by the server when
+    /// a new peer registers this worker).
+    AuthUpdate {
+        authorized_peers: Vec<String>,
+        failed_peers: Vec<FailedPeer>,
     },
 
     /// Server declines the connection.  Closes after sending.

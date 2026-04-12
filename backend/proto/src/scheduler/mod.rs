@@ -26,8 +26,7 @@ use gradient_core::types::*;
 use sea_orm::EntityTrait;
 
 use crate::messages::{
-    Architecture, BuildOutput, CandidateScore, DiscoveredDerivation, GradientCapabilities,
-    JobCandidate,
+    BuildOutput, CandidateScore, DiscoveredDerivation, GradientCapabilities, JobCandidate,
 };
 
 use jobs::{Assignment, JobTracker, PendingBuildJob, PendingEvalJob, PendingJob};
@@ -75,7 +74,7 @@ impl Scheduler {
     pub async fn update_worker_capabilities(
         &self,
         peer_id: &str,
-        architectures: Vec<Architecture>,
+        architectures: Vec<String>,
         system_features: Vec<String>,
         max_concurrent_builds: u32,
     ) {

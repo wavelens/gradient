@@ -23,7 +23,7 @@ use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::messages::{Architecture as ProtoArch, DiscoveredDerivation};
+use crate::messages::DiscoveredDerivation;
 use super::jobs::PendingEvalJob;
 
 const BATCH_SIZE: usize = 1000;
@@ -88,7 +88,7 @@ pub async fn handle_eval_result(
             id: Set(id),
             organization: Set(organization_id),
             derivation_path: Set(d.drv_path.clone()),
-            architecture: Set(proto_arch_to_entity(&d.architecture)),
+            architecture: Set(d.architecture.clone()),
             created_at: Set(now),
         });
         for output in &d.outputs {
@@ -200,7 +200,6 @@ pub async fn handle_eval_result(
             Arc::clone(state),
             d.required_features.clone(),
             Some(drv_id),
-            None,
         ).await {
             error!(error = %e, %drv_id, "failed to add system features");
         }
@@ -264,12 +263,3 @@ pub async fn handle_eval_job_failed(state: &Arc<ServerState>, evaluation_id: Uui
     Ok(())
 }
 
-fn proto_arch_to_entity(arch: &ProtoArch) -> entity::server::Architecture {
-    match arch {
-        ProtoArch::Builtin        => entity::server::Architecture::BUILTIN,
-        ProtoArch::X86_64Linux    => entity::server::Architecture::X86_64Linux,
-        ProtoArch::Aarch64Linux   => entity::server::Architecture::Aarch64Linux,
-        ProtoArch::X86_64Darwin   => entity::server::Architecture::X86_64Darwin,
-        ProtoArch::Aarch64Darwin  => entity::server::Architecture::Aarch64Darwin,
-    }
-}

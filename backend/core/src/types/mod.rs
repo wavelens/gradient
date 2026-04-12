@@ -228,6 +228,11 @@ pub struct Cli {
     /// Requires `discoverable` to be enabled.
     #[arg(long, env = "GRADIENT_FEDERATE_PROTO", default_value = "false")]
     pub federate_proto: bool,
+
+    /// Expose `GET /api/v1/workers` and worker stats without authentication.
+    /// When `false` (default), only superusers can access those endpoints.
+    #[arg(long, env = "GRADIENT_GLOBAL_STATS_PUBLIC", default_value = "false")]
+    pub global_stats_public: bool,
 }
 
 #[derive(Debug)]

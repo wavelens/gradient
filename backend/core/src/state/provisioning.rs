@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{StateApiKey, StateCache, StateConfiguration, StateOrganization, StateProject, StateServer, StateUpstream, StateUser};
+use super::{StateApiKey, StateCache, StateConfiguration, StateOrganization, StateProject, StateUpstream, StateUser};
 use crate::types::consts::BASE_ROLE_ADMIN_ID;
 use crate::types::input::load_secret_bytes;
 use crate::types::*;
@@ -31,7 +31,6 @@ pub(super) async fn apply_state_to_database(
     apply_users(db, &config.users).await?;
     apply_organizations(db, &config.organizations, &config.users, crypt_secret_file).await?;
     apply_projects(db, &config.projects, &config.users, &config.organizations, crypt_secret_file).await?;
-    apply_servers(db, &config.servers, &config.users, &config.organizations).await?;
     apply_caches(db, &config.caches, &config.users, &config.organizations, crypt_secret_file).await?;
     apply_api_keys(db, &config.api_keys).await?;
     unmark_removed_entities(db, config, delete_state).await?;
@@ -68,6 +67,7 @@ async fn apply_users(
             user.email = Set(state_user.email.clone());
             user.password = Set(Some(generate_hash(password.trim())));
             user.email_verified = Set(state_user.email_verified);
+            user.superuser = Set(state_user.superuser);
             user.managed = Set(true);
             user.update(db).await?;
             tracing::info!("Updated managed user: {}", state_user.username);
@@ -84,6 +84,7 @@ async fn apply_users(
                 email_verification_token: Set(None),
                 email_verification_token_expires: Set(None),
                 managed: Set(true),
+                superuser: Set(state_user.superuser),
             };
             user.insert(db).await?;
             tracing::info!("Created managed user: {}", state_user.username);
@@ -324,71 +325,6 @@ async fn apply_projects(
             proj.insert(db).await?;
             tracing::info!("Created managed project: {}", state_project.name);
         }
-    }
-
-    Ok(())
-}
-
-async fn apply_servers(
-    db: &DatabaseConnection,
-    state_servers: &HashMap<String, StateServer>,
-    _state_users: &HashMap<String, StateUser>,
-    _state_orgs: &HashMap<String, StateOrganization>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let user_map = create_user_lookup(db).await?;
-    let org_map = create_org_lookup(db).await?;
-
-    for state_server in state_servers.values() {
-        let created_by_id = user_map
-            .get(&state_server.created_by)
-            .ok_or_else(|| format!("User '{}' not found", state_server.created_by))?;
-
-        let org_id = org_map
-            .get(&state_server.organization)
-            .ok_or_else(|| format!("Organization '{}' not found", state_server.organization))?;
-
-        let existing_server = server::Entity::find()
-            .filter(server::Column::Name.eq(&state_server.name))
-            .one(db)
-            .await?;
-
-        let now = Utc::now().naive_utc();
-
-        if let Some(existing) = existing_server {
-            let mut serv: server::ActiveModel = existing.into();
-            serv.display_name = Set(state_server.display_name.clone());
-            serv.organization = Set(*org_id);
-            serv.active = Set(state_server.active);
-            serv.host = Set(state_server.host.clone());
-            serv.port = Set(state_server.port);
-            serv.username = Set(state_server.username.clone());
-            serv.max_concurrent_builds = Set(state_server.max_concurrent_builds);
-            serv.created_by = Set(*created_by_id);
-            serv.managed = Set(true);
-            serv.update(db).await?;
-            tracing::info!("Updated managed server: {}", state_server.name);
-        } else {
-            let serv = server::ActiveModel {
-                id: Set(Uuid::new_v4()),
-                name: Set(state_server.name.clone()),
-                display_name: Set(state_server.display_name.clone()),
-                organization: Set(*org_id),
-                active: Set(state_server.active),
-                host: Set(state_server.host.clone()),
-                port: Set(state_server.port),
-                username: Set(state_server.username.clone()),
-                last_connection_at: Set(now),
-                max_concurrent_builds: Set(state_server.max_concurrent_builds),
-                created_by: Set(*created_by_id),
-                created_at: Set(now),
-                managed: Set(true),
-            };
-            serv.insert(db).await?;
-            tracing::info!("Created managed server: {}", state_server.name);
-        }
-
-        apply_server_features(db, &state_server.name, &state_server.features).await?;
-        apply_server_architectures(db, &state_server.name, &state_server.architectures).await?;
     }
 
     Ok(())
@@ -657,107 +593,6 @@ async fn apply_api_keys(
     Ok(())
 }
 
-async fn apply_server_features(
-    db: &DatabaseConnection,
-    server_name: &str,
-    features: &[String],
-) -> Result<(), Box<dyn std::error::Error>> {
-    let server = EServer::find()
-        .filter(CServer::Name.eq(server_name))
-        .one(db)
-        .await?;
-
-    let Some(server) = server else {
-        return Err(format!("Server '{}' not found", server_name).into());
-    };
-
-    EServerFeature::delete_many()
-        .filter(CServerFeature::Server.eq(server.id))
-        .exec(db)
-        .await?;
-
-    for feature_name in features {
-        let feature = EFeature::find()
-            .filter(CFeature::Name.eq(feature_name))
-            .one(db)
-            .await?;
-
-        let feature = if let Some(feature) = feature {
-            feature
-        } else {
-            let afeature = AFeature {
-                id: Set(Uuid::new_v4()),
-                name: Set(feature_name.clone()),
-            };
-            afeature.insert(db).await?
-        };
-
-        let aserver_feature = AServerFeature {
-            id: Set(Uuid::new_v4()),
-            server: Set(server.id),
-            feature: Set(feature.id),
-        };
-        aserver_feature.insert(db).await?;
-    }
-
-    tracing::debug!(
-        "Applied {} features to server '{}'",
-        features.len(),
-        server_name
-    );
-    Ok(())
-}
-
-async fn apply_server_architectures(
-    db: &DatabaseConnection,
-    server_name: &str,
-    architectures: &[String],
-) -> Result<(), Box<dyn std::error::Error>> {
-    let server = EServer::find()
-        .filter(CServer::Name.eq(server_name))
-        .one(db)
-        .await?;
-
-    let Some(server) = server else {
-        return Err(format!("Server '{}' not found", server_name).into());
-    };
-
-    EServerArchitecture::delete_many()
-        .filter(CServerArchitecture::Server.eq(server.id))
-        .exec(db)
-        .await?;
-
-    let parsed_architectures: Result<Vec<server::Architecture>, _> =
-        architectures.iter().map(|arch| arch.parse()).collect();
-
-    let parsed_architectures =
-        parsed_architectures.map_err(|_| "Invalid architecture specified")?;
-
-    if parsed_architectures.is_empty() {
-        return Err("No valid architectures specified".into());
-    }
-
-    let server_architecture_models: Vec<AServerArchitecture> = parsed_architectures
-        .into_iter()
-        .map(|arch| AServerArchitecture {
-            id: Set(Uuid::new_v4()),
-            server: Set(server.id),
-            architecture: Set(arch),
-        })
-        .collect();
-
-    EServerArchitecture::insert_many(server_architecture_models)
-        .exec(db)
-        .await?;
-
-    tracing::debug!(
-        "Applied {} architectures to server '{}'",
-        architectures.len(),
-        server_name
-    );
-    Ok(())
-}
-
 async fn unmark_removed_entities(
     db: &DatabaseConnection,
     config: &StateConfiguration,
@@ -766,7 +601,6 @@ async fn unmark_removed_entities(
     let state_usernames: std::collections::HashSet<&String> = config.users.keys().collect();
     let state_org_names: std::collections::HashSet<&String> = config.organizations.keys().collect();
     let state_project_names: std::collections::HashSet<&String> = config.projects.keys().collect();
-    let state_server_names: std::collections::HashSet<&String> = config.servers.keys().collect();
     let state_cache_names: std::collections::HashSet<&String> = config.caches.keys().collect();
     let state_api_key_names: std::collections::HashSet<&String> = config.api_keys.keys().collect();
 
@@ -830,28 +664,6 @@ async fn unmark_removed_entities(
                 project.managed = Set(false);
                 project.update(db).await?;
                 tracing::info!("Unmanaged project: {}", project_name);
-            }
-        }
-    }
-
-    let managed_servers = server::Entity::find()
-        .filter(server::Column::Managed.eq(true))
-        .all(db)
-        .await?;
-
-    for server_model in managed_servers {
-        if !state_server_names.contains(&server_model.name) {
-            let server_name = server_model.name.clone();
-            if delete_state {
-                server::Entity::delete_by_id(server_model.id)
-                    .exec(db)
-                    .await?;
-                tracing::info!("Deleted server: {}", server_name);
-            } else {
-                let mut server: server::ActiveModel = server_model.into();
-                server.managed = Set(false);
-                server.update(db).await?;
-                tracing::info!("Unmanaged server: {}", server_name);
             }
         }
     }

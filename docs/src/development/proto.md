@@ -191,18 +191,19 @@ The `GET /api/v1/workers` endpoint shows all connected workers and their status.
 
 ## Capability Advertisement
 
-Immediately after a successful handshake, workers with `build` enabled send `WorkerCapabilities`:
+After a successful handshake, workers with the `build` capability negotiated send `WorkerCapabilities`. Workers without `build` (e.g. eval-only workers) never send this message.
 
 ```rust
 WorkerCapabilities {
-    system_features: Vec<String>,       // e.g. ["x86_64-linux", "kvm", "big-parallel"]
+    architectures: Vec<String>,         // Nix system strings, e.g. ["x86_64-linux", "aarch64-linux"]
+    system_features: Vec<String>,       // Nix system features, e.g. ["kvm", "big-parallel"]
     max_concurrent_builds: u32,         // how many parallel builds this worker accepts
 }
 ```
 
-Architectures (e.g. `x86_64-linux`, `aarch64-linux`) are **not** a separate enum — they are string entries in `system_features`, the same as `kvm` or `big-parallel`. This keeps the wire format simple and allows custom/unusual platforms without code changes.
+Architectures are free-form strings (e.g. `"x86_64-linux"`, `"aarch64-linux"`) — not an enum. Custom or unusual platforms (e.g. `"riscv64-linux"`) can be advertised without any code changes.
 
-When the server dispatches a build, it checks that the build's target architecture and all required system features are present in the worker's `system_features`. For example, a build targeting `aarch64-linux` with `required_features: ["kvm"]` requires a worker with both `"aarch64-linux"` and `"kvm"` in its `system_features`.
+When the server dispatches a build, it checks that the build's target architecture is present in the worker's `architectures` and all `required_features` are present in the worker's `system_features`. For example, a build targeting `aarch64-linux` with `required_features: ["kvm"]` requires a worker with `"aarch64-linux"` in `architectures` and `"kvm"` in `system_features`.
 
 **Federation proxy behavior:** a proxy with `federate` enabled connects upstream as a single worker. It **aggregates** the capabilities of all its downstream workers:
 - `GradientCapabilities` (in `InitConnection`) — OR of all downstream workers' capabilities (if any worker can build, the proxy advertises `build`)
@@ -219,6 +220,29 @@ graph RL
 ```
 
 The server uses these to match `RequestJobChunk` to queued builds. A worker that does not send capabilities will only receive `FlakeJob`s, never `BuildJob`s.
+
+### Capability Updates
+
+`WorkerCapabilities` can be re-sent **at any point during the connection** to update the server's view. The server replaces the previous values immediately. This is the primary mechanism for proxies to keep the upstream server in sync when their downstream worker pool changes.
+
+**Example — downstream worker disconnects from a proxy:**
+
+```mermaid
+sequenceDiagram
+    participant WA as Worker A (aarch64)
+    participant P as Proxy
+    participant S as Server
+
+    Note over P,S: initial state — proxying Worker A + B
+    WA-xP: disconnect
+    Note over P: recalculates aggregated capabilities<br/>aarch64-linux no longer available
+    P->>S: WorkerCapabilities { architectures: ["x86_64-linux"], system_features: [...], max_concurrent_builds: N }
+    Note over S: immediately stops dispatching<br/>aarch64 builds to this proxy
+```
+
+The server's handler processes mid-connection `WorkerCapabilities` identically to the initial send — it calls `scheduler.update_worker_capabilities()` which atomically replaces the worker's entry in the pool. Any pending build offers for architectures or features no longer advertised are revoked.
+
+Re-sending `WorkerCapabilities` does **not** require reconnecting and does **not** interrupt in-flight jobs. Only future job offers are affected.
 
 ### Ephemeral Workers
 
@@ -355,7 +379,7 @@ DiscoveredDerivation {
     drv_path: String,                   // /nix/store/xxx.drv
     outputs: Vec<DerivationOutput>,     // [{name: "out", path: "/nix/store/..."}]
     dependencies: Vec<String>,          // drv paths this depends on
-    system: String,                     // e.g. "x86_64-linux" — the derivation's target platform
+    architecture: String,               // Nix system string, e.g. "x86_64-linux", "builtin"
     required_features: Vec<String>,     // Nix system features needed to build (e.g. "kvm")
     substituted: bool,                  // all outputs already in worker's local store
 }
@@ -363,7 +387,7 @@ DiscoveredDerivation {
 
 `substituted: true` means the worker checked its local Nix store and all outputs for this derivation already exist — no build needed. The server marks these as `Substituted` (7) and they are immediately eligible for cache signing.
 
-The `system` field is a free-form string (e.g. `"x86_64-linux"`, `"aarch64-linux"`, `"builtin"`). `"builtin"` means the derivation uses `builtin:fetchurl` or similar — it can run on any worker regardless of system features.
+The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`, `"aarch64-linux"`, `"builtin"`). `"builtin"` means the derivation uses `builtin:fetchurl` or similar — it can run on any worker regardless of architecture.
 
 ### Incremental Evaluation
 
@@ -504,10 +528,10 @@ enum CredentialKind { SshKey, SigningKey }
 enum ClientMessage {
     // Handshake + auth
     InitConnection { version: u16, capabilities: GradientCapabilities, id: Uuid },
-    AuthResponse { tokens: HashMap<Uuid, String> },  // peer_id → token
+    AuthResponse { tokens: Vec<(String, String)> },  // [(peer_id, token), ...]
     ReauthRequest,                              // ask server to re-send AuthChallenge
     Reject { code: u16, reason: String },       // decline connection after InitAck
-    WorkerCapabilities { system_features: Vec<String>, max_concurrent_builds: u32 },
+    WorkerCapabilities { architectures: Vec<String>, system_features: Vec<String>, max_concurrent_builds: u32 },
     AssignJobResponse { job_id: Uuid, accepted: bool, reason: Option<String> },
 
     // Job dispatch

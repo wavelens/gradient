@@ -13,7 +13,6 @@ pub mod evals;
 pub mod forge_hooks;
 pub mod orgs;
 pub mod projects;
-pub mod servers;
 pub mod stats;
 pub mod user;
 pub mod webhooks;

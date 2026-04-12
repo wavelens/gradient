@@ -62,6 +62,7 @@ pub fn user() -> user::Model {
         email_verification_token: None,
         email_verification_token_expires: None,
         managed: false,
+        superuser: false,
     }
 }
 

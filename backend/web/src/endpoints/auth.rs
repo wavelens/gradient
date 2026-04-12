@@ -104,6 +104,7 @@ pub async fn post_basic_register(
         email_verification_token: Set(verification_token.clone()),
         email_verification_token_expires: Set(verification_expires),
         managed: Set(false),
+        superuser: Set(false),
     };
 
     let user = user.insert(&state.db).await?;

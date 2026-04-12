@@ -6,7 +6,6 @@
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use entity::server::Architecture;
 use gradient_core::db::Derivation;
 use gradient_core::nix::{DerivationResolver, ResolvedDerivation};
 use std::collections::HashMap;
@@ -22,7 +21,7 @@ pub struct FakeDerivationResolver {
     flake_attrs: Mutex<HashMap<String, Vec<String>>>,
     drv_paths: Mutex<HashMap<(String, String), String>>,
     derivations: Mutex<HashMap<String, Derivation>>,
-    features: Mutex<HashMap<String, (Architecture, Vec<String>)>>,
+    features: Mutex<HashMap<String, (String, Vec<String>)>>,
 }
 
 impl FakeDerivationResolver {
@@ -59,13 +58,13 @@ impl FakeDerivationResolver {
     pub fn with_features(
         self,
         drv_path: impl Into<String>,
-        arch: Architecture,
+        arch: impl Into<String>,
         features: Vec<String>,
     ) -> Self {
         self.features
             .lock()
             .unwrap()
-            .insert(drv_path.into(), (arch, features));
+            .insert(drv_path.into(), (arch.into(), features));
         self
     }
 }
@@ -119,13 +118,13 @@ impl DerivationResolver for FakeDerivationResolver {
             .ok_or_else(|| anyhow!("no fake derivation for {}", drv_path))
     }
 
-    async fn get_features(&self, drv_path: String) -> Result<(Architecture, Vec<String>)> {
+    async fn get_features(&self, drv_path: String) -> Result<(String, Vec<String>)> {
         Ok(self
             .features
             .lock()
             .unwrap()
             .get(&drv_path)
             .cloned()
-            .unwrap_or((Architecture::BUILTIN, vec![])))
+            .unwrap_or(("builtin".to_string(), vec![])))
     }
 }

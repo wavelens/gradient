@@ -105,6 +105,14 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/orgs/{organization}/forge-webhook-secret",
             post(forge_hooks::post_forge_webhook_secret),
         )
+        .route(
+            "/orgs/{organization}/workers",
+            get(orgs::get_org_workers).post(orgs::post_org_worker),
+        )
+        .route(
+            "/orgs/{organization}/workers/{worker_id}",
+            delete(orgs::delete_org_worker),
+        )
         .route("/projects/{organization}", put(projects::put))
         .route(
             "/projects/{organization}/available",
@@ -184,24 +192,6 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route(
             "/user/settings",
             get(user::get_settings).patch(user::patch_settings),
-        )
-        .route(
-            "/servers/{organization}",
-            get(servers::get).put(servers::put),
-        )
-        .route(
-            "/servers/{organization}/{server}",
-            get(servers::get_server)
-                .patch(servers::patch_server)
-                .delete(servers::delete_server),
-        )
-        .route(
-            "/servers/{organization}/{server}/check-connection",
-            post(servers::post_server_check_connection),
-        )
-        .route(
-            "/servers/{organization}/{server}/active",
-            post(servers::post_server_active).delete(servers::delete_server_active),
         )
         .route("/workers", get(workers::get_workers))
         .route("/commits/{commit}", get(commits::get_commit))

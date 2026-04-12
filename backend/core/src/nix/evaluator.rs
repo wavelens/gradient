@@ -14,8 +14,6 @@
 use crate::db::Derivation;
 use anyhow::Result;
 use async_trait::async_trait;
-use entity::server::Architecture;
-
 /// Result of resolving one flake attribute path: `(attr_path, Result<(drv_path, references)>)`.
 pub type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
 
@@ -45,7 +43,8 @@ pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
     /// Read and parse a `.drv` file at `drv_path`.
     async fn get_derivation(&self, drv_path: String) -> Result<Derivation>;
 
-    /// Returns `(system_architecture, required_features)` for the derivation
-    /// at `drv_path`. For non-`.drv` paths returns `(BUILTIN, [])`.
-    async fn get_features(&self, drv_path: String) -> Result<(Architecture, Vec<String>)>;
+    /// Returns `(system_string, required_features)` for the derivation at `drv_path`.
+    /// `system_string` is a Nix system, e.g. `"x86_64-linux"`.
+    /// For non-`.drv` paths returns `("builtin", [])`.
+    async fn get_features(&self, drv_path: String) -> Result<(String, Vec<String>)>;
 }

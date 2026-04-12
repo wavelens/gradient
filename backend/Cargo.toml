@@ -40,6 +40,7 @@ harmonia-utils-hash    = { git = "https://github.com/nix-community/harmonia.git"
 harmonia-utils-io      = { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
 git2             = "0.20"
 libc             = "0.2"
+hex              = "0.4"
 hmac             = "0.13"
 nix-bindings     = { git = "https://github.com/NotAShelf/nix-bindings" }
 mockall          = "0.14"

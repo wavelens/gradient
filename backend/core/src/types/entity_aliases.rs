@@ -5,7 +5,6 @@
  */
 
 use entity::*;
-use entity::{build_machine, build_machine_architecture, build_machine_feature};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -41,15 +40,9 @@ pub type EOrganizationCache = organization_cache::Entity;
 pub type EOrganizationUser = organization_user::Entity;
 pub type EProject = project::Entity;
 pub type ERole = role::Entity;
-pub type EServer = server::Entity;
-pub type EServerArchitecture = server_architecture::Entity;
-pub type EServerFeature = server_feature::Entity;
-// New names — prefer these in new code
-pub type EBuildMachine = build_machine::Entity;
-pub type EBuildMachineArchitecture = build_machine_architecture::Entity;
-pub type EBuildMachineFeature = build_machine_feature::Entity;
 pub type EUser = user::Entity;
 pub type EWebhook = webhook::Entity;
+pub type EWorkerRegistration = worker_registration::Entity;
 
 pub type MApi = api::Model;
 pub type MBuild = build::Model;
@@ -74,15 +67,9 @@ pub type MOrganizationCache = organization_cache::Model;
 pub type MOrganizationUser = organization_user::Model;
 pub type MProject = project::Model;
 pub type MRole = role::Model;
-pub type MServer = server::Model;
-pub type MServerArchitecture = server_architecture::Model;
-pub type MServerFeature = server_feature::Model;
-// New names — prefer these in new code
-pub type MBuildMachine = build_machine::Model;
-pub type MBuildMachineArchitecture = build_machine_architecture::Model;
-pub type MBuildMachineFeature = build_machine_feature::Model;
 pub type MUser = user::Model;
 pub type MWebhook = webhook::Model;
+pub type MWorkerRegistration = worker_registration::Model;
 
 pub type AApi = api::ActiveModel;
 pub type ABuild = build::ActiveModel;
@@ -107,15 +94,9 @@ pub type AOrganizationCache = organization_cache::ActiveModel;
 pub type AOrganizationUser = organization_user::ActiveModel;
 pub type AProject = project::ActiveModel;
 pub type ARole = role::ActiveModel;
-pub type AServer = server::ActiveModel;
-pub type AServerArchitecture = server_architecture::ActiveModel;
-pub type AServerFeature = server_feature::ActiveModel;
-// New names — prefer these in new code
-pub type ABuildMachine = build_machine::ActiveModel;
-pub type ABuildMachineArchitecture = build_machine_architecture::ActiveModel;
-pub type ABuildMachineFeature = build_machine_feature::ActiveModel;
 pub type AUser = user::ActiveModel;
 pub type AWebhook = webhook::ActiveModel;
+pub type AWorkerRegistration = worker_registration::ActiveModel;
 
 pub type CApi = api::Column;
 pub type CBuild = build::Column;
@@ -140,15 +121,9 @@ pub type COrganizationCache = organization_cache::Column;
 pub type COrganizationUser = organization_user::Column;
 pub type CProject = project::Column;
 pub type CRole = role::Column;
-pub type CServer = server::Column;
-pub type CServerArchitecture = server_architecture::Column;
-pub type CServerFeature = server_feature::Column;
-// New names — prefer these in new code
-pub type CBuildMachine = build_machine::Column;
-pub type CBuildMachineArchitecture = build_machine_architecture::Column;
-pub type CBuildMachineFeature = build_machine_feature::Column;
 pub type CUser = user::Column;
 pub type CWebhook = webhook::Column;
+pub type CWorkerRegistration = worker_registration::Column;
 
 pub type RApi = api::Relation;
 pub type RBuild = build::Relation;
@@ -172,13 +147,6 @@ pub type ROrganizationCache = organization_cache::Relation;
 pub type ROrganizationUser = organization_user::Relation;
 pub type RProject = project::Relation;
 pub type RRole = role::Relation;
-pub type RServer = server::Relation;
-pub type RServerArchitecture = server_architecture::Relation;
-pub type RServerFeature = server_feature::Relation;
-// New names — prefer these in new code
-pub type RBuildMachine = build_machine::Relation;
-pub type RBuildMachineArchitecture = build_machine_architecture::Relation;
-pub type RBuildMachineFeature = build_machine_feature::Relation;
 pub type RUser = user::Relation;
 pub type RWebhook = webhook::Relation;
 

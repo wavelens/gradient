@@ -75,6 +75,12 @@
         default = true;
         description = "Whether the user's email has been verified";
       };
+
+      superuser = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Whether the user has superuser privileges";
+      };
     };
   });
 
@@ -203,75 +209,6 @@
   });
 
 
-  serverType = types.submodule ({ config, name, pkgs, ... }: {
-    options = {
-      name = mkOption {
-        type = types.str;
-        default = name;
-        defaultText = "<attrset key>";
-        description = "Unique name for the server";
-      };
-
-      display_name = mkOption {
-        type = types.str;
-        default = config.name;
-        defaultText = "config.name";
-        description = "Display name for the server";
-      };
-
-      organization = mkOption {
-        type = types.str;
-        description = "Name of the organization this server belongs to";
-      };
-
-      active = mkOption {
-        type = types.bool;
-        default = true;
-        description = "Whether the server is active";
-      };
-
-      host = mkOption {
-        type = types.str;
-        default = "localhost";
-        description = "Hostname or IP address of the server";
-      };
-
-      port = mkOption {
-        type = types.port;
-        default = 22;
-        description = "SSH port of the server";
-      };
-
-      username = mkOption {
-        type = types.str;
-        description = "SSH username for connecting to the server";
-      };
-
-      architectures = mkOption {
-        type = types.listOf (types.enum [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ]);
-        default = [ pkgs.system ];
-        description = "List of architectures supported by this server";
-      };
-
-      features = mkOption {
-        type = types.listOf types.str;
-        default = [ ];
-        description = "List of feature names supported by this server";
-      };
-
-      max_concurrent_builds = mkOption {
-        type = types.ints.positive;
-        default = 1;
-        description = "Maximum number of builds that can run concurrently on this server";
-      };
-
-      created_by = mkOption {
-        type = types.str;
-        description = "Username of the user who created this server";
-      };
-    };
-  });
-
   cacheType = types.submodule ({ config, name, ... }: {
     options = {
       name = mkOption {
@@ -398,12 +335,6 @@
         description = "Attribute set of projects to create, keyed by name";
       };
 
-      servers = mkOption {
-        type = types.attrsOf serverType;
-        default = { };
-        description = "Attribute set of servers to create, keyed by name";
-      };
-
       caches = mkOption {
         type = types.attrsOf cacheType;
         default = { };
@@ -424,7 +355,7 @@ in
     state = mkOption {
       type = stateType;
       default = { };
-      description = "Gradient state configuration for users, organizations, projects, servers, and caches";
+      description = "Gradient state configuration for users, organizations, projects, and caches";
       example = literalExpression ''
         {
           users = {
@@ -433,6 +364,7 @@ in
               email = "alice@example.com";
               password_file = "/etc/gradient/secrets/alice_password";
               email_verified = true;
+              superuser = true;
             };
           };
           organizations = {
@@ -452,17 +384,6 @@ in
               repository = "https://github.com/acme-corp/web-app.git";
               evaluation_wildcard = "nixosConfigurations.*.config.system.build.toplevel";
               active = true;
-              created_by = "alice";
-            };
-          };
-          servers = {
-            build-server-1 = {
-              display_name = "Build Server 1";
-              organization = "acme-corp";
-              host = "build1.internal.acme.com";
-              username = "gradient";
-              architectures = [ "x86_64-linux" "aarch64-linux" ];
-              features = [ "nixos-test" "benchmark" "big-parallel" ];
               created_by = "alice";
             };
           };

@@ -42,7 +42,8 @@ pub struct DiscoveredDerivation {
     pub outputs: Vec<DerivationOutput>,
     /// `.drv` paths this derivation directly depends on.
     pub dependencies: Vec<String>,
-    pub architecture: Architecture,
+    /// Nix system string, e.g. `"x86_64-linux"`, `"aarch64-linux"`.
+    pub architecture: String,
     /// Nix `requiredSystemFeatures` for this derivation.
     pub required_features: Vec<String>,
     /// `true` if all outputs already exist in the worker's local store.
@@ -75,18 +76,6 @@ pub struct BuildOutput {
 }
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
-
-/// Nix system architecture / platform.
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
-pub enum Architecture {
-    /// `builtin:fetchurl` and similar — runs on any platform.
-    Builtin,
-    X86_64Linux,
-    Aarch64Linux,
-    X86_64Darwin,
-    Aarch64Darwin,
-}
 
 /// Type of credential delivered via [`super::server::ServerMessage::Credential`].
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]

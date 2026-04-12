@@ -39,12 +39,12 @@ impl Worker {
 
         // TODO: load persistent peer_id from disk; generate on first start.
         let peer_id = uuid::Uuid::new_v4().to_string();
-        let token = read_token(config.token_file.as_deref()).await?;
+        let peer_tokens = config.peer_tokens();
 
         let handshake = perform_handshake(
             &mut conn,
             peer_id,
-            token,
+            peer_tokens,
             config.capabilities(),
         )
         .await?;
@@ -54,7 +54,7 @@ impl Worker {
         // If the server granted build capability, advertise our build capacity.
         if handshake.negotiated.build {
             conn.send(ClientMessage::WorkerCapabilities {
-                architectures: vec![], // TODO(1.3): detect from nix-daemon
+                architectures: vec![], // TODO: detect from nix-daemon
                 system_features: vec![],
                 max_concurrent_builds: config.max_concurrent_builds,
             })
@@ -189,6 +189,25 @@ impl Worker {
                 ServerMessage::InitAck { .. } | ServerMessage::Reject { .. } => {
                     warn!("unexpected handshake message in dispatch loop — ignoring");
                 }
+
+                ServerMessage::AuthChallenge { peers } => {
+                    debug!(?peers, "mid-connection AuthChallenge — sending AuthResponse");
+                    let tokens: Vec<(String, String)> = self.config.peer_tokens()
+                        .into_iter()
+                        .filter(|(pid, _)| peers.contains(pid))
+                        .collect();
+                    if let Err(e) = self.conn.send(proto::messages::ClientMessage::AuthResponse { tokens }).await {
+                        error!(error = %e, "failed to send AuthResponse");
+                        break;
+                    }
+                }
+
+                ServerMessage::AuthUpdate { authorized_peers, failed_peers } => {
+                    info!(authorized = authorized_peers.len(), failed = failed_peers.len(), "auth updated");
+                    for fp in &failed_peers {
+                        warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
+                    }
+                }
             }
         }
 
@@ -208,11 +227,3 @@ impl Worker {
     }
 }
 
-/// Read the API token from the file at `path`, if any.
-async fn read_token(path: Option<&str>) -> Result<Option<String>> {
-    let Some(path) = path else {
-        return Ok(None);
-    };
-    let content = tokio::fs::read_to_string(path).await?;
-    Ok(Some(content.trim().to_owned()))
-}

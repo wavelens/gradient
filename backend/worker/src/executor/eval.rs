@@ -21,7 +21,7 @@ use crate::worker_pool::WorkerPoolResolver;
 use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_core::db::parse_drv;
 use gradient_core::nix::DerivationResolver;
-use proto::messages::{Architecture as ProtoArch, DerivationOutput, DiscoveredDerivation, FlakeJob};
+use proto::messages::{DerivationOutput, DiscoveredDerivation, FlakeJob};
 use tracing::{debug, warn};
 
 use crate::job::JobUpdater;
@@ -181,8 +181,7 @@ pub async fn evaluate_derivations(
             results.into_iter().all(|r| r.unwrap_or(false))
         };
 
-        // Map system string → proto Architecture.
-        let architecture = system_to_proto_arch(&drv.system);
+        let architecture = drv.system.clone();
 
         // Collect dependencies (just the drv paths, no output info needed here).
         let dependencies: Vec<String> = drv
@@ -216,13 +215,3 @@ pub async fn evaluate_derivations(
     updater.report_eval_result(discovered, warnings).await
 }
 
-/// Convert a Nix system string to the proto [`Architecture`] enum.
-fn system_to_proto_arch(system: &str) -> ProtoArch {
-    match system {
-        "x86_64-linux" => ProtoArch::X86_64Linux,
-        "aarch64-linux" => ProtoArch::Aarch64Linux,
-        "x86_64-darwin" => ProtoArch::X86_64Darwin,
-        "aarch64-darwin" => ProtoArch::Aarch64Darwin,
-        _ => ProtoArch::Builtin,
-    }
-}

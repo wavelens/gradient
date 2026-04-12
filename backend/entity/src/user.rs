@@ -25,6 +25,7 @@ pub struct Model {
     pub email_verification_token: Option<String>,
     pub email_verification_token_expires: Option<NaiveDateTime>,
     pub managed: bool,
+    pub superuser: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

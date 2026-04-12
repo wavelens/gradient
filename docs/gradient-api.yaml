@@ -2254,6 +2254,126 @@ paths:
 
   # ── Workers ──────────────────────────────────────────────────────────────────
 
+  /orgs/{organization}/workers:
+    parameters:
+      - name: organization
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organization name
+
+    get:
+      tags: [workers]
+      summary: List registered workers for an organization
+      description: |
+        Returns all workers registered under this organization (peer), merged with
+        live status from the scheduler for currently connected workers.
+        Live fields (`architectures`, `system_features`, etc.) are only populated
+        for build-capable workers that have sent `WorkerCapabilities`.
+      operationId: listOrgWorkers
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Worker list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/OrgWorkerEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    post:
+      tags: [workers]
+      summary: Register a worker under an organization
+      description: |
+        Registers a worker ID under this organization as a peer. Returns a one-time
+        plaintext token that the worker operator must add to their worker config.
+        The token is shown only once — it cannot be retrieved later.
+      operationId: registerOrgWorker
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [worker_id]
+              properties:
+                worker_id:
+                  type: string
+                  description: Persistent worker identity string (UUID or human-readable name)
+      responses:
+        '200':
+          description: Worker registered
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/RegisterWorkerResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orgs/{organization}/workers/{worker_id}:
+    parameters:
+      - name: organization
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Organization name
+      - name: worker_id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Worker ID to unregister
+
+    delete:
+      tags: [workers]
+      summary: Unregister a worker from an organization
+      description: |
+        Removes the worker registration. The worker may still be connected until
+        it disconnects naturally — it will not be able to reconnect after that.
+      operationId: deleteOrgWorker
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Worker unregistered
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /workers:
     get:
       tags: [workers]
@@ -3278,6 +3398,61 @@ components:
           properties:
             message:
               type: string
+
+    RegisterWorkerResponse:
+      type: object
+      required: [peer_id, token]
+      properties:
+        peer_id:
+          type: string
+          format: uuid
+          description: The organization's UUID — used as the peer_id in worker config
+        token:
+          type: string
+          description: Plaintext token (shown once only) — worker must store this securely
+
+    WorkerLiveInfo:
+      type: object
+      required: [architectures, system_features, max_concurrent_builds, assigned_job_count, draining]
+      properties:
+        architectures:
+          type: array
+          items:
+            type: string
+          description: CPU architectures this worker can build for. Empty for non-build workers.
+        system_features:
+          type: array
+          items:
+            type: string
+          description: Nix system features advertised by the worker. Empty for non-build workers.
+        max_concurrent_builds:
+          type: integer
+          format: int32
+          description: Maximum number of concurrent builds the worker accepts
+        assigned_job_count:
+          type: integer
+          format: int32
+          description: Number of jobs currently assigned to this worker
+        draining:
+          type: boolean
+          description: Whether the worker is draining (no new jobs will be dispatched)
+
+    OrgWorkerEntry:
+      type: object
+      required: [worker_id, registered_at]
+      properties:
+        worker_id:
+          type: string
+          description: Persistent worker identity string
+        registered_at:
+          type: string
+          format: date-time
+          description: When this worker was registered under the organization
+        live:
+          allOf:
+            - $ref: '#/components/schemas/WorkerLiveInfo'
+          nullable: true
+          description: Present when the worker is currently connected to this server
 
     WorkerInfo:
       type: object

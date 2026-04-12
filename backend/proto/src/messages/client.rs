@@ -8,24 +8,31 @@ use gradient_core::types::proto::GradientCapabilities;
 use rkyv::{Archive, Deserialize, Serialize};
 
 use super::jobs::JobUpdateKind;
-use super::types::{Architecture, CandidateScore};
+use super::types::CandidateScore;
 
 /// Messages sent from the client (worker / federated peer) to the server.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub enum ClientMessage {
     /// First message on every connection.  The peer declares its protocol
-    /// version, capabilities, persistent identity, and authentication token.
-    /// Server responds with [`super::server::ServerMessage::InitAck`] or
-    /// [`super::server::ServerMessage::Reject`].
+    /// version, capabilities, and persistent identity.  The server responds
+    /// with [`super::server::ServerMessage::AuthChallenge`].
     InitConnection {
         version: u16,
         capabilities: GradientCapabilities,
         /// Persistent peer UUID, generated on first start and stored locally.
         id: String,
-        /// API key for authentication.  May be `None` for public cache clients.
-        token: Option<String>,
     },
+
+    /// Response to [`super::server::ServerMessage::AuthChallenge`].
+    /// Contains per-peer tokens for each peer the worker has credentials for.
+    /// Pairs are `(peer_id, token)`.
+    AuthResponse { tokens: Vec<(String, String)> },
+
+    /// Request a new auth challenge from the server — sent when the worker
+    /// has acquired a new peer token and wants to become authorized for that
+    /// peer without reconnecting.
+    ReauthRequest,
 
     /// Decline the connection after receiving
     /// [`super::server::ServerMessage::InitAck`].
@@ -35,8 +42,8 @@ pub enum ClientMessage {
     /// Advertise build capacity.  Sent after a successful handshake by any
     /// peer with the `build` capability negotiated.
     WorkerCapabilities {
-        /// Supported architectures, native-first.
-        architectures: Vec<Architecture>,
+        /// Supported architectures as Nix system strings, e.g. `"x86_64-linux"`.
+        architectures: Vec<String>,
         /// Nix system features (e.g. `"kvm"`, `"big-parallel"`), capacity-sorted.
         system_features: Vec<String>,
         /// Maximum number of concurrent builds this peer accepts.

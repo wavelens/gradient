@@ -70,5 +70,6 @@ pub fn test_cli() -> Cli {
         max_proto_connections: 16,
         discoverable: false,
         federate_proto: false,
+        global_stats_public: false,
     }
 }

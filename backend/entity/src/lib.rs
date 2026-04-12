@@ -6,9 +6,6 @@
 
 pub mod api;
 pub mod build;
-pub mod build_machine;
-pub mod build_machine_architecture;
-pub mod build_machine_feature;
 pub mod cache;
 pub mod cache_derivation;
 pub mod cache_metric;
@@ -31,7 +28,6 @@ pub mod organization_user;
 pub mod project;
 pub mod role;
 pub mod server;
-pub mod server_architecture;
-pub mod server_feature;
 pub mod user;
 pub mod webhook;
+pub mod worker_registration;

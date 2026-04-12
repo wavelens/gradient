@@ -150,7 +150,6 @@ pub async fn add_features(
     state: Arc<ServerState>,
     features: Vec<String>,
     derivation_id: Option<Uuid>,
-    server_id: Option<Uuid>,
 ) -> Result<()> {
     for f in features {
         let feature = EFeature::find()
@@ -184,19 +183,6 @@ pub async fn add_features(
                 .insert(&state.db)
                 .await
                 .context("Failed to insert derivation feature")?;
-        }
-
-        if let Some(s_id) = server_id {
-            let aserver_feature = AServerFeature {
-                id: Set(Uuid::new_v4()),
-                server: Set(s_id),
-                feature: Set(feature.id),
-            };
-
-            aserver_feature
-                .insert(&state.db)
-                .await
-                .context("Failed to insert server feature")?;
         }
     }
     Ok(())
@@ -267,24 +253,6 @@ pub async fn get_any_project_by_name(
             .await
             .context("Failed to query project")?
             .map(|p| (o, p))),
-        None => Ok(None),
-    }
-}
-
-pub async fn get_server_by_name(
-    state: Arc<ServerState>,
-    user_id: Uuid,
-    organization_name: String,
-    server_name: String,
-) -> Result<Option<(MOrganization, MServer)>> {
-    match get_organization_by_name(state.clone(), user_id, organization_name).await? {
-        Some(o) => Ok(EServer::find()
-            .filter(CServer::Organization.eq(o.id))
-            .filter(CServer::Name.eq(server_name))
-            .one(&state.db)
-            .await
-            .context("Failed to query server")?
-            .map(|s| (o, s))),
         None => Ok(None),
     }
 }

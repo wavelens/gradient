@@ -52,6 +52,10 @@ mod m20260408_000001_evaluation_messages;
 mod m20260409_000000_add_ci_reporter_to_project;
 mod m20260410_000000_add_fetching_evaluation_status;
 mod m20260411_000000_rename_server_to_build_machine;
+mod m20260412_000000_add_superuser_to_user;
+mod m20260412_000001_create_worker_registration;
+mod m20260412_000002_convert_architecture_to_string;
+mod m20260412_000003_drop_ssh_server_tables;
 
 pub struct Migrator;
 
@@ -105,6 +109,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20260409_000000_add_ci_reporter_to_project::Migration),
             Box::new(m20260410_000000_add_fetching_evaluation_status::Migration),
             Box::new(m20260411_000000_rename_server_to_build_machine::Migration),
+            Box::new(m20260412_000000_add_superuser_to_user::Migration),
+            Box::new(m20260412_000001_create_worker_registration::Migration),
+            Box::new(m20260412_000002_convert_architecture_to_string::Migration),
+            Box::new(m20260412_000003_drop_ssh_server_tables::Migration),
         ]
     }
 }

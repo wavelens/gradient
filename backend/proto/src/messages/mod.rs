@@ -14,10 +14,10 @@ pub use gradient_core::types::proto::GradientCapabilities;
 pub use jobs::{
     BuildJob, BuildTask, CompressTask, FlakeJob, FlakeTask, Job, JobUpdateKind, SignTask,
 };
-pub use server::ServerMessage;
+pub use server::{FailedPeer, ServerMessage};
 pub use types::{
-    Architecture, BuildOutput, CandidateScore, CredentialKind, DerivationOutput,
-    DiscoveredDerivation, JobCandidate,
+    BuildOutput, CandidateScore, CredentialKind, DerivationOutput, DiscoveredDerivation,
+    JobCandidate,
 };
 
 /// Wire protocol version implemented by this build.

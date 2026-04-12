@@ -20,6 +20,8 @@ pub struct StateUser {
     pub password_file: String,
     #[serde(default)]
     pub email_verified: bool,
+    #[serde(default)]
+    pub superuser: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,30 +65,6 @@ pub struct StateProject {
     /// (loaded via `LoadCredential`), encrypts it, and stores it in the database.
     #[serde(default)]
     pub ci_reporter_has_token: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateServer {
-    pub name: String,
-    pub display_name: String,
-    pub organization: String,
-    #[serde(default = "default_true")]
-    pub active: bool,
-    pub host: String,
-    #[serde(default = "default_ssh_port")]
-    pub port: i32,
-    pub username: String,
-    #[serde(default = "default_architectures")]
-    pub architectures: Vec<String>,
-    #[serde(default)]
-    pub features: Vec<String>,
-    #[serde(default = "default_max_concurrent_builds")]
-    pub max_concurrent_builds: i32,
-    pub created_by: String,
-}
-
-fn default_max_concurrent_builds() -> i32 {
-    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,8 +121,6 @@ pub struct StateConfiguration {
     #[serde(default)]
     pub projects: HashMap<String, StateProject>,
     #[serde(default)]
-    pub servers: HashMap<String, StateServer>,
-    #[serde(default)]
     pub caches: HashMap<String, StateCache>,
     #[serde(default)]
     pub api_keys: HashMap<String, StateApiKey>,
@@ -169,14 +145,6 @@ fn default_true() -> bool {
 
 fn default_main() -> String {
     "main".to_string()
-}
-
-fn default_ssh_port() -> i32 {
-    22
-}
-
-fn default_architectures() -> Vec<String> {
-    vec!["x86_64-linux".to_string()]
 }
 
 fn default_priority() -> i32 {
@@ -230,45 +198,6 @@ impl StateConfiguration {
                 errors.push(ValidationError {
                     field: format!("projects.{}.repository", project.name),
                     message: "Repository URL must start with http or git".to_string(),
-                });
-            }
-        }
-
-        for server in self.servers.values() {
-            if !self.organizations.contains_key(&server.organization) {
-                errors.push(ValidationError {
-                    field: format!("servers.{}.organization", server.name),
-                    message: format!("Organization '{}' does not exist", server.organization),
-                });
-            }
-
-            if !self.users.contains_key(&server.created_by) {
-                errors.push(ValidationError {
-                    field: format!("servers.{}.created_by", server.name),
-                    message: format!("User '{}' does not exist", server.created_by),
-                });
-            }
-
-            for arch in &server.architectures {
-                if ![
-                    "x86_64-linux",
-                    "aarch64-linux",
-                    "x86_64-darwin",
-                    "aarch64-darwin",
-                ]
-                .contains(&arch.as_str())
-                {
-                    errors.push(ValidationError {
-                        field: format!("servers.{}.architectures", server.name),
-                        message: format!("Unknown architecture: {}", arch),
-                    });
-                }
-            }
-
-            if server.port < 1 || server.port > 65535 {
-                errors.push(ValidationError {
-                    field: format!("servers.{}.port", server.name),
-                    message: "Port must be between 1 and 65535".to_string(),
                 });
             }
         }

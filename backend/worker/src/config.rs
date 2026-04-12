@@ -16,10 +16,11 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_WORKER_SERVER_URL")]
     pub server_url: String,
 
-    /// File containing the API token for authentication.
-    /// Not required for public cache-only connections.
-    #[arg(long, env = "GRADIENT_WORKER_TOKEN_FILE")]
-    pub token_file: Option<String>,
+    /// Peer-to-token mappings for challenge-response authentication.
+    /// Format: `peer_id1:token1,peer_id2:token2` (comma-separated pairs).
+    /// Each peer can be an org, cache, or proxy UUID.
+    #[arg(long, env = "GRADIENT_WORKER_PEERS")]
+    pub peers: Option<String>,
 
     /// Re-exec as a Nix evaluator subprocess (internal — do not set manually).
     #[arg(long, env = "GRADIENT_EVAL_WORKER", hide = true)]
@@ -79,6 +80,23 @@ pub struct WorkerConfig {
 }
 
 impl WorkerConfig {
+    /// Parse `GRADIENT_WORKER_PEERS` into `(peer_id, token)` pairs.
+    pub fn peer_tokens(&self) -> Vec<(String, String)> {
+        let Some(peers) = &self.peers else { return vec![] };
+        peers
+            .split(',')
+            .filter_map(|entry| {
+                let mut parts = entry.splitn(2, ':');
+                let peer_id = parts.next()?.trim().to_owned();
+                let token = parts.next()?.trim().to_owned();
+                if peer_id.is_empty() || token.is_empty() {
+                    return None;
+                }
+                Some((peer_id, token))
+            })
+            .collect()
+    }
+
     /// Build the `GradientCapabilities` struct from the CLI flags.
     pub fn capabilities(&self) -> GradientCapabilities {
         GradientCapabilities {
