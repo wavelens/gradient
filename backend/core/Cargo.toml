@@ -40,6 +40,7 @@ ring             = { workspace = true }
 rkyv             = { workspace = true }
 
 # Crate-specific dependencies
+libc             = { workspace = true }
 async-ssh2-lite  = { version = "0.5", features = ["tokio"] }
 base64           = "0.22"
 git2             = { workspace = true }

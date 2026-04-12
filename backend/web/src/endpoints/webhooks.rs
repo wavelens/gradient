@@ -311,7 +311,7 @@ pub async fn post_webhook_test(
         .map_err(|e| {
             WebError::InternalServerError(format!("Failed to decrypt webhook secret: {}", e))
         })?;
-    let signature = core::ci::sign_webhook_payload(&plaintext_secret, &body_str);
+    let signature = core::ci::sign_webhook_payload(plaintext_secret.expose(), &body_str);
 
     let status = state
         .webhooks

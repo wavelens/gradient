@@ -87,7 +87,7 @@ pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), SourceE
 
     let public_key_openssh = format!("{} {}", Algorithm::Ed25519.as_str(), public_key_data);
 
-    let encrypted_private_key = crypter::encrypt_with_password(&secret, &private_key_openssh)
+    let encrypted_private_key = crypter::encrypt_with_password(secret.expose(), &private_key_openssh)
         .ok_or(SourceError::CryptographicOperation)?;
 
     let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_private_key);
@@ -110,7 +110,7 @@ pub fn decrypt_ssh_private_key(
         })?;
 
     let decrypted_private_key = if let Some(p) =
-        crypter::decrypt_with_password(&secret, encrypted_private_key.clone())
+        crypter::decrypt_with_password(secret.expose(), encrypted_private_key.clone())
     {
         String::from_utf8(p).map_err(|_| SourceError::KeyUtf8Conversion)?
     } else {

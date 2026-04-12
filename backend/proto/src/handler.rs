@@ -70,7 +70,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>, scheduler
 
     debug!(client_version, ?client_capabilities, %peer_id, "InitConnection received");
 
-    if client_version > PROTO_VERSION {
+    if client_version != PROTO_VERSION {
         send_reject(
             &mut socket,
             400,
@@ -138,7 +138,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>, scheduler
     // Reject duplicate connections (same worker ID already connected).
     if scheduler.is_worker_connected(&peer_id).await {
         warn!(%peer_id, "duplicate connection rejected (worker already connected)");
-        send_reject(&mut socket, 429, "worker already connected".into()).await;
+        send_reject(&mut socket, 496, "worker already connected".into()).await;
         return;
     }
 

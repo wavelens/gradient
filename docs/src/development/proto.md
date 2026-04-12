@@ -975,20 +975,20 @@ This is distinct from a crash (unexpected disconnect) where workers reconnect im
 
 | Code | Meaning |
 |------|---------|
-| 400 | Malformed message or unsupported protocol version |
-| 401 | Unauthorized (missing or invalid token) |
-| 403 | Capability not negotiated for this session |
-| 404 | Job not found (e.g. AbortJob for unknown job_id) |
-| 409 | Job already assigned or completed |
-| 429 | Duplicate connection (worker ID already connected) |
-| 500 | Internal server error |
-| 503 | Server shutting down — do not reconnect immediately |
+| 400  | Malformed message or unsupported protocol version |
+| 401  | Unauthorized (missing or invalid token) |
+| 499  | Capability not negotiated for this session |
+| 498  | Job not found (e.g. AbortJob for unknown job_id) |
+| 497  | Job already assigned or completed |
+| 496  | Duplicate connection (already connected) |
+| 500  | Internal server error |
+| 599  | Peer shutting down |
+| 598  | Peer starting |
 
 ---
 
 ## Versioning
 
 - `PROTO_VERSION` (currently `1`) is incremented on breaking wire changes.
-- Server accepts any `client_version <= PROTO_VERSION`.
-- New fields in rkyv structs default to `false`/`0` — adding fields is forwards-compatible without a version bump.
+- Server accepts any `client_version == PROTO_VERSION`.
 - New capabilities are gated by `GradientCapabilities` flags, not version numbers.

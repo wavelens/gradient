@@ -1129,6 +1129,7 @@ dependencies = [
  "hex",
  "hmac 0.13.0",
  "lettre",
+ "libc",
  "migration",
  "mockall",
  "nix-bindings",

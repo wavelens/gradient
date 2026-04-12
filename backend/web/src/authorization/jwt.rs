@@ -80,7 +80,7 @@ pub fn encode_jwt(
     encode(
         &Header::default(),
         &claim,
-        &EncodingKey::from_secret(secret.as_ref()),
+        &EncodingKey::from_secret(secret.expose().as_bytes()),
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
@@ -122,7 +122,7 @@ pub async fn decode_jwt(
 
         decode(
             &jwt,
-            &DecodingKey::from_secret(secret.as_ref()),
+            &DecodingKey::from_secret(secret.expose().as_bytes()),
             &Validation::default(),
         )
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -143,7 +143,7 @@ pub fn encode_download_token(
     encode(
         &Header::default(),
         &claim,
-        &EncodingKey::from_secret(secret.as_ref()),
+        &EncodingKey::from_secret(secret.expose().as_bytes()),
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
@@ -155,7 +155,7 @@ pub async fn decode_download_token(
     let secret = load_secret(&state.cli.jwt_secret_file);
     decode::<DownloadClaims>(
         &token,
-        &DecodingKey::from_secret(secret.as_ref()),
+        &DecodingKey::from_secret(secret.expose().as_bytes()),
         &Validation::default(),
     )
     .map(|d| d.claims)

@@ -7,6 +7,7 @@
 pub mod consts;
 pub mod input;
 pub mod proto;
+pub mod secret;
 pub mod wildcard;
 
 mod entity_aliases;
@@ -18,6 +19,7 @@ pub use self::entity_aliases::*;
 pub use self::input::*;
 pub use self::io::*;
 pub use self::nix_cache::*;
+pub use self::secret::{SecretBytes, SecretString};
 pub use self::wildcard::*;
 
 use super::storage::email::EmailSender;

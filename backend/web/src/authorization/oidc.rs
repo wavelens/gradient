@@ -152,7 +152,7 @@ pub async fn oidc_login_verify(
             ("code", authorization_code.as_str()),
             ("redirect_uri", redirect_uri.as_str()),
             ("client_id", client_id.as_str()),
-            ("client_secret", client_secret.as_str()),
+            ("client_secret", client_secret.expose()),
         ])
         .send()
         .await

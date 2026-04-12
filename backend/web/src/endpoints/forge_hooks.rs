@@ -90,7 +90,7 @@ pub async fn github_app_webhook(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    if !verify_github_signature(&secret, sig_header, &body) {
+    if !verify_github_signature(secret.expose(), sig_header, &body) {
         warn!("GitHub App webhook: invalid signature");
         return StatusCode::UNAUTHORIZED;
     }
@@ -246,7 +246,7 @@ pub async fn forge_webhook(
                 .get("X-Gitea-Signature")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-            verify_gitea_signature(&plaintext_secret, sig, &body)
+            verify_gitea_signature(plaintext_secret.expose(), sig, &body)
         }
         "gitlab" => {
             // GitLab sends a plain token in X-Gitlab-Token; no HMAC.
@@ -254,7 +254,7 @@ pub async fn forge_webhook(
                 .get("X-Gitlab-Token")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-            token == plaintext_secret
+            token == plaintext_secret.expose()
         }
         "github" => {
             // GitHub without the App: same HMAC as App webhooks.
@@ -262,7 +262,7 @@ pub async fn forge_webhook(
                 .get("X-Hub-Signature-256")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-            verify_github_signature(&plaintext_secret, sig, &body)
+            verify_github_signature(plaintext_secret.expose(), sig, &body)
         }
         unknown => {
             warn!(forge = %unknown, "Unknown forge type in webhook path");

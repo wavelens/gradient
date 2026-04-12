@@ -139,7 +139,7 @@ async fn apply_organizations(
         let public_key = derive_public_key(private_key.trim())?;
         let secret = load_secret_bytes(crypt_secret_file);
 
-        let encrypted_bytes = crypter::encrypt_with_password(&secret, private_key.trim())
+        let encrypted_bytes = crypter::encrypt_with_password(secret.expose(), private_key.trim())
             .ok_or_else(|| "Failed to encrypt SSH private key".to_string())?;
         let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_bytes);
 
@@ -252,7 +252,7 @@ async fn apply_projects(
                 match fs::read_to_string(&token_path) {
                     Ok(token) => {
                         let secret = load_secret_bytes(crypt_secret_file);
-                        match crypter::encrypt_with_password(&secret, token.trim()) {
+                        match crypter::encrypt_with_password(secret.expose(), token.trim()) {
                             Some(encrypted_bytes) => {
                                 Some(Some(general_purpose::STANDARD.encode(&encrypted_bytes)))
                             }
@@ -375,7 +375,7 @@ async fn apply_caches(
         let public_key = general_purpose::STANDARD.encode(&key_bytes[key_bytes.len() - 32..]);
 
         let secret = load_secret_bytes(crypt_secret_file);
-        let encrypted_bytes = crypter::encrypt_with_password(&secret, signing_key.trim())
+        let encrypted_bytes = crypter::encrypt_with_password(secret.expose(), signing_key.trim())
             .ok_or_else(|| {
                 format!(
                     "Failed to encrypt signing key for cache '{}'",

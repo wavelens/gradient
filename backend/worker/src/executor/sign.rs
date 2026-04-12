@@ -38,11 +38,12 @@ pub async fn sign_outputs(
 ) -> Result<()> {
     updater.report_signing().await?;
 
-    let key_str = credentials
+    let key_secret = credentials
         .signing_key()
         .ok_or_else(|| anyhow::anyhow!("no signing key credential received for this job"))?;
 
-    let secret_key: SecretKey = key_str
+    let secret_key: SecretKey = key_secret
+        .expose()
         .parse()
         .map_err(|e| anyhow::anyhow!("failed to parse signing key: {}", e))?;
 

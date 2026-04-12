@@ -64,20 +64,22 @@ impl WebhookClient for ReqwestWebhookClient {
 /// Encrypts `plaintext_secret` with the server crypt key and returns a base64-encoded ciphertext.
 pub fn encrypt_webhook_secret(crypt_secret_file: &str, plaintext: &str) -> Result<String, String> {
     let key = load_secret_bytes(crypt_secret_file);
-    let ciphertext = crypter::encrypt_with_password(&key, plaintext.as_bytes())
+    let ciphertext = crypter::encrypt_with_password(key.expose(), plaintext.as_bytes())
         .ok_or_else(|| "Encryption failed".to_string())?;
     Ok(general_purpose::STANDARD.encode(ciphertext))
 }
 
 /// Decrypts a base64-encoded ciphertext produced by `encrypt_webhook_secret`.
-pub fn decrypt_webhook_secret(crypt_secret_file: &str, encoded: &str) -> Result<String, String> {
+pub fn decrypt_webhook_secret(crypt_secret_file: &str, encoded: &str) -> Result<crate::types::SecretString, String> {
     let key = load_secret_bytes(crypt_secret_file);
     let ciphertext = general_purpose::STANDARD
         .decode(encoded)
         .map_err(|e| format!("Base64 decode error: {}", e))?;
-    let plaintext = crypter::decrypt_with_password(&key, ciphertext)
+    let plaintext = crypter::decrypt_with_password(key.expose(), ciphertext)
         .ok_or_else(|| "Decryption failed".to_string())?;
-    String::from_utf8(plaintext).map_err(|e| format!("UTF-8 decode error: {}", e))
+    String::from_utf8(plaintext)
+        .map(crate::types::SecretString::new)
+        .map_err(|e| format!("UTF-8 decode error: {}", e))
 }
 
 /// Signs `body` with HMAC-SHA256 using `secret` and returns `sha256=<hex>`.
@@ -252,7 +254,7 @@ async fn fire_webhooks(
                 continue;
             }
         };
-        let signature = sign_webhook_payload(&plaintext_secret, &body_str);
+        let signature = sign_webhook_payload(plaintext_secret.expose(), &body_str);
 
         let result = state
             .webhooks

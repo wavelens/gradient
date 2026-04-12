@@ -22,7 +22,7 @@ pub fn generate_signing_key(secret_file: String) -> Result<(String, String), Sou
     // Derive the standalone public key (last 32 bytes)
     let public_key_b64 = general_purpose::STANDARD.encode(*keypair.pk);
 
-    let encrypted_private_key = crypter::encrypt_with_password(&secret, key_b64.as_bytes())
+    let encrypted_private_key = crypter::encrypt_with_password(secret.expose(), key_b64.as_bytes())
         .ok_or(SourceError::CryptographicOperation)?;
 
     Ok((
@@ -72,7 +72,7 @@ pub fn decrypt_signing_key(secret_file: String, cache: MCache) -> Result<String,
             reason: format!("{}. The private key in the cache appears to be corrupted or not properly base64-encoded.", e)
         })?;
 
-    let decrypted_private_key = crypter::decrypt_with_password(&secret, encrypted_private_key)
+    let decrypted_private_key = crypter::decrypt_with_password(secret.expose(), encrypted_private_key)
         .ok_or(SourceError::PrivateKeyDecryption)?;
 
     let decrypted_key_str =

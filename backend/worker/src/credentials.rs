@@ -12,15 +12,17 @@
 //! makes it available to executors that need it.
 //!
 //! Credentials are intentionally NOT persisted to disk and are dropped when the
-//! connection closes.
+//! connection closes. Both [`SecretString`] and [`SecretBytes`] lock their
+//! memory pages with `mlock(2)` and zero them on drop.
 
+use gradient_core::types::{SecretBytes, SecretString};
 use proto::messages::CredentialKind;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 struct Inner {
-    signing_key: Option<String>,
-    ssh_key: Option<Vec<u8>>,
+    signing_key: Option<SecretString>,
+    ssh_key: Option<SecretBytes>,
 }
 
 /// Thread-safe, in-memory credential store.
@@ -39,22 +41,34 @@ impl CredentialStore {
         let mut inner = self.inner.lock().unwrap();
         match kind {
             CredentialKind::SigningKey => {
-                inner.signing_key = String::from_utf8(data).ok();
+                inner.signing_key = String::from_utf8(data).ok().map(SecretString::new);
             }
             CredentialKind::SshKey => {
-                inner.ssh_key = Some(data);
+                inner.ssh_key = Some(SecretBytes::new(data));
             }
         }
     }
 
     /// Retrieve the signing key (Ed25519 `name:base64` format).
-    pub fn signing_key(&self) -> Option<String> {
-        self.inner.lock().unwrap().signing_key.clone()
+    /// Returns a clone of the secret — the caller is responsible for dropping
+    /// it promptly after use.
+    pub fn signing_key(&self) -> Option<SecretString> {
+        self.inner
+            .lock()
+            .unwrap()
+            .signing_key
+            .as_ref()
+            .map(|s| SecretString::new(s.expose().to_string()))
     }
 
     /// Retrieve the SSH private key bytes.
-    pub fn ssh_key(&self) -> Option<Vec<u8>> {
-        self.inner.lock().unwrap().ssh_key.clone()
+    pub fn ssh_key(&self) -> Option<SecretBytes> {
+        self.inner
+            .lock()
+            .unwrap()
+            .ssh_key
+            .as_ref()
+            .map(|b| SecretBytes::new(b.expose().to_vec()))
     }
 
     /// Clear all stored credentials (called after a job completes).

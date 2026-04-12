@@ -6,6 +6,7 @@
  - disko image builder for unit test store: nix run .#diskoImage-qemu in libretoy (https://github.com/nix-community/disko/blob/5ad85c82cc52264f4beddc934ba57f3789f28347/lib/make-disk-image.nix#L168)
  - error pages - add a page for 404, 500, 502, 503, 504
  - poll rarly even when there are webhooks
+ - accept only connections with same proto version
 
  - save which builder was used for each build in the database
  - add a eval logLevel (seperate from build)

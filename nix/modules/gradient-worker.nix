@@ -155,7 +155,7 @@ in {
       after = [ "network.target" ];
 
       serviceConfig = {
-        ExecStart = "${lib.getBin cfg.package}/worker";
+        ExecStart = "${lib.getBin cfg.package}/bin/gradient-worker";
         User = "gradient-worker";
         Group = "gradient-worker";
         Restart = "on-failure";
