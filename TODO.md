@@ -1,6 +1,4 @@
  - Log OIDC Errors in journal error
- - Add Super User
- - Add Non-SSH server as default
  - Base (Default) Servers (for all orgs), configured only in state
  - move Evaluation errors to Entrypoint
  - when new git commit is detected, add it as queued (dont wait for the current evaluation to finish), abort the previous build if it is still running

@@ -23,6 +23,7 @@ nav:
     - Architecture: development/architecture.md
     - Internals: development/internals.md
     - Proto: development/proto.md
+    - Tests: development/tests.md
     - Contributing: development/contributing.md
 
 plugins:
