@@ -17,13 +17,14 @@ pub struct WorkerConfig {
     pub server_url: String,
 
     /// Peer-to-token mappings for challenge-response authentication.
-    /// Format: `peer_id1:token1,peer_id2:token2` (comma-separated pairs).
-    /// Each peer can be an org, cache, or proxy UUID.
+    /// Format: one `peer_id:token` pair per line (newline-separated).
+    /// Use `*:token` to respond with `token` for any peer UUID the server challenges.
+    /// Each named peer is an org, cache, or proxy UUID.
     /// Mutually exclusive with `--peers-file`.
     #[arg(long, env = "GRADIENT_WORKER_PEERS")]
     pub peers: Option<String>,
 
-    /// Path to a file whose contents are the peer-to-token string
+    /// Path to a file whose contents are peer-to-token pairs, one per line
     /// (same format as `--peers`). Takes precedence over `--peers`.
     #[arg(long, env = "GRADIENT_WORKER_PEERS_FILE")]
     pub peers_file: Option<String>,
@@ -93,6 +94,10 @@ pub struct WorkerConfig {
 impl WorkerConfig {
     /// Parse peer-to-token pairs from `--peers-file` (preferred) or `--peers`.
     /// Returns an empty vec when neither is set (open/discoverable mode).
+    ///
+    /// Format: one `peer_id:token` entry per line. The special peer ID `*`
+    /// matches any UUID the server challenges — callers should expand it using
+    /// [`Self::resolve_tokens_for_challenge`].
     pub fn peer_tokens(&self) -> Vec<(String, String)> {
         let raw = if let Some(path) = &self.peers_file {
             match std::fs::read_to_string(path) {
@@ -108,17 +113,66 @@ impl WorkerConfig {
             return vec![];
         };
 
-        raw.split(',')
+        raw.lines()
             .filter_map(|entry| {
+                let entry = entry.trim();
+                if entry.is_empty() || entry.starts_with('#') {
+                    return None;
+                }
                 let mut parts = entry.splitn(2, ':');
                 let peer_id = parts.next()?.trim().to_owned();
                 let token = parts.next()?.trim().to_owned();
                 if peer_id.is_empty() || token.is_empty() {
                     return None;
                 }
+                // Tokens must be the base64 encoding of 48 random bytes
+                // (64 characters), as produced by `openssl rand -base64 48`
+                // or the worker registration API.
+                if token.len() < 64 {
+                    tracing::warn!(
+                        peer_id,
+                        token_len = token.len(),
+                        "token is too short (expected 64 base64 chars / 48 bytes); skipping entry"
+                    );
+                    return None;
+                }
                 Some((peer_id, token))
             })
             .collect()
+    }
+
+    /// Given the list of peer UUIDs the server challenged us about, build the
+    /// `(peer_id, token)` pairs to include in `AuthResponse`.
+    ///
+    /// A wildcard entry (`*:token`) expands to a response for every challenged
+    /// peer that is not already covered by an explicit entry.
+    pub fn resolve_tokens_for_challenge(
+        peer_tokens: &[(String, String)],
+        challenged: &[String],
+    ) -> Vec<(String, String)> {
+        let wildcard_token: Option<&str> = peer_tokens
+            .iter()
+            .find(|(id, _)| id == "*")
+            .map(|(_, t)| t.as_str());
+
+        let mut result: Vec<(String, String)> = peer_tokens
+            .iter()
+            .filter(|(id, _)| id != "*" && challenged.contains(id))
+            .cloned()
+            .collect();
+
+        if let Some(token) = wildcard_token {
+            let covered: std::collections::HashSet<String> =
+                result.iter().map(|(id, _)| id.clone()).collect();
+            let extras: Vec<(String, String)> = challenged
+                .iter()
+                .filter(|pid| !covered.contains(*pid))
+                .map(|pid| (pid.clone(), token.to_owned()))
+                .collect();
+            result.extend(extras);
+        }
+
+        result
     }
 
     /// Build the `GradientCapabilities` struct from the CLI flags.

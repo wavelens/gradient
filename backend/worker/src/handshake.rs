@@ -15,6 +15,7 @@ use anyhow::{Context, Result, bail};
 use proto::messages::{ClientMessage, GradientCapabilities, ServerMessage, PROTO_VERSION};
 use tracing::{debug, info};
 
+use crate::config::WorkerConfig;
 use crate::connection::ProtoConnection;
 
 /// Result of a successful handshake.
@@ -61,10 +62,8 @@ pub async fn perform_handshake(
     debug!(peers = ?challenge_peers, "received AuthChallenge");
 
     // Reply with tokens for the peers the server challenged us about.
-    let tokens: Vec<(String, String)> = peer_tokens
-        .into_iter()
-        .filter(|(pid, _)| challenge_peers.contains(pid))
-        .collect();
+    // Wildcard entries (`*:token`) are expanded here.
+    let tokens = WorkerConfig::resolve_tokens_for_challenge(&peer_tokens, &challenge_peers);
 
     conn.send(ClientMessage::AuthResponse { tokens })
         .await

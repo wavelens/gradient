@@ -197,11 +197,20 @@ services.gradient.worker = {
 };
 ```
 
-Write the registration result to the peers file:
+Write the registration result to the peers file (one `peer_id:token` pair per line):
 
 ```sh
 echo "<peer_id>:<token>" > /run/secrets/gradient-worker-peers
 ```
+
+The special peer ID `*` can be used instead of a specific UUID to respond with that token for any peer the server challenges:
+
+```
+# /run/secrets/gradient-worker-peers
+*:<token>
+```
+
+The token must be the 48-byte random secret returned by the registration API (generated via `openssl rand -base64 48` server-side).
 
 When `peersFile` is `null` (the default), the worker connects in **open mode** â€” suitable for co-located workers. The server accepts the connection without token validation if no peers have been registered for that worker ID.
 
@@ -210,7 +219,7 @@ When `peersFile` is `null` (the default), the worker connects in **open mode** â
 | Option | Default | Description |
 |---|---|---|
 | `serverUrl` | `""` | WebSocket URL of the server's `/proto` endpoint |
-| `peersFile` | `null` | Path to `peer_id:token,...` auth file; null = open mode |
+| `peersFile` | `null` | Path to peers file (`peer_id:token` per line, `*` = any peer); null = open mode |
 | `discoverable` | `false` | Accept incoming connections from the server (reverse-proxy mode) |
 | `port` | `3100` | Listener port when `discoverable` is enabled |
 | `capabilities.fetch` | `false` | Prefetch flake inputs |

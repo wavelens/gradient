@@ -11,6 +11,7 @@ use core::db::get_organization_by_name;
 use core::types::{BaseResponse, MUser, ServerState};
 use entity::worker_registration::{self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration};
 use proto::{Scheduler, WorkerInfo};
+use base64::Engine as _;
 use rand::RngCore;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
@@ -68,10 +69,11 @@ pub async fn post_org_worker(
         return Err(WebError::BadRequest("worker_id must not be empty".into()));
     }
 
-    // Generate a cryptographically random 32-byte token, hex-encoded.
-    let mut raw = [0u8; 32];
+    // Generate a cryptographically random 48-byte token, base64-encoded.
+    // Equivalent to `openssl rand -base64 48` (produces 64 base64 characters).
+    let mut raw = [0u8; 48];
     rand::rng().fill_bytes(&mut raw);
-    let token = hex::encode(raw);
+    let token = base64::engine::general_purpose::STANDARD.encode(raw);
 
     let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
 

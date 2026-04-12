@@ -29,12 +29,19 @@ in {
 
     peersFile = lib.mkOption {
       description = ''
-        Path to a file containing the peer-to-token authentication string for
-        challenge-response auth with the Gradient server.
+        Path to a file containing peer-to-token pairs for challenge-response
+        auth with the Gradient server, one entry per line:
 
-        Format: <literal>peer_id1:token1,peer_id2:token2</literal>
-        (comma-separated; each peer is an org UUID paired with the token
-        registered via <literal>services.gradient.state.workers</literal>).
+        <literal>
+        # one peer_id:token per line; lines starting with # are ignored
+        &lt;uuid&gt;:&lt;token&gt;
+        *:&lt;token&gt;
+        </literal>
+
+        The special peer ID <literal>*</literal> matches any UUID the server
+        challenges, so a single token works for any org. Each token must be
+        a 48-byte random secret (e.g. <literal>openssl rand -base64 48</literal>)
+        and is registered via <literal>POST /api/v1/orgs/{org}/workers</literal>.
 
         When null (default), the worker connects in open/discoverable mode —
         the server accepts the connection without token validation. Suitable
@@ -80,7 +87,7 @@ in {
       evalWorkers = lib.mkOption {
         description = "Number of Nix evaluator subprocesses";
         type = lib.types.ints.positive;
-        default = 1;
+        default = 4;
       };
 
       maxEvaluationsPerWorker = lib.mkOption {
@@ -89,13 +96,13 @@ in {
           list/resolve calls. Set to 0 to disable recycling.
         '';
         type = lib.types.ints.unsigned;
-        default = 20;
+        default = 1;
       };
 
       maxProtoConnections = lib.mkOption {
         description = "Maximum number of simultaneous proto WebSocket connections";
         type = lib.types.ints.positive;
-        default = 16;
+        default = 1;
       };
 
       evalClosureParallelism = lib.mkOption {

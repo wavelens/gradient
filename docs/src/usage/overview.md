@@ -94,7 +94,8 @@ To run a worker on the server host itself, import the `gradient-worker` NixOS mo
 2. **Configure the worker** on the remote machine (see [Configuration → Workers](../configuration.md#workers) for the full NixOS module):
 
     ```sh
-    # Write peers file:  peer_id:token
+    # Write peers file — one peer_id:token per line.
+    # Use * as peer_id to respond with that token for any org UUID.
     echo "<peer_id>:<token>" > /run/secrets/gradient-worker-peers
     ```
 
