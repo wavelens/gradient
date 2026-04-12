@@ -113,6 +113,14 @@ pub struct StateApiKey {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateWorker {
+    pub worker_id: String,
+    pub url: String,
+    pub organization: String,
+    pub token_file: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateConfiguration {
     #[serde(default)]
     pub users: HashMap<String, StateUser>,
@@ -124,6 +132,8 @@ pub struct StateConfiguration {
     pub caches: HashMap<String, StateCache>,
     #[serde(default)]
     pub api_keys: HashMap<String, StateApiKey>,
+    #[serde(default)]
+    pub workers: HashMap<String, StateWorker>,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -225,6 +235,15 @@ impl StateConfiguration {
                 errors.push(ValidationError {
                     field: format!("api_keys.{}.owned_by", api_key.name),
                     message: format!("User '{}' does not exist", api_key.owned_by),
+                });
+            }
+        }
+
+        for worker in self.workers.values() {
+            if !self.organizations.contains_key(&worker.organization) {
+                errors.push(ValidationError {
+                    field: format!("workers.{}.organization", worker.worker_id),
+                    message: format!("Organization '{}' does not exist", worker.organization),
                 });
             }
         }

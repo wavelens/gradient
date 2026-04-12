@@ -294,6 +294,33 @@
     };
   });
 
+  workerType = types.submodule ({ name, ... }: {
+    options = {
+      worker_id = mkOption {
+        type = types.str;
+        default = name;
+        defaultText = "<attrset key>";
+        description = "Worker identity string. Must match GRADIENT_WORKER_ID on the worker machine.";
+      };
+
+      url = mkOption {
+        type = types.str;
+        description = "WebSocket URL of the Gradient server the worker connects to";
+        example = "wss://gradient.example.com/proto";
+      };
+
+      organization = mkOption {
+        type = types.str;
+        description = "Name of the organization this worker is registered under";
+      };
+
+      token_file = mkOption {
+        type = types.str;
+        description = "Path to a file containing the authentication token for this worker";
+      };
+    };
+  });
+
   apiKeyType = types.submodule ({ name, ... }: {
     options = {
       name = mkOption {
@@ -345,6 +372,25 @@
         type = types.attrsOf apiKeyType;
         default = { };
         description = "Attribute set of API keys to create, keyed by name";
+      };
+
+      workers = mkOption {
+        type = types.attrsOf workerType;
+        default = { };
+        description = ''
+          Attribute set of worker registrations, keyed by worker_id.
+          Each entry inserts a row into worker_registration so the worker
+          can authenticate via challenge-response. The token is read from
+          token_file, hashed, and stored — the plaintext is never persisted.
+        '';
+        example = literalExpression ''
+          {
+            builder-1 = {
+              organization = "acme-corp";
+              token_file = "/etc/gradient/secrets/builder-1-token";
+            };
+          }
+        '';
       };
     };
   };

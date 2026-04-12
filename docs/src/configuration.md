@@ -137,14 +137,18 @@ Gradient matches the incoming push payload's clone URL against active projects a
 
 ## Workers
 
-Build capacity is provided by **`gradient-worker`** instances that connect to the server over a WebSocket at `/proto`. Each worker is a separate process and can run on the same host or a remote machine.
+Build capacity is provided by **`gradient-worker`** instances that connect to the server over a WebSocket at `/proto`. Workers are separate processes and can run on the same host or on dedicated build machines.
 
-### Local Worker (default)
+The server does **not** start a worker automatically. Configure one explicitly using the `gradient-worker` NixOS module.
 
-Every Gradient server automatically starts a co-located worker:
+### Co-located Worker
+
+To run a worker on the same machine as the server, import the worker module and configure `services.gradient.worker`:
 
 ```nix
-services.gradient.workers.local = {
+imports = [ inputs.gradient.nixosModules.gradient-worker ];
+
+services.gradient.worker = {
   enable    = true;
   serverUrl = "ws://127.0.0.1:3000/proto";
   capabilities = {
@@ -156,22 +160,26 @@ services.gradient.workers.local = {
 };
 ```
 
-This is enabled by default (`lib.mkDefault true`). Override any value to tune it.
-
 ### Remote Workers
 
-Deploy `gradient-worker` on additional machines by importing the worker module:
+Deploy `gradient-worker` on dedicated build machines. First register the worker under an organization — either declaratively via `state.workers` (see below) or via the API:
+
+```sh
+curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"worker_id": "builder-1"}'
+# → {"error":false,"message":{"peer_id":"<uuid>","token":"<token>"}}
+```
+
+Then on the build machine:
 
 ```nix
-# On the remote build machine:
-imports = [ inputs.gradient.nixosModules.default ];
+imports = [ inputs.gradient.nixosModules.gradient-worker ];
 
-services.gradient.workers.main = {
+services.gradient.worker = {
   enable    = true;
   serverUrl = "wss://gradient.example.com/proto";
-
-  # Authenticate against an organization that registered this worker
-  # (see POST /api/v1/orgs/{org}/workers for registration)
   peersFile = "/run/secrets/gradient-worker-peers";
 
   capabilities = {
@@ -182,36 +190,26 @@ services.gradient.workers.main = {
   };
 
   settings = {
-    maxConcurrentBuilds       = 8;
-    evalWorkers               = 2;
-    maxConcurrentEvaluations  = 2;
+    maxConcurrentBuilds      = 8;
+    evalWorkers              = 2;
+    maxConcurrentEvaluations = 2;
   };
 };
 ```
 
-The `peersFile` must contain `peer_id:token` pairs (comma-separated). Obtain the `peer_id` and `token` by registering the worker under an organization:
-
-```sh
-curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"worker_id": "my-builder-hostname"}'
-# → {"error":false,"message":{"peer_id":"<uuid>","token":"<token>"}}
-```
-
-Write the result to the peers file:
+Write the registration result to the peers file:
 
 ```sh
 echo "<peer_id>:<token>" > /run/secrets/gradient-worker-peers
 ```
 
-When `peersFile` is `null` (the default), the worker connects in **open mode** — suitable for co-located workers that you trust implicitly. The server accepts the connection if no peers have been explicitly registered for that worker ID.
+When `peersFile` is `null` (the default), the worker connects in **open mode** — suitable for co-located workers. The server accepts the connection without token validation if no peers have been registered for that worker ID.
 
 ### Worker Options
 
 | Option | Default | Description |
 |---|---|---|
-| `serverUrl` | — | WebSocket URL of the server's `/proto` endpoint (required) |
+| `serverUrl` | `""` | WebSocket URL of the server's `/proto` endpoint |
 | `peersFile` | `null` | Path to `peer_id:token,...` auth file; null = open mode |
 | `discoverable` | `false` | Accept incoming connections from the server (reverse-proxy mode) |
 | `port` | `3100` | Listener port when `discoverable` is enabled |
@@ -328,3 +326,27 @@ The key file must contain a token with the `GRAD` prefix:
 ```sh
 echo "GRAD$(openssl rand -hex 32)" > /run/secrets/ci-api-key
 ```
+
+### Workers
+
+Worker registrations can be declared in state instead of using the API. This is useful for NixOS-managed build machines where you want tokens to be provisioned automatically.
+
+```nix
+services.gradient.state.workers = {
+  builder-1 = {
+    url          = "wss://gradient.example.com/proto";
+    organization = "acme";
+    token_file   = "/run/secrets/builder-1-token";
+  };
+};
+```
+
+The token file must contain a single plaintext token. The server hashes it and stores the result — the plaintext is never persisted.
+
+```sh
+openssl rand -hex 32 > /run/secrets/builder-1-token
+```
+
+The `worker_id` defaults to the attrset key. Set it explicitly only if the worker machine uses a custom `GRADIENT_WORKER_ID`.
+
+State-managed worker registrations are deleted automatically when removed from `state.workers` (subject to `settings.deleteState`).

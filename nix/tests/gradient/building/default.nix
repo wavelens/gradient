@@ -78,11 +78,6 @@
           max-jobs = 0;
         };
 
-        services.gradient.workers.local = {
-          capabilities.build = lib.mkForce false;
-          capabilities.sign = lib.mkForce false;
-        };
-
         systemd.tmpfiles.rules = [
           "d /var/lib/git 0755 git git"
           "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
@@ -123,7 +118,7 @@
           ];
         };
 
-        services.gradient.workers.local = {
+        services.gradient.worker = {
           enable = true;
           serverUrl = "ws://server/proto";
           capabilities = {
@@ -145,7 +140,7 @@
       server.wait_for_unit("gradient-server.service")
       server.sleep(5)
       server.wait_for_unit("git-daemon.service")
-      builder.wait_for_unit("gradient-worker-local.service")
+      builder.wait_for_unit("gradient-worker.service")
       print(server.succeed("journalctl -u nix-daemon -n 200 --no-pager"))
       builder.succeed("systemctl restart nix-daemon.service")
       print(builder.succeed("journalctl -u nix-daemon -n 200 --no-pager"))

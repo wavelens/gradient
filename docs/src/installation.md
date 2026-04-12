@@ -59,7 +59,7 @@ In your `configuration.nix`:
 }
 ```
 
-The server automatically starts a **local `gradient-worker`** connected on the loopback interface with `fetch`, `eval`, `build`, and `sign` capabilities. This worker handles all jobs out of the box for single-host setups. See [Configuration → Workers](configuration.md#workers) to add remote workers or tune the local one.
+The server does **not** start a worker automatically. Add a co-located worker to handle jobs on the same machine (import the `gradient-worker` module and set `services.gradient.worker.enable = true`), or deploy `gradient-worker` on separate build machines. See [Configuration → Workers](configuration.md#workers) for the full setup.
 
 All available options are searchable at the [Options Search](https://wavelens.github.io/gradient-search).
 
@@ -92,4 +92,4 @@ Gradient will start automatically and be available at `https://gradient.example.
 2. Log in and create an organization.
 3. Create a Nix cache (optional — required for binary cache serving).
 4. Create your first project pointing to a Git repository.
-5. Trigger an evaluation — the local worker will fetch, evaluate, and build automatically.
+5. Trigger an evaluation — a connected `gradient-worker` will fetch, evaluate, and build.

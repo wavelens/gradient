@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Convert the `architecture` columns in `derivation`, `build_machine_architecture`,
-//! and `server_architecture` from Integer (enum discriminant) to Text (free-form
-//! Nix system string, e.g. `"x86_64-linux"`).
+//! Convert the `architecture` columns in `derivation` and `build_machine_architecture`
+//! from Integer (enum discriminant) to Text (free-form Nix system string,
+//! e.g. `"x86_64-linux"`).
+//!
+//! Note: `server_architecture` was renamed to `build_machine_architecture` in
+//! `m20260411_000000_rename_server_to_build_machine` and is handled via that name here.
 
 use sea_orm_migration::prelude::*;
 
@@ -27,7 +30,7 @@ impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let db = manager.get_connection();
 
-        for table in &["derivation", "build_machine_architecture", "server_architecture"] {
+        for table in &["derivation", "build_machine_architecture"] {
             // Add a temporary text column.
             db.execute_unprepared(&format!(
                 "ALTER TABLE \"{table}\" ADD COLUMN architecture_text TEXT NOT NULL DEFAULT ''"
@@ -67,7 +70,7 @@ impl MigrationTrait for Migration {
             ELSE 0 \
             END";
 
-        for table in &["derivation", "build_machine_architecture", "server_architecture"] {
+        for table in &["derivation", "build_machine_architecture"] {
             db.execute_unprepared(&format!(
                 "ALTER TABLE \"{table}\" ADD COLUMN architecture_int SMALLINT NOT NULL DEFAULT 0"
             ))

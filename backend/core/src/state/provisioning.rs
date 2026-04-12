@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{StateApiKey, StateCache, StateConfiguration, StateOrganization, StateProject, StateUpstream, StateUser};
+use super::{StateApiKey, StateCache, StateConfiguration, StateOrganization, StateProject, StateUpstream, StateUser, StateWorker};
 use crate::types::consts::BASE_ROLE_ADMIN_ID;
 use crate::types::input::load_secret_bytes;
 use crate::types::*;
@@ -33,6 +33,7 @@ pub(super) async fn apply_state_to_database(
     apply_projects(db, &config.projects, &config.users, &config.organizations, crypt_secret_file).await?;
     apply_caches(db, &config.caches, &config.users, &config.organizations, crypt_secret_file).await?;
     apply_api_keys(db, &config.api_keys).await?;
+    apply_workers(db, &config.workers).await?;
     unmark_removed_entities(db, config, delete_state).await?;
 
     println!("State applied successfully");
@@ -593,6 +594,65 @@ async fn apply_api_keys(
     Ok(())
 }
 
+async fn apply_workers(
+    db: &DatabaseConnection,
+    state_workers: &HashMap<String, StateWorker>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use sha2::{Digest, Sha256};
+
+    let org_map = create_org_lookup(db).await?;
+
+    let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
+        .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
+
+    for state_worker in state_workers.values() {
+        let token_path = format!(
+            "{}/gradient_worker_{}_token",
+            credentials_dir, state_worker.worker_id
+        );
+        let token = fs::read_to_string(&token_path)
+            .map_err(|e| format!("Failed to read worker token file {}: {}", token_path, e))?;
+        let token = token.trim();
+
+        let mut hasher = Sha256::new();
+        hasher.update(token.as_bytes());
+        let token_hash = hex::encode(hasher.finalize());
+
+        let peer_id = *org_map
+            .get(&state_worker.organization)
+            .ok_or_else(|| format!("Organization '{}' not found", state_worker.organization))?;
+
+        let existing = worker_registration::Entity::find()
+            .filter(worker_registration::Column::PeerId.eq(peer_id))
+            .filter(worker_registration::Column::WorkerId.eq(&state_worker.worker_id))
+            .one(db)
+            .await?;
+
+        let now = chrono::Utc::now().naive_utc();
+
+        if let Some(existing) = existing {
+            let mut reg: worker_registration::ActiveModel = existing.into();
+            reg.token_hash = Set(token_hash);
+            reg.managed = Set(true);
+            reg.update(db).await?;
+            tracing::info!("Updated worker registration: {}", state_worker.worker_id);
+        } else {
+            let reg = worker_registration::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                peer_id: Set(peer_id),
+                worker_id: Set(state_worker.worker_id.clone()),
+                token_hash: Set(token_hash),
+                managed: Set(true),
+                created_at: Set(now),
+            };
+            reg.insert(db).await?;
+            tracing::info!("Created worker registration: {}", state_worker.worker_id);
+        }
+    }
+
+    Ok(())
+}
+
 async fn unmark_removed_entities(
     db: &DatabaseConnection,
     config: &StateConfiguration,
@@ -603,6 +663,7 @@ async fn unmark_removed_entities(
     let state_project_names: std::collections::HashSet<&String> = config.projects.keys().collect();
     let state_cache_names: std::collections::HashSet<&String> = config.caches.keys().collect();
     let state_api_key_names: std::collections::HashSet<&String> = config.api_keys.keys().collect();
+    let state_worker_ids: std::collections::HashSet<&String> = config.workers.values().map(|w| &w.worker_id).collect();
 
     let managed_users = user::Entity::find()
         .filter(user::Column::Managed.eq(true))
@@ -705,6 +766,19 @@ async fn unmark_removed_entities(
                 api_key.update(db).await?;
                 tracing::info!("Unmanaged API key: {}", api_key_name);
             }
+        }
+    }
+
+    let managed_workers = worker_registration::Entity::find()
+        .filter(worker_registration::Column::Managed.eq(true))
+        .all(db)
+        .await?;
+
+    for reg in managed_workers {
+        if !state_worker_ids.contains(&reg.worker_id) {
+            let worker_id = reg.worker_id.clone();
+            worker_registration::Entity::delete_by_id(reg.id).exec(db).await?;
+            tracing::info!("Deleted worker registration: {}", worker_id);
         }
     }
 

@@ -5,7 +5,7 @@
 1. **Register / Log in** — `/` redirects to login automatically.
 2. **Create an organization** — organizations own projects, caches, and workers.
 3. **Create a project** — point it at a Git repository and set an evaluation wildcard.
-4. **Trigger an evaluation** — the server's built-in local worker handles fetch, eval, and build automatically. Register additional workers for higher capacity or cross-architecture builds (see [Workers](#workers) below).
+4. **Configure a worker** — at least one `gradient-worker` must be connected to run jobs. Deploy one co-located on the server or on a dedicated build machine (see [Workers](#workers) below).
 
 ## Evaluation Wildcard
 
@@ -75,9 +75,9 @@ The key is scoped to the organization; different organizations use different key
 
 ## Workers
 
-Build capacity is provided by `gradient-worker` processes. Each Gradient server starts a **co-located local worker** automatically — no extra setup needed for single-host deployments.
+Build capacity is provided by `gradient-worker` processes. The server does not start a worker automatically — at least one must be configured explicitly.
 
-For additional capacity or cross-architecture builds, deploy remote workers:
+To run a worker on the server host itself, import the `gradient-worker` NixOS module and enable `services.gradient.worker`. For remote build machines or additional capacity:
 
 1. **Register the worker** under an organization:
 
@@ -100,4 +100,4 @@ For additional capacity or cross-architecture builds, deploy remote workers:
 
 3. The worker connects and is visible in **Organization → Workers** in the UI and via `GET /api/v1/orgs/{org}/workers`.
 
-Workers authenticate using per-organization tokens. A worker authorized for an org receives only that org's job offers. Workers with no peers file run in **open mode** and are trusted for all jobs — suitable for the server's own local worker.
+Workers authenticate using per-organization tokens. A worker authorized for an org receives only that org's job offers. Workers with no peers file run in **open mode** and are trusted for all jobs — suitable for co-located workers on a trusted host.

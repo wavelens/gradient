@@ -56,6 +56,7 @@ mod m20260412_000000_add_superuser_to_user;
 mod m20260412_000001_create_worker_registration;
 mod m20260412_000002_convert_architecture_to_string;
 mod m20260412_000003_drop_ssh_server_tables;
+mod m20260412_000004_add_managed_to_worker_registration;
 
 pub struct Migrator;
 
@@ -113,6 +114,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260412_000001_create_worker_registration::Migration),
             Box::new(m20260412_000002_convert_architecture_to_string::Migration),
             Box::new(m20260412_000003_drop_ssh_server_tables::Migration),
+            Box::new(m20260412_000004_add_managed_to_worker_registration::Migration),
         ]
     }
 }

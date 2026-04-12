@@ -513,16 +513,6 @@ in {
         }];
       };
 
-      gradient.workers.local = {
-        enable = lib.mkDefault true;
-        serverUrl = lib.mkDefault "ws://127.0.0.1:${toString cfg.port}/proto";
-        capabilities = {
-          fetch = lib.mkDefault true;
-          eval = lib.mkDefault true;
-          build = lib.mkDefault true;
-          sign = lib.mkDefault true;
-        };
-      };
     };
 
     users = {

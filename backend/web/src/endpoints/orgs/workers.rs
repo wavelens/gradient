@@ -80,6 +80,7 @@ pub async fn post_org_worker(
         peer_id: Set(org.id),
         worker_id: Set(body.worker_id),
         token_hash: Set(token_hash),
+        managed: Set(false),
         created_at: Set(Utc::now().naive_utc()),
     };
     row.insert(&state.db).await?;

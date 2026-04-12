@@ -22,6 +22,8 @@ pub struct Model {
     pub worker_id: String,
     /// SHA-256 hex digest of the token issued by the peer to this worker.
     pub token_hash: String,
+    /// True when this row was created by declarative state management.
+    pub managed: bool,
     pub created_at: NaiveDateTime,
 }
 

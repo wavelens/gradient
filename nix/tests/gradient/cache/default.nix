@@ -150,11 +150,6 @@
             directory = *
         '';
 
-        services.gradient.workers.local = {
-          capabilities.build = lib.mkForce false;
-          capabilities.sign = lib.mkForce false;
-        };
-
         systemd.tmpfiles.rules = [
           "d /var/lib/git 0755 git git"
           "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
@@ -181,7 +176,7 @@
           max-jobs = lib.mkForce 8;
         };
 
-        services.gradient.workers.local = {
+        services.gradient.worker = {
           enable = true;
           serverUrl = "ws://server/proto";
           capabilities = {
@@ -213,7 +208,7 @@
 
       server.wait_for_unit("gradient-server.service")
       server.sleep(5)
-      builder.wait_for_unit("gradient-worker-local.service")
+      builder.wait_for_unit("gradient-worker.service")
 
       # Configure git
       server.succeed("${lib.getExe pkgs.git} config --global --add safe.directory '*'")
