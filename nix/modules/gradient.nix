@@ -63,8 +63,8 @@ in {
         };
 
         git = lib.mkOption {
-          default = pkgs.nixVersions.git;
-          defaultText = lib.literalExpression "pkgs.nixVersions.git";
+          default = config.programs.git.package;
+          defaultText = lib.literalExpression "config.programs.git.package";
           type = lib.types.package;
           description = "Git package to use";
         };
@@ -415,6 +415,7 @@ in {
           GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
           GRADIENT_MAX_PROTO_CONNECTIONS = toString cfg.settings.maxProtoConnections;
           GRADIENT_LOG_LEVEL = cfg.settings.logLevel.default;
+          GRADIENT_USE_TLS = lib.boolToString cfg.useTls;
           GRADIENT_QUIC = lib.boolToString cfg.enableQuic;
           GRADIENT_DISCOVERABLE = lib.boolToString cfg.discoverable;
           GRADIENT_FEDERATE_PROTO = lib.boolToString cfg.proto.federate;

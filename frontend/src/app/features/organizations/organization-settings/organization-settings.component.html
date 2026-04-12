@@ -155,10 +155,10 @@
       <div class="settings-card">
         <div class="nav-row">
           <div>
-            <h3>Servers</h3>
-            <p class="text-secondary">Manage build servers for this organization</p>
+            <h3>Workers</h3>
+            <p class="text-secondary">Manage build workers for this organization</p>
           </div>
-          <button pButton label="Manage Servers" icon="pi pi-server" severity="secondary" [routerLink]="['/organization', orgName, 'servers']"></button>
+          <button pButton label="Manage Workers" icon="pi pi-cog" severity="secondary" [routerLink]="['/organization', orgName, 'workers']"></button>
         </div>
         <p-divider />
         <div class="nav-row">
@@ -178,7 +178,7 @@
         <app-loading-spinner message="Loading SSH key..." />
       } @else {
         <div class="settings-card">
-          <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories and Build Server. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.) and to your connected remote Build Servers authorized_keys file.</p>
+          <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).</p>
           @if (sshKey()) {
             <div class="form-group">
               <label>Public Key</label>

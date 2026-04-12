@@ -26,12 +26,15 @@ base64            = { workspace = true }
 bytes             = { workspace = true }
 futures           = { workspace = true }
 harmonia-nar           = { workspace = true }
+hex               = { workspace = true }
 harmonia-protocol      = { workspace = true }
 harmonia-store-core    = { workspace = true }
 harmonia-store-remote  = { workspace = true }
 harmonia-utils-hash    = { workspace = true }
 libc              = { workspace = true }
 nix-bindings      = { workspace = true }
+reqwest           = { workspace = true }
+sha2              = { workspace = true }
 rkyv              = { workspace = true }
 serde             = { workspace = true }
 serde_json        = { workspace = true }

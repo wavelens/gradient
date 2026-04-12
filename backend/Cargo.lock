@@ -4702,9 +4702,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.37"
+version = "0.23.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "758025cb5fccfd3bc2fd74708fd4682be41d99e5dff73c377c0646c6012c73a4"
+checksum = "69f9466fb2c14ea04357e91413efb882e2a6d4a406e625449bc0a5d360d53a21"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -7177,12 +7177,15 @@ dependencies = [
  "harmonia-store-core",
  "harmonia-store-remote",
  "harmonia-utils-hash",
+ "hex",
  "libc",
  "nix-bindings",
  "proto",
+ "reqwest 0.13.2",
  "rkyv 0.8.15",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "test-support",
  "tokio",
  "tokio-tungstenite 0.29.0",

@@ -1,0 +1,193 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgName }}</a>
+        <span class="breadcrumb-separator">/</span>
+        <a [routerLink]="['/organization', orgName, 'settings']" class="breadcrumb-link">Settings</a>
+        <span class="breadcrumb-separator">/</span>
+        <span class="breadcrumb-current">Workers</span>
+      </div>
+      <h1>Workers</h1>
+      <p class="text-secondary">Registered build workers for this organization</p>
+    </div>
+    <button pButton label="Register Worker" icon="pi pi-plus" (click)="openRegisterDialog()"></button>
+  </div>
+
+  @if (orgId()) {
+    <div class="peer-id-banner">
+      <span class="material-symbols-outlined">vpn_key</span>
+      <div>
+        <div class="peer-id-label">Organization Peer ID</div>
+        <div class="peer-id-value">{{ orgId() }}</div>
+        <div class="peer-id-hint text-secondary">Use this as <code>peer_id</code> in your worker's peers file alongside the token issued during registration.</div>
+      </div>
+      <button
+        pButton
+        [label]="peerIdCopied() ? 'Copied!' : 'Copy'"
+        [icon]="peerIdCopied() ? 'pi pi-check' : 'pi pi-copy'"
+        severity="secondary"
+        (click)="copyPeerId()"
+      ></button>
+    </div>
+  }
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading workers..." />
+  } @else {
+    @if (workers().length === 0) {
+      <div class="empty-state">
+        <span class="material-symbols-outlined">construction</span>
+        <h3>No workers registered</h3>
+        <p class="text-secondary">Register a <code>gradient-worker</code> to run builds for this organization.</p>
+        <button pButton label="Register Worker" icon="pi pi-plus" (click)="openRegisterDialog()"></button>
+      </div>
+    } @else {
+      <div class="workers-list">
+        @for (worker of workers(); track worker.worker_id) {
+          <div class="worker-row">
+            <div class="worker-info">
+              <span class="material-symbols-outlined">construction</span>
+              <div>
+                <div class="worker-id">{{ worker.worker_id }}</div>
+                @if (worker.architectures && worker.architectures.length > 0) {
+                  <div class="worker-archs text-secondary">
+                    {{ worker.architectures.join(', ') }}
+                    @if (worker.max_concurrent_builds) {
+                      <span class="worker-builds-limit">· {{ worker.max_concurrent_builds }} concurrent build{{ worker.max_concurrent_builds === 1 ? '' : 's' }}</span>
+                    }
+                  </div>
+                }
+              </div>
+            </div>
+            <div class="worker-meta">
+              @if (worker.managed) {
+                <span class="badge badge-managed">Managed</span>
+              }
+              @if (worker.draining) {
+                <span class="badge badge-draining">Draining</span>
+              }
+              <span class="badge" [class.badge-connected]="worker.connected" [class.badge-offline]="!worker.connected">
+                {{ worker.connected ? 'Connected' : 'Offline' }}
+              </span>
+              <button
+                pButton
+                label="Delete"
+                icon="pi pi-trash"
+                severity="danger"
+                [disabled]="worker.managed || deletingId() !== null"
+                [loading]="deletingId() === worker.worker_id"
+                (click)="deleteWorker(worker)"
+              ></button>
+            </div>
+          </div>
+        }
+      </div>
+    }
+  }
+</div>
+
+<!-- Register Worker Dialog -->
+<p-dialog
+  header="Register Worker"
+  [(visible)]="showRegisterDialog"
+  [modal]="true"
+  [style]="{ width: '480px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  @if (orgId()) {
+    <div class="dialog-info">
+      <span class="material-symbols-outlined">vpn_key</span>
+      <div>
+        <div class="dialog-info-label">Peer ID (this organization)</div>
+        <code class="dialog-info-value">{{ orgId() }}</code>
+        <div class="dialog-info-hint text-secondary">Write this alongside the token into your worker's peers file.</div>
+      </div>
+    </div>
+  }
+  @if (errorMessage()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ errorMessage() }}
+    </div>
+  }
+  <div class="form-group">
+    <label for="worker-id">Worker ID</label>
+    <input
+      pInputText
+      id="worker-id"
+      [(ngModel)]="newWorkerId"
+      placeholder="e.g. aarch64-builder-01"
+      class="w-full"
+      (keyup.enter)="registerWorker()"
+    />
+    <small class="text-secondary">A stable identifier for this worker process — use the machine hostname or a descriptive name.</small>
+  </div>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showRegisterDialog.set(false)" [disabled]="registering()"></button>
+    <button
+      pButton
+      label="Register"
+      icon="pi pi-plus"
+      (click)="registerWorker()"
+      [loading]="registering()"
+      [disabled]="registering() || !newWorkerId.trim()"
+    ></button>
+  </ng-template>
+</p-dialog>
+
+<!-- Token Dialog (shown once after registration) -->
+<p-dialog
+  header="Worker Registered"
+  [(visible)]="showTokenDialog"
+  [modal]="true"
+  [style]="{ width: '520px' }"
+  [draggable]="false"
+  [resizable]="false"
+  [closable]="false"
+>
+  @if (lastRegistration(); as reg) {
+    <div class="token-warning">
+      <span class="material-symbols-outlined">warning</span>
+      <strong>Save this token now.</strong> It will not be shown again.
+    </div>
+
+    <div class="form-group">
+      <label>Peer ID</label>
+      <div class="copy-row">
+        <code class="copy-value">{{ reg.peer_id }}</code>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Token</label>
+      <div class="copy-row">
+        <code class="copy-value token-value">{{ reg.token }}</code>
+      </div>
+      <button
+        pButton
+        [label]="tokenCopied() ? 'Copied!' : 'Copy Token'"
+        [icon]="tokenCopied() ? 'pi pi-check' : 'pi pi-copy'"
+        severity="secondary"
+        class="copy-btn"
+        (click)="copyToken()"
+      ></button>
+    </div>
+
+    <div class="form-group">
+      <label>Peers file entry</label>
+      <pre class="peers-file-example">{{ reg.peer_id }}:{{ reg.token }}</pre>
+      <small class="text-secondary">Add this line to <code>/run/secrets/gradient-worker-peers</code> on your worker host, then set <code>peersFile</code> in your NixOS config.</small>
+    </div>
+  }
+  <ng-template pTemplate="footer">
+    <button pButton label="I've saved the token" icon="pi pi-check" (click)="closeTokenDialog()"></button>
+  </ng-template>
+</p-dialog>

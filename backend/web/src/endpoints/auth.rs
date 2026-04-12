@@ -163,6 +163,7 @@ pub async fn post_basic_login(
         return Err(WebError::BadRequest("Email not verified. Please check your email and verify your account before logging in.".to_string()));
     }
 
+    let use_tls = state.cli.use_tls;
     let token = encode_jwt(state.clone(), user.id, body.remember_me)
         .map_err(|_| WebError::failed_to_generate_token())?;
 
@@ -170,7 +171,7 @@ pub async fn post_basic_login(
         .await
         .map_err(|_| WebError::failed_to_update_user())?;
 
-    let cookie = jwt_cookie(&token, body.remember_me);
+    let cookie = jwt_cookie(&token, body.remember_me, use_tls);
     let res = BaseResponse {
         error: false,
         message: token,
@@ -257,6 +258,7 @@ pub async fn get_oidc_callback(
 ) -> WebResult<Response> {
     let code = query.get("code").ok_or_else(WebError::invalid_oauth_code)?;
 
+    let use_tls = state.cli.use_tls;
     let user: MUser = oidc_login_verify(state.clone(), code.to_string())
         .await
         .map_err(|e| WebError::InternalServerError(e.to_string()))?;
@@ -264,7 +266,7 @@ pub async fn get_oidc_callback(
     let token =
         encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
 
-    let cookie = jwt_cookie(&token, false);
+    let cookie = jwt_cookie(&token, false, use_tls);
 
     match Response::builder()
         .status(StatusCode::FOUND)
@@ -282,7 +284,9 @@ pub async fn get_oidc_callback(
     }
 }
 
-pub async fn post_logout(_state: State<Arc<ServerState>>) -> WebResult<Response> {
+pub async fn post_logout(state: State<Arc<ServerState>>) -> WebResult<Response> {
+    let secure = if state.cli.use_tls { "; Secure" } else { "" };
+    let clear_cookie = format!("jwt_token=; HttpOnly{}; SameSite=Strict; Path=/; Max-Age=0", secure);
     let res = BaseResponse {
         error: false,
         message: "Logout Successfully".to_string(),
@@ -290,17 +294,17 @@ pub async fn post_logout(_state: State<Arc<ServerState>>) -> WebResult<Response>
     let mut response = Json(res).into_response();
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
-        HeaderValue::from_static(
-            "jwt_token=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0",
-        ),
+        HeaderValue::from_str(&clear_cookie)
+            .map_err(|_| WebError::InternalServerError("Bad cookie".to_string()))?,
     );
     Ok(response)
 }
 
-fn jwt_cookie(token: &str, remember_me: bool) -> String {
+fn jwt_cookie(token: &str, remember_me: bool, use_tls: bool) -> String {
+    let secure = if use_tls { "; Secure" } else { "" };
     let base = format!(
-        "jwt_token={}; HttpOnly; Secure; SameSite=Strict; Path=/",
-        token
+        "jwt_token={}; HttpOnly{}; SameSite=Strict; Path=/",
+        token, secure
     );
     if remember_me {
         format!("{}; Max-Age=2592000", base) // 30 days

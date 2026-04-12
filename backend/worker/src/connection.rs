@@ -10,7 +10,7 @@
 //! send/receive over rkyv-serialised [`proto::messages`] frames.
 
 use anyhow::{Context, Result};
-use proto::messages::{ClientMessage, ServerMessage, PROTO_VERSION};
+use proto::messages::{ClientMessage, ServerMessage};
 use rkyv::rancor::Error as RkyvError;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
@@ -20,7 +20,9 @@ use futures::StreamExt;
 
 /// A live WebSocket connection to the server.
 pub struct ProtoConnection {
-    pub(crate) version: u16,
+    /// Protocol version the server reported in `InitAck`. Set to 0 before the
+    /// handshake completes; updated via [`Self::set_server_version`] afterwards.
+    pub(crate) server_version: u16,
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
 }
 
@@ -33,7 +35,18 @@ impl ProtoConnection {
         let (socket, _) = connect_async(url)
             .await
             .with_context(|| format!("failed to connect to {url}"))?;
-        Ok(Self { version: PROTO_VERSION, socket })
+        Ok(Self { server_version: 0, socket })
+    }
+
+    /// Record the protocol version the server reported in `InitAck`.
+    pub fn set_server_version(&mut self, version: u16) {
+        self.server_version = version;
+    }
+
+    /// The protocol version the server reported during the handshake.
+    /// Returns 0 if the handshake has not completed yet.
+    pub fn server_version(&self) -> u16 {
+        self.server_version
     }
 
     /// Send a typed [`ClientMessage`] to the server.
@@ -74,12 +87,15 @@ impl ProtoConnection {
         let _ = self.socket.close(None).await;
     }
 
-    /// Reconnect to the same URL. Used by the main loop after a disconnect.
+    /// Reconnect to a (possibly different) URL, resetting the server version.
+    /// Used by the main reconnect loop after a clean or unclean disconnect.
     pub async fn reconnect(&mut self, url: &str) -> Result<()> {
+        self.close().await;
         let (socket, _) = connect_async(url)
             .await
             .with_context(|| format!("failed to reconnect to {url}"))?;
         self.socket = socket;
+        self.server_version = 0;
         Ok(())
     }
 }

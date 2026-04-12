@@ -235,6 +235,11 @@ pub struct Cli {
     /// When `false` (default), only superusers can access those endpoints.
     #[arg(long, env = "GRADIENT_GLOBAL_STATS_PUBLIC", default_value = "false")]
     pub global_stats_public: bool,
+
+    /// Whether the server is served over TLS (HTTPS). Controls the `Secure`
+    /// flag on session cookies. Set to `false` for plain HTTP deployments.
+    #[arg(long, env = "GRADIENT_USE_TLS", default_value = "true")]
+    pub use_tls: bool,
 }
 
 #[derive(Debug)]

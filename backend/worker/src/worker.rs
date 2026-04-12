@@ -8,6 +8,9 @@
 //!
 //! [`Worker`] connects to the Gradient server, performs the handshake,
 //! registers capabilities, and then drives the job dispatch loop.
+//!
+//! The `run()` method returns when the connection closes or the server signals
+//! `Draining`.  The reconnect loop lives in `main.rs`.
 
 use anyhow::{Context, Result};
 use proto::messages::{ClientMessage, Job, ServerMessage};
@@ -15,6 +18,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
 use crate::connection::ProtoConnection;
+
 use crate::credentials::CredentialStore;
 use crate::executor::{JobExecutor, WorkerEvaluator};
 use crate::handshake::perform_handshake;
@@ -29,6 +33,9 @@ pub struct Worker {
     executor: JobExecutor,
     scorer: JobScorer,
     credentials: CredentialStore,
+    /// Set to `true` after the server sends `Draining`. While draining the
+    /// worker finishes any in-flight job but rejects new assignments.
+    draining: bool,
 }
 
 impl Worker {
@@ -49,7 +56,13 @@ impl Worker {
         )
         .await?;
 
-        info!(negotiated = ?handshake.negotiated, "capabilities negotiated");
+        // Record the server's protocol version on the connection object.
+        conn.set_server_version(handshake.server_version);
+        info!(
+            negotiated = ?handshake.negotiated,
+            server_version = conn.server_version(),
+            "capabilities negotiated"
+        );
 
         // If the server granted build capability, advertise our build capacity.
         if handshake.negotiated.build {
@@ -78,10 +91,58 @@ impl Worker {
             executor,
             scorer: JobScorer::new(),
             credentials,
+            draining: false,
         })
     }
 
-    /// Main dispatch loop — runs until the connection is closed.
+    /// Re-use an existing [`ProtoConnection`] that has already been reconnected.
+    ///
+    /// Called by the reconnect loop in `main.rs` after `reconnect()` succeeds and
+    /// the handshake has been re-performed.
+    pub async fn reconnect(&mut self) -> Result<()> {
+        self.conn.reconnect(&self.config.server_url).await?;
+        self.draining = false;
+
+        let peer_id = load_or_generate_id(&self.config.data_dir)
+            .context("failed to load persistent worker ID")?;
+        let peer_tokens = self.config.peer_tokens();
+
+        let handshake = perform_handshake(
+            &mut self.conn,
+            peer_id,
+            peer_tokens,
+            self.config.capabilities(),
+        )
+        .await?;
+
+        self.conn.set_server_version(handshake.server_version);
+        info!(
+            negotiated = ?handshake.negotiated,
+            server_version = self.conn.server_version(),
+            "reconnected and re-negotiated capabilities"
+        );
+
+        if handshake.negotiated.build {
+            self.conn.send(ClientMessage::WorkerCapabilities {
+                architectures: vec![],
+                system_features: vec![],
+                max_concurrent_builds: self.config.max_concurrent_builds,
+            })
+            .await?;
+        }
+
+        self.conn.send(ClientMessage::RequestJobList).await?;
+        Ok(())
+    }
+
+    /// Returns `true` if the server has asked this worker to drain.
+    pub fn is_draining(&self) -> bool {
+        self.draining
+    }
+
+    /// Main dispatch loop — runs until the connection closes or the server
+    /// signals `Draining`.  Returns `Ok(())` on a clean disconnect so the
+    /// caller can decide whether to reconnect.
     pub async fn run(&mut self) -> Result<()> {
         info!("entering dispatch loop");
 
@@ -89,7 +150,7 @@ impl Worker {
             let msg = match self.conn.recv().await? {
                 Some(m) => m,
                 None => {
-                    info!("server closed connection; will reconnect");
+                    info!("server closed connection");
                     break;
                 }
             };
@@ -97,17 +158,21 @@ impl Worker {
             match msg {
                 ServerMessage::JobListChunk { candidates, is_final } => {
                     debug!(count = candidates.len(), is_final, "received job list chunk");
+                    if self.draining {
+                        // Don't request any new work while draining.
+                        continue;
+                    }
                     let scores = self.scorer.score_candidates(&candidates).await?;
                     self.conn
-                        .send(ClientMessage::RequestJobChunk {
-                            scores,
-                            is_final,
-                        })
+                        .send(ClientMessage::RequestJobChunk { scores, is_final })
                         .await?;
                 }
 
                 ServerMessage::JobOffer { candidates } => {
                     debug!(count = candidates.len(), "received job offer");
+                    if self.draining {
+                        continue;
+                    }
                     let scores = self.scorer.score_candidates(&candidates).await?;
                     if !scores.is_empty() {
                         self.conn
@@ -121,10 +186,23 @@ impl Worker {
 
                 ServerMessage::RevokeJob { job_ids } => {
                     debug!(?job_ids, "jobs revoked");
-                    // TODO: remove from local candidate cache.
+                    // TODO: cancel any locally-queued (not yet started) candidates.
                 }
 
                 ServerMessage::AssignJob { job_id, job, timeout_secs: _ } => {
+                    if self.draining {
+                        // Politely decline: we are winding down.
+                        warn!(%job_id, "rejecting assigned job — draining");
+                        self.conn
+                            .send(ClientMessage::AssignJobResponse {
+                                job_id,
+                                accepted: false,
+                                reason: Some("worker is draining".to_owned()),
+                            })
+                            .await?;
+                        continue;
+                    }
+
                     info!(%job_id, "job assigned — accepting");
                     self.conn
                         .send(ClientMessage::AssignJobResponse {
@@ -134,13 +212,9 @@ impl Worker {
                         })
                         .await?;
 
-                    // Execute the job. Each task sends its own progress updates.
                     let result = self.execute_job(&job_id, job).await;
-
-                    // Clear credentials now that the job is done.
                     self.credentials.clear();
 
-                    // Report completion or failure.
                     let updater = JobUpdater::new(job_id.clone(), &mut self.conn);
                     match result {
                         Ok(()) => updater.complete().await?,
@@ -168,18 +242,30 @@ impl Worker {
 
                 ServerMessage::PresignedDownload { job_id, store_path, url: _ } => {
                     debug!(%job_id, %store_path, "received presigned download URL");
-                    // TODO(1.4): download NAR from S3 and import.
+                    // TODO(1.4): download NAR from S3 and import into local store.
                 }
 
-                ServerMessage::PresignedUpload { .. } => {
-                    // Server should not send this unsolicited.
-                    warn!("unexpected PresignedUpload — ignoring");
+                ServerMessage::PresignedUpload { job_id, store_path, url, method, headers } => {
+                    debug!(%job_id, %store_path, %method, "received presigned upload URL");
+                    if let Err(e) = crate::nar::upload_presigned(
+                        &job_id,
+                        &store_path,
+                        &url,
+                        &method,
+                        &headers,
+                        &mut self.conn,
+                    )
+                    .await
+                    {
+                        error!(%job_id, %store_path, error = %e, "presigned NAR upload failed");
+                    }
                 }
 
                 ServerMessage::Draining => {
                     info!("server is draining; finishing in-flight work then disconnecting");
-                    // TODO: stop accepting new jobs, finish current.
-                    break;
+                    self.draining = true;
+                    // The loop continues so we can finish any already-accepted job,
+                    // but new assignments will be declined above.
                 }
 
                 ServerMessage::Error { code, message } => {
@@ -192,11 +278,12 @@ impl Worker {
 
                 ServerMessage::AuthChallenge { peers } => {
                     debug!(?peers, "mid-connection AuthChallenge — sending AuthResponse");
-                    let tokens: Vec<(String, String)> = self.config.peer_tokens()
-                        .into_iter()
-                        .filter(|(pid, _)| peers.contains(pid))
-                        .collect();
-                    if let Err(e) = self.conn.send(proto::messages::ClientMessage::AuthResponse { tokens }).await {
+                    let peer_tokens = self.config.peer_tokens();
+                    let tokens = WorkerConfig::resolve_tokens_for_challenge(&peer_tokens, &peers);
+                    if let Err(e) = self.conn
+                        .send(ClientMessage::AuthResponse { tokens })
+                        .await
+                    {
                         error!(error = %e, "failed to send AuthResponse");
                         break;
                     }
@@ -218,7 +305,9 @@ impl Worker {
         let mut updater = JobUpdater::new(job_id.to_owned(), &mut self.conn);
         match job {
             Job::Flake(flake_job) => {
-                self.executor.execute_flake_job(flake_job, &mut updater).await
+                self.executor
+                    .execute_flake_job(flake_job, &mut updater, &self.credentials)
+                    .await
             }
             Job::Build(build_job) => {
                 self.executor.execute_build_job(build_job, &mut updater).await
@@ -229,10 +318,6 @@ impl Worker {
 
 /// Load the persistent worker ID from `{data_dir}/worker-id`, or generate a
 /// new UUID, write it to that file, and return it.
-///
-/// The ID persists across restarts so the server can:
-/// - Detect duplicate connections (same ID already connected).
-/// - Re-match orphaned jobs after a server restart.
 fn load_or_generate_id(data_dir: &str) -> Result<String> {
     use std::fs;
     use std::path::Path;
@@ -247,7 +332,6 @@ fn load_or_generate_id(data_dir: &str) -> Result<String> {
         let raw = fs::read_to_string(&id_path)
             .with_context(|| format!("failed to read '{}'", id_path.display()))?;
         let id = raw.trim().to_owned();
-        // Validate: must be a parseable UUID.
         id.parse::<uuid::Uuid>()
             .with_context(|| format!("'{}' contains an invalid UUID: {:?}", id_path.display(), id))?;
         info!(path = %id_path.display(), %id, "loaded persistent worker ID");
@@ -260,4 +344,3 @@ fn load_or_generate_id(data_dir: &str) -> Result<String> {
     info!(path = %id_path.display(), %id, "generated and persisted new worker ID");
     Ok(id)
 }
-

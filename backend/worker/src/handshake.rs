@@ -22,6 +22,8 @@ use crate::connection::ProtoConnection;
 pub struct HandshakeResult {
     /// Capabilities negotiated with the server (AND of client offer + server accept).
     pub negotiated: GradientCapabilities,
+    /// Protocol version the server reported in `InitAck`.
+    pub server_version: u16,
 }
 
 /// Perform the full challenge-response handshake.
@@ -80,6 +82,7 @@ pub async fn perform_handshake(
         ServerMessage::InitAck { version, capabilities: negotiated, authorized_peers, failed_peers } => {
             info!(
                 server_version = version,
+                client_version = PROTO_VERSION,
                 authorized = authorized_peers.len(),
                 failed = failed_peers.len(),
                 "handshake successful"
@@ -89,7 +92,7 @@ pub async fn perform_handshake(
                     tracing::warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
                 }
             }
-            Ok(HandshakeResult { negotiated })
+            Ok(HandshakeResult { negotiated, server_version: version })
         }
         ServerMessage::Reject { code, reason } => {
             bail!("server rejected connection (code {code}): {reason}");

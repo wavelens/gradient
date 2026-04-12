@@ -153,13 +153,13 @@ export const routes: Routes = [
           ),
       },
 
-      // Servers
+      // Workers
       {
-        path: 'organization/:org/servers',
-        title: 'Servers',
+        path: 'organization/:org/workers',
+        title: 'Workers',
         loadComponent: () =>
-          import('./features/organizations/servers/servers.component').then(
-            (m) => m.ServersComponent
+          import('./features/organizations/workers/workers.component').then(
+            (m) => m.WorkersComponent
           ),
       },
 

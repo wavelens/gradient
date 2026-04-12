@@ -19,6 +19,5 @@
  - docs: fix cache secret "main-cache:" before private key not needed (needs reformatting is not described in the docs)
  - oidc: with other port does not work
  - frontend hide login form if oidc is required and hide register form if oidc is required or registration is disabled
- - useTls is false but Set-Cookie has Secure flag
  - update updater script
 

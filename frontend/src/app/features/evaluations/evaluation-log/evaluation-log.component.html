@@ -206,8 +206,8 @@
         } @else if (ev.status === 'Waiting') {
           <div class="queued-hint">
             <span class="material-symbols-outlined queued-icon">pause_circle</span>
-            <span class="queued-title">Waiting for Servers</span>
-            <span class="queued-sub">No build servers are currently available. Evaluation will resume when a server comes online&hellip;</span>
+            <span class="queued-title">Waiting for Workers</span>
+            <span class="queued-sub">No build workers are currently available. Evaluation will resume when a worker connects&hellip;</span>
           </div>
         } @else if (ev.status === 'Queued') {
           <div class="queued-hint">

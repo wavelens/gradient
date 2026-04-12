@@ -71,5 +71,6 @@ pub fn test_cli() -> Cli {
         discoverable: false,
         federate_proto: false,
         global_stats_public: false,
+        use_tls: false,
     }
 }
