@@ -1,4 +1,4 @@
-# Protocol
+# Proto
 
 Gradient workers connect to the server over a persistent WebSocket at `/proto`. All messages are binary frames serialized with [rkyv](https://rkyv.org/). WebSocket framing handles message boundaries — no additional length-prefix is needed.
 

@@ -13,7 +13,6 @@
       networking.firewall.enable = false;
       virtualisation.writableStore = true;
       documentation.enable = false;
-      nix.settings.max-jobs = 0;
     };
 
     nodes = {
@@ -98,20 +97,6 @@
                 project = {
                   organization = "org";
                   repository = "git://server/test";
-                  created_by = "admin";
-                };
-              };
-
-              servers = {
-                build-server = {
-                  display_name = "Build Server";
-                  organization = "org";
-                  active = true;
-                  host = "localhost";
-                  port = 22;
-                  username = "gradient";
-                  architectures = [ "x86_64-linux" ];
-                  features = [ "big-parallel" "kvm" ];
                   created_by = "admin";
                 };
               };

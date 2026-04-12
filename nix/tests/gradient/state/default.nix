@@ -127,31 +127,6 @@
                 };
               };
 
-              servers = {
-                build-server-1 = {
-                  display_name = "Build Server 1";
-                  organization = "corp";
-                  active = true;
-                  host = "build1.internal.example.com";
-                  port = 22;
-                  username = "gradient";
-                  architectures = [ "x86_64-linux" "aarch64-linux" ];
-                  features = [ "big-parallel" "kvm" ];
-                  created_by = "alice";
-                };
-                mac-mini-farm = {
-                  display_name = "Mac Mini Build Farm";
-                  organization = "corp";
-                  active = true;
-                  host = "macfarm.internal.example.com";
-                  port = 22;
-                  username = "builder";
-                  architectures = [ "x86_64-darwin" "aarch64-darwin" ];
-                  features = [ "big-parallel" "nixos-test" ];
-                  created_by = "alice";
-                };
-              };
-
               caches = {
                 main = {
                   display_name = "Main Binary Cache";

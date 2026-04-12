@@ -141,11 +141,43 @@ with subtest("check api /projects/{organization}/{project}"):
     assert req.get("error") == False, req.get("message")
     assert req.get("message").get("id") == project_id, "Project ID should match"
 
-with subtest("check api /servers/{organization}"):
+with subtest("check api /orgs/{organization}/workers"):
+    # Register a worker under the org
     req = json.loads(machine.succeed("""
-        curl -XPUT http://localhost:3000/api/v1/servers/org_name -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"name": "myserver", "display_name": "My Server", "host": "localhost", "port": 22, "username": "root", "architectures": ["x86_64-linux"], "features": ["big-parallel"]}'
+        curl -XPOST http://localhost:3000/api/v1/orgs/org_name/workers -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json' -d '{"worker_id": "test-worker-001"}'
+    """.replace("api_key", api_key).replace("org_name", org_name)))
+
+    assert req.get("error") == False, req.get("message")
+    worker_reg = req.get("message")
+    peer_id = worker_reg.get("peer_id")
+    token = worker_reg.get("token")
+    assert peer_id is not None, "peer_id should be present"
+    assert token is not None and len(token) > 0, "token should be non-empty"
+    print(f"Worker registered: peer_id={peer_id}")
+
+    # List workers — should contain our registration
+    req = json.loads(machine.succeed("""
+        curl -XGET http://localhost:3000/api/v1/orgs/org_name/workers -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json'
+    """.replace("api_key", api_key).replace("org_name", org_name)))
+
+    assert req.get("error") == False, req.get("message")
+    workers = req.get("message")
+    assert any(w.get("worker_id") == "test-worker-001" for w in workers), \
+        f"test-worker-001 not found in: {[w.get('worker_id') for w in workers]}"
+
+    # Delete the worker registration
+    req = json.loads(machine.succeed("""
+        curl -XDELETE http://localhost:3000/api/v1/orgs/org_name/workers/test-worker-001 -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json'
     """.replace("api_key", api_key).replace("org_name", org_name)))
 
     assert req.get("error") == False, req.get("message")
 
-    server_id = req.get("message")
+    # Confirm deletion
+    req = json.loads(machine.succeed("""
+        curl -XGET http://localhost:3000/api/v1/orgs/org_name/workers -H 'Authorization: Bearer api_key' -H 'Content-Type: application/json'
+    """.replace("api_key", api_key).replace("org_name", org_name)))
+
+    assert req.get("error") == False, req.get("message")
+    workers = req.get("message")
+    assert not any(w.get("worker_id") == "test-worker-001" for w in workers), \
+        "worker should have been deleted"

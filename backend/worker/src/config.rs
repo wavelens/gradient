@@ -19,8 +19,14 @@ pub struct WorkerConfig {
     /// Peer-to-token mappings for challenge-response authentication.
     /// Format: `peer_id1:token1,peer_id2:token2` (comma-separated pairs).
     /// Each peer can be an org, cache, or proxy UUID.
+    /// Mutually exclusive with `--peers-file`.
     #[arg(long, env = "GRADIENT_WORKER_PEERS")]
     pub peers: Option<String>,
+
+    /// Path to a file whose contents are the peer-to-token string
+    /// (same format as `--peers`). Takes precedence over `--peers`.
+    #[arg(long, env = "GRADIENT_WORKER_PEERS_FILE")]
+    pub peers_file: Option<String>,
 
     /// Directory for persistent worker state (worker ID file, etc.).
     /// Defaults to `/var/lib/gradient-worker`. Must be writable.
@@ -85,11 +91,24 @@ pub struct WorkerConfig {
 }
 
 impl WorkerConfig {
-    /// Parse `GRADIENT_WORKER_PEERS` into `(peer_id, token)` pairs.
+    /// Parse peer-to-token pairs from `--peers-file` (preferred) or `--peers`.
+    /// Returns an empty vec when neither is set (open/discoverable mode).
     pub fn peer_tokens(&self) -> Vec<(String, String)> {
-        let Some(peers) = &self.peers else { return vec![] };
-        peers
-            .split(',')
+        let raw = if let Some(path) = &self.peers_file {
+            match std::fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(path, error = %e, "failed to read peers file; connecting in open mode");
+                    return vec![];
+                }
+            }
+        } else if let Some(s) = &self.peers {
+            s.clone()
+        } else {
+            return vec![];
+        };
+
+        raw.split(',')
             .filter_map(|entry| {
                 let mut parts = entry.splitn(2, ':');
                 let peer_id = parts.next()?.trim().to_owned();

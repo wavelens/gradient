@@ -128,7 +128,7 @@ in {
           description = "Public URL of the Gradient frontend, used in CI status report links";
           type = lib.types.str;
           default = "http${lib.optionalString cfg.useTls "s"}://${cfg.domain}";
-          defaultText = lib.literalExpression ''"http\${lib.optionalString config.services.gradient.useTls "s"}://\${config.services.gradient.domain}"'';
+          defaultText = lib.literalExpression ''http''${lib.optionalString config.services.gradient.useTls "s"}://''${config.services.gradient.domain}'';
           example = "https://gradient.example.com";
         };
       };

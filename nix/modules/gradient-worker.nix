@@ -26,8 +26,21 @@
         example = "wss://gradient.example.com/proto";
       };
 
-      tokenFile = lib.mkOption {
-        description = "File containing the API key used to authenticate with the server. Not required for cache-only (public) connections";
+      peersFile = lib.mkOption {
+        description = ''
+          Path to a file containing the peer-to-token authentication string for
+          challenge-response auth with the Gradient server.
+
+          Format: <literal>peer_id1:token1,peer_id2:token2</literal>
+          (comma-separated; each peer is an org, cache, or proxy UUID).
+
+          Obtain a token by registering this worker under an org:
+          <literal>POST /api/v1/orgs/{org}/workers</literal>
+
+          When null (default), the worker connects in open/discoverable mode —
+          the server accepts the connection if no peers are registered for this
+          worker ID. Suitable for local co-located workers.
+        '';
         type = lib.types.nullOr lib.types.path;
         default = null;
       };
@@ -156,7 +169,7 @@ in {
         remote = {
           enable = true;
           serverUrl = "wss://gradient.example.com/proto";
-          tokenFile = "/run/secrets/gradient-remote-token";
+          peersFile = "/run/secrets/gradient-worker-peers";
           capabilities = { build = true; };
         };
       }
@@ -168,10 +181,6 @@ in {
       {
         assertion = wcfg.capabilities.federate -> wcfg.discoverable;
         message = "workers.${name}: capabilities.federate requires discoverable to be enabled";
-      }
-      {
-        assertion = (wcfg.capabilities.federate || wcfg.capabilities.fetch || wcfg.capabilities.eval || wcfg.capabilities.build || wcfg.capabilities.sign) -> (wcfg.tokenFile != null);
-        message = "workers.${name}: tokenFile is required when any capability other than cache is enabled";
       }
     ]) enabledWorkers);
 
@@ -190,15 +199,16 @@ in {
         ProtectSystem = "strict";
         RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
         StateDirectory = "gradient-worker-${name}";
-        LoadCredential = lib.optionals (wcfg.tokenFile != null) [
-          "gradient_worker_token:${wcfg.tokenFile}"
+        LoadCredential = lib.optionals (wcfg.peersFile != null) [
+          "gradient_worker_peers:${wcfg.peersFile}"
         ];
       };
 
       environment = {
-        GRADIENT_WORKER_SERVER_URL    = wcfg.serverUrl;
-      } // lib.optionalAttrs (wcfg.tokenFile != null) {
-        GRADIENT_WORKER_TOKEN_FILE    = "%d/gradient_worker_token";
+        GRADIENT_WORKER_SERVER_URL = wcfg.serverUrl;
+        GRADIENT_WORKER_DATA_DIR   = "%S/gradient-worker-${name}";
+      } // lib.optionalAttrs (wcfg.peersFile != null) {
+        GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
       } // {
         GRADIENT_WORKER_DISCOVERABLE = lib.boolToString wcfg.discoverable;
         GRADIENT_MAX_CONCURRENT_EVALUATIONS = toString wcfg.settings.maxConcurrentEvaluations;

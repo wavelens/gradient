@@ -58,18 +58,6 @@ with subtest("check state-managed projects exist"):
     assert "web-app" in project_names, f"web-app project missing. Found: {project_names}"
     assert "mobile-app" in project_names, f"mobile-app project missing. Found: {project_names}"
 
-with subtest("check state-managed servers exist"):
-    req = json.loads(machine.succeed("""
-        curl -XGET http://gradient.local/api/v1/servers/corp -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'
-    """.replace("alice_token", alice_token_to_use)))
-
-    assert req.get("error") == False, f"Failed to get servers: {req.get('message')}"
-    servers = req.get("message").get("items")
-
-    server_names = [s.get("name") for s in servers]
-    assert "build-server-1" in server_names, f"build-server-1 missing. Found: {server_names}"
-    assert "mac-mini-farm" in server_names, f"mac-mini-farm missing. Found: {server_names}"
-
 with subtest("check state-managed caches exist"):
     req = json.loads(machine.succeed("""
         curl -XGET http://gradient.local/api/v1/caches -H 'Authorization: Bearer alice_token' -H 'Content-Type: application/json'

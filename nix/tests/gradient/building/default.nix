@@ -72,14 +72,15 @@
             options = "--enable=receive-pack";
           };
 
-          openssh = {
-            enable = true;
-            settings.PasswordAuthentication = false;
-          };
         };
 
         nix.settings = {
           max-jobs = 0;
+        };
+
+        services.gradient.workers.local = {
+          capabilities.build = lib.mkForce false;
+          capabilities.sign = lib.mkForce false;
         };
 
         systemd.tmpfiles.rules = [
@@ -87,10 +88,6 @@
           "L+ /var/lib/git/flake.nix 0755 git git - ${./flake_repository.nix}"
           "L+ /var/lib/git/flake.lock 0755 git git - ${./flake_repository.lock}"
           "L+ /var/lib/git/build-test.nix 0755 git git - ${./build-test_repository.nix}"
-        ];
-
-        users.users.root.openssh.authorizedKeys.keys = [
-          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPQhtH1+yyKLtn4FWkGkaLm1YOlqsJ5dYEw+BKKCeB0f microvm"
         ];
 
         environment = {
@@ -108,11 +105,9 @@
       };
 
       builder = { config, pkgs, lib, ... }: {
+        imports = [ ../../../modules/gradient-worker.nix ];
+
         environment.variables.TEST_PKGS = [ self.inputs.nixpkgs ];
-        users.users.builder = {
-          isNormalUser = true;
-          group = "users";
-        };
 
         nix.settings = {
           experimental-features = [
@@ -124,23 +119,16 @@
           trusted-users = [
             "root"
             "@wheel"
-            "builder"
+            "gradient-worker"
           ];
         };
 
-        systemd.tmpfiles.rules = [
-          "d /home/builder/.ssh 0700 builder users"
-        ];
-
-        services.openssh = {
+        services.gradient.workers.local = {
           enable = true;
-          settings = {
-            PasswordAuthentication = false;
-            # rust lib ssh2 requires one of the following Message Authentication Codes:
-            # hmac-sha2-256,hmac-sha2-512,hmac-sha1,hmac-sha1-96,hmac-md5,hmac-md5-96,hmac-ripemd160,hmac-ripemd160@openssh.com
-            Macs = [
-              "hmac-sha2-512"
-            ];
+          serverUrl = "ws://server/proto";
+          capabilities = {
+            eval = true;
+            build = true;
           };
         };
       };
@@ -157,6 +145,7 @@
       server.wait_for_unit("gradient-server.service")
       server.sleep(5)
       server.wait_for_unit("git-daemon.service")
+      builder.wait_for_unit("gradient-worker-local.service")
       print(server.succeed("journalctl -u nix-daemon -n 200 --no-pager"))
       builder.succeed("systemctl restart nix-daemon.service")
       print(builder.succeed("journalctl -u nix-daemon -n 200 --no-pager"))
@@ -246,24 +235,6 @@
       # Ensure git repository is available without authentication
       server.succeed("${lib.getExe pkgs.git} clone git://localhost/test test")
       print(server.succeed("${lib.getExe pkgs.git} ls-remote git://server/test"))
-
-      # Add SSH key to builder machine
-      builder.succeed(f"echo '{org_pub_key}' > /home/builder/.ssh/authorized_keys")
-      builder.succeed("chown builder:users /home/builder/.ssh/authorized_keys")
-      builder.succeed("chmod 600 /home/builder/.ssh/authorized_keys")
-
-      # Test server commands
-      print("=== Testing Server Commands ===")
-      server.succeed("${lib.getExe pkgs.gradient-cli} server create --name testserver --display-name MyServer --host builder --port 22 --ssh-user builder --architectures x86_64-linux --features big-parallel")
-      print(server.succeed("${lib.getExe pkgs.gradient-cli} server list"))
-
-      # Test server connection
-      print(server.succeed(f"""
-        ${lib.getExe pkgs.curl} -i --fail \
-          -X POST \
-          -H "Authorization: Bearer {token}" \
-          http://gradient.local/api/v1/servers/testorg/testserver/check-connection
-      """))
 
       # Test project commands
       print("=== Testing Project Commands ===")

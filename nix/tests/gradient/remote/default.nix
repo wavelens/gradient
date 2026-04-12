@@ -28,12 +28,6 @@
 
         nix.settings = {
           substituters = lib.mkForce [ ];
-          trusted-users = [ "builder" ];
-        };
-
-        users.users.builder = {
-          isNormalUser = true;
-          group = "users";
         };
 
         services = {
@@ -74,19 +68,7 @@
           };
 
 
-          openssh = {
-            enable = true;
-            settings.PasswordAuthentication = false;
-          };
         };
-
-        systemd.tmpfiles.rules = [
-          "d /home/builder/.ssh 0700 builder users"
-        ];
-
-        users.users.root.openssh.authorizedKeys.keys = [
-          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPQhtH1+yyKLtn4FWkGkaLm1YOlqsJ5dYEw+BKKCeB0f microvm"
-        ];
       };
 
       client = { config, pkgs, lib, ... }: {
@@ -168,22 +150,6 @@
       print("=== Testing Organization SSH from Client ===")
       org_pub_key = client.succeed("${lib.getExe pkgs.gradient-cli} organization ssh show")[12:].strip()
       print(f"Got Organization Public Key: {org_pub_key}")
-
-      print("=== Adding Server ===")
-      server.succeed(f"echo '{org_pub_key}' > /home/builder/.ssh/authorized_keys")
-      server.succeed("chown builder:users /home/builder/.ssh/authorized_keys")
-      server.succeed("chmod 600 /home/builder/.ssh/authorized_keys")
-
-      client.succeed("${lib.getExe pkgs.gradient-cli} server create --name testserver --display-name MyServer --host localhost --port 22 --ssh-user builder --architectures x86_64-linux --features big-parallel")
-      print(client.succeed("${lib.getExe pkgs.gradient-cli} server list"))
-
-      # Test server connection
-      print(client.succeed(f"""
-        ${lib.getExe pkgs.curl} -i --fail \
-          -X POST \
-          -H "Authorization: Bearer {token}" \
-          http://gradient.local/api/v1/servers/testorg/testserver/check-connection
-      """))
 
       # Initialize git repository in client's home directory
       print("=== Setting up Git Repository ===")
