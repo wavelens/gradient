@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::stream::{FuturesUnordered, StreamExt};
 use harmonia_protocol::daemon_wire::types2::GCAction;
-use harmonia_protocol::types::DaemonStore as _;
+use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::StorePath;
 use harmonia_utils_hash::fmt::CommonHash as _;
@@ -353,7 +353,7 @@ pub fn convert_valid_path_info(
     PathInfo {
         deriver: vi.deriver.as_ref().map(|d| d.to_string()),
         references: vi.references.iter().map(|r| r.to_string()).collect(),
-        nar_hash: format!("{}", vi.nar_hash.as_sri()),
+        nar_hash: format!("{}", vi.nar_hash.sri()),
         nar_size: vi.nar_size,
         ultimate: vi.ultimate,
         signatures: vi.signatures.iter().map(|s| s.to_string()).collect(),

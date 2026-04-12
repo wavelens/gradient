@@ -17,7 +17,7 @@ use gradient_core::executer::path_utils::{nix_store_path, strip_nix_store_prefix
 use gradient_core::sources::get_hash_from_path;
 use harmonia_protocol::build_result::BuildResultInner;
 use harmonia_protocol::daemon_wire::types2::BuildMode;
-use harmonia_protocol::types::DaemonStore as _;
+use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT};
 use harmonia_store_core::store_path::StorePath;
 use proto::messages::{BuildOutput, BuildTask};

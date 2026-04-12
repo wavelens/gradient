@@ -16,7 +16,7 @@
 use std::collections::BTreeSet;
 
 use anyhow::{Context, Result};
-use harmonia_protocol::types::DaemonStore as _;
+use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_core::signature::{SecretKey, fingerprint_path};
 use harmonia_utils_hash::fmt::CommonHash as _;
 use harmonia_store_core::store_path::{StoreDir, StorePath};
@@ -86,7 +86,7 @@ async fn sign_one_path(
 
     // Convert SRI hash to Nix format for fingerprinting.
     let nar_hash_nix =
-        sri_to_nix_hash(&path_info.nar_hash.as_sri().to_string()).context("convert NAR hash")?;
+        sri_to_nix_hash(&path_info.nar_hash.sri().to_string()).context("convert NAR hash")?;
 
     let references: BTreeSet<StorePath> = path_info
         .references

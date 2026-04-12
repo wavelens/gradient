@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use gradient_core::executer::BuildOutputInfo;
 use gradient_core::executer::{NixStoreProvider, PathInfo};
 use harmonia_store_core::signature::Signature;
+use proto::traits::WorkerStore;
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
@@ -97,6 +98,13 @@ impl FakeNixStoreProvider {
     /// Remove a path from the store (inverse of `with_present_path`).
     pub fn remove_present_path(&self, path: &str) {
         self.present.lock().unwrap().remove(path);
+    }
+}
+
+#[async_trait]
+impl WorkerStore for FakeNixStoreProvider {
+    async fn has_path(&self, store_path: &str) -> Result<bool> {
+        Ok(self.present.lock().unwrap().contains(store_path))
     }
 }
 

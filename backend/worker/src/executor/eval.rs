@@ -69,12 +69,16 @@ pub async fn evaluate_derivations(
     job: &FlakeJob,
     updater: &mut JobUpdater<'_>,
 ) -> Result<()> {
-    evaluate_derivations_with(evaluator, store, &FsDrvReader, job, updater).await
+    evaluate_derivations_with(&*evaluator.resolver, store, &FsDrvReader, job, updater).await
 }
 
 /// Testable version of [`evaluate_derivations`] that accepts trait objects.
+///
+/// All concrete dependencies are replaced with trait objects so this function
+/// can be exercised in unit tests with fakes (no real nix-daemon, no real
+/// filesystem, no real WebSocket connection).
 pub async fn evaluate_derivations_with(
-    evaluator: &WorkerEvaluator,
+    resolver: &dyn DerivationResolver,
     store: &dyn WorkerStore,
     drv_reader: &dyn DrvReader,
     job: &FlakeJob,
@@ -87,8 +91,7 @@ pub async fn evaluate_derivations_with(
 
     // ── Step 1: discover attr paths ──────────────────────────────────────────
     debug!(repo = %repo, "listing flake derivations");
-    let (attrs, mut warnings) = evaluator
-        .resolver
+    let (attrs, mut warnings) = resolver
         .list_flake_derivations(repo.clone(), wildcards)
         .await
         .context("list_flake_derivations failed")?;
@@ -100,8 +103,7 @@ pub async fn evaluate_derivations_with(
     }
 
     // ── Step 2: resolve attr paths → drv paths ───────────────────────────────
-    let (resolved, resolve_warnings) = evaluator
-        .resolver
+    let (resolved, resolve_warnings) = resolver
         .resolve_derivation_paths(repo.clone(), attrs.clone())
         .await
         .context("resolve_derivation_paths failed")?;
@@ -224,5 +226,227 @@ pub async fn evaluate_derivations_with(
     );
 
     updater.report_eval_result(discovered, warnings).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use test_support::prelude::*;
+    use test_support::fakes::derivation_resolver::FakeDerivationResolver;
+
+    fn fixture_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("test")
+    }
+
+    fn make_flake_job(repo: &str) -> FlakeJob {
+        FlakeJob {
+            tasks: vec![],
+            repository: repo.into(),
+            commit: "abc123".into(),
+            wildcards: vec!["*".into()],
+            timeout_secs: None,
+        }
+    }
+
+    /// Set up resolver, drv_reader, and store from a StoreFixture.
+    fn setup_from_fixture(
+        fixture: &StoreFixture,
+        repo: &str,
+        attr: &str,
+    ) -> (FakeDerivationResolver, FakeDrvReader, FakeWorkerStore) {
+        let resolver = FakeDerivationResolver::new()
+            .with_flake_attrs(repo, vec![attr.to_string()])
+            .with_drv_path(repo, attr, fixture.entry_point.clone());
+
+        let drv_reader = FakeDrvReader::from_raw_drvs(fixture.raw_drvs.clone());
+        let store = FakeWorkerStore::from_present_paths(fixture.store.present_paths());
+
+        (resolver, drv_reader, store)
+    }
+
+    #[tokio::test]
+    async fn test_eval_closure_walk_empty_store() {
+        let fixture = load_store(&fixture_dir());
+        let repo = "https://example.com/repo";
+        let (resolver, drv_reader, store) = setup_from_fixture(&fixture, repo, "hello");
+        let job = make_flake_job(repo);
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, &mut reporter)
+            .await
+            .unwrap();
+
+        // Should have EvaluatingDerivations + EvalResult events.
+        assert_eq!(reporter.len(), 2);
+
+        if let ReportedEvent::EvalResult { derivations, warnings } = reporter.last_eval_result().unwrap() {
+            // All derivations from the fixture should be discovered.
+            assert_eq!(derivations.len(), fixture.derivations.len());
+            // Nothing is built → nothing substituted.
+            assert!(derivations.iter().all(|d| !d.substituted));
+            // Entry point should have the attr set.
+            let entry = derivations.iter().find(|d| d.drv_path == fixture.entry_point).unwrap();
+            assert_eq!(entry.attr, "hello");
+            // Warnings should be empty for a valid fixture.
+            assert!(warnings.is_empty(), "unexpected warnings: {:?}", warnings);
+        } else {
+            panic!("expected EvalResult");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_eval_partial_substitution() {
+        let mut fixture = load_store(&fixture_dir());
+        // Build ~50% of derivations.
+        fixture.mark_all_built();
+        fixture.remove_random_subtrees(0.5, 42);
+
+        let repo = "https://example.com/repo";
+        let (resolver, drv_reader, store) = setup_from_fixture(&fixture, repo, "hello");
+        let job = make_flake_job(repo);
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, &mut reporter)
+            .await
+            .unwrap();
+
+        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap() {
+            let substituted_count = derivations.iter().filter(|d| d.substituted).count();
+            let not_substituted = derivations.iter().filter(|d| !d.substituted).count();
+            assert!(substituted_count > 0, "some should be substituted");
+            assert!(not_substituted > 0, "some should not be substituted");
+
+            // Verify substituted flags match the fixture's built state.
+            for drv in derivations {
+                let fixture_drv = fixture.derivations.iter().find(|d| d.drv_path == drv.drv_path).unwrap();
+                let is_built = fixture.built().iter().any(|b| b.drv_path == drv.drv_path);
+                assert_eq!(
+                    drv.substituted, is_built,
+                    "substituted mismatch for {}: got {} expected {}",
+                    drv.drv_path, drv.substituted, is_built
+                );
+            }
+        } else {
+            panic!("expected EvalResult");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_eval_all_substituted() {
+        let mut fixture = load_store(&fixture_dir());
+        fixture.mark_all_built();
+
+        let repo = "https://example.com/repo";
+        let (resolver, drv_reader, store) = setup_from_fixture(&fixture, repo, "hello");
+        let job = make_flake_job(repo);
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, &mut reporter)
+            .await
+            .unwrap();
+
+        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap() {
+            assert!(
+                derivations.iter().all(|d| d.substituted),
+                "all should be substituted when everything is built"
+            );
+        } else {
+            panic!("expected EvalResult");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_eval_empty_attrs() {
+        let resolver = FakeDerivationResolver::new();
+        let drv_reader = FakeDrvReader::new();
+        let store = FakeWorkerStore::new();
+        let job = make_flake_job("https://example.com/empty");
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, &mut reporter)
+            .await
+            .unwrap();
+
+        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap() {
+            assert!(derivations.is_empty());
+        } else {
+            panic!("expected EvalResult");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_eval_missing_drv_warns() {
+        // Resolver resolves an attr to a drv path that doesn't exist in the reader.
+        let resolver = FakeDerivationResolver::new()
+            .with_flake_attrs("repo", vec!["pkg".into()])
+            .with_drv_path("repo", "pkg", "/nix/store/nonexistent.drv");
+        let drv_reader = FakeDrvReader::new(); // No drvs loaded
+        let store = FakeWorkerStore::new();
+        let job = make_flake_job("repo");
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, &mut reporter)
+            .await
+            .unwrap();
+
+        if let ReportedEvent::EvalResult { derivations, warnings } = reporter.last_eval_result().unwrap() {
+            assert!(derivations.is_empty(), "no derivations should be discovered");
+            assert!(!warnings.is_empty(), "should have a warning about missing drv");
+            assert!(
+                warnings[0].contains("nonexistent.drv"),
+                "warning should mention the missing path: {:?}",
+                warnings
+            );
+        } else {
+            panic!("expected EvalResult");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_eval_dependencies_match_fixture() {
+        let fixture = load_store(&fixture_dir());
+        let repo = "https://example.com/repo";
+        let (resolver, drv_reader, store) = setup_from_fixture(&fixture, repo, "hello");
+        let job = make_flake_job(repo);
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, &mut reporter)
+            .await
+            .unwrap();
+
+        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap() {
+            // Build a dependency map from the eval result.
+            let eval_deps: std::collections::HashMap<&str, Vec<&str>> = derivations
+                .iter()
+                .map(|d| (d.drv_path.as_str(), d.dependencies.iter().map(|s| s.as_str()).collect()))
+                .collect();
+
+            // Compare against fixture tree.
+            for drv in &fixture.derivations {
+                let eval_dep_list = eval_deps.get(drv.drv_path.as_str())
+                    .unwrap_or_else(|| panic!("missing {} in eval result", drv.drv_path));
+                let fixture_dep_list = fixture.tree.get(&drv.drv_path).unwrap();
+
+                let mut eval_sorted: Vec<&str> = eval_dep_list.clone();
+                eval_sorted.sort();
+                let mut fixture_sorted: Vec<&str> = fixture_dep_list.iter().map(|s| s.as_str()).collect();
+                fixture_sorted.sort();
+
+                assert_eq!(
+                    eval_sorted, fixture_sorted,
+                    "dependency mismatch for {}",
+                    drv.drv_path
+                );
+            }
+        } else {
+            panic!("expected EvalResult");
+        }
+    }
 }
 

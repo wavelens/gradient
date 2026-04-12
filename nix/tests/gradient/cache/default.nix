@@ -275,7 +275,7 @@
       store_path = server.succeed(f"${lib.getExe pkgs.nix} path-info {store_path_drv}^out").strip()
       store_hash = store_path.split("-")[0].replace("/nix/store/", "")
       print(f"Detected store path: {store_path}")
-      print(server.succeed(f"nix path-info {store_path} --json"))
+      print(server.succeed(f"${lib.getExe pkgs.nix} path-info {store_path} --json"))
 
       print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM organization_cache;\"'"))
       print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM cache;\"'"))

@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use futures::stream::{FuturesUnordered, StreamExt};
 use harmonia_protocol::build_result::BuildResultInner;
 use harmonia_protocol::daemon_wire::types2::BuildMode;
-use harmonia_protocol::types::DaemonStore;
+use harmonia_store_remote::DaemonStore;
 use harmonia_store_core::derivation::BasicDerivation;
 use harmonia_store_core::store_path::StorePath;
 use harmonia_store_remote::{DaemonClientBuilder, HandshakeDaemonStore as _};

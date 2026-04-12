@@ -35,6 +35,9 @@ use worker_pool::WorkerPool;
 
 pub use worker_pool::WorkerInfo;
 
+#[cfg(test)]
+mod scheduler_tests;
+
 /// The shared scheduler — clone freely (all fields are `Arc`s).
 #[derive(Clone)]
 pub struct Scheduler {

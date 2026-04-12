@@ -41,3 +41,6 @@ tracing           = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid              = { workspace = true }
 zstd              = { workspace = true }
+
+[dev-dependencies]
+test-support = { path = "../test-support" }
