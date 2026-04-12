@@ -22,6 +22,11 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_WORKER_PEERS")]
     pub peers: Option<String>,
 
+    /// Directory for persistent worker state (worker ID file, etc.).
+    /// Defaults to `/var/lib/gradient-worker`. Must be writable.
+    #[arg(long, env = "GRADIENT_WORKER_DATA_DIR", default_value = "/var/lib/gradient-worker")]
+    pub data_dir: String,
+
     /// Re-exec as a Nix evaluator subprocess (internal — do not set manually).
     #[arg(long, env = "GRADIENT_EVAL_WORKER", hide = true)]
     pub eval_worker: bool,

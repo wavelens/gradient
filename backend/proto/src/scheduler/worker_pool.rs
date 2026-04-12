@@ -8,6 +8,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use uuid::Uuid;
+
 use crate::messages::GradientCapabilities;
 
 /// Metadata for a single connected worker.
@@ -19,6 +21,9 @@ pub struct ConnectedWorker {
     pub max_concurrent_builds: u32,
     pub assigned_jobs: HashSet<String>,
     pub draining: bool,
+    /// Peer IDs (org/cache/proxy UUIDs) this worker is authorized for.
+    /// Empty means no peers registered this worker (open/discoverable mode).
+    pub authorized_peers: HashSet<Uuid>,
 }
 
 /// In-memory registry of all currently connected workers.
@@ -32,7 +37,16 @@ impl WorkerPool {
         Self::default()
     }
 
-    pub fn register(&mut self, id: String, capabilities: GradientCapabilities) {
+    pub fn is_connected(&self, id: &str) -> bool {
+        self.workers.contains_key(id)
+    }
+
+    pub fn register(
+        &mut self,
+        id: String,
+        capabilities: GradientCapabilities,
+        authorized_peers: HashSet<Uuid>,
+    ) {
         self.workers.insert(
             id,
             ConnectedWorker {
@@ -42,8 +56,22 @@ impl WorkerPool {
                 max_concurrent_builds: 1,
                 assigned_jobs: HashSet::new(),
                 draining: false,
+                authorized_peers,
             },
         );
+    }
+
+    pub fn update_authorized_peers(&mut self, id: &str, authorized_peers: HashSet<Uuid>) {
+        if let Some(w) = self.workers.get_mut(id) {
+            w.authorized_peers = authorized_peers;
+        }
+    }
+
+    /// Returns the authorized peer set for a worker, or `None` if the worker
+    /// is not connected. An empty set means no peers registered this worker
+    /// (open/discoverable mode — all jobs visible).
+    pub fn authorized_peers_for(&self, id: &str) -> Option<&HashSet<Uuid>> {
+        self.workers.get(id).map(|w| &w.authorized_peers)
     }
 
     pub fn update_capabilities(

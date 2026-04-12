@@ -94,7 +94,7 @@ async fn dispatch_queued_evals(scheduler: &Arc<Scheduler>) -> anyhow::Result<()>
         let pending = PendingEvalJob {
             evaluation_id: eval.id,
             project_id: eval.project,
-            organization_id: org_id,
+            peer_id: org_id,
             commit_id: eval.commit,
             repository: eval.repository.clone(),
             job: flake_job,
@@ -162,6 +162,22 @@ async fn dispatch_ready_builds(scheduler: &Arc<Scheduler>) -> anyhow::Result<()>
             }
         };
 
+        let eval = match EEvaluation::find_by_id(build.evaluation).one(&state.db).await? {
+            Some(e) => e,
+            None => {
+                error!(build_id = %build.id, "evaluation not found for build");
+                continue;
+            }
+        };
+
+        let peer_id = match organization_id_for_eval(state, &eval).await {
+            Some(id) => id,
+            None => {
+                error!(build_id = %build.id, "could not determine peer for build");
+                continue;
+            }
+        };
+
         let build_job = BuildJob {
             builds: vec![BuildTask {
                 build_id: build.id.to_string(),
@@ -174,6 +190,7 @@ async fn dispatch_ready_builds(scheduler: &Arc<Scheduler>) -> anyhow::Result<()>
         let pending = PendingBuildJob {
             build_id: build.id,
             evaluation_id: build.evaluation,
+            peer_id,
             job: build_job,
             required_paths: vec![],
         };

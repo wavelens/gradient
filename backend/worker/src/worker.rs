@@ -9,7 +9,7 @@
 //! [`Worker`] connects to the Gradient server, performs the handshake,
 //! registers capabilities, and then drives the job dispatch loop.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use proto::messages::{ClientMessage, Job, ServerMessage};
 use tracing::{debug, error, info, warn};
 
@@ -37,8 +37,8 @@ impl Worker {
     pub async fn connect(config: WorkerConfig) -> Result<Self> {
         let mut conn = ProtoConnection::open(&config.server_url).await?;
 
-        // TODO: load persistent peer_id from disk; generate on first start.
-        let peer_id = uuid::Uuid::new_v4().to_string();
+        let peer_id = load_or_generate_id(&config.data_dir)
+            .context("failed to load or generate persistent worker ID")?;
         let peer_tokens = config.peer_tokens();
 
         let handshake = perform_handshake(
@@ -225,5 +225,39 @@ impl Worker {
             }
         }
     }
+}
+
+/// Load the persistent worker ID from `{data_dir}/worker-id`, or generate a
+/// new UUID, write it to that file, and return it.
+///
+/// The ID persists across restarts so the server can:
+/// - Detect duplicate connections (same ID already connected).
+/// - Re-match orphaned jobs after a server restart.
+fn load_or_generate_id(data_dir: &str) -> Result<String> {
+    use std::fs;
+    use std::path::Path;
+
+    let dir = Path::new(data_dir);
+    fs::create_dir_all(dir)
+        .with_context(|| format!("failed to create data directory '{}'", data_dir))?;
+
+    let id_path = dir.join("worker-id");
+
+    if id_path.exists() {
+        let raw = fs::read_to_string(&id_path)
+            .with_context(|| format!("failed to read '{}'", id_path.display()))?;
+        let id = raw.trim().to_owned();
+        // Validate: must be a parseable UUID.
+        id.parse::<uuid::Uuid>()
+            .with_context(|| format!("'{}' contains an invalid UUID: {:?}", id_path.display(), id))?;
+        info!(path = %id_path.display(), %id, "loaded persistent worker ID");
+        return Ok(id);
+    }
+
+    let id = uuid::Uuid::new_v4().to_string();
+    fs::write(&id_path, &id)
+        .with_context(|| format!("failed to write '{}'", id_path.display()))?;
+    info!(path = %id_path.display(), %id, "generated and persisted new worker ID");
+    Ok(id)
 }
 

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::Router;
@@ -14,6 +15,7 @@ use axum::routing::get;
 use gradient_core::types::ServerState;
 use rkyv::rancor::Error as RkyvError;
 use tracing::{debug, error, info, instrument, warn};
+use uuid::Uuid;
 
 use crate::messages::{
     ClientMessage, GradientCapabilities, JobUpdateKind, PROTO_VERSION, ServerMessage,
@@ -133,8 +135,23 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>, scheduler
 
     info!(%peer_id, client_version, authorized = authorized_peers.len(), "handshake complete");
 
+    // Reject duplicate connections (same worker ID already connected).
+    if scheduler.is_worker_connected(&peer_id).await {
+        warn!(%peer_id, "duplicate connection rejected (worker already connected)");
+        send_reject(&mut socket, 429, "worker already connected".into()).await;
+        return;
+    }
+
+    // Parse authorized peer IDs as UUIDs for job dispatch filtering.
+    let authorized_peer_uuids: HashSet<Uuid> = authorized_peers
+        .iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
     // Register this worker in the scheduler.
-    scheduler.register_worker(&peer_id, negotiated.clone()).await;
+    scheduler
+        .register_worker(&peer_id, negotiated.clone(), authorized_peer_uuids)
+        .await;
 
     // ── Dispatch loop ─────────────────────────────────────────────────────────
 
@@ -180,6 +197,14 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>, scheduler
                 let registered_peers = lookup_registered_peers(&state, &peer_id).await;
                 let (authorized_peers, failed_peers) =
                     validate_tokens(&registered_peers, &tokens);
+
+                // Update the scheduler's peer filter for this worker.
+                let updated_uuids: HashSet<Uuid> = authorized_peers
+                    .iter()
+                    .filter_map(|s| s.parse().ok())
+                    .collect();
+                scheduler.update_authorized_peers(&peer_id, updated_uuids).await;
+
                 if send_server_msg(
                     &mut socket,
                     &ServerMessage::AuthUpdate { authorized_peers, failed_peers },
@@ -202,7 +227,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>, scheduler
             // ── Job list snapshot ─────────────────────────────────────────
             ClientMessage::RequestJobList => {
                 debug!(%peer_id, "RequestJobList");
-                let candidates = scheduler.get_job_candidates().await;
+                let candidates = scheduler.get_job_candidates(&peer_id).await;
                 let is_final = true;
                 let chunk = ServerMessage::JobListChunk { candidates, is_final };
                 if send_server_msg(&mut socket, &chunk).await.is_err() {

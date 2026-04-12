@@ -15,6 +15,7 @@ pub mod eval;
 pub mod jobs;
 pub mod worker_pool;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -66,9 +67,29 @@ impl Scheduler {
 
     // ── Worker lifecycle ──────────────────────────────────────────────────────
 
-    pub async fn register_worker(&self, peer_id: &str, capabilities: GradientCapabilities) {
-        self.worker_pool.write().await.register(peer_id.to_owned(), capabilities);
+    pub async fn is_worker_connected(&self, peer_id: &str) -> bool {
+        self.worker_pool.read().await.is_connected(peer_id)
+    }
+
+    pub async fn register_worker(
+        &self,
+        peer_id: &str,
+        capabilities: GradientCapabilities,
+        authorized_peers: HashSet<Uuid>,
+    ) {
+        self.worker_pool
+            .write()
+            .await
+            .register(peer_id.to_owned(), capabilities, authorized_peers);
         info!(%peer_id, "worker registered");
+    }
+
+    pub async fn update_authorized_peers(&self, peer_id: &str, authorized_peers: HashSet<Uuid>) {
+        self.worker_pool
+            .write()
+            .await
+            .update_authorized_peers(peer_id, authorized_peers);
+        debug!(%peer_id, "authorized peers updated");
     }
 
     pub async fn update_worker_capabilities(
@@ -109,8 +130,18 @@ impl Scheduler {
         self.job_tracker.write().await.add_pending(job_id, PendingJob::Build(job))
     }
 
-    pub async fn get_job_candidates(&self) -> Vec<JobCandidate> {
-        self.job_tracker.read().await.all_candidates()
+    /// Returns pending job candidates visible to the given worker,
+    /// filtered by its authorized peer set.
+    pub async fn get_job_candidates(&self, worker_id: &str) -> Vec<JobCandidate> {
+        let pool = self.worker_pool.read().await;
+        let authorized = pool.authorized_peers_for(worker_id);
+        // Empty authorized set = open mode, show all.
+        let filter = if authorized.is_some_and(|p| !p.is_empty()) {
+            authorized
+        } else {
+            None
+        };
+        self.job_tracker.read().await.candidates_for_worker(filter)
     }
 
     // ── Scoring / assignment ──────────────────────────────────────────────────
@@ -120,15 +151,31 @@ impl Scheduler {
         peer_id: &str,
         scores: Vec<CandidateScore>,
     ) -> Option<Assignment> {
+        // Snapshot authorized peers (read lock, short-lived).
+        let authorized: Option<HashSet<Uuid>> = {
+            let pool = self.worker_pool.read().await;
+            pool.authorized_peers_for(peer_id).and_then(|p| {
+                if p.is_empty() { None } else { Some(p.clone()) }
+            })
+        };
+
         // Try score-based assignment (missing: 0).
-        let assignment = self.job_tracker.write().await.receive_scores(peer_id, scores);
+        let assignment = self
+            .job_tracker
+            .write()
+            .await
+            .receive_scores(peer_id, authorized.as_ref(), scores);
         if let Some(ref a) = assignment {
             self.worker_pool.write().await.assign_job(peer_id, &a.job_id);
             info!(%peer_id, job_id = %a.job_id, "job assigned via scoring");
             return assignment;
         }
         // Fallback: assign any job with no required paths.
-        let fallback = self.job_tracker.write().await.take_empty_required(peer_id);
+        let fallback = self
+            .job_tracker
+            .write()
+            .await
+            .take_empty_required(peer_id, authorized.as_ref());
         if let Some(ref a) = fallback {
             self.worker_pool.write().await.assign_job(peer_id, &a.job_id);
             info!(%peer_id, job_id = %a.job_id, "job assigned (no required paths)");

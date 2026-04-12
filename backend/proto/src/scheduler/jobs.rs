@@ -6,7 +6,7 @@
 
 //! Pending and active job tracking.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use uuid::Uuid;
 
@@ -16,7 +16,9 @@ use crate::messages::{FlakeJob, BuildJob, Job, JobCandidate, CandidateScore};
 pub struct PendingEvalJob {
     pub evaluation_id: Uuid,
     pub project_id: Option<Uuid>,
-    pub organization_id: Uuid,
+    /// Peer (org/cache/proxy) that owns this job. Workers must be authorized
+    /// for this peer to receive the job offer.
+    pub peer_id: Uuid,
     pub commit_id: Uuid,
     pub repository: String,
     pub job: FlakeJob,
@@ -27,6 +29,8 @@ pub struct PendingEvalJob {
 pub struct PendingBuildJob {
     pub build_id: Uuid,
     pub evaluation_id: Uuid,
+    /// Peer (org/cache/proxy) that owns this job.
+    pub peer_id: Uuid,
     pub job: BuildJob,
     pub required_paths: Vec<String>,
 }
@@ -42,6 +46,13 @@ impl PendingJob {
         match self {
             PendingJob::Eval(j) => &j.required_paths,
             PendingJob::Build(j) => &j.required_paths,
+        }
+    }
+
+    pub fn peer_id(&self) -> Uuid {
+        match self {
+            PendingJob::Eval(j) => j.peer_id,
+            PendingJob::Build(j) => j.peer_id,
         }
     }
 
@@ -90,26 +101,39 @@ impl JobTracker {
         candidate
     }
 
-    pub fn all_candidates(&self) -> Vec<JobCandidate> {
+    /// Returns all pending job candidates that the worker is authorized to receive.
+    /// Pass `None` to get all candidates (open/no-peer-restriction mode).
+    pub fn candidates_for_worker(&self, authorized: Option<&HashSet<Uuid>>) -> Vec<JobCandidate> {
         self.pending
             .iter()
+            .filter(|(_, job)| {
+                authorized.is_none_or(|peers| peers.contains(&job.peer_id()))
+            })
             .map(|(id, job)| job.as_candidate(id))
             .collect()
     }
 
     /// Process scores from a worker; assign if best score is 0.
+    /// Only considers jobs the worker is authorized for.
     pub fn receive_scores(
         &mut self,
         peer_id: &str,
+        authorized: Option<&HashSet<Uuid>>,
         scores: Vec<CandidateScore>,
     ) -> Option<Assignment> {
         let worker_scores = self.scores.entry(peer_id.to_owned()).or_default();
         let mut best: Option<(String, u32)> = None;
 
         for score in scores {
-            if !self.pending.contains_key(&score.job_id) {
-                continue;
-            }
+            let job = match self.pending.get(&score.job_id) {
+                Some(j) => j,
+                None => continue,
+            };
+            // Skip jobs this worker is not authorized for.
+            if let Some(peers) = authorized
+                && !peers.contains(&job.peer_id()) {
+                    continue;
+                }
             worker_scores.insert(score.job_id.clone(), score.missing);
             match &best {
                 None => best = Some((score.job_id, score.missing)),
@@ -128,13 +152,21 @@ impl JobTracker {
         self.assign_pending(peer_id, &job_id)
     }
 
-    /// Assign any pending job that has no required paths (will assign immediately).
-    pub fn take_empty_required(&mut self, peer_id: &str) -> Option<Assignment> {
+    /// Assign any pending job with no required paths, restricted to authorized peers.
+    pub fn take_empty_required(
+        &mut self,
+        peer_id: &str,
+        authorized: Option<&HashSet<Uuid>>,
+    ) -> Option<Assignment> {
         let job_id = self
             .pending
             .iter()
-            .find(|(_, j)| j.required_paths().is_empty())
-            .map(|(id, _)| id.clone())?;
+            .filter(|(_, j)| {
+                j.required_paths().is_empty()
+                    && authorized.is_none_or(|peers| peers.contains(&j.peer_id()))
+            })
+            .map(|(id, _)| id.clone())
+            .next()?;
         self.assign_pending(peer_id, &job_id)
     }
 

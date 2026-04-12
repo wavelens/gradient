@@ -35,7 +35,7 @@ pub async fn handle_eval_result(
     warnings: Vec<String>,
 ) -> Result<()> {
     let evaluation_id = job.evaluation_id;
-    let organization_id = job.organization_id;
+    let organization_id = job.peer_id;
 
     let current = EEvaluation::find_by_id(evaluation_id)
         .one(&state.db)
@@ -238,19 +238,17 @@ pub async fn handle_eval_job_completed(state: &Arc<ServerState>, evaluation_id: 
         .filter(CBuild::Status.is_in(vec![BuildStatus::Created, BuildStatus::Queued, BuildStatus::Building]))
         .all(&state.db).await.unwrap_or_default();
 
-    if active.is_empty() {
-        if let Some(eval) = EEvaluation::find_by_id(evaluation_id).one(&state.db).await? {
-            if eval.status == EvaluationStatus::Building {
+    if active.is_empty()
+        && let Some(eval) = EEvaluation::find_by_id(evaluation_id).one(&state.db).await?
+            && eval.status == EvaluationStatus::Building {
                 update_evaluation_status(Arc::clone(state), eval, EvaluationStatus::Completed).await;
             }
-        }
-    }
     Ok(())
 }
 
 pub async fn handle_eval_job_failed(state: &Arc<ServerState>, evaluation_id: Uuid, error: &str) -> Result<()> {
-    if let Some(eval) = EEvaluation::find_by_id(evaluation_id).one(&state.db).await? {
-        if !matches!(eval.status, EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted) {
+    if let Some(eval) = EEvaluation::find_by_id(evaluation_id).one(&state.db).await?
+        && !matches!(eval.status, EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted) {
             update_evaluation_status_with_error(
                 Arc::clone(state),
                 eval,
@@ -259,7 +257,6 @@ pub async fn handle_eval_job_failed(state: &Arc<ServerState>, evaluation_id: Uui
                 Some("worker".to_string()),
             ).await;
         }
-    }
     Ok(())
 }
 
