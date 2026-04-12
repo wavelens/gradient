@@ -4097,6 +4097,7 @@ name = "proto"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "chrono",
  "core",
@@ -5805,6 +5806,7 @@ dependencies = [
  "futures",
  "harmonia-store-core",
  "password-auth",
+ "proto",
  "sea-orm",
  "tokio",
  "uuid",

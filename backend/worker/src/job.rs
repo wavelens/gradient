@@ -10,12 +10,14 @@
 //! reporting progress back to the server during job execution.
 
 use anyhow::Result;
+use async_trait::async_trait;
 use proto::messages::{
     BuildOutput, ClientMessage, DiscoveredDerivation, JobUpdateKind,
 };
 use tracing::debug;
 
 use crate::connection::ProtoConnection;
+use proto::traits::JobReporter;
 
 /// Typed sender for reporting job progress to the server.
 ///
@@ -106,5 +108,52 @@ impl<'a> JobUpdater<'a> {
                 update,
             })
             .await
+    }
+}
+
+#[async_trait]
+impl JobReporter for JobUpdater<'_> {
+    async fn report_fetching(&mut self) -> Result<()> {
+        self.report_fetching().await
+    }
+
+    async fn report_evaluating_flake(&mut self) -> Result<()> {
+        self.report_evaluating_flake().await
+    }
+
+    async fn report_evaluating_derivations(&mut self) -> Result<()> {
+        self.report_evaluating_derivations().await
+    }
+
+    async fn report_eval_result(
+        &mut self,
+        derivations: Vec<DiscoveredDerivation>,
+        warnings: Vec<String>,
+    ) -> Result<()> {
+        self.report_eval_result(derivations, warnings).await
+    }
+
+    async fn report_building(&mut self, build_id: String) -> Result<()> {
+        self.report_building(build_id).await
+    }
+
+    async fn report_build_output(
+        &mut self,
+        build_id: String,
+        outputs: Vec<BuildOutput>,
+    ) -> Result<()> {
+        self.report_build_output(build_id, outputs).await
+    }
+
+    async fn report_compressing(&mut self) -> Result<()> {
+        self.report_compressing().await
+    }
+
+    async fn report_signing(&mut self) -> Result<()> {
+        self.report_signing().await
+    }
+
+    async fn send_log_chunk(&mut self, task_index: u32, data: Vec<u8>) -> Result<()> {
+        self.send_log_chunk(task_index, data).await
     }
 }

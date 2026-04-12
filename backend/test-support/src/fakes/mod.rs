@@ -5,6 +5,11 @@
  */
 
 pub mod ci_reporter;
+pub mod derivation_resolver;
+pub mod drv_reader;
 pub mod email;
+pub mod job_reporter;
 pub mod nix_store;
+pub mod store_fixture;
 pub mod webhooks;
+pub mod worker_store;

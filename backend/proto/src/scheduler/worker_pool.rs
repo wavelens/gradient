@@ -141,3 +141,140 @@ pub struct WorkerInfo {
     pub assigned_job_count: usize,
     pub draining: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn caps() -> GradientCapabilities {
+        GradientCapabilities::default()
+    }
+
+    #[test]
+    fn test_register_and_is_connected() {
+        let mut pool = WorkerPool::new();
+        assert!(!pool.is_connected("w1"));
+        pool.register("w1".into(), caps(), HashSet::new());
+        assert!(pool.is_connected("w1"));
+        assert_eq!(pool.worker_count(), 1);
+    }
+
+    #[test]
+    fn test_unregister_returns_assigned_jobs() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new());
+        pool.assign_job("w1", "j1");
+        pool.assign_job("w1", "j2");
+
+        let mut jobs = pool.unregister("w1");
+        jobs.sort();
+        assert_eq!(jobs, vec!["j1", "j2"]);
+        assert!(!pool.is_connected("w1"));
+        assert_eq!(pool.worker_count(), 0);
+    }
+
+    #[test]
+    fn test_unregister_unknown_returns_empty() {
+        let mut pool = WorkerPool::new();
+        assert!(pool.unregister("w1").is_empty());
+    }
+
+    #[test]
+    fn test_update_capabilities() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new());
+        pool.update_capabilities(
+            "w1",
+            vec!["x86_64-linux".into()],
+            vec!["kvm".into()],
+            4,
+        );
+
+        let workers = pool.all_workers();
+        assert_eq!(workers.len(), 1);
+        assert_eq!(workers[0].architectures, vec!["x86_64-linux"]);
+        assert_eq!(workers[0].system_features, vec!["kvm"]);
+        assert_eq!(workers[0].max_concurrent_builds, 4);
+    }
+
+    #[test]
+    fn test_mark_draining() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new());
+
+        let info = &pool.all_workers()[0];
+        assert!(!info.draining);
+
+        pool.mark_draining("w1");
+        let info = &pool.all_workers()[0];
+        assert!(info.draining);
+    }
+
+    #[test]
+    fn test_authorized_peers_for() {
+        let mut pool = WorkerPool::new();
+        let peer_a = Uuid::new_v4();
+        let peer_b = Uuid::new_v4();
+
+        pool.register("w1".into(), caps(), HashSet::from([peer_a, peer_b]));
+        let peers = pool.authorized_peers_for("w1").unwrap();
+        assert!(peers.contains(&peer_a));
+        assert!(peers.contains(&peer_b));
+        assert_eq!(peers.len(), 2);
+
+        // Unknown worker returns None.
+        assert!(pool.authorized_peers_for("w2").is_none());
+    }
+
+    #[test]
+    fn test_update_authorized_peers() {
+        let mut pool = WorkerPool::new();
+        let peer_a = Uuid::new_v4();
+        let peer_b = Uuid::new_v4();
+
+        pool.register("w1".into(), caps(), HashSet::from([peer_a]));
+        assert_eq!(pool.authorized_peers_for("w1").unwrap().len(), 1);
+
+        pool.update_authorized_peers("w1", HashSet::from([peer_a, peer_b]));
+        assert_eq!(pool.authorized_peers_for("w1").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_assign_and_release_job() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new());
+
+        pool.assign_job("w1", "j1");
+        assert_eq!(pool.all_workers()[0].assigned_job_count, 1);
+
+        pool.assign_job("w1", "j2");
+        assert_eq!(pool.all_workers()[0].assigned_job_count, 2);
+
+        pool.release_job("w1", "j1");
+        assert_eq!(pool.all_workers()[0].assigned_job_count, 1);
+
+        pool.release_job("w1", "j2");
+        assert_eq!(pool.all_workers()[0].assigned_job_count, 0);
+    }
+
+    #[test]
+    fn test_all_workers_info() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new());
+        pool.register("w2".into(), caps(), HashSet::new());
+        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec![], 2);
+        pool.assign_job("w1", "j1");
+        pool.mark_draining("w2");
+
+        let mut workers = pool.all_workers();
+        workers.sort_by(|a, b| a.id.cmp(&b.id));
+
+        assert_eq!(workers[0].id, "w1");
+        assert_eq!(workers[0].assigned_job_count, 1);
+        assert!(!workers[0].draining);
+
+        assert_eq!(workers[1].id, "w2");
+        assert_eq!(workers[1].assigned_job_count, 0);
+        assert!(workers[1].draining);
+    }
+}

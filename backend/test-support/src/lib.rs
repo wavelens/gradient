@@ -29,6 +29,10 @@ pub mod state;
 pub mod prelude {
     pub use crate::cli::test_cli;
     pub use crate::db::db_with;
+    pub use crate::fakes::drv_reader::FakeDrvReader;
+    pub use crate::fakes::job_reporter::{RecordingJobReporter, ReportedEvent};
+    pub use crate::fakes::store_fixture::{StoreFixture, load_store};
+    pub use crate::fakes::worker_store::FakeWorkerStore;
     pub use crate::fixtures::*;
     pub use crate::log_storage::NoopLogStorage;
     pub use crate::state::test_state;

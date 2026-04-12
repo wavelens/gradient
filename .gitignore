@@ -1,7 +1,5 @@
 # ---> PostgreSQL
-testing/
-.claude/
-CLAUDE.md
+test/
 .nixos-test-history
 
 # ---> Python

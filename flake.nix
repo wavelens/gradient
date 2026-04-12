@@ -29,6 +29,7 @@
     checks = import ./nix/tests { inherit self inputs system pkgs; };
     apps = import ./nix/vms { inherit inputs system pkgs; };
     packages = rec {
+      store = pkgs.callPackage ./nix/scripts/store.nix { };
       gradient = pkgs.callPackage ./nix/packages/gradient.nix { };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
       gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix { };

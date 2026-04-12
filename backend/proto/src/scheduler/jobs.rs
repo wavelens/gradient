@@ -225,3 +225,173 @@ impl JobTracker {
         self.active.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::messages::{BuildJob, BuildTask, FlakeJob, FlakeTask};
+
+    fn eval_job(peer: Uuid) -> PendingJob {
+        PendingJob::Eval(PendingEvalJob {
+            evaluation_id: Uuid::new_v4(),
+            project_id: None,
+            peer_id: peer,
+            commit_id: Uuid::new_v4(),
+            repository: "https://example.com/repo".into(),
+            job: FlakeJob {
+                tasks: vec![FlakeTask::EvaluateDerivations],
+                repository: "https://example.com/repo".into(),
+                commit: "abc123".into(),
+                wildcards: vec!["*".into()],
+                timeout_secs: None,
+            },
+            required_paths: vec![],
+        })
+    }
+
+    fn build_job(peer: Uuid, required: Vec<String>) -> PendingJob {
+        PendingJob::Build(PendingBuildJob {
+            build_id: Uuid::new_v4(),
+            evaluation_id: Uuid::new_v4(),
+            peer_id: peer,
+            job: BuildJob {
+                builds: vec![BuildTask {
+                    build_id: Uuid::new_v4().to_string(),
+                    drv_path: "/nix/store/abc.drv".into(),
+                }],
+                compress: None,
+                sign: None,
+            },
+            required_paths: required,
+        })
+    }
+
+    #[test]
+    fn test_add_pending_and_candidates() {
+        let mut tracker = JobTracker::new();
+        let peer = Uuid::new_v4();
+        tracker.add_pending("j1".into(), eval_job(peer));
+        tracker.add_pending("j2".into(), eval_job(peer));
+        tracker.add_pending("j3".into(), build_job(peer, vec![]));
+
+        let candidates = tracker.candidates_for_worker(None);
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(tracker.pending_count(), 3);
+    }
+
+    #[test]
+    fn test_candidates_filtered_by_peer() {
+        let mut tracker = JobTracker::new();
+        let peer_a = Uuid::new_v4();
+        let peer_b = Uuid::new_v4();
+        tracker.add_pending("ja".into(), eval_job(peer_a));
+        tracker.add_pending("jb".into(), eval_job(peer_b));
+
+        let mut authorized = HashSet::new();
+        authorized.insert(peer_a);
+
+        let candidates = tracker.candidates_for_worker(Some(&authorized));
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].job_id, "ja");
+    }
+
+    #[test]
+    fn test_receive_scores_assigns_zero_missing() {
+        let mut tracker = JobTracker::new();
+        let peer = Uuid::new_v4();
+        tracker.add_pending("j1".into(), build_job(peer, vec!["/nix/store/foo".into()]));
+
+        let assignment = tracker.receive_scores(
+            "w1",
+            None,
+            vec![CandidateScore { job_id: "j1".into(), missing: 0 }],
+        );
+        assert!(assignment.is_some());
+        assert_eq!(assignment.unwrap().job_id, "j1");
+        assert_eq!(tracker.pending_count(), 0);
+        assert_eq!(tracker.active_count(), 1);
+    }
+
+    #[test]
+    fn test_receive_scores_no_assign_nonzero() {
+        let mut tracker = JobTracker::new();
+        let peer = Uuid::new_v4();
+        tracker.add_pending("j1".into(), build_job(peer, vec!["/nix/store/foo".into()]));
+
+        let assignment = tracker.receive_scores(
+            "w1",
+            None,
+            vec![CandidateScore { job_id: "j1".into(), missing: 5 }],
+        );
+        assert!(assignment.is_none());
+        assert_eq!(tracker.pending_count(), 1);
+        assert_eq!(tracker.active_count(), 0);
+    }
+
+    #[test]
+    fn test_release_to_pending_after_rejection() {
+        let mut tracker = JobTracker::new();
+        let peer = Uuid::new_v4();
+        tracker.add_pending("j1".into(), eval_job(peer));
+
+        // Assign it.
+        let assignment = tracker.take_empty_required("w1", None);
+        assert!(assignment.is_some());
+        assert_eq!(tracker.pending_count(), 0);
+        assert_eq!(tracker.active_count(), 1);
+
+        // Release it back.
+        tracker.release_to_pending("j1");
+        assert_eq!(tracker.pending_count(), 1);
+        assert_eq!(tracker.active_count(), 0);
+
+        // Should reappear in candidates.
+        let candidates = tracker.candidates_for_worker(None);
+        assert_eq!(candidates.len(), 1);
+    }
+
+    #[test]
+    fn test_worker_disconnected_requeues() {
+        let mut tracker = JobTracker::new();
+        let peer = Uuid::new_v4();
+        tracker.add_pending("j1".into(), eval_job(peer));
+        tracker.add_pending("j2".into(), eval_job(peer));
+
+        tracker.take_empty_required("w1", None);
+        tracker.take_empty_required("w1", None);
+        assert_eq!(tracker.active_count(), 2);
+        assert_eq!(tracker.pending_count(), 0);
+
+        let orphaned = tracker.worker_disconnected("w1");
+        assert_eq!(orphaned.len(), 2);
+        assert_eq!(tracker.pending_count(), 2);
+        assert_eq!(tracker.active_count(), 0);
+    }
+
+    #[test]
+    fn test_take_empty_required() {
+        let mut tracker = JobTracker::new();
+        let peer = Uuid::new_v4();
+        // Job with required paths — should NOT be taken.
+        tracker.add_pending("j1".into(), build_job(peer, vec!["/nix/store/x".into()]));
+        // Job with no required paths — should be taken.
+        tracker.add_pending("j2".into(), eval_job(peer));
+
+        let assignment = tracker.take_empty_required("w1", None);
+        assert!(assignment.is_some());
+        assert_eq!(assignment.unwrap().job_id, "j2");
+    }
+
+    #[test]
+    fn test_contains_job_both_maps() {
+        let mut tracker = JobTracker::new();
+        let peer = Uuid::new_v4();
+        tracker.add_pending("j1".into(), eval_job(peer));
+        assert!(tracker.contains_job("j1"));
+        assert!(!tracker.contains_job("j2"));
+
+        tracker.take_empty_required("w1", None);
+        // Now in active, not pending — should still be "contained".
+        assert!(tracker.contains_job("j1"));
+    }
+}

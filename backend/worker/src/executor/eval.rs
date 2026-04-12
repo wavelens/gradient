@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use crate::worker_pool::WorkerPoolResolver;
-use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_core::db::parse_drv;
 use gradient_core::nix::DerivationResolver;
 use proto::messages::{DerivationOutput, DiscoveredDerivation, FlakeJob};
@@ -26,6 +25,8 @@ use tracing::{debug, warn};
 
 use crate::job::JobUpdater;
 use crate::store::LocalNixStore;
+use crate::traits::{DrvReader, FsDrvReader, JobReporter, WorkerStore};
+
 
 /// Drives Nix evaluation inside the worker.
 ///
@@ -67,6 +68,17 @@ pub async fn evaluate_derivations(
     store: &LocalNixStore,
     job: &FlakeJob,
     updater: &mut JobUpdater<'_>,
+) -> Result<()> {
+    evaluate_derivations_with(evaluator, store, &FsDrvReader, job, updater).await
+}
+
+/// Testable version of [`evaluate_derivations`] that accepts trait objects.
+pub async fn evaluate_derivations_with(
+    evaluator: &WorkerEvaluator,
+    store: &dyn WorkerStore,
+    drv_reader: &dyn DrvReader,
+    job: &FlakeJob,
+    updater: &mut dyn JobReporter,
 ) -> Result<()> {
     updater.report_evaluating_derivations().await?;
 
@@ -127,13 +139,7 @@ pub async fn evaluate_derivations(
     }
 
     while let Some((attr, drv_path)) = queue.pop_front() {
-        let full_path = if drv_path.starts_with('/') {
-            drv_path.clone()
-        } else {
-            format!("/nix/store/{}", drv_path)
-        };
-
-        let drv_bytes = match tokio::fs::read(&full_path).await {
+        let drv_bytes = match drv_reader.read_drv(&drv_path).await {
             Ok(b) => b,
             Err(e) => {
                 warn!(drv = %drv_path, error = %e, "failed to read .drv file; skipping");
@@ -173,12 +179,17 @@ pub async fn evaluate_derivations(
         let substituted = if outputs.is_empty() {
             false
         } else {
-            let checks: FuturesUnordered<_> = outputs
-                .iter()
-                .map(|o| store.has_path(&o.path))
-                .collect();
-            let results: Vec<_> = checks.collect().await;
-            results.into_iter().all(|r| r.unwrap_or(false))
+            let mut all_present = true;
+            for o in &outputs {
+                match store.has_path(&o.path).await {
+                    Ok(true) => {}
+                    _ => {
+                        all_present = false;
+                        break;
+                    }
+                }
+            }
+            all_present
         };
 
         let architecture = drv.system.clone();

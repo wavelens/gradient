@@ -16,6 +16,7 @@ mod nar;
 mod nix_eval;
 mod scorer;
 mod store;
+mod traits;
 mod worker;
 mod worker_pool;
 

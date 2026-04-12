@@ -18,7 +18,6 @@ fn init_connection_roundtrip() {
         version: PROTO_VERSION,
         capabilities: GradientCapabilities::default(),
         id: "550e8400-e29b-41d4-a716-446655440000".into(),
-        token: Some("test-token".into()),
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
@@ -30,6 +29,8 @@ fn init_ack_roundtrip() {
     let original = ServerMessage::InitAck {
         version: PROTO_VERSION,
         capabilities: GradientCapabilities::default(),
+        authorized_peers: vec!["peer-1".into()],
+        failed_peers: vec![],
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();

@@ -15,6 +15,7 @@ axum          = { version = "0.8", features = ["ws"] }
 gradient-core = { path = "../core", package = "core" }
 entity        = { workspace = true }
 anyhow        = { workspace = true }
+async-trait   = { workspace = true }
 chrono        = { workspace = true }
 rkyv          = { workspace = true }
 serde         = { workspace = true }

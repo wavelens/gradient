@@ -7,6 +7,9 @@
  - error pages - add a page for 404, 500, 502, 503, 504
  - poll rarly even when there are webhooks
  - accept only connections with same proto version
+ - workers need to be restared (maybe they crash)
+ - prioritzie workers when oom killing
+ - when commit id is same no need to re-evaluate
 
  - save which builder was used for each build in the database
  - add a eval logLevel (seperate from build)

@@ -17,6 +17,7 @@ chrono           = { workspace = true }
 harmonia-store-core = { workspace = true }
 gradient-core    = { path = "../core", package = "core" }
 entity           = { workspace = true }
+proto            = { workspace = true }
 futures          = { workspace = true }
 sea-orm          = { workspace = true }
 tokio            = { workspace = true }

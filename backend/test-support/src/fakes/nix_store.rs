@@ -88,6 +88,16 @@ impl FakeNixStoreProvider {
     pub fn deleted_paths(&self) -> Vec<String> {
         self.deleted.lock().unwrap().clone()
     }
+
+    /// Snapshot of all paths currently present in the store.
+    pub fn present_paths(&self) -> HashSet<String> {
+        self.present.lock().unwrap().clone()
+    }
+
+    /// Remove a path from the store (inverse of `with_present_path`).
+    pub fn remove_present_path(&self, path: &str) {
+        self.present.lock().unwrap().remove(path);
+    }
 }
 
 #[async_trait]

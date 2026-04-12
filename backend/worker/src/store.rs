@@ -12,9 +12,12 @@
 //! and triggering builds.
 
 use anyhow::Result;
+use async_trait::async_trait;
 use harmonia_protocol::types::DaemonStore as _;
 use harmonia_store_core::store_path::StorePath;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig};
+
+use proto::traits::WorkerStore;
 
 const DEFAULT_DAEMON_SOCKET: &str = "/nix/var/nix/daemon-socket/socket";
 
@@ -64,6 +67,13 @@ impl LocalNixStore {
     /// Return the harmonia connection pool (for build execution).
     pub fn pool(&self) -> &ConnectionPool {
         &self.pool
+    }
+}
+
+#[async_trait]
+impl WorkerStore for LocalNixStore {
+    async fn has_path(&self, store_path: &str) -> Result<bool> {
+        self.has_path(store_path).await
     }
 }
 

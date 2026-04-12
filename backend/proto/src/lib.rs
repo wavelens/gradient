@@ -7,6 +7,7 @@
 pub mod handler;
 pub mod messages;
 pub mod scheduler;
+pub mod traits;
 
 #[cfg(test)]
 mod tests;
