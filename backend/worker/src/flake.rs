@@ -154,3 +154,89 @@ pub(super) fn get_derivation_path(
 
     Ok((strip_nix_store_prefix(&drv_path), vec![]))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── split_attr_path ───────────────────────────────────────────────────────
+
+    #[test]
+    fn split_attr_path_simple() {
+        assert_eq!(split_attr_path("packages.x86_64-linux.hello"), vec!["packages", "x86_64-linux", "hello"]);
+    }
+
+    #[test]
+    fn split_attr_path_quoted_dot() {
+        let segs = split_attr_path(r#"packages."python3.12""#);
+        assert_eq!(segs, vec!["packages", r#""python3.12""#]);
+    }
+
+    #[test]
+    fn split_attr_path_wildcard() {
+        assert_eq!(split_attr_path("*.*"), vec!["*", "*"]);
+    }
+
+    #[test]
+    fn split_attr_path_single_segment() {
+        assert_eq!(split_attr_path("packages"), vec!["packages"]);
+    }
+
+    // ── pattern_to_nix_list ───────────────────────────────────────────────────
+
+    #[test]
+    fn pattern_to_nix_list_simple() {
+        assert_eq!(pattern_to_nix_list("a.b"), r#"[ "a" "b" ]"#);
+    }
+
+    #[test]
+    fn pattern_to_nix_list_unquotes_inner() {
+        // "python3.12" segment gets its outer quotes stripped, re-wrapped
+        let result = pattern_to_nix_list(r#"packages."python3.12""#);
+        assert_eq!(result, r#"[ "packages" "python3.12" ]"#);
+    }
+
+    #[test]
+    fn pattern_to_nix_list_collapses_consecutive_wildcards() {
+        // *.*  →  single "*"
+        let result = pattern_to_nix_list("*.*");
+        assert_eq!(result, r#"[ "*" ]"#);
+    }
+
+    #[test]
+    fn pattern_to_nix_list_wildcard_then_name() {
+        let result = pattern_to_nix_list("packages.*.hello");
+        assert_eq!(result, r#"[ "packages" "*" "hello" ]"#);
+    }
+
+    // ── build_wildcard_nix_expr ───────────────────────────────────────────────
+
+    #[test]
+    fn build_wildcard_nix_expr_include_only() {
+        let result = build_wildcard_nix_expr(&["packages.*.*".to_string()]);
+        assert!(result.contains("\"include\""));
+        assert!(result.contains("\"exclude\" = [  ]"));
+    }
+
+    #[test]
+    fn build_wildcard_nix_expr_exclude_only() {
+        let result = build_wildcard_nix_expr(&["!packages.x86_64-linux.broken".to_string()]);
+        assert!(result.contains("\"include\" = [  ]"));
+        assert!(result.contains("\"exclude\""));
+    }
+
+    #[test]
+    fn build_wildcard_nix_expr_mixed() {
+        let patterns = vec!["packages.*.*".to_string(), "!packages.x86_64-linux.broken".to_string()];
+        let result = build_wildcard_nix_expr(&patterns);
+        // Include should have the positive pattern
+        assert!(result.contains("\"include\" = ["));
+        // Exclude should have the negative pattern
+        assert!(result.contains("\"exclude\" = ["));
+        // The include should be non-empty and exclude should be non-empty
+        let include_empty = result.contains("\"include\" = [  ]");
+        let exclude_empty = result.contains("\"exclude\" = [  ]");
+        assert!(!include_empty, "include should not be empty");
+        assert!(!exclude_empty, "exclude should not be empty");
+    }
+}

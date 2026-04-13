@@ -157,3 +157,116 @@ impl JobReporter for JobUpdater<'_> {
         self.send_log_chunk(task_index, data).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_support::prelude::MockProtoServer;
+
+    /// Spawn the server accept task FIRST (before client opens connection) to
+    /// avoid deadlocking on the single-thread tokio test runtime.
+    macro_rules! server_then_client {
+        ($job_id:expr, |$sc:ident| $server_body:expr) => {{
+            let server = MockProtoServer::bind().await;
+            let url = server.url().to_owned();
+
+            let server_task = tokio::spawn(async move {
+                let mut $sc = server.accept().await;
+                $server_body
+            });
+
+            let conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
+            let job_id: String = $job_id.to_owned();
+            (conn, server_task, job_id)
+        }};
+    }
+
+    #[tokio::test]
+    async fn updater_report_fetching() {
+        let (mut conn, server_task, job_id) = server_then_client!("job-fetch", |sc| {
+            let msg = sc.recv().await.unwrap();
+            if let ClientMessage::JobUpdate { job_id, update } = msg {
+                assert_eq!(job_id, "job-fetch");
+                assert!(matches!(update, JobUpdateKind::Fetching));
+            } else {
+                panic!("expected JobUpdate, got {msg:?}");
+            }
+        });
+
+        let mut updater = JobUpdater::new(job_id, &mut conn);
+        updater.report_fetching().await.unwrap();
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn updater_report_eval_result() {
+        let (mut conn, server_task, job_id) = server_then_client!("job-eval", |sc| {
+            let msg = sc.recv().await.unwrap();
+            if let ClientMessage::JobUpdate {
+                update: JobUpdateKind::EvalResult { derivations, warnings },
+                ..
+            } = msg
+            {
+                assert_eq!(derivations.len(), 0);
+                assert_eq!(warnings, vec!["warn1".to_owned()]);
+            } else {
+                panic!("expected EvalResult, got {msg:?}");
+            }
+        });
+
+        let mut updater = JobUpdater::new(job_id, &mut conn);
+        updater.report_eval_result(vec![], vec!["warn1".to_owned()]).await.unwrap();
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn updater_send_log_chunk() {
+        let (mut conn, server_task, job_id) = server_then_client!("job-log", |sc| {
+            let msg = sc.recv().await.unwrap();
+            if let ClientMessage::LogChunk { job_id, task_index, data } = msg {
+                assert_eq!(job_id, "job-log");
+                assert_eq!(task_index, 3);
+                assert_eq!(data, b"hello log".to_vec());
+            } else {
+                panic!("expected LogChunk, got {msg:?}");
+            }
+        });
+
+        let mut updater = JobUpdater::new(job_id, &mut conn);
+        updater.send_log_chunk(3, b"hello log".to_vec()).await.unwrap();
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn updater_complete() {
+        let (mut conn, server_task, job_id) = server_then_client!("job-done", |sc| {
+            let msg = sc.recv().await.unwrap();
+            if let ClientMessage::JobCompleted { job_id } = msg {
+                assert_eq!(job_id, "job-done");
+            } else {
+                panic!("expected JobCompleted, got {msg:?}");
+            }
+        });
+
+        let updater = JobUpdater::new(job_id, &mut conn);
+        updater.complete().await.unwrap();
+        server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn updater_fail() {
+        let (mut conn, server_task, job_id) = server_then_client!("job-fail", |sc| {
+            let msg = sc.recv().await.unwrap();
+            if let ClientMessage::JobFailed { job_id, error } = msg {
+                assert_eq!(job_id, "job-fail");
+                assert_eq!(error, "something went wrong");
+            } else {
+                panic!("expected JobFailed, got {msg:?}");
+            }
+        });
+
+        let updater = JobUpdater::new(job_id, &mut conn);
+        updater.fail("something went wrong".to_owned()).await.unwrap();
+        server_task.await.unwrap();
+    }
+}

@@ -30,6 +30,7 @@ async-trait      = "0.1"
 base64           = "0.22"
 bytes            = "1.11"
 chrono           = "0.4"
+clap             = "4.6"
 futures              = "0.3"
 tokio-tungstenite    = { version = "0.29", features = ["native-tls"] }
 # { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
@@ -67,7 +68,7 @@ zstd             = "0.13"
 
 [dependencies]
 cache            = { workspace = true }
-clap             = { version = "4.6", features = ["derive"] }
+clap             = { workspace = true }
 gradient-core    = { path = "core", package = "core" }
 sentry           = { workspace = true }
 tokio            = { workspace = true, features = ["process"] }

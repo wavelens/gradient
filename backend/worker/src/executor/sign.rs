@@ -141,3 +141,52 @@ fn nix_base32_encode(hash: &[u8]) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nix_base32_encode_zeros() {
+        // 32 zero bytes → 52 '0' characters (each 5-bit group is 0).
+        let result = nix_base32_encode(&[0u8; 32]);
+        assert_eq!(result.len(), 52);
+        assert!(result.chars().all(|c| c == '0'), "expected all zeros, got {result}");
+    }
+
+    #[test]
+    fn nix_base32_encode_known_vector() {
+        // SHA-256("") = e3b0c44298fc1c149afbf4c8996fb924...
+        // Expected nix-base32 verified by running the nix_base32_encode function itself.
+        let empty_sha256: [u8; 32] = [
+            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,
+            0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
+            0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
+            0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+        ];
+        let result = nix_base32_encode(&empty_sha256);
+        assert_eq!(result, "0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73");
+        assert_eq!(result.len(), 52);
+    }
+
+    #[test]
+    fn sri_to_nix_hash_valid() {
+        use base64::Engine as _;
+        let empty_sha256: [u8; 32] = [
+            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,
+            0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
+            0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
+            0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+        ];
+        let b64 = base64::engine::general_purpose::STANDARD.encode(empty_sha256);
+        let sri = format!("sha256-{b64}");
+        let result = sri_to_nix_hash(&sri).unwrap();
+        assert_eq!(result, "sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73");
+    }
+
+    #[test]
+    fn sri_to_nix_hash_rejects_non_sha256() {
+        let err = sri_to_nix_hash("md5-AAAA").unwrap_err();
+        assert!(err.to_string().contains("sha256"), "unexpected error: {err}");
+    }
+}

@@ -344,3 +344,47 @@ fn load_or_generate_id(data_dir: &str) -> Result<String> {
     info!(path = %id_path.display(), %id, "generated and persisted new worker ID");
     Ok(id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn temp_dir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("failed to create temp dir")
+    }
+
+    #[test]
+    fn load_or_generate_id_creates_new() {
+        let dir = temp_dir();
+        let data_dir = dir.path().to_string_lossy().to_string();
+        let id = load_or_generate_id(&data_dir).expect("should generate id");
+        // Must be a valid UUID
+        id.parse::<uuid::Uuid>().expect("generated id must be a valid UUID");
+        // File must exist
+        let id_path = dir.path().join("worker-id");
+        assert!(id_path.exists(), "worker-id file should be created");
+        assert_eq!(fs::read_to_string(&id_path).unwrap().trim(), id);
+    }
+
+    #[test]
+    fn load_or_generate_id_reads_existing() {
+        let dir = temp_dir();
+        let id_path = dir.path().join("worker-id");
+        let known_id = uuid::Uuid::new_v4().to_string();
+        fs::write(&id_path, &known_id).unwrap();
+        let data_dir = dir.path().to_string_lossy().to_string();
+        let loaded = load_or_generate_id(&data_dir).expect("should read existing id");
+        assert_eq!(loaded, known_id);
+    }
+
+    #[test]
+    fn load_or_generate_id_invalid_uuid_fails() {
+        let dir = temp_dir();
+        let id_path = dir.path().join("worker-id");
+        fs::write(&id_path, "not-a-uuid").unwrap();
+        let data_dir = dir.path().to_string_lossy().to_string();
+        let result = load_or_generate_id(&data_dir);
+        assert!(result.is_err(), "invalid UUID in file should return Err");
+    }
+}

@@ -9,6 +9,12 @@ use gradient_core::types::Cli;
 /// Single source of truth for the `Cli` struct in tests.
 /// Update only here when fields are added/removed from `Cli`.
 pub fn test_cli() -> Cli {
+    test_cli_with_crypt("test-secret".into())
+}
+
+/// Like `test_cli()` but with a custom `crypt_secret_file` path.
+/// Use this in tests that need a real decryptable webhook secret.
+pub fn test_cli_with_crypt(crypt_secret_file: String) -> Cli {
     Cli {
         log_level: "error".into(),
         builder_log_level: None,
@@ -32,7 +38,7 @@ pub fn test_cli() -> Cli {
         oidc_client_secret_file: None,
         oidc_scopes: None,
         oidc_discovery_url: None,
-        crypt_secret_file: "test-secret".into(),
+        crypt_secret_file,
         jwt_secret_file: "test-jwt".into(),
         serve_cache: false,
         binpath_nix: "nix".into(),

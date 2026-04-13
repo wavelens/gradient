@@ -277,3 +277,67 @@ async fn fire_webhooks(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ci::github_app::verify_github_signature;
+    use std::io::Write;
+
+    /// Write a temporary crypt secret file with a 32-char key and return the path.
+    fn temp_secret_file() -> (tempfile::NamedTempFile, String) {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(b"test-secret-key-32-bytes-padding!").unwrap();
+        f.flush().unwrap();
+        let path = f.path().to_string_lossy().to_string();
+        (f, path)
+    }
+
+    // ── encrypt_webhook_secret / decrypt_webhook_secret ───────────────────────
+
+    #[test]
+    fn encrypt_decrypt_roundtrip() {
+        let (_f, path) = temp_secret_file();
+        let plaintext = "my-webhook-secret";
+        let encrypted = encrypt_webhook_secret(&path, plaintext).expect("encrypt failed");
+        let decrypted = decrypt_webhook_secret(&path, &encrypted).expect("decrypt failed");
+        assert_eq!(decrypted.expose(), plaintext);
+    }
+
+    #[test]
+    fn decrypt_invalid_base64_fails() {
+        let (_f, path) = temp_secret_file();
+        let result = decrypt_webhook_secret(&path, "!!!not-base64!!!");
+        assert!(result.is_err(), "expected Err for invalid base64");
+    }
+
+    // ── sign_webhook_payload ─────────────────────────────────────────────────
+
+    #[test]
+    fn sign_payload_has_sha256_prefix() {
+        let sig = sign_webhook_payload("secret", "body");
+        assert!(sig.starts_with("sha256="), "expected sha256= prefix, got: {sig}");
+    }
+
+    #[test]
+    fn sign_payload_deterministic() {
+        let a = sign_webhook_payload("secret", "body");
+        let b = sign_webhook_payload("secret", "body");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn sign_payload_different_secret_different_sig() {
+        let a = sign_webhook_payload("secret-a", "body");
+        let b = sign_webhook_payload("secret-b", "body");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn sign_payload_roundtrip_with_verify_github() {
+        let secret = "roundtrip-secret";
+        let body = "some webhook payload";
+        let sig = sign_webhook_payload(secret, body);
+        assert!(verify_github_signature(secret, &sig, body.as_bytes()));
+    }
+}

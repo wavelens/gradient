@@ -188,3 +188,196 @@ impl WorkerConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Helper: build a minimal WorkerConfig with `peers` set ────────────────
+
+    fn config_with_peers(peers: &str) -> WorkerConfig {
+        WorkerConfig {
+            server_url: String::new(),
+            peers: Some(peers.to_owned()),
+            peers_file: None,
+            data_dir: String::new(),
+            eval_worker: false,
+            eval_workers: 1,
+            max_concurrent_builds: 1,
+            log_level: "info".to_owned(),
+            eval_log_level: None,
+            build_log_level: None,
+            proto_log_level: None,
+            discoverable: false,
+            capability_federate: false,
+            capability_fetch: false,
+            capability_eval: false,
+            capability_build: false,
+            capability_sign: false,
+        }
+    }
+
+    /// 64 `x` characters — the minimum accepted token length.
+    const TOK64: &str = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    /// 63 `x` characters — one too short.
+    const TOK63: &str = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+
+    // ── peer_tokens() ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn peer_tokens_from_inline_string() {
+        let cfg = config_with_peers(&format!("peer1:{TOK64}\npeer2:{TOK64}"));
+        let tokens = cfg.peer_tokens();
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0], ("peer1".to_owned(), TOK64.to_owned()));
+        assert_eq!(tokens[1], ("peer2".to_owned(), TOK64.to_owned()));
+    }
+
+    #[test]
+    fn peer_tokens_skips_blank_lines_and_comments() {
+        let input = format!("\n# this is a comment\npeer:{TOK64}\n\n");
+        let cfg = config_with_peers(&input);
+        let tokens = cfg.peer_tokens();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].0, "peer");
+    }
+
+    #[test]
+    fn peer_tokens_skips_short_tokens() {
+        let input = format!("peer-short:{TOK63}\npeer-ok:{TOK64}");
+        let cfg = config_with_peers(&input);
+        let tokens = cfg.peer_tokens();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].0, "peer-ok");
+    }
+
+    #[test]
+    fn peer_tokens_empty_when_neither_set() {
+        let cfg = WorkerConfig {
+            server_url: String::new(),
+            peers: None,
+            peers_file: None,
+            data_dir: String::new(),
+            eval_worker: false,
+            eval_workers: 1,
+            max_concurrent_builds: 1,
+            log_level: "info".to_owned(),
+            eval_log_level: None,
+            build_log_level: None,
+            proto_log_level: None,
+            discoverable: false,
+            capability_federate: false,
+            capability_fetch: false,
+            capability_eval: false,
+            capability_build: false,
+            capability_sign: false,
+        };
+        assert!(cfg.peer_tokens().is_empty());
+    }
+
+    #[test]
+    fn peer_tokens_skips_empty_peer_or_token() {
+        // ":token" → peer_id is empty
+        // "peer:" → token is empty
+        // "nocolon" → no separator → skipped
+        let input = format!(":tok64ok\npeer:\nnocolon\npeer-valid:{TOK64}");
+        let cfg = config_with_peers(&input);
+        let tokens = cfg.peer_tokens();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].0, "peer-valid");
+    }
+
+    #[test]
+    fn peer_tokens_preserves_wildcard() {
+        let input = format!("*:{TOK64}");
+        let cfg = config_with_peers(&input);
+        let tokens = cfg.peer_tokens();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], ("*".to_owned(), TOK64.to_owned()));
+    }
+
+    #[test]
+    fn peer_tokens_from_file() {
+        let path = std::env::temp_dir()
+            .join(format!("gradient-test-peers-{}", std::process::id()))
+            .to_str()
+            .unwrap()
+            .to_owned();
+        std::fs::write(&path, format!("peer-file:{TOK64}")).unwrap();
+
+        let cfg = WorkerConfig {
+            server_url: String::new(),
+            peers: Some(format!("peer-inline:{TOK64}")), // should be ignored
+            peers_file: Some(path.clone()),
+            data_dir: String::new(),
+            eval_worker: false,
+            eval_workers: 1,
+            max_concurrent_builds: 1,
+            log_level: "info".to_owned(),
+            eval_log_level: None,
+            build_log_level: None,
+            proto_log_level: None,
+            discoverable: false,
+            capability_federate: false,
+            capability_fetch: false,
+            capability_eval: false,
+            capability_build: false,
+            capability_sign: false,
+        };
+        let tokens = cfg.peer_tokens();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].0, "peer-file");
+    }
+
+    // ── resolve_tokens_for_challenge() ────────────────────────────────────────
+
+    #[test]
+    fn resolve_tokens_explicit_only() {
+        let tokens = vec![
+            ("peer-a".to_owned(), "tok-a".to_owned()),
+            ("peer-c".to_owned(), "tok-c".to_owned()),
+        ];
+        let challenged = vec!["peer-a".to_owned(), "peer-b".to_owned()];
+        let result = WorkerConfig::resolve_tokens_for_challenge(&tokens, &challenged);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], ("peer-a".to_owned(), "tok-a".to_owned()));
+    }
+
+    #[test]
+    fn resolve_tokens_wildcard_fills_gaps() {
+        let tokens = vec![
+            ("*".to_owned(), "wild".to_owned()),
+            ("peer-a".to_owned(), "tok-a".to_owned()),
+        ];
+        let challenged = vec![
+            "peer-a".to_owned(),
+            "peer-b".to_owned(),
+            "peer-c".to_owned(),
+        ];
+        let result = WorkerConfig::resolve_tokens_for_challenge(&tokens, &challenged);
+        assert_eq!(result.len(), 3);
+
+        let map: std::collections::HashMap<_, _> = result.into_iter().collect();
+        assert_eq!(map["peer-a"], "tok-a");
+        assert_eq!(map["peer-b"], "wild");
+        assert_eq!(map["peer-c"], "wild");
+    }
+
+    #[test]
+    fn resolve_tokens_wildcard_only() {
+        let tokens = vec![("*".to_owned(), "wild".to_owned())];
+        let challenged = vec!["p1".to_owned(), "p2".to_owned(), "p3".to_owned()];
+        let result = WorkerConfig::resolve_tokens_for_challenge(&tokens, &challenged);
+        assert_eq!(result.len(), 3);
+        assert!(result.iter().all(|(_, t)| t == "wild"));
+    }
+
+    #[test]
+    fn resolve_tokens_empty_when_no_match() {
+        let tokens = vec![("peer-x".to_owned(), "tok".to_owned())];
+        let challenged = vec!["peer-y".to_owned()];
+        let result = WorkerConfig::resolve_tokens_for_challenge(&tokens, &challenged);
+        assert!(result.is_empty());
+    }
+}

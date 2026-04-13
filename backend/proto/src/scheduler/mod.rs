@@ -36,6 +36,10 @@ use worker_pool::WorkerPool;
 pub use worker_pool::WorkerInfo;
 
 #[cfg(test)]
+mod dispatch_tests;
+#[cfg(test)]
+mod handler_tests;
+#[cfg(test)]
 mod scheduler_tests;
 
 /// The shared scheduler — clone freely (all fields are `Arc`s).

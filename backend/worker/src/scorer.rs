@@ -48,3 +48,57 @@ impl Default for JobScorer {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn score_empty_candidates() {
+        let scorer = JobScorer::new();
+        let scores = scorer.score_candidates(&[]).await.unwrap();
+        assert!(scores.is_empty());
+    }
+
+    #[tokio::test]
+    async fn score_sets_missing_to_required_count() {
+        let scorer = JobScorer::new();
+        let candidates = vec![JobCandidate {
+            job_id: "job-1".to_owned(),
+            required_paths: vec![
+                "/nix/store/aaa".to_owned(),
+                "/nix/store/bbb".to_owned(),
+                "/nix/store/ccc".to_owned(),
+                "/nix/store/ddd".to_owned(),
+                "/nix/store/eee".to_owned(),
+            ],
+        }];
+        let scores = scorer.score_candidates(&candidates).await.unwrap();
+        assert_eq!(scores.len(), 1);
+        assert_eq!(scores[0].job_id, "job-1");
+        assert_eq!(scores[0].missing, 5);
+    }
+
+    #[tokio::test]
+    async fn score_multiple_candidates() {
+        let scorer = JobScorer::new();
+        let candidates = vec![
+            JobCandidate { job_id: "a".to_owned(), required_paths: vec![] },
+            JobCandidate {
+                job_id: "b".to_owned(),
+                required_paths: vec!["/nix/store/x".to_owned(), "/nix/store/y".to_owned()],
+            },
+            JobCandidate {
+                job_id: "c".to_owned(),
+                required_paths: vec!["/nix/store/z".to_owned()],
+            },
+        ];
+        let scores = scorer.score_candidates(&candidates).await.unwrap();
+        assert_eq!(scores.len(), 3);
+        let map: std::collections::HashMap<_, _> =
+            scores.into_iter().map(|s| (s.job_id, s.missing)).collect();
+        assert_eq!(map["a"], 0);
+        assert_eq!(map["b"], 2);
+        assert_eq!(map["c"], 1);
+    }
+}

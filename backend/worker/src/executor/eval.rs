@@ -324,7 +324,6 @@ mod tests {
 
             // Verify substituted flags match the fixture's built state.
             for drv in derivations {
-                let fixture_drv = fixture.derivations.iter().find(|d| d.drv_path == drv.drv_path).unwrap();
                 let is_built = fixture.built().iter().any(|b| b.drv_path == drv.drv_path);
                 assert_eq!(
                     drv.substituted, is_built,

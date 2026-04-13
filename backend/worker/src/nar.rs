@@ -25,6 +25,7 @@ use tracing::{debug, info};
 
 use crate::connection::ProtoConnection;
 
+
 /// Chunk size for direct NAR streaming (64 KiB).
 const NAR_CHUNK_SIZE: usize = 64 * 1024;
 
@@ -155,4 +156,160 @@ pub async fn upload_presigned(
 
     info!(store_path, nar_size, "presigned NAR upload complete");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use test_support::prelude::MockProtoServer;
+
+    /// Create a temporary directory with a single file and return its path.
+    fn make_temp_store_path() -> std::path::PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("gradient-nar-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("hello"), b"gradient nar test data").unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn push_direct_sends_chunks_and_final() {
+        let store_path = make_temp_store_path();
+        let store_path_str = store_path.to_str().unwrap().to_owned();
+
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+
+        let server_task = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            let mut chunks: Vec<(Vec<u8>, u64, bool)> = Vec::new();
+
+            loop {
+                let msg = sc.recv().await.unwrap();
+                if let ClientMessage::NarPush { data, offset, is_final, .. } = msg {
+                    let done = is_final;
+                    chunks.push((data, offset, is_final));
+                    if done { break; }
+                } else {
+                    panic!("expected NarPush, got {msg:?}");
+                }
+            }
+
+            // At least one non-empty data chunk + one final empty chunk.
+            assert!(chunks.len() >= 2, "expected at least 2 chunks, got {}", chunks.len());
+
+            let last = chunks.last().unwrap();
+            assert!(last.2, "last chunk must be final");
+            assert!(last.0.is_empty(), "final chunk data must be empty");
+
+            // Offsets must be monotonically non-decreasing.
+            let offsets: Vec<u64> = chunks.iter().map(|(_, o, _)| *o).collect();
+            for w in offsets.windows(2) {
+                assert!(w[1] >= w[0], "offsets not monotonic: {offsets:?}");
+            }
+        });
+
+        let mut conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
+        push_direct("job-123", &store_path_str, &mut conn).await.unwrap();
+
+        server_task.await.unwrap();
+        let _ = std::fs::remove_dir_all(&store_path);
+    }
+
+    #[tokio::test]
+    async fn push_direct_data_is_valid_zstd() {
+        let store_path = make_temp_store_path();
+        let store_path_str = store_path.to_str().unwrap().to_owned();
+
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+
+        let server_task = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            let mut all_data: Vec<u8> = Vec::new();
+
+            loop {
+                let msg = sc.recv().await.unwrap();
+                if let ClientMessage::NarPush { data, is_final, .. } = msg {
+                    all_data.extend_from_slice(&data);
+                    if is_final { break; }
+                }
+            }
+
+            // The concatenated data (minus the empty final chunk) must be valid zstd.
+            let decoded = zstd::decode_all(std::io::Cursor::new(&all_data))
+                .expect("zstd decompression failed");
+            assert!(!decoded.is_empty(), "decompressed NAR should not be empty");
+        });
+
+        let mut conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
+        push_direct("job-123", &store_path_str, &mut conn).await.unwrap();
+
+        server_task.await.unwrap();
+        let _ = std::fs::remove_dir_all(&store_path);
+    }
+
+    /// Minimal HTTP server that accepts one PUT and replies 200.
+    async fn one_shot_http_server() -> (String, tokio::task::JoinHandle<Vec<u8>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = format!("http://127.0.0.1:{port}/upload");
+
+        let handle = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            // Read until we see the end of headers (blank line).
+            let mut buf = vec![0u8; 65536];
+            let mut total = 0;
+            loop {
+                let n = stream.read(&mut buf[total..]).await.unwrap();
+                if n == 0 { break; }
+                total += n;
+                // Look for \r\n\r\n (end of HTTP headers).
+                if buf[..total].windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            // Reply 200 OK.
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").await.unwrap();
+            // Return the received bytes (headers + body prefix).
+            buf[..total].to_vec()
+        });
+
+        (url, handle)
+    }
+
+    #[tokio::test]
+    async fn upload_presigned_sends_nar_ready() {
+        let store_path = make_temp_store_path();
+        let store_path_str = store_path.to_str().unwrap().to_owned();
+
+        let (http_url, _http_task) = one_shot_http_server().await;
+
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+
+        let server_task = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            let msg = sc.recv().await.unwrap();
+            if let ClientMessage::NarReady { job_id, store_path: sp, nar_size, nar_hash } = msg {
+                assert_eq!(job_id, "job-xyz");
+                assert!(!sp.is_empty());
+                assert!(nar_size > 0, "nar_size should be nonzero");
+                assert!(nar_hash.starts_with("sha256:"), "nar_hash should be sha256: SRI, got {nar_hash}");
+            } else {
+                panic!("expected NarReady, got {msg:?}");
+            }
+        });
+
+        let mut conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
+        upload_presigned("job-xyz", &store_path_str, &http_url, "PUT", &[], &mut conn)
+            .await
+            .unwrap();
+
+        server_task.await.unwrap();
+        let _ = std::fs::remove_dir_all(&store_path);
+    }
 }

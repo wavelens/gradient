@@ -1,7 +1,7 @@
 # Tests
 
 This page documents all unit and integration tests in the Rust backend workspace
-(**205 tests** across **7 crates**). Run them with:
+(**379 tests** across **7 crates**). Run them with:
 
 ```sh
 cargo test --workspace --tests
@@ -19,32 +19,32 @@ in-memory implementations. The diagram below shows how production and test code
 relate:
 
 ```
-                        ┌─────────────────────────────────────────┐
-                        │              proto crate                │
-                        │                                         │
-                        │  traits.rs                              │
-                        │  ┌───────────────────────────────────┐  │
-                        │  │  WorkerStore    (has_path)        │  │
-                        │  │  DrvReader      (read_drv)        │  │
-                        │  │  JobReporter    (report_*)        │  │
-                        │  └───────────────────────────────────┘  │
-                        │                                         │
-                        │  scheduler/                             │
-                        │  ┌──────────┐  ┌───────────────┐       │
-                        │  │JobTracker│  │  WorkerPool   │       │
-                        │  │(pending/ │  │(connected     │       │
-                        │  │ active)  │  │ workers)      │       │
-                        │  └──────────┘  └───────────────┘       │
-                        │         └──────┬──────┘                │
-                        │                v                       │
-                        │         ┌────────────┐                 │
-                        │         │ Scheduler  │                 │
-                        │         └────────────┘                 │
-                        └─────────────────────────────────────────┘
+                     ┌─────────────────────────────────────────┐
+                     │              proto crate                │
+                     │                                         │
+                     │  traits.rs                              │
+                     │  ┌───────────────────────────────────┐  │
+                     │  │  WorkerStore    (has_path)        │  │
+                     │  │  DrvReader      (read_drv)        │  │
+                     │  │  JobReporter    (report_*)        │  │
+                     │  └───────────────────────────────────┘  │
+                     │                                         │
+                     │  scheduler/                             │
+                     │  ┌────────────────┐  ┌───────────────┐  │
+                     │  │   JobTracker   │  │   WorkerPool  │  │
+                     │  │   (pending/    │  │   (connected  │  │
+                     │  │    active)     │  │   workers)    │  │
+                     │  └────────────────┘  └───────────────┘  │
+                     │         └──────────┬────────────┘       │
+                     │                    v                    │
+                     │              ┌────────────┐             │
+                     │              │ Scheduler  │             │
+                     │              └────────────┘             │
+                     └─────────────────────────────────────────┘
                                          |
               ┌──────────────────────────┼───────────────────────────┐
               v                          v                           v
-   ┌─────────────────────┐   ┌─────────────────────┐   ┌─────────────────────┐
+   ┌─────────────────────┐   ┌──────────────────────┐   ┌─────────────────────┐
    │    worker crate     │   │  test-support crate  │   │     core crate      │
    │                     │   │                      │   │                     │
    │  LocalNixStore      │   │  FakeWorkerStore     │   │  DerivationResolver │
@@ -57,7 +57,7 @@ relate:
    │    impl JobReporter │   │    impl JobReporter  │   │    Resolver         │
    │                     │   │                      │   │                     │
    │  evaluate_          │   │  StoreFixture        │   │  FakeNixStore-      │
-   │    derivations_with │   │    (951 real .drv)    │   │    Provider         │
+   │    derivations_with │   │   (951 real .drv)    │   │    Provider         │
    └─────────────────────┘   └──────────────────────┘   └─────────────────────┘
 ```
 
@@ -73,6 +73,7 @@ a production trait and substitutes the real dependency with an in-memory version
 | `FakeWorkerStore` | `worker_store.rs` | `WorkerStore` | Minimal path-presence tracker |
 | `FakeDrvReader` | `drv_reader.rs` | `DrvReader` | Serves raw `.drv` bytes from memory (backed by `StoreFixture.raw_drvs`) |
 | `RecordingJobReporter` | `job_reporter.rs` | `JobReporter` | Captures all job status calls as `Vec<ReportedEvent>` |
+| `MockProtoServer` / `MockServerConn` | `mock_server.rs` | — | In-process WebSocket server for testing `ProtoConnection`-based code; binds `127.0.0.1:0`, accepts one connection, provides typed `send(ServerMessage)` / `recv() → ClientMessage` over rkyv framing |
 | `RecordingWebhookClient` | `webhooks.rs` | `WebhookClient` | Records webhook deliveries with scripted status codes |
 | `InMemoryEmailSender` | `email.rs` | `EmailSender` | Captures verification/password-reset emails |
 | `RecordingCiReporter` | `ci_reporter.rs` | `CiReporter` | Records CI status report calls |
@@ -100,20 +101,20 @@ the full closure and populates fakes.
          load_store("test/")
                │
                v
-  ┌────────────────────────┐
-  │     StoreFixture       │
-  ├────────────────────────┤
-  │ entry_point: String    │  ← "/nix/store/7mdg...-hello-2.12.3.drv"
-  │ derivations: Vec<...>  │  ← 951 DiscoveredDerivation structs
-  │ tree: HashMap<...>     │  ← drv_path → [dependency drv_paths]
-  │ parsed: HashMap<...>   │  ← drv_path → Derivation (parsed ATerm)
-  │ raw_drvs: HashMap<...> │  ← drv_path → raw bytes (for FakeDrvReader)
-  │ resolver: FakeDerivationResolver │
-  │ store: FakeNixStoreProvider      │
-  └────────────────────────┘
+  ┌────────────────────────────────────────┐
+  │     StoreFixture                       │
+  ├────────────────────────────────────────┤
+  │ entry_point: String                    │  ← "/nix/store/7mdg...-hello-2.12.3.drv"
+  │ derivations: Vec<...>                  │  ← 951 DiscoveredDerivation structs
+  │ tree: HashMap<...>                     │  ← drv_path → [dependency drv_paths]
+  │ parsed: HashMap<...>                   │  ← drv_path → Derivation (parsed ATerm)
+  │ raw_drvs: HashMap<...>                 │  ← drv_path → raw bytes (for FakeDrvReader)
+  │ resolver: FakeDerivationResolver       │
+  │ store: FakeNixStoreProvider            │
+  └────────────────────────────────────────┘
                │
                v
-  mark_all_built()  →  remove_random_subtrees(0.5, seed)
+       mark_all_built()  →  remove_random_subtrees(0.5, seed)
                │
                v
   ┌─────────────────────────────────────────┐
@@ -443,37 +444,37 @@ nix-daemon, filesystem, or WebSocket connection.
 ### Evaluation data flow (test configuration)
 
 ```
-  FakeDerivationResolver                FakeDrvReader
-  ┌───────────────────────┐            ┌──────────────────┐
-  │ list_flake_derivations│            │ from_raw_drvs(   │
-  │   "repo" → ["hello"] │            │   fixture.raw_drvs│
-  │                       │            │ )                 │
-  │ resolve_derivation_   │            │                   │
-  │   paths               │            │ read_drv(path)    │
-  │   "hello" → entry.drv │            │   → raw bytes     │
-  └───────────┬───────────┘            └────────┬─────────┘
-              │                                 │
-              v                                 v
+  FakeDerivationResolver         FakeDrvReader
+  ┌───────────────────────┐      ┌───────────────────────┐
+  │ list_flake_derivations│      │ from_raw_drvs(        │
+  │   "repo" → ["hello"]  │      │   fixture.raw_drvs    │
+  │                       │      │ )                     │
+  │ resolve_derivation_   │      │                       │
+  │   paths               │      │ read_drv(path)        │
+  │   "hello" → entry.drv │      │   → raw bytes         │
+  └───────────┬───────────┘      └───────────┬───────────┘
+              │                              │
+              v                              v
   ┌──────────────────────────────────────────────────────┐
   │          evaluate_derivations_with()                 │
   │                                                      │
   │  1. list attrs via resolver                          │
   │  2. resolve attrs → drv paths via resolver           │
-  │  3. BFS: read .drv → parse → extract outputs/deps   │
+  │  3. BFS: read .drv → parse → extract outputs/deps    │
   │  4. Check has_path() for substitution                │
   │  5. Report EvalResult via reporter                   │
   └──────────┬───────────────────────────────┬───────────┘
              │                               │
              v                               v
-  FakeWorkerStore                  RecordingJobReporter
-  ┌──────────────────┐             ┌──────────────────────┐
-  │ has_path()       │             │ events:              │
-  │   → present set  │             │   EvaluatingDervs    │
-  │   (from fixture) │             │   EvalResult {       │
-  └──────────────────┘             │     derivations,     │
-                                   │     warnings         │
-                                   │   }                  │
-                                   └──────────────────────┘
+  FakeWorkerStore                 RecordingJobReporter
+  ┌───────────────────────┐       ┌──────────────────────┐
+  │ has_path()            │       │ events:              │
+  │   → present set       │       │   EvaluatingDervs    │
+  │   (from fixture)      │       │   EvalResult {       │
+  └───────────────────────┘       │     derivations,     │
+                                  │     warnings         │
+                                  │   }                  │
+                                  └──────────────────────┘
 ```
 
 | Test | What it checks |
@@ -748,21 +749,622 @@ validates user-supplied values and returns a descriptive error on rejection.
 
 ---
 
+## `worker::config` — Peer Token Parsing
+
+**File:** `backend/worker/src/config.rs`
+**Run:** `cargo test -p worker`
+
+Tests for `WorkerConfig::peer_tokens()` and `WorkerConfig::resolve_tokens_for_challenge()`,
+the two functions responsible for reading peer-to-token pairs from `--peers` /
+`--peers-file` and expanding them during challenge-response auth.
+
+### Token source precedence
+
+```
+  peers_file set? ──yes──► read file contents  ──► parse lines
+                  │
+                  no
+                  │
+  peers set?    ──yes──► use inline string     ──► parse lines
+                  │
+                  no
+                  │
+                  └──────► return [] (open mode, no auth)
+```
+
+### Line format
+
+```
+  peer_id:token64    →  ("peer_id", "token64")  ✓
+  *:token64          →  ("*", "token64")         ✓  (wildcard)
+  # comment          →  skipped
+  <blank line>       →  skipped
+  :token64           →  skipped (empty peer_id)
+  peer:              →  skipped (empty token)
+  nocolon            →  skipped (no separator)
+  peer:short_token   →  skipped (token < 64 chars)
+```
+
+### `peer_tokens()` tests
+
+| Test | What it checks |
+|------|---------------|
+| `peer_tokens_from_inline_string` | `"peer1:tok64\npeer2:tok64"` → 2 pairs in order |
+| `peer_tokens_skips_blank_lines_and_comments` | Blank lines and `#`-prefixed lines are silently skipped |
+| `peer_tokens_skips_short_tokens` | Tokens < 64 chars are rejected; 64-char tokens pass |
+| `peer_tokens_empty_when_neither_set` | Both `--peers` and `--peers-file` unset → empty vec |
+| `peer_tokens_skips_empty_peer_or_token` | `":tok"`, `"peer:"`, and `"nocolon"` are all skipped |
+| `peer_tokens_preserves_wildcard` | `"*:tok64"` → `("*", "tok64")` — wildcard is preserved verbatim |
+| `peer_tokens_from_file` | Writes a temp file, sets `peers_file`; file takes precedence over `--peers` |
+
+### `resolve_tokens_for_challenge()` tests
+
+| Test | What it checks |
+|------|---------------|
+| `resolve_tokens_explicit_only` | Only the challenged peer that has an explicit token is returned |
+| `resolve_tokens_wildcard_fills_gaps` | Explicit peer-a token + `*:wild`; all challenged peers covered, peer-a keeps its explicit token |
+| `resolve_tokens_wildcard_only` | Only `*:wild`; all 3 challenged peers receive the wildcard token |
+| `resolve_tokens_empty_when_no_match` | No match and no wildcard → empty result |
+
+---
+
+## `worker::credentials` — Credential Store
+
+**File:** `backend/worker/src/credentials.rs`
+**Run:** `cargo test -p worker`
+
+Tests for `CredentialStore`, a shared (cloneable) in-memory store for the two
+credential kinds the server sends during a job: a UTF-8 signing key and raw SSH
+private key bytes. Both are wrapped in `SecureString`/`SecureBytes` to avoid
+accidental logging.
+
+```
+  CredentialStore (Arc<Mutex<Inner>>)
+  ┌───────────────────────────────────┐
+  │ signing_key: Option<SecureString> │  ← UTF-8 Ed25519 secret key
+  │ ssh_key:     Option<SecureBytes>  │  ← raw private key bytes
+  ├───────────────────────────────────┤
+  │ store_signing_key(bytes) → Ok/Err │
+  │ store_ssh_key(bytes)              │
+  │ signing_key() → Option<&Secure…>  │
+  │ ssh_key()     → Option<&Secure…>  │
+  │ clear()                           │
+  └───────────────────────────────────┘
+```
+
+| Test | What it checks |
+|------|---------------|
+| `store_and_retrieve_signing_key` | UTF-8 bytes stored via `store_signing_key`; retrieved via `signing_key()` |
+| `store_and_retrieve_ssh_key` | Raw bytes stored via `store_ssh_key`; retrieved via `ssh_key()` |
+| `signing_key_invalid_utf8_stores_none` | `vec![0xFF]` is not valid UTF-8; `store_signing_key` fails and `signing_key()` returns `None` |
+| `clear_drops_both` | Store both keys, call `clear()`; both `signing_key()` and `ssh_key()` return `None` |
+| `overwrite_replaces_previous` | Store `"A"` then `"B"`; `signing_key()` returns `"B"` |
+| `clone_shares_state` | Clone the store, store a key via the clone; original reflects the change (shared `Arc`) |
+
+---
+
+## `worker::scorer` — Job Candidate Scoring
+
+**File:** `backend/worker/src/scorer.rs`
+**Run:** `cargo test -p worker`
+
+Tests for `score_candidates()`, which annotates each `JobCandidate` with the
+number of its `required_paths` that are absent from the worker's local store.
+The scheduler uses this score to prefer jobs whose inputs are already cached.
+
+```
+  score_candidates(candidates, store)
+       │
+       ├─ for each candidate:
+       │     missing = required_paths not in store.has_path()
+       │     → JobScore { job_id, missing }
+       │
+       └─ return Vec<JobScore>
+```
+
+| Test | What it checks |
+|------|---------------|
+| `score_empty_candidates` | Empty input → empty output |
+| `score_sets_missing_to_required_count` | 5 `required_paths`, none in store → `missing = 5` |
+| `score_multiple_candidates` | 3 candidates with 0, 3, and 5 required paths → correct `missing` counts and `job_id`s preserved |
+
+---
+
+## `worker::handshake` — Challenge-Response Handshake
+
+**File:** `backend/worker/src/handshake.rs`
+**Run:** `cargo test -p worker`
+
+Tests for `perform_handshake()`, which drives the full challenge-response auth
+sequence over a live `ProtoConnection`. All tests use `MockProtoServer` —
+no real Gradient server needed.
+
+### Handshake sequence
+
+```mermaid
+sequenceDiagram
+    participant W as Worker (perform_handshake)
+    participant S as MockProtoServer
+
+    W->>S: InitConnection(version, worker_id, capabilities)
+    S->>W: AuthChallenge(peers: ["peer-a"])
+    W->>S: AuthResponse(tokens: [("peer-a", "tok64")])
+    S->>W: InitAck(authorized_peers: ["peer-a"], failed_peers: [])
+    Note over W: HandshakeResult { authorized_peers, server_version }
+```
+
+| Test | What it checks |
+|------|---------------|
+| `handshake_success` | Full flow succeeds; `HandshakeResult` has correct `authorized_peers` and `server_version` |
+| `handshake_reject_at_challenge` | Server sends `Reject` instead of `AuthChallenge` → `Err` containing the rejection reason |
+| `handshake_reject_at_ack` | `AuthChallenge` ok, then server sends `Reject` instead of `InitAck` → `Err("bad token")` |
+| `handshake_unexpected_message_at_challenge` | Server sends `Draining` instead of `AuthChallenge` → `Err` mentioning "authchallenge" |
+| `handshake_wildcard_expansion` | Config has `*:wild-tok`; server challenges two peers → `AuthResponse` covers both with the wildcard token |
+
+---
+
+## `worker::job` — Job Updater Protocol
+
+**File:** `backend/worker/src/job.rs`
+**Run:** `cargo test -p worker`
+
+Tests for `JobUpdater`, which wraps a `ProtoConnection` and provides typed
+methods for reporting job progress. Each test uses `MockProtoServer` and a
+`server_then_client!` macro that spawns the server accept task **before** the
+client opens its connection (required to avoid deadlock on the single-thread
+tokio runtime).
+
+```
+  JobUpdater::report_fetching()
+       │
+       └─► ProtoConnection::send(ClientMessage::JobUpdate {
+               job_id: "…",
+               update: JobUpdateKind::Fetching,
+           })
+               │
+               └─► MockServerConn::recv() → assert message shape
+```
+
+| Test | What it checks |
+|------|---------------|
+| `updater_report_fetching` | Sends `JobUpdate { update: Fetching }` with correct `job_id` |
+| `updater_report_eval_result` | Sends `JobUpdate { update: EvalResult { derivations: [], warnings: ["warn1"] } }` |
+| `updater_send_log_chunk` | Sends `LogChunk { job_id, task_index: 3, data: b"hello log" }` |
+| `updater_complete` | Sends `JobCompleted { job_id }` |
+| `updater_fail` | Sends `JobFailed { job_id, error: "something went wrong" }` |
+
+---
+
+## `worker::nar` — NAR Push & Upload
+
+**File:** `backend/worker/src/nar.rs`
+**Run:** `cargo test -p worker`
+
+Tests for `push_direct()` (chunk-streaming to server) and `upload_presigned()`
+(streaming to a presigned URL). Both use `MockProtoServer` and temp directories;
+`push_direct` also validates zstd compression integrity.
+
+### `push_direct` flow
+
+```
+  push_direct(job_id, store_path, conn)
+       │
+       ├─ NarByteStream::new(store_path) → async byte stream
+       ├─ zstd-compress chunks (64 KiB each)
+       │
+       ├─► NarPush { job_id, store_path, offset: 0, data: <bytes>, is_final: false }
+       ├─► NarPush { job_id, store_path, offset: N, data: <bytes>, is_final: false }
+       └─► NarPush { job_id, store_path, offset: M, data: [],      is_final: true  }
+```
+
+### `upload_presigned` flow
+
+```
+  upload_presigned(job_id, store_path, url, conn)
+       │
+       ├─ stream NAR → HTTP PUT to presigned URL
+       ├─ compute sha256 of raw NAR bytes
+       │
+       └─► NarReady { job_id, store_path, sha256: "sha256:<hex>", nar_size: N }
+```
+
+| Test | What it checks |
+|------|---------------|
+| `push_direct_sends_chunks_and_final` | At least 2 `NarPush` messages sent; last has `is_final: true` and empty `data`; offsets are monotonically increasing |
+| `push_direct_data_is_valid_zstd` | All chunk `data` bytes concatenated then zstd-decompressed without error |
+| `upload_presigned_sends_nar_ready` | Spins up a one-shot HTTP server (accepts PUT, returns 200); verifies `NarReady` message has `sha256:` prefix and nonzero `nar_size` |
+
+---
+
+## `worker::executor::sign` — Nix Path Signing Helpers
+
+**File:** `backend/worker/src/executor/sign.rs`
+**Run:** `cargo test -p worker`
+
+Tests for the two private pure functions that convert between hash formats
+required by `fingerprint_path`. No nix-daemon, filesystem, or network access.
+
+### Hash conversion pipeline
+
+```
+  sign_one_path()
+       │
+       ├─ query_path_info() → path_info.nar_hash  (SRI format: "sha256-<base64>")
+       │
+       ├─ sri_to_nix_hash("sha256-<base64>")
+       │       │
+       │       ├─ strip "sha256-" prefix
+       │       ├─ base64-decode → raw bytes
+       │       └─ nix_base32_encode(raw) → "sha256:<nix-base32>"
+       │
+       └─ fingerprint_path(store_dir, store_path, nar_hash_nix, nar_size, refs)
+```
+
+| Test | What it checks |
+|------|---------------|
+| `nix_base32_encode_zeros` | `[0u8; 32]` → 52 `'0'` characters (all 5-bit groups are zero) |
+| `nix_base32_encode_known_vector` | SHA-256 of empty string encodes to `"0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73"` |
+| `sri_to_nix_hash_valid` | `"sha256-<base64-of-sha256-empty>"` → `"sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73"` |
+| `sri_to_nix_hash_rejects_non_sha256` | `"md5-AAAA"` → `Err` containing `"sha256"` |
+
+---
+
+## `worker::executor::fetch` — Flake Fetching
+
+**File:** `backend/worker/src/executor/fetch.rs`
+**Run:** `cargo test -p worker`
+
+Tests for `fetch_repository()`, which clones or fetches a git repository for
+a given commit and optionally injects an SSH key from `CredentialStore`.
+Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
+
+| Test | What it checks |
+|------|---------------|
+| `fetch_reports_fetching_and_succeeds` | Reporter receives a `Fetching` event; function returns `Ok(())` |
+| `fetch_with_ssh_key_reports_fetching` | Same as above, but an SSH key credential is pre-loaded; still reports `Fetching` and succeeds |
+
+---
+
+## `core::types::secret` — Secret Memory Wrappers
+
+| Test | What it checks |
+|------|---------------|
+| `secret_string_debug_redacted` | `Debug` format prints `[REDACTED]` |
+| `secret_string_display_redacted` | `Display` format prints `[REDACTED]` |
+| `secret_string_expose` | `.expose()` returns the original string |
+| `secret_bytes_debug_redacted` | `Debug` format for `SecretBytes` prints `[REDACTED]` |
+| `secret_bytes_expose` | `.expose()` returns the original byte slice |
+
+---
+
+## `core::state_machine::build` — Build Status Machine
+
+| Test | What it checks |
+|------|---------------|
+| `build_sm_created_to_queued` | Created → Queued is valid |
+| `build_sm_queued_to_building` | Queued → Building is valid |
+| `build_sm_building_to_completed` | Building → Completed is valid |
+| `build_sm_building_to_failed` | Building → Failed is valid |
+| `build_sm_any_nonterminal_to_aborted` | Created/Queued/Building → Aborted all valid |
+| `build_sm_any_nonterminal_to_dep_failed` | Created/Queued/Building → DependencyFailed all valid |
+| `build_sm_terminal_rejects_all` | Completed/Failed/Aborted/DependencyFailed/Substituted cannot transition away |
+| `build_sm_same_state_ok` | from == to → Ok (idempotent) |
+| `build_sm_skip_queued_rejected` | Created → Building (skipping Queued) is rejected |
+| `build_sm_is_terminal` | Identifies all 5 terminal states correctly |
+
+---
+
+## `core::state_machine::eval` — Evaluation Status Machine
+
+| Test | What it checks |
+|------|---------------|
+| `eval_sm_happy_path` | Full chain Queued→Fetching→EvaluatingFlake→EvaluatingDerivation→Building→Completed |
+| `eval_sm_building_waiting_cycle` | Building↔Waiting back-and-forth is valid |
+| `eval_sm_any_nonterminal_to_failed` | All non-terminal states → Failed valid |
+| `eval_sm_any_nonterminal_to_aborted` | All non-terminal states → Aborted valid |
+| `eval_sm_terminal_rejects_all` | Completed/Failed/Aborted cannot transition away |
+| `eval_sm_skip_fetching_ok` | Queued → EvaluatingFlake (skip Fetching) is valid |
+| `eval_sm_same_state_ok` | from == to → Ok |
+| `eval_sm_is_terminal` | 3 terminal states return true; 6 non-terminal return false |
+
+---
+
+## `core::ci::github_app` — GitHub App JWT & Webhook Verification
+
+| Test | What it checks |
+|------|---------------|
+| `generate_jwt_three_parts` | Generated JWT has `header.payload.signature` format |
+| `generate_jwt_header_rs256` | Decoded header contains `"alg":"RS256"` |
+| `generate_jwt_payload_iss` | Decoded payload `iss` matches the given `app_id` |
+| `generate_jwt_invalid_pem_err` | Garbage PEM → `Err` |
+| `verify_github_signature_valid` | Correctly HMAC-signed body → true |
+| `verify_github_signature_wrong_body` | Tampered body → false |
+| `verify_github_signature_wrong_secret` | Wrong secret → false |
+| `verify_github_signature_missing_prefix` | No `sha256=` prefix → false |
+| `verify_github_signature_invalid_hex` | `sha256=ZZZZ` → false |
+| `verify_github_signature_empty_body` | Empty body + correct signature → true |
+| `verify_gitea_signature_valid` | Bare hex + correct secret → true |
+| `verify_gitea_signature_whitespace_trimmed` | Trailing whitespace in header → still valid |
+| `verify_gitea_signature_wrong_secret` | Wrong secret → false |
+| `verify_gitea_signature_invalid_hex` | Non-hex signature → false |
+| `pem_to_der_valid` | Strips PEM headers and base64-decodes body correctly |
+| `pem_to_der_invalid_base64` | Invalid base64 body → `Err` |
+
+---
+
+## `core::ci::webhook` — Webhook Signing & Encryption
+
+| Test | What it checks |
+|------|---------------|
+| `sign_payload_has_sha256_prefix` | Output starts with `sha256=` |
+| `sign_payload_deterministic` | Same inputs produce the same signature |
+| `sign_payload_different_secret_different_sig` | Different secrets → different signatures |
+| `sign_payload_roundtrip_with_verify_github` | `sign_webhook_payload` + `verify_github_signature` → true |
+| `encrypt_decrypt_roundtrip` | Encrypt then decrypt returns original plaintext |
+| `decrypt_invalid_base64_fails` | Non-base64 ciphertext → `Err` |
+
+---
+
+## `core::ci::trigger` — Evaluation Trigger Guard
+
+| Test | What it checks |
+|------|---------------|
+| `trigger_creates_queued_eval` | No in-progress eval → creates a new `Queued` evaluation |
+| `trigger_already_in_progress` | Existing `Queued` eval → `Err(AlreadyInProgress)` |
+| `trigger_each_active_status_blocks` | Fetching/EvaluatingFlake/EvaluatingDerivation/Building/Waiting all block |
+| `trigger_terminal_does_not_block` | Only terminal evals in DB → new trigger succeeds |
+
+---
+
+## `core::sources::ssh_key` — SSH Key Formatting
+
+| Test | What it checks |
+|------|---------------|
+| `format_public_key_strips_https` | `https://host` → hostname only |
+| `format_public_key_strips_path` | `https://host/api/v1` → host only (path stripped) |
+| `format_public_key_format` | Output is `"{pubkey} {hostname}-{orgname}"` |
+
+---
+
+## `core::sources::cache_key` — Cache Signing Key Lifecycle
+
+| Test | What it checks |
+|------|---------------|
+| `generate_decrypt_roundtrip` | Generate → decrypt → 64-byte ed25519 keypair |
+| `format_cache_public_key_stored` | Non-empty `public_key` → `"{base_url}-{name}:{pubkey}"` |
+| `format_cache_public_key_legacy` | Empty `public_key` → derives from encrypted private key |
+| `sign_narinfo_fingerprint_format` | Output starts with `"{base_url}-{name}:"` |
+| `sign_narinfo_sorts_references` | Same refs in different order → identical signature |
+| `decrypt_corrupted_base64_fails` | Invalid base64 `private_key` → `Err` |
+
+---
+
+## `builder::status` — Evaluation Terminal Status
+
+| Test | What it checks |
+|------|---------------|
+| `eval_status_all_completed` | All Completed/Substituted → `Some(Completed)` |
+| `eval_status_failed_no_active` | Failed + Completed, no active → `Some(Failed)` |
+| `eval_status_active_builds_none` | Some Queued remaining → `None` (no change yet) |
+| `eval_status_aborted_no_active` | Aborted/DependencyFailed only → `Some(Aborted)` |
+| `eval_status_empty_builds` | No builds → `Some(Completed)` (vacuously true) |
+
+---
+
+## `worker::nix_eval` — Nix String Escaping
+
+| Test | What it checks |
+|------|---------------|
+| `escape_nix_str_plain` | Plain string → unchanged |
+| `escape_nix_str_backslash` | `\` → `\\` |
+| `escape_nix_str_double_quote` | `"` → `\"` |
+| `escape_nix_str_both` | Mixed → correct ordering of escapes |
+| `escape_nix_str_empty` | Empty string → empty string |
+
+---
+
+## `worker::flake` — Flake Attribute Path Utilities
+
+| Test | What it checks |
+|------|---------------|
+| `split_attr_path_simple` | `packages.x86_64-linux.hello` → 3 segments |
+| `split_attr_path_quoted_dot` | `packages."python3.12"` preserves quoted segment with dot |
+| `split_attr_path_wildcard` | `*.*` → `["*", "*"]` |
+| `split_attr_path_single_segment` | Single segment returned as-is |
+| `pattern_to_nix_list_simple` | `a.b` → `[ "a" "b" ]` |
+| `pattern_to_nix_list_unquotes_inner` | Quoted `"python3.12"` segment → outer quotes stripped in output |
+| `pattern_to_nix_list_collapses_consecutive_wildcards` | `*.*` → `[ "*" ]` (single wildcard) |
+| `pattern_to_nix_list_wildcard_then_name` | `packages.*.hello` → `[ "packages" "*" "hello" ]` |
+| `build_wildcard_nix_expr_include_only` | No `!` prefix → `include` non-empty, `exclude` empty |
+| `build_wildcard_nix_expr_exclude_only` | All `!` prefix → `include` empty, `exclude` non-empty |
+| `build_wildcard_nix_expr_mixed` | Mix → both `include` and `exclude` non-empty |
+
+---
+
+## `worker::worker_pool::resolver` — Attr Path Matching
+
+| Test | What it checks |
+|------|---------------|
+| `match_pattern_prefix_suffix` | `hello-*-world` matches by prefix and suffix around `*` |
+| `match_pattern_no_star_returns_empty` | Pattern without `*` → no matches |
+| `match_pattern_empty_candidates` | Empty candidate list → empty results |
+| `match_pattern_prefix_and_suffix` | Prefix + suffix pattern filters correctly |
+| `quote_if_needed_plain_ident` | `hello` → unquoted |
+| `quote_if_needed_hyphenated` | `x86_64-linux` → quoted |
+| `quote_if_needed_dotted` | `python3.12` → quoted |
+| `nix_store_path_absolute_unchanged` | Already-absolute path → returned as-is |
+| `nix_store_path_bare_prefixed` | Bare name → `/nix/store/` prefix added |
+
+---
+
+## `worker::executor::build` — BasicDerivation Construction
+
+| Test | What it checks |
+|------|---------------|
+| `build_basic_drv_empty_path_deferred` | Output with empty path → `DerivationOutput::Deferred` |
+| `build_basic_drv_nonempty_path_input_addressed` | Output with store path → `DerivationOutput::InputAddressed` |
+| `build_basic_drv_name_extraction` | `/nix/store/hash-name.drv` → name component `name.drv` |
+| `build_basic_drv_no_dash_full_base` | No `-` in path → full base used as name |
+
+---
+
+## `worker::worker` — Persistent Worker ID
+
+| Test | What it checks |
+|------|---------------|
+| `load_or_generate_id_creates_new` | Empty dir → generates UUID, writes to file, returns valid UUID |
+| `load_or_generate_id_reads_existing` | Pre-written UUID file → returns that UUID unchanged |
+| `load_or_generate_id_invalid_uuid_fails` | File contains non-UUID string → `Err` |
+
+---
+
+## `worker::eval_worker` — Eval Worker Protocol Serde
+
+| Test | What it checks |
+|------|---------------|
+| `eval_request_serde_roundtrip` | All `EvalRequest` variants serialize → deserialize → re-serialize identically |
+| `eval_response_serde_roundtrip` | All `EvalResponse` variants serialize → deserialize → re-serialize identically |
+
+---
+
+## `proto::scheduler::handler_tests` — Scheduler DB Handler Functions
+
+**File:** `backend/proto/src/scheduler/handler_tests.rs`
+**Run:** `cargo test -p proto`
+
+Integration tests for the six handler functions that the scheduler calls when
+workers report results. These are the most critical code paths in the system:
+they insert derivations and builds into the database, cascade failures through
+dependency edges, and determine when an evaluation is complete.
+
+Tests drive the handler functions directly (`eval::handle_eval_result`,
+`build::handle_build_job_completed`, etc.) using SeaORM's `MockDatabase` with
+staged query/exec results — no real Postgres required.
+
+### MockDatabase staging rules
+
+SeaORM 1.x on Postgres has a subtle split between two result queues:
+
+```
+  append_query_results  →  consumed by SELECT, UPDATE…RETURNING, find_by_id,
+                           and insert_many().exec() (Postgres uses RETURNING)
+
+  append_exec_results   →  consumed by update_many().exec() and single-row
+                           insert() with an explicit primary key
+```
+
+The critical non-obvious rule: `EEntity::insert_many().exec()` on the Postgres
+backend calls `db.query_all()` internally (because `primary_key = None` +
+`support_returning = true`), so it consumes from `query_results`, not
+`exec_results`. Each staged query result for an `insert_many` only needs a row
+with a valid `id: Uuid`.
+
+### Data flow through `handle_eval_result`
+
+```
+  Worker sends EvalResult
+       │
+       v
+  handle_eval_result(state, job, derivations, warnings)
+       │
+       ├─ 1. EEvaluation::find_by_id()          Q
+       │       abort if status == Aborted
+       │
+       ├─ 2. EDerivation::find()...all()         Q   (existing drv check)
+       │
+       ├─ 3. EDerivation::insert_many().exec()   Q   (new drvs only)
+       ├─ 4. EDerivationOutput::insert_many()    Q
+       ├─ 5. EDerivationDependency::insert_many()Q   (if deps present)
+       ├─ 6. EBuild::insert_many().exec()        Q
+       │
+       ├─ 7. record_evaluation_message() ×N      E   (per warning)
+       │
+       ├─ 8. EBuild::find() Created builds       Q
+       │
+       ├─ 9. update_build_status() ×N            Q   (Created → Queued)
+       │
+       └─ 10. update_evaluation_status()         E + Q
+```
+
+### Cascade flow through `handle_build_job_failed`
+
+```
+  handle_build_job_failed(state, build_id, error)
+       │
+       ├─ EBuild::find_by_id()                              Q
+       ├─ update_build_status(build, Failed)                Q  (Building→Failed)
+       │
+       └─ cascade_dependency_failed(eval_id, failed_drv_id)
+               │
+               ├─ EBuild::find() Created/Queued builds      Q
+               └─ for each candidate build:
+                       ├─ EDerivationDependency::find()     Q  (dep edge check)
+                       └─ if edge: update_build_status      Q  (→ DependencyFailed)
+```
+
+### Group A: `handle_eval_result`
+
+| Test | Scenario | What it checks |
+|------|----------|---------------|
+| `eval_result_aborted_eval_discarded` | Eval status = Aborted | Returns `Ok(())` immediately, no inserts |
+| `eval_result_missing_eval_errors` | Eval row not found | Returns `Err` |
+| `eval_result_empty_derivations_completes` | Zero derivations in result | No builds inserted; eval → Completed directly |
+| `eval_result_single_derivation_creates_build` | One new derivation with one output | Derivation + output + build rows inserted; build transitions Created → Queued; eval stays Building |
+| `eval_result_existing_derivation_reuses_id` | Derivation already in DB | No derivation/output insert; only a new build row created for this evaluation |
+| `eval_result_substituted_derivation_completes_eval` | Derivation is substituted | Build inserted with `Substituted` status; "find Created builds" returns empty → eval → Completed |
+| `eval_result_with_dependencies` | Two drvs where A depends on B | Dependency edge row inserted; both builds queued; eval stays Building |
+| `eval_result_with_warnings` | Eval result includes warning strings | `evaluation_message` row inserted per warning before build queue transition |
+
+### Group B: `handle_build_job_completed` + `check_evaluation_done`
+
+| Test | Scenario | What it checks |
+|------|----------|---------------|
+| `build_completed_last_build_completes_eval` | Last active build finishes, no failed siblings | Build → Completed; eval → Completed |
+| `build_completed_with_remaining_active` | Other builds still running | `check_evaluation_done` exits early; eval stays Building |
+| `build_completed_with_failed_sibling` | All builds done, one sibling Failed | Eval → Failed |
+| `build_completed_eval_not_building_noop` | Eval already Completed | `check_evaluation_done` sees non-Building eval; no status change |
+| `build_completed_unknown_build_noop` | `build_id` not in DB | Returns `Ok(())` silently |
+| `build_completed_dep_failed_siblings_cause_eval_failed` | All done, one sibling DependencyFailed | `DependencyFailed` counts in the failed query; eval → Failed |
+
+### Group C: `handle_build_job_failed` + `cascade_dependency_failed`
+
+| Test | Scenario | What it checks |
+|------|----------|---------------|
+| `build_failed_cascades_to_direct_dependent` | Build A fails; B depends on A | B → DependencyFailed; cascade checks dep edge presence; eval → Failed |
+| `build_failed_no_dependents` | Build fails, no Created/Queued siblings | Cascade is a no-op; eval → Failed |
+| `build_failed_cascade_only_direct_dependents` | A fails; B depends on A, C does not | Only B → DependencyFailed; C stays Queued (still active) → eval stays Building |
+| `build_failed_unknown_build_noop` | `build_id` not in DB | Returns `Ok(())` silently |
+| `build_failed_cascade_skips_building_status` | The only sibling is Building | `cascade_dependency_failed` filters for Created/Queued only; Building sibling untouched → eval stays Building |
+
+### Group D: `handle_build_output`
+
+| Test | Scenario | What it checks |
+|------|----------|---------------|
+| `build_output_updates_derivation_output` | Output row exists in DB | `nar_size`, `file_hash`, and `has_artefacts` fields updated via `UPDATE…RETURNING` |
+| `build_output_missing_row_warns_not_errors` | `derivation_output` row not found | Logs a warning, returns `Ok(())` (best-effort update) |
+| `build_output_unknown_build_errors` | `build_id` not in DB | Returns `Err` (build context is required) |
+
+### Group E: `handle_eval_job_completed` / `handle_eval_job_failed`
+
+| Test | Scenario | What it checks |
+|------|----------|---------------|
+| `eval_job_completed_no_active_builds_completes_eval` | Eval job done, no active builds | Eval → Completed |
+| `eval_job_completed_active_builds_remain_noop` | Active builds still running | No status change (eval will complete when last build finishes) |
+| `eval_job_failed_transitions_eval_to_failed` | Eval job crashed | `evaluation_message` error row inserted; eval → Failed |
+| `eval_job_failed_terminal_eval_noop` | Eval already Completed | Terminal guard prevents overwrite; no status change |
+
+---
+
 ## Test count summary
 
 | Crate | Runner | Count |
 |-------|--------|-------|
-| `core` | inline unit tests | 47 |
-| `core` | `tests/mod.rs` (input + sources) | 50 |
-| `core` | `tests/sources.rs` | 4 |
-| `proto` | inline unit tests | 35 |
+| `core` | inline unit tests + `tests/` | 205 |
+| `proto` | inline unit tests | 73 |
 | `test-support` | inline unit tests | 11 |
-| `web` | inline unit tests | 6 |
-| `worker` | inline unit tests | 6 |
-| **Total** | | **205** |
-
-(The `tests/mod.rs` tests are the same as `tests/input.rs` + `tests/sources.rs`
-re-exported; cargo runs them through separate test binaries.)
+| `web` | inline unit tests | 11 |
+| `worker` | inline unit tests | 79 |
+| **Total** | | **379** |
 
 ---
 

@@ -158,3 +158,49 @@ pub fn format_public_key(organization: MOrganization, serve_url: &str) -> String
         organization.public_key, hostname, organization.name
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDateTime;
+    use uuid::Uuid;
+
+    fn make_org(name: &str, public_key: &str) -> MOrganization {
+        MOrganization {
+            id: Uuid::nil(),
+            name: name.to_string(),
+            display_name: name.to_string(),
+            description: String::new(),
+            public_key: public_key.to_string(),
+            private_key: String::new(),
+            use_nix_store: false,
+            public: false,
+            created_by: Uuid::nil(),
+            created_at: NaiveDateTime::default(),
+            managed: false,
+            github_installation_id: None,
+            forge_webhook_secret: None,
+        }
+    }
+
+    #[test]
+    fn format_public_key_strips_https() {
+        let org = make_org("myorg", "ssh-ed25519 AAAA");
+        let result = format_public_key(org, "https://example.com");
+        assert_eq!(result, "ssh-ed25519 AAAA example.com-myorg");
+    }
+
+    #[test]
+    fn format_public_key_strips_path() {
+        let org = make_org("myorg", "ssh-ed25519 AAAA");
+        let result = format_public_key(org, "https://example.com/api/v1");
+        assert_eq!(result, "ssh-ed25519 AAAA example.com-myorg");
+    }
+
+    #[test]
+    fn format_public_key_format() {
+        let org = make_org("wavelens", "ssh-ed25519 BBBB");
+        let result = format_public_key(org, "https://gradient.wavelens.io");
+        assert_eq!(result, "ssh-ed25519 BBBB gradient.wavelens.io-wavelens");
+    }
+}

@@ -78,3 +78,61 @@ impl CredentialStore {
         inner.ssh_key = None;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn store_and_retrieve_signing_key() {
+        let store = CredentialStore::new();
+        store.store(CredentialKind::SigningKey, b"cache.example.com:AAAA".to_vec());
+        let key = store.signing_key().expect("signing key should be present");
+        assert_eq!(key.expose(), "cache.example.com:AAAA");
+    }
+
+    #[test]
+    fn store_and_retrieve_ssh_key() {
+        let store = CredentialStore::new();
+        let raw = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        store.store(CredentialKind::SshKey, raw.clone());
+        let key = store.ssh_key().expect("ssh key should be present");
+        assert_eq!(key.expose(), raw.as_slice());
+    }
+
+    #[test]
+    fn signing_key_invalid_utf8_stores_none() {
+        let store = CredentialStore::new();
+        store.store(CredentialKind::SigningKey, vec![0xFF, 0xFE]);
+        assert!(store.signing_key().is_none());
+    }
+
+    #[test]
+    fn clear_drops_both() {
+        let store = CredentialStore::new();
+        store.store(CredentialKind::SigningKey, b"key".to_vec());
+        store.store(CredentialKind::SshKey, vec![1, 2, 3]);
+        store.clear();
+        assert!(store.signing_key().is_none());
+        assert!(store.ssh_key().is_none());
+    }
+
+    #[test]
+    fn overwrite_replaces_previous() {
+        let store = CredentialStore::new();
+        store.store(CredentialKind::SigningKey, b"key-a".to_vec());
+        store.store(CredentialKind::SigningKey, b"key-b".to_vec());
+        let key = store.signing_key().unwrap();
+        assert_eq!(key.expose(), "key-b");
+    }
+
+    #[test]
+    fn clone_shares_state() {
+        let store = CredentialStore::new();
+        let clone = store.clone();
+        // Store via clone, retrieve via original.
+        clone.store(CredentialKind::SigningKey, b"shared".to_vec());
+        let key = store.signing_key().expect("original should see cloned value");
+        assert_eq!(key.expose(), "shared");
+    }
+}

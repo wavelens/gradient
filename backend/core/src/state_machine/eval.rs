@@ -90,3 +90,84 @@ impl EvalStateMachine {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_sm_happy_path() {
+        let chain = [
+            (EvaluationStatus::Queued, EvaluationStatus::Fetching),
+            (EvaluationStatus::Fetching, EvaluationStatus::EvaluatingFlake),
+            (EvaluationStatus::EvaluatingFlake, EvaluationStatus::EvaluatingDerivation),
+            (EvaluationStatus::EvaluatingDerivation, EvaluationStatus::Building),
+            (EvaluationStatus::Building, EvaluationStatus::Completed),
+        ];
+        for (from, to) in chain {
+            assert!(EvalStateMachine::validate(from.clone(), to.clone()).is_ok(), "{from:?} → {to:?} failed");
+        }
+    }
+
+    #[test]
+    fn eval_sm_building_waiting_cycle() {
+        assert!(EvalStateMachine::validate(EvaluationStatus::Building, EvaluationStatus::Waiting).is_ok());
+        assert!(EvalStateMachine::validate(EvaluationStatus::Waiting, EvaluationStatus::Building).is_ok());
+    }
+
+    #[test]
+    fn eval_sm_any_nonterminal_to_failed() {
+        let nonterminals = [
+            EvaluationStatus::Queued, EvaluationStatus::Fetching,
+            EvaluationStatus::EvaluatingFlake, EvaluationStatus::EvaluatingDerivation,
+            EvaluationStatus::Building, EvaluationStatus::Waiting,
+        ];
+        for from in nonterminals {
+            assert!(EvalStateMachine::validate(from.clone(), EvaluationStatus::Failed).is_ok(), "{from:?} → Failed failed");
+        }
+    }
+
+    #[test]
+    fn eval_sm_any_nonterminal_to_aborted() {
+        let nonterminals = [
+            EvaluationStatus::Queued, EvaluationStatus::Fetching,
+            EvaluationStatus::EvaluatingFlake, EvaluationStatus::EvaluatingDerivation,
+            EvaluationStatus::Building, EvaluationStatus::Waiting,
+        ];
+        for from in nonterminals {
+            assert!(EvalStateMachine::validate(from.clone(), EvaluationStatus::Aborted).is_ok(), "{from:?} → Aborted failed");
+        }
+    }
+
+    #[test]
+    fn eval_sm_terminal_rejects_all() {
+        for from in [EvaluationStatus::Completed, EvaluationStatus::Failed, EvaluationStatus::Aborted] {
+            for to in [EvaluationStatus::Queued, EvaluationStatus::Building, EvaluationStatus::Fetching] {
+                assert!(EvalStateMachine::validate(from.clone(), to.clone()).is_err(), "{from:?} → {to:?} should be rejected");
+            }
+        }
+    }
+
+    #[test]
+    fn eval_sm_skip_fetching_ok() {
+        // Queued → EvaluatingFlake is explicitly allowed (line 65)
+        assert!(EvalStateMachine::validate(EvaluationStatus::Queued, EvaluationStatus::EvaluatingFlake).is_ok());
+    }
+
+    #[test]
+    fn eval_sm_same_state_ok() {
+        for s in [EvaluationStatus::Queued, EvaluationStatus::Building, EvaluationStatus::Fetching] {
+            assert!(EvalStateMachine::validate(s.clone(), s).is_ok());
+        }
+    }
+
+    #[test]
+    fn eval_sm_is_terminal() {
+        for s in [EvaluationStatus::Completed, EvaluationStatus::Failed, EvaluationStatus::Aborted] {
+            assert!(EvalStateMachine::is_terminal(&s), "{s:?} should be terminal");
+        }
+        for s in [EvaluationStatus::Queued, EvaluationStatus::Building, EvaluationStatus::Fetching, EvaluationStatus::EvaluatingFlake, EvaluationStatus::EvaluatingDerivation, EvaluationStatus::Waiting] {
+            assert!(!EvalStateMachine::is_terminal(&s), "{s:?} should not be terminal");
+        }
+    }
+}

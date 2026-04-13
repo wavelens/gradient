@@ -48,7 +48,7 @@ async fn eval_dispatch_loop(scheduler: Arc<Scheduler>) {
     }
 }
 
-async fn dispatch_queued_evals(scheduler: &Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) async fn dispatch_queued_evals(scheduler: &Arc<Scheduler>) -> anyhow::Result<()> {
     let state = &scheduler.state;
 
     let evals = EEvaluation::find()
@@ -121,7 +121,7 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
     }
 }
 
-async fn dispatch_ready_builds(scheduler: &Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) async fn dispatch_ready_builds(scheduler: &Arc<Scheduler>) -> anyhow::Result<()> {
     let state = &scheduler.state;
 
     // Ready builds: status = Queued AND no unsatisfied dependencies.

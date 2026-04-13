@@ -298,3 +298,66 @@ where
 {
     (f(), vec![])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_request_serde_roundtrip() {
+        let requests = [
+            EvalRequest::List {
+                repository: "github:nixos/nixpkgs".into(),
+                wildcards: vec!["packages.*.*".into()],
+            },
+            EvalRequest::Resolve {
+                repository: "github:nixos/nixpkgs".into(),
+                attrs: vec!["packages.x86_64-linux.hello".into()],
+            },
+            EvalRequest::AttrNames {
+                repository: "github:nixos/nixpkgs".into(),
+                path: "packages".into(),
+            },
+            EvalRequest::Shutdown,
+        ];
+
+        for req in &requests {
+            let json = serde_json::to_string(req).expect("serialize failed");
+            let back: EvalRequest = serde_json::from_str(&json).expect("deserialize failed");
+            // Re-serialize and compare JSON strings (no PartialEq on enums)
+            assert_eq!(
+                serde_json::to_string(&back).unwrap(),
+                json,
+                "roundtrip mismatch for request"
+            );
+        }
+    }
+
+    #[test]
+    fn eval_response_serde_roundtrip() {
+        let responses: Vec<EvalResponse> = vec![
+            EvalResponse::ListOk { attrs: vec!["packages.x86_64-linux.hello".into()], warnings: vec![] },
+            EvalResponse::ResolveOk {
+                items: vec![ResolvedItem {
+                    attr: "packages.x86_64-linux.hello".into(),
+                    drv_path: Some("aaaa-hello.drv".into()),
+                    references: vec![],
+                    error: None,
+                }],
+                warnings: vec![],
+            },
+            EvalResponse::AttrNamesOk { keys: vec!["x86_64-linux".into()], warnings: vec![] },
+            EvalResponse::Err { message: "something went wrong".into() },
+        ];
+
+        for resp in &responses {
+            let json = serde_json::to_string(resp).expect("serialize failed");
+            let back: EvalResponse = serde_json::from_str(&json).expect("deserialize failed");
+            assert_eq!(
+                serde_json::to_string(&back).unwrap(),
+                json,
+                "roundtrip mismatch for response"
+            );
+        }
+    }
+}

@@ -252,3 +252,35 @@ unsafe fn err_msg(ctx: *mut nix_c_context) -> String {
 pub fn escape_nix_str(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::escape_nix_str;
+
+    #[test]
+    fn escape_nix_str_plain() {
+        assert_eq!(escape_nix_str("hello"), "hello");
+    }
+
+    #[test]
+    fn escape_nix_str_backslash() {
+        assert_eq!(escape_nix_str("a\\b"), "a\\\\b");
+    }
+
+    #[test]
+    fn escape_nix_str_double_quote() {
+        assert_eq!(escape_nix_str(r#"a"b"#), r#"a\"b"#);
+    }
+
+    #[test]
+    fn escape_nix_str_both() {
+        // Input: a\"b  (backslash then quote)
+        // Expected: a\\"b  (each escaped separately, backslash first)
+        assert_eq!(escape_nix_str("a\\\"b"), "a\\\\\\\"b");
+    }
+
+    #[test]
+    fn escape_nix_str_empty() {
+        assert_eq!(escape_nix_str(""), "");
+    }
+}

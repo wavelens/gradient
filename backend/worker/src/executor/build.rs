@@ -164,3 +164,75 @@ fn build_basic_derivation(
         structured_attrs: None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gradient_core::db::{Derivation, DerivationOutput};
+    use harmonia_store_core::derivation::DerivationOutput as HarmoniaOutput;
+
+    fn empty_drv() -> Derivation {
+        Derivation {
+            outputs: vec![],
+            input_derivations: vec![],
+            input_sources: vec![],
+            system: "x86_64-linux".into(),
+            builder: "/bin/sh".into(),
+            args: vec![],
+            environment: Default::default(),
+        }
+    }
+
+    #[test]
+    fn build_basic_drv_empty_path_deferred() {
+        let mut drv = empty_drv();
+        drv.outputs = vec![DerivationOutput {
+            name: "out".into(),
+            path: "".into(),
+            hash_algo: "".into(),
+            hash: "".into(),
+        }];
+        let basic = build_basic_derivation("aaaa-hello.drv", &drv).unwrap();
+        let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
+        let out = basic.outputs.get(&out_name).expect("output 'out' not found");
+        assert!(matches!(out, HarmoniaOutput::Deferred), "empty path → Deferred");
+    }
+
+    #[test]
+    fn build_basic_drv_nonempty_path_input_addressed() {
+        let mut drv = empty_drv();
+        // nix store path hashes are 32 nix-base32 chars
+        drv.outputs = vec![DerivationOutput {
+            name: "out".into(),
+            path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".into(),
+            hash_algo: "".into(),
+            hash: "".into(),
+        }];
+        let basic = build_basic_derivation(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello.drv",
+            &drv,
+        ).unwrap();
+        let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
+        let out = basic.outputs.get(&out_name).expect("output 'out' not found");
+        assert!(matches!(out, HarmoniaOutput::InputAddressed(_)), "non-empty path → InputAddressed");
+    }
+
+    #[test]
+    fn build_basic_drv_name_extraction() {
+        let drv = empty_drv();
+        // nix store path hashes are 32 nix-base32 chars
+        let basic = build_basic_derivation(
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv",
+            &drv,
+        ).unwrap();
+        assert_eq!(basic.name.as_ref(), "hello.drv");
+    }
+
+    #[test]
+    fn build_basic_drv_no_dash_full_base() {
+        // If there's no '-' in the base path, use the full base as the name.
+        let drv = empty_drv();
+        let basic = build_basic_derivation("nodashname.drv", &drv).unwrap();
+        assert_eq!(basic.name.as_ref(), "nodashname.drv");
+    }
+}

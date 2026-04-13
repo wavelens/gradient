@@ -152,3 +152,117 @@ pub fn sign_narinfo_fingerprint(
 
     Ok(format!("{}-{}:{}", base_url, cache.name, sig_b64))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDateTime;
+    use std::io::Write;
+    use uuid::Uuid;
+
+    fn temp_secret_file() -> (tempfile::NamedTempFile, String) {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(b"test-secret-key-32-bytes-padding!").unwrap();
+        f.flush().unwrap();
+        let path = f.path().to_string_lossy().to_string();
+        (f, path)
+    }
+
+    fn make_cache(name: &str, public_key: &str, private_key: &str) -> MCache {
+        MCache {
+            id: Uuid::nil(),
+            name: name.to_string(),
+            display_name: name.to_string(),
+            description: String::new(),
+            active: true,
+            priority: 0,
+            public_key: public_key.to_string(),
+            private_key: private_key.to_string(),
+            public: false,
+            created_by: Uuid::nil(),
+            created_at: NaiveDateTime::default(),
+            managed: false,
+        }
+    }
+
+    #[test]
+    fn generate_decrypt_roundtrip() {
+        let (_f, path) = temp_secret_file();
+        let (encrypted_priv, pub_b64) = generate_signing_key(path.clone()).expect("generate failed");
+        let cache = make_cache("testcache", &pub_b64, &encrypted_priv);
+        let decrypted = decrypt_signing_key(path, cache).expect("decrypt failed");
+        // Decrypted should be base64-encoded 64-byte keypair
+        let bytes = general_purpose::STANDARD.decode(decrypted.trim()).expect("base64 decode failed");
+        assert_eq!(bytes.len(), 64, "ed25519 keypair is 64 bytes");
+    }
+
+    #[test]
+    fn format_cache_public_key_stored() {
+        let (_f, path) = temp_secret_file();
+        let (encrypted_priv, pub_b64) = generate_signing_key(path.clone()).expect("generate failed");
+        let cache = make_cache("mycache", &pub_b64, &encrypted_priv);
+        let result = format_cache_public_key(path, cache, "https://cache.example.com".to_string())
+            .expect("format failed");
+        // format: {base_url}-{name}:{pubkey}
+        assert!(result.contains("mycache"), "result should contain cache name");
+        assert!(result.contains(&pub_b64), "result should contain public key");
+        assert!(result.starts_with("cache.example.com-mycache:"), "unexpected format: {result}");
+    }
+
+    #[test]
+    fn format_cache_public_key_legacy() {
+        // Empty public_key → derive from private key
+        let (_f, path) = temp_secret_file();
+        let (encrypted_priv, _pub_b64) = generate_signing_key(path.clone()).expect("generate failed");
+        let cache = make_cache("legacy", "", &encrypted_priv);
+        let result = format_cache_public_key(path, cache, "https://cache.example.com".to_string())
+            .expect("format failed");
+        assert!(result.starts_with("cache.example.com-legacy:"), "unexpected format: {result}");
+    }
+
+    #[test]
+    fn sign_narinfo_fingerprint_format() {
+        let (_f, path) = temp_secret_file();
+        let (encrypted_priv, pub_b64) = generate_signing_key(path.clone()).expect("generate failed");
+        let cache = make_cache("sigcache", &pub_b64, &encrypted_priv);
+        let result = sign_narinfo_fingerprint(
+            path,
+            cache,
+            "https://cache.example.com".to_string(),
+            "/nix/store/aaaa-hello",
+            "sha256:AAAA",
+            12345,
+            &[],
+        )
+        .expect("sign failed");
+        // Format: {base_url}-{name}:{base64_sig}
+        assert!(result.starts_with("cache.example.com-sigcache:"), "unexpected prefix: {result}");
+    }
+
+    #[test]
+    fn sign_narinfo_sorts_references() {
+        let (_f, path) = temp_secret_file();
+        let (encrypted_priv, pub_b64) = generate_signing_key(path.clone()).expect("generate failed");
+        let cache = make_cache("sigcache", &pub_b64, &encrypted_priv);
+        // Sign once with sorted order, once with reversed order — signatures must match
+        let refs_sorted = vec!["aaaa-a".to_string(), "bbbb-b".to_string(), "cccc-c".to_string()];
+        let refs_reversed = vec!["cccc-c".to_string(), "bbbb-b".to_string(), "aaaa-a".to_string()];
+        let sig1 = sign_narinfo_fingerprint(
+            path.clone(), cache.clone(), "https://cache.example.com".to_string(),
+            "/nix/store/aaaa-hello", "sha256:AAAA", 100, &refs_sorted,
+        ).expect("sign failed");
+        let sig2 = sign_narinfo_fingerprint(
+            path, cache, "https://cache.example.com".to_string(),
+            "/nix/store/aaaa-hello", "sha256:AAAA", 100, &refs_reversed,
+        ).expect("sign failed");
+        assert_eq!(sig1, sig2, "sorting refs should give identical signatures");
+    }
+
+    #[test]
+    fn decrypt_corrupted_base64_fails() {
+        let (_f, path) = temp_secret_file();
+        let cache = make_cache("badcache", "", "!!!not-base64!!!");
+        let result = decrypt_signing_key(path, cache);
+        assert!(result.is_err(), "expected error for corrupted base64");
+    }
+}

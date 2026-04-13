@@ -177,3 +177,38 @@ fn munlock_slice(s: &[u8]) {
         libc::munlock(s.as_ptr() as *const libc::c_void, s.len());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_string_debug_redacted() {
+        let s = SecretString::new("super-secret".to_string());
+        assert_eq!(format!("{:?}", s), "[REDACTED]");
+    }
+
+    #[test]
+    fn secret_string_display_redacted() {
+        let s = SecretString::new("super-secret".to_string());
+        assert_eq!(format!("{}", s), "[REDACTED]");
+    }
+
+    #[test]
+    fn secret_string_expose() {
+        let s = SecretString::new("my-token".to_string());
+        assert_eq!(s.expose(), "my-token");
+    }
+
+    #[test]
+    fn secret_bytes_debug_redacted() {
+        let b = SecretBytes::new(vec![1, 2, 3]);
+        assert_eq!(format!("{:?}", b), "[REDACTED]");
+    }
+
+    #[test]
+    fn secret_bytes_expose() {
+        let b = SecretBytes::new(vec![10, 20, 30]);
+        assert_eq!(b.expose(), &[10u8, 20, 30]);
+    }
+}

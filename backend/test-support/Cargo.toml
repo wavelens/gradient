@@ -21,5 +21,7 @@ proto            = { workspace = true }
 futures          = { workspace = true }
 sea-orm          = { workspace = true }
 tokio            = { workspace = true }
+tokio-tungstenite = { workspace = true }
+rkyv             = { workspace = true }
 uuid             = { workspace = true }
 password-auth    = "1.0"

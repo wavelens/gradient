@@ -450,3 +450,48 @@ pub async fn post_resend_verification(
         message: "Verification email sent successfully".to_string(),
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── jwt_cookie ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn jwt_cookie_no_tls_no_remember() {
+        let cookie = jwt_cookie("mytoken", false, false);
+        assert!(cookie.contains("jwt_token=mytoken"));
+        assert!(cookie.contains("HttpOnly"));
+        assert!(cookie.contains("SameSite=Strict"));
+        assert!(cookie.contains("Path=/"));
+        assert!(!cookie.contains("Secure"));
+        assert!(!cookie.contains("Max-Age"));
+    }
+
+    #[test]
+    fn jwt_cookie_tls_adds_secure() {
+        let cookie = jwt_cookie("mytoken", false, true);
+        assert!(cookie.contains("; Secure"));
+        assert!(!cookie.contains("Max-Age"));
+    }
+
+    #[test]
+    fn jwt_cookie_remember_adds_max_age() {
+        let cookie = jwt_cookie("mytoken", true, false);
+        assert!(cookie.contains("Max-Age=2592000"));
+        assert!(!cookie.contains("Secure"));
+    }
+
+    #[test]
+    fn jwt_cookie_both_flags() {
+        let cookie = jwt_cookie("mytoken", true, true);
+        assert!(cookie.contains("; Secure"));
+        assert!(cookie.contains("Max-Age=2592000"));
+    }
+
+    #[test]
+    fn jwt_cookie_contains_token() {
+        let cookie = jwt_cookie("tok123", false, false);
+        assert!(cookie.starts_with("jwt_token=tok123"));
+    }
+}

@@ -82,3 +82,90 @@ impl BuildStateMachine {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_sm_created_to_queued() {
+        assert!(BuildStateMachine::validate(BuildStatus::Created, BuildStatus::Queued).is_ok());
+    }
+
+    #[test]
+    fn build_sm_queued_to_building() {
+        assert!(BuildStateMachine::validate(BuildStatus::Queued, BuildStatus::Building).is_ok());
+    }
+
+    #[test]
+    fn build_sm_building_to_completed() {
+        assert!(BuildStateMachine::validate(BuildStatus::Building, BuildStatus::Completed).is_ok());
+    }
+
+    #[test]
+    fn build_sm_building_to_failed() {
+        assert!(BuildStateMachine::validate(BuildStatus::Building, BuildStatus::Failed).is_ok());
+    }
+
+    #[test]
+    fn build_sm_any_nonterminal_to_aborted() {
+        for from in [BuildStatus::Created, BuildStatus::Queued, BuildStatus::Building] {
+            assert!(
+                BuildStateMachine::validate(from.clone(), BuildStatus::Aborted).is_ok(),
+                "{from:?} → Aborted should be valid"
+            );
+        }
+    }
+
+    #[test]
+    fn build_sm_any_nonterminal_to_dep_failed() {
+        for from in [BuildStatus::Created, BuildStatus::Queued, BuildStatus::Building] {
+            assert!(
+                BuildStateMachine::validate(from.clone(), BuildStatus::DependencyFailed).is_ok(),
+                "{from:?} → DependencyFailed should be valid"
+            );
+        }
+    }
+
+    #[test]
+    fn build_sm_terminal_rejects_all() {
+        let terminals = [
+            BuildStatus::Completed,
+            BuildStatus::Substituted,
+            BuildStatus::Failed,
+            BuildStatus::Aborted,
+            BuildStatus::DependencyFailed,
+        ];
+        for from in &terminals {
+            // Try transitioning to every non-same status
+            for to in [BuildStatus::Created, BuildStatus::Queued, BuildStatus::Building] {
+                assert!(
+                    BuildStateMachine::validate(from.clone(), to.clone()).is_err(),
+                    "{from:?} → {to:?} should be rejected"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn build_sm_same_state_ok() {
+        for s in [BuildStatus::Created, BuildStatus::Queued, BuildStatus::Building, BuildStatus::Completed] {
+            assert!(BuildStateMachine::validate(s.clone(), s).is_ok());
+        }
+    }
+
+    #[test]
+    fn build_sm_skip_queued_rejected() {
+        assert!(BuildStateMachine::validate(BuildStatus::Created, BuildStatus::Building).is_err());
+    }
+
+    #[test]
+    fn build_sm_is_terminal() {
+        for s in [BuildStatus::Completed, BuildStatus::Substituted, BuildStatus::Failed, BuildStatus::Aborted, BuildStatus::DependencyFailed] {
+            assert!(BuildStateMachine::is_terminal(&s), "{s:?} should be terminal");
+        }
+        for s in [BuildStatus::Created, BuildStatus::Queued, BuildStatus::Building] {
+            assert!(!BuildStateMachine::is_terminal(&s), "{s:?} should not be terminal");
+        }
+    }
+}

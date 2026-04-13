@@ -397,3 +397,69 @@ impl DerivationResolver for WorkerPoolResolver {
         Ok((drv.system.clone(), features))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── match_pattern ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn match_pattern_prefix_suffix() {
+        let candidates = ["packages.x86_64-linux", "packages.aarch64-linux", "checks.x86_64-linux"];
+        let result = match_pattern("packages.*", candidates.iter().copied());
+        assert_eq!(result, vec!["packages.x86_64-linux", "packages.aarch64-linux"]);
+    }
+
+    #[test]
+    fn match_pattern_no_star_returns_empty() {
+        let candidates = ["packages.x86_64-linux"];
+        let result = match_pattern("packages.x86_64-linux", candidates.iter().copied());
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn match_pattern_empty_candidates() {
+        let result = match_pattern("packages.*", std::iter::empty());
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn match_pattern_prefix_and_suffix() {
+        let candidates = ["checks.x86_64-linux.mytest", "checks.aarch64-linux.mytest", "checks.x86_64-linux.other"];
+        let result = match_pattern("checks.*.mytest", candidates.iter().copied());
+        assert_eq!(result, vec!["checks.x86_64-linux.mytest", "checks.aarch64-linux.mytest"]);
+    }
+
+    // ── quote_if_needed ───────────────────────────────────────────────────────
+
+    #[test]
+    fn quote_if_needed_plain_ident() {
+        assert_eq!(quote_if_needed("hello"), "hello");
+        assert_eq!(quote_if_needed("packages"), "packages");
+        assert_eq!(quote_if_needed("my_pkg"), "my_pkg");
+    }
+
+    #[test]
+    fn quote_if_needed_hyphenated() {
+        assert_eq!(quote_if_needed("x86_64-linux"), "\"x86_64-linux\"");
+    }
+
+    #[test]
+    fn quote_if_needed_dotted() {
+        assert_eq!(quote_if_needed("python3.12"), "\"python3.12\"");
+    }
+
+    // ── nix_store_path ────────────────────────────────────────────────────────
+
+    #[test]
+    fn nix_store_path_absolute_unchanged() {
+        let path = "/nix/store/hash-name";
+        assert_eq!(nix_store_path(path), path);
+    }
+
+    #[test]
+    fn nix_store_path_bare_prefixed() {
+        assert_eq!(nix_store_path("hash-name"), "/nix/store/hash-name");
+    }
+}

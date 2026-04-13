@@ -151,27 +151,9 @@ pub(super) async fn check_evaluation_status(state: Arc<ServerState>, evaluation_
         .map(|b| b.status)
         .collect::<Vec<BuildStatus>>();
 
-    let in_progress = statuses.iter().any(|s| {
-        matches!(
-            s,
-            BuildStatus::Queued | BuildStatus::Created | BuildStatus::Building
-        )
-    });
-
-    let eval_status = if statuses
-        .iter()
-        .all(|s| matches!(s, BuildStatus::Completed | BuildStatus::Substituted))
-    {
-        EvaluationStatus::Completed
-    } else if !in_progress && statuses.contains(&BuildStatus::Failed) {
-        EvaluationStatus::Failed
-    } else if !in_progress
-        && (statuses.contains(&BuildStatus::Aborted)
-            || statuses.contains(&BuildStatus::DependencyFailed))
-    {
-        EvaluationStatus::Aborted
-    } else {
-        return;
+    let eval_status = match eval_terminal_status(&statuses) {
+        Some(s) => s,
+        None => return,
     };
 
     report_ci_completion(Arc::clone(&state), &evaluation, eval_status.clone()).await;
@@ -296,5 +278,61 @@ async fn report_ci_completion(
         if let Err(e) = reporter.report(&report).await {
             warn!(error = %e, eval = %ep.eval, "CI completion report failed");
         }
+    }
+}
+
+/// Pure function that determines the terminal `EvaluationStatus` from a slice
+/// of build statuses, or returns `None` if builds are still in progress.
+fn eval_terminal_status(statuses: &[BuildStatus]) -> Option<EvaluationStatus> {
+    let in_progress = statuses.iter().any(|s| {
+        matches!(s, BuildStatus::Queued | BuildStatus::Created | BuildStatus::Building)
+    });
+
+    if statuses.iter().all(|s| matches!(s, BuildStatus::Completed | BuildStatus::Substituted)) {
+        Some(EvaluationStatus::Completed)
+    } else if !in_progress && statuses.contains(&BuildStatus::Failed) {
+        Some(EvaluationStatus::Failed)
+    } else if !in_progress
+        && (statuses.contains(&BuildStatus::Aborted)
+            || statuses.contains(&BuildStatus::DependencyFailed))
+    {
+        Some(EvaluationStatus::Aborted)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_status_all_completed() {
+        let statuses = vec![BuildStatus::Completed, BuildStatus::Substituted, BuildStatus::Completed];
+        assert_eq!(eval_terminal_status(&statuses), Some(EvaluationStatus::Completed));
+    }
+
+    #[test]
+    fn eval_status_failed_no_active() {
+        let statuses = vec![BuildStatus::Failed, BuildStatus::Completed];
+        assert_eq!(eval_terminal_status(&statuses), Some(EvaluationStatus::Failed));
+    }
+
+    #[test]
+    fn eval_status_active_builds_none() {
+        let statuses = vec![BuildStatus::Queued, BuildStatus::Completed];
+        assert_eq!(eval_terminal_status(&statuses), None);
+    }
+
+    #[test]
+    fn eval_status_aborted_no_active() {
+        let statuses = vec![BuildStatus::Aborted, BuildStatus::DependencyFailed];
+        assert_eq!(eval_terminal_status(&statuses), Some(EvaluationStatus::Aborted));
+    }
+
+    #[test]
+    fn eval_status_empty_builds() {
+        // All vacuously Completed/Substituted (empty iter)
+        assert_eq!(eval_terminal_status(&[]), Some(EvaluationStatus::Completed));
     }
 }

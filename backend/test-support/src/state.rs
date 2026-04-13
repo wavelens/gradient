@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::cli::test_cli;
+use crate::cli::{test_cli, test_cli_with_crypt};
 use crate::fakes::email::InMemoryEmailSender;
 use crate::fakes::nix_store::FakeNixStoreProvider;
 use crate::fakes::webhooks::RecordingWebhookClient;
@@ -31,4 +31,26 @@ pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
     })
+}
+
+/// Like `test_state` but uses a custom `crypt_secret_file` path and returns
+/// the `RecordingWebhookClient` separately so tests can inspect deliveries.
+pub fn test_state_recorded(
+    db: DatabaseConnection,
+    crypt_secret_file: String,
+) -> (Arc<ServerState>, Arc<RecordingWebhookClient>) {
+    let cli = test_cli_with_crypt(crypt_secret_file);
+    let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
+    let recorder = Arc::new(RecordingWebhookClient::new());
+    let state = Arc::new(ServerState {
+        db,
+        cli,
+        log_storage: Arc::new(NoopLogStorage),
+        nix_store: Arc::new(FakeNixStoreProvider::new()) as Arc<dyn NixStoreProvider>,
+        web_nix_store: Arc::new(FakeNixStoreProvider::new()) as Arc<dyn NixStoreProvider>,
+        webhooks: Arc::clone(&recorder) as Arc<dyn WebhookClient>,
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        nar_storage,
+    });
+    (state, recorder)
 }

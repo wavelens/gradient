@@ -50,7 +50,7 @@ impl JobExecutor {
     ) -> Result<()> {
         for task in &job.tasks {
             match task {
-                FlakeTask::FetchFlake => fetch::fetch_repository(&job, updater, credentials).await?,
+                FlakeTask::FetchFlake => fetch::fetch_repository(&job, updater as &mut dyn proto::traits::JobReporter, credentials).await?,
                 FlakeTask::EvaluateFlake => eval::evaluate_flake(&job, updater).await?,
                 FlakeTask::EvaluateDerivations => {
                     eval::evaluate_derivations(&self.evaluator, &self.store, &job, updater)

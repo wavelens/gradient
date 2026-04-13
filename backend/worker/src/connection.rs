@@ -69,7 +69,11 @@ impl ProtoConnection {
                 None => return Ok(None),
                 Some(Err(e)) => return Err(e.into()),
                 Some(Ok(Message::Binary(bytes))) => {
-                    let msg = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes)
+                    // rkyv 0.8 requires the buffer to be aligned; network
+                    // buffers are not guaranteed to satisfy this.
+                    let mut aligned = rkyv::util::AlignedVec::<16>::new();
+                    aligned.extend_from_slice(&bytes);
+                    let msg = rkyv::from_bytes::<ServerMessage, RkyvError>(&aligned)
                         .context("failed to deserialise ServerMessage")?;
                     return Ok(Some(msg));
                 }

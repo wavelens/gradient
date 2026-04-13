@@ -16,17 +16,17 @@
 
 use anyhow::Result;
 use proto::messages::FlakeJob;
+use proto::traits::JobReporter;
 use tracing::debug;
 
 use crate::credentials::CredentialStore;
-use crate::job::JobUpdater;
 
 /// Clone (or update) the repository referenced by `job` at the specified commit.
 ///
 /// `credentials` may contain an SSH private key for private repository access.
 pub async fn fetch_repository(
     job: &FlakeJob,
-    updater: &mut JobUpdater<'_>,
+    updater: &mut dyn JobReporter,
     credentials: &CredentialStore,
 ) -> Result<()> {
     updater.report_fetching().await?;
@@ -46,4 +46,52 @@ pub async fn fetch_repository(
     //   - return the working-directory path via updater or a side-channel.
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proto::messages::FlakeTask;
+    use test_support::fakes::job_reporter::{RecordingJobReporter, ReportedEvent};
+
+    fn make_flake_job() -> FlakeJob {
+        FlakeJob {
+            tasks: vec![FlakeTask::FetchFlake],
+            repository: "https://example.com/repo.git".into(),
+            commit: "abc123".into(),
+            wildcards: vec![],
+            timeout_secs: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_reports_fetching_and_succeeds() {
+        let job = make_flake_job();
+        let credentials = crate::credentials::CredentialStore::new();
+        let mut reporter = RecordingJobReporter::new();
+
+        fetch_repository(&job, &mut reporter, &credentials)
+            .await
+            .unwrap();
+
+        assert_eq!(reporter.len(), 1);
+        assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
+    }
+
+    #[tokio::test]
+    async fn fetch_with_ssh_key_reports_fetching() {
+        let job = make_flake_job();
+        let credentials = crate::credentials::CredentialStore::new();
+        credentials.store(
+            proto::messages::CredentialKind::SshKey,
+            b"-----BEGIN OPENSSH PRIVATE KEY-----".to_vec(),
+        );
+        let mut reporter = RecordingJobReporter::new();
+
+        fetch_repository(&job, &mut reporter, &credentials)
+            .await
+            .unwrap();
+
+        assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
+    }
 }
