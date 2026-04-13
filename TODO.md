@@ -10,6 +10,7 @@
  - workers need to be restared (maybe they crash)
  - prioritzie workers when oom killing
  - when commit id is same no need to re-evaluate
+ - dropdown for "ci-provider" integration in frontend is different css from the other dropdowns
 
  - save which builder was used for each build in the database
  - add a eval logLevel (seperate from build)

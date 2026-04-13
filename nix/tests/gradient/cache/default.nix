@@ -67,7 +67,7 @@
               mode = "0600";
               user = "gradient";
               group = "gradient";
-              text = "dGhpcyBpcyBhIHRlc3QgdG9rZW4gZm9yIHRoZSBidWlsZGVyIHdvcmtlciBpbiB0aGUgY2FjaGUgdGVzdA==";
+              text = "C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
             };
           };
         };
@@ -202,7 +202,7 @@
           mode = "0600";
           user = "gradient-worker";
           group = "gradient-worker";
-          text = "*:dGhpcyBpcyBhIHRlc3QgdG9rZW4gZm9yIHRoZSBidWlsZGVyIHdvcmtlciBpbiB0aGUgY2FjaGUgdGVzdA==";
+          text = "*:C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
         };
 
         services.gradient.worker = {

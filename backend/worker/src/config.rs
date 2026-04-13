@@ -129,14 +129,14 @@ impl WorkerConfig {
                 if peer_id.is_empty() || token.is_empty() {
                     return None;
                 }
-                // Tokens must be the base64 encoding of 48 random bytes
+                // Tokens must be exactly the base64 encoding of 48 random bytes
                 // (64 characters), as produced by `openssl rand -base64 48`
                 // or the worker registration API.
-                if token.len() < 64 {
+                if token.len() != 64 {
                     tracing::warn!(
                         peer_id,
                         token_len = token.len(),
-                        "token is too short (expected 64 base64 chars / 48 bytes); skipping entry"
+                        "token must be exactly 64 base64 chars (48 bytes); skipping entry"
                     );
                     return None;
                 }
@@ -222,10 +222,12 @@ mod tests {
         }
     }
 
-    /// 64 `x` characters — the minimum accepted token length.
+    /// 64 `x` characters — the only accepted token length.
     const TOK64: &str = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
     /// 63 `x` characters — one too short.
     const TOK63: &str = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    /// 65 `x` characters — one too long.
+    const TOK65: &str = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 
     // ── peer_tokens() ─────────────────────────────────────────────────────────
 
@@ -250,6 +252,15 @@ mod tests {
     #[test]
     fn peer_tokens_skips_short_tokens() {
         let input = format!("peer-short:{TOK63}\npeer-ok:{TOK64}");
+        let cfg = config_with_peers(&input);
+        let tokens = cfg.peer_tokens();
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].0, "peer-ok");
+    }
+
+    #[test]
+    fn peer_tokens_skips_long_tokens() {
+        let input = format!("peer-long:{TOK65}\npeer-ok:{TOK64}");
         let cfg = config_with_peers(&input);
         let tokens = cfg.peer_tokens();
         assert_eq!(tokens.len(), 1);

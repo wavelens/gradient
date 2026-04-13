@@ -288,3 +288,26 @@ async fn dispatch_ready_build_skips_already_enqueued() {
 
     assert_eq!(scheduler.pending_job_count().await, 1, "second dispatch must be a no-op");
 }
+
+// ── Group J: project polling ────────────────────────────────────────────────
+
+/// Verifies that the project polling function exists and is callable.
+/// This test was added after the evaluator service was accidentally disconnected
+/// from the server during the builder crate split — no evaluations were ever
+/// created automatically because no code polled projects for new commits.
+#[tokio::test]
+async fn project_poll_with_no_projects_is_noop() {
+    // poll_projects_for_evaluations is pub(crate), so this test proves it exists
+    // and compiles. A real git repo is required for check_project_updates, so we
+    // just verify the function handles an empty project list gracefully.
+    let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+        // Query for active projects with last_evaluation join → empty
+        .append_query_results([Vec::<entity::project::Model>::new()])
+        // Query for active projects without last_evaluation → empty
+        .append_query_results([Vec::<entity::project::Model>::new()])
+        .into_connection();
+
+    let scheduler = make_scheduler(db);
+    let result = dispatch::poll_projects_for_evaluations(&scheduler).await;
+    assert!(result.is_ok(), "poll with no projects should succeed");
+}

@@ -23,8 +23,14 @@ in {
     serverUrl = lib.mkOption {
       description = "WebSocket URL of the Gradient server protocol endpoint";
       type = lib.types.str;
-      default = "";
+      default = "ws://localhost:3100/proto";
       example = "wss://worker.example.com/proto";
+    };
+
+    port = lib.mkOption {
+      description = "Port for the worker's listener";
+      type = lib.types.port;
+      default = 3100;
     };
 
     peersFile = lib.mkOption {
@@ -49,12 +55,6 @@ in {
       '';
       type = lib.types.nullOr lib.types.path;
       default = null;
-    };
-
-    port = lib.mkOption {
-      description = "Port for the worker's listener";
-      type = lib.types.port;
-      default = 3100;
     };
 
     capabilities = {

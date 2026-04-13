@@ -496,6 +496,11 @@ in {
             "/proto" = lib.mkIf cfg.discoverable {
               proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
               proxyWebsockets = true;
+              extraConfig = ''
+                proxy_connect_timeout 90d;
+                proxy_send_timeout 90d;
+                proxy_read_timeout 90d;
+              '';
             };
 
             "/cache/" = lib.mkIf cfg.serveCache {
