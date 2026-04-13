@@ -49,12 +49,12 @@ in rustPlatform.buildRustPackage {
     allowBuiltinFetchGit = true;
   };
 
+  LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
+  BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${glibc.dev}";
+
   preCheck = ''
     ln -s ${testStore} ./test-store
   '';
-
-  LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
-  BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${glibc.dev}";
 
   meta = {
     description = "Nix Continuous Integration System Backend";
