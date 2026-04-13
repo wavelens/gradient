@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::messages::{CandidateScore, FlakeJob, FlakeTask, GradientCapabilities};
 
-use super::jobs::{PendingEvalJob, PendingJob};
+use super::jobs::PendingEvalJob;
 use super::Scheduler;
 
 /// Create a scheduler backed by a mock DB that returns empty results.

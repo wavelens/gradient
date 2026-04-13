@@ -19,6 +19,7 @@
   orgPrivateKeyFiles = lib.mapAttrsToList (_: org: "gradient_org_${org.name}_private_key:${org.private_key_file}") cfg.state.organizations;
   cacheSigningKeyFiles = lib.mapAttrsToList (_: cache: "gradient_cache_${cache.name}_signing_key:${cache.signing_key_file}") cfg.state.caches;
   apiKeyFiles = lib.mapAttrsToList (_: api_key: "gradient_api_${api_key.name}_key:${api_key.key_file}") cfg.state.api_keys;
+  workerTokenFiles = lib.mapAttrsToList (_: worker: "gradient_worker_${worker.worker_id}_token:${worker.token_file}") cfg.state.workers;
   projectCiTokenFiles = lib.concatLists (lib.mapAttrsToList (_: proj:
     lib.optional (proj.ci_reporter_token_file != null)
       "gradient_project_${proj.name}_ci_token:${proj.ci_reporter_token_file}"
@@ -392,7 +393,7 @@ in {
             "gradient_github_app_private_key:${cfg.githubApp.privateKeyFile}"
             "gradient_github_app_webhook_secret:${cfg.githubApp.webhookSecretFile}"
           ] ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
-            ++ projectCiTokenFiles;
+            ++ workerTokenFiles ++ projectCiTokenFiles;
         };
 
         environment = {

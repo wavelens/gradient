@@ -12,10 +12,13 @@
 , nixVersions
 , openssl
 , pkg-config
+, pkgs
 , rustPlatform
 , zstd
 }:
 let
+  testStore = import ../scripts/store.nix { inherit pkgs; };
+
   nixVersion = nixVersions.nix_2_34;
   ignoredPaths = [ ".github" "target" ];
 in rustPlatform.buildRustPackage {
@@ -45,6 +48,10 @@ in rustPlatform.buildRustPackage {
     lockFile = ../../backend/Cargo.lock;
     allowBuiltinFetchGit = true;
   };
+
+  preCheck = ''
+    ln -s ${testStore} ./test-store
+  '';
 
   LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
   BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${glibc.dev}";

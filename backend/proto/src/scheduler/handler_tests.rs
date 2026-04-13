@@ -38,7 +38,7 @@ use uuid::Uuid;
 use crate::messages::{BuildOutput, DerivationOutput, DiscoveredDerivation, FlakeJob, FlakeTask};
 use crate::scheduler::jobs::{PendingBuildJob, PendingEvalJob};
 use crate::scheduler::{build as build_handler, eval as eval_handler};
-use test_support::prelude::{RecordingWebhookClient, test_state_recorded};
+use test_support::prelude::test_state_recorded;
 
 // ── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -168,6 +168,62 @@ fn make_discovered(
         architecture: "x86_64-linux".into(),
         required_features: vec![],
         substituted: false,
+    }
+}
+
+/// Evaluation fixture with `project: Some(project_id)`. Used for webhook tests
+/// where the webhook path must not return early at the `project? = None` guard.
+fn make_eval_with_project(id: Uuid, project_id: Uuid, status: EvaluationStatus) -> MEvaluation {
+    entity::evaluation::Model {
+        id,
+        project: Some(project_id),
+        repository: "https://example.com/repo".into(),
+        commit: Uuid::nil(),
+        wildcard: "*".into(),
+        status,
+        previous: None,
+        next: None,
+        created_at: test_date(),
+        updated_at: test_date(),
+    }
+}
+
+/// Project fixture for webhook tests.
+fn make_project(id: Uuid, org_id: Uuid) -> entity::project::Model {
+    entity::project::Model {
+        id,
+        organization: org_id,
+        name: "test-project".into(),
+        active: true,
+        display_name: "Test Project".into(),
+        description: "".into(),
+        repository: "https://example.com/repo".into(),
+        evaluation_wildcard: "*".into(),
+        last_evaluation: None,
+        last_check_at: test_date(),
+        force_evaluation: false,
+        created_by: Uuid::nil(),
+        created_at: test_date(),
+        managed: false,
+        keep_evaluations: 30,
+        ci_reporter_type: None,
+        ci_reporter_url: None,
+        ci_reporter_token: None,
+    }
+}
+
+/// Webhook fixture. `secret` should be an already-encrypted base64 ciphertext.
+fn make_webhook(id: Uuid, org_id: Uuid, encrypted_secret: &str, events: &[&str]) -> entity::webhook::Model {
+    entity::webhook::Model {
+        id,
+        organization: org_id,
+        name: "test-hook".into(),
+        url: "http://localhost:19999/hook".into(),
+        secret: encrypted_secret.to_string(),
+        events: serde_json::json!(events),
+        active: true,
+        created_by: Uuid::nil(),
+        created_at: test_date(),
     }
 }
 
@@ -494,7 +550,7 @@ async fn build_completed_last_build_completes_eval() {
         .into_connection();
 
     let state = make_state(db);
-    let job = make_build_job(build_id, eval_id, org_id);
+    let _job = make_build_job(build_id, eval_id, org_id);
 
     let result = build_handler::handle_build_job_completed(&state, build_id).await;
     assert!(result.is_ok());
@@ -990,4 +1046,490 @@ async fn eval_job_failed_terminal_eval_noop() {
     let state = make_state(db);
     let result = eval_handler::handle_eval_job_failed(&state, eval_id, "late error").await;
     assert!(result.is_ok());
+}
+
+// ── Group G: abort_evaluation ─────────────────────────────────────────────────
+
+/// `abort_evaluation` with two active builds (Queued + Building) cascades both
+/// to Aborted and then transitions the evaluation to Aborted.
+///
+/// DB call sequence:
+///   1. Q: find active builds (Created/Queued/Building) → [buildA(Queued), buildB(Building)]
+///   2. Q: update buildA → Aborted (UPDATE…RETURNING)
+///      → spawns fire_build_webhook(Aborted) — returns early (DependencyFailed/Aborted → return)
+///      → spawns log_finalize (NoopLogStorage → no-op)
+///   3. Q: update buildB → Aborted
+///   4. E: update_many eval → Aborted
+///   5. Q: find_by_id(eval) after update
+///      → spawns fire_evaluation_webhook (eval.project=None → returns early)
+#[tokio::test]
+async fn abort_cascades_to_active_builds() {
+    let eval_id = Uuid::new_v4();
+    let drv_a_id = Uuid::new_v4();
+    let drv_b_id = Uuid::new_v4();
+    let build_a_id = Uuid::new_v4();
+    let build_b_id = Uuid::new_v4();
+
+    let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Queued);
+    let build_b = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Building);
+    let build_a_aborted = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Aborted);
+    let build_b_aborted = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Aborted);
+    let eval = make_eval(eval_id, EvaluationStatus::Building);
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find active builds
+        .append_query_results([vec![build_a, build_b]])
+        // 2. update buildA → Aborted (UPDATE RETURNING)
+        .append_query_results([vec![build_a_aborted]])
+        // 3. update buildB → Aborted
+        .append_query_results([vec![build_b_aborted]])
+        // 4. update_many eval → Aborted
+        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        // 5. find_by_id(eval) after update
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Aborted)]])
+        .into_connection();
+
+    let state = make_state(db);
+    gradient_core::db::abort_evaluation(Arc::clone(&state), eval).await;
+    // Reaching here without panic confirms the abort cascade completed.
+}
+
+/// `abort_evaluation` returns immediately without any DB queries when the
+/// evaluation is already Completed.
+#[tokio::test]
+async fn abort_skips_completed_eval() {
+    let eval_id = Uuid::new_v4();
+    // Empty MockDatabase — any unexpected DB call would cause an error that,
+    // if propagated, would surface as a test failure.
+    let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+    let state = make_state(db);
+    let eval = make_eval(eval_id, EvaluationStatus::Completed);
+    // Should return immediately; the guard `evaluation.status == Completed → return`
+    // prevents any DB queries.
+    gradient_core::db::abort_evaluation(Arc::clone(&state), eval).await;
+}
+
+/// `abort_evaluation` with no active builds still transitions the evaluation
+/// to Aborted (the find-builds query returns empty, but the eval update runs).
+#[tokio::test]
+async fn abort_no_active_builds() {
+    let eval_id = Uuid::new_v4();
+    let eval = make_eval(eval_id, EvaluationStatus::Building);
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find active builds → empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 2. update_many eval → Aborted
+        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        // 3. find_by_id(eval) after update
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Aborted)]])
+        .into_connection();
+
+    let state = make_state(db);
+    gradient_core::db::abort_evaluation(Arc::clone(&state), eval).await;
+}
+
+// ── Group H: Handler behavioral gaps ─────────────────────────────────────────
+
+/// When `EDerivation::insert_many().exec()` fails (MockDB returns empty rows →
+/// `RecordNotInserted`), `handle_eval_result` transitions the evaluation to
+/// Failed via `update_evaluation_status_with_error` and returns `Err`.
+///
+/// DB call sequence:
+///   1. Q: find_by_id(eval) → Building
+///   2. Q: find existing derivations → none
+///   3. Q: insert_many derivations → EMPTY (→ RecordNotInserted error)
+///   4. E: insert evaluation_message (error record)
+///   5. E: update_many eval → Failed
+///   6. Q: find_by_id(eval) → Failed
+#[tokio::test]
+async fn eval_result_error_on_derivation_insert_transitions_eval_failed() {
+    let eval_id = Uuid::new_v4();
+    let org_id = Uuid::new_v4();
+
+    let drv_path = "/nix/store/aaaa-fail-insert.drv";
+    let discovered = make_discovered(drv_path, vec![("out", "/nix/store/bbbb-fail-insert")], vec![]);
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find_by_id(eval) → Building
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        // 2. find existing derivations → none
+        .append_query_results([Vec::<MDerivation>::new()])
+        // 3. insert_many derivations → empty result → RecordNotInserted
+        .append_query_results([Vec::<MDerivation>::new()])
+        // 4. update_evaluation_status_with_error: insert evaluation_message
+        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        // 5. update_many eval → Failed
+        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        // 6. find_by_id(eval) → Failed
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
+        .into_connection();
+
+    let state = make_state(db);
+    let job = make_eval_job(eval_id, org_id);
+
+    let result = eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![]).await;
+    assert!(result.is_err(), "expected Err when derivation insert fails, got: {:?}", result.ok());
+}
+
+/// When `EBuild::insert_many().exec()` fails after derivations are inserted
+/// successfully, `handle_eval_result` transitions the evaluation to Failed.
+///
+/// DB call sequence:
+///   1. Q: find_by_id(eval) → Building
+///   2. Q: find existing derivations → none
+///   3. Q: insert_many derivations → success
+///   4. Q: insert_many derivation_outputs → success
+///   5. Q: insert_many builds → EMPTY (→ RecordNotInserted error)
+///   6. E: insert evaluation_message
+///   7. E: update_many eval → Failed
+///   8. Q: find_by_id(eval) → Failed
+#[tokio::test]
+async fn eval_result_build_insert_fails_transitions_eval_failed() {
+    let eval_id = Uuid::new_v4();
+    let org_id = Uuid::new_v4();
+    let drv_id = Uuid::new_v4();
+
+    let drv_path = "/nix/store/cccc-build-fail.drv";
+    let out_path = "/nix/store/dddd-build-fail";
+    let discovered = make_discovered(drv_path, vec![("out", out_path)], vec![]);
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find_by_id(eval)
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        // 2. find existing derivations → none
+        .append_query_results([Vec::<MDerivation>::new()])
+        // 3. insert_many derivations → success
+        .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
+        // 4. insert_many derivation_outputs → success
+        .append_query_results([vec![make_drv_output(Uuid::new_v4(), drv_id, "out", out_path)]])
+        // 5. insert_many builds → empty result → RecordNotInserted error
+        .append_query_results([Vec::<MBuild>::new()])
+        // 6. update_evaluation_status_with_error: insert evaluation_message
+        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        // 7. update_many eval → Failed
+        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        // 8. find_by_id(eval) → Failed
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
+        .into_connection();
+
+    let state = make_state(db);
+    let job = make_eval_job(eval_id, org_id);
+
+    let result = eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![]).await;
+    assert!(result.is_err(), "expected Err when build insert fails, got: {:?}", result.ok());
+}
+
+/// When derivation A already exists in the DB and new derivation B depends on A,
+/// the dep edge B→A is still inserted because A's ID is in `drv_path_to_id`
+/// from the initial existing-derivation lookup.
+///
+/// DB call sequence:
+///   1. Q: find_by_id(eval) → Building
+///   2. Q: find existing derivations → [drvA (existing)]
+///   3. Q: insert_many derivations (only B is new)
+///   4. Q: insert_many derivation_outputs (for B)
+///   5. Q: insert_many dep_edges (B→A)
+///   6. Q: insert_many builds (both A and B get new build rows)
+///   7. Q: find Created builds → [buildA_created, buildB_created]
+///   8. Q: update buildA → Queued
+///   9. Q: update buildB → Queued
+///  10. E: update_many eval → Building
+///  11. Q: find_by_id(eval) → Building
+#[tokio::test]
+async fn eval_result_existing_drv_still_creates_dep_edge() {
+    let eval_id = Uuid::new_v4();
+    let org_id = Uuid::new_v4();
+    let drv_a_id = Uuid::new_v4();
+    let drv_b_id = Uuid::new_v4();
+    let build_a_id = Uuid::new_v4();
+    let build_b_id = Uuid::new_v4();
+
+    let path_a = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-existing.drv";
+    let path_b = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-new.drv";
+    // A already exists; B is new and depends on A.
+    let drv_a_existing = make_discovered(path_a, vec![("out", "/nix/store/aaaa-existing")], vec![]);
+    let drv_b_new = make_discovered(
+        path_b,
+        vec![("out", "/nix/store/bbbb-new")],
+        vec![path_a], // B depends on A
+    );
+
+    let build_a_created = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Created);
+    let build_b_created = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Created);
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find_by_id(eval)
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        // 2. find existing derivations → drvA already in DB
+        .append_query_results([vec![make_derivation(drv_a_id, org_id, path_a)]])
+        // 3. insert_many derivations (only B is new)
+        .append_query_results([vec![make_derivation(drv_b_id, org_id, path_b)]])
+        // 4. insert_many derivation_outputs (for B)
+        .append_query_results([vec![make_drv_output(Uuid::new_v4(), drv_b_id, "out", "/nix/store/bbbb-new")]])
+        // 5. insert_many dep_edges (B→A): A's ID is in drv_path_to_id from the existing lookup
+        .append_query_results([vec![make_dep_edge(Uuid::new_v4(), drv_b_id, drv_a_id)]])
+        // 6. insert_many builds (A and B both get new build rows for this evaluation)
+        .append_query_results([vec![build_a_created.clone()]])
+        // 7. find Created builds
+        .append_query_results([vec![build_a_created, build_b_created]])
+        // 8. update buildA → Queued
+        .append_query_results([vec![make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Queued)]])
+        // 9. update buildB → Queued
+        .append_query_results([vec![make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Queued)]])
+        // 10. update_many eval → Building
+        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        // 11. find_by_id(eval) → Building
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        .into_connection();
+
+    let state = make_state(db);
+    let job = make_eval_job(eval_id, org_id);
+
+    let result = eval_handler::handle_eval_result(
+        &state,
+        &job,
+        vec![drv_a_existing, drv_b_new],
+        vec![],
+    )
+    .await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+}
+
+// ── Group I: Webhook delivery ─────────────────────────────────────────────────
+
+/// After `handle_build_job_completed`, the `RecordingWebhookClient` receives a
+/// delivery with event `"build.completed"`.
+///
+/// Uses `eval.project: Some(project_id)` so that `fire_build_webhook` and
+/// `fire_evaluation_webhook` proceed past the `project? = None → return` guard.
+/// Both webhook tasks are spawned inside `update_build_status` /
+/// `update_evaluation_status` and run when the main task yields.
+///
+/// DB call sequence (main handler):
+///   1. Q: find_by_id(build) → Building
+///   2. Q: update build → Completed (UPDATE…RETURNING)
+///      → spawns TASK_A: fire_build_webhook(build, Completed)
+///      → spawns TASK_B: log_finalize (NoopLogStorage → no-op)
+///   3. Q: find active builds → empty
+///   4. Q: find_by_id(eval) → Building (with project=Some)
+///   5. Q: find failed builds → empty
+///   6. E: update_many eval → Completed
+///   7. Q: find_by_id(eval) → Completed
+///      → spawns TASK_C: fire_evaluation_webhook(eval, Completed)
+///
+/// TASK_A (fire_build_webhook Completed):
+///   8.  Q: get_build_org_id: find_by_id(eval) → eval with project=Some
+///   9.  Q: get_build_org_id: find_by_id(project_id) → project
+///   10. Q: find_by_id(build.derivation) → derivation (best-effort)
+///   11. Q: find webhooks for org → [webhook subscribed to "build.completed"]
+///         decrypt + sign + deliver → recorded
+///
+/// TASK_B: no-op.
+///
+/// TASK_C (fire_evaluation_webhook Completed):
+///   12. Q: find_by_id(project_id) → project
+///   13. Q: find webhooks for org → [webhook subscribed to "build.completed"]
+///         subscription check for "evaluation.completed" → false → no delivery
+#[tokio::test]
+async fn webhook_fired_on_build_completed() {
+    use std::io::Write as _;
+
+    // Create a real 32-byte key file so decrypt_webhook_secret can read it.
+    let mut key_file = tempfile::NamedTempFile::new().expect("create temp key file");
+    key_file.write_all(b"test-secret-key-32-bytes-padding!").unwrap();
+    key_file.flush().unwrap();
+    let key_path = key_file.path().to_string_lossy().to_string();
+
+    // Encrypt the webhook secret with this key.
+    let encrypted_secret = gradient_core::ci::encrypt_webhook_secret(&key_path, "plaintext-hook-secret")
+        .expect("encrypt webhook secret");
+
+    let eval_id = Uuid::new_v4();
+    let project_id = Uuid::new_v4();
+    let org_id = Uuid::new_v4();
+    let drv_id = Uuid::new_v4();
+    let build_id = Uuid::new_v4();
+    let webhook_id = Uuid::new_v4();
+
+    let build_building = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
+    let build_completed = make_build(build_id, eval_id, drv_id, BuildStatus::Completed);
+    let eval_building = make_eval_with_project(eval_id, project_id, EvaluationStatus::Building);
+    let eval_completed = make_eval_with_project(eval_id, project_id, EvaluationStatus::Completed);
+    let project = make_project(project_id, org_id);
+    let drv = make_derivation(drv_id, org_id, "/nix/store/aaaa-hello.drv");
+    let webhook = make_webhook(webhook_id, org_id, &encrypted_secret, &["build.completed"]);
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // Main handler:
+        // 1. find_by_id(build)
+        .append_query_results([vec![build_building]])
+        // 2. update build → Completed
+        .append_query_results([vec![build_completed]])
+        // 3. find active builds → empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 4. find_by_id(eval) → Building
+        .append_query_results([vec![eval_building]])
+        // 5. find failed builds → empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 6. update_many eval → Completed
+        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        // 7. find_by_id(eval) → Completed
+        .append_query_results([vec![eval_completed.clone()]])
+        // TASK_A (fire_build_webhook Completed):
+        // 8. get_build_org_id: find_by_id(eval)
+        .append_query_results([vec![eval_completed.clone()]])
+        // 9. get_build_org_id: find_by_id(project)
+        .append_query_results([vec![project.clone()]])
+        // 10. find_by_id(build.derivation) — best-effort
+        .append_query_results([vec![drv]])
+        // 11. find webhooks for org
+        .append_query_results([vec![webhook.clone()]])
+        // TASK_C (fire_evaluation_webhook Completed):
+        // 12. find_by_id(project)
+        .append_query_results([vec![project]])
+        // 13. find webhooks for org (subscribed to "build.completed", not "evaluation.completed")
+        .append_query_results([vec![webhook]])
+        .into_connection();
+
+    let (state, recorder) = test_state_recorded(db, key_path);
+    let result = build_handler::handle_build_job_completed(&state, build_id).await;
+    assert!(result.is_ok());
+
+    // Let spawned webhook tasks run.
+    tokio::task::yield_now().await;
+
+    let calls = recorder.calls();
+    assert!(
+        calls.iter().any(|c| c.event == "build.completed"),
+        "expected build.completed webhook call; got: {:?}",
+        calls.iter().map(|c| &c.event).collect::<Vec<_>>()
+    );
+}
+
+/// After `handle_build_job_failed` where build B is cascaded to `DependencyFailed`,
+/// the `RecordingWebhookClient` receives a `"build.failed"` delivery (for build A)
+/// but NOT a `"build.dependency_failed"` delivery (DependencyFailed → early return
+/// in `fire_build_webhook` at line: `Created | Aborted | DependencyFailed => return`).
+///
+/// DB call sequence (main handler):
+///   1. Q: find_by_id(buildA) → Building
+///   2. Q: update buildA → Failed
+///      → spawns TASK_A: fire_build_webhook(buildA, Failed)
+///      → spawns TASK_B: log_finalize
+///   3. Q: cascade: find Created/Queued builds → [buildB]
+///   4. Q: cascade: find dep edge for buildB → found
+///   5. Q: update buildB → DependencyFailed
+///      → spawns TASK_C: fire_build_webhook(buildB, DependencyFailed) — returns early
+///      → spawns TASK_D: log_finalize
+///   6. Q: check active → empty
+///   7. Q: find_by_id(eval) → Building (with project=Some)
+///   8. Q: find failed → [buildA, buildB]
+///   9. E: update_many eval → Failed
+///  10. Q: find_by_id(eval) → Failed
+///      → spawns TASK_E: fire_evaluation_webhook(eval, Failed)
+///
+/// TASK_A (fire_build_webhook Failed):
+///  11. Q: get_build_org_id: find_by_id(eval_id)
+///  12. Q: get_build_org_id: find_by_id(project_id)
+///  13. Q: find_by_id(buildA.derivation) — best-effort
+///  14. Q: find webhooks → [webhook subscribed to "build.failed"]
+///         deliver → "build.failed" recorded
+///
+/// TASK_C (fire_build_webhook DependencyFailed): returns immediately — no DB.
+///
+/// TASK_E (fire_evaluation_webhook Failed):
+///  15. Q: find_by_id(project_id)
+///  16. Q: find webhooks → [webhook subscribed to "build.failed"]
+///         subscription check for "evaluation.failed" → false → no delivery
+#[tokio::test]
+async fn webhook_not_fired_for_dep_failed() {
+    use std::io::Write as _;
+
+    let mut key_file = tempfile::NamedTempFile::new().expect("create temp key file");
+    key_file.write_all(b"test-secret-key-32-bytes-padding!").unwrap();
+    key_file.flush().unwrap();
+    let key_path = key_file.path().to_string_lossy().to_string();
+
+    let encrypted_secret = gradient_core::ci::encrypt_webhook_secret(&key_path, "plaintext-hook-secret")
+        .expect("encrypt webhook secret");
+
+    let eval_id = Uuid::new_v4();
+    let project_id = Uuid::new_v4();
+    let org_id = Uuid::new_v4();
+    let drv_a_id = Uuid::new_v4();
+    let drv_b_id = Uuid::new_v4();
+    let build_a_id = Uuid::new_v4();
+    let build_b_id = Uuid::new_v4();
+    let webhook_id = Uuid::new_v4();
+
+    let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
+    let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed);
+    let build_b = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Queued);
+    let build_b_dep_failed = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
+    let dep_edge = make_dep_edge(Uuid::new_v4(), drv_b_id, drv_a_id);
+    // Eval with project set so webhooks fire.
+    let eval_building = make_eval_with_project(eval_id, project_id, EvaluationStatus::Building);
+    let eval_failed = make_eval_with_project(eval_id, project_id, EvaluationStatus::Failed);
+    let project = make_project(project_id, org_id);
+    let drv_a = make_derivation(drv_a_id, org_id, "/nix/store/aaaa-a.drv");
+    // Webhook subscribed only to "build.failed", not "build.dependency_failed".
+    let webhook = make_webhook(webhook_id, org_id, &encrypted_secret, &["build.failed"]);
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // Main handler:
+        // 1. find_by_id(buildA)
+        .append_query_results([vec![build_a]])
+        // 2. update buildA → Failed
+        .append_query_results([vec![build_a_failed.clone()]])
+        // 3. cascade: find Created/Queued → [buildB]
+        .append_query_results([vec![build_b]])
+        // 4. cascade: dep edge for buildB → found
+        .append_query_results([vec![dep_edge]])
+        // 5. update buildB → DependencyFailed
+        .append_query_results([vec![build_b_dep_failed.clone()]])
+        // 6. check active → empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 7. find_by_id(eval) → Building
+        .append_query_results([vec![eval_building]])
+        // 8. find failed → [buildA, buildB]
+        .append_query_results([vec![build_a_failed, build_b_dep_failed]])
+        // 9. update_many eval → Failed
+        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        // 10. find_by_id(eval) → Failed
+        .append_query_results([vec![eval_failed.clone()]])
+        // TASK_A (fire_build_webhook Failed):
+        // 11. get_build_org_id: find_by_id(eval)
+        .append_query_results([vec![eval_failed]])
+        // 12. get_build_org_id: find_by_id(project)
+        .append_query_results([vec![project.clone()]])
+        // 13. find_by_id(buildA.derivation)
+        .append_query_results([vec![drv_a]])
+        // 14. find webhooks
+        .append_query_results([vec![webhook.clone()]])
+        // TASK_C: fire_build_webhook(DependencyFailed) → returns immediately, no DB
+        // TASK_E (fire_evaluation_webhook Failed):
+        // 15. find_by_id(project)
+        .append_query_results([vec![project]])
+        // 16. find webhooks (subscribed to "build.failed", not "evaluation.failed")
+        .append_query_results([vec![webhook]])
+        .into_connection();
+
+    let (state, recorder) = test_state_recorded(db, key_path);
+    let result = build_handler::handle_build_job_failed(&state, build_a_id, "build error").await;
+    assert!(result.is_ok());
+
+    tokio::task::yield_now().await;
+
+    let calls = recorder.calls();
+    assert!(
+        calls.iter().any(|c| c.event == "build.failed"),
+        "expected build.failed webhook call; got: {:?}",
+        calls.iter().map(|c| &c.event).collect::<Vec<_>>()
+    );
+    assert!(
+        !calls.iter().any(|c| c.event == "build.dependency_failed"),
+        "build.dependency_failed must NOT be delivered; got: {:?}",
+        calls.iter().map(|c| &c.event).collect::<Vec<_>>()
+    );
 }

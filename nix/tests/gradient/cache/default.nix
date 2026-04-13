@@ -62,6 +62,13 @@
               group = "gradient";
               text = "22yRW7p/hxuPRWJh9pcfGH0oXPk2MFUuG0wIA1rfq1BvDbvMqzMZS+er/BE8ucbxNSG5KZ8B0ELO4TJal8mZlw==";
             };
+
+            "gradient/secrets/worker_token" = {
+              mode = "0600";
+              user = "gradient";
+              group = "gradient";
+              text = "dGhpcyBpcyBhIHRlc3QgdG9rZW4gZm9yIHRoZSBidWlsZGVyIHdvcmtlciBpbiB0aGUgY2FjaGUgdGVzdA==";
+            };
           };
         };
 
@@ -108,6 +115,14 @@
                   organizations = [ "org" ];
                   public = true;
                   created_by = "admin";
+                };
+              };
+
+              workers = {
+                builder = {
+                  worker_id = "a0000000-0000-0000-0000-000000000001";
+                  organization = "org";
+                  token_file = "/etc/gradient/secrets/worker_token";
                 };
               };
             };
@@ -176,9 +191,24 @@
           max-jobs = lib.mkForce 8;
         };
 
+        # Pre-seed a deterministic worker UUID so the server state config
+        # can register it before the worker boots.
+        systemd.tmpfiles.rules = [
+          "d /var/lib/gradient-worker 0755 gradient-worker gradient-worker"
+          "f /var/lib/gradient-worker/worker-id 0644 gradient-worker gradient-worker - a0000000-0000-0000-0000-000000000001"
+        ];
+
+        environment.etc."gradient/secrets/worker_peers" = {
+          mode = "0600";
+          user = "gradient-worker";
+          group = "gradient-worker";
+          text = "*:dGhpcyBpcyBhIHRlc3QgdG9rZW4gZm9yIHRoZSBidWlsZGVyIHdvcmtlciBpbiB0aGUgY2FjaGUgdGVzdA==";
+        };
+
         services.gradient.worker = {
           enable = true;
           serverUrl = "ws://server/proto";
+          peersFile = "/etc/gradient/secrets/worker_peers";
           capabilities = {
             eval  = true;
             build = true;
@@ -209,6 +239,13 @@
       server.wait_for_unit("gradient-server.service")
       server.sleep(5)
       builder.wait_for_unit("gradient-worker.service")
+
+      # Verify worker authenticated via state-managed registration
+      builder.sleep(10)
+      auth_logs = builder.succeed("journalctl -u gradient-worker --no-pager -n 100")
+      assert "handshake successful" in auth_logs, \
+          f"Worker did not authenticate successfully: {auth_logs[-500:]}"
+      print("=== Worker authenticated via state-managed registration ===")
 
       # Configure git
       server.succeed("${lib.getExe pkgs.git} config --global --add safe.directory '*'")

@@ -1,7 +1,7 @@
 # Tests
 
 This page documents all unit and integration tests in the Rust backend workspace
-(**379 tests** across **7 crates**). Run them with:
+(**393 tests** across **7 crates**). Run them with:
 
 ```sh
 cargo test --workspace --tests
@@ -1227,6 +1227,68 @@ Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
 
 ---
 
+## `proto::scheduler::dispatch_tests` — Dispatch Loop Functions
+
+**File:** `backend/proto/src/scheduler/dispatch_tests.rs`
+**Run:** `cargo test -p proto`
+
+Integration tests for the two background dispatch functions that feed the
+in-memory scheduler from the database. Both are normally private but are
+exposed as `pub(crate)` for testability.
+
+Tests use a staged `MockDatabase` and a real `Scheduler` instance; after each
+call the pending job count is asserted directly on the scheduler.
+
+### `dispatch_queued_evals` — DB call sequence
+
+```
+  dispatch_queued_evals(scheduler)
+       │
+       ├─ 1. EEvaluation::find().filter(status=Queued).all()       Q
+       │
+       └─ for each eval (if not already in scheduler):
+               ├─ 2. ECommit::find_by_id(commit_id).one()          Q
+               │
+               └─ 3. organization_id_for_eval:
+                       ├─ if eval.project = Some(pid):
+                       │     EProject::find_by_id(pid).one()       Q
+                       └─ else (direct build):
+                             EDirectBuild::find()
+                               .filter(evaluation=id).one()        Q
+```
+
+### `dispatch_ready_builds` — DB call sequence
+
+```
+  dispatch_ready_builds(scheduler)
+       │
+       ├─ 1. EBuild::find().from_raw_sql(ready_builds_query).all() Q
+       │       (Queued builds with no unsatisfied dependencies)
+       │
+       └─ for each build (if not already in scheduler):
+               ├─ 2. EDerivation::find_by_id(drv_id).one()         Q
+               ├─ 3. EEvaluation::find_by_id(eval_id).one()        Q
+               └─ 4. organization_id_for_eval (see above)          Q
+```
+
+### Group F: `dispatch_queued_evals`
+
+| Test | Scenario | What it checks |
+|------|----------|---------------|
+| `dispatch_queued_eval_enqueues_job` | One Queued eval with valid commit and project | `scheduler.pending_job_count() == 1` after dispatch |
+| `dispatch_queued_eval_skips_already_enqueued` | Same eval dispatched twice | Second call is a no-op; job count stays at 1 |
+| `dispatch_queued_eval_skips_missing_commit` | Commit row not found in DB | Eval is skipped; no job enqueued |
+| `dispatch_queued_eval_via_direct_build_org` | Eval with `project: None` (direct build) | Org ID looked up via `DirectBuild`; job enqueued |
+
+### Group F: `dispatch_ready_builds`
+
+| Test | Scenario | What it checks |
+|------|----------|---------------|
+| `dispatch_ready_build_enqueues_job` | One ready Queued build with derivation, eval, and project | `scheduler.pending_job_count() == 1`; `drv_path` from derivation row |
+| `dispatch_ready_build_skips_already_enqueued` | Same build dispatched twice | Second call is a no-op; job count stays at 1 |
+
+---
+
 ## `proto::scheduler::handler_tests` — Scheduler DB Handler Functions
 
 **File:** `backend/proto/src/scheduler/handler_tests.rs`
@@ -1353,6 +1415,80 @@ with a valid `id: Uuid`.
 | `eval_job_failed_transitions_eval_to_failed` | Eval job crashed | `evaluation_message` error row inserted; eval → Failed |
 | `eval_job_failed_terminal_eval_noop` | Eval already Completed | Terminal guard prevents overwrite; no status change |
 
+### Group G: `abort_evaluation`
+
+Tests for `gradient_core::db::abort_evaluation`, which cascades `Aborted` to
+all active builds before aborting the evaluation itself.
+
+**DB call sequence:**
+```
+  abort_evaluation(state, evaluation)
+       │
+       ├─ guard: if eval.status == Completed → return (no DB calls)
+       │
+       ├─ 1. EBuild::find()
+       │       .filter(evaluation=id)
+       │       .filter(status IN Created/Queued/Building)
+       │       .all()                                                Q
+       │
+       ├─ for each active build:
+       │     update_build_status(build, Aborted)                    Q  (UPDATE…RETURNING)
+       │     spawns fire_build_webhook(Aborted) → returns early
+       │     spawns log_finalize (NoopLogStorage → no-op)
+       │
+       └─ update_evaluation_status(eval, Aborted)
+               update_many().exec()                                  E
+               find_by_id(eval)                                      Q
+               spawns fire_evaluation_webhook(project=None → early return)
+```
+
+| Test | Scenario | What it checks |
+|------|----------|---------------|
+| `abort_cascades_to_active_builds` | Eval Building, 2 active builds (Queued + Building) | Both builds → Aborted via `update_build_status`; eval → Aborted |
+| `abort_skips_completed_eval` | Eval already Completed | Guard fires immediately — empty MockDB means any unexpected query would surface as an error |
+| `abort_no_active_builds` | Eval Building, no active builds found | Build query returns empty; eval still transitions → Aborted |
+
+### Group H: Handler behavioral gaps
+
+Tests for error paths and edge cases not covered by Groups A–E.
+
+| Test | Scenario | What it checks |
+|------|----------|---------------|
+| `eval_result_error_on_derivation_insert_transitions_eval_failed` | `EDerivation::insert_many()` returns empty rows → `RecordNotInserted` | Handler calls `update_evaluation_status_with_error`; `evaluation_message` row inserted; eval → Failed; handler returns `Err` |
+| `eval_result_build_insert_fails_transitions_eval_failed` | Derivations insert successfully but `EBuild::insert_many()` returns empty rows | Same error path as above but triggered by the build-row insert; handler returns `Err` |
+| `eval_result_existing_drv_still_creates_dep_edge` | Derivation A already in DB; new derivation B depends on A | A's ID is in `drv_path_to_id` from the initial existing-derivation lookup; dep edge B→A is still inserted; both A and B get new build rows for this evaluation |
+
+### Group I: Webhook delivery
+
+Tests that use `eval.project: Some(project_id)` to exercise the full webhook
+delivery path. A real temporary key file is created so `decrypt_webhook_secret`
+can succeed. After the handler returns, `tokio::task::yield_now().await` lets
+the spawned webhook tasks run on the `current_thread` runtime. Deliveries are
+captured by `RecordingWebhookClient` (returned alongside the state by
+`test_state_recorded`).
+
+```
+  handle_build_job_completed()
+         │
+         ├─ update_build_status(Completed)
+         │     spawns ──► fire_build_webhook(Completed)
+         │                    ├─ get_build_org_id → eval → project → org
+         │                    ├─ find_by_id(derivation) [best-effort]
+         │                    └─ fire_webhooks → decrypt → sign → deliver
+         │                                                  ↓
+         │                                       RecordingWebhookClient.calls()
+         │
+         └─ update_evaluation_status(Completed)
+               spawns ──► fire_evaluation_webhook(Completed)
+                              ├─ eval.project = Some → find project → org
+                              └─ fire_webhooks → subscription check → deliver
+```
+
+| Test | Scenario | What it checks |
+|------|----------|---------------|
+| `webhook_fired_on_build_completed` | Build completes; eval has `project: Some`; webhook subscribed to `"build.completed"` | After `yield_now()`, `recorder.calls()` contains a delivery with `event == "build.completed"` |
+| `webhook_not_fired_for_dep_failed` | Build A fails → B cascaded to DependencyFailed; eval has `project: Some`; webhook subscribed to `"build.failed"` | After `yield_now()`, `calls` contains `"build.failed"` but NOT `"build.dependency_failed"` (DependencyFailed hits the `Created \| Aborted \| DependencyFailed => return` early exit in `fire_build_webhook`) |
+
 ---
 
 ## Test count summary
@@ -1371,3 +1507,31 @@ with a valid `id: Uuid`.
 ## Integration Tests
 
 The NixOS VM integration tests live in `nix/tests/gradient/` and are documented in [Contributing](contributing.md#integration-tests). They test the full server + worker stack end-to-end, including the proto handshake, job dispatch, cache serving, and declarative state management.
+
+### Worker Authentication
+
+Both the `building` and `cache` integration tests validate the challenge-response
+authentication flow that workers use to connect to the server:
+
+**`gradient-building`** — API-based worker registration:
+1. Worker boots and generates a persistent UUID
+2. User creates an organization via CLI
+3. Worker's UUID is registered with the org via `POST /api/v1/orgs/{org}/workers`
+4. **Negative sub-test**: Worker restarts WITHOUT a peers file → server challenges,
+   worker has no tokens → `Reject(401)`. Test asserts rejection in journalctl.
+5. **Positive sub-test**: Peers file is written with `{peer_id}:{token}`, worker
+   restarts with `GRADIENT_WORKER_PEERS_FILE` → handshake succeeds. Test asserts
+   `"handshake successful"` in journalctl.
+6. Project is created and evaluation + build complete with the authenticated worker.
+
+**`gradient-cache`** — Declarative state-managed worker registration:
+1. Worker UUID is pre-seeded via `systemd.tmpfiles.rules` to a known value
+2. Server state config registers the worker with a shared token (hashed and stored)
+3. Worker's `peersFile` contains `*:{token}` (wildcard matches any org UUID)
+4. On boot, worker authenticates via challenge-response with the pre-shared token
+5. Test asserts `"handshake successful"` in journalctl before proceeding to builds
+
+**`gradient-api`** — Worker registration CRUD:
+- Tests `POST /api/v1/orgs/{org}/workers` returns a valid 64-character base64 token
+- Tests `GET /api/v1/orgs/{org}/workers` lists the registered worker
+- Tests `DELETE /api/v1/orgs/{org}/workers/{id}` removes the registration

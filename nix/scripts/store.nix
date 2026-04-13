@@ -4,17 +4,40 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ lib, pkgs, ... }: let
+{ pkgs, ... }: let
   testPkgs = pkgs.hello;
+  closureInfo = pkgs.stdenvNoCC.mkDerivation {
+    name = "closure-info";
+
+    __structuredAttrs = true;
+
+    exportReferencesGraph.closure = [ testPkgs.drvPath ];
+
+    preferLocalBuild = true;
+
+    nativeBuildInputs = with pkgs; [
+      coreutils
+      jq
+    ];
+
+    buildCommand = ''
+      out=''${outputs[out]}
+      mkdir $out
+
+      jq -r '.closure[] | select(.ca != null) | .path' < "$NIX_ATTRS_JSON_FILE" > $out/store-paths
+    '';
+  };
 in with pkgs; runCommand "store-${testPkgs.pname}" { } ''
   mkdir -p $out/nix-support
   echo "file folder $out/store" >> $out/nix-support/hydra-build-products
 
-  ${lib.getExe nix} copy --extra-experimental-features nix-command --offline --to ./test --derivation ${testPkgs.drvPath}
+  mkdir -p $out/store
 
-  chmod -R 744 ./test
-
-  mv ./test/nix/store $out/store
+  while read -r path; do
+    if [ -f "$path" ]; then
+      echo "$path"
+    fi
+  done < "${closureInfo}/store-paths" | xargs -P 8 -I {} cp {} $out/store
 
   echo "${testPkgs.drvPath}" > $out/output
 ''

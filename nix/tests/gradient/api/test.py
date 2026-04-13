@@ -153,6 +153,7 @@ with subtest("check api /orgs/{organization}/workers"):
     token = worker_reg.get("token")
     assert peer_id is not None, "peer_id should be present"
     assert token is not None and len(token) > 0, "token should be non-empty"
+    assert len(token) == 64, f"Expected 64-char base64 token (48 bytes), got {len(token)}: {token}"
     print(f"Worker registered: peer_id={peer_id}")
 
     # List workers — should contain our registration

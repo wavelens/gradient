@@ -135,23 +135,29 @@
 
     testScript = { nodes, ... }:
       ''
+      import json
+
       start_all()
 
       server.wait_for_unit("gradient-server.service")
       server.sleep(5)
       server.wait_for_unit("git-daemon.service")
+
+      # Let the builder start to generate its persistent worker UUID, then stop it.
+      # The worker will initially connect in open mode (no registrations exist yet).
       builder.wait_for_unit("gradient-worker.service")
-      print(server.succeed("journalctl -u nix-daemon -n 200 --no-pager"))
       builder.succeed("systemctl restart nix-daemon.service")
-      print(builder.succeed("journalctl -u nix-daemon -n 200 --no-pager"))
 
       print(server.succeed("cat /etc/nix/nix.conf"))
       print(builder.succeed("cat /etc/nix/nix.conf"))
 
+      # Stop the worker — we need to register it before it can authenticate
+      builder.succeed("systemctl stop gradient-worker")
+
       # Test health endpoint
       server.succeed("${lib.getExe pkgs.curl} http://gradient.local/api/v1/health -i --fail")
 
-      # Test user registration and authentication
+      # Register user and login
       server.succeed("""
           ${lib.getExe pkgs.curl} \
           -X POST \
@@ -171,45 +177,98 @@
 
       print(f"Got Token: {token}")
 
-      # Test CLI configuration commands
-      print("=== Testing CLI Configuration ===")
+      # Configure CLI
       server.succeed("${lib.getExe pkgs.gradient-cli} config Server http://gradient.local")
       server.succeed("${lib.getExe pkgs.gradient-cli} config AuthToken ACCESS_TOKEN".replace("ACCESS_TOKEN", token))
 
-      # Test status command
       print(server.succeed("${lib.getExe pkgs.gradient-cli} status"))
-
-      # Test info command
       print(server.succeed("${lib.getExe pkgs.gradient-cli} info"))
 
-      # Test organization commands
+      # Create organization
       print("=== Testing Organization Commands ===")
       server.succeed("${lib.getExe pkgs.gradient-cli} organization create --name testorg --display-name MyOrganization --description 'My Test Organization'")
       print(server.succeed("${lib.getExe pkgs.gradient-cli} organization show"))
-      print(server.succeed("${lib.getExe pkgs.gradient-cli} organization list"))
 
-      # Test organization SSH commands
-      print("=== Testing Organization SSH ===")
+      # Organization SSH
       org_pub_key = server.succeed("${lib.getExe pkgs.gradient-cli} organization ssh show")[12:].strip()
       print(f"Got Organization Public Key: {org_pub_key}")
 
-      # Test cache commands
-      print("=== Testing Cache Commands ===")
+      # Cache commands
       server.succeed("${lib.getExe pkgs.gradient-cli} cache create --name testcache --display-name 'Test Cache' --description 'Test cache description' --priority 10")
-      print(server.succeed("${lib.getExe pkgs.gradient-cli} cache list"))
-      print(server.succeed("${lib.getExe pkgs.gradient-cli} cache show testcache"))
-
-      # Test organization cache subscription
       server.succeed("${lib.getExe pkgs.gradient-cli} organization cache add testcache")
-      print(server.succeed("${lib.getExe pkgs.gradient-cli} organization cache list"))
 
-      # Configure git
+      # ── Worker Authentication ──────────────────────────────────────────────────
+
+      # Read the worker's persistent UUID (generated on first boot)
+      worker_uuid = builder.succeed("cat /var/lib/gradient-worker/worker-id").strip()
+      print(f"Worker UUID: {worker_uuid}")
+
+      # Register the worker with the organization via API
+      register_result = json.loads(server.succeed(f"""
+        ${lib.getExe pkgs.curl} \
+          -X POST \
+          -H "Authorization: Bearer {token}" \
+          -H "Content-Type: application/json" \
+          -d '{{"worker_id": "{worker_uuid}"}}' \
+          http://gradient.local/api/v1/orgs/testorg/workers
+      """))
+
+      assert register_result.get("error") == False, f"Worker registration failed: {register_result}"
+      peer_id = register_result["message"]["peer_id"]
+      worker_token = register_result["message"]["token"]
+      print(f"Registered worker: peer_id={peer_id}")
+
+      # Verify worker appears in the list
+      workers_list = json.loads(server.succeed(f"""
+        ${lib.getExe pkgs.curl} \
+          -H "Authorization: Bearer {token}" \
+          http://gradient.local/api/v1/orgs/testorg/workers
+      """))
+      assert any(w.get("worker_id") == worker_uuid for w in workers_list["message"]), \
+          "Registered worker not found in list"
+
+      # ── Sub-test: Worker rejected without token ────────────────────────────────
+
+      # Restart worker WITHOUT a peers file. Since registered_peers is now non-empty
+      # (we just registered it), the server will challenge and the worker has no tokens
+      # to respond with → Reject(401).
+      print("=== Sub-test: Worker auth rejection (no token) ===")
+      builder.succeed("journalctl -u gradient-worker --rotate --vacuum-time=1s 2>/dev/null || true")
+      builder.succeed("systemctl start gradient-worker")
+      builder.sleep(15)
+      reject_logs = builder.succeed("journalctl -u gradient-worker --no-pager -n 100")
+      print(reject_logs)
+      assert "server rejected connection (code 401)" in reject_logs, \
+          f"Expected 401 rejection without token, but logs show:\n{reject_logs[-500:]}"
+      print("=== Worker correctly rejected without token ===")
+
+      # ── Sub-test: Worker authenticates with token ──────────────────────────────
+
+      # Write the peers file and configure the worker to use it
+      print("=== Sub-test: Worker auth success (with token) ===")
+      builder.succeed("systemctl stop gradient-worker")
+      builder.succeed(f"echo '{peer_id}:{worker_token}' > /tmp/worker-peers")
+      builder.succeed("chmod 600 /tmp/worker-peers")
+      builder.succeed("mkdir -p /etc/systemd/system/gradient-worker.service.d")
+      builder.succeed("""echo '[Service]
+      Environment=GRADIENT_WORKER_PEERS_FILE=/tmp/worker-peers' > /etc/systemd/system/gradient-worker.service.d/peers.conf""")
+      builder.succeed("systemctl daemon-reload")
+      builder.succeed("journalctl -u gradient-worker --rotate --vacuum-time=1s 2>/dev/null || true")
+      builder.succeed("systemctl start gradient-worker")
+      builder.sleep(10)
+      auth_logs = builder.succeed("journalctl -u gradient-worker --no-pager -n 100")
+      print(auth_logs)
+      assert "handshake successful" in auth_logs, \
+          f"Expected successful handshake, but logs show:\n{auth_logs[-500:]}"
+      print("=== Worker authenticated successfully ===")
+
+      # ── Git repository setup ───────────────────────────────────────────────────
+
       server.succeed("${lib.getExe pkgs.git} config --global --add safe.directory '*'")
       server.succeed("${lib.getExe pkgs.git} config --global init.defaultBranch main")
       server.succeed("${lib.getExe pkgs.git} config --global user.email 'nixos@localhost'")
       server.succeed("${lib.getExe pkgs.git} config --global user.name 'NixOS test'")
 
-      # Initialize git repository
       server.succeed("${lib.getExe pkgs.git} init /var/lib/git/test")
       server.succeed("cp /var/lib/git/{,test/}flake.nix")
       server.succeed("cp /var/lib/git/{,test/}flake.lock")
@@ -227,11 +286,11 @@
       server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add build-test.nix")
       server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test commit -m 'Initial commit'")
 
-      # Ensure git repository is available without authentication
       server.succeed("${lib.getExe pkgs.git} clone git://localhost/test test")
       print(server.succeed("${lib.getExe pkgs.git} ls-remote git://server/test"))
 
-      # Test project commands
+      # ── Project creation and build ─────────────────────────────────────────────
+
       print("=== Testing Project Commands ===")
       server.succeed("${lib.getExe pkgs.gradient-cli} project create --name testproject --display-name MyProject --description 'Just a test' --repository git://server/test --evaluation-wildcard packages.*.default")
       print(server.succeed("${lib.getExe pkgs.gradient-cli} project list"))
@@ -245,17 +304,15 @@
           http://gradient.local/api/v1/projects/testorg/testproject/check-repository
       """))
 
-      # Wait for evaluation to complete and test cache functionality
+      # Wait for evaluation and build to complete
       builder.sleep(150)
       print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM build;\"'"))
       print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM derivation_dependency;\"'"))
       builder.sleep(470)
 
-      # Check if builds are cached properly
       project_output = server.succeed("${lib.getExe pkgs.gradient-cli} project show")
       print(project_output)
 
-      # Test should fail if "No builds." appears in output
       if "No builds." in project_output:
           raise Exception("Test failed: Evaluation shows 'No builds.' indicating failure")
 

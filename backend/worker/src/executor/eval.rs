@@ -239,9 +239,7 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
-            .parent()
-            .unwrap()
-            .join("test")
+            .join("test-store")
     }
 
     fn make_flake_job(repo: &str) -> FlakeJob {
