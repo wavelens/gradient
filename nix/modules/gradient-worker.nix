@@ -184,6 +184,7 @@ in {
         GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
       } // {
         GRADIENT_WORKER_DISCOVERABLE                = lib.boolToString cfg.discoverable;
+        GRADIENT_WORKER_PORT                        = toString cfg.port;
         GRADIENT_MAX_CONCURRENT_EVALUATIONS         = toString cfg.settings.maxConcurrentEvaluations;
         GRADIENT_MAX_CONCURRENT_BUILDS              = toString cfg.settings.maxConcurrentBuilds;
         GRADIENT_MAX_NIXDAEMON_CONNECTIONS          = toString cfg.settings.maxNixdaemonConnections;

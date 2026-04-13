@@ -4107,6 +4107,7 @@ dependencies = [
  "chrono",
  "core",
  "entity",
+ "futures",
  "hex",
  "rkyv 0.8.15",
  "sea-orm",
@@ -4116,6 +4117,7 @@ dependencies = [
  "tempfile",
  "test-support",
  "tokio",
+ "tokio-tungstenite 0.29.0",
  "tracing",
  "uuid",
 ]

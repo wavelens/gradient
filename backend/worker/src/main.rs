@@ -12,6 +12,7 @@ mod executor;
 mod flake;
 mod handshake;
 mod job;
+mod listener;
 mod nar;
 mod nix_eval;
 mod scorer;
@@ -50,6 +51,16 @@ fn main() -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         info!(server_url = %config.server_url, "gradient-worker starting");
+
+        // Start the listener for incoming server connections if discoverable.
+        if config.discoverable {
+            let listener_config = config.clone();
+            tokio::spawn(async move {
+                if let Err(e) = listener::start_listener(listener_config).await {
+                    error!(error = %e, "listener failed");
+                }
+            });
+        }
 
         let mut backoff = INITIAL_BACKOFF;
 

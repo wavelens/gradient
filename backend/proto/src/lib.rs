@@ -6,6 +6,7 @@
 
 pub mod handler;
 pub mod messages;
+pub mod outbound;
 pub mod scheduler;
 pub mod traits;
 

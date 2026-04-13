@@ -95,6 +95,54 @@ impl Worker {
         })
     }
 
+    /// Accept an incoming server-initiated WebSocket connection.
+    ///
+    /// Called by the listener when `discoverable = true`. Runs the same
+    /// handshake and capability negotiation as [`Self::connect`].
+    pub async fn from_accepted(
+        ws: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+        config: WorkerConfig,
+    ) -> Result<Self> {
+        let mut conn = ProtoConnection::from_accepted(ws);
+
+        let peer_id = load_or_generate_id(&config.data_dir)
+            .context("failed to load or generate persistent worker ID")?;
+        let peer_tokens = config.peer_tokens();
+
+        let handshake = perform_handshake(&mut conn, peer_id, peer_tokens, config.capabilities()).await?;
+        conn.set_server_version(handshake.server_version);
+        info!(
+            negotiated = ?handshake.negotiated,
+            server_version = conn.server_version(),
+            "incoming connection: capabilities negotiated"
+        );
+
+        if handshake.negotiated.build {
+            conn.send(ClientMessage::WorkerCapabilities {
+                architectures: vec![],
+                system_features: vec![],
+                max_concurrent_builds: config.max_concurrent_builds,
+            })
+            .await?;
+        }
+
+        conn.send(ClientMessage::RequestJobList).await?;
+
+        let store = LocalNixStore::connect().await?;
+        let evaluator = WorkerEvaluator::new(config.eval_workers, 0);
+        let credentials = CredentialStore::new();
+        let executor = JobExecutor::new(store, evaluator, credentials.clone());
+
+        Ok(Self {
+            config,
+            conn,
+            executor,
+            scorer: JobScorer::new(),
+            credentials,
+            draining: false,
+        })
+    }
+
     /// Re-use an existing [`ProtoConnection`] that has already been reconnected.
     ///
     /// Called by the reconnect loop in `main.rs` after `reconnect()` succeeds and

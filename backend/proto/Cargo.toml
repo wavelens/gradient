@@ -23,6 +23,8 @@ sha2          = { workspace = true }
 hex           = { workspace = true }
 sea-orm       = { workspace = true }
 tokio         = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
+tokio-tungstenite = { workspace = true }
+futures       = { workspace = true }
 tracing       = { workspace = true }
 uuid          = { workspace = true }
 

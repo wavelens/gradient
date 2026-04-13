@@ -306,8 +306,8 @@
       url = mkOption {
         type = types.str;
         default = "";
-        description = "WebSocket URL of the Gradient server the worker connects to";
-        example = "wss://gradient.example.com/proto";
+        description = "WebSocket URL where the worker accepts incoming server connections. When set, the server connects outbound to this URL. Leave empty for worker-initiated connections.";
+        example = "wss://worker.example.com/proto";
       };
 
       organization = mkOption {

@@ -25,6 +25,9 @@ use crate::error::{WebError, WebResult};
 #[derive(Deserialize)]
 pub struct RegisterWorkerRequest {
     pub worker_id: String,
+    /// WebSocket URL where the worker listens for incoming server connections.
+    /// When set, the server connects outbound to this URL.
+    pub url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -37,6 +40,9 @@ pub struct RegisterWorkerResponse {
 pub struct OrgWorkerEntry {
     pub worker_id: String,
     pub registered_at: NaiveDateTime,
+    /// WebSocket URL where the worker accepts incoming server connections.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     /// Present when the worker is currently connected to this server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live: Option<WorkerLiveInfo>,
@@ -83,6 +89,7 @@ pub async fn post_org_worker(
         worker_id: Set(body.worker_id),
         token_hash: Set(token_hash),
         managed: Set(false),
+        url: Set(body.url),
         created_at: Set(Utc::now().naive_utc()),
     };
     row.insert(&state.db).await?;
@@ -135,6 +142,7 @@ pub async fn get_org_workers(
             OrgWorkerEntry {
                 worker_id: reg.worker_id,
                 registered_at: reg.created_at,
+                url: reg.url,
                 live,
             }
         })

@@ -65,11 +65,12 @@ impl Scheduler {
         }
     }
 
-    /// Spawn background eval/build dispatch loops.
+    /// Spawn background eval/build dispatch loops and outbound worker connections.
     ///
     /// Call once after creating the scheduler, before serving requests.
     pub fn start(self: &Arc<Self>) {
         dispatch::start_dispatch_loops(Arc::clone(self));
+        crate::outbound::start_outbound_loop(Arc::clone(self));
     }
 
     // ── Worker lifecycle ──────────────────────────────────────────────────────

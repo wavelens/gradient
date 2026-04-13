@@ -24,6 +24,10 @@ pub struct Model {
     pub token_hash: String,
     /// True when this row was created by declarative state management.
     pub managed: bool,
+    /// WebSocket URL where the worker accepts incoming connections from the server.
+    /// When set, the server connects outbound to this URL instead of waiting for
+    /// the worker to connect inbound.
+    pub url: Option<String>,
     pub created_at: NaiveDateTime,
 }
 

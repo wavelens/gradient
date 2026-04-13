@@ -56,6 +56,9 @@
               <span class="material-symbols-outlined">construction</span>
               <div>
                 <div class="worker-id">{{ worker.worker_id }}</div>
+                @if (worker.url) {
+                  <div class="worker-url text-secondary">{{ worker.url }}</div>
+                }
                 @if (worker.architectures && worker.architectures.length > 0) {
                   <div class="worker-archs text-secondary">
                     {{ worker.architectures.join(', ') }}
@@ -129,6 +132,17 @@
       (keyup.enter)="registerWorker()"
     />
     <small class="text-secondary">A stable identifier for this worker process — use the machine hostname or a descriptive name.</small>
+  </div>
+  <div class="form-group">
+    <label for="worker-url">Worker URL <span class="text-secondary">(optional)</span></label>
+    <input
+      pInputText
+      id="worker-url"
+      [(ngModel)]="newWorkerUrl"
+      placeholder="e.g. wss://worker.example.com/proto"
+      class="w-full"
+    />
+    <small class="text-secondary">If set, the server connects outbound to this URL instead of waiting for the worker to connect.</small>
   </div>
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showRegisterDialog.set(false)" [disabled]="registering()"></button>

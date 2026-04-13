@@ -18,12 +18,20 @@ use tracing::{debug, instrument, warn};
 use futures::SinkExt;
 use futures::StreamExt;
 
+/// Internal enum to abstract over client-initiated and server-accepted sockets.
+enum ProtoStream {
+    /// Outbound: worker connected to a server URL.
+    Client(WebSocketStream<MaybeTlsStream<TcpStream>>),
+    /// Inbound: server connected to our listener.
+    Accepted(WebSocketStream<TcpStream>),
+}
+
 /// A live WebSocket connection to the server.
 pub struct ProtoConnection {
     /// Protocol version the server reported in `InitAck`. Set to 0 before the
     /// handshake completes; updated via [`Self::set_server_version`] afterwards.
     pub(crate) server_version: u16,
-    socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    socket: ProtoStream,
 }
 
 impl ProtoConnection {
@@ -35,7 +43,12 @@ impl ProtoConnection {
         let (socket, _) = connect_async(url)
             .await
             .with_context(|| format!("failed to connect to {url}"))?;
-        Ok(Self { server_version: 0, socket })
+        Ok(Self { server_version: 0, socket: ProtoStream::Client(socket) })
+    }
+
+    /// Wrap an already-accepted WebSocket stream (server connected to us).
+    pub fn from_accepted(socket: WebSocketStream<TcpStream>) -> Self {
+        Self { server_version: 0, socket: ProtoStream::Accepted(socket) }
     }
 
     /// Record the protocol version the server reported in `InitAck`.
@@ -53,10 +66,11 @@ impl ProtoConnection {
     pub async fn send(&mut self, msg: ClientMessage) -> Result<()> {
         let bytes = rkyv::to_bytes::<RkyvError>(&msg)
             .context("failed to serialise ClientMessage")?;
-        self.socket
-            .send(Message::Binary(bytes.to_vec().into()))
-            .await
-            .context("WebSocket send failed")?;
+        let frame = Message::Binary(bytes.to_vec().into());
+        match &mut self.socket {
+            ProtoStream::Client(ws) => ws.send(frame).await.context("WebSocket send failed")?,
+            ProtoStream::Accepted(ws) => ws.send(frame).await.context("WebSocket send failed")?,
+        }
         debug!("sent client message");
         Ok(())
     }
@@ -65,12 +79,14 @@ impl ProtoConnection {
     /// Returns `None` on clean close; errors on protocol violations.
     pub async fn recv(&mut self) -> Result<Option<ServerMessage>> {
         loop {
-            match self.socket.next().await {
+            let frame = match &mut self.socket {
+                ProtoStream::Client(ws) => ws.next().await,
+                ProtoStream::Accepted(ws) => ws.next().await,
+            };
+            match frame {
                 None => return Ok(None),
                 Some(Err(e)) => return Err(e.into()),
                 Some(Ok(Message::Binary(bytes))) => {
-                    // rkyv 0.8 requires the buffer to be aligned; network
-                    // buffers are not guaranteed to satisfy this.
                     let mut aligned = rkyv::util::AlignedVec::<16>::new();
                     aligned.extend_from_slice(&bytes);
                     let msg = rkyv::from_bytes::<ServerMessage, RkyvError>(&aligned)
@@ -88,7 +104,10 @@ impl ProtoConnection {
 
     /// Close the connection gracefully.
     pub async fn close(&mut self) {
-        let _ = self.socket.close(None).await;
+        match &mut self.socket {
+            ProtoStream::Client(ws) => { let _ = ws.close(None).await; }
+            ProtoStream::Accepted(ws) => { let _ = ws.close(None).await; }
+        }
     }
 
     /// Reconnect to a (possibly different) URL, resetting the server version.
@@ -98,7 +117,7 @@ impl ProtoConnection {
         let (socket, _) = connect_async(url)
             .await
             .with_context(|| format!("failed to reconnect to {url}"))?;
-        self.socket = socket;
+        self.socket = ProtoStream::Client(socket);
         self.server_version = 0;
         Ok(())
     }

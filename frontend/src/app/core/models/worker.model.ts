@@ -9,6 +9,8 @@ export interface Worker {
   peer_id: string;
   managed: boolean;
   created_at?: string;
+  /** WebSocket URL where the worker accepts incoming server connections. */
+  url?: string;
   /** Present when the worker is currently connected via proto. */
   connected?: boolean;
   architectures?: string[];

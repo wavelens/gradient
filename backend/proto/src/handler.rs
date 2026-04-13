@@ -8,12 +8,15 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{Message as AxumMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::{Extension, State};
 use axum::response::IntoResponse;
 use axum::routing::get;
+use futures::{SinkExt, StreamExt};
 use gradient_core::types::ServerState;
 use rkyv::rancor::Error as RkyvError;
+use tokio::net::TcpStream;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message as TungsteniteMessage};
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
@@ -35,7 +38,63 @@ async fn ws_upgrade(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_socket(socket, state, scheduler))
+    ws.on_upgrade(move |socket| {
+        handle_socket(ProtoSocket::Axum(socket), state, scheduler, false)
+    })
+}
+
+// ── Socket abstraction ───────────────────────────────────────────────────────
+
+/// Wraps both axum and raw tungstenite WebSocket streams so `handle_socket` can
+/// drive connections regardless of who initiated the transport.
+pub(crate) enum ProtoSocket {
+    /// Inbound: worker connected to the server's `/proto` endpoint.
+    Axum(WebSocket),
+    /// Outbound: server connected to a worker's listener.
+    Tungstenite(WebSocketStream<MaybeTlsStream<TcpStream>>),
+}
+
+impl ProtoSocket {
+    async fn recv_bytes(&mut self) -> Option<Result<Vec<u8>, ()>> {
+        match self {
+            Self::Axum(ws) => loop {
+                match ws.recv().await? {
+                    Ok(AxumMessage::Binary(bytes)) => return Some(Ok(bytes.to_vec())),
+                    Ok(AxumMessage::Close(_)) => return None,
+                    Ok(_) => continue,
+                    Err(e) => {
+                        debug!(error = %e, "WebSocket recv error");
+                        return None;
+                    }
+                }
+            },
+            Self::Tungstenite(ws) => loop {
+                match ws.next().await? {
+                    Ok(TungsteniteMessage::Binary(bytes)) => return Some(Ok(bytes.to_vec())),
+                    Ok(TungsteniteMessage::Close(_)) => return None,
+                    Ok(TungsteniteMessage::Ping(_) | TungsteniteMessage::Pong(_)) => continue,
+                    Ok(_) => continue,
+                    Err(e) => {
+                        debug!(error = %e, "WebSocket recv error");
+                        return None;
+                    }
+                }
+            },
+        }
+    }
+
+    async fn send_bytes(&mut self, bytes: Vec<u8>) -> Result<(), ()> {
+        match self {
+            Self::Axum(ws) => ws
+                .send(AxumMessage::Binary(bytes.into()))
+                .await
+                .map_err(|e| debug!(error = %e, "WebSocket send error")),
+            Self::Tungstenite(ws) => ws
+                .send(TungsteniteMessage::Binary(bytes.into()))
+                .await
+                .map_err(|e| debug!(error = %e, "WebSocket send error")),
+        }
+    }
 }
 
 /// Drives a single WebSocket connection for its lifetime.
@@ -45,11 +104,19 @@ async fn ws_upgrade(
 /// OPEN → [discoverable check] → HANDSHAKE → [version/token check]
 ///      → ACK → [optional WorkerCapabilities] → DISPATCH LOOP → CLOSED
 /// ```
+///
+/// When `server_initiated` is true the discoverable check is skipped — the
+/// server already decided to connect outbound to this worker.
 #[instrument(skip_all)]
-async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>, scheduler: Arc<Scheduler>) {
-    info!("WebSocket connection opened");
+pub(crate) async fn handle_socket(
+    mut socket: ProtoSocket,
+    state: Arc<ServerState>,
+    scheduler: Arc<Scheduler>,
+    server_initiated: bool,
+) {
+    info!(server_initiated, "WebSocket connection opened");
 
-    if !state.cli.discoverable {
+    if !server_initiated && !state.cli.discoverable {
         send_reject(&mut socket, 403, "server is not accepting connections".into()).await;
         return;
     }
@@ -361,44 +428,33 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<ServerState>, scheduler
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-async fn recv_client_msg(socket: &mut WebSocket) -> Option<ClientMessage> {
-    loop {
-        match socket.recv().await? {
-            Ok(Message::Binary(bytes)) => {
-                match rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes) {
-                    Ok(msg) => return Some(msg),
-                    Err(e) => {
-                        warn!(error = %e, "failed to deserialize client message");
-                        send_error(socket, 400, "malformed message".into()).await;
-                        return None;
-                    }
-                }
-            }
-            Ok(Message::Close(_)) => return None,
-            Ok(_) => continue,
-            Err(e) => {
-                debug!(error = %e, "WebSocket recv error");
-                return None;
-            }
+async fn recv_client_msg(socket: &mut ProtoSocket) -> Option<ClientMessage> {
+    let bytes = match socket.recv_bytes().await? {
+        Ok(b) => b,
+        Err(()) => return None,
+    };
+    match rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes) {
+        Ok(msg) => Some(msg),
+        Err(e) => {
+            warn!(error = %e, "failed to deserialize client message");
+            send_error(socket, 400, "malformed message".into()).await;
+            None
         }
     }
 }
 
-async fn send_server_msg(socket: &mut WebSocket, msg: &ServerMessage) -> Result<(), ()> {
+async fn send_server_msg(socket: &mut ProtoSocket, msg: &ServerMessage) -> Result<(), ()> {
     let bytes = rkyv::to_bytes::<RkyvError>(msg).map_err(|e| {
         warn!(error = %e, "failed to serialize server message");
     })?;
-    socket
-        .send(Message::Binary(bytes.to_vec().into()))
-        .await
-        .map_err(|e| debug!(error = %e, "WebSocket send error"))
+    socket.send_bytes(bytes.to_vec()).await
 }
 
-async fn send_error(socket: &mut WebSocket, code: u16, message: String) {
+async fn send_error(socket: &mut ProtoSocket, code: u16, message: String) {
     let _ = send_server_msg(socket, &ServerMessage::Error { code, message }).await;
 }
 
-async fn send_reject(socket: &mut WebSocket, code: u16, reason: String) {
+async fn send_reject(socket: &mut ProtoSocket, code: u16, reason: String) {
     let _ = send_server_msg(socket, &ServerMessage::Reject { code, reason }).await;
 }
 

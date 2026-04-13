@@ -137,7 +137,8 @@ fn assign_job_roundtrip() {
 
 #[test]
 fn proto_version_is_nonzero() {
-    assert!(PROTO_VERSION >= 1);
+    let version = PROTO_VERSION;
+    assert!(version >= 1);
 }
 
 // Full WebSocket handshake integration tests (InitConnection → InitAck) live in

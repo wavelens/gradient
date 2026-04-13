@@ -630,10 +630,13 @@ async fn apply_workers(
 
         let now = chrono::Utc::now().naive_utc();
 
+        let url = if state_worker.url.is_empty() { None } else { Some(state_worker.url.clone()) };
+
         if let Some(existing) = existing {
             let mut reg: worker_registration::ActiveModel = existing.into();
             reg.token_hash = Set(token_hash);
             reg.managed = Set(true);
+            reg.url = Set(url);
             reg.update(db).await?;
             tracing::info!("Updated worker registration: {}", state_worker.worker_id);
         } else {
@@ -643,6 +646,7 @@ async fn apply_workers(
                 worker_id: Set(state_worker.worker_id.clone()),
                 token_hash: Set(token_hash),
                 managed: Set(true),
+                url: Set(url),
                 created_at: Set(now),
             };
             reg.insert(db).await?;

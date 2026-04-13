@@ -17,8 +17,8 @@ export class WorkersService {
     return this.api.get<Worker[]>(`orgs/${org}/workers`);
   }
 
-  registerWorker(org: string, workerId: string): Observable<WorkerRegistration> {
-    return this.api.post<WorkerRegistration>(`orgs/${org}/workers`, { worker_id: workerId });
+  registerWorker(org: string, workerId: string, url?: string): Observable<WorkerRegistration> {
+    return this.api.post<WorkerRegistration>(`orgs/${org}/workers`, { worker_id: workerId, url: url || undefined });
   }
 
   deleteWorker(org: string, workerId: string): Observable<string> {

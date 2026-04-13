@@ -48,6 +48,7 @@ export class WorkersComponent implements OnInit {
   orgId = signal<string>('');
   workers = signal<Worker[]>([]);
   newWorkerId = '';
+  newWorkerUrl = '';
   lastRegistration = signal<WorkerRegistration | null>(null);
   tokenCopied = signal(false);
   peerIdCopied = signal(false);
@@ -81,6 +82,7 @@ export class WorkersComponent implements OnInit {
 
   openRegisterDialog(): void {
     this.newWorkerId = '';
+    this.newWorkerUrl = '';
     this.errorMessage.set(null);
     this.showRegisterDialog.set(true);
   }
@@ -89,7 +91,8 @@ export class WorkersComponent implements OnInit {
     if (!this.newWorkerId.trim()) return;
     this.registering.set(true);
     this.errorMessage.set(null);
-    this.workersService.registerWorker(this.orgName, this.newWorkerId.trim()).subscribe({
+    const url = this.newWorkerUrl.trim() || undefined;
+    this.workersService.registerWorker(this.orgName, this.newWorkerId.trim(), url).subscribe({
       next: (reg) => {
         this.registering.set(false);
         this.showRegisterDialog.set(false);

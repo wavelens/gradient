@@ -67,6 +67,10 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_WORKER_DISCOVERABLE", default_value = "false")]
     pub discoverable: bool,
 
+    /// Port on which to listen for incoming server connections when discoverable.
+    #[arg(long, env = "GRADIENT_WORKER_PORT", default_value_t = 3100)]
+    pub port: u16,
+
     // ── Capabilities ──────────────────────────────────────────────────────────
 
     /// Relay work and NAR traffic between workers and servers (federation).
@@ -209,6 +213,7 @@ mod tests {
             build_log_level: None,
             proto_log_level: None,
             discoverable: false,
+            port: 3100,
             capability_federate: false,
             capability_fetch: false,
             capability_eval: false,
@@ -266,6 +271,7 @@ mod tests {
             build_log_level: None,
             proto_log_level: None,
             discoverable: false,
+            port: 3100,
             capability_federate: false,
             capability_fetch: false,
             capability_eval: false,
@@ -318,6 +324,7 @@ mod tests {
             build_log_level: None,
             proto_log_level: None,
             discoverable: false,
+            port: 3100,
             capability_federate: false,
             capability_fetch: false,
             capability_eval: false,
