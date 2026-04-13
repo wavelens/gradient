@@ -1,5 +1,5 @@
 # ---> Tests
-./backend/test-store
+backend/test-store
 .nixos-test-history
 
 # ---> Python

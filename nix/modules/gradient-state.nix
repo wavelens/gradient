@@ -305,6 +305,7 @@
 
       url = mkOption {
         type = types.str;
+        default = "";
         description = "WebSocket URL of the Gradient server the worker connects to";
         example = "wss://gradient.example.com/proto";
       };
