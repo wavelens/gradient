@@ -492,6 +492,15 @@ impl Scheduler {
             .remove_pending_for_evaluation(evaluation_id);
     }
 
+    /// Return the peer (org) UUID that owns the active job, if found.
+    pub async fn peer_id_for_job(&self, job_id: &str) -> Option<Uuid> {
+        self.job_tracker
+            .read()
+            .await
+            .active_job(job_id)
+            .map(|j| j.peer_id())
+    }
+
     // ── Diagnostics ───────────────────────────────────────────────────────────
 
     pub async fn worker_count(&self) -> usize {

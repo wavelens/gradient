@@ -53,6 +53,8 @@ export class OrganizationSettingsComponent implements OnInit {
   sshLoading = signal(true);
   generatingSSH = signal(false);
   generatingForgeSecret = signal(false);
+  deletingForgeSecret = signal(false);
+  showDeleteForgeSecretDialog = signal(false);
   hasForgeSecret = signal<boolean>(false);
   forgeWebhookResult = signal<{ webhook_url: string; secret: string } | null>(null);
   forgeSecretError = signal<string | null>(null);
@@ -284,6 +286,24 @@ export class OrganizationSettingsComponent implements OnInit {
       error: (error) => {
         this.forgeSecretError.set(error?.error?.message || error?.message || 'Failed to generate webhook secret.');
         this.generatingForgeSecret.set(false);
+      },
+    });
+  }
+
+  deleteForgeWebhookSecret(): void {
+    this.deletingForgeSecret.set(true);
+    this.forgeSecretError.set(null);
+    this.organizationsService.deleteForgeWebhookSecret(this.orgName).subscribe({
+      next: () => {
+        this.deletingForgeSecret.set(false);
+        this.showDeleteForgeSecretDialog.set(false);
+        this.hasForgeSecret.set(false);
+        this.forgeWebhookResult.set(null);
+      },
+      error: (error) => {
+        this.forgeSecretError.set(error?.error?.message || error?.message || 'Failed to delete webhook secret.');
+        this.deletingForgeSecret.set(false);
+        this.showDeleteForgeSecretDialog.set(false);
       },
     });
   }

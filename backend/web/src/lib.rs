@@ -104,7 +104,8 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route(
             "/orgs/{organization}/forge-webhook-secret",
-            post(forge_hooks::post_forge_webhook_secret),
+            post(forge_hooks::post_forge_webhook_secret)
+                .delete(forge_hooks::delete_forge_webhook_secret),
         )
         .route(
             "/orgs/{organization}/workers",

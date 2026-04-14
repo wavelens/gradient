@@ -567,14 +567,12 @@ pub(crate) async fn handle_socket(
             // ── Cache queries ────────────────────────────────────────────
             ClientMessage::CacheQuery { job_id, paths } => {
                 debug!(%peer_id, %job_id, count = paths.len(), "CacheQuery");
-                let cached = handle_cache_query(&state, &paths).await;
+                let org_id = scheduler.peer_id_for_job(&job_id).await;
+                let cached = handle_cache_query(&state, org_id, &paths).await;
                 debug!(%peer_id, %job_id, cached = cached.len(), "CacheStatus");
                 if send_server_msg(
                     &mut socket,
-                    &ServerMessage::CacheStatus {
-                        job_id,
-                        cached,
-                    },
+                    &ServerMessage::CacheStatus { job_id, cached },
                 )
                 .await
                 .is_err()
@@ -804,16 +802,25 @@ fn negotiate_capabilities(
     }
 }
 
-/// Check which store paths have cached NARs in the server's cache storage.
+/// Check which store paths are available — in the local Gradient cache or upstream.
 ///
-/// Extracts the nix32 hash prefix from each `/nix/store/<hash>-<name>` path and
-/// batch-queries the `derivation_output` table for rows with `is_cached = true`.
-/// Returns each cached path with its `file_size` and `nar_size` for download cost estimation.
+/// Returns a single `Vec<CachedPath>` where:
+/// - `url: None` — path is in the local Gradient cache.
+/// - `url: Some(abs_url)` — path was found in an upstream external Nix cache; the worker
+///   should download the NAR directly from that URL.
+///
+/// Upstream caches are resolved via `org_id → organization_cache → cache → cache_upstream`
+/// and narinfo is fetched over HTTP for any path not found locally.
 async fn handle_cache_query(
     state: &ServerState,
+    org_id: Option<uuid::Uuid>,
     paths: &[String],
 ) -> Vec<gradient_core::types::proto::CachedPath> {
+    use entity::cache_upstream::{Column as CCacheUpstream, Entity as ECacheUpstream};
     use entity::derivation_output::{Column as CDerivationOutput, Entity as EDerivationOutput};
+    use entity::organization_cache::{
+        CacheSubscriptionMode, Column as COrgCache, Entity as EOrgCache,
+    };
     use gradient_core::types::proto::CachedPath;
 
     // Extract (hash, original_path) pairs from store paths.
@@ -822,11 +829,7 @@ async fn handle_cache_query(
         .filter_map(|p| {
             let base = p.strip_prefix("/nix/store/").unwrap_or(p);
             let hash = base.split('-').next()?;
-            if hash.len() == 32 {
-                Some((hash, p.as_str()))
-            } else {
-                None
-            }
+            if hash.len() == 32 { Some((hash, p.as_str())) } else { None }
         })
         .collect();
 
@@ -836,7 +839,8 @@ async fn handle_cache_query(
 
     let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
 
-    // Batch query: find all derivation_output rows with is_cached=true for these hashes.
+    // ── Local cache lookup ────────────────────────────────────────────────────
+
     let cached_rows = match EDerivationOutput::find()
         .filter(
             sea_orm::Condition::all()
@@ -848,27 +852,119 @@ async fn handle_cache_query(
     {
         Ok(rows) => rows,
         Err(e) => {
-            warn!(error = %e, "CacheQuery DB lookup failed");
-            return vec![];
+            warn!(error = %e, "CacheQuery local DB lookup failed");
+            vec![]
         }
     };
 
-    // Build a map from hash → (file_size, nar_size).
     let cached_map: std::collections::HashMap<&str, (Option<i64>, Option<i64>)> = cached_rows
         .iter()
         .map(|r| (r.hash.as_str(), (r.file_size, r.nar_size)))
         .collect();
 
-    hash_path_pairs
+    let mut result: Vec<CachedPath> = hash_path_pairs
         .iter()
         .filter_map(|(hash, path)| {
             cached_map.get(hash).map(|(file_size, nar_size)| CachedPath {
                 path: path.to_string(),
                 file_size: file_size.map(|v| v as u64),
                 nar_size: nar_size.map(|v| v as u64),
+                url: None,
             })
         })
-        .collect()
+        .collect();
+
+    // ── Upstream cache lookup ─────────────────────────────────────────────────
+
+    let locally_cached_hashes: std::collections::HashSet<&str> =
+        cached_map.keys().copied().collect();
+    let uncached_pairs: Vec<(&str, &str)> = hash_path_pairs
+        .iter()
+        .filter(|(hash, _)| !locally_cached_hashes.contains(hash))
+        .copied()
+        .collect();
+
+    if uncached_pairs.is_empty() || org_id.is_none() {
+        return result;
+    }
+    let org_id = org_id.unwrap();
+
+    // Load all external upstream URLs for the org's readable caches.
+    let org_cache_rows = match EOrgCache::find()
+        .filter(
+            sea_orm::Condition::all()
+                .add(COrgCache::Organization.eq(org_id))
+                .add(COrgCache::Mode.ne(CacheSubscriptionMode::WriteOnly)),
+        )
+        .all(&state.db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(%org_id, error = %e, "CacheQuery org_cache lookup failed");
+            return result;
+        }
+    };
+
+    let cache_ids: Vec<uuid::Uuid> = org_cache_rows.iter().map(|r| r.cache).collect();
+    if cache_ids.is_empty() {
+        return result;
+    }
+
+    let upstream_rows = match ECacheUpstream::find()
+        .filter(
+            sea_orm::Condition::all()
+                .add(CCacheUpstream::Cache.is_in(cache_ids))
+                .add(CCacheUpstream::Url.is_not_null())
+                .add(CCacheUpstream::Mode.ne(CacheSubscriptionMode::WriteOnly)),
+        )
+        .all(&state.db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(%org_id, error = %e, "CacheQuery upstream lookup failed");
+            return result;
+        }
+    };
+
+    let upstream_urls: Vec<String> =
+        upstream_rows.into_iter().filter_map(|r| r.url).collect();
+
+    if upstream_urls.is_empty() {
+        return result;
+    }
+
+    let http = reqwest::Client::new();
+
+    'paths: for (hash, store_path) in uncached_pairs {
+        for base_url in &upstream_urls {
+            let narinfo_url =
+                format!("{}/{}.narinfo", base_url.trim_end_matches('/'), hash);
+            let body = match http.get(&narinfo_url).send().await {
+                Ok(r) if r.status().is_success() => match r.text().await {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                },
+                _ => continue,
+            };
+            if let Some(nar_path) = body
+                .lines()
+                .find_map(|l| l.strip_prefix("URL: ").map(str::trim))
+            {
+                let url = format!("{}/{}", base_url.trim_end_matches('/'), nar_path);
+                result.push(CachedPath {
+                    path: store_path.to_string(),
+                    file_size: None,
+                    nar_size: None,
+                    url: Some(url),
+                });
+                continue 'paths;
+            }
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]

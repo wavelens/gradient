@@ -48,8 +48,10 @@ pub trait DrvReader: Send + Sync {
 /// Test: `test_support::fakes::job_reporter::RecordingJobReporter`
 #[async_trait]
 pub trait JobReporter: Send {
-    /// Query the server's cache for which paths are already cached.
-    /// Returns each cached path with its size metadata.
+    /// Query the server's cache for which paths are available.
+    ///
+    /// Returns all available paths as `CachedPath`. Local Gradient cache entries
+    /// have `url: None`; upstream external cache entries have `url: Some(abs_url)`.
     async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<CachedPath>>;
     async fn report_fetching(&mut self) -> Result<()>;
     async fn report_fetch_result(&mut self, fetched_paths: Vec<FetchedInput>) -> Result<()>;

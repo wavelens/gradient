@@ -247,11 +247,21 @@
             pButton
             [label]="(hasForgeSecret() || forgeWebhookResult()) ? 'Rotate Secret' : 'Generate Webhook Secret'"
             icon="pi pi-key"
-            [severity]="(hasForgeSecret() || forgeWebhookResult()) ? 'danger' : 'primary'"
+            [severity]="(hasForgeSecret() || forgeWebhookResult()) ? 'warn' : 'primary'"
             (click)="generateForgeWebhookSecret()"
             [loading]="generatingForgeSecret()"
-            [disabled]="generatingForgeSecret()"
+            [disabled]="generatingForgeSecret() || deletingForgeSecret()"
           ></button>
+          @if (hasForgeSecret() || forgeWebhookResult()) {
+            <button
+              pButton
+              label="Delete Webhook"
+              icon="pi pi-trash"
+              severity="danger"
+              (click)="showDeleteForgeSecretDialog.set(true)"
+              [disabled]="generatingForgeSecret() || deletingForgeSecret()"
+            ></button>
+          }
         </div>
         @if (forgeSecretError()) {
           <div class="message-banner error">
@@ -359,6 +369,22 @@
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showRegenerateKeyDialog.set(false)" [disabled]="generatingSSH()"></button>
     <button pButton label="Regenerate" severity="danger" icon="pi pi-refresh" (click)="confirmRegenerateSSHKey()" [loading]="generatingSSH()" [disabled]="generatingSSH()"></button>
+  </ng-template>
+</p-dialog>
+
+<!-- Delete Forge Webhook Secret Dialog -->
+<p-dialog
+  header="Delete Webhook"
+  [(visible)]="showDeleteForgeSecretDialog"
+  [modal]="true"
+  [style]="{ width: '420px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <p>Are you sure you want to delete the forge webhook secret? Your Git forge will no longer be able to trigger evaluations via push events.</p>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showDeleteForgeSecretDialog.set(false)" [disabled]="deletingForgeSecret()"></button>
+    <button pButton label="Delete" severity="danger" icon="pi pi-trash" (click)="deleteForgeWebhookSecret()" [loading]="deletingForgeSecret()" [disabled]="deletingForgeSecret()"></button>
   </ng-template>
 </p-dialog>
 

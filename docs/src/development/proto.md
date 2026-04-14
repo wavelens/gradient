@@ -458,17 +458,24 @@ CacheQuery {
 // Server → Worker
 CacheStatus {
     job_id: String,
-    cached: Vec<CachedPath>,            // paths present in the cache with size metadata
+    cached: Vec<CachedPath>,            // all available paths (local + upstream)
 }
 
 CachedPath {
     path: String,                       // /nix/store/xxx-name
     file_size: Option<u64>,             // compressed NAR size on disk (bytes)
     nar_size: Option<u64>,              // uncompressed NAR size (bytes)
+    url: Option<String>,                // None = local Gradient cache
+                                        // Some = absolute NAR URL from upstream cache
 }
 ```
 
-The query is batched — the worker collects output paths during the BFS walk and sends them in one or a few `CacheQuery` messages. The server checks its NAR store (S3 bucket or local `nars/` directory) and responds with the subset that already has `.narinfo` + `.nar.zst` files. This avoids the worker needing direct access to the cache backend.
+The query is batched — the worker collects output paths during the BFS walk and sends them in one or a few `CacheQuery` messages. The server responds with a single `CacheStatus` containing all available paths:
+
+1. **Local cache** — paths with `is_cached = true` in the Gradient NAR store (`url: None`).
+2. **Upstream caches** — for paths not found locally, the server fetches `.narinfo` from any external upstream caches configured for the org (`org → organization_cache → cache → cache_upstream`). Found paths are included with `url: Some(absolute_nar_url)`.
+
+The worker marks derivations as `substituted` for all entries in `cached` regardless of `url`. For upstream paths (`url: Some`), the worker downloads the NAR directly from the provided URL, then compresses and signs it before uploading to the Gradient cache.
 
 ### Cache Verification
 
@@ -623,7 +630,8 @@ enum ServerMessage {
     PresignedDownload { job_id: Uuid, store_path: String, url: String },
 
     // Cache queries
-    CacheStatus { job_id: String, cached: Vec<CachedPath> },  // response to CacheQuery
+    NixDownload { job_id: String, path: String, url: String }, // upstream path found; sent before CacheStatus
+    CacheStatus { job_id: String, cached: Vec<CachedPath> },   // local hits; terminator for CacheQuery response
 }
 
 struct FailedPeer { peer_id: Uuid, reason: String }

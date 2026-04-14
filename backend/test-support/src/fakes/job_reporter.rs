@@ -80,7 +80,6 @@ impl RecordingJobReporter {
 #[async_trait]
 impl JobReporter for RecordingJobReporter {
     async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<CachedPath>> {
-        // Return the intersection of queried paths and pre-configured cached paths.
         let cached: std::collections::HashSet<&str> =
             self.cached_paths.iter().map(|s| s.as_str()).collect();
         Ok(paths
@@ -90,6 +89,7 @@ impl JobReporter for RecordingJobReporter {
                 path,
                 file_size: None,
                 nar_size: None,
+                url: None,
             })
             .collect())
     }

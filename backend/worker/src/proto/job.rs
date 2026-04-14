@@ -11,9 +11,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use proto::messages::{
-    BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, FetchedInput, JobUpdateKind,
-};
+use proto::messages::{BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, FetchedInput, JobUpdateKind};
 use tracing::debug;
 
 use crate::connection::ProtoConnection;
@@ -33,10 +31,10 @@ impl<'a> JobUpdater<'a> {
         Self { job_id, conn }
     }
 
-    /// Send a CacheQuery and wait for the CacheStatus response.
+    /// Send a `CacheQuery` and wait for the `CacheStatus` response.
     ///
-    /// Returns the set of paths that the server confirms are already cached,
-    /// each with size metadata.
+    /// Returns all available paths — local Gradient cache entries have `url: None`;
+    /// upstream entries have `url: Some(absolute_nar_url)`.
     pub async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<CachedPath>> {
         use proto::messages::ServerMessage;
         self.conn
@@ -46,12 +44,11 @@ impl<'a> JobUpdater<'a> {
             })
             .await?;
 
-        // Wait for the CacheStatus response (next message from server).
         loop {
             match self.conn.recv().await? {
                 Some(ServerMessage::CacheStatus { cached, .. }) => return Ok(cached),
                 Some(other) => {
-                    debug!(job_id = %self.job_id, ?other, "ignoring non-CacheStatus message while waiting for query response");
+                    debug!(job_id = %self.job_id, ?other, "ignoring unexpected message while waiting for CacheStatus");
                 }
                 None => anyhow::bail!("connection closed while waiting for CacheStatus"),
             }

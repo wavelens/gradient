@@ -27,6 +27,10 @@ use sea_orm::{
     ActiveModelTrait as _, ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QueryOrder,
     QuerySelect, RelationTrait,
 };
+
+/// Fallback poll interval for projects whose org has a forge webhook configured.
+/// Webhooks are the primary trigger; this catches any that fail to arrive.
+const WEBHOOK_BACKUP_POLL_SECS: i64 = 1800; // 30 minutes
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -59,48 +63,47 @@ async fn project_poll_loop(scheduler: Arc<Scheduler>) {
 
 /// Polls active projects for new git commits and creates `Queued` evaluations.
 ///
-/// For each project that is due for checking (based on `evaluation_timeout`),
-/// calls `check_project_updates` to compare the remote HEAD with the last
-/// evaluated commit. If an update is found, creates a new `Queued` evaluation
-/// via `trigger_evaluation`.
+/// Projects whose organization has a forge webhook configured are polled every
+/// [`WEBHOOK_BACKUP_POLL_SECS`] (30 min) as a fallback in case a webhook delivery
+/// fails. Projects without a webhook use the CLI `evaluation_timeout`.
 pub(crate) async fn poll_projects_for_evaluations(
     scheduler: &Scheduler,
 ) -> anyhow::Result<()> {
     let state = &scheduler.state;
-    let threshold_time =
-        Utc::now().naive_utc() - chrono::Duration::seconds(state.cli.evaluation_timeout);
+    let now = Utc::now().naive_utc();
+    let threshold = now - chrono::Duration::seconds(state.cli.evaluation_timeout);
+    let webhook_threshold = now - chrono::Duration::seconds(WEBHOOK_BACKUP_POLL_SECS);
 
-    // Find projects with a last evaluation in terminal state that are due for checking.
-    let mut projects = EProject::find()
-        .join(JoinType::InnerJoin, RProject::LastEvaluation.def())
-        .filter(
-            Condition::all()
-                .add(CProject::Active.eq(true))
-                .add(CProject::LastCheckAt.lte(threshold_time))
-                .add(
-                    Condition::any()
-                        .add(CEvaluation::Status.eq(EvaluationStatus::Completed))
-                        .add(CEvaluation::Status.eq(EvaluationStatus::Failed))
-                        .add(CProject::ForceEvaluation.eq(true)),
-                ),
-        )
-        .order_by_asc(CProject::LastCheckAt)
-        .all(&state.db)
-        .await?;
+    // Single query joining organization to apply different thresholds per project.
+    // LEFT JOIN evaluation so new projects (no last_evaluation) are also included.
+    // Terminal statuses: 5=Completed, 6=Failed, 7=Aborted.
+    let sql = sea_orm::Statement::from_string(
+        sea_orm::DbBackend::Postgres,
+        format!(
+            r#"
+            SELECT p.*
+            FROM project p
+            JOIN organization o ON p.organization = o.id
+            LEFT JOIN evaluation e ON p.last_evaluation = e.id
+            WHERE p.active = true
+            AND (
+                (o.forge_webhook_secret IS NULL     AND p.last_check_at <= '{threshold}')
+                OR
+                (o.forge_webhook_secret IS NOT NULL AND p.last_check_at <= '{webhook_threshold}')
+            )
+            AND (
+                e.status IN (5, 6, 7)
+                OR p.force_evaluation = true
+                OR p.last_evaluation IS NULL
+            )
+            ORDER BY p.last_check_at ASC
+            "#,
+            threshold = threshold.format("%Y-%m-%d %H:%M:%S%.f"),
+            webhook_threshold = webhook_threshold.format("%Y-%m-%d %H:%M:%S%.f"),
+        ),
+    );
 
-    // Also find projects that have never been evaluated.
-    let new_projects = EProject::find()
-        .filter(
-            Condition::all()
-                .add(CProject::Active.eq(true))
-                .add(CProject::LastCheckAt.lte(threshold_time))
-                .add(CProject::LastEvaluation.is_null()),
-        )
-        .order_by_asc(CProject::LastCheckAt)
-        .all(&state.db)
-        .await?;
-
-    projects.extend(new_projects);
+    let projects = EProject::find().from_raw_sql(sql).all(&state.db).await?;
 
     for project in &projects {
         let (has_update, commit_hash) = match check_project_updates(Arc::clone(state), project)
@@ -143,6 +146,14 @@ pub(crate) async fn poll_projects_for_evaluations(
         {
             Ok(eval) => {
                 info!(project = %project.name, evaluation_id = %eval.id, "created evaluation from project poll");
+                // Clear force_evaluation so the project is not re-evaluated on every
+                // subsequent poll cycle.
+                let mut ap: AProject = project.clone().into();
+                ap.force_evaluation = sea_orm::ActiveValue::Set(false);
+                ap.last_check_at = sea_orm::ActiveValue::Set(Utc::now().naive_utc());
+                if let Err(e) = ap.update(&state.db).await {
+                    warn!(project = %project.name, error = %e, "failed to clear force_evaluation");
+                }
             }
             Err(TriggerError::AlreadyInProgress) => {
                 debug!(project = %project.name, "evaluation already in progress, skipping");

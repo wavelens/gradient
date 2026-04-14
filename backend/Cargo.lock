@@ -4109,6 +4109,7 @@ dependencies = [
  "entity",
  "futures",
  "hex",
+ "reqwest 0.13.2",
  "rkyv 0.8.15",
  "scheduler",
  "sea-orm",

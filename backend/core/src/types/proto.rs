@@ -142,7 +142,14 @@ pub struct CacheInfo {
     pub nar_size: u64,
 }
 
-/// A store path confirmed present in the server's binary cache, with size metadata.
+/// A store path available to the worker, returned in [`CacheStatus`].
+///
+/// When `url` is `None` the path is in the local Gradient cache — the worker
+/// fetches it via `NarRequest` / `PresignedDownload` as usual.
+///
+/// When `url` is `Some` the path was found in an upstream external Nix binary
+/// cache; the worker downloads the NAR directly from that absolute URL, then
+/// compresses and signs it before uploading to the Gradient cache.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct CachedPath {
@@ -151,6 +158,8 @@ pub struct CachedPath {
     pub file_size: Option<u64>,
     /// Uncompressed NAR size (bytes). `None` if not yet recorded.
     pub nar_size: Option<u64>,
+    /// Absolute NAR URL for upstream paths; `None` for local Gradient cache.
+    pub url: Option<String>,
 }
 
 /// A store path required by a job candidate, with optional cache metadata.

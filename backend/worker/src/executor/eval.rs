@@ -102,8 +102,16 @@ pub async fn evaluate_derivations_with(
 
     // Use the local clone from FetchFlake if available, otherwise build a
     // commit-pinned remote URL.
+    //
+    // Prefer `git+file://` over `path:` for local clones: `path:` puts Nix
+    // into impure evaluation mode, which lets `builtins.fetchGit` (and similar
+    // builtins) attempt live network fetches.  Those IO failures are NOT
+    // catchable by `builtins.tryEval`, so a single module with an un-pinned
+    // `fetchGit` call crashes the whole evaluation.  `git+file://?rev=` keeps
+    // Nix in pure mode: `builtins.fetchGit` without a `rev` then throws a
+    // regular exception that `tryEval` can handle gracefully.
     let repo = if let Some(path) = local_flake_path {
-        format!("path:{}", path)
+        format!("git+file://{}?rev={}", path, job.commit)
     } else {
         gradient_core::nix::NixFlakeUrl::new(&job.repository, &job.commit)
             .map(|u| u.to_string())
@@ -231,7 +239,8 @@ pub async fn evaluate_derivations_with(
         .collect();
 
     if !all_output_paths.is_empty() {
-        // Ask the server which outputs are already in its cache.
+        // Ask the server which outputs are available — local cache (url: None)
+        // or upstream external caches (url: Some). Both are treated as substituted.
         let cached_paths = updater
             .query_cache(all_output_paths.clone())
             .await

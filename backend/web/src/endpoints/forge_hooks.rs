@@ -510,3 +510,35 @@ pub async fn post_forge_webhook_secret(
         },
     }))
 }
+
+/// `DELETE /api/v1/orgs/{organization}/forge-webhook-secret` — removes the
+/// per-org forge webhook secret, disabling inbound forge webhook verification.
+pub async fn delete_forge_webhook_secret(
+    State(state): State<Arc<ServerState>>,
+    axum::Extension(user): axum::Extension<MUser>,
+    Path(organization): Path<String>,
+) -> WebResult<axum::Json<BaseResponse<String>>> {
+    use super::projects::user_can_edit;
+
+    let org = EOrganization::find()
+        .filter(COrganization::Name.eq(organization.as_str()))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if !user_can_edit(&state, user.id, org.id).await? {
+        return Err(WebError::Forbidden(
+            "You do not have permission to manage forge webhooks for this organization."
+                .to_string(),
+        ));
+    }
+
+    let mut active = org.into_active_model();
+    active.forge_webhook_secret = Set(None);
+    active.update(&state.db).await?;
+
+    Ok(axum::Json(BaseResponse {
+        error: false,
+        message: "Forge webhook secret deleted.".to_string(),
+    }))
+}

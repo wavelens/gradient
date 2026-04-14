@@ -92,10 +92,23 @@ fn build_wildcard_nix_expr(wildcards: &[String]) -> String {
     )
 }
 
+/// Returns true when a wildcard pattern segment contains no wildcard characters.
+fn is_literal_pattern(pattern: &str) -> bool {
+    let path = pattern.strip_prefix('!').unwrap_or(pattern);
+    !path.contains('*') && !path.contains('#')
+}
+
 /// Discovers all derivation attribute paths in a flake matching the given
 /// wildcard patterns by evaluating the embedded `eval.nix` through the Nix C API.
 ///
-/// ## Wildcard semantics
+/// Literal include patterns (no `*` or `#`) are returned directly **without**
+/// calling `eval.nix`.  `eval.nix` checks `isDerivation` at each leaf by
+/// forcing `v.type`, which can trigger deep NixOS module evaluation and
+/// uncatchable `builtins.fetchGit` errors.  For an exact attr path the user
+/// already knows the target; `get_derivation_path` will validate it by
+/// evaluating `.drvPath` with proper per-attr error handling.
+///
+/// ## Wildcard semantics (for patterns passed to eval.nix)
 ///
 /// - `*` — **recursive** wildcard. Consecutive `*` segments are collapsed by
 ///   [`build_wildcard_nix_expr`] before being passed to `eval.nix`, so
@@ -114,18 +127,36 @@ pub(super) fn discover_derivations(
     repository: &str,
     wildcards: &[String],
 ) -> Result<Vec<String>> {
-    let escaped_repo = escape_nix_str(repository);
-    let wildcard_ref = build_wildcard_nix_expr(wildcards);
-    let expr = format!("({}) \"{}\" {}", EVAL_NIX, escaped_repo, wildcard_ref);
+    // Separate fully-literal include patterns from those that need eval.nix.
+    let mut attrs: Vec<String> = wildcards
+        .iter()
+        .filter(|p| !p.starts_with('!') && is_literal_pattern(p))
+        .cloned()
+        .collect();
 
-    debug!(wildcards = ?wildcards, "discovering derivations via eval.nix");
+    let wildcard_patterns: Vec<String> = wildcards
+        .iter()
+        .filter(|p| !is_literal_pattern(p))
+        .cloned()
+        .collect();
 
-    let json_str = evaluator
-        .eval_string(&expr)
-        .context("eval.nix evaluation failed")?;
+    if !wildcard_patterns.is_empty() {
+        let escaped_repo = escape_nix_str(repository);
+        let wildcard_ref = build_wildcard_nix_expr(&wildcard_patterns);
+        let expr = format!("({}) \"{}\" {}", EVAL_NIX, escaped_repo, wildcard_ref);
 
-    let attrs: Vec<String> =
-        serde_json::from_str(&json_str).context("Failed to parse eval.nix JSON output")?;
+        debug!(wildcards = ?wildcard_patterns, "discovering derivations via eval.nix");
+
+        let json_str = evaluator
+            .eval_string(&expr)
+            .context("eval.nix evaluation failed")?;
+
+        let wildcard_attrs: Vec<String> =
+            serde_json::from_str(&json_str).context("Failed to parse eval.nix JSON output")?;
+        attrs.extend(wildcard_attrs);
+    } else {
+        debug!(wildcards = ?wildcards, "all patterns are literal; skipping eval.nix");
+    }
 
     Ok(attrs)
 }
@@ -241,5 +272,27 @@ mod tests {
         let exclude_empty = result.contains("\"exclude\" = [  ]");
         assert!(!include_empty, "include should not be empty");
         assert!(!exclude_empty, "exclude should not be empty");
+    }
+
+    // ── is_literal_pattern / discover_derivations literal bypass ─────────────
+
+    #[test]
+    fn is_literal_pattern_plain() {
+        assert!(is_literal_pattern("nixosConfigurations.server1.config.system.build.toplevel"));
+        assert!(is_literal_pattern("packages.x86_64-linux.hello"));
+    }
+
+    #[test]
+    fn is_literal_pattern_with_wildcard() {
+        assert!(!is_literal_pattern("packages.*"));
+        assert!(!is_literal_pattern("packages.#.hello"));
+        assert!(!is_literal_pattern("*"));
+    }
+
+    #[test]
+    fn is_literal_pattern_exclude_prefix() {
+        // Exclude patterns with no wildcards are literal too.
+        assert!(is_literal_pattern("!packages.x86_64-linux.broken"));
+        assert!(!is_literal_pattern("!packages.*.broken"));
     }
 }
