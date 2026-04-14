@@ -85,7 +85,13 @@ pub async fn evaluate_derivations_with(
 ) -> Result<()> {
     updater.report_evaluating_derivations().await?;
 
-    let repo = job.repository.clone();
+    // Build a commit-pinned Nix flake URL (e.g. `git+git://server/test?rev=<hash>`).
+    // This ensures the evaluator fetches exactly the commit the server detected,
+    // and that `git://` URLs are normalised to the `git+git://` scheme that Nix
+    // understands.
+    let repo = gradient_core::nix::NixFlakeUrl::new(&job.repository, &job.commit)
+        .map(|u| u.to_string())
+        .unwrap_or_else(|_| job.repository.clone());
     let wildcards = job.wildcards.clone();
 
     // ── Step 1: discover attr paths ──────────────────────────────────────────

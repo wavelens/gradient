@@ -15,30 +15,114 @@ use sea_orm::EntityTrait;
 use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
 
-/// List the remote HEAD ref without spawning a git process.
-/// Uses libgit2 via the `git2` crate; SSH credentials are passed in-memory.
-fn ls_remote_head(
+/// List the remote HEAD ref using the raw git wire protocol (v0) over TCP.
+///
+/// libgit2's `connect_auth` + `list()` can return an empty ref list for
+/// `git://` URLs because it negotiates git protocol v2 with git-daemon, and
+/// the subsequent `ls-refs` exchange may fail silently on some daemon versions.
+/// This implementation sends a plain protocol-v0 pkt-line request (no
+/// `version=2` extra parameter) so the daemon responds with an immediate v0
+/// ref advertisement containing HEAD.
+fn ls_remote_head_git_protocol(url: &str) -> Result<Vec<u8>, SourceError> {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
+
+    // Parse git://[host[:port]]/path
+    let rest = url.strip_prefix("git://").ok_or(SourceError::InvalidUrl)?;
+    let (host_port, repo_path) = rest.split_once('/').ok_or(SourceError::InvalidUrl)?;
+    let (host, port) = if let Some((h, p)) = host_port.rsplit_once(':') {
+        (h, p.parse::<u16>().unwrap_or(9418))
+    } else {
+        (host_port, 9418u16)
+    };
+
+    let mut stream = TcpStream::connect((host, port))
+        .map_err(|e| SourceError::GitCommandFailed { stderr: e.to_string() })?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .map_err(|e| SourceError::GitCommandFailed { stderr: e.to_string() })?;
+
+    // Protocol-v0 request: "git-upload-pack /path\0host=host\0"
+    // Deliberately omitting "version=2" so the daemon responds in v0 format.
+    let body = format!("git-upload-pack /{}\0host={}\0", repo_path, host);
+    let pkt = format!("{:04x}{}", body.len() + 4, body);
+    stream
+        .write_all(pkt.as_bytes())
+        .map_err(|e| SourceError::GitCommandFailed { stderr: e.to_string() })?;
+
+    // Read the server's pkt-line ref advertisement.
+    let mut buf = Vec::new();
+    stream
+        .read_to_end(&mut buf)
+        .map_err(|e| SourceError::GitCommandFailed { stderr: e.to_string() })?;
+
+    // Iterate pkt-lines: each starts with a 4-hex-digit length (including those 4 bytes).
+    let mut pos = 0;
+    while pos + 4 <= buf.len() {
+        let len = match std::str::from_utf8(&buf[pos..pos + 4])
+            .ok()
+            .and_then(|s| usize::from_str_radix(s, 16).ok())
+        {
+            Some(l) => l,
+            None => break,
+        };
+        if len == 0 {
+            break; // flush pkt — end of advertisement
+        }
+        if len < 4 || pos + len > buf.len() {
+            break;
+        }
+        let data = &buf[pos + 4..pos + len];
+        pos += len;
+
+        // Ref lines: "<40-hex-sha1> <refname>[NUL capabilities]\n"
+        if data.len() >= 41 && data[40] == b' ' {
+            let sha = match std::str::from_utf8(&data[..40]) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let ref_bytes = &data[41..];
+            let refname_end = ref_bytes
+                .iter()
+                .position(|&b| b == 0 || b == b'\n')
+                .unwrap_or(ref_bytes.len());
+            let refname = std::str::from_utf8(&ref_bytes[..refname_end])
+                .unwrap_or("")
+                .trim();
+            if refname == "HEAD" {
+                return hex::decode(sha).map_err(|_| SourceError::GitOutputParsing);
+            }
+        }
+    }
+
+    Err(SourceError::GitHashExtraction)
+}
+
+/// List the remote HEAD ref via libgit2 with in-memory SSH credentials.
+///
+/// Used exclusively for SSH URLs where the private key must be supplied
+/// in-memory without writing it to disk.
+fn ls_remote_head_ssh(
     url: &str,
-    private_key: Option<&str>,
-    public_key: Option<&str>,
+    private_key: &str,
+    public_key: &str,
 ) -> Result<Vec<u8>, SourceError> {
     let mut remote =
         git2::Remote::create_detached(url).map_err(|e| SourceError::GitCommand(e.to_string()))?;
 
     let mut callbacks = RemoteCallbacks::new();
     callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificateOk));
-    if let (Some(priv_key), Some(pub_key)) = (private_key, public_key) {
-        let priv_key = priv_key.to_string();
-        let pub_key = pub_key.to_string();
-        callbacks.credentials(move |_url, username_from_url, _allowed| {
-            git2::Cred::ssh_key_from_memory(
-                username_from_url.unwrap_or("git"),
-                Some(&pub_key),
-                &priv_key,
-                None,
-            )
-        });
-    }
+    let priv_key = private_key.to_string();
+    let pub_key = public_key.to_string();
+    callbacks.credentials(move |_url, username_from_url, _allowed| {
+        git2::Cred::ssh_key_from_memory(
+            username_from_url.unwrap_or("git"),
+            Some(&pub_key),
+            &priv_key,
+            None,
+        )
+    });
 
     let conn = remote
         .connect_auth(Direction::Fetch, Some(callbacks), None)
@@ -55,6 +139,39 @@ fn ls_remote_head(
         .or_else(|| list.first())
         .map(|h| h.oid().as_bytes().to_vec())
         .ok_or(SourceError::GitHashExtraction)
+}
+
+/// List the remote HEAD ref via libgit2 with no credentials (for https://).
+fn ls_remote_head_no_creds(url: &str) -> Result<Vec<u8>, SourceError> {
+    let mut remote =
+        git2::Remote::create_detached(url).map_err(|e| SourceError::GitCommand(e.to_string()))?;
+    let mut callbacks = RemoteCallbacks::new();
+    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificateOk));
+    let conn = remote
+        .connect_auth(Direction::Fetch, Some(callbacks), None)
+        .map_err(|e| SourceError::GitCommandFailed {
+            stderr: e.message().to_string(),
+        })?;
+    let list = conn.list().map_err(|e| SourceError::GitCommandFailed {
+        stderr: e.message().to_string(),
+    })?;
+    list.iter()
+        .find(|h| h.name() == "HEAD")
+        .or_else(|| list.first())
+        .map(|h| h.oid().as_bytes().to_vec())
+        .ok_or(SourceError::GitHashExtraction)
+}
+
+fn ls_remote_head(
+    url: &str,
+    private_key: Option<&str>,
+    public_key: Option<&str>,
+) -> Result<Vec<u8>, SourceError> {
+    match (private_key, public_key) {
+        (Some(priv_key), Some(pub_key)) => ls_remote_head_ssh(url, priv_key, pub_key),
+        _ if url.starts_with("git://") => ls_remote_head_git_protocol(url),
+        _ => ls_remote_head_no_creds(url),
+    }
 }
 
 #[instrument(skip(state), fields(project_id = %project.id, project_name = %project.name))]

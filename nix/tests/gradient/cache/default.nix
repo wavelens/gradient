@@ -293,7 +293,48 @@
       server.sleep(10)
       print(server.succeed("${lib.getExe pkgs.gradient-cli} project show"))
 
-      server.sleep(240)
+      # Wait for the server to detect the new commit (check cycle is 30 s).
+      # Poll in short increments so we surface errors quickly instead of timing out.
+      def check_journal_for_errors(since_seconds=45):
+          j = server.succeed(f"journalctl -u gradient-server --no-pager --since='-{since_seconds}s' -n 200")
+          if "Unable to extract hash from Git URL" in j:
+              raise Exception(
+                  f"Gradient server cannot read git HEAD — check libgit2 / git-daemon compatibility:\n{j[-2000:]}"
+              )
+          if "panicked" in j or "SIGABRT" in j:
+              raise Exception(f"Gradient server crashed:\n{j[-2000:]}")
+          return j
+
+      # First window: wait for repository detection
+      detected = False
+      for attempt in range(1, 7):
+          server.sleep(15)
+          j = check_journal_for_errors(since_seconds=attempt * 15 + 15)
+          if "update needed" in j or "Force evaluation" in j or "triggered evaluation" in j or "Queued" in j:
+              detected = True
+              print(f"=== Repository update detected on attempt {attempt} ===")
+              break
+          if attempt == 6:
+              raise Exception(f"Server did not detect repository change after 90 s:\n{j[-2000:]}")
+
+      # Second window: wait for build to complete (up to 210 s)
+      completed = False
+      for attempt in range(1, 22):
+          server.sleep(10)
+          check_journal_for_errors(since_seconds=15)
+          output = server.succeed("${lib.getExe pkgs.gradient-cli} project show")
+          if "Completed" in output:
+              completed = True
+              break
+          if attempt % 3 == 0:
+              print(f"Still waiting for build (attempt {attempt}/21)...")
+              print(output)
+
+      if not completed:
+          output = server.succeed("${lib.getExe pkgs.gradient-cli} project show")
+          print(server.succeed("journalctl -u gradient-server --no-pager --since='-300s' -n 200"))
+          raise Exception(f"Build did not complete after 210 s:\n{output}")
+
       output = server.succeed("${lib.getExe pkgs.gradient-cli} project show")
       print(output)
 

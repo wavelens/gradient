@@ -33,7 +33,11 @@ pub struct RepositoryUrl {
 
 impl RepositoryUrl {
     fn normalize(url: &str) -> String {
-        if url.starts_with("ssh://") || url.starts_with("http://") || url.starts_with("https://") {
+        if url.starts_with("ssh://")
+            || url.starts_with("http://")
+            || url.starts_with("https://")
+            || url.starts_with("git://")
+        {
             format!("git+{}", url)
         } else {
             url.to_string()
@@ -166,9 +170,9 @@ mod tests {
     }
 
     #[test]
-    fn repo_url_git_protocol_passthrough() {
+    fn repo_url_git_protocol_normalized() {
         let r: RepositoryUrl = "git://server.example.com/repo.git".parse().unwrap();
-        assert_eq!(r.to_string(), "git://server.example.com/repo.git");
+        assert_eq!(r.to_string(), "git+git://server.example.com/repo.git");
     }
 
     #[test]
