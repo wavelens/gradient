@@ -44,7 +44,7 @@ impl Worker {
     pub async fn connect(config: WorkerConfig) -> Result<Self> {
         let mut conn = ProtoConnection::open(&config.server_url).await?;
 
-        let peer_id = load_or_generate_id(&config.data_dir)
+        let peer_id = load_or_generate_id(&config.data_dir, config.worker_id.as_deref())
             .context("failed to load or generate persistent worker ID")?;
         let peer_tokens = config.peer_tokens();
 
@@ -100,7 +100,7 @@ impl Worker {
     ) -> Result<Self> {
         let mut conn = ProtoConnection::from_accepted(ws);
 
-        let peer_id = load_or_generate_id(&config.data_dir)
+        let peer_id = load_or_generate_id(&config.data_dir, config.worker_id.as_deref())
             .context("failed to load or generate persistent worker ID")?;
         let peer_tokens = config.peer_tokens();
 
@@ -147,7 +147,7 @@ impl Worker {
         self.conn.reconnect(&self.config.server_url).await?;
         self.draining = false;
 
-        let peer_id = load_or_generate_id(&self.config.data_dir)
+        let peer_id = load_or_generate_id(&self.config.data_dir, self.config.worker_id.as_deref())
             .context("failed to load persistent worker ID")?;
         let peer_tokens = self.config.peer_tokens();
 
@@ -396,11 +396,23 @@ impl Worker {
     }
 }
 
-/// Load the persistent worker ID from `{data_dir}/worker-id`, or generate a
-/// new UUID, write it to that file, and return it.
-fn load_or_generate_id(data_dir: &str) -> Result<String> {
+/// Resolve the worker's persistent UUID.
+///
+/// Priority:
+/// 1. `id_override` — set via `GRADIENT_WORKER_ID` / `--worker-id`; validated as a UUID.
+/// 2. `{data_dir}/worker-id` — previously persisted UUID.
+/// 3. A freshly generated UUID v4, written to `{data_dir}/worker-id`.
+fn load_or_generate_id(data_dir: &str, id_override: Option<&str>) -> Result<String> {
     use std::fs;
     use std::path::Path;
+
+    if let Some(raw) = id_override {
+        let id = raw.trim().to_owned();
+        id.parse::<uuid::Uuid>()
+            .with_context(|| format!("GRADIENT_WORKER_ID is not a valid UUID: {:?}", id))?;
+        info!(%id, "using worker ID from GRADIENT_WORKER_ID");
+        return Ok(id);
+    }
 
     let dir = Path::new(data_dir);
     fs::create_dir_all(dir)
@@ -438,11 +450,9 @@ mod tests {
     fn load_or_generate_id_creates_new() {
         let dir = temp_dir();
         let data_dir = dir.path().to_string_lossy().to_string();
-        let id = load_or_generate_id(&data_dir).expect("should generate id");
-        // Must be a valid UUID
+        let id = load_or_generate_id(&data_dir, None).expect("should generate id");
         id.parse::<uuid::Uuid>()
             .expect("generated id must be a valid UUID");
-        // File must exist
         let id_path = dir.path().join("worker-id");
         assert!(id_path.exists(), "worker-id file should be created");
         assert_eq!(fs::read_to_string(&id_path).unwrap().trim(), id);
@@ -455,7 +465,7 @@ mod tests {
         let known_id = uuid::Uuid::new_v4().to_string();
         fs::write(&id_path, &known_id).unwrap();
         let data_dir = dir.path().to_string_lossy().to_string();
-        let loaded = load_or_generate_id(&data_dir).expect("should read existing id");
+        let loaded = load_or_generate_id(&data_dir, None).expect("should read existing id");
         assert_eq!(loaded, known_id);
     }
 
@@ -465,7 +475,27 @@ mod tests {
         let id_path = dir.path().join("worker-id");
         fs::write(&id_path, "not-a-uuid").unwrap();
         let data_dir = dir.path().to_string_lossy().to_string();
-        let result = load_or_generate_id(&data_dir);
+        let result = load_or_generate_id(&data_dir, None);
         assert!(result.is_err(), "invalid UUID in file should return Err");
+    }
+
+    #[test]
+    fn load_or_generate_id_override_takes_priority() {
+        let dir = temp_dir();
+        let id_path = dir.path().join("worker-id");
+        let file_id = uuid::Uuid::new_v4().to_string();
+        fs::write(&id_path, &file_id).unwrap();
+        let override_id = uuid::Uuid::new_v4().to_string();
+        let data_dir = dir.path().to_string_lossy().to_string();
+        let result = load_or_generate_id(&data_dir, Some(&override_id)).expect("override should work");
+        assert_eq!(result, override_id, "override must win over file");
+    }
+
+    #[test]
+    fn load_or_generate_id_override_invalid_uuid_fails() {
+        let dir = temp_dir();
+        let data_dir = dir.path().to_string_lossy().to_string();
+        let result = load_or_generate_id(&data_dir, Some("not-a-uuid"));
+        assert!(result.is_err(), "invalid override UUID should return Err");
     }
 }

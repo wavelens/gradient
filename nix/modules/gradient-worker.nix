@@ -33,6 +33,24 @@ in {
       default = 3100;
     };
 
+    workerId = lib.mkOption {
+      description = ''
+        Override the worker's persistent UUID. When set, this value is used as
+        the worker identity instead of the UUID auto-generated and stored in
+        <literal>$StateDirectory/worker-id</literal> on first start.
+
+        Useful for declarative deployments where the worker UUID must be known
+        ahead of time (e.g. to pre-register it in <literal>state.workers</literal>).
+        Must be a valid UUID.
+
+        When null (default) the worker reads or generates its ID from the state
+        directory as usual.
+      '';
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "550e8400-e29b-41d4-a716-446655440001";
+    };
+
     peersFile = lib.mkOption {
       description = ''
         Path to a file containing peer-to-token pairs for challenge-response
@@ -182,6 +200,8 @@ in {
         GRADIENT_WORKER_DATA_DIR   = "%S/gradient-worker";
       } // lib.optionalAttrs (cfg.peersFile != null) {
         GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
+      } // lib.optionalAttrs (cfg.workerId != null) {
+        GRADIENT_WORKER_ID = cfg.workerId;
       } // {
         GRADIENT_WORKER_DISCOVERABLE                = lib.boolToString cfg.discoverable;
         GRADIENT_WORKER_PORT                        = toString cfg.port;

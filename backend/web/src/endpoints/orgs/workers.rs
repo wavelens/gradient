@@ -30,12 +30,17 @@ pub struct RegisterWorkerRequest {
     /// WebSocket URL where the worker listens for incoming server connections.
     /// When set, the server connects outbound to this URL.
     pub url: Option<String>,
+    /// Pre-generated token (output of `openssl rand -base64 48`, exactly 64 base64 chars).
+    /// When provided the server stores its hash and does NOT return the token in the response.
+    pub token: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct RegisterWorkerResponse {
     pub peer_id: Uuid,
-    pub token: String,
+    /// Only present when the token was server-generated (i.e. not supplied in the request).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -73,22 +78,39 @@ pub async fn post_org_worker(
         .map_err(|e| WebError::InternalServerError(e.to_string()))?
         .ok_or_else(|| WebError::not_found("organization"))?;
 
-    if body.worker_id.is_empty() {
-        return Err(WebError::BadRequest("worker_id must not be empty".into()));
-    }
+    let worker_uuid = Uuid::parse_str(&body.worker_id)
+        .ok()
+        .filter(|u| u.get_version() == Some(uuid::Version::Random))
+        .ok_or_else(|| WebError::BadRequest("worker_id must be a valid UUID v4".into()))?;
+    let worker_id_str = worker_uuid.to_string();
 
-    // Generate a cryptographically random 48-byte token, base64-encoded.
-    // Equivalent to `openssl rand -base64 48` (produces 64 base64 characters).
-    let mut raw = [0u8; 48];
-    rand::rng().fill(&mut raw);
-    let token = base64::engine::general_purpose::STANDARD.encode(raw);
+    // Resolve token: use caller-supplied one (after validation) or generate a new one.
+    let (token, return_token) = if let Some(provided) = body.token {
+        let t = provided.trim().to_string();
+        // Must be exactly 64 chars of valid standard base64 (openssl rand -base64 48 output).
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&t)
+            .map_err(|_| WebError::BadRequest("token is not valid base64".into()))?;
+        if decoded.len() != 48 {
+            return Err(WebError::BadRequest(
+                "token must be 48 raw bytes encoded as base64 (openssl rand -base64 48)".into(),
+            ));
+        }
+        (t, false)
+    } else {
+        // Generate a cryptographically random 48-byte token, base64-encoded.
+        // Equivalent to `openssl rand -base64 48` (produces 64 base64 characters).
+        let mut raw = [0u8; 48];
+        rand::rng().fill(&mut raw);
+        (base64::engine::general_purpose::STANDARD.encode(raw), true)
+    };
 
     let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
 
     let row = AWorkerRegistration {
         id: Set(Uuid::new_v4()),
         peer_id: Set(org.id),
-        worker_id: Set(body.worker_id),
+        worker_id: Set(worker_id_str),
         token_hash: Set(token_hash),
         managed: Set(false),
         url: Set(body.url),
@@ -100,7 +122,7 @@ pub async fn post_org_worker(
         error: false,
         message: RegisterWorkerResponse {
             peer_id: org.id,
-            token,
+            token: if return_token { Some(token) } else { None },
         },
     }))
 }

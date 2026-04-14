@@ -23,8 +23,62 @@ use tracing::{debug, info, instrument, warn};
 /// This implementation sends a plain protocol-v0 pkt-line request (no
 /// `version=2` extra parameter) so the daemon responds with an immediate v0
 /// ref advertisement containing HEAD.
+/// Read pkt-lines from `reader` and return the SHA-1 hash of HEAD.
+///
+/// This reads incrementally — one pkt-line at a time — so it works correctly
+/// even when the remote keeps the connection open after the ref advertisement
+/// (which is normal git protocol behavior).
+fn read_head_from_pktlines(reader: &mut dyn std::io::Read) -> Result<Vec<u8>, SourceError> {
+    let mut len_buf = [0u8; 4];
+    loop {
+        std::io::Read::read_exact(reader, &mut len_buf).map_err(|e| {
+            SourceError::GitCommandFailed {
+                stderr: e.to_string(),
+            }
+        })?;
+        let len = std::str::from_utf8(&len_buf)
+            .ok()
+            .and_then(|s| usize::from_str_radix(s, 16).ok())
+            .ok_or(SourceError::GitOutputParsing)?;
+        if len == 0 {
+            break; // flush pkt — end of advertisement
+        }
+        if len < 4 {
+            break;
+        }
+        let payload_len = len - 4;
+        let mut data = vec![0u8; payload_len];
+        std::io::Read::read_exact(reader, &mut data).map_err(|e| {
+            SourceError::GitCommandFailed {
+                stderr: e.to_string(),
+            }
+        })?;
+
+        // Ref lines: "<40-hex-sha1> <refname>[NUL capabilities]\n"
+        if data.len() >= 41 && data[40] == b' ' {
+            let sha = match std::str::from_utf8(&data[..40]) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let ref_bytes = &data[41..];
+            let refname_end = ref_bytes
+                .iter()
+                .position(|&b| b == 0 || b == b'\n')
+                .unwrap_or(ref_bytes.len());
+            let refname = std::str::from_utf8(&ref_bytes[..refname_end])
+                .unwrap_or("")
+                .trim();
+            if refname == "HEAD" {
+                return hex::decode(sha).map_err(|_| SourceError::GitOutputParsing);
+            }
+        }
+    }
+
+    Err(SourceError::GitHashExtraction)
+}
+
 fn ls_remote_head_git_protocol(url: &str) -> Result<Vec<u8>, SourceError> {
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::net::TcpStream;
     use std::time::Duration;
 
@@ -51,52 +105,7 @@ fn ls_remote_head_git_protocol(url: &str) -> Result<Vec<u8>, SourceError> {
         .write_all(pkt.as_bytes())
         .map_err(|e| SourceError::GitCommandFailed { stderr: e.to_string() })?;
 
-    // Read the server's pkt-line ref advertisement.
-    let mut buf = Vec::new();
-    stream
-        .read_to_end(&mut buf)
-        .map_err(|e| SourceError::GitCommandFailed { stderr: e.to_string() })?;
-
-    // Iterate pkt-lines: each starts with a 4-hex-digit length (including those 4 bytes).
-    let mut pos = 0;
-    while pos + 4 <= buf.len() {
-        let len = match std::str::from_utf8(&buf[pos..pos + 4])
-            .ok()
-            .and_then(|s| usize::from_str_radix(s, 16).ok())
-        {
-            Some(l) => l,
-            None => break,
-        };
-        if len == 0 {
-            break; // flush pkt — end of advertisement
-        }
-        if len < 4 || pos + len > buf.len() {
-            break;
-        }
-        let data = &buf[pos + 4..pos + len];
-        pos += len;
-
-        // Ref lines: "<40-hex-sha1> <refname>[NUL capabilities]\n"
-        if data.len() >= 41 && data[40] == b' ' {
-            let sha = match std::str::from_utf8(&data[..40]) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            let ref_bytes = &data[41..];
-            let refname_end = ref_bytes
-                .iter()
-                .position(|&b| b == 0 || b == b'\n')
-                .unwrap_or(ref_bytes.len());
-            let refname = std::str::from_utf8(&ref_bytes[..refname_end])
-                .unwrap_or("")
-                .trim();
-            if refname == "HEAD" {
-                return hex::decode(sha).map_err(|_| SourceError::GitOutputParsing);
-            }
-        }
-    }
-
-    Err(SourceError::GitHashExtraction)
+    read_head_from_pktlines(&mut stream)
 }
 
 /// List the remote HEAD ref via libgit2 with in-memory SSH credentials.
@@ -481,4 +490,115 @@ async fn prefetch_flake_inner(
     })??;
 
     Ok(Some(temp_dir))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a git protocol v0 pkt-line from raw bytes.
+    fn pkt_line(data: &[u8]) -> Vec<u8> {
+        let len = data.len() + 4;
+        let mut pkt = format!("{:04x}", len).into_bytes();
+        pkt.extend_from_slice(data);
+        pkt
+    }
+
+    /// Build a ref advertisement line: "<hex-sha1> <refname>\n"
+    fn ref_line(hex_sha: &str, refname: &str) -> Vec<u8> {
+        pkt_line(format!("{} {}\n", hex_sha, refname).as_bytes())
+    }
+
+    /// The first ref line includes NUL-separated capabilities:
+    /// "<hex-sha1> <refname>\0<capabilities>\n"
+    fn ref_line_with_caps(hex_sha: &str, refname: &str, caps: &str) -> Vec<u8> {
+        let mut data = format!("{} {}\0{}\n", hex_sha, refname, caps).into_bytes();
+        // pkt_line wraps it
+        let len = data.len() + 4;
+        let mut pkt = format!("{:04x}", len).into_bytes();
+        pkt.append(&mut data);
+        pkt
+    }
+
+    const FLUSH: &[u8] = b"0000";
+    const FAKE_SHA: &str = "aabbccddee00112233445566778899aabbccddee";
+
+    #[test]
+    fn read_head_from_pktlines_basic() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&ref_line_with_caps(FAKE_SHA, "HEAD", "multi_ack"));
+        buf.extend_from_slice(&ref_line(FAKE_SHA, "refs/heads/main"));
+        buf.extend_from_slice(FLUSH);
+
+        let result = read_head_from_pktlines(&mut buf.as_slice()).unwrap();
+        assert_eq!(hex::encode(&result), FAKE_SHA);
+    }
+
+    #[test]
+    fn read_head_from_pktlines_head_not_first() {
+        let other_sha = "1111111111111111111111111111111111111111";
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&ref_line_with_caps(other_sha, "refs/heads/main", "caps"));
+        buf.extend_from_slice(&ref_line(FAKE_SHA, "HEAD"));
+        buf.extend_from_slice(FLUSH);
+
+        let result = read_head_from_pktlines(&mut buf.as_slice()).unwrap();
+        assert_eq!(hex::encode(&result), FAKE_SHA);
+    }
+
+    #[test]
+    fn read_head_from_pktlines_no_head_returns_error() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&ref_line_with_caps(FAKE_SHA, "refs/heads/main", "caps"));
+        buf.extend_from_slice(FLUSH);
+
+        let err = read_head_from_pktlines(&mut buf.as_slice()).unwrap_err();
+        assert!(matches!(err, SourceError::GitHashExtraction));
+    }
+
+    /// Reproduces the original bug: git-daemon keeps the connection open after
+    /// the ref advertisement. With `read_to_end` this would block until timeout
+    /// and then fail with EAGAIN. With incremental pkt-line reading it should
+    /// return HEAD immediately after the flush packet, without reading further.
+    #[test]
+    fn read_head_from_pktlines_server_keeps_connection_open() {
+        use std::io::Write;
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            // Send ref advertisement then flush — but do NOT close the connection.
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&ref_line_with_caps(FAKE_SHA, "HEAD", "multi_ack"));
+            payload.extend_from_slice(FLUSH);
+            conn.write_all(&payload).unwrap();
+            conn.flush().unwrap();
+            // Keep connection open — sleep long enough that read_to_end would block.
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            drop(conn);
+        });
+
+        let mut stream = std::net::TcpStream::connect(addr).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+
+        // This must return quickly (not block for 2+ seconds waiting for EOF/timeout).
+        let start = std::time::Instant::now();
+        let result = read_head_from_pktlines(&mut stream).unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(hex::encode(&result), FAKE_SHA);
+        assert!(
+            elapsed.as_millis() < 1000,
+            "read_head_from_pktlines blocked for {}ms — likely still using read_to_end",
+            elapsed.as_millis()
+        );
+
+        drop(stream);
+        server.join().unwrap();
+    }
 }

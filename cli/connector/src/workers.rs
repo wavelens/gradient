@@ -11,12 +11,14 @@ use serde::{Deserialize, Serialize};
 pub struct RegisterWorkerRequest {
     pub worker_id: String,
     pub url: Option<String>,
+    pub token: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RegisterWorkerResponse {
     pub peer_id: String,
-    pub token: String,
+    /// Absent when the token was supplied in the request.
+    pub token: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -41,8 +43,9 @@ pub async fn post_org_worker(
     organization: String,
     worker_id: String,
     url: Option<String>,
+    token: Option<String>,
 ) -> Result<BaseResponse<RegisterWorkerResponse>, String> {
-    let req = RegisterWorkerRequest { worker_id, url };
+    let req = RegisterWorkerRequest { worker_id, url, token };
 
     let res = get_client(
         config,

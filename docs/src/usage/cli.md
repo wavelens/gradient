@@ -118,22 +118,23 @@ gradient --help      Show help for any command
 gradient --version   Print CLI version
 ```
 
-## Worker Management
-
-Workers are registered and managed via the REST API (not the CLI). See [API → Workers](api.md#workers) for the full reference, or use `curl`/`jq` directly:
+### Workers
 
 ```sh
-# Register a worker under an org
-curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"worker_id": "my-builder"}'
+# Register a worker (worker_id must be a UUID v4).
+# The worker auto-generates one on first start and writes it to
+# /var/lib/gradient-worker/worker-id — use that value here.
+gradient worker register <uuid>
 
-# List registered workers (and live connection status)
-curl https://gradient.example.com/api/v1/orgs/myorg/workers \
-  -H "Authorization: Bearer $TOKEN"
+# Register with optional URL and pre-generated token
+gradient worker register <uuid> --url wss://builder.example.com/proto
+gradient worker register <uuid> --token "$(openssl rand -base64 48)"
 
-# Remove a worker registration
-curl -X DELETE https://gradient.example.com/api/v1/orgs/myorg/workers/my-builder \
-  -H "Authorization: Bearer $TOKEN"
+# List registered workers (shows live connection status)
+gradient worker list
+
+# Unregister a worker
+gradient worker delete <uuid>
 ```
+
+When no `--token` is given, the server generates one and prints it once — store it securely. When `--token` is supplied, the token is not echoed back (the server stores only its hash).

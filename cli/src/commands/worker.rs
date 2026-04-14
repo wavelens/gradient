@@ -19,6 +19,10 @@ pub enum Commands {
         /// Optional WebSocket URL where the worker listens for incoming server connections
         #[arg(short, long)]
         url: Option<String>,
+        /// Pre-generated token (output of `openssl rand -base64 48`). When omitted the server
+        /// generates one and prints it — store it securely, it cannot be retrieved again.
+        #[arg(short, long)]
+        token: Option<String>,
     },
     /// List all workers registered under the selected organization
     List,
@@ -31,7 +35,7 @@ pub enum Commands {
 
 pub async fn handle(cmd: Commands) {
     match cmd {
-        Commands::Register { worker_id, url } => {
+        Commands::Register { worker_id, url, token } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 _ => {
@@ -40,11 +44,14 @@ pub async fn handle(cmd: Commands) {
                 }
             };
 
+            let token_provided = token.is_some();
+
             let res = workers::post_org_worker(
                 get_request_config(load_config()).unwrap(),
                 organization,
                 worker_id,
                 url,
+                token,
             )
             .await
             .map_err(|e| {
@@ -60,9 +67,13 @@ pub async fn handle(cmd: Commands) {
 
             println!("Worker registered.");
             println!("Peer ID:  {}", res.message.peer_id);
-            println!("Token:    {}", res.message.token);
-            println!();
-            println!("Store the token securely — it cannot be retrieved again.");
+            if let Some(token) = res.message.token {
+                println!("Token:    {}", token);
+                println!();
+                println!("Store the token securely — it cannot be retrieved again.");
+            } else if token_provided {
+                println!("Token was pre-supplied; not echoed back.");
+            }
         }
 
         Commands::List => {

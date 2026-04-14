@@ -127,11 +127,11 @@
       pInputText
       id="worker-id"
       [(ngModel)]="newWorkerId"
-      placeholder="e.g. aarch64-builder-01"
+      placeholder="e.g. a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
       class="w-full"
       (keyup.enter)="registerWorker()"
     />
-    <small class="text-secondary">A stable identifier for this worker process — use the machine hostname or a descriptive name.</small>
+    <small class="text-secondary">Must be a UUID v4 — run <code>uuidgen</code> or use the worker's auto-generated ID from <code>/var/lib/gradient-worker/worker-id</code>.</small>
   </div>
   <div class="form-group">
     <label for="worker-url">Worker URL <span class="text-secondary">(optional)</span></label>
@@ -143,6 +143,17 @@
       class="w-full"
     />
     <small class="text-secondary">If set, the server connects outbound to this URL instead of waiting for the worker to connect.</small>
+  </div>
+  <div class="form-group">
+    <label for="worker-token">Token <span class="text-secondary">(optional)</span></label>
+    <input
+      pInputText
+      id="worker-token"
+      [(ngModel)]="newWorkerToken"
+      placeholder="Output of: openssl rand -base64 48"
+      class="w-full"
+    />
+    <small class="text-secondary">Pre-generated token. Leave blank to have the server generate one (it will be shown once after registration).</small>
   </div>
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showRegisterDialog.set(false)" [disabled]="registering()"></button>
@@ -168,10 +179,12 @@
   [closable]="false"
 >
   @if (lastRegistration(); as reg) {
-    <div class="token-warning">
-      <span class="material-symbols-outlined">warning</span>
-      <strong>Save this token now.</strong> It will not be shown again.
-    </div>
+    @if (reg.token) {
+      <div class="token-warning">
+        <span class="material-symbols-outlined">warning</span>
+        <strong>Save this token now.</strong> It will not be shown again.
+      </div>
+    }
 
     <div class="form-group">
       <label>Peer ID</label>
@@ -180,26 +193,30 @@
       </div>
     </div>
 
-    <div class="form-group">
-      <label>Token</label>
-      <div class="copy-row">
-        <code class="copy-value token-value">{{ reg.token }}</code>
+    @if (reg.token) {
+      <div class="form-group">
+        <label>Token</label>
+        <div class="copy-row">
+          <code class="copy-value token-value">{{ reg.token }}</code>
+        </div>
+        <button
+          pButton
+          [label]="tokenCopied() ? 'Copied!' : 'Copy Token'"
+          [icon]="tokenCopied() ? 'pi pi-check' : 'pi pi-copy'"
+          severity="secondary"
+          class="copy-btn"
+          (click)="copyToken()"
+        ></button>
       </div>
-      <button
-        pButton
-        [label]="tokenCopied() ? 'Copied!' : 'Copy Token'"
-        [icon]="tokenCopied() ? 'pi pi-check' : 'pi pi-copy'"
-        severity="secondary"
-        class="copy-btn"
-        (click)="copyToken()"
-      ></button>
-    </div>
 
-    <div class="form-group">
-      <label>Peers file entry</label>
-      <pre class="peers-file-example">{{ reg.peer_id }}:{{ reg.token }}</pre>
-      <small class="text-secondary">Add this line to <code>/run/secrets/gradient-worker-peers</code> on your worker host, then set <code>peersFile</code> in your NixOS config.</small>
-    </div>
+      <div class="form-group">
+        <label>Peers file entry</label>
+        <pre class="peers-file-example">{{ reg.peer_id }}:{{ reg.token }}</pre>
+        <small class="text-secondary">Add this line to <code>/run/secrets/gradient-worker-peers</code> on your worker host, then set <code>peersFile</code> in your NixOS config.</small>
+      </div>
+    } @else {
+      <p class="text-secondary">Worker registered successfully. The token was pre-supplied and will not be echoed back.</p>
+    }
   }
   <ng-template pTemplate="footer">
     <button pButton label="I've saved the token" icon="pi pi-check" (click)="closeTokenDialog()"></button>

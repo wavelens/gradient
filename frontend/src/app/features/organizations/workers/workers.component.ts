@@ -49,6 +49,7 @@ export class WorkersComponent implements OnInit {
   workers = signal<Worker[]>([]);
   newWorkerId = '';
   newWorkerUrl = '';
+  newWorkerToken = '';
   lastRegistration = signal<WorkerRegistration | null>(null);
   tokenCopied = signal(false);
   peerIdCopied = signal(false);
@@ -83,6 +84,7 @@ export class WorkersComponent implements OnInit {
   openRegisterDialog(): void {
     this.newWorkerId = '';
     this.newWorkerUrl = '';
+    this.newWorkerToken = '';
     this.errorMessage.set(null);
     this.showRegisterDialog.set(true);
   }
@@ -92,13 +94,17 @@ export class WorkersComponent implements OnInit {
     this.registering.set(true);
     this.errorMessage.set(null);
     const url = this.newWorkerUrl.trim() || undefined;
-    this.workersService.registerWorker(this.orgName, this.newWorkerId.trim(), url).subscribe({
+    const token = this.newWorkerToken.trim() || undefined;
+    this.workersService.registerWorker(this.orgName, this.newWorkerId.trim(), url, token).subscribe({
       next: (reg) => {
         this.registering.set(false);
         this.showRegisterDialog.set(false);
-        this.lastRegistration.set(reg);
-        this.tokenCopied.set(false);
-        this.showTokenDialog.set(true);
+        // Only show the token dialog when there is something to display.
+        if (reg.token || this.newWorkerToken.trim()) {
+          this.lastRegistration.set(reg);
+          this.tokenCopied.set(false);
+          this.showTokenDialog.set(true);
+        }
         this.loadWorkers();
       },
       error: (err) => {

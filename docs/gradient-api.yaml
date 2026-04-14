@@ -2110,6 +2110,13 @@ paths:
                   type: string
                   nullable: true
                   description: Optional WebSocket URL where the worker listens for incoming server connections. When set, the server connects outbound to this URL.
+                token:
+                  type: string
+                  nullable: true
+                  description: >
+                    Pre-generated token (output of `openssl rand -base64 48`, exactly 64 standard-base64 characters).
+                    When provided the server stores its hash and does NOT return the token in the response.
+                    Omit to have the server generate a token — it will be returned once and cannot be retrieved again.
       responses:
         '200':
           description: Worker registered
@@ -3188,7 +3195,7 @@ components:
 
     RegisterWorkerResponse:
       type: object
-      required: [peer_id, token]
+      required: [peer_id]
       properties:
         peer_id:
           type: string
@@ -3196,7 +3203,10 @@ components:
           description: The organization's UUID — used as the peer_id in worker config
         token:
           type: string
-          description: Plaintext token (shown once only) — worker must store this securely
+          nullable: true
+          description: >
+            Plaintext token (present only when the server generated it — not present when the caller
+            supplied a token in the request). Store securely; it cannot be retrieved again.
 
     WorkerLiveInfo:
       type: object

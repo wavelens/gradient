@@ -83,21 +83,28 @@ Workers are `gradient-worker` processes that connect to the server over WebSocke
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/orgs/{org}/workers` | Register a worker — returns `peer_id` + one-time `token` |
+| `POST` | `/orgs/{org}/workers` | Register a worker — returns `peer_id` and optionally a one-time `token` |
 | `GET` | `/orgs/{org}/workers` | List registered workers (merges live state) |
 | `DELETE` | `/orgs/{org}/workers/{worker_id}` | Unregister a worker |
 | `GET` | `/workers` | List all currently connected workers (superuser or `GRADIENT_GLOBAL_STATS_PUBLIC`) |
 
 **Register a worker:**
 
+`worker_id` must be a **UUID v4**. On a NixOS host running the `gradient-worker` service the worker auto-generates one on first start and persists it to `/var/lib/gradient-worker/worker-id` — read it with:
+
 ```sh
+cat /var/lib/gradient-worker/worker-id
+```
+
+```sh
+# Server generates the token (returned once, store it immediately)
 curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"worker_id": "build-01"}'
+  -d '{"worker_id": "550e8400-e29b-41d4-a716-446655440001"}'
 ```
 
-Response:
+Response (server-generated token):
 
 ```json
 {
@@ -109,10 +116,30 @@ Response:
 }
 ```
 
-The `token` is shown **once only** — store it immediately. On the worker, write it to the peers file:
+Alternatively, supply a pre-generated token (`openssl rand -base64 48` — exactly 64 standard base64 characters). The server stores its hash and **does not** return it in the response:
 
 ```sh
-echo "550e8400-e29b-41d4-a716-446655440000:a1b2c3..." > /run/secrets/gradient-worker-peers
+curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"worker_id\": \"550e8400-e29b-41d4-a716-446655440001\", \"token\": \"$(openssl rand -base64 48)\"}"
+```
+
+Response (pre-supplied token — no `token` field):
+
+```json
+{
+  "error": false,
+  "message": {
+    "peer_id": "550e8400-e29b-41d4-a716-446655440000"
+  }
+}
+```
+
+Write the `peer_id` and token to the peers file on the worker host:
+
+```sh
+echo "<peer_id>:<token>" > /run/secrets/gradient-worker-peers
 ```
 
 Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.

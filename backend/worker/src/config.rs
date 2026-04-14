@@ -38,6 +38,13 @@ pub struct WorkerConfig {
     )]
     pub data_dir: String,
 
+    /// Override the worker's persistent UUID. When set, this value is used as
+    /// the worker identity instead of the UUID stored in `{data_dir}/worker-id`.
+    /// Useful for declarative deployments where the ID must be known before the
+    /// worker first runs. Must be a valid UUID.
+    #[arg(long, env = "GRADIENT_WORKER_ID")]
+    pub worker_id: Option<String>,
+
     /// Re-exec as a Nix evaluator subprocess (internal — do not set manually).
     #[arg(long, env = "GRADIENT_EVAL_WORKER", hide = true)]
     pub eval_worker: bool,

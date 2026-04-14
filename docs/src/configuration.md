@@ -162,15 +162,21 @@ services.gradient.worker = {
 
 ### Remote Workers
 
-Deploy `gradient-worker` on dedicated build machines. First register the worker under an organization — either declaratively via `state.workers` (see below) or via the API:
+Deploy `gradient-worker` on dedicated build machines. First register the worker under an organization — either declaratively via `state.workers` (see below) or via the API. The `worker_id` must be a **UUID v4**. The worker auto-generates one on first start and persists it to `/var/lib/gradient-worker/worker-id`:
+
+```sh
+cat /var/lib/gradient-worker/worker-id
+```
 
 ```sh
 curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"worker_id": "builder-1"}'
+  -d '{"worker_id": "550e8400-e29b-41d4-a716-446655440001"}'
 # → {"error":false,"message":{"peer_id":"<uuid>","token":"<token>"}}
 ```
+
+You can optionally pre-generate the token and pass it in the request (`openssl rand -base64 48`); the response will then omit the token field.
 
 Then on the build machine:
 
@@ -219,6 +225,7 @@ When `peersFile` is `null` (the default), the worker connects in **open mode** �
 | Option | Default | Description |
 |---|---|---|
 | `serverUrl` | `""` | WebSocket URL of the server's `/proto` endpoint |
+| `workerId` | `null` | Override the worker UUID (`GRADIENT_WORKER_ID`). When null, the ID is read from `$StateDirectory/worker-id` or auto-generated on first start |
 | `peersFile` | `null` | Path to peers file (`peer_id:token` per line, `*` = any peer); null = open mode |
 | `discoverable` | `false` | Accept incoming connections from the server (reverse-proxy mode) |
 | `port` | `3100` | Listener port when `discoverable` is enabled |
@@ -350,12 +357,18 @@ services.gradient.state.workers = {
 };
 ```
 
-The token file must contain a single plaintext token. The server hashes it and stores the result — the plaintext is never persisted.
+The token file must contain a single plaintext token — the server hashes it and stores the result, the plaintext is never persisted. Use the same format expected by the worker's peers file:
 
 ```sh
-openssl rand -hex 32 > /run/secrets/builder-1-token
+openssl rand -base64 48 > /run/secrets/builder-1-token
 ```
 
-The `worker_id` defaults to the attrset key. Set it explicitly only if the worker machine uses a custom `GRADIENT_WORKER_ID`.
+The `worker_id` defaults to the attrset key. Unlike API registration, state-managed workers are not restricted to UUID v4 — any stable string is accepted, though using a UUID is conventional.
+
+To ensure the worker uses the same UUID that was pre-registered, set `workerId` in the worker module so the worker does not auto-generate a different one on first start:
+
+```nix
+services.gradient.worker.workerId = "550e8400-e29b-41d4-a716-446655440001";
+```
 
 State-managed worker registrations are deleted automatically when removed from `state.workers` (subject to `settings.deleteState`).

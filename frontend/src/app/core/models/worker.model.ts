@@ -21,5 +21,6 @@ export interface Worker {
 
 export interface WorkerRegistration {
   peer_id: string;
-  token: string;
+  /** Absent when the token was pre-supplied in the registration request. */
+  token?: string;
 }

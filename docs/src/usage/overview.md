@@ -79,17 +79,17 @@ Build capacity is provided by `gradient-worker` processes. The server does not s
 
 To run a worker on the server host itself, import the `gradient-worker` NixOS module and enable `services.gradient.worker`. For remote build machines or additional capacity:
 
-1. **Register the worker** under an organization:
+1. **Register the worker** under an organization (`worker_id` must be a UUID v4):
 
     ```sh
     curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
       -H "Authorization: Bearer $TOKEN" \
       -H "Content-Type: application/json" \
-      -d '{"worker_id": "my-aarch64-builder"}'
+      -d '{"worker_id": "550e8400-e29b-41d4-a716-446655440001"}'
     # → {"error":false,"message":{"peer_id":"<uuid>","token":"<secret>"}}
     ```
 
-    Store the returned `peer_id` and `token` — the token is shown only once.
+    Store the returned `peer_id` and `token` — the token is shown only once. You can also supply your own pre-generated token via the `token` field (`openssl rand -base64 48`); in that case the response omits the token.
 
 2. **Configure the worker** on the remote machine (see [Configuration → Workers](../configuration.md#workers) for the full NixOS module):
 
