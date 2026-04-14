@@ -62,10 +62,10 @@ enum MainCommands {
         #[command(subcommand)]
         cmd: project::Commands,
     },
-    /// Manage build servers
-    Server {
+    /// Manage build workers
+    Worker {
         #[command(subcommand)]
-        cmd: server::Commands,
+        cmd: worker::Commands,
     },
     /// Manage build caches
     Cache {
@@ -248,7 +248,7 @@ pub async fn run_cli() -> std::io::Result<()> {
         }
         MainCommands::Organization { cmd } => organization::handle(cmd).await,
         MainCommands::Project { cmd } => project::handle(cmd).await,
-        MainCommands::Server { cmd } => server::handle(cmd).await,
+        MainCommands::Worker { cmd } => worker::handle(cmd).await,
         MainCommands::Cache { cmd } => cache::handle(cmd).await,
         MainCommands::Generate { cmd } => generate::handle(cmd).await,
     }

@@ -11,8 +11,8 @@ pub mod commits;
 pub mod evals;
 pub mod orgs;
 pub mod projects;
-pub mod servers;
 pub mod user;
+pub mod workers;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};

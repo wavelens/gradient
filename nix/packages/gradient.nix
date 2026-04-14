@@ -52,6 +52,10 @@ in rustPlatform.buildRustPackage {
   LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
   BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${glibc.dev}";
 
+  nativeCheckInputs = [
+    git
+  ];
+
   preCheck = ''
     ln -s ${testStore} ./test-store
   '';

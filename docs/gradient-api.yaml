@@ -86,10 +86,8 @@ tags:
     description: Evaluation details, status, and log streaming
   - name: builds
     description: Build details, logs, artefact downloads, and dependency graph
-  - name: servers
-    description: Remote Nix build server management
   - name: workers
-    description: Connected proto workers (live status)
+    description: Worker registration and live status (proto workers connected via WebSocket)
   - name: caches
     description: Binary cache management
   - name: commits
@@ -2011,212 +2009,6 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  # ── Servers ──────────────────────────────────────────────────────────────────
-
-  /servers/{organization}:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
-    get:
-      tags: [servers]
-      summary: List servers
-      description: Returns all build servers registered in the organization.
-      operationId: listServers
-      responses:
-        '200':
-          description: Server list
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        $ref: '#/components/schemas/ListResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    put:
-      tags: [servers]
-      summary: Add server
-      description: Registers a new remote Nix build server with the organization.
-      operationId: createServer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/MakeServerRequest'
-            example:
-              name: builder-1
-              display_name: Primary Builder
-              host: builder.example.com
-              port: 22
-              username: nix-ssh
-              architectures: [x86_64-linux]
-              features: [kvm, nixos-test]
-      responses:
-        '200':
-          description: Server UUID
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StringResponse'
-              example:
-                error: false
-                message: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-
-  /servers/{organization}/{server}:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ServerSlug'
-    get:
-      tags: [servers]
-      summary: Get server
-      operationId: getServer
-      responses:
-        '200':
-          description: Server details
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/BaseResponse'
-                  - type: object
-                    properties:
-                      message:
-                        $ref: '#/components/schemas/Server'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    patch:
-      tags: [servers]
-      summary: Update server
-      description: Updates one or more server fields. Managed servers cannot be edited via the API.
-      operationId: patchServer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PatchServerRequest'
-      responses:
-        '200':
-          description: Updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StringResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-    delete:
-      tags: [servers]
-      summary: Delete server
-      description: Removes the server. Managed servers cannot be deleted via the API.
-      operationId: deleteServer
-      responses:
-        '200':
-          description: Deleted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StringResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /servers/{organization}/{server}/check-connection:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ServerSlug'
-    post:
-      tags: [servers]
-      summary: Test server connection
-      description: Attempts to open an SSH connection to the server using the organization's SSH key. Returns a 504 if the connection cannot be established within the timeout.
-      operationId: checkServerConnection
-      responses:
-        '200':
-          description: Connection successful
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StringResponse'
-              example:
-                error: false
-                message: "server connection established"
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '504':
-          description: Connection timed out or failed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StringResponse'
-
-  /servers/{organization}/{server}/active:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ServerSlug'
-    post:
-      tags: [servers]
-      summary: Enable server
-      description: Sets the server's active flag to true so the scheduler will dispatch builds to it.
-      operationId: enableServer
-      responses:
-        '200':
-          description: Enabled
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StringResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-    delete:
-      tags: [servers]
-      summary: Disable server
-      description: Sets the server's active flag to false, preventing the scheduler from dispatching new builds.
-      operationId: disableServer
-      responses:
-        '200':
-          description: Disabled
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StringResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
   /projects/{organization}/available:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
@@ -2314,6 +2106,10 @@ paths:
                 worker_id:
                   type: string
                   description: Persistent worker identity string (UUID or human-readable name)
+                url:
+                  type: string
+                  nullable: true
+                  description: Optional WebSocket URL where the worker listens for incoming server connections. When set, the server connects outbound to this URL.
       responses:
         '200':
           description: Worker registered
@@ -3290,15 +3086,6 @@ components:
         example: my-project
       description: Project name (slug)
 
-    ServerSlug:
-      name: server
-      in: path
-      required: true
-      schema:
-        type: string
-        example: builder-1
-      description: Server name (slug)
-
     CacheSlug:
       name: cache
       in: path
@@ -3448,6 +3235,10 @@ components:
           type: string
           format: date-time
           description: When this worker was registered under the organization
+        url:
+          type: string
+          nullable: true
+          description: WebSocket URL where the worker listens for incoming server connections (if configured)
         live:
           allOf:
             - $ref: '#/components/schemas/WorkerLiveInfo'
@@ -4237,104 +4028,6 @@ components:
         status:
           type: string
           description: Build status string
-
-    # ── Servers ───────────────────────────────────────────────────────────────
-
-    MakeServerRequest:
-      type: object
-      required: [name, display_name, host, port, username, architectures, features]
-      properties:
-        name:
-          type: string
-          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
-          example: builder-1
-        display_name:
-          type: string
-          example: Primary Builder
-        host:
-          type: string
-          description: Hostname or IP address
-          example: builder.example.com
-        port:
-          type: integer
-          description: SSH port
-          default: 22
-          example: 22
-        username:
-          type: string
-          description: SSH username
-          example: nix-ssh
-        architectures:
-          type: array
-          items:
-            $ref: '#/components/schemas/Architecture'
-          minItems: 1
-          example: [x86_64-linux]
-        features:
-          type: array
-          items:
-            type: string
-          description: Nix build features (e.g. `kvm`, `nixos-test`, `big-parallel`)
-          example: [kvm, nixos-test]
-
-    PatchServerRequest:
-      type: object
-      properties:
-        name:
-          type: string
-        display_name:
-          type: string
-        host:
-          type: string
-        port:
-          type: integer
-        username:
-          type: string
-        architectures:
-          type: array
-          items:
-            $ref: '#/components/schemas/Architecture'
-        features:
-          type: array
-          items:
-            type: string
-
-    Server:
-      type: object
-      required: [id, name, display_name, organization, active, host, port, username, managed, created_by, created_at]
-      properties:
-        id:
-          type: string
-          format: uuid
-        name:
-          type: string
-        display_name:
-          type: string
-        organization:
-          type: string
-          format: uuid
-        active:
-          type: boolean
-          description: Whether the scheduler will dispatch builds to this server
-        host:
-          type: string
-        port:
-          type: integer
-        username:
-          type: string
-        managed:
-          type: boolean
-          description: If true, this server is controlled by NixOS configuration
-        last_connection_at:
-          type: string
-          format: date-time
-          nullable: true
-        created_by:
-          type: string
-          format: uuid
-        created_at:
-          type: string
-          format: date-time
 
     # ── Caches ────────────────────────────────────────────────────────────────
 
