@@ -171,8 +171,15 @@ mod tests {
     use test_support::prelude::MockProtoServer;
 
     /// Create a temporary directory with a single file and return its path.
+    ///
+    /// Each call produces a unique directory (UUID-based) so parallel tests
+    /// don't interfere with each other's cleanup.
     fn make_temp_store_path() -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("gradient-nar-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "gradient-nar-test-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("hello"), b"gradient nar test data").unwrap();
         dir

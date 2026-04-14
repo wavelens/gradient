@@ -28,8 +28,13 @@ use tracing::{debug, info, instrument, warn};
 /// This reads incrementally — one pkt-line at a time — so it works correctly
 /// even when the remote keeps the connection open after the ref advertisement
 /// (which is normal git protocol behavior).
+///
+/// Falls back to the first non-zero ref if HEAD is not listed (e.g. empty repo
+/// advertising only `capabilities^{}`).
 fn read_head_from_pktlines(reader: &mut dyn std::io::Read) -> Result<Vec<u8>, SourceError> {
     let mut len_buf = [0u8; 4];
+    let mut first_ref: Option<Vec<u8>> = None;
+
     loop {
         std::io::Read::read_exact(reader, &mut len_buf).map_err(|e| {
             SourceError::GitCommandFailed {
@@ -68,13 +73,30 @@ fn read_head_from_pktlines(reader: &mut dyn std::io::Read) -> Result<Vec<u8>, So
             let refname = std::str::from_utf8(&ref_bytes[..refname_end])
                 .unwrap_or("")
                 .trim();
+
+            debug!(refname, sha, "pkt-line ref");
+
             if refname == "HEAD" {
                 return hex::decode(sha).map_err(|_| SourceError::GitOutputParsing);
             }
+
+            // Remember the first real ref as fallback (skip zero-id capabilities marker).
+            if first_ref.is_none() && sha != "0000000000000000000000000000000000000000" {
+                if let Ok(bytes) = hex::decode(sha) {
+                    first_ref = Some(bytes);
+                }
+            }
+        } else {
+            // Non-ref pkt-line (e.g. version advertisement).
+            let preview = std::str::from_utf8(&data)
+                .unwrap_or("<binary>")
+                .trim_end();
+            debug!(preview, "pkt-line non-ref");
         }
     }
 
-    Err(SourceError::GitHashExtraction)
+    // Fall back to the first non-zero ref (matches libgit2's list.first() behavior).
+    first_ref.ok_or(SourceError::GitHashExtraction)
 }
 
 fn ls_remote_head_git_protocol(url: &str) -> Result<Vec<u8>, SourceError> {
@@ -547,9 +569,20 @@ mod tests {
     }
 
     #[test]
-    fn read_head_from_pktlines_no_head_returns_error() {
+    fn read_head_from_pktlines_no_head_falls_back_to_first_ref() {
         let mut buf = Vec::new();
         buf.extend_from_slice(&ref_line_with_caps(FAKE_SHA, "refs/heads/main", "caps"));
+        buf.extend_from_slice(FLUSH);
+
+        let result = read_head_from_pktlines(&mut buf.as_slice()).unwrap();
+        assert_eq!(hex::encode(&result), FAKE_SHA);
+    }
+
+    #[test]
+    fn read_head_from_pktlines_empty_repo_returns_error() {
+        let zero_id = "0000000000000000000000000000000000000000";
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&ref_line_with_caps(zero_id, "capabilities^{}", "multi_ack"));
         buf.extend_from_slice(FLUSH);
 
         let err = read_head_from_pktlines(&mut buf.as_slice()).unwrap_err();

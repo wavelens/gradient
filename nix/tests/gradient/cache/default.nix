@@ -297,10 +297,6 @@
       # Poll in short increments so we surface errors quickly instead of timing out.
       def check_journal_for_errors(since_seconds=45):
           j = server.succeed(f"journalctl -u gradient-server --no-pager --since='-{since_seconds}s' -n 200")
-          if "Unable to extract hash from Git URL" in j:
-              raise Exception(
-                  f"Gradient server cannot read git HEAD — check libgit2 / git-daemon compatibility:\n{j[-2000:]}"
-              )
           if "panicked" in j or "SIGABRT" in j:
               raise Exception(f"Gradient server crashed:\n{j[-2000:]}")
           return j

@@ -190,8 +190,8 @@ in {
 
     systemd = {
       tmpfiles.settings."10-gradient"."/nix/var/nix/gcroots/gradient".d = {
-        user = "gradient";
-        group = "gradient";
+        user = "gradient-worker";
+        group = "gradient-worker";
         mode = "0755";
       };
 
@@ -228,7 +228,7 @@ in {
         environment = {
           NIX_REMOTE = "daemon";
           XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
-          GRADIENT_WORKER_DATA_DIR   = "%S/gradient-worker";
+          GRADIENT_WORKER_DATA_DIR   = cfg.baseDir;
         } // lib.optionalAttrs (cfg.serverUrl != null) {
           GRADIENT_WORKER_SERVER_URL = cfg.serverUrl;
         } // lib.optionalAttrs (cfg.peersFile != null) {
