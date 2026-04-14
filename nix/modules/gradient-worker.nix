@@ -12,6 +12,7 @@ in {
     enable = lib.mkEnableOption "Gradient worker";
     package = lib.mkPackageOption pkgs "gradient" { };
     configureNginx = lib.mkEnableOption "Nginx reverse proxy for the worker listener";
+    useTls = lib.mkEnableOption "TLS" // { default = true; };
     discoverable = lib.mkEnableOption "listen for incoming connections from servers";
     domain = lib.mkOption {
       description = "Domain under which the worker's nginx vhost is served. Only used when configureNginx is enabled";
@@ -22,9 +23,21 @@ in {
 
     serverUrl = lib.mkOption {
       description = "WebSocket URL of the Gradient server protocol endpoint";
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "wss://gradient.example.com/proto";
+    };
+
+    baseDir = lib.mkOption {
+      description = "Base directory for Gradient";
+      type = lib.types.path;
+      default = "/var/lib/gradient-worker";
+    };
+
+    listenAddr = lib.mkOption {
+      description = "IP address on which the worker listener binds";
       type = lib.types.str;
-      default = "ws://localhost:3100/proto";
-      example = "wss://worker.example.com/proto";
+      default = "127.0.0.1";
     };
 
     port = lib.mkOption {
@@ -175,65 +188,94 @@ in {
       }
     ];
 
-    systemd.services.gradient-worker = {
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" ];
-
-      serviceConfig = {
-        ExecStart = "${lib.getBin cfg.package}/bin/gradient-worker";
-        User = "gradient-worker";
-        Group = "gradient-worker";
-        Restart = "on-failure";
-        RestartSec = 10;
-        PrivateTmp = true;
-        ProtectHome = true;
-        ProtectSystem = "strict";
-        RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
-        StateDirectory = "gradient-worker";
-        LoadCredential = lib.optionals (cfg.peersFile != null) [
-          "gradient_worker_peers:${cfg.peersFile}"
-        ];
+    systemd = {
+      tmpfiles.settings."10-gradient"."/nix/var/nix/gcroots/gradient".d = {
+        user = "gradient";
+        group = "gradient";
+        mode = "0755";
       };
 
-      environment = {
-        GRADIENT_WORKER_SERVER_URL = cfg.serverUrl;
-        GRADIENT_WORKER_DATA_DIR   = "%S/gradient-worker";
-      } // lib.optionalAttrs (cfg.peersFile != null) {
-        GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
-      } // lib.optionalAttrs (cfg.workerId != null) {
-        GRADIENT_WORKER_ID = cfg.workerId;
-      } // {
-        GRADIENT_WORKER_DISCOVERABLE                = lib.boolToString cfg.discoverable;
-        GRADIENT_WORKER_PORT                        = toString cfg.port;
-        GRADIENT_MAX_CONCURRENT_EVALUATIONS         = toString cfg.settings.maxConcurrentEvaluations;
-        GRADIENT_MAX_CONCURRENT_BUILDS              = toString cfg.settings.maxConcurrentBuilds;
-        GRADIENT_MAX_NIXDAEMON_CONNECTIONS          = toString cfg.settings.maxNixdaemonConnections;
-        GRADIENT_WORKER_EVAL_WORKERS                = toString cfg.settings.evalWorkers;
-        GRADIENT_MAX_EVALUATIONS_PER_WORKER         = toString cfg.settings.maxEvaluationsPerWorker;
-        GRADIENT_EVAL_CLOSURE_PARALLELISM           = toString cfg.settings.evalClosureParallelism;
-        GRADIENT_MAX_PROTO_CONNECTIONS              = toString cfg.settings.maxProtoConnections;
-        GRADIENT_WORKER_CAPABILITY_FEDERATE         = lib.boolToString cfg.capabilities.federate;
-        GRADIENT_WORKER_CAPABILITY_FETCH            = lib.boolToString cfg.capabilities.fetch;
-        GRADIENT_WORKER_CAPABILITY_EVAL             = lib.boolToString cfg.capabilities.eval;
-        GRADIENT_WORKER_CAPABILITY_BUILD            = lib.boolToString cfg.capabilities.build;
-        GRADIENT_WORKER_CAPABILITY_SIGN             = lib.boolToString cfg.capabilities.sign;
-        GRADIENT_LOG_LEVEL                          = cfg.settings.logLevel.default;
-        RUST_LOG                                    = cfg.settings.logLevel.default;
-      } // lib.optionalAttrs (cfg.settings.logLevel.eval != null) {
-        GRADIENT_EVAL_LOG_LEVEL = cfg.settings.logLevel.eval;
-      } // lib.optionalAttrs (cfg.settings.logLevel.build != null) {
-        GRADIENT_BUILD_LOG_LEVEL = cfg.settings.logLevel.build;
-      } // lib.optionalAttrs (cfg.settings.logLevel.proto != null) {
-        GRADIENT_PROTO_LOG_LEVEL = cfg.settings.logLevel.proto;
+      services.gradient-worker = {
+        wantedBy = [ "multi-user.target" ];
+        after = [ "network.target" ];
+
+        serviceConfig = {
+          ExecStart = "${lib.getBin cfg.package}/bin/gradient-worker";
+          User = "gradient-worker";
+          Group = "gradient-worker";
+          PrivateTmp = true;
+          ProtectHome = true;
+          ProtectHostname = true;
+          ProtectKernelLogs = true;
+          ProtectKernelModules = true;
+          ProtectKernelTunables = true;
+          ProtectProc = "invisible";
+          ProtectSystem = "strict";
+          ReadWritePaths = [ "/nix/var/nix/gcroots/gradient" ];
+          Restart = "on-failure";
+          RestartSec = 10;
+          LimitNOFILE = 65535;
+          RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
+          RestrictNamespaces = true;
+          RestrictRealtime = true;
+          RestrictSUIDSGID = true;
+          WorkingDirectory = cfg.baseDir;
+          LoadCredential = lib.optionals (cfg.peersFile != null) [
+            "gradient_worker_peers:${cfg.peersFile}"
+          ];
+        };
+
+        environment = {
+          NIX_REMOTE = "daemon";
+          XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
+          GRADIENT_WORKER_DATA_DIR   = "%S/gradient-worker";
+        } // lib.optionalAttrs (cfg.serverUrl != null) {
+          GRADIENT_WORKER_SERVER_URL = cfg.serverUrl;
+        } // lib.optionalAttrs (cfg.peersFile != null) {
+          GRADIENT_WORKER_PEERS_FILE = "%d/gradient_worker_peers";
+        } // lib.optionalAttrs (cfg.workerId != null) {
+          GRADIENT_WORKER_ID = cfg.workerId;
+        } // {
+          GRADIENT_WORKER_DISCOVERABLE                = lib.boolToString cfg.discoverable;
+          GRADIENT_WORKER_LISTEN_ADDR                 = cfg.listenAddr;
+          GRADIENT_WORKER_PORT                        = toString cfg.port;
+          GRADIENT_MAX_CONCURRENT_EVALUATIONS         = toString cfg.settings.maxConcurrentEvaluations;
+          GRADIENT_MAX_CONCURRENT_BUILDS              = toString cfg.settings.maxConcurrentBuilds;
+          GRADIENT_MAX_NIXDAEMON_CONNECTIONS          = toString cfg.settings.maxNixdaemonConnections;
+          GRADIENT_WORKER_EVAL_WORKERS                = toString cfg.settings.evalWorkers;
+          GRADIENT_MAX_EVALUATIONS_PER_WORKER         = toString cfg.settings.maxEvaluationsPerWorker;
+          GRADIENT_EVAL_CLOSURE_PARALLELISM           = toString cfg.settings.evalClosureParallelism;
+          GRADIENT_MAX_PROTO_CONNECTIONS              = toString cfg.settings.maxProtoConnections;
+          GRADIENT_WORKER_CAPABILITY_FEDERATE         = lib.boolToString cfg.capabilities.federate;
+          GRADIENT_WORKER_CAPABILITY_FETCH            = lib.boolToString cfg.capabilities.fetch;
+          GRADIENT_WORKER_CAPABILITY_EVAL             = lib.boolToString cfg.capabilities.eval;
+          GRADIENT_WORKER_CAPABILITY_BUILD            = lib.boolToString cfg.capabilities.build;
+          GRADIENT_WORKER_CAPABILITY_SIGN             = lib.boolToString cfg.capabilities.sign;
+          GRADIENT_LOG_LEVEL                          = cfg.settings.logLevel.default;
+          RUST_LOG                                    = cfg.settings.logLevel.default;
+        } // lib.optionalAttrs (cfg.settings.logLevel.eval != null) {
+          GRADIENT_EVAL_LOG_LEVEL = cfg.settings.logLevel.eval;
+        } // lib.optionalAttrs (cfg.settings.logLevel.build != null) {
+          GRADIENT_BUILD_LOG_LEVEL = cfg.settings.logLevel.build;
+        } // lib.optionalAttrs (cfg.settings.logLevel.proto != null) {
+          GRADIENT_PROTO_LOG_LEVEL = cfg.settings.logLevel.proto;
+        };
       };
     };
 
     services.nginx = lib.mkIf cfg.configureNginx {
       enable = true;
       virtualHosts."${cfg.domain}" = {
+        enableACME = cfg.useTls;
+        forceSSL = cfg.useTls;
         locations."/proto" = {
-          proxyPass = "http://127.0.0.1:${toString cfg.port}";
+          proxyPass = "http://${cfg.listenAddr}:${toString cfg.port}";
           proxyWebsockets = true;
+          extraConfig = ''
+            proxy_connect_timeout 90d;
+            proxy_send_timeout 90d;
+            proxy_read_timeout 90d;
+          '';
         };
       };
     };

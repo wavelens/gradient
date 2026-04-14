@@ -20,7 +20,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, tungstenite::Message as TungsteniteMessage,
 };
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 use uuid::Uuid;
 
 use crate::messages::{
@@ -227,16 +227,37 @@ pub(crate) async fn handle_socket(
         .collect();
 
     // Register this worker in the scheduler.
-    scheduler
+    let reauth_notify = scheduler
         .register_worker(&peer_id, negotiated.clone(), authorized_peer_uuids)
         .await;
 
     // ── Dispatch loop ─────────────────────────────────────────────────────────
 
     loop {
-        let msg = match recv_client_msg(&mut socket).await {
-            Some(m) => m,
-            None => break,
+        let msg = tokio::select! {
+            msg = recv_client_msg(&mut socket) => {
+                match msg {
+                    Some(m) => m,
+                    None => break,
+                }
+            }
+            _ = reauth_notify.notified() => {
+                // Server-initiated reauth: registrations changed via API.
+                debug!(%peer_id, "server-initiated reauth");
+                let registered_peers = lookup_registered_peers(&state, &peer_id).await;
+                if send_server_msg(
+                    &mut socket,
+                    &ServerMessage::AuthChallenge {
+                        peers: registered_peers.iter().map(|(id, _)| id.clone()).collect(),
+                    },
+                )
+                .await
+                .is_err()
+                {
+                    break;
+                }
+                continue;
+            }
         };
 
         debug!(?msg, "received client message");
@@ -588,7 +609,10 @@ async fn recv_client_msg(socket: &mut ProtoSocket) -> Option<ClientMessage> {
         Err(()) => return None,
     };
     match rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes) {
-        Ok(msg) => Some(msg),
+        Ok(msg) => {
+            trace!(?msg, bytes = bytes.len(), "recv ClientMessage");
+            Some(msg)
+        }
         Err(e) => {
             warn!(error = %e, "failed to deserialize client message");
             send_error(socket, 400, "malformed message".into()).await;
@@ -601,6 +625,7 @@ async fn send_server_msg(socket: &mut ProtoSocket, msg: &ServerMessage) -> Resul
     let bytes = rkyv::to_bytes::<RkyvError>(msg).map_err(|e| {
         warn!(error = %e, "failed to serialize server message");
     })?;
+    trace!(?msg, bytes = bytes.len(), "send ServerMessage");
     socket.send_bytes(bytes.to_vec()).await
 }
 

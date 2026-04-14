@@ -84,12 +84,14 @@ impl Scheduler {
         peer_id: &str,
         capabilities: GradientCapabilities,
         authorized_peers: HashSet<Uuid>,
-    ) {
-        self.worker_pool
+    ) -> Arc<tokio::sync::Notify> {
+        let notify = self
+            .worker_pool
             .write()
             .await
             .register(peer_id.to_owned(), capabilities, authorized_peers);
         info!(%peer_id, "worker registered");
+        notify
     }
 
     pub async fn update_authorized_peers(&self, peer_id: &str, authorized_peers: HashSet<Uuid>) {
@@ -98,6 +100,15 @@ impl Scheduler {
             .await
             .update_authorized_peers(peer_id, authorized_peers);
         debug!(%peer_id, "authorized peers updated");
+    }
+
+    /// Signal a connected worker that its registrations have changed,
+    /// triggering a server-initiated re-authentication.
+    pub async fn request_reauth(&self, worker_id: &str) {
+        self.worker_pool
+            .read()
+            .await
+            .request_reauth(worker_id);
     }
 
     pub async fn update_worker_capabilities(

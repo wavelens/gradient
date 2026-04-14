@@ -24,6 +24,9 @@ fn build_filter_directive(cli: &Cli) -> String {
     if let Some(lvl) = &cli.web_log_level {
         parts.push(format!("web={}", lvl));
     }
+    if let Some(lvl) = &cli.proto_log_level {
+        parts.push(format!("proto={}", lvl));
+    }
     parts.join(",")
 }
 
@@ -72,6 +75,7 @@ async fn run() -> std::io::Result<()> {
         builder_log_level = state.cli.builder_log_level.as_deref().unwrap_or("(default)"),
         cache_log_level = state.cli.cache_log_level.as_deref().unwrap_or("(default)"),
         web_log_level = state.cli.web_log_level.as_deref().unwrap_or("(default)"),
+        proto_log_level = state.cli.proto_log_level.as_deref().unwrap_or("(default)"),
         "Starting Gradient server"
     );
 

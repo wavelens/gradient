@@ -24,7 +24,7 @@ use crate::worker::Worker;
 /// Each accepted connection gets its own executor and dispatch loop, running
 /// concurrently with the worker's outbound connection (if any).
 pub async fn start_listener(config: WorkerConfig) -> Result<()> {
-    let addr = format!("0.0.0.0:{}", config.port);
+    let addr = format!("{}:{}", config.listen_addr, config.port);
     let listener = TcpListener::bind(&addr)
         .await
         .with_context(|| format!("failed to bind listener on {addr}"))?;

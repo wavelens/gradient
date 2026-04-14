@@ -7,7 +7,9 @@
 //! In-memory registry of connected proto workers.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 use gradient_core::types::proto::GradientCapabilities;
@@ -24,6 +26,9 @@ pub struct ConnectedWorker {
     /// Peer IDs (org/cache/proxy UUIDs) this worker is authorized for.
     /// Empty means no peers registered this worker (open/discoverable mode).
     pub authorized_peers: HashSet<Uuid>,
+    /// Signalled by the API when registrations change and the worker should
+    /// re-authenticate without disconnecting.
+    pub reauth_notify: Arc<Notify>,
 }
 
 /// In-memory registry of all currently connected workers.
@@ -46,7 +51,8 @@ impl WorkerPool {
         id: String,
         capabilities: GradientCapabilities,
         authorized_peers: HashSet<Uuid>,
-    ) {
+    ) -> Arc<Notify> {
+        let notify = Arc::new(Notify::new());
         self.workers.insert(
             id,
             ConnectedWorker {
@@ -57,8 +63,18 @@ impl WorkerPool {
                 assigned_jobs: HashSet::new(),
                 draining: false,
                 authorized_peers,
+                reauth_notify: Arc::clone(&notify),
             },
         );
+        notify
+    }
+
+    /// Signal a connected worker that its registrations have changed and it
+    /// should re-authenticate.  No-op if the worker is not connected.
+    pub fn request_reauth(&self, worker_id: &str) {
+        if let Some(w) = self.workers.get(worker_id) {
+            w.reauth_notify.notify_one();
+        }
     }
 
     pub fn update_authorized_peers(&mut self, id: &str, authorized_peers: HashSet<Uuid>) {
@@ -271,5 +287,31 @@ mod tests {
         assert_eq!(workers[1].id, "w2");
         assert_eq!(workers[1].assigned_job_count, 0);
         assert!(workers[1].draining);
+    }
+
+    #[test]
+    fn test_request_reauth_notifies_connected_worker() {
+        let mut pool = WorkerPool::new();
+        let notify = pool.register("w1".into(), caps(), HashSet::new());
+
+        pool.request_reauth("w1");
+
+        // After request_reauth, the notify should fire immediately.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_millis(50), notify.notified())
+                .await
+                .expect("reauth notify should fire immediately");
+        });
+    }
+
+    #[test]
+    fn test_request_reauth_noop_for_unknown_worker() {
+        let pool = WorkerPool::new();
+        // Should not panic for unknown worker.
+        pool.request_reauth("nonexistent");
     }
 }

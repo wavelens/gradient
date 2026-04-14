@@ -16,7 +16,7 @@ use proto::messages::{ClientMessage, ServerMessage};
 use rkyv::rancor::Error as RkyvError;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
-use tracing::{debug, instrument, warn};
+use tracing::{instrument, trace, warn};
 
 /// Internal enum to abstract over client-initiated and server-accepted sockets.
 enum ProtoStream {
@@ -77,7 +77,7 @@ impl ProtoConnection {
             ProtoStream::Client(ws) => ws.send(frame).await.context("WebSocket send failed")?,
             ProtoStream::Accepted(ws) => ws.send(frame).await.context("WebSocket send failed")?,
         }
-        debug!("sent client message");
+        trace!(?msg, bytes = bytes.len(), "send ClientMessage");
         Ok(())
     }
 
@@ -97,6 +97,7 @@ impl ProtoConnection {
                     aligned.extend_from_slice(&bytes);
                     let msg = rkyv::from_bytes::<ServerMessage, RkyvError>(&aligned)
                         .context("failed to deserialise ServerMessage")?;
+                    trace!(?msg, bytes = bytes.len(), "recv ServerMessage");
                     return Ok(Some(msg));
                 }
                 Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,

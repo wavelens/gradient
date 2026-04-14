@@ -265,3 +265,27 @@ async fn test_draining_worker_still_has_assigned_jobs() {
     assert!(workers[0].draining);
     assert_eq!(workers[0].assigned_job_count, 1);
 }
+
+#[tokio::test]
+async fn test_request_reauth_signals_connected_worker() {
+    let scheduler = test_scheduler();
+
+    let notify = scheduler
+        .register_worker("w1", GradientCapabilities::default(), HashSet::new())
+        .await;
+
+    scheduler.request_reauth("w1").await;
+
+    // The notify should fire immediately — the dispatch loop would use this
+    // to send an AuthChallenge to the worker.
+    tokio::time::timeout(std::time::Duration::from_millis(50), notify.notified())
+        .await
+        .expect("reauth notify should fire immediately");
+}
+
+#[tokio::test]
+async fn test_request_reauth_noop_for_disconnected_worker() {
+    let scheduler = test_scheduler();
+    // Should not panic when the worker is not connected.
+    scheduler.request_reauth("nonexistent").await;
+}

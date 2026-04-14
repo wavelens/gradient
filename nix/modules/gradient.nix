@@ -336,132 +336,123 @@ in {
       }
     ];
 
-    systemd = {
-      tmpfiles.settings."10-gradient"."/nix/var/nix/gcroots/gradient".d = {
-        user = "gradient";
-        group = "gradient";
-        mode = "0755";
+    systemd.services.gradient-server = {
+      wantedBy = [ "multi-user.target" ];
+      after = [
+        "network.target"
+        "systemd-tmpfiles-setup.service"
+      ] ++ lib.optional cfg.configurePostgres "postgresql.target";
+
+      path = [
+        cfg.packages.nix
+        cfg.packages.ssh
+        cfg.packages.git
+      ];
+
+      serviceConfig = {
+        ExecStart = lib.getExe cfg.packages.server;
+        StateDirectory = "gradient";
+        User = "gradient";
+        Group = "gradient";
+        PrivateTmp = true;
+        ProtectHome = true;
+        ProtectHostname = true;
+        ProtectKernelLogs = true;
+        ProtectKernelModules = true;
+        ProtectKernelTunables = true;
+        ProtectProc = "invisible";
+        ProtectSystem = "strict";
+        Restart = "on-failure";
+        RestartSec = 10;
+        LimitNOFILE = 65535;
+        RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
+        RestrictNamespaces = true;
+        RestrictRealtime = true;
+        RestrictSUIDSGID = true;
+        WorkingDirectory = cfg.baseDir;
+        LoadCredential = [
+          "gradient_database_url:${cfg.databaseUrlFile}"
+          "gradient_crypt_secret:${cfg.cryptSecretFile}"
+          "gradient_jwt_secret:${cfg.jwtSecretFile}"
+          "gradient_state:${stateJsonFile}"
+        ] ++ lib.optional cfg.oidc.enable [
+          "gradient_oidc_client_secret:${cfg.oidc.clientSecretFile}"
+        ] ++ lib.optional cfg.email.enable [
+          "gradient_email_smtp_password:${cfg.email.smtpPasswordFile}"
+        ] ++ lib.optionals (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) [
+          "gradient_s3_secret_access_key:${cfg.s3.secretAccessKeyFile}"
+        ] ++ lib.optionals cfg.githubApp.enable [
+          "gradient_github_app_private_key:${cfg.githubApp.privateKeyFile}"
+          "gradient_github_app_webhook_secret:${cfg.githubApp.webhookSecretFile}"
+        ] ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
+          ++ workerTokenFiles ++ projectCiTokenFiles;
       };
 
-      services.gradient-server = {
-        wantedBy = [ "multi-user.target" ];
-        after = [
-          "network.target"
-          "systemd-tmpfiles-setup.service"
-        ] ++ lib.optional cfg.configurePostgres "postgresql.target";
-
-        path = [
-          cfg.packages.nix
-          cfg.packages.ssh
-          cfg.packages.git
-        ];
-
-        serviceConfig = {
-          ExecStart = lib.getExe cfg.packages.server;
-          StateDirectory = "gradient";
-          User = "gradient";
-          Group = "gradient";
-          PrivateTmp = true;
-          ProtectHome = true;
-          ProtectHostname = true;
-          ProtectKernelLogs = true;
-          ProtectKernelModules = true;
-          ProtectKernelTunables = true;
-          ProtectProc = "invisible";
-          ProtectSystem = "strict";
-          ReadWritePaths = [ "/nix/var/nix/gcroots/gradient" ];
-          Restart = "on-failure";
-          RestartSec = 10;
-          LimitNOFILE = 65535;
-          RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
-          RestrictNamespaces = true;
-          RestrictRealtime = true;
-          RestrictSUIDSGID = true;
-          WorkingDirectory = cfg.baseDir;
-          LoadCredential = [
-            "gradient_database_url:${cfg.databaseUrlFile}"
-            "gradient_crypt_secret:${cfg.cryptSecretFile}"
-            "gradient_jwt_secret:${cfg.jwtSecretFile}"
-            "gradient_state:${stateJsonFile}"
-          ] ++ lib.optional cfg.oidc.enable [
-            "gradient_oidc_client_secret:${cfg.oidc.clientSecretFile}"
-          ] ++ lib.optional cfg.email.enable [
-            "gradient_email_smtp_password:${cfg.email.smtpPasswordFile}"
-          ] ++ lib.optionals (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) [
-            "gradient_s3_secret_access_key:${cfg.s3.secretAccessKeyFile}"
-          ] ++ lib.optionals cfg.githubApp.enable [
-            "gradient_github_app_private_key:${cfg.githubApp.privateKeyFile}"
-            "gradient_github_app_webhook_secret:${cfg.githubApp.webhookSecretFile}"
-          ] ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
-            ++ workerTokenFiles ++ projectCiTokenFiles;
-        };
-
-        environment = {
-          NIX_REMOTE = "daemon";
-          XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
-          GRADIENT_IP = cfg.listenAddr;
-          GRADIENT_PORT = toString cfg.port;
-          GRADIENT_SERVE_URL = "http${lib.optionalString cfg.useTls "s"}://${cfg.domain}";
-          GRADIENT_FRONTEND_URL = cfg.frontend.url;
-          GRADIENT_BASE_PATH = cfg.baseDir;
-          GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
-          GRADIENT_BINPATH_NIX = lib.getExe cfg.packages.nix;
-          GRADIENT_BINPATH_SSH = lib.getExe' cfg.packages.ssh "ssh";
-          GRADIENT_OIDC_ENABLED = lib.boolToString cfg.oidc.enable;
-          GRADIENT_ENABLE_REGISTRATION = lib.boolToString cfg.settings.enableRegistration;
-          GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
-          GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";
-          GRADIENT_SERVE_CACHE = lib.boolToString cfg.serveCache;
-          GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
-          GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
-          GRADIENT_MAX_PROTO_CONNECTIONS = toString cfg.settings.maxProtoConnections;
-          GRADIENT_LOG_LEVEL = cfg.settings.logLevel.default;
-          GRADIENT_USE_TLS = lib.boolToString cfg.useTls;
-          GRADIENT_QUIC = lib.boolToString cfg.enableQuic;
-          GRADIENT_DISCOVERABLE = lib.boolToString cfg.discoverable;
-          GRADIENT_FEDERATE_PROTO = lib.boolToString cfg.proto.federate;
-          GRADIENT_DELETE_STATE = lib.boolToString cfg.settings.deleteState;
-          GRADIENT_NAR_TTL_HOURS = toString cfg.settings.cacheTtlHours;
-          GRADIENT_STATE_FILE = "%d/gradient_state";
-          GRADIENT_CREDENTIALS_DIR = "%d";
-          RUST_LOG = cfg.settings.logLevel.default;
-        } // lib.optionalAttrs (cfg.settings.logLevel.cache != null) {
-          GRADIENT_CACHE_LOG_LEVEL = cfg.settings.logLevel.cache;
-        } // lib.optionalAttrs (cfg.settings.logLevel.web != null) {
-          GRADIENT_WEB_LOG_LEVEL = cfg.settings.logLevel.web;
-        } // lib.optionalAttrs (cfg.settings.logLevel.proto != null) {
-          GRADIENT_PROTO_LOG_LEVEL = cfg.settings.logLevel.proto;
-        } // lib.optionalAttrs cfg.oidc.enable {
-          GRADIENT_OIDC_CLIENT_ID = cfg.oidc.clientId;
-          GRADIENT_OIDC_CLIENT_SECRET_FILE = "%d/gradient_oidc_client_secret";
-          GRADIENT_OIDC_SCOPES = builtins.concatStringsSep " " cfg.oidc.scopes;
-          GRADIENT_OIDC_DISCOVERY_URL = cfg.oidc.discoveryUrl;
-          GRADIENT_OIDC_REQUIRED = lib.boolToString cfg.oidc.required;
-        } // lib.optionalAttrs cfg.email.enable {
-          GRADIENT_EMAIL_ENABLED = lib.boolToString cfg.email.enable;
-          GRADIENT_EMAIL_REQUIRE_VERIFICATION = lib.boolToString cfg.email.requireVerification;
-          GRADIENT_EMAIL_SMTP_HOST = cfg.email.smtpHost;
-          GRADIENT_EMAIL_SMTP_PORT = toString cfg.email.smtpPort;
-          GRADIENT_EMAIL_SMTP_USERNAME = cfg.email.smtpUsername;
-          GRADIENT_EMAIL_SMTP_PASSWORD_FILE = "%d/gradient_email_smtp_password";
-          GRADIENT_EMAIL_FROM_ADDRESS = cfg.email.fromAddress;
-          GRADIENT_EMAIL_FROM_NAME = cfg.email.fromName;
-          GRADIENT_EMAIL_ENABLE_TLS = lib.boolToString cfg.email.enableTls;
-        } // lib.optionalAttrs cfg.s3.enable {
-          GRADIENT_S3_BUCKET = cfg.s3.bucket;
-          GRADIENT_S3_REGION = cfg.s3.region;
-          GRADIENT_S3_PREFIX = cfg.s3.prefix;
-        } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.endpoint != null) {
-          GRADIENT_S3_ENDPOINT = cfg.s3.endpoint;
-        } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.accessKeyId != null) {
-          GRADIENT_S3_ACCESS_KEY_ID = cfg.s3.accessKeyId;
-        } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) {
-          GRADIENT_S3_SECRET_ACCESS_KEY_FILE = "%d/gradient_s3_secret_access_key";
-        } // lib.optionalAttrs cfg.githubApp.enable {
-          GRADIENT_GITHUB_APP_ID = toString cfg.githubApp.appId;
-          GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE = "%d/gradient_github_app_private_key";
-          GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE = "%d/gradient_github_app_webhook_secret";
-        };
+      environment = {
+        NIX_REMOTE = "daemon";
+        XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
+        GRADIENT_IP = cfg.listenAddr;
+        GRADIENT_PORT = toString cfg.port;
+        GRADIENT_SERVE_URL = "http${lib.optionalString cfg.useTls "s"}://${cfg.domain}";
+        GRADIENT_FRONTEND_URL = cfg.frontend.url;
+        GRADIENT_BASE_PATH = cfg.baseDir;
+        GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
+        GRADIENT_BINPATH_NIX = lib.getExe cfg.packages.nix;
+        GRADIENT_BINPATH_SSH = lib.getExe' cfg.packages.ssh "ssh";
+        GRADIENT_OIDC_ENABLED = lib.boolToString cfg.oidc.enable;
+        GRADIENT_ENABLE_REGISTRATION = lib.boolToString cfg.settings.enableRegistration;
+        GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
+        GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";
+        GRADIENT_SERVE_CACHE = lib.boolToString cfg.serveCache;
+        GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
+        GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
+        GRADIENT_MAX_PROTO_CONNECTIONS = toString cfg.settings.maxProtoConnections;
+        GRADIENT_LOG_LEVEL = cfg.settings.logLevel.default;
+        GRADIENT_USE_TLS = lib.boolToString cfg.useTls;
+        GRADIENT_QUIC = lib.boolToString cfg.enableQuic;
+        GRADIENT_DISCOVERABLE = lib.boolToString cfg.discoverable;
+        GRADIENT_FEDERATE_PROTO = lib.boolToString cfg.proto.federate;
+        GRADIENT_DELETE_STATE = lib.boolToString cfg.settings.deleteState;
+        GRADIENT_NAR_TTL_HOURS = toString cfg.settings.cacheTtlHours;
+        GRADIENT_STATE_FILE = "%d/gradient_state";
+        GRADIENT_CREDENTIALS_DIR = "%d";
+        RUST_LOG = cfg.settings.logLevel.default;
+      } // lib.optionalAttrs (cfg.settings.logLevel.cache != null) {
+        GRADIENT_CACHE_LOG_LEVEL = cfg.settings.logLevel.cache;
+      } // lib.optionalAttrs (cfg.settings.logLevel.web != null) {
+        GRADIENT_WEB_LOG_LEVEL = cfg.settings.logLevel.web;
+      } // lib.optionalAttrs (cfg.settings.logLevel.proto != null) {
+        GRADIENT_PROTO_LOG_LEVEL = cfg.settings.logLevel.proto;
+      } // lib.optionalAttrs cfg.oidc.enable {
+        GRADIENT_OIDC_CLIENT_ID = cfg.oidc.clientId;
+        GRADIENT_OIDC_CLIENT_SECRET_FILE = "%d/gradient_oidc_client_secret";
+        GRADIENT_OIDC_SCOPES = builtins.concatStringsSep " " cfg.oidc.scopes;
+        GRADIENT_OIDC_DISCOVERY_URL = cfg.oidc.discoveryUrl;
+        GRADIENT_OIDC_REQUIRED = lib.boolToString cfg.oidc.required;
+      } // lib.optionalAttrs cfg.email.enable {
+        GRADIENT_EMAIL_ENABLED = lib.boolToString cfg.email.enable;
+        GRADIENT_EMAIL_REQUIRE_VERIFICATION = lib.boolToString cfg.email.requireVerification;
+        GRADIENT_EMAIL_SMTP_HOST = cfg.email.smtpHost;
+        GRADIENT_EMAIL_SMTP_PORT = toString cfg.email.smtpPort;
+        GRADIENT_EMAIL_SMTP_USERNAME = cfg.email.smtpUsername;
+        GRADIENT_EMAIL_SMTP_PASSWORD_FILE = "%d/gradient_email_smtp_password";
+        GRADIENT_EMAIL_FROM_ADDRESS = cfg.email.fromAddress;
+        GRADIENT_EMAIL_FROM_NAME = cfg.email.fromName;
+        GRADIENT_EMAIL_ENABLE_TLS = lib.boolToString cfg.email.enableTls;
+      } // lib.optionalAttrs cfg.s3.enable {
+        GRADIENT_S3_BUCKET = cfg.s3.bucket;
+        GRADIENT_S3_REGION = cfg.s3.region;
+        GRADIENT_S3_PREFIX = cfg.s3.prefix;
+      } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.endpoint != null) {
+        GRADIENT_S3_ENDPOINT = cfg.s3.endpoint;
+      } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.accessKeyId != null) {
+        GRADIENT_S3_ACCESS_KEY_ID = cfg.s3.accessKeyId;
+      } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.secretAccessKeyFile != null) {
+        GRADIENT_S3_SECRET_ACCESS_KEY_FILE = "%d/gradient_s3_secret_access_key";
+      } // lib.optionalAttrs cfg.githubApp.enable {
+        GRADIENT_GITHUB_APP_ID = toString cfg.githubApp.appId;
+        GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE = "%d/gradient_github_app_private_key";
+        GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE = "%d/gradient_github_app_webhook_secret";
       };
     };
 

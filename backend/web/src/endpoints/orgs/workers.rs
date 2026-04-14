@@ -71,6 +71,7 @@ pub async fn post_org_worker(
     state: State<Arc<ServerState>>,
     Path(organization): Path<String>,
     Extension(user): Extension<MUser>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<RegisterWorkerResponse>>> {
     let org = get_organization_by_name(Arc::clone(&state), user.id, organization)
@@ -110,13 +111,17 @@ pub async fn post_org_worker(
     let row = AWorkerRegistration {
         id: Set(Uuid::new_v4()),
         peer_id: Set(org.id),
-        worker_id: Set(worker_id_str),
+        worker_id: Set(worker_id_str.clone()),
         token_hash: Set(token_hash),
         managed: Set(false),
         url: Set(body.url),
         created_at: Set(Utc::now().naive_utc()),
     };
     row.insert(&state.db).await?;
+
+    // Trigger re-auth if the worker is already connected, so it picks up
+    // the new peer registration without requiring a reconnect.
+    scheduler.request_reauth(&worker_id_str).await;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -182,6 +187,7 @@ pub async fn delete_org_worker(
     state: State<Arc<ServerState>>,
     Path((organization, worker_id)): Path<(String, String)>,
     Extension(user): Extension<MUser>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let org = get_organization_by_name(Arc::clone(&state), user.id, organization)
         .await
@@ -197,6 +203,9 @@ pub async fn delete_org_worker(
     if result.rows_affected == 0 {
         return Err(WebError::not_found("worker registration"));
     }
+
+    // Trigger re-auth so the worker loses authorization for the removed peer.
+    scheduler.request_reauth(&worker_id).await;
 
     Ok(Json(BaseResponse {
         error: false,

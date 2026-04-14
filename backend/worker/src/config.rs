@@ -80,6 +80,10 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_WORKER_DISCOVERABLE", default_value = "false")]
     pub discoverable: bool,
 
+    /// IP address on which to listen for incoming server connections when discoverable.
+    #[arg(long, env = "GRADIENT_WORKER_LISTEN_ADDR", default_value = "127.0.0.1")]
+    pub listen_addr: String,
+
     /// Port on which to listen for incoming server connections when discoverable.
     #[arg(long, env = "GRADIENT_WORKER_PORT", default_value_t = 3100)]
     pub port: u16,
@@ -237,6 +241,7 @@ mod tests {
             eval_log_level: None,
             build_log_level: None,
             proto_log_level: None,
+            listen_addr: "127.0.0.1".to_owned(),
             discoverable: false,
             port: 3100,
             capability_federate: false,
@@ -307,6 +312,7 @@ mod tests {
             eval_log_level: None,
             build_log_level: None,
             proto_log_level: None,
+            listen_addr: "127.0.0.1".to_owned(),
             discoverable: false,
             port: 3100,
             capability_federate: false,
@@ -361,6 +367,7 @@ mod tests {
             eval_log_level: None,
             build_log_level: None,
             proto_log_level: None,
+            listen_addr: "127.0.0.1".to_owned(),
             discoverable: false,
             port: 3100,
             capability_federate: false,
