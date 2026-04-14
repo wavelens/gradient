@@ -468,7 +468,7 @@ pub async fn post_forge_webhook_secret(
 ) -> WebResult<axum::Json<BaseResponse<ForgeWebhookSecretResponse>>> {
     use super::projects::user_can_edit;
     use core::ci::encrypt_webhook_secret;
-    use rand::Rng;
+    use rand::RngExt;
 
     let org = EOrganization::find()
         .filter(COrganization::Name.eq(organization.as_str()))
@@ -484,7 +484,8 @@ pub async fn post_forge_webhook_secret(
     }
 
     // Generate a 32-byte random secret, hex-encoded.
-    let secret_bytes: [u8; 32] = rand::rng().random();
+    let mut secret_bytes = [0u8; 32];
+    rand::rng().fill(&mut secret_bytes);
     let plaintext = hex::encode(secret_bytes);
 
     let encrypted =

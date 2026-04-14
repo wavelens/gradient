@@ -10,8 +10,7 @@ use chrono::{Duration, Utc};
 use core::types::input::load_secret;
 use core::types::*;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation, decode, encode};
-use rand::Rng;
-use rand::distr::Alphanumeric;
+use rand::distr::{Alphanumeric, SampleString};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -163,9 +162,5 @@ pub async fn decode_download_token(
 }
 
 pub fn generate_api_key() -> String {
-    rand::rng()
-        .sample_iter(&Alphanumeric)
-        .take(64)
-        .map(char::from)
-        .collect()
+    Alphanumeric.sample_string(&mut rand::rng(), 64)
 }

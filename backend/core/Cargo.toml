@@ -51,7 +51,7 @@ git-url-parse    = "0.6"
 hex              = "0.4"
 lettre           = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1-rustls-tls"] }
 password-auth    = "1.0"
-rand_core        = "0.9"
+rand_core        = "0.10"
 ssh-key          = { version = "0.6", features = ["ed25519"] }
 object_store     = { workspace = true }
 tempfile         = "3.27"

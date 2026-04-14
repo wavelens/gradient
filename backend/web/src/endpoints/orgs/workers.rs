@@ -13,7 +13,7 @@ use core::types::{BaseResponse, MUser, ServerState};
 use entity::worker_registration::{
     self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
 };
-use rand::RngCore;
+use rand::RngExt as _;
 use scheduler::{Scheduler, WorkerInfo};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
@@ -80,7 +80,7 @@ pub async fn post_org_worker(
     // Generate a cryptographically random 48-byte token, base64-encoded.
     // Equivalent to `openssl rand -base64 48` (produces 64 base64 characters).
     let mut raw = [0u8; 48];
-    rand::rng().fill_bytes(&mut raw);
+    rand::rng().fill(&mut raw);
     let token = base64::engine::general_purpose::STANDARD.encode(raw);
 
     let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
