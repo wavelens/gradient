@@ -229,6 +229,7 @@ mod tests {
             peers: Some(peers.to_owned()),
             peers_file: None,
             data_dir: String::new(),
+            worker_id: None,
             eval_worker: false,
             eval_workers: 1,
             max_concurrent_builds: 1,
@@ -298,6 +299,7 @@ mod tests {
             peers: None,
             peers_file: None,
             data_dir: String::new(),
+            worker_id: None,
             eval_worker: false,
             eval_workers: 1,
             max_concurrent_builds: 1,
@@ -351,6 +353,7 @@ mod tests {
             peers: Some(format!("peer-inline:{TOK64}")), // should be ignored
             peers_file: Some(path.clone()),
             data_dir: String::new(),
+            worker_id: None,
             eval_worker: false,
             eval_workers: 1,
             max_concurrent_builds: 1,
