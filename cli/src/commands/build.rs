@@ -73,7 +73,8 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
         exit(1);
     });
 
-    let file_list: Vec<String> = index.iter()
+    let file_list: Vec<String> = index
+        .iter()
         .filter_map(|entry| String::from_utf8(entry.path).ok())
         .collect();
 

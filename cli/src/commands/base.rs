@@ -7,7 +7,7 @@
 use super::*;
 use crate::config::*;
 use crate::input::*;
-use clap::{CommandFactory, Parser, Subcommand, arg};
+use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use connector::*;
 use std::io;

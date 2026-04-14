@@ -35,11 +35,17 @@ pub enum Commands {
 
 pub async fn handle(cmd: Commands) {
     match cmd {
-        Commands::Register { worker_id, url, token } => {
+        Commands::Register {
+            worker_id,
+            url,
+            token,
+        } => {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 _ => {
-                    eprintln!("Organization is required. Use `gradient organization select <name>`.");
+                    eprintln!(
+                        "Organization is required. Use `gradient organization select <name>`."
+                    );
                     exit(1);
                 }
             };
@@ -80,21 +86,21 @@ pub async fn handle(cmd: Commands) {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 _ => {
-                    eprintln!("Organization is required. Use `gradient organization select <name>`.");
+                    eprintln!(
+                        "Organization is required. Use `gradient organization select <name>`."
+                    );
                     exit(1);
                 }
             };
 
-            let res = workers::get_org_workers(
-                get_request_config(load_config()).unwrap(),
-                organization,
-            )
-            .await
-            .map_err(|e| {
-                eprintln!("{}", e);
-                exit(1);
-            })
-            .unwrap();
+            let res =
+                workers::get_org_workers(get_request_config(load_config()).unwrap(), organization)
+                    .await
+                    .map_err(|e| {
+                        eprintln!("{}", e);
+                        exit(1);
+                    })
+                    .unwrap();
 
             if res.error {
                 eprintln!("Failed to list workers");
@@ -105,12 +111,16 @@ pub async fn handle(cmd: Commands) {
                 println!("No workers registered.");
             } else {
                 for w in res.message {
-                    let status = if w.live.is_some() { "online" } else { "offline" };
-                    let url_part = w
-                        .url
-                        .map(|u| format!(" (url: {})", u))
-                        .unwrap_or_default();
-                    println!("{}: {} [{}]{}", w.worker_id, w.registered_at, status, url_part);
+                    let status = if w.live.is_some() {
+                        "online"
+                    } else {
+                        "offline"
+                    };
+                    let url_part = w.url.map(|u| format!(" (url: {})", u)).unwrap_or_default();
+                    println!(
+                        "{}: {} [{}]{}",
+                        w.worker_id, w.registered_at, status, url_part
+                    );
                 }
             }
         }
@@ -119,7 +129,9 @@ pub async fn handle(cmd: Commands) {
             let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
                 Some(id) => id,
                 _ => {
-                    eprintln!("Organization is required. Use `gradient organization select <name>`.");
+                    eprintln!(
+                        "Organization is required. Use `gradient organization select <name>`."
+                    );
                     exit(1);
                 }
             };

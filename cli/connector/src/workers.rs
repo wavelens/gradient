@@ -45,7 +45,11 @@ pub async fn post_org_worker(
     url: Option<String>,
     token: Option<String>,
 ) -> Result<BaseResponse<RegisterWorkerResponse>, String> {
-    let req = RegisterWorkerRequest { worker_id, url, token };
+    let req = RegisterWorkerRequest {
+        worker_id,
+        url,
+        token,
+    };
 
     let res = get_client(
         config,

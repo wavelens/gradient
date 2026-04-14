@@ -6,10 +6,10 @@
 
 use crate::config::*;
 use crate::input::*;
-use clap::{Subcommand, arg};
+use clap::Subcommand;
 use connector::*;
-use std::process::exit;
 use std::fs;
+use std::process::exit;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -215,8 +215,16 @@ pub async fn handle(cmd: Commands) {
             println!("Cache Public Key: {:?}", res.message);
         }
 
-        Commands::InstallNetrc { server, token, cache, netrc_file } => {
-            let config = RequestConfig { server_url: server, token: Some(token) };
+        Commands::InstallNetrc {
+            server,
+            token,
+            cache,
+            netrc_file,
+        } => {
+            let config = RequestConfig {
+                server_url: server,
+                token: Some(token),
+            };
 
             let res = caches::get_cache_netrc(config, cache.clone())
                 .await
@@ -227,7 +235,10 @@ pub async fn handle(cmd: Commands) {
                 .unwrap();
 
             if res.error {
-                eprintln!("Failed to fetch netrc for cache '{}': {}", cache, res.message);
+                eprintln!(
+                    "Failed to fetch netrc for cache '{}': {}",
+                    cache, res.message
+                );
                 exit(1);
             }
 
@@ -251,11 +262,11 @@ pub async fn handle(cmd: Commands) {
             };
 
             // Ensure parent directory exists.
-            if let Some(parent) = std::path::Path::new(&netrc_file).parent() {
-                if let Err(e) = fs::create_dir_all(parent) {
-                    eprintln!("Failed to create directory '{}': {}", parent.display(), e);
-                    exit(1);
-                }
+            if let Some(parent) = std::path::Path::new(&netrc_file).parent()
+                && let Err(e) = fs::create_dir_all(parent)
+            {
+                eprintln!("Failed to create directory '{}': {}", parent.display(), e);
+                exit(1);
             }
 
             fs::write(&netrc_file, &updated).unwrap_or_else(|e| {
@@ -263,7 +274,10 @@ pub async fn handle(cmd: Commands) {
                 exit(1);
             });
 
-            println!("netrc credentials for '{}' installed into '{}'.", cache, netrc_file);
+            println!(
+                "netrc credentials for '{}' installed into '{}'.",
+                cache, netrc_file
+            );
         }
     }
 }
