@@ -88,14 +88,17 @@ impl Scheduler {
         peer_id: &str,
         capabilities: GradientCapabilities,
         authorized_peers: HashSet<Uuid>,
-    ) -> Arc<tokio::sync::Notify> {
-        let notify = self
+    ) -> (
+        Arc<tokio::sync::Notify>,
+        tokio::sync::mpsc::UnboundedReceiver<(String, String)>,
+    ) {
+        let (notify, abort_rx) = self
             .worker_pool
             .write()
             .await
             .register(peer_id.to_owned(), capabilities, authorized_peers);
         info!(%peer_id, "worker registered");
-        notify
+        (notify, abort_rx)
     }
 
     pub async fn update_authorized_peers(&self, peer_id: &str, authorized_peers: HashSet<Uuid>) {
@@ -445,6 +448,48 @@ impl Scheduler {
         };
 
         self.state.log_storage.append(log_id, text).await
+    }
+
+    // ── Abort ─────────────────────────────────────────────────────────────────
+
+    /// Abort an evaluation: update DB status and send `AbortJob` to any
+    /// worker currently executing a job belonging to this evaluation.
+    pub async fn abort_evaluation(&self, evaluation: MEvaluation) {
+        let evaluation_id = evaluation.id;
+
+        // Update DB (builds → Aborted, eval → Aborted).
+        gradient_core::db::abort_evaluation(Arc::clone(&self.state), evaluation).await;
+
+        // Find active jobs for this evaluation and abort them.
+        let tracker = self.job_tracker.read().await;
+        let pool = self.worker_pool.read().await;
+
+        // Collect (worker_id, job_id) pairs for jobs belonging to this evaluation.
+        // We need to iterate active jobs to find eval/build jobs for this evaluation.
+        let to_abort: Vec<(String, String)> = tracker
+            .active_jobs()
+            .filter_map(|(job_id, worker_id, job)| {
+                if job.evaluation_id() == evaluation_id {
+                    Some((worker_id.to_owned(), job_id.to_owned()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for (worker_id, job_id) in to_abort {
+            if pool.send_abort(&worker_id, job_id.clone(), "evaluation aborted".to_owned()) {
+                info!(%worker_id, %job_id, %evaluation_id, "sent AbortJob to worker");
+            }
+        }
+
+        // Also remove any pending (unassigned) jobs for this evaluation.
+        drop(pool);
+        drop(tracker);
+        self.job_tracker
+            .write()
+            .await
+            .remove_pending_for_evaluation(evaluation_id);
     }
 
     // ── Diagnostics ───────────────────────────────────────────────────────────

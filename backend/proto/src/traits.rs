@@ -12,7 +12,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::messages::{BuildOutput, DiscoveredDerivation, FetchedInput};
+use crate::messages::{BuildOutput, CachedPath, DiscoveredDerivation, FetchedInput};
 
 // ── Store access ─────────────────────────────────────────────────────────────
 
@@ -49,7 +49,8 @@ pub trait DrvReader: Send + Sync {
 #[async_trait]
 pub trait JobReporter: Send {
     /// Query the server's cache for which paths are already cached.
-    async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<String>>;
+    /// Returns each cached path with its size metadata.
+    async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<CachedPath>>;
     async fn report_fetching(&mut self) -> Result<()>;
     async fn report_fetch_result(&mut self, fetched_paths: Vec<FetchedInput>) -> Result<()>;
     async fn report_evaluating_flake(&mut self) -> Result<()>;

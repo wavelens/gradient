@@ -213,7 +213,7 @@ impl Worker {
                         // Don't request any new work while draining.
                         continue;
                     }
-                    let scores = self.scorer.score_candidates(&candidates).await?;
+                    let scores = self.scorer.score_candidates(&self.executor.store, &candidates).await?;
                     self.conn
                         .send(ClientMessage::RequestJobChunk { scores, is_final })
                         .await?;
@@ -224,7 +224,7 @@ impl Worker {
                     if self.draining {
                         continue;
                     }
-                    let scores = self.scorer.score_candidates(&candidates).await?;
+                    let scores = self.scorer.score_candidates(&self.executor.store, &candidates).await?;
                     if !scores.is_empty() {
                         self.conn
                             .send(ClientMessage::RequestJobChunk {

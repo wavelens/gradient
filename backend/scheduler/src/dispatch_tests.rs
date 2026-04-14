@@ -277,6 +277,8 @@ async fn dispatch_ready_build_enqueues_job() {
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
         // 4. organization_id_for_eval: find project
         .append_query_results([vec![make_project(project_id, org_id)]])
+        // 5. dependency_output_paths: derivation_dependency edges (none)
+        // (no dependency_output_paths query — required_paths computed worker-side)
         .into_connection();
 
     let scheduler = make_scheduler(db);
@@ -308,10 +310,12 @@ async fn dispatch_ready_build_skips_already_enqueued() {
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
         .append_query_results([vec![make_project(project_id, org_id)]])
+        // dependency_output_paths: derivation_dependency edges (none)
+        // (no dependency_output_paths query — required_paths computed worker-side)
         // Second dispatch:
         // raw SQL query returns the same build; contains_job → true → skips lookups
         .append_query_results([vec![make_build_queued(build_id, eval_id, drv_id)]])
-        // No derivation / eval / project lookups
+        // No derivation / eval / project lookups (contains_job = true)
         .into_connection();
 
     let scheduler = make_scheduler(db);

@@ -8,7 +8,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use proto::messages::{BuildOutput, DiscoveredDerivation, FetchedInput};
+use proto::messages::{BuildOutput, CachedPath, DiscoveredDerivation, FetchedInput};
 use proto::traits::JobReporter;
 
 /// A reported event captured by [`RecordingJobReporter`].
@@ -79,13 +79,18 @@ impl RecordingJobReporter {
 
 #[async_trait]
 impl JobReporter for RecordingJobReporter {
-    async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<String>> {
+    async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<CachedPath>> {
         // Return the intersection of queried paths and pre-configured cached paths.
         let cached: std::collections::HashSet<&str> =
             self.cached_paths.iter().map(|s| s.as_str()).collect();
         Ok(paths
             .into_iter()
             .filter(|p| cached.contains(p.as_str()))
+            .map(|path| CachedPath {
+                path,
+                file_size: None,
+                nar_size: None,
+            })
             .collect())
     }
 

@@ -55,6 +55,22 @@ pub struct OrganizationSummary {
     pub running_evaluations: i64,
 }
 
+#[derive(Serialize)]
+pub struct OrgResponse {
+    pub id: Uuid,
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    pub public_key: Option<String>,
+    pub use_nix_store: bool,
+    pub public: bool,
+    pub managed: bool,
+    pub created_by: Uuid,
+    pub created_at: chrono::NaiveDateTime,
+    pub github_installation_id: Option<i64>,
+    pub forge_webhook_secret_set: bool,
+}
+
 pub async fn get_org_name_available(
     state: State<Arc<ServerState>>,
     Query(params): Query<HashMap<String, String>>,
@@ -258,16 +274,16 @@ pub async fn get_organization(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(organization): Path<String>,
-) -> WebResult<Json<BaseResponse<MOrganization>>> {
-    let organization: MOrganization =
+) -> WebResult<Json<BaseResponse<OrgResponse>>> {
+    let org: MOrganization =
         get_any_organization_by_name(state.0.clone(), organization.clone())
             .await?
             .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    if !organization.public {
+    if !org.public {
         match &maybe_user {
             Some(user) => {
-                if !user_is_org_member(&state.0, user.id, organization.id).await? {
+                if !user_is_org_member(&state.0, user.id, org.id).await? {
                     return Err(WebError::not_found("Organization"));
                 }
             }
@@ -277,7 +293,20 @@ pub async fn get_organization(
 
     Ok(Json(BaseResponse {
         error: false,
-        message: organization,
+        message: OrgResponse {
+            forge_webhook_secret_set: org.forge_webhook_secret.is_some(),
+            id: org.id,
+            name: org.name,
+            display_name: org.display_name,
+            description: org.description,
+            public_key: Some(org.public_key),
+            use_nix_store: org.use_nix_store,
+            public: org.public,
+            managed: org.managed,
+            created_by: org.created_by,
+            created_at: org.created_at,
+            github_installation_id: org.github_installation_id,
+        },
     }))
 }
 

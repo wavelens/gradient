@@ -101,12 +101,15 @@ impl JobExecutor {
         for build_task in &job.builds {
             build::build_derivation(&self.store, build_task, updater).await?;
         }
+
         if let Some(compress_task) = &job.compress {
             compress::compress_outputs(&self.store, compress_task, updater).await?;
         }
+
         if let Some(sign_task) = &job.sign {
             sign::sign_outputs(&self.store, &self.credentials, sign_task, updater).await?;
         }
+
         Ok(())
     }
 }

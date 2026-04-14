@@ -5,6 +5,7 @@
  */
 
 use rkyv::{Archive, Deserialize, Serialize};
+use serde::Serialize as SerdeSerialize;
 
 /// Feature flags exchanged during the protocol handshake.
 ///
@@ -16,7 +17,7 @@ use rkyv::{Archive, Deserialize, Serialize};
 ///
 /// All fields default to `false` so a zeroed struct is a valid
 /// "no features" state.
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+#[derive(Archive, Serialize, Deserialize, SerdeSerialize, Debug, Clone, PartialEq, Default)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct GradientCapabilities {
     /// Peer is the Gradient server itself (coordinator).
@@ -131,12 +132,48 @@ pub struct FetchedInput {
 
 // ── Scheduling types ─────────────────────────────────────────────────────────
 
+/// Cache metadata for a store path.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct CacheInfo {
+    /// Compressed NAR size on disk (bytes).
+    pub file_size: u64,
+    /// Uncompressed NAR size (bytes).
+    pub nar_size: u64,
+}
+
+/// A store path confirmed present in the server's binary cache, with size metadata.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct CachedPath {
+    pub path: String,
+    /// Compressed NAR size on disk (bytes). `None` if not yet recorded.
+    pub file_size: Option<u64>,
+    /// Uncompressed NAR size (bytes). `None` if not yet recorded.
+    pub nar_size: Option<u64>,
+}
+
+/// A store path required by a job candidate, with optional cache metadata.
+///
+/// `cache_info` is `Some` when the path is known to be in the server's binary
+/// cache, allowing workers to estimate download cost during scoring.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct RequiredPath {
+    pub path: String,
+    pub cache_info: Option<CacheInfo>,
+}
+
 /// A job candidate pushed to workers by the server.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct JobCandidate {
     pub job_id: String,
-    pub required_paths: Vec<String>,
+    pub required_paths: Vec<RequiredPath>,
+    /// Derivation paths for build candidates; empty for eval jobs.
+    /// Workers use these to read the `.drv` file and determine the
+    /// actual set of inputs needed.
+    pub drv_paths: Vec<String>,
 }
 
 /// A worker's score for a single job candidate.
@@ -144,7 +181,11 @@ pub struct JobCandidate {
 #[rkyv(derive(Debug, PartialEq))]
 pub struct CandidateScore {
     pub job_id: String,
-    pub missing: u32,
+    /// Number of required paths not present in the worker's local Nix store.
+    pub missing_count: u32,
+    /// Total uncompressed NAR size of missing paths (bytes).
+    /// Derived from `CacheInfo.nar_size`; zero when cache info is unavailable.
+    pub missing_nar_size: u64,
 }
 
 // ── Derivation discovery ─────────────────────────────────────────────────────

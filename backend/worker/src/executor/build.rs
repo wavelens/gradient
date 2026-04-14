@@ -18,6 +18,7 @@ use gradient_core::sources::get_hash_from_path;
 use harmonia_protocol::build_result::BuildResultInner;
 use harmonia_protocol::daemon_wire::types2::BuildMode;
 use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT};
+use harmonia_store_core::store_path::ContentAddress;
 use harmonia_store_core::store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use proto::messages::{BuildOutput, BuildTask};
@@ -117,7 +118,30 @@ fn build_basic_derivation(
             .name
             .parse()
             .with_context(|| format!("invalid output name: {}", o.name))?;
-        let drv_output = if o.path.is_empty() {
+        let drv_output = if !o.hash_algo.is_empty() && !o.hash.is_empty() {
+            // Fixed-output derivation (FOD): the hash_algo field is either
+            // "sha256" (flat) or "r:sha256" (recursive/NAR hash).
+            let (recursive, algo_str) = o
+                .hash_algo
+                .strip_prefix("r:")
+                .map(|rest| (true, rest))
+                .unwrap_or((false, &o.hash_algo));
+            let algorithm: harmonia_utils_hash::Algorithm = algo_str
+                .parse()
+                .with_context(|| format!("unknown hash algorithm: {}", o.hash_algo))?;
+            let hash =
+                harmonia_utils_hash::fmt::Base16::parse(algorithm, &o.hash)
+                    .or_else(|_| harmonia_utils_hash::fmt::Base32::parse(algorithm, &o.hash))
+                    .with_context(|| {
+                        format!("invalid hash for output {}: {}", o.name, o.hash)
+                    })?;
+            let ca = if recursive {
+                ContentAddress::Recursive(hash)
+            } else {
+                ContentAddress::Flat(hash)
+            };
+            DerivationOutput::CAFixed(ca)
+        } else if o.path.is_empty() {
             DerivationOutput::Deferred
         } else {
             let sp = StorePath::from_base_path(strip_store_prefix(&o.path))
@@ -225,6 +249,54 @@ mod tests {
             matches!(out, HarmoniaOutput::InputAddressed(_)),
             "non-empty path → InputAddressed"
         );
+    }
+
+    #[test]
+    fn build_basic_drv_fixed_output_flat() {
+        let mut drv = empty_drv();
+        // Fixed-output derivation with flat sha256 hash (like fetchurl).
+        // 64 hex chars = 32 bytes = sha256.
+        drv.outputs = vec![DerivationOutput {
+            name: "out".into(),
+            path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source.tar.gz".into(),
+            hash_algo: "sha256".into(),
+            hash: "0000000000000000000000000000000000000000000000000000000000000000".into(),
+        }];
+        drv.builder = "builtin:fetchurl".into();
+        let basic = build_basic_derivation("aaaa-source.tar.gz.drv", &drv).unwrap();
+        let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
+        let out = basic.outputs.get(&out_name).expect("output 'out' not found");
+        assert!(
+            matches!(out, HarmoniaOutput::CAFixed(_)),
+            "FOD with sha256 hash → CAFixed, got {:?}",
+            out,
+        );
+    }
+
+    #[test]
+    fn build_basic_drv_fixed_output_recursive() {
+        let mut drv = empty_drv();
+        // Fixed-output derivation with recursive (NAR) sha256 hash.
+        drv.outputs = vec![DerivationOutput {
+            name: "out".into(),
+            path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source".into(),
+            hash_algo: "r:sha256".into(),
+            hash: "0000000000000000000000000000000000000000000000000000000000000000".into(),
+        }];
+        drv.builder = "builtin:fetchurl".into();
+        let basic = build_basic_derivation("aaaa-source.drv", &drv).unwrap();
+        let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
+        let out = basic.outputs.get(&out_name).expect("output 'out' not found");
+        match out {
+            HarmoniaOutput::CAFixed(ca) => {
+                assert!(
+                    matches!(ca, ContentAddress::Recursive(_)),
+                    "r:sha256 → Recursive, got {:?}",
+                    ca,
+                );
+            }
+            other => panic!("expected CAFixed, got {:?}", other),
+        }
     }
 
     #[test]

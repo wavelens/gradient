@@ -227,7 +227,7 @@ pub(crate) async fn handle_socket(
         .collect();
 
     // Register this worker in the scheduler.
-    let reauth_notify = scheduler
+    let (reauth_notify, mut abort_rx) = scheduler
         .register_worker(&peer_id, negotiated.clone(), authorized_peer_uuids)
         .await;
     let job_notify = scheduler.job_notify();
@@ -275,6 +275,27 @@ pub(crate) async fn handle_socket(
                     }
                 }
                 continue;
+            }
+            abort_msg = abort_rx.recv() => {
+                match abort_msg {
+                    Some((job_id, reason)) => {
+                        info!(%peer_id, %job_id, %reason, "sending AbortJob to worker");
+                        if send_server_msg(
+                            &mut socket,
+                            &ServerMessage::AbortJob { job_id, reason },
+                        )
+                        .await
+                        .is_err()
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+                    None => {
+                        // Channel closed — scheduler dropped the sender.
+                        break;
+                    }
+                }
             }
         };
 
@@ -449,6 +470,11 @@ pub(crate) async fn handle_socket(
                         {
                             error!(%peer_id, %job_id, error = %e, "handle_eval_result failed");
                         }
+                        // Eval result creates builds and dispatches them into
+                        // the in-memory tracker. job_notify fired during
+                        // processing but this handler wasn't in select! so the
+                        // notification was lost. Push candidates directly.
+                        push_pending_candidates(&mut socket, &scheduler, &peer_id).await;
                     }
                     JobUpdateKind::Building { build_id } => {
                         scheduler.handle_build_status_update(&build_id).await;
@@ -473,6 +499,9 @@ pub(crate) async fn handle_socket(
                 if let Err(e) = scheduler.handle_job_completed(&peer_id, &job_id).await {
                     error!(%peer_id, %job_id, error = %e, "handle_job_completed failed");
                 }
+                // A completed build unlocks dependents; push any new
+                // candidates that were dispatched during processing.
+                push_pending_candidates(&mut socket, &scheduler, &peer_id).await;
             }
 
             ClientMessage::JobFailed { job_id, error } => {
@@ -480,6 +509,9 @@ pub(crate) async fn handle_socket(
                 if let Err(e) = scheduler.handle_job_failed(&peer_id, &job_id, &error).await {
                     error!(%peer_id, %job_id, error = %e, "handle_job_failed failed");
                 }
+                // Failed build cascades DependencyFailed; push any freed
+                // candidates.
+                push_pending_candidates(&mut socket, &scheduler, &peer_id).await;
             }
 
             // ── Worker draining ───────────────────────────────────────────
@@ -644,6 +676,26 @@ async fn send_credentials_for_job(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/// Push any pending job candidates to the worker.
+///
+/// Called after processing messages that create or free jobs (EvalResult,
+/// JobCompleted, JobFailed). The handler can't rely on `job_notify` for
+/// these because it's the one doing the processing — it isn't in `select!`
+/// waiting on `notified()`, so notifications fired during processing are
+/// lost. This direct push ensures the worker learns about new candidates
+/// immediately.
+async fn push_pending_candidates(
+    socket: &mut ProtoSocket,
+    scheduler: &Scheduler,
+    peer_id: &str,
+) {
+    let candidates = scheduler.get_job_candidates(peer_id).await;
+    if !candidates.is_empty() {
+        debug!(%peer_id, count = candidates.len(), "pushing job offer after message processing");
+        let _ = send_server_msg(socket, &ServerMessage::JobOffer { candidates }).await;
+    }
+}
+
 async fn recv_client_msg(socket: &mut ProtoSocket) -> Option<ClientMessage> {
     let bytes = match socket.recv_bytes().await? {
         Ok(b) => b,
@@ -756,8 +808,13 @@ fn negotiate_capabilities(
 ///
 /// Extracts the nix32 hash prefix from each `/nix/store/<hash>-<name>` path and
 /// batch-queries the `derivation_output` table for rows with `is_cached = true`.
-async fn handle_cache_query(state: &ServerState, paths: &[String]) -> Vec<String> {
+/// Returns each cached path with its `file_size` and `nar_size` for download cost estimation.
+async fn handle_cache_query(
+    state: &ServerState,
+    paths: &[String],
+) -> Vec<gradient_core::types::proto::CachedPath> {
     use entity::derivation_output::{Column as CDerivationOutput, Entity as EDerivationOutput};
+    use gradient_core::types::proto::CachedPath;
 
     // Extract (hash, original_path) pairs from store paths.
     let hash_path_pairs: Vec<(&str, &str)> = paths
@@ -796,13 +853,21 @@ async fn handle_cache_query(state: &ServerState, paths: &[String]) -> Vec<String
         }
     };
 
-    let cached_hashes: std::collections::HashSet<&str> =
-        cached_rows.iter().map(|r| r.hash.as_str()).collect();
+    // Build a map from hash → (file_size, nar_size).
+    let cached_map: std::collections::HashMap<&str, (Option<i64>, Option<i64>)> = cached_rows
+        .iter()
+        .map(|r| (r.hash.as_str(), (r.file_size, r.nar_size)))
+        .collect();
 
     hash_path_pairs
         .iter()
-        .filter(|(hash, _)| cached_hashes.contains(hash))
-        .map(|(_, path)| path.to_string())
+        .filter_map(|(hash, path)| {
+            cached_map.get(hash).map(|(file_size, nar_size)| CachedPath {
+                path: path.to_string(),
+                file_size: file_size.map(|v| v as u64),
+                nar_size: nar_size.map(|v| v as u64),
+            })
+        })
         .collect()
 }
 

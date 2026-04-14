@@ -111,7 +111,8 @@ async fn test_score_assignment_flow() {
             "w1",
             vec![CandidateScore {
                 job_id: "j1".into(),
-                missing: 0,
+                missing_count: 0,
+                missing_nar_size: 0,
             }],
         )
         .await;
@@ -140,7 +141,8 @@ async fn test_job_rejected_requeues() {
             "w1",
             vec![CandidateScore {
                 job_id: "j1".into(),
-                missing: 0,
+                missing_count: 0,
+                missing_nar_size: 0,
             }],
         )
         .await;
@@ -173,7 +175,8 @@ async fn test_worker_disconnect_requeues_jobs() {
             "w1",
             vec![CandidateScore {
                 job_id: "j1".into(),
-                missing: 0,
+                missing_count: 0,
+                missing_nar_size: 0,
             }],
         )
         .await;
@@ -182,7 +185,8 @@ async fn test_worker_disconnect_requeues_jobs() {
             "w1",
             vec![CandidateScore {
                 job_id: "j2".into(),
-                missing: 0,
+                missing_count: 0,
+                missing_nar_size: 0,
             }],
         )
         .await;
@@ -252,7 +256,8 @@ async fn test_draining_worker_still_has_assigned_jobs() {
             "w1",
             vec![CandidateScore {
                 job_id: "j1".into(),
-                missing: 0,
+                missing_count: 0,
+                missing_nar_size: 0,
             }],
         )
         .await;
@@ -270,7 +275,7 @@ async fn test_draining_worker_still_has_assigned_jobs() {
 async fn test_request_reauth_signals_connected_worker() {
     let scheduler = test_scheduler();
 
-    let notify = scheduler
+    let (notify, _abort_rx) = scheduler
         .register_worker("w1", GradientCapabilities::default(), HashSet::new())
         .await;
 

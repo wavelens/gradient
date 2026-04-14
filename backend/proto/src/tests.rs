@@ -6,7 +6,7 @@
 
 use crate::messages::{
     ClientMessage, FlakeJob, FlakeTask, GradientCapabilities, Job, JobCandidate, PROTO_VERSION,
-    ServerMessage,
+    RequiredPath, ServerMessage,
 };
 use rkyv::rancor::Error as RkyvError;
 
@@ -61,7 +61,11 @@ fn job_list_chunk_roundtrip() {
     let original = ServerMessage::JobListChunk {
         candidates: vec![JobCandidate {
             job_id: "550e8400-e29b-41d4-a716-446655440000".into(),
-            required_paths: vec!["/nix/store/abc-foo".into()],
+            required_paths: vec![RequiredPath {
+                path: "/nix/store/abc-foo".into(),
+                cache_info: None,
+            }],
+            drv_paths: vec![],
         }],
         is_final: false,
     };

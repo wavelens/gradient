@@ -8,7 +8,6 @@ use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use core::db::abort_evaluation;
 use core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -19,6 +18,7 @@ use super::types::MakeEvaluationRequest;
 pub async fn post_evaluation(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(scheduler): Extension<Arc<scheduler::Scheduler>>,
     Path(evaluation_id): Path<Uuid>,
     Json(body): Json<MakeEvaluationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
@@ -64,7 +64,7 @@ pub async fn post_evaluation(
     }
 
     if body.method == "abort" {
-        abort_evaluation(Arc::clone(&state), evaluation).await;
+        scheduler.abort_evaluation(evaluation).await;
     }
 
     let res = BaseResponse {

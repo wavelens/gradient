@@ -240,7 +240,7 @@ pub async fn evaluate_derivations_with(
                 vec![]
             });
 
-        let cached_set: HashSet<&str> = cached_paths.iter().map(|s| s.as_str()).collect();
+        let cached_set: HashSet<&str> = cached_paths.iter().map(|c| c.path.as_str()).collect();
 
         // Check local store to find paths missing on this worker.
         let mut locally_missing: Vec<String> = Vec::new();

@@ -43,7 +43,7 @@ flake_ref: wildcard_ref: let
       if isDerivation node && !(isExcluded excludes prefix) then
         [ (builtins.concatStringsSep "." prefix) ]
       else
-        []
+        [ ]
     else let
       seg = builtins.head pattern;
       rest = builtins.tail pattern;
@@ -56,9 +56,9 @@ flake_ref: wildcard_ref: let
             newPrefix = prefix ++ [ name ];
           in
             if !child.success then
-              []
+              [ ]
             else
-              if rest == [] then (
+              if rest == [ ] then (
                 # Last segment: check derivation + recurse one level deeper
                 # to handle the `*.*` collapse (consecutive `*` segments are
                 # collapsed to a single `*` by build_wildcard_nix_expr, so a
@@ -71,19 +71,19 @@ flake_ref: wildcard_ref: let
                       subChild = builtins.tryEval (builtins.getAttr subName child.value);
                       subPrefix = newPrefix ++ [ subName ];
                     in if !subChild.success then
-                      []
+                      [ ]
                     else if isDerivation subChild.value && !(isExcluded excludes subPrefix) then
                       [ (builtins.concatStringsSep "." subPrefix) ]
                     else
-                      []
+                      [ ]
                   ) (builtins.attrNames child.value)
                   else
-                    []
+                    [ ]
               ) else
                 resolve excludes child.value rest newPrefix
           ) (builtins.attrNames node)
         else
-          []
+          [ ]
       else
         if seg == "#" then
           # Non-recursive wildcard: enumerate all attributes of the current node.
@@ -97,18 +97,18 @@ flake_ref: wildcard_ref: let
               newPrefix = prefix ++ [ name ];
             in
               if !child.success then
-                []
+                [ ]
               else
-                if rest == [] then
+                if rest == [ ] then
                   if isDerivation child.value && !(isExcluded excludes newPrefix) then
                     [ (builtins.concatStringsSep "." newPrefix) ]
                   else
-                    []
+                    [ ]
                 else
                   resolve excludes child.value rest newPrefix
             ) (builtins.attrNames node)
           else
-            []
+            [ ]
         else
           # Literal segment: descend directly.
           if builtins.isAttrs node && node ? ${seg} then let
@@ -117,11 +117,11 @@ flake_ref: wildcard_ref: let
             if child.success then
               resolve excludes child.value rest (prefix ++ [ seg ])
             else
-              []
+              [ ]
           else
-            [];
+            [ ];
 in builtins.toJSON (
   builtins.concatMap (pattern:
-    resolve wildcard_ref.exclude flake pattern []
+    resolve wildcard_ref.exclude flake pattern [ ]
   ) wildcard_ref.include
 )

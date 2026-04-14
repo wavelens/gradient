@@ -11,7 +11,9 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use proto::messages::{BuildOutput, ClientMessage, DiscoveredDerivation, FetchedInput, JobUpdateKind};
+use proto::messages::{
+    BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, FetchedInput, JobUpdateKind,
+};
 use tracing::debug;
 
 use crate::connection::ProtoConnection;
@@ -33,8 +35,9 @@ impl<'a> JobUpdater<'a> {
 
     /// Send a CacheQuery and wait for the CacheStatus response.
     ///
-    /// Returns the set of paths that the server confirms are already cached.
-    pub async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<String>> {
+    /// Returns the set of paths that the server confirms are already cached,
+    /// each with size metadata.
+    pub async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<CachedPath>> {
         use proto::messages::ServerMessage;
         self.conn
             .send(ClientMessage::CacheQuery {
@@ -145,7 +148,7 @@ impl<'a> JobUpdater<'a> {
 
 #[async_trait]
 impl JobReporter for JobUpdater<'_> {
-    async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<String>> {
+    async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<CachedPath>> {
         self.query_cache(paths).await
     }
 

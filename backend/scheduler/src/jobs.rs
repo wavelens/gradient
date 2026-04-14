@@ -10,7 +10,9 @@ use std::collections::{HashMap, HashSet};
 
 use uuid::Uuid;
 
-use gradient_core::types::proto::{BuildJob, CandidateScore, FlakeJob, Job, JobCandidate};
+use gradient_core::types::proto::{
+    BuildJob, CandidateScore, FlakeJob, Job, JobCandidate, RequiredPath,
+};
 
 #[derive(Debug, Clone)]
 pub struct PendingEvalJob {
@@ -22,7 +24,7 @@ pub struct PendingEvalJob {
     pub commit_id: Uuid,
     pub repository: String,
     pub job: FlakeJob,
-    pub required_paths: Vec<String>,
+    pub required_paths: Vec<RequiredPath>,
 }
 
 #[derive(Debug, Clone)]
@@ -32,7 +34,7 @@ pub struct PendingBuildJob {
     /// Peer (org/cache/proxy) that owns this job.
     pub peer_id: Uuid,
     pub job: BuildJob,
-    pub required_paths: Vec<String>,
+    pub required_paths: Vec<RequiredPath>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,7 +44,7 @@ pub enum PendingJob {
 }
 
 impl PendingJob {
-    pub fn required_paths(&self) -> &[String] {
+    pub fn required_paths(&self) -> &[RequiredPath] {
         match self {
             PendingJob::Eval(j) => &j.required_paths,
             PendingJob::Build(j) => &j.required_paths,
@@ -57,9 +59,14 @@ impl PendingJob {
     }
 
     pub fn as_candidate(&self, job_id: &str) -> JobCandidate {
+        let drv_paths = match self {
+            PendingJob::Build(j) => j.job.builds.iter().map(|t| t.drv_path.clone()).collect(),
+            PendingJob::Eval(_) => vec![],
+        };
         JobCandidate {
             job_id: job_id.to_owned(),
             required_paths: self.required_paths().to_vec(),
+            drv_paths,
         }
     }
 
@@ -113,8 +120,13 @@ impl JobTracker {
             .collect()
     }
 
-    /// Process scores from a worker; assign if best score is 0.
+    /// Process scores from a worker; assign the best-scoring candidate.
     /// Only considers jobs the worker is authorized for.
+    ///
+    /// The worker with the lowest `missing_nar_size` (fewest bytes to download)
+    /// gets the job. `missing_count` is used as a tiebreaker when nar sizes are
+    /// equal. Zero missing_nar_size and zero missing_count means the worker has
+    /// all dependencies cached and can start immediately.
     pub fn receive_scores(
         &mut self,
         peer_id: &str,
@@ -122,7 +134,7 @@ impl JobTracker {
         scores: Vec<CandidateScore>,
     ) -> Option<Assignment> {
         let worker_scores = self.scores.entry(peer_id.to_owned()).or_default();
-        let mut best: Option<(String, u32)> = None;
+        let mut best: Option<(String, u64, u32)> = None;
 
         for score in scores {
             let job = match self.pending.get(&score.job_id) {
@@ -135,21 +147,20 @@ impl JobTracker {
             {
                 continue;
             }
-            worker_scores.insert(score.job_id.clone(), score.missing);
-            match &best {
-                None => best = Some((score.job_id, score.missing)),
-                Some((_, b)) if score.missing < *b => {
-                    best = Some((score.job_id, score.missing));
+            worker_scores.insert(score.job_id.clone(), score.missing_count);
+            let is_better = match &best {
+                None => true,
+                Some((_, b_nar, b_cnt)) => {
+                    score.missing_nar_size < *b_nar
+                        || (score.missing_nar_size == *b_nar && score.missing_count < *b_cnt)
                 }
-                _ => {}
+            };
+            if is_better {
+                best = Some((score.job_id, score.missing_nar_size, score.missing_count));
             }
         }
 
-        let (job_id, missing) = best?;
-        if missing != 0 {
-            return None;
-        }
-
+        let (job_id, _, _) = best?;
         self.assign_pending(peer_id, &job_id)
     }
 
@@ -220,6 +231,19 @@ impl JobTracker {
         self.pending.contains_key(job_id) || self.active.contains_key(job_id)
     }
 
+    /// Iterate over active jobs: yields `(job_id, worker_id, &PendingJob)`.
+    pub fn active_jobs(&self) -> impl Iterator<Item = (&str, &str, &PendingJob)> {
+        self.active
+            .iter()
+            .map(|(job_id, (worker_id, job))| (job_id.as_str(), worker_id.as_str(), job))
+    }
+
+    /// Remove all pending (unassigned) jobs belonging to a given evaluation.
+    pub fn remove_pending_for_evaluation(&mut self, evaluation_id: Uuid) {
+        self.pending
+            .retain(|_, job| job.evaluation_id() != evaluation_id);
+    }
+
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }
@@ -252,7 +276,7 @@ mod tests {
         })
     }
 
-    fn build_job(peer: Uuid, required: Vec<String>) -> PendingJob {
+    fn build_job(peer: Uuid, required: Vec<RequiredPath>) -> PendingJob {
         PendingJob::Build(PendingBuildJob {
             build_id: Uuid::new_v4(),
             evaluation_id: Uuid::new_v4(),
@@ -302,14 +326,24 @@ mod tests {
     fn test_receive_scores_assigns_zero_missing() {
         let mut tracker = JobTracker::new();
         let peer = Uuid::new_v4();
-        tracker.add_pending("j1".into(), build_job(peer, vec!["/nix/store/foo".into()]));
+        tracker.add_pending(
+            "j1".into(),
+            build_job(
+                peer,
+                vec![RequiredPath {
+                    path: "/nix/store/foo".into(),
+                    cache_info: None,
+                }],
+            ),
+        );
 
         let assignment = tracker.receive_scores(
             "w1",
             None,
             vec![CandidateScore {
                 job_id: "j1".into(),
-                missing: 0,
+                missing_count: 0,
+                missing_nar_size: 0,
             }],
         );
         assert!(assignment.is_some());
@@ -319,22 +353,34 @@ mod tests {
     }
 
     #[test]
-    fn test_receive_scores_no_assign_nonzero() {
+    fn test_receive_scores_assigns_nonzero_best() {
         let mut tracker = JobTracker::new();
         let peer = Uuid::new_v4();
-        tracker.add_pending("j1".into(), build_job(peer, vec!["/nix/store/foo".into()]));
+        tracker.add_pending(
+            "j1".into(),
+            build_job(
+                peer,
+                vec![RequiredPath {
+                    path: "/nix/store/foo".into(),
+                    cache_info: None,
+                }],
+            ),
+        );
 
+        // Even with missing > 0, the best candidate is assigned.
         let assignment = tracker.receive_scores(
             "w1",
             None,
             vec![CandidateScore {
                 job_id: "j1".into(),
-                missing: 5,
+                missing_count: 5,
+                missing_nar_size: 0,
             }],
         );
-        assert!(assignment.is_none());
-        assert_eq!(tracker.pending_count(), 1);
-        assert_eq!(tracker.active_count(), 0);
+        assert!(assignment.is_some());
+        assert_eq!(assignment.unwrap().job_id, "j1");
+        assert_eq!(tracker.pending_count(), 0);
+        assert_eq!(tracker.active_count(), 1);
     }
 
     #[test]
@@ -382,7 +428,16 @@ mod tests {
         let mut tracker = JobTracker::new();
         let peer = Uuid::new_v4();
         // Job with required paths — should NOT be taken.
-        tracker.add_pending("j1".into(), build_job(peer, vec!["/nix/store/x".into()]));
+        tracker.add_pending(
+            "j1".into(),
+            build_job(
+                peer,
+                vec![RequiredPath {
+                    path: "/nix/store/x".into(),
+                    cache_info: None,
+                }],
+            ),
+        );
         // Job with no required paths — should be taken.
         tracker.add_pending("j2".into(), eval_job(peer));
 

@@ -10,6 +10,7 @@ use base64::Engine as _;
 use chrono::{NaiveDateTime, Utc};
 use core::db::get_organization_by_name;
 use core::types::{BaseResponse, MUser, ServerState};
+use core::types::proto::GradientCapabilities;
 use entity::worker_registration::{
     self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
 };
@@ -57,6 +58,7 @@ pub struct OrgWorkerEntry {
 
 #[derive(Serialize)]
 pub struct WorkerLiveInfo {
+    pub capabilities: GradientCapabilities,
     /// Nix system strings (e.g. "x86_64-linux"). Only populated for workers
     /// with the `build` capability negotiated.
     pub architectures: Vec<String>,
@@ -160,6 +162,7 @@ pub async fn get_org_workers(
         .into_iter()
         .map(|reg| {
             let live = live_workers.get(&reg.worker_id).map(|w| WorkerLiveInfo {
+                capabilities: w.capabilities.clone(),
                 // architectures/system_features are only non-empty for build-capable workers
                 // (WorkerCapabilities is only sent when `build` is negotiated)
                 architectures: w.architectures.clone(),

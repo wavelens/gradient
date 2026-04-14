@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::types::proto::{CredentialKind, GradientCapabilities, Job, JobCandidate};
+use gradient_core::types::proto::{
+    CachedPath, CredentialKind, GradientCapabilities, Job, JobCandidate,
+};
 use rkyv::{Archive, Deserialize, Serialize};
 
 /// A peer that failed authentication during the challenge-response flow.
@@ -115,9 +117,10 @@ pub enum ServerMessage {
     },
 
     /// Response to [`super::client::ClientMessage::CacheQuery`].
-    /// Lists the subset of queried paths that are already present in the cache.
+    /// Lists the subset of queried paths that are already present in the cache,
+    /// including size metadata for download cost estimation.
     CacheStatus {
         job_id: String,
-        cached: Vec<String>,
+        cached: Vec<CachedPath>,
     },
 }
