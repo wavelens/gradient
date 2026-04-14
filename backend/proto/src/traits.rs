@@ -48,6 +48,8 @@ pub trait DrvReader: Send + Sync {
 /// Test: `test_support::fakes::job_reporter::RecordingJobReporter`
 #[async_trait]
 pub trait JobReporter: Send {
+    /// Query the server's cache for which paths are already cached.
+    async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<String>>;
     async fn report_fetching(&mut self) -> Result<()>;
     async fn report_fetch_result(&mut self, fetched_paths: Vec<FetchedInput>) -> Result<()>;
     async fn report_evaluating_flake(&mut self) -> Result<()>;

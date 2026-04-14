@@ -113,4 +113,11 @@ pub enum ServerMessage {
         store_path: String,
         url: String,
     },
+
+    /// Response to [`super::client::ClientMessage::CacheQuery`].
+    /// Lists the subset of queried paths that are already present in the cache.
+    CacheStatus {
+        job_id: String,
+        cached: Vec<String>,
+    },
 }

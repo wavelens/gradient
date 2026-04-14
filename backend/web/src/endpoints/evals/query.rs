@@ -17,7 +17,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::types::{
-    BuildItem, BuildsQuery, EvaluationMessageResponse, EvaluationResponse, PaginatedBuilds,
+    BuildItem, BuildsQuery, EntryPointBrief, EvaluationMessageResponse, EvaluationResponse,
+    PaginatedBuilds,
 };
 
 pub async fn get_evaluation(
@@ -95,6 +96,39 @@ pub async fn get_evaluation(
         .filter(|m| m.level == entity::evaluation_message::MessageLevel::Warning)
         .count() as u64;
 
+    // Load entry points with their build statuses.
+    let ep_rows = EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.eq(evaluation.id))
+        .all(&state.db)
+        .await?;
+    let entry_points = if ep_rows.is_empty() {
+        vec![]
+    } else {
+        let build_ids: Vec<Uuid> = ep_rows.iter().map(|ep| ep.build).collect();
+        let builds: std::collections::HashMap<Uuid, entity::build::BuildStatus> =
+            EBuild::find()
+                .filter(CBuild::Id.is_in(build_ids))
+                .all(&state.db)
+                .await?
+                .into_iter()
+                .map(|b| (b.id, b.status))
+                .collect();
+        ep_rows
+            .into_iter()
+            .map(|ep| {
+                let build_status = builds
+                    .get(&ep.build)
+                    .cloned()
+                    .unwrap_or(entity::build::BuildStatus::Created);
+                EntryPointBrief {
+                    id: ep.id,
+                    eval: ep.eval,
+                    build_status,
+                }
+            })
+            .collect()
+    };
+
     let res = BaseResponse {
         error: false,
         message: EvaluationResponse {
@@ -110,6 +144,7 @@ pub async fn get_evaluation(
             created_at: evaluation.created_at,
             error_count,
             warning_count,
+            entry_points,
         },
     };
 

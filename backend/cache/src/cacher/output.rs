@@ -14,7 +14,6 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use super::gcroot::create_gcroot;
 use super::signing::{pack_derivation_output, sign_derivation_output};
 
 /// Caches a single derivation output to all caches subscribed by its owning organisation.
@@ -54,24 +53,14 @@ pub async fn cache_derivation_output(state: Arc<ServerState>, output: MDerivatio
 
     let path = get_path_from_derivation_output(output.clone());
 
-    // Ensure the path is present locally — for substituted builds it may not
-    // have been fetched yet.
+    // The path must be present in the server's local store to pack it into
+    // a NAR. Paths built by remote workers are uploaded directly by the
+    // worker via NarPush/PresignedUpload — the server never uses ensure_path.
     match state.nix_store.query_pathinfo(path.clone()).await {
         Ok(Some(_)) => {}
         Ok(None) => {
-            // Try to substitute from binary caches before giving up.
-            if let Err(e) = state.nix_store.ensure_path(path.clone()).await {
-                warn!(error = %e, path = %path, "Path not in local store and substitution failed, skipping cache");
-                return;
-            }
-            // Verify it is now present.
-            match state.nix_store.query_pathinfo(path.clone()).await {
-                Ok(Some(_)) => {}
-                _ => {
-                    warn!(path = %path, "Path still not in local store after substitution, skipping cache");
-                    return;
-                }
-            }
+            // Path not local — worker will upload the NAR separately.
+            return;
         }
         Err(e) => {
             error!(error = %e, path = %path, "Failed to query local store, skipping cache");
@@ -140,8 +129,6 @@ pub async fn cache_derivation_output(state: Arc<ServerState>, output: MDerivatio
         error!(error = %e, "Failed to update derivation output cache status");
         return;
     }
-
-    create_gcroot(&state, &output.hash, &output.package).await;
 
     // After updating, check whether this derivation's full closure is now
     // available in any of the caches. If so, record the cache_derivation row.

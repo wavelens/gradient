@@ -43,11 +43,20 @@ pub enum ReportedEvent {
 #[derive(Debug, Default)]
 pub struct RecordingJobReporter {
     pub events: Vec<ReportedEvent>,
+    /// Paths to return from `query_cache`. Tests set this to simulate
+    /// paths already present in the server's cache.
+    pub cached_paths: Vec<String>,
 }
 
 impl RecordingJobReporter {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Configure paths that `query_cache` will report as cached.
+    pub fn with_cached_paths(mut self, paths: Vec<String>) -> Self {
+        self.cached_paths = paths;
+        self
     }
 
     /// Number of events recorded.
@@ -70,6 +79,16 @@ impl RecordingJobReporter {
 
 #[async_trait]
 impl JobReporter for RecordingJobReporter {
+    async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<String>> {
+        // Return the intersection of queried paths and pre-configured cached paths.
+        let cached: std::collections::HashSet<&str> =
+            self.cached_paths.iter().map(|s| s.as_str()).collect();
+        Ok(paths
+            .into_iter()
+            .filter(|p| cached.contains(p.as_str()))
+            .collect())
+    }
+
     async fn report_fetching(&mut self) -> Result<()> {
         self.events.push(ReportedEvent::Fetching);
         Ok(())

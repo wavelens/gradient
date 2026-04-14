@@ -331,7 +331,13 @@ impl Scheduler {
                 }
             }
         };
-        eval::handle_eval_result(&self.state, &job, derivations, warnings).await
+        eval::handle_eval_result(&self.state, &job, derivations, warnings).await?;
+        // Immediately dispatch newly-queued builds so workers don't have to
+        // wait for the next build_dispatch_loop iteration (5 seconds).
+        if let Err(e) = dispatch::dispatch_ready_builds(self).await {
+            warn!(error = %e, "immediate build dispatch after eval result failed");
+        }
+        Ok(())
     }
 
     pub async fn handle_build_output(
@@ -368,7 +374,14 @@ impl Scheduler {
                 eval::handle_eval_job_completed(&self.state, j.evaluation_id).await
             }
             Some(PendingJob::Build(j)) => {
-                build::handle_build_job_completed(&self.state, j.build_id).await
+                let result =
+                    build::handle_build_job_completed(&self.state, j.build_id).await;
+                // A completed build may unlock dependent builds — dispatch them
+                // immediately instead of waiting for the build_dispatch_loop.
+                if let Err(e) = dispatch::dispatch_ready_builds(self).await {
+                    warn!(error = %e, "immediate build dispatch after completion failed");
+                }
+                result
             }
             None => {
                 warn!(%job_id, "job_completed for unknown job");
@@ -385,7 +398,14 @@ impl Scheduler {
                 eval::handle_eval_job_failed(&self.state, j.evaluation_id, error).await
             }
             Some(PendingJob::Build(j)) => {
-                build::handle_build_job_failed(&self.state, j.build_id, error).await
+                let result =
+                    build::handle_build_job_failed(&self.state, j.build_id, error).await;
+                // A failed build may cascade DependencyFailed, unlocking other
+                // builds to dispatch or completing the evaluation.
+                if let Err(e) = dispatch::dispatch_ready_builds(self).await {
+                    warn!(error = %e, "immediate build dispatch after failure failed");
+                }
+                result
             }
             None => {
                 warn!(%job_id, "job_failed for unknown job");

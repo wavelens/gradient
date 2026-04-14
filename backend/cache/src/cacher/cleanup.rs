@@ -15,7 +15,6 @@ use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use super::gcroot::remove_gcroot;
 use super::signing::sign_derivation_output;
 
 /// Checks every `is_cached = true` output against the NAR store.
@@ -200,7 +199,6 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
                 if let Err(e) = state.nar_storage.delete(&o.hash).await {
                     warn!(error = %e, hash = %o.hash, "Failed to remove stale compressed NAR");
                 }
-                remove_gcroot(&state, &o.hash, &o.package).await;
             }
         }
     }

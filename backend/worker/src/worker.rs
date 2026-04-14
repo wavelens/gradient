@@ -373,6 +373,12 @@ impl Worker {
                         warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
                     }
                 }
+
+                ServerMessage::CacheStatus { job_id, cached } => {
+                    // CacheStatus is normally consumed inline by the eval code
+                    // via query_cache(). If it arrives here, it's out of order.
+                    warn!(%job_id, count = cached.len(), "unexpected CacheStatus in dispatch loop");
+                }
             }
         }
 

@@ -31,6 +31,30 @@ impl<'a> JobUpdater<'a> {
         Self { job_id, conn }
     }
 
+    /// Send a CacheQuery and wait for the CacheStatus response.
+    ///
+    /// Returns the set of paths that the server confirms are already cached.
+    pub async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<String>> {
+        use proto::messages::ServerMessage;
+        self.conn
+            .send(ClientMessage::CacheQuery {
+                job_id: self.job_id.clone(),
+                paths,
+            })
+            .await?;
+
+        // Wait for the CacheStatus response (next message from server).
+        loop {
+            match self.conn.recv().await? {
+                Some(ServerMessage::CacheStatus { cached, .. }) => return Ok(cached),
+                Some(other) => {
+                    debug!(job_id = %self.job_id, ?other, "ignoring non-CacheStatus message while waiting for query response");
+                }
+                None => anyhow::bail!("connection closed while waiting for CacheStatus"),
+            }
+        }
+    }
+
     pub async fn report_fetching(&mut self) -> Result<()> {
         self.send_update(JobUpdateKind::Fetching).await
     }
@@ -121,6 +145,10 @@ impl<'a> JobUpdater<'a> {
 
 #[async_trait]
 impl JobReporter for JobUpdater<'_> {
+    async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<String>> {
+        self.query_cache(paths).await
+    }
+
     async fn report_fetching(&mut self) -> Result<()> {
         self.report_fetching().await
     }

@@ -199,23 +199,6 @@ pub async fn evaluate_derivations_with(
             })
             .collect();
 
-        // Check if all outputs are already in the local store.
-        let substituted = if outputs.is_empty() {
-            false
-        } else {
-            let mut all_present = true;
-            for o in &outputs {
-                match store.has_path(&o.path).await {
-                    Ok(true) => {}
-                    _ => {
-                        all_present = false;
-                        break;
-                    }
-                }
-            }
-            all_present
-        };
-
         let architecture = drv.system.clone();
 
         // Collect dependencies (just the drv paths, no output info needed here).
@@ -234,8 +217,66 @@ pub async fn evaluate_derivations_with(
             dependencies,
             architecture,
             required_features,
-            substituted,
+            substituted: false, // set after cache query below
         });
+    }
+
+    // ── Step 5: query server cache and local store ────────────────────────
+    // Collect all output paths, query the server's cache to determine which
+    // derivations are already cached (substituted), and check the local store
+    // to identify paths the worker is missing (for future NAR fetching).
+    let all_output_paths: Vec<String> = discovered
+        .iter()
+        .flat_map(|d| d.outputs.iter().map(|o| o.path.clone()))
+        .collect();
+
+    if !all_output_paths.is_empty() {
+        // Ask the server which outputs are already in its cache.
+        let cached_paths = updater
+            .query_cache(all_output_paths.clone())
+            .await
+            .unwrap_or_else(|e| {
+                warn!(error = %e, "cache query failed; treating all paths as uncached");
+                vec![]
+            });
+
+        let cached_set: HashSet<&str> = cached_paths.iter().map(|s| s.as_str()).collect();
+
+        // Check local store to find paths missing on this worker.
+        let mut locally_missing: Vec<String> = Vec::new();
+        for path in &all_output_paths {
+            match store.has_path(path).await {
+                Ok(true) => {}
+                _ => locally_missing.push(path.clone()),
+            }
+        }
+
+        if !locally_missing.is_empty() {
+            debug!(
+                missing = locally_missing.len(),
+                total = all_output_paths.len(),
+                "output paths missing from local store"
+            );
+        }
+
+        // Mark derivations whose outputs are all in the server's cache.
+        for drv in &mut discovered {
+            if !drv.outputs.is_empty()
+                && drv
+                    .outputs
+                    .iter()
+                    .all(|o| cached_set.contains(o.path.as_str()))
+            {
+                drv.substituted = true;
+            }
+        }
+
+        debug!(
+            total = discovered.len(),
+            substituted = discovered.iter().filter(|d| d.substituted).count(),
+            locally_missing = locally_missing.len(),
+            "cache query and local store check complete"
+        );
     }
 
     warnings.sort_unstable();
@@ -337,7 +378,9 @@ mod tests {
         let repo = "https://example.com/repo";
         let (resolver, drv_reader, store) = setup_from_fixture(&fixture, repo, "hello");
         let job = make_flake_job(repo);
-        let mut reporter = RecordingJobReporter::new();
+        // Simulate the same subset being cached on the server.
+        let cached: Vec<String> = fixture.store.present_paths().into_iter().collect();
+        let mut reporter = RecordingJobReporter::new().with_cached_paths(cached);
 
         evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
             .await
@@ -372,7 +415,9 @@ mod tests {
         let repo = "https://example.com/repo";
         let (resolver, drv_reader, store) = setup_from_fixture(&fixture, repo, "hello");
         let job = make_flake_job(repo);
-        let mut reporter = RecordingJobReporter::new();
+        // Simulate all output paths being present in the server's cache.
+        let cached: Vec<String> = fixture.store.present_paths().into_iter().collect();
+        let mut reporter = RecordingJobReporter::new().with_cached_paths(cached);
 
         evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
             .await
@@ -382,7 +427,7 @@ mod tests {
         {
             assert!(
                 derivations.iter().all(|d| d.substituted),
-                "all should be substituted when everything is built"
+                "all should be substituted when everything is cached"
             );
         } else {
             panic!("expected EvalResult");

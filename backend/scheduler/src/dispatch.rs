@@ -64,7 +64,7 @@ async fn project_poll_loop(scheduler: Arc<Scheduler>) {
 /// evaluated commit. If an update is found, creates a new `Queued` evaluation
 /// via `trigger_evaluation`.
 pub(crate) async fn poll_projects_for_evaluations(
-    scheduler: &Arc<Scheduler>,
+    scheduler: &Scheduler,
 ) -> anyhow::Result<()> {
     let state = &scheduler.state;
     let threshold_time =
@@ -169,7 +169,7 @@ async fn eval_dispatch_loop(scheduler: Arc<Scheduler>) {
     }
 }
 
-pub(crate) async fn dispatch_queued_evals(scheduler: &Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Result<()> {
     let state = &scheduler.state;
 
     let evals = EEvaluation::find()
@@ -246,7 +246,7 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
     }
 }
 
-pub(crate) async fn dispatch_ready_builds(scheduler: &Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Result<()> {
     let state = &scheduler.state;
 
     // Ready builds: status = Queued AND no unsatisfied dependencies.

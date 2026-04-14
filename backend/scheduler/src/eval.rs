@@ -262,6 +262,12 @@ pub async fn handle_eval_result(
         let mut active_entry_points: Vec<AEntryPoint> = Vec::new();
 
         for d in &derivations {
+            // Only root derivations (with a non-empty attr) are entry points.
+            // Transitive dependencies have attr = "" and should not be tracked
+            // as entry points.
+            if d.attr.is_empty() {
+                continue;
+            }
             if let Some(&drv_id) = drv_path_to_id.get(&d.drv_path)
                 && let Some(&build_id) = drv_id_to_build.get(&drv_id)
             {

@@ -115,4 +115,11 @@ pub enum ClientMessage {
         /// SRI-format hash: `sha256-<base64>`.
         nar_hash: String,
     },
+
+    /// Bulk query: which of these output store paths are already in the cache?
+    /// Server responds with [`super::server::ServerMessage::CacheStatus`].
+    CacheQuery {
+        job_id: String,
+        paths: Vec<String>,
+    },
 }

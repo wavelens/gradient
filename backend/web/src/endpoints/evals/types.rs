@@ -48,6 +48,15 @@ pub struct EvaluationResponse {
     pub created_at: chrono::NaiveDateTime,
     pub error_count: u64,
     pub warning_count: u64,
+    pub entry_points: Vec<EntryPointBrief>,
+}
+
+/// Compact entry-point representation returned inline on the evaluation.
+#[derive(Serialize, Debug)]
+pub struct EntryPointBrief {
+    pub id: Uuid,
+    pub eval: String,
+    pub build_status: entity::build::BuildStatus,
 }
 
 #[derive(Serialize, Debug)]

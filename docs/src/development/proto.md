@@ -300,7 +300,7 @@ sequenceDiagram
 
 ### How It Works
 
-1. **`JobOffer`** (server → workers, pushed eagerly) — as soon as a job enters the queue (e.g. evaluation discovers new builds, or a build's dependencies complete), the server pushes it to all connected workers whose negotiated capabilities and advertised system features match, and who are authorized for the job's peer (org). Each candidate includes `required_paths` so workers can score locally.
+1. **`JobOffer`** (server → workers, pushed eagerly) — as soon as a job enters the queue (e.g. evaluation discovers new builds, or a build's dependencies complete), the server pushes it to all connected workers whose negotiated capabilities and advertised system features match, and who are authorized for the job's peer (org). Each candidate includes `required_paths` so workers can score locally. The server dispatches builds immediately after three events: evaluation result (new builds queued), build completion (dependent builds unlocked), and build failure (cascade frees blocked builds). A background dispatch loop (5-second interval) acts as a safety net.
 
 2. **Workers score in the background** — on receiving `JobOffer`, the worker checks its local Nix store against each candidate's `required_paths` and caches the result. This is a fast local operation (no network I/O) and happens continuously, not on-demand.
 
@@ -411,13 +411,59 @@ DiscoveredDerivation {
     dependencies: Vec<String>,          // drv paths this depends on
     architecture: String,               // Nix system string, e.g. "x86_64-linux", "builtin"
     required_features: Vec<String>,     // Nix system features needed to build (e.g. "kvm")
-    substituted: bool,                  // all outputs already in worker's local store
+    substituted: bool,                  // all outputs already present in the server's cache
 }
 ```
 
-`substituted: true` means the worker checked its local Nix store and all outputs for this derivation already exist — no build needed. The server marks these as `Substituted` (7) and they are immediately eligible for cache signing.
+`substituted: true` means all outputs for this derivation are already present in the **server's binary cache** — no build needed. The worker determines this by querying the server via `CacheQuery` during the closure walk (see below). The server marks these as `Substituted` (7).
 
 The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`, `"aarch64-linux"`, `"builtin"`). `"builtin"` means the derivation uses `builtin:fetchurl` or similar — it can run on any worker regardless of architecture.
+
+#### Cache Query
+
+During `EvaluateDerivations`, the worker discovers output store paths and needs to know which ones the server already has cached. Rather than checking the worker's local Nix store (which is irrelevant — the server serves the cache, not the worker), the worker performs a bulk query against the server's cache:
+
+```mermaid
+sequenceDiagram
+    participant W as Worker
+    participant S as Server
+
+    Note over W: closure walk discovers output paths
+    W->>S: CacheQuery { paths: [A, B, C, D, E] }
+    Note right of S: checks NAR store (S3 / local)
+    S->>W: CacheStatus { cached: [A, C] }
+    Note over W: marks A,C derivations as substituted
+```
+
+```rust
+// Worker → Server
+CacheQuery {
+    job_id: String,
+    paths: Vec<String>,                 // output store paths to check
+}
+
+// Server → Worker
+CacheStatus {
+    job_id: String,
+    cached: Vec<String>,                // paths present in the cache
+}
+```
+
+The query is batched — the worker collects output paths during the BFS walk and sends them in one or a few `CacheQuery` messages. The server checks its NAR store (S3 bucket or local `nars/` directory) and responds with the subset that already has `.narinfo` + `.nar.zst` files. This avoids the worker needing direct access to the cache backend.
+
+### Cache Verification
+
+After a build completes, the server **verifies** that the build outputs are present in the cache rather than trying to fetch them from its own local Nix store. The server never needs the built paths in its local store — it only needs the compressed NARs in its cache storage.
+
+The flow for getting build outputs into the cache:
+
+1. **Worker builds** the derivation and has the outputs in its local store.
+2. **Worker compresses** outputs into zstd NARs (if `compress` task is in the `BuildJob`).
+3. **Worker uploads** NARs to the server via `NarPush` (direct mode) or to S3 via `PresignedUpload`.
+4. **Server records** the NAR metadata (hash, size) and verifies the NAR is present in cache storage.
+5. **Server signs** the path (if a signing key is configured for the org's cache).
+
+The server does **not** use `ensure_path` or GC roots. All cached content lives in the NAR store (S3 or local files), not in the server's Nix store.
 
 ### Incremental Evaluation
 
@@ -435,8 +481,11 @@ sequenceDiagram
     W->>S: JobUpdate::EvaluatingFlake
     Note over W: nix eval (uses local clone)
     W->>S: JobUpdate::EvaluatingDerivations
+    Note over W: BFS closure walk
+    W->>S: CacheQuery { paths: [output paths] }
+    S->>W: CacheStatus { cached: [subset] }
     W->>S: JobUpdate::EvalResult (batch 1: 50 derivations, 12 substituted)
-    Note right of S: inserts rows, marks substituted,<br/>queues signing for substituted outputs
+    Note right of S: inserts rows, marks substituted
     W->>S: JobUpdate::EvalResult (batch 2: 30 derivations)
     Note right of S: inserts rows, queues builds
     W->>S: JobCompleted
@@ -444,11 +493,11 @@ sequenceDiagram
 
 The server processes each batch immediately:
 1. Insert `derivation`, `derivation_output`, `derivation_dependency` rows.
-2. Insert `build` rows — `Substituted` for derivations the worker marked as `substituted`, `Created` for the rest.
-3. Substituted outputs are immediately eligible for signing (cache loop picks them up).
-4. Non-substituted builds enter the build queue — other workers can start building dependencies before evaluation finishes.
+2. Insert `build` rows — `Substituted` for derivations the worker marked as `substituted` (confirmed in cache), `Created` for the rest.
+3. Create **entry points** for root derivations (those with a non-empty `attr`) — transitive dependencies are not tracked as entry points. Entry points map user-facing packages to their builds for CI reporting and the frontend UI.
+4. Transition non-substituted builds from `Created` → `Queued` and **immediately dispatch** them to the in-memory job tracker. Workers are notified via `JobOffer` without waiting for the background dispatch loop.
 
-This means builds and signing can start **while evaluation is still in progress**, significantly reducing end-to-end latency for large closures.
+This means builds can start **while evaluation is still in progress**, significantly reducing end-to-end latency for large closures.
 
 ### BuildJob
 
@@ -553,6 +602,9 @@ enum ServerMessage {
     // NAR transfer — S3 mode (batched)
     PresignedUpload { job_id: Uuid, store_path: String, url: String, method: String, headers: Vec<(String, String)> },
     PresignedDownload { job_id: Uuid, store_path: String, url: String },
+
+    // Cache queries
+    CacheStatus { job_id: String, cached: Vec<String> },  // response to CacheQuery
 }
 
 struct FailedPeer { peer_id: Uuid, reason: String }
@@ -588,6 +640,9 @@ enum ClientMessage {
     NarRequest { job_id: Uuid, paths: Vec<String> },    // "send me these paths"
     NarPush { job_id: Uuid, store_path: String, data: Vec<u8>, offset: u64, is_final: bool },
     NarReady { job_id: Uuid, store_path: String, nar_size: u64, nar_hash: String },
+
+    // Cache queries
+    CacheQuery { job_id: String, paths: Vec<String> },  // "which of these are already cached?"
 }
 ```
 
@@ -642,7 +697,7 @@ struct BuildOutput {
 | `FetchResult` | `evaluation` | Stays `Fetching`; records fetched input paths, uploads NARs to cache |
 | `EvaluatingFlake` | `evaluation` | `EvaluatingFlake` (1) |
 | `EvaluatingDerivations` | `evaluation` | `EvaluatingDerivation` (2) |
-| `EvalResult` | `evaluation` + `derivation` + `build` + `evaluation_message` | Inserts rows per batch; substituted → `Substituted` (7), rest → `Created` (0). First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. |
+| `EvalResult` | `evaluation` + `derivation` + `build` + `entry_point` + `evaluation_message` | Inserts rows per batch; substituted → `Substituted` (7), rest → `Created` (0) → `Queued` (1). Creates `entry_point` rows for root derivations (non-empty `attr`). Immediately dispatches ready builds to workers. First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. |
 | `Building` | `build` | `Building` (2) — per derivation in chain |
 | `BuildOutput` | `build` + `derivation_output` | `Completed` (3); updates output hash/size/path |
 | `Compressing` | — | No status change; informational — packing outputs into zstd NARs |

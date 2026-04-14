@@ -531,6 +531,25 @@ pub(crate) async fn handle_socket(
                     error!(%peer_id, %job_id, error = %e, "handle_nar_ready failed");
                 }
             }
+
+            // ── Cache queries ────────────────────────────────────────────
+            ClientMessage::CacheQuery { job_id, paths } => {
+                debug!(%peer_id, %job_id, count = paths.len(), "CacheQuery");
+                let cached = handle_cache_query(&state, &paths).await;
+                debug!(%peer_id, %job_id, cached = cached.len(), "CacheStatus");
+                if send_server_msg(
+                    &mut socket,
+                    &ServerMessage::CacheStatus {
+                        job_id,
+                        cached,
+                    },
+                )
+                .await
+                .is_err()
+                {
+                    break;
+                }
+            }
         }
     }
 
@@ -731,6 +750,60 @@ fn negotiate_capabilities(
         build: client.build,
         sign: client.sign,
     }
+}
+
+/// Check which store paths have cached NARs in the server's cache storage.
+///
+/// Extracts the nix32 hash prefix from each `/nix/store/<hash>-<name>` path and
+/// batch-queries the `derivation_output` table for rows with `is_cached = true`.
+async fn handle_cache_query(state: &ServerState, paths: &[String]) -> Vec<String> {
+    use entity::derivation_output::{Column as CDerivationOutput, Entity as EDerivationOutput};
+
+    // Extract (hash, original_path) pairs from store paths.
+    let hash_path_pairs: Vec<(&str, &str)> = paths
+        .iter()
+        .filter_map(|p| {
+            let base = p.strip_prefix("/nix/store/").unwrap_or(p);
+            let hash = base.split('-').next()?;
+            if hash.len() == 32 {
+                Some((hash, p.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if hash_path_pairs.is_empty() {
+        return vec![];
+    }
+
+    let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
+
+    // Batch query: find all derivation_output rows with is_cached=true for these hashes.
+    let cached_rows = match EDerivationOutput::find()
+        .filter(
+            sea_orm::Condition::all()
+                .add(CDerivationOutput::IsCached.eq(true))
+                .add(CDerivationOutput::Hash.is_in(hashes.clone())),
+        )
+        .all(&state.db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "CacheQuery DB lookup failed");
+            return vec![];
+        }
+    };
+
+    let cached_hashes: std::collections::HashSet<&str> =
+        cached_rows.iter().map(|r| r.hash.as_str()).collect();
+
+    hash_path_pairs
+        .iter()
+        .filter(|(hash, _)| cached_hashes.contains(hash))
+        .map(|(_, path)| path.to_string())
+        .collect()
 }
 
 #[cfg(test)]

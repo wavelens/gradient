@@ -313,23 +313,56 @@
           if attempt == 6:
               raise Exception(f"Server did not detect repository change after 90 s:\n{j[-2000:]}")
 
-      # Second window: wait for build to complete (up to 210 s)
+      # Second window: wait for eval + build to complete (up to 300 s)
+      # Use the API directly (curl) instead of the CLI to avoid non-zero exit
+      # codes while the evaluation is still in progress.
       completed = False
-      for attempt in range(1, 22):
+      for attempt in range(1, 31):
           server.sleep(10)
           check_journal_for_errors(since_seconds=15)
-          output = server.succeed("${lib.getExe pkgs.gradient-cli} project show")
-          if "Completed" in output:
+          status = server.succeed("""
+            ${lib.getExe pkgs.curl} -sf \
+              -H "Authorization: Bearer ACCESS_TOKEN" \
+              http://gradient.local/api/v1/projects/org/project \
+              | ${lib.getExe pkgs.jq} -rj '.message.last_evaluation // empty'
+          """.replace("ACCESS_TOKEN", token)).strip()
+          if not status:
+              if attempt % 3 == 0:
+                  print(f"Still waiting for evaluation to start (attempt {attempt}/30)...")
+              continue
+          eval_status = server.succeed(f"""
+            ${lib.getExe pkgs.curl} -sf \
+              -H "Authorization: Bearer {token}" \
+              http://gradient.local/api/v1/evals/{status} \
+              | ${lib.getExe pkgs.jq} -rj '.message.status'
+          """).strip()
+          if eval_status == "Completed":
               completed = True
+              print(f"=== Evaluation completed on attempt {attempt} ===")
               break
+          elif eval_status == "Failed":
+              j = server.succeed("journalctl -u gradient-server --no-pager --since='-300s' -n 200")
+              bj = server.succeed("journalctl -u gradient-worker --no-pager --since='-300s' -n 200") if True else ""
+              raise Exception(f"Evaluation failed:\nServer:\n{j[-2000:]}\nWorker:\n{bj[-2000:]}")
           if attempt % 3 == 0:
-              print(f"Still waiting for build (attempt {attempt}/21)...")
-              print(output)
+              # Print eval status, entry point count, and build status breakdown
+              eval_detail = server.succeed(f"""
+                ${lib.getExe pkgs.curl} -sf \
+                  -H "Authorization: Bearer {token}" \
+                  http://gradient.local/api/v1/evals/{status} \
+                  | ${lib.getExe pkgs.jq} -c '.message | {{status, entry_points: (.entry_points | length)}}'
+              """).strip()
+              builds_summary = server.succeed(f"""
+                ${lib.getExe pkgs.curl} -sf \
+                  -H "Authorization: Bearer {token}" \
+                  http://gradient.local/api/v1/evals/{status}/builds \
+                  | ${lib.getExe pkgs.jq} -c '.message | {{total, by_status: ([.builds[].status] | group_by(.) | map({{key: .[0], value: length}}) | from_entries)}}'
+              """).strip()
+              print(f"Attempt {attempt}/30 — eval: {eval_detail}, builds: {builds_summary}")
 
       if not completed:
-          output = server.succeed("${lib.getExe pkgs.gradient-cli} project show")
-          print(server.succeed("journalctl -u gradient-server --no-pager --since='-300s' -n 200"))
-          raise Exception(f"Build did not complete after 210 s:\n{output}")
+          j = server.succeed("journalctl -u gradient-server --no-pager --since='-300s' -n 200")
+          raise Exception(f"Evaluation did not complete after 300 s:\n{j[-2000:]}")
 
       output = server.succeed("${lib.getExe pkgs.gradient-cli} project show")
       print(output)

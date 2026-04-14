@@ -5,7 +5,6 @@
  */
 
 mod cleanup;
-mod gcroot;
 mod invalidate;
 mod output;
 mod signing;
