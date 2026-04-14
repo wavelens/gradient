@@ -5,7 +5,7 @@
  */
 
 use clap::Subcommand;
-use rand::{Rng, distr::Alphanumeric};
+use rand::distr::{Alphanumeric, SampleString};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -31,11 +31,7 @@ pub async fn handle(cmd: Commands) {
 
 fn generate_api_key_pair() -> (String, String) {
     // Generate a 64-character alphanumeric key that matches the backend format
-    let private_key: String = rand::rng()
-        .sample_iter(&Alphanumeric)
-        .take(64)
-        .map(char::from)
-        .collect();
+    let private_key: String = Alphanumeric.sample_string(&mut rand::rng(), 64);
 
     // The public key is the private key with "GRAD" prefix for API authentication
     let public_key = format!("GRAD{}", private_key);
