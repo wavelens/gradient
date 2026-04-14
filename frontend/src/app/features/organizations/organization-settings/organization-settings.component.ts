@@ -53,6 +53,7 @@ export class OrganizationSettingsComponent implements OnInit {
   sshLoading = signal(true);
   generatingSSH = signal(false);
   generatingForgeSecret = signal(false);
+  hasForgeSecret = signal<boolean>(false);
   forgeWebhookResult = signal<{ webhook_url: string; secret: string } | null>(null);
   forgeSecretError = signal<string | null>(null);
 
@@ -95,6 +96,7 @@ export class OrganizationSettingsComponent implements OnInit {
     this.organizationsService.getOrganization(this.orgName).subscribe({
       next: (org) => {
         this.organization.set(org);
+        this.hasForgeSecret.set(org.forge_webhook_secret_set ?? false);
         this.formData = {
           display_name: org.display_name,
           description: org.description,
@@ -276,6 +278,7 @@ export class OrganizationSettingsComponent implements OnInit {
     this.organizationsService.generateForgeWebhookSecret(this.orgName).subscribe({
       next: (result) => {
         this.forgeWebhookResult.set(result);
+        this.hasForgeSecret.set(true);
         this.generatingForgeSecret.set(false);
       },
       error: (error) => {

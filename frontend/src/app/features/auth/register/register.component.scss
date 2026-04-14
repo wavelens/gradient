@@ -203,6 +203,31 @@
   }
 }
 
+.auth-blocked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: $spacing-sm;
+  padding: $spacing-lg;
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+  margin-bottom: $spacing-lg;
+
+  .material-symbols-outlined {
+    font-size: 40px;
+    color: $text-secondary;
+  }
+
+  p {
+    margin: 0;
+    color: $text-secondary;
+    font-size: $font-size-sm;
+    line-height: 1.5;
+  }
+}
+
 .auth-footer {
   text-align: center;
   margin-top: $spacing-lg;

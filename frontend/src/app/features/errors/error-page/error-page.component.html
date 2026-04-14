@@ -1,0 +1,20 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="error-page">
+  <div class="error-card">
+    <span class="material-symbols-outlined error-icon">{{ meta().icon }}</span>
+    <div class="error-code">{{ code() || '' }}</div>
+    <h1 class="error-title">{{ meta().title }}</h1>
+    <p class="error-description">{{ meta().description }}</p>
+    <div class="error-actions">
+      <a routerLink="/" class="btn btn-primary">Go Home</a>
+      @if (meta().retryable) {
+        <button class="btn btn-secondary" (click)="retry()">Try Again</button>
+      }
+    </div>
+  </div>
+</div>

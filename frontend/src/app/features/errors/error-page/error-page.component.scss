@@ -1,0 +1,89 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.error-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: calc(100vh - 120px);
+  padding: $spacing-xxl $spacing-lg;
+}
+
+.error-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 480px;
+  width: 100%;
+}
+
+.error-icon {
+  font-size: 64px;
+  color: $text-secondary;
+  margin-bottom: $spacing-lg;
+}
+
+.error-code {
+  font-size: 96px;
+  font-weight: 700;
+  line-height: 1;
+  color: $text-light;
+  margin-bottom: $spacing-md;
+  font-family: $font-family-mono;
+  letter-spacing: -4px;
+}
+
+.error-title {
+  font-size: $font-size-xxl;
+  font-weight: 600;
+  margin: 0 0 $spacing-md;
+  color: $text-primary;
+}
+
+.error-description {
+  font-size: $font-size-md;
+  color: $text-secondary;
+  line-height: 1.6;
+  margin: 0 0 $spacing-xxl;
+}
+
+.error-actions {
+  display: flex;
+  gap: $spacing-md;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-sm $spacing-xl;
+  border-radius: $border-radius-md;
+  font-size: $font-size-md;
+  font-weight: 500;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  transition: opacity $transition-fast;
+
+  &:hover { opacity: 0.85; }
+
+  &.btn-primary {
+    background: $color-info;
+    color: $text-primary;
+  }
+
+  &.btn-secondary {
+    background: $color-tertiary;
+    color: $text-primary;
+    border: 1px solid $color-border;
+  }
+}

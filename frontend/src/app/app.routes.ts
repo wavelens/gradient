@@ -221,9 +221,42 @@ export const routes: Routes = [
     ],
   },
 
-  // Fallback route
+  // Error pages
+  {
+    path: 'error/500',
+    title: 'Internal Server Error',
+    data: { code: 500 },
+    loadComponent: () =>
+      import('./features/errors/error-page/error-page.component').then((m) => m.ErrorPageComponent),
+  },
+  {
+    path: 'error/502',
+    title: 'Bad Gateway',
+    data: { code: 502 },
+    loadComponent: () =>
+      import('./features/errors/error-page/error-page.component').then((m) => m.ErrorPageComponent),
+  },
+  {
+    path: 'error/503',
+    title: 'Service Unavailable',
+    data: { code: 503 },
+    loadComponent: () =>
+      import('./features/errors/error-page/error-page.component').then((m) => m.ErrorPageComponent),
+  },
+  {
+    path: 'error/504',
+    title: 'Gateway Timeout',
+    data: { code: 504 },
+    loadComponent: () =>
+      import('./features/errors/error-page/error-page.component').then((m) => m.ErrorPageComponent),
+  },
+
+  // 404 fallback
   {
     path: '**',
-    redirectTo: '',
+    title: 'Page Not Found',
+    data: { code: 404 },
+    loadComponent: () =>
+      import('./features/errors/error-page/error-page.component').then((m) => m.ErrorPageComponent),
   },
 ];

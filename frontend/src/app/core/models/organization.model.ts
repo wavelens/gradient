@@ -17,6 +17,7 @@ export interface Organization {
   created_at?: string;
   role?: 'owner' | 'member';
   running_evaluations?: number;
+  forge_webhook_secret_set?: boolean;
 }
 
 export interface OrganizationMember {

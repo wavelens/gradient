@@ -86,14 +86,26 @@
 
   .material-symbols-outlined { font-size: 20px; color: $text-secondary; }
   .worker-id { font-weight: 500; font-family: $font-family-mono; }
-  .worker-archs { font-size: $font-size-sm; font-family: $font-family-mono; }
-  .worker-builds-limit { font-family: $font-family-base; color: $text-light; }
+  .worker-caps { display: flex; gap: $spacing-xs; flex-wrap: wrap; margin-top: $spacing-xs; }
+  .worker-archs { font-size: $font-size-sm; font-family: $font-family-mono; margin-top: $spacing-xs; }
+  .worker-features { color: $text-light; }
+  .worker-stats { font-size: $font-size-sm; margin-top: $spacing-xs; }
 }
 
 .worker-meta {
   display: flex;
   align-items: center;
   gap: $spacing-sm;
+}
+
+.cap-badge {
+  padding: 1px $spacing-xs;
+  border-radius: $border-radius-sm;
+  font-size: $font-size-xs;
+  font-family: $font-family-mono;
+
+  &.cap-on  { background: rgba($color-success, 0.12); color: $color-success; }
+  &.cap-off { background: rgba($text-secondary, 0.08); color: $text-light; text-decoration: line-through; }
 }
 
 .badge {

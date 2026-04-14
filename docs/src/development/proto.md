@@ -288,9 +288,9 @@ sequenceDiagram
     Note over W1: scores against local store (background)
     Note over W2: scores against local store (background)
 
-    W1->>S: RequestJobChunk { scores: [{id, missing:12}], is_final: false }
-    W2->>S: RequestJobChunk { scores: [{id, missing:0}], is_final: false }
-    Note over S: Worker B has missing:0 — assign immediately
+    W1->>S: RequestJobChunk { scores: [{id, missing_count:3, missing_nar_size:150MB}], is_final: false }
+    W2->>S: RequestJobChunk { scores: [{id, missing_count:0, missing_nar_size:0}], is_final: false }
+    Note over S: Worker B has missing_nar_size:0 — assign immediately
     S->>W2: AssignJob { job_id, job }
     S->>W1: RevokeJob { job_id }
     Note over W1: removes from local candidate cache
@@ -300,13 +300,13 @@ sequenceDiagram
 
 ### How It Works
 
-1. **`JobOffer`** (server → workers, pushed eagerly) — as soon as a job enters the queue (e.g. evaluation discovers new builds, or a build's dependencies complete), the server pushes it to all connected workers whose negotiated capabilities and advertised system features match, and who are authorized for the job's peer (org). Each candidate includes `required_paths` so workers can score locally. The server dispatches builds immediately after three events: evaluation result (new builds queued), build completion (dependent builds unlocked), and build failure (cascade frees blocked builds). A background dispatch loop (5-second interval) acts as a safety net.
+1. **`JobOffer`** (server → workers, pushed eagerly) — as soon as a job enters the queue (e.g. evaluation discovers new builds, or a build's dependencies complete), the server pushes it to all connected workers whose negotiated capabilities and advertised system features match, and who are authorized for the job's peer (org). Each candidate includes `required_paths` (with optional `CacheInfo` for paths in the server's cache) so workers can score locally. The server dispatches builds immediately after three events: evaluation result (new builds queued), build completion (dependent builds unlocked), and build failure (cascade frees blocked builds). A background dispatch loop (5-second interval) acts as a safety net.
 
 2. **Workers score in the background** — on receiving `JobOffer`, the worker checks its local Nix store against each candidate's `required_paths` and caches the result. This is a fast local operation (no network I/O) and happens continuously, not on-demand.
 
 3. **`RequestJobChunk`** (worker → server, streamed as scores are computed) — as the worker scores candidates against its local store, it sends batches of scores incrementally. `is_final: true` marks the last chunk. The server can start making decisions before all scores arrive — e.g. a `missing: 0` score can trigger immediate assignment.
 
-4. **`AssignJob`** (server → winning worker) — the server compares scores across all workers that want the same job. Lowest `missing` count wins. Ties broken by fewest assigned jobs (server tracks this via `WorkerCapabilities.max_concurrent_builds` and current assignments). The server may assign before all workers have sent `is_final` if a score is clearly optimal.
+4. **`AssignJob`** (server → winning worker) — the server compares scores across all workers that want the same job. Lowest `missing_nar_size` wins (fewest bytes to download). Ties are broken by `missing_count`, then by fewest assigned jobs. The server may assign before all workers have sent `is_final` if a score is clearly optimal (e.g. `missing_nar_size: 0`).
 
 5. **`RevokeJob`** (server → losing workers) — all other workers that had this candidate in their cache are told to remove it.
 
@@ -318,7 +318,18 @@ JobOffer {
 
 JobCandidate {
     job_id: Uuid,
-    required_paths: Vec<String>,        // store paths needed (worker scores against these)
+    required_paths: Vec<RequiredPath>,  // store paths needed (worker scores against these)
+    drv_paths: Vec<String>,             // .drv paths for build candidates; empty for eval jobs
+}
+
+RequiredPath {
+    path: String,                       // /nix/store/xxx-name
+    cache_info: Option<CacheInfo>,      // present when the path is in the server's binary cache
+}
+
+CacheInfo {
+    file_size: u64,                     // compressed NAR size on disk (bytes)
+    nar_size: u64,                      // uncompressed NAR size (bytes)
 }
 
 // Server → Worker (after assignment to another worker)
@@ -334,7 +345,9 @@ RequestJobChunk {
 
 CandidateScore {
     job_id: Uuid,
-    missing: u32,                       // number of required_paths not in local store
+    missing_count: u32,                 // number of required_paths not in local store
+    missing_nar_size: u64,              // total uncompressed NAR size of missing paths (bytes)
+                                        // derived from CacheInfo.nar_size; 0 when unavailable
 }
 ```
 
@@ -342,7 +355,7 @@ CandidateScore {
 
 - **No scoring round-trip at request time** — workers pre-score candidates as offers arrive and stream scores incrementally.
 - **Early assignment** — server can assign as soon as it sees an optimal score (e.g. `missing: 0`) without waiting for all workers to finish scoring. For non-obvious cases, it waits for `is_final` from all workers before deciding.
-- **Optimal assignment** — server sees all workers' scores before deciding. A worker that already has 90% of the closure cached gets the job over one that needs everything.
+- **Optimal assignment** — server sees all workers' scores before deciding. A worker that already has 90% of the closure cached (lower `missing_nar_size`) gets the job over one that needs everything.
 - **Large build trees handled incrementally** — as evaluation discovers derivations in batches (`EvalResult`), the server pushes new `JobOffer`s immediately. Workers start scoring while evaluation is still in progress.
 
 ### Edge Cases
@@ -445,7 +458,13 @@ CacheQuery {
 // Server → Worker
 CacheStatus {
     job_id: String,
-    cached: Vec<String>,                // paths present in the cache
+    cached: Vec<CachedPath>,            // paths present in the cache with size metadata
+}
+
+CachedPath {
+    path: String,                       // /nix/store/xxx-name
+    file_size: Option<u64>,             // compressed NAR size on disk (bytes)
+    nar_size: Option<u64>,              // uncompressed NAR size (bytes)
 }
 ```
 
@@ -604,7 +623,7 @@ enum ServerMessage {
     PresignedDownload { job_id: Uuid, store_path: String, url: String },
 
     // Cache queries
-    CacheStatus { job_id: String, cached: Vec<String> },  // response to CacheQuery
+    CacheStatus { job_id: String, cached: Vec<CachedPath> },  // response to CacheQuery
 }
 
 struct FailedPeer { peer_id: Uuid, reason: String }
@@ -979,7 +998,7 @@ Credentials are encrypted in transit (TLS). Workers MUST:
 
 Either side can abort a job:
 
-**Server-initiated:** `AbortJob { job_id, reason }` → worker stops current task, cleans up, responds `JobFailed` with the abort reason.
+**Server-initiated:** `AbortJob { job_id, reason }` → worker stops current task, cleans up, responds `JobFailed` with the abort reason. The server sends `AbortJob` when an evaluation is aborted via the API (`POST /evals/{id}` with `method: "abort"`). The scheduler finds which worker holds the active job and delivers the message through a per-worker channel. Pending (unassigned) jobs for the aborted evaluation are removed from the in-memory tracker.
 
 **Worker-initiated:** worker sends `JobFailed` at any time.
 

@@ -31,6 +31,7 @@ export class LoginComponent {
   loading = signal(false);
   showPassword = signal(false);
   get oidcEnabled() { return this.config.oidcEnabled; }
+  get oidcRequired() { return this.config.oidcRequired; }
   get registrationDisabled() { return this.config.registrationDisabled; }
 
   constructor() {

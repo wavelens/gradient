@@ -114,11 +114,15 @@
       <div class="settings-card">
         <div class="form-group">
           <label for="ci-provider">CI Provider</label>
-          <select id="ci-provider" [(ngModel)]="ciFormData.ci_reporter_type" class="role-select" [disabled]="proj.managed || !proj.can_edit">
-            @for (p of ciProviders; track p.value) {
-              <option [value]="p.value">{{ p.label }}</option>
-            }
-          </select>
+          <p-select
+            inputId="ci-provider"
+            [(ngModel)]="ciFormData.ci_reporter_type"
+            [options]="ciProviders"
+            optionLabel="label"
+            optionValue="value"
+            styleClass="w-full"
+            [disabled]="proj.managed || !proj.can_edit"
+          />
           <small class="text-secondary">Reports a commit status per entry point back to your Git host.</small>
         </div>
 

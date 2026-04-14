@@ -60,6 +60,7 @@ pub async fn get_health() -> WebResult<Json<BaseResponse<String>>> {
 pub struct ServerConfig {
     pub version: String,
     pub oidc_enabled: bool,
+    pub oidc_required: bool,
     pub registration_enabled: bool,
     pub email_verification_enabled: bool,
     /// Whether the server advertises HTTP/3 (QUIC) support.
@@ -76,6 +77,7 @@ pub async fn get_config(
         message: ServerConfig {
             version: env!("CARGO_PKG_VERSION").to_string(),
             oidc_enabled: state.cli.oidc_enabled,
+            oidc_required: state.cli.oidc_required,
             registration_enabled: state.cli.enable_registration && !state.cli.oidc_required,
             email_verification_enabled: state.cli.email_enabled
                 && state.cli.email_require_verification,

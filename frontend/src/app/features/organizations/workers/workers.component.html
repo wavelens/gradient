@@ -59,13 +59,23 @@
                 @if (worker.url) {
                   <div class="worker-url text-secondary">{{ worker.url }}</div>
                 }
-                @if (worker.architectures && worker.architectures.length > 0) {
-                  <div class="worker-archs text-secondary">
-                    {{ worker.architectures.join(', ') }}
-                    @if (worker.max_concurrent_builds) {
-                      <span class="worker-builds-limit">· {{ worker.max_concurrent_builds }} concurrent build{{ worker.max_concurrent_builds === 1 ? '' : 's' }}</span>
+                @if (worker.live) {
+                  <div class="worker-caps">
+                    @for (cap of capLabels; track cap.key) {
+                      <span class="cap-badge" [class.cap-on]="worker.live.capabilities[cap.key]" [class.cap-off]="!worker.live.capabilities[cap.key]">{{ cap.label }}</span>
                     }
                   </div>
+                  @if (worker.live.architectures.length > 0) {
+                    <div class="worker-archs text-secondary">
+                      {{ worker.live.architectures.join(', ') }}
+                      @if (worker.live.system_features.length > 0) {
+                        <span class="worker-features"> · {{ worker.live.system_features.join(', ') }}</span>
+                      }
+                    </div>
+                  }
+                  @if (worker.live.assigned_job_count > 0) {
+                    <div class="worker-stats text-secondary">{{ worker.live.assigned_job_count }} active job{{ worker.live.assigned_job_count === 1 ? '' : 's' }}</div>
+                  }
                 }
               </div>
             </div>
@@ -73,11 +83,11 @@
               @if (worker.managed) {
                 <span class="badge badge-managed">Managed</span>
               }
-              @if (worker.draining) {
+              @if (worker.live?.draining) {
                 <span class="badge badge-draining">Draining</span>
               }
-              <span class="badge" [class.badge-connected]="worker.connected" [class.badge-offline]="!worker.connected">
-                {{ worker.connected ? 'Connected' : 'Offline' }}
+              <span class="badge" [class.badge-connected]="worker.live" [class.badge-offline]="!worker.live">
+                {{ worker.live ? 'Connected' : 'Offline' }}
               </span>
               <button
                 pButton

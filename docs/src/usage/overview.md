@@ -48,7 +48,7 @@ Exclusion patterns must be exact paths — they cannot contain `*` or `#`.
 | `packages.*` | Packages for every system (equivalent to `packages.*.*`) |
 | `packages.*,checks.*` | Packages and checks for every system |
 | `packages.x86_64-linux.*,checks.x86_64-linux.*` | Packages and checks for x86\_64-linux only |
-| `nixosConfigurations.#` | All NixOS system configurations |
+| `nixosConfigurations.#.config.system.build.toplevel` | All NixOS system configurations |
 | `devShells.*` | All dev shells for every system |
 | `*` | Everything in all top-level output categories |
 | `packages.*,!packages.x86_64-linux.broken` | All packages except one excluded path |

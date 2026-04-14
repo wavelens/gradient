@@ -13,7 +13,7 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { WorkersService } from '@core/services/workers.service';
 import { OrganizationsService } from '@core/services/organizations.service';
-import { Worker, WorkerRegistration } from '@core/models';
+import { GradientCapabilities, Worker, WorkerRegistration } from '@core/models';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 
 @Component({
@@ -35,6 +35,14 @@ export class WorkersComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private workersService = inject(WorkersService);
   private orgsService = inject(OrganizationsService);
+
+  readonly capLabels: { key: keyof GradientCapabilities; label: string }[] = [
+    { key: 'federate', label: 'federate' },
+    { key: 'fetch',    label: 'fetch' },
+    { key: 'eval',     label: 'eval' },
+    { key: 'build',    label: 'build' },
+    { key: 'sign',     label: 'sign' },
+  ];
 
   loading = signal(true);
   registering = signal(false);

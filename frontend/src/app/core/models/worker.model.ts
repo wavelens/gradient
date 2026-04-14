@@ -4,19 +4,33 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+export interface GradientCapabilities {
+  core: boolean;
+  federate: boolean;
+  fetch: boolean;
+  eval: boolean;
+  build: boolean;
+  sign: boolean;
+  cache: boolean;
+}
+
+export interface WorkerLiveInfo {
+  capabilities: GradientCapabilities;
+  architectures: string[];
+  system_features: string[];
+  max_concurrent_builds: number;
+  assigned_job_count: number;
+  draining: boolean;
+}
+
 export interface Worker {
   worker_id: string;
-  peer_id: string;
   managed: boolean;
-  created_at?: string;
+  registered_at?: string;
   /** WebSocket URL where the worker accepts incoming server connections. */
   url?: string;
   /** Present when the worker is currently connected via proto. */
-  connected?: boolean;
-  architectures?: string[];
-  system_features?: string[];
-  max_concurrent_builds?: number;
-  draining?: boolean;
+  live?: WorkerLiveInfo;
 }
 
 export interface WorkerRegistration {

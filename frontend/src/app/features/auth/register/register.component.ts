@@ -17,6 +17,7 @@ import {
 import { Router, RouterModule } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
+import { environment } from '@environments/environment';
 import { debounceTime, switchMap, map } from 'rxjs/operators';
 import { of } from 'rxjs';
 
@@ -163,5 +164,12 @@ export class RegisterComponent {
 
   get confirmPassword() {
     return this.registerForm.get('confirmPassword');
+  }
+
+  get oidcRequired() { return this.config.oidcRequired; }
+  get registrationDisabled() { return this.config.registrationDisabled; }
+
+  loginWithOIDC(): void {
+    window.location.href = `${environment.apiUrl}/auth/oidc/login`;
   }
 }

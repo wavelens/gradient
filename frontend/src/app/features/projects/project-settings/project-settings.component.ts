@@ -15,6 +15,7 @@ import { TextareaModule } from 'primeng/textarea';
 import { ProjectsService } from '@core/services/projects.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { AutoCompleteModule } from 'primeng/autocomplete';
+import { SelectModule } from 'primeng/select';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { Project } from '@core/models';
 
@@ -30,6 +31,7 @@ import { Project } from '@core/models';
     InputTextModule,
     TextareaModule,
     AutoCompleteModule,
+    SelectModule,
     LoadingSpinnerComponent,
   ],
   templateUrl: './project-settings.component.html',
