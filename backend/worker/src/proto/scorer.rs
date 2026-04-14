@@ -83,7 +83,10 @@ mod tests {
     async fn score_multiple_candidates() {
         let scorer = JobScorer::new();
         let candidates = vec![
-            JobCandidate { job_id: "a".to_owned(), required_paths: vec![] },
+            JobCandidate {
+                job_id: "a".to_owned(),
+                required_paths: vec![],
+            },
             JobCandidate {
                 job_id: "b".to_owned(),
                 required_paths: vec!["/nix/store/x".to_owned(), "/nix/store/y".to_owned()],

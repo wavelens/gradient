@@ -6,13 +6,15 @@
 
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
+use base64::Engine as _;
 use chrono::{NaiveDateTime, Utc};
 use core::db::get_organization_by_name;
 use core::types::{BaseResponse, MUser, ServerState};
-use entity::worker_registration::{self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration};
-use proto::{Scheduler, WorkerInfo};
-use base64::Engine as _;
+use entity::worker_registration::{
+    self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
+};
 use rand::RngCore;
+use scheduler::{Scheduler, WorkerInfo};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};

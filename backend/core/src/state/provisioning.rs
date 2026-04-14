@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{StateApiKey, StateCache, StateConfiguration, StateOrganization, StateProject, StateUpstream, StateUser, StateWorker};
+use super::{
+    StateApiKey, StateCache, StateConfiguration, StateOrganization, StateProject, StateUpstream,
+    StateUser, StateWorker,
+};
 use crate::types::consts::BASE_ROLE_ADMIN_ID;
 use crate::types::input::load_secret_bytes;
 use crate::types::*;
@@ -30,8 +33,22 @@ pub(super) async fn apply_state_to_database(
 
     apply_users(db, &config.users).await?;
     apply_organizations(db, &config.organizations, &config.users, crypt_secret_file).await?;
-    apply_projects(db, &config.projects, &config.users, &config.organizations, crypt_secret_file).await?;
-    apply_caches(db, &config.caches, &config.users, &config.organizations, crypt_secret_file).await?;
+    apply_projects(
+        db,
+        &config.projects,
+        &config.users,
+        &config.organizations,
+        crypt_secret_file,
+    )
+    .await?;
+    apply_caches(
+        db,
+        &config.caches,
+        &config.users,
+        &config.organizations,
+        crypt_secret_file,
+    )
+    .await?;
     apply_api_keys(db, &config.api_keys).await?;
     apply_workers(db, &config.workers).await?;
     unmark_removed_entities(db, config, delete_state).await?;
@@ -241,45 +258,44 @@ async fn apply_projects(
 
         let now = Utc::now().naive_utc();
 
-        let encrypted_ci_token: Option<Option<String>> =
-            if state_project.ci_reporter_has_token {
-                let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
-                    .unwrap_or_else(|_| ".".to_string());
-                let token_path = format!(
-                    "{}/gradient_project_{}_ci_token",
-                    credentials_dir, state_project.name
-                );
-                match fs::read_to_string(&token_path) {
-                    Ok(token) => {
-                        let secret = load_secret_bytes(crypt_secret_file);
-                        match crypter::encrypt_with_password(secret.expose(), token.trim()) {
-                            Some(encrypted_bytes) => {
-                                Some(Some(general_purpose::STANDARD.encode(&encrypted_bytes)))
-                            }
-                            None => {
-                                tracing::warn!(
-                                    project = %state_project.name,
-                                    "Failed to encrypt CI reporter token, skipping"
-                                );
-                                None
-                            }
+        let encrypted_ci_token: Option<Option<String>> = if state_project.ci_reporter_has_token {
+            let credentials_dir =
+                std::env::var("GRADIENT_CREDENTIALS_DIR").unwrap_or_else(|_| ".".to_string());
+            let token_path = format!(
+                "{}/gradient_project_{}_ci_token",
+                credentials_dir, state_project.name
+            );
+            match fs::read_to_string(&token_path) {
+                Ok(token) => {
+                    let secret = load_secret_bytes(crypt_secret_file);
+                    match crypter::encrypt_with_password(secret.expose(), token.trim()) {
+                        Some(encrypted_bytes) => {
+                            Some(Some(general_purpose::STANDARD.encode(&encrypted_bytes)))
+                        }
+                        None => {
+                            tracing::warn!(
+                                project = %state_project.name,
+                                "Failed to encrypt CI reporter token, skipping"
+                            );
+                            None
                         }
                     }
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e,
-                            path = %token_path,
-                            project = %state_project.name,
-                            "Failed to read CI reporter token credential, skipping"
-                        );
-                        None
-                    }
                 }
-            } else if state_project.ci_reporter_type.is_some() {
-                Some(None)
-            } else {
-                None
-            };
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        path = %token_path,
+                        project = %state_project.name,
+                        "Failed to read CI reporter token credential, skipping"
+                    );
+                    None
+                }
+            }
+        } else if state_project.ci_reporter_type.is_some() {
+            Some(None)
+        } else {
+            None
+        };
 
         if let Some(existing) = existing_project {
             let mut proj: project::ActiveModel = existing.into();
@@ -377,11 +393,11 @@ async fn apply_caches(
         let secret = load_secret_bytes(crypt_secret_file);
         let encrypted_bytes = crypter::encrypt_with_password(secret.expose(), signing_key.trim())
             .ok_or_else(|| {
-                format!(
-                    "Failed to encrypt signing key for cache '{}'",
-                    state_cache.name
-                )
-            })?;
+            format!(
+                "Failed to encrypt signing key for cache '{}'",
+                state_cache.name
+            )
+        })?;
         let encrypted_signing_key = general_purpose::STANDARD.encode(&encrypted_bytes);
 
         let created_by_id = user_map
@@ -630,7 +646,11 @@ async fn apply_workers(
 
         let now = chrono::Utc::now().naive_utc();
 
-        let url = if state_worker.url.is_empty() { None } else { Some(state_worker.url.clone()) };
+        let url = if state_worker.url.is_empty() {
+            None
+        } else {
+            Some(state_worker.url.clone())
+        };
 
         if let Some(existing) = existing {
             let mut reg: worker_registration::ActiveModel = existing.into();
@@ -667,7 +687,8 @@ async fn unmark_removed_entities(
     let state_project_names: std::collections::HashSet<&String> = config.projects.keys().collect();
     let state_cache_names: std::collections::HashSet<&String> = config.caches.keys().collect();
     let state_api_key_names: std::collections::HashSet<&String> = config.api_keys.keys().collect();
-    let state_worker_ids: std::collections::HashSet<&String> = config.workers.values().map(|w| &w.worker_id).collect();
+    let state_worker_ids: std::collections::HashSet<&String> =
+        config.workers.values().map(|w| &w.worker_id).collect();
 
     let managed_users = user::Entity::find()
         .filter(user::Column::Managed.eq(true))
@@ -781,7 +802,9 @@ async fn unmark_removed_entities(
     for reg in managed_workers {
         if !state_worker_ids.contains(&reg.worker_id) {
             let worker_id = reg.worker_id.clone();
-            worker_registration::Entity::delete_by_id(reg.id).exec(db).await?;
+            worker_registration::Entity::delete_by_id(reg.id)
+                .exec(db)
+                .await?;
             tracing::info!("Deleted worker registration: {}", worker_id);
         }
     }

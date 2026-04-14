@@ -10,7 +10,9 @@ mod invalidate;
 mod output;
 mod signing;
 
-pub use self::cleanup::{cleanup_old_evaluations, cleanup_orphaned_cache_files, cleanup_stale_cached_nars};
+pub use self::cleanup::{
+    cleanup_old_evaluations, cleanup_orphaned_cache_files, cleanup_stale_cached_nars,
+};
 pub use self::invalidate::invalidate_cache_for_path;
 pub use self::output::cache_derivation_output;
 pub use self::signing::sign_derivation_output;

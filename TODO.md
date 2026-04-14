@@ -11,6 +11,11 @@
  - prioritzie workers when oom killing
  - when commit id is same no need to re-evaluate
  - dropdown for "ci-provider" integration in frontend is different css from the other dropdowns
+ - is the worker token aes encrypted in the database and handled as a secret? if not, encrypt it
+ - "Genrate Webhook Secret" button in frontend is not reapearing after saving and then refreshing the page
+
+ - Final CI reporting (L2, L3, Q1, Q2) — needs injectable CI reporter to assert CiStatus::Success/Failure is sent when evaluation reaches terminal state. Currently the CI path is hard-coded to reporter_for_project() which creates reporters from DB config, not injectable.
+ - Transitive cascade (M1) — needs proper graph walk test, but the current cascade_dependency_failed logic uses DB queries that are hard to stage for transitive walks with MockDB.
 
  - save which builder was used for each build in the database
  - add a eval logLevel (seperate from build)

@@ -9,8 +9,7 @@ mod middleware;
 mod oidc;
 
 pub use self::jwt::{
-    Cliams, DownloadClaims,
-    decode_download_token, decode_jwt, encode_download_token, encode_jwt,
+    Cliams, DownloadClaims, decode_download_token, decode_jwt, encode_download_token, encode_jwt,
     extract_bearer_or_cookie, generate_api_key,
 };
 pub use self::middleware::{MaybeUser, authorize, authorize_optional, update_last_login};

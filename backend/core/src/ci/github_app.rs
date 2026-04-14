@@ -40,21 +40,25 @@ pub fn generate_jwt(app_id: u64, private_key_pem: &str) -> Result<String> {
     let exp = now + 600; // 10-minute window (GitHub max)
 
     // Encode header and payload as base64url (no padding).
-    let header = general_purpose::URL_SAFE_NO_PAD
-        .encode(r#"{"alg":"RS256","typ":"JWT"}"#);
+    let header = general_purpose::URL_SAFE_NO_PAD.encode(r#"{"alg":"RS256","typ":"JWT"}"#);
     let payload = general_purpose::URL_SAFE_NO_PAD
         .encode(format!(r#"{{"iat":{iat},"exp":{exp},"iss":"{app_id}"}}"#));
     let signing_input = format!("{header}.{payload}");
 
     // Parse DER-encoded RSA private key from PEM.
     let der = pem_to_der(private_key_pem).context("failed to decode GitHub App private key PEM")?;
-    let key_pair = RsaKeyPair::from_pkcs8(&der)
-        .map_err(|e| anyhow!("invalid RSA private key: {e:?}"))?;
+    let key_pair =
+        RsaKeyPair::from_pkcs8(&der).map_err(|e| anyhow!("invalid RSA private key: {e:?}"))?;
 
     let rng = ring::rand::SystemRandom::new();
     let mut signature = vec![0u8; key_pair.public().modulus_len()];
     key_pair
-        .sign(&signature::RSA_PKCS1_SHA256, &rng, signing_input.as_bytes(), &mut signature)
+        .sign(
+            &signature::RSA_PKCS1_SHA256,
+            &rng,
+            signing_input.as_bytes(),
+            &mut signature,
+        )
         .map_err(|e| anyhow!("RSA signing failed: {e:?}"))?;
 
     let sig_b64 = general_purpose::URL_SAFE_NO_PAD.encode(&signature);
@@ -63,10 +67,7 @@ pub fn generate_jwt(app_id: u64, private_key_pem: &str) -> Result<String> {
 
 /// Strips PEM headers/footers and decodes the base64 body to DER bytes.
 fn pem_to_der(pem: &str) -> Result<Vec<u8>> {
-    let body: String = pem
-        .lines()
-        .filter(|l| !l.starts_with("-----"))
-        .collect();
+    let body: String = pem.lines().filter(|l| !l.starts_with("-----")).collect();
     general_purpose::STANDARD
         .decode(body.trim())
         .context("base64 decode of PEM body failed")
@@ -94,9 +95,7 @@ pub async fn get_installation_token(
         .build()
         .context("failed to build reqwest client")?;
 
-    let url = format!(
-        "https://api.github.com/app/installations/{installation_id}/access_tokens"
-    );
+    let url = format!("https://api.github.com/app/installations/{installation_id}/access_tokens");
     debug!(installation_id, "requesting GitHub App installation token");
 
     let resp = client
@@ -209,7 +208,10 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
         let header_b64 = jwt.split('.').next().unwrap();
         let header_json = general_purpose::URL_SAFE_NO_PAD.decode(header_b64).unwrap();
         let header_str = String::from_utf8(header_json).unwrap();
-        assert!(header_str.contains("RS256"), "header must contain RS256: {header_str}");
+        assert!(
+            header_str.contains("RS256"),
+            "header must contain RS256: {header_str}"
+        );
     }
 
     #[test]
@@ -217,7 +219,9 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
         let app_id = 99887u64;
         let jwt = generate_jwt(app_id, TEST_RSA_PEM).expect("generate_jwt failed");
         let payload_b64 = jwt.split('.').nth(1).unwrap();
-        let payload_json = general_purpose::URL_SAFE_NO_PAD.decode(payload_b64).unwrap();
+        let payload_json = general_purpose::URL_SAFE_NO_PAD
+            .decode(payload_b64)
+            .unwrap();
         let payload_str = String::from_utf8(payload_json).unwrap();
         assert!(
             payload_str.contains(&format!("\"iss\":\"{app_id}\"")),

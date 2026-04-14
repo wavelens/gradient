@@ -48,11 +48,7 @@ impl MigrationTrait for Migration {
                             .integer()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(EvaluationMessage::Message)
-                            .text()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(EvaluationMessage::Message).text().not_null())
                     .col(ColumnDef::new(EvaluationMessage::Source).string())
                     .col(
                         ColumnDef::new(EvaluationMessage::CreatedAt)
@@ -97,11 +93,7 @@ impl MigrationTrait for Migration {
                             .uuid()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(EntryPointMessage::Message)
-                            .uuid()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(EntryPointMessage::Message).uuid().not_null())
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-entry_point_message-entry_point")
@@ -137,19 +129,11 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(
-                Table::drop()
-                    .table(EntryPointMessage::Table)
-                    .to_owned(),
-            )
+            .drop_table(Table::drop().table(EntryPointMessage::Table).to_owned())
             .await?;
 
         manager
-            .drop_table(
-                Table::drop()
-                    .table(EvaluationMessage::Table)
-                    .to_owned(),
-            )
+            .drop_table(Table::drop().table(EvaluationMessage::Table).to_owned())
             .await?;
 
         manager

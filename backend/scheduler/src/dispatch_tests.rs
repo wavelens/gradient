@@ -33,7 +33,7 @@ use gradient_core::types::*;
 use sea_orm::{DatabaseBackend, MockDatabase};
 use uuid::Uuid;
 
-use crate::scheduler::{Scheduler, dispatch};
+use crate::{Scheduler, dispatch};
 
 // ── Fixture helpers ──────────────────────────────────────────────────────────
 
@@ -150,9 +150,15 @@ async fn dispatch_queued_eval_enqueues_job() {
         .into_connection();
 
     let scheduler = make_scheduler(db);
-    dispatch::dispatch_queued_evals(&scheduler).await.expect("dispatch failed");
+    dispatch::dispatch_queued_evals(&scheduler)
+        .await
+        .expect("dispatch failed");
 
-    assert_eq!(scheduler.pending_job_count().await, 1, "expected 1 job enqueued");
+    assert_eq!(
+        scheduler.pending_job_count().await,
+        1,
+        "expected 1 job enqueued"
+    );
 }
 
 /// Calling dispatch twice for the same Queued eval does not enqueue a second job.
@@ -179,10 +185,18 @@ async fn dispatch_queued_eval_skips_already_enqueued() {
         .into_connection();
 
     let scheduler = make_scheduler(db);
-    dispatch::dispatch_queued_evals(&scheduler).await.expect("first dispatch failed");
-    dispatch::dispatch_queued_evals(&scheduler).await.expect("second dispatch failed");
+    dispatch::dispatch_queued_evals(&scheduler)
+        .await
+        .expect("first dispatch failed");
+    dispatch::dispatch_queued_evals(&scheduler)
+        .await
+        .expect("second dispatch failed");
 
-    assert_eq!(scheduler.pending_job_count().await, 1, "second dispatch must be a no-op");
+    assert_eq!(
+        scheduler.pending_job_count().await,
+        1,
+        "second dispatch must be a no-op"
+    );
 }
 
 /// When the commit row is missing, the eval is skipped and no job is enqueued.
@@ -201,9 +215,15 @@ async fn dispatch_queued_eval_skips_missing_commit() {
         .into_connection();
 
     let scheduler = make_scheduler(db);
-    dispatch::dispatch_queued_evals(&scheduler).await.expect("dispatch failed");
+    dispatch::dispatch_queued_evals(&scheduler)
+        .await
+        .expect("dispatch failed");
 
-    assert_eq!(scheduler.pending_job_count().await, 0, "missing commit: no job should be enqueued");
+    assert_eq!(
+        scheduler.pending_job_count().await,
+        0,
+        "missing commit: no job should be enqueued"
+    );
 }
 
 /// When the eval has no project (direct build), org is looked up via DirectBuild.
@@ -224,9 +244,15 @@ async fn dispatch_queued_eval_via_direct_build_org() {
         .into_connection();
 
     let scheduler = make_scheduler(db);
-    dispatch::dispatch_queued_evals(&scheduler).await.expect("dispatch failed");
+    dispatch::dispatch_queued_evals(&scheduler)
+        .await
+        .expect("dispatch failed");
 
-    assert_eq!(scheduler.pending_job_count().await, 1, "direct-build org: job should be enqueued");
+    assert_eq!(
+        scheduler.pending_job_count().await,
+        1,
+        "direct-build org: job should be enqueued"
+    );
 }
 
 // ── Group F: dispatch_ready_builds ───────────────────────────────────────────
@@ -254,9 +280,15 @@ async fn dispatch_ready_build_enqueues_job() {
         .into_connection();
 
     let scheduler = make_scheduler(db);
-    dispatch::dispatch_ready_builds(&scheduler).await.expect("dispatch failed");
+    dispatch::dispatch_ready_builds(&scheduler)
+        .await
+        .expect("dispatch failed");
 
-    assert_eq!(scheduler.pending_job_count().await, 1, "expected 1 build job enqueued");
+    assert_eq!(
+        scheduler.pending_job_count().await,
+        1,
+        "expected 1 build job enqueued"
+    );
 }
 
 /// Calling dispatch_ready_builds twice for the same build does not enqueue a second job.
@@ -283,10 +315,18 @@ async fn dispatch_ready_build_skips_already_enqueued() {
         .into_connection();
 
     let scheduler = make_scheduler(db);
-    dispatch::dispatch_ready_builds(&scheduler).await.expect("first dispatch failed");
-    dispatch::dispatch_ready_builds(&scheduler).await.expect("second dispatch failed");
+    dispatch::dispatch_ready_builds(&scheduler)
+        .await
+        .expect("first dispatch failed");
+    dispatch::dispatch_ready_builds(&scheduler)
+        .await
+        .expect("second dispatch failed");
 
-    assert_eq!(scheduler.pending_job_count().await, 1, "second dispatch must be a no-op");
+    assert_eq!(
+        scheduler.pending_job_count().await,
+        1,
+        "second dispatch must be a no-op"
+    );
 }
 
 // ── Group J: project polling ────────────────────────────────────────────────

@@ -13,8 +13,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_core::store_path::StorePath;
+use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig};
 
 use proto::traits::WorkerStore;

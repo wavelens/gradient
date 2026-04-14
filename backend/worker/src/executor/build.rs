@@ -17,15 +17,15 @@ use gradient_core::executer::path_utils::{nix_store_path, strip_nix_store_prefix
 use gradient_core::sources::get_hash_from_path;
 use harmonia_protocol::build_result::BuildResultInner;
 use harmonia_protocol::daemon_wire::types2::BuildMode;
-use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT};
 use harmonia_store_core::store_path::StorePath;
+use harmonia_store_remote::DaemonStore as _;
 use proto::messages::{BuildOutput, BuildTask};
 use std::collections::BTreeMap;
 use tracing::{debug, info, warn};
 
-use crate::job::JobUpdater;
-use crate::store::{LocalNixStore, strip_store_prefix};
+use crate::nix::store::{LocalNixStore, strip_store_prefix};
+use crate::proto::job::JobUpdater;
 
 /// Build a single derivation on the local nix-daemon.
 ///
@@ -46,8 +46,8 @@ pub async fn build_derivation(
         .await
         .with_context(|| format!("read .drv file: {}", full_drv_path))?;
 
-    let drv = parse_drv(&drv_bytes)
-        .with_context(|| format!("parse .drv file: {}", full_drv_path))?;
+    let drv =
+        parse_drv(&drv_bytes).with_context(|| format!("parse .drv file: {}", full_drv_path))?;
 
     // ── Build BasicDerivation for harmonia ────────────────────────────────────
     let basic_drv = build_basic_derivation(&task.drv_path, &drv)?;
@@ -87,7 +87,7 @@ pub async fn build_derivation(
                     name: output_name.to_string(),
                     store_path: store_path_str,
                     hash,
-                    nar_size: None,  // filled in by compress step
+                    nar_size: None, // filled in by compress step
                     nar_hash: None,
                     has_artefacts,
                 });
@@ -194,8 +194,14 @@ mod tests {
         }];
         let basic = build_basic_derivation("aaaa-hello.drv", &drv).unwrap();
         let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
-        let out = basic.outputs.get(&out_name).expect("output 'out' not found");
-        assert!(matches!(out, HarmoniaOutput::Deferred), "empty path → Deferred");
+        let out = basic
+            .outputs
+            .get(&out_name)
+            .expect("output 'out' not found");
+        assert!(
+            matches!(out, HarmoniaOutput::Deferred),
+            "empty path → Deferred"
+        );
     }
 
     #[test]
@@ -208,13 +214,17 @@ mod tests {
             hash_algo: "".into(),
             hash: "".into(),
         }];
-        let basic = build_basic_derivation(
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello.drv",
-            &drv,
-        ).unwrap();
+        let basic =
+            build_basic_derivation("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello.drv", &drv).unwrap();
         let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
-        let out = basic.outputs.get(&out_name).expect("output 'out' not found");
-        assert!(matches!(out, HarmoniaOutput::InputAddressed(_)), "non-empty path → InputAddressed");
+        let out = basic
+            .outputs
+            .get(&out_name)
+            .expect("output 'out' not found");
+        assert!(
+            matches!(out, HarmoniaOutput::InputAddressed(_)),
+            "non-empty path → InputAddressed"
+        );
     }
 
     #[test]
@@ -224,7 +234,8 @@ mod tests {
         let basic = build_basic_derivation(
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv",
             &drv,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(basic.name.as_ref(), "hello.drv");
     }
 

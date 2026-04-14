@@ -44,10 +44,8 @@ impl MigrationTrait for Migration {
             .await?;
 
             // Drop the old integer column and rename the new one.
-            db.execute_unprepared(&format!(
-                "ALTER TABLE \"{table}\" DROP COLUMN architecture"
-            ))
-            .await?;
+            db.execute_unprepared(&format!("ALTER TABLE \"{table}\" DROP COLUMN architecture"))
+                .await?;
 
             db.execute_unprepared(&format!(
                 "ALTER TABLE \"{table}\" RENAME COLUMN architecture_text TO architecture"
@@ -81,10 +79,8 @@ impl MigrationTrait for Migration {
             ))
             .await?;
 
-            db.execute_unprepared(&format!(
-                "ALTER TABLE \"{table}\" DROP COLUMN architecture"
-            ))
-            .await?;
+            db.execute_unprepared(&format!("ALTER TABLE \"{table}\" DROP COLUMN architecture"))
+                .await?;
 
             db.execute_unprepared(&format!(
                 "ALTER TABLE \"{table}\" RENAME COLUMN architecture_int TO architecture"

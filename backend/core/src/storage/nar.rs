@@ -6,8 +6,8 @@
 
 use anyhow::{Context, Result};
 use futures::StreamExt as _;
-use object_store::{ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
 pub use object_store::{MultipartUpload, WriteMultipart};
+use object_store::{ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
 use std::sync::Arc;
 
 /// Unified NAR file storage abstraction over local disk or an S3-compatible backend.

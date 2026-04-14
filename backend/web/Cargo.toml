@@ -18,6 +18,7 @@ async-stream = { workspace = true }
 chrono       = { workspace = true }
 core         = { workspace = true }
 proto        = { workspace = true }
+scheduler    = { path = "../scheduler" }
 entity       = { workspace = true }
 rand         = { workspace = true }
 sea-orm      = { workspace = true }

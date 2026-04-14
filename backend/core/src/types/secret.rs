@@ -153,9 +153,7 @@ fn mlock_slice(s: &[u8]) {
     }
     #[cfg(unix)]
     {
-        let ret = unsafe {
-            libc::mlock(s.as_ptr() as *const libc::c_void, s.len())
-        };
+        let ret = unsafe { libc::mlock(s.as_ptr() as *const libc::c_void, s.len()) };
         if ret != 0 {
             let err = std::io::Error::last_os_error();
             tracing::warn!(

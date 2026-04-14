@@ -12,7 +12,9 @@ use crate::types::*;
 use chrono::Utc;
 use entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter,
+};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -159,7 +161,10 @@ mod tests {
             // SELECT project for update
             .append_query_results([vec![project.clone()]])
             // UPDATE project → exec result
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .into_connection();
 
         let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None).await;
@@ -223,7 +228,10 @@ mod tests {
             }]])
             .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Queued)]])
             .append_query_results([vec![project.clone()]])
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .into_connection();
 
         let result = trigger_evaluation(&db, &project, vec![0u8; 20], None, None).await;

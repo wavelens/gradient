@@ -58,9 +58,10 @@ impl RecordingJobReporter {
 
     /// Get the last `EvalResult` event, if any.
     pub fn last_eval_result(&self) -> Option<&ReportedEvent> {
-        self.events.iter().rev().find(|e| {
-            matches!(e, ReportedEvent::EvalResult { .. })
-        })
+        self.events
+            .iter()
+            .rev()
+            .find(|e| matches!(e, ReportedEvent::EvalResult { .. }))
     }
 }
 
@@ -119,7 +120,8 @@ impl JobReporter for RecordingJobReporter {
     }
 
     async fn send_log_chunk(&mut self, task_index: u32, data: Vec<u8>) -> Result<()> {
-        self.events.push(ReportedEvent::LogChunk { task_index, data });
+        self.events
+            .push(ReportedEvent::LogChunk { task_index, data });
         Ok(())
     }
 }

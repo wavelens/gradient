@@ -10,8 +10,8 @@ use core::sources::{format_cache_key, get_hash_from_path, get_path_from_derivati
 use core::types::*;
 use harmonia_store_core::signature::{SecretKey, fingerprint_path};
 use harmonia_store_core::store_path::{StoreDir, StorePath};
-use sea_orm::ActiveValue::Set;
 use sea_orm::ActiveModelTrait;
+use sea_orm::ActiveValue::Set;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use tracing::error;
@@ -65,9 +65,7 @@ pub async fn sign_derivation_output(
     };
 
     let store_dir = StoreDir::default();
-    let base = path
-        .strip_prefix("/nix/store/")
-        .unwrap_or(&path);
+    let base = path.strip_prefix("/nix/store/").unwrap_or(&path);
     let store_path = match StorePath::from_base_path(base) {
         Ok(sp) => sp,
         Err(e) => {
@@ -182,8 +180,8 @@ pub async fn pack_derivation_output(
     state: Arc<ServerState>,
     output: MDerivationOutput,
 ) -> Result<(String, u64, u64)> {
-    use std::io::Write as _;
     use futures::StreamExt;
+    use std::io::Write as _;
 
     let path = get_path_from_derivation_output(output);
     let (path_hash, _) =
@@ -194,7 +192,10 @@ pub async fn pack_derivation_output(
     // 10 MiB parts — above S3's 5 MiB minimum, large enough to reduce
     // round-trips, small enough to keep memory bounded.
     const PART_SIZE: usize = 10 * 1024 * 1024;
-    let mut writer = state.nar_storage.put_streaming(&path_hash, PART_SIZE).await?;
+    let mut writer = state
+        .nar_storage
+        .put_streaming(&path_hash, PART_SIZE)
+        .await?;
 
     // Streaming zstd encoder writing compressed output into a reusable Vec.
     let mut encoder = zstd::stream::Encoder::new(Vec::with_capacity(256 * 1024), 6)

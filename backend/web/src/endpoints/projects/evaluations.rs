@@ -4,9 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{
-    user_can_edit, EntryPointSummary, EvaluationSummary, ProjectDetailsResponse,
-};
+use super::{EntryPointSummary, EvaluationSummary, ProjectDetailsResponse, user_can_edit};
 use crate::authorization::MaybeUser;
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};

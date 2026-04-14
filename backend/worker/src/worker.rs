@@ -19,12 +19,12 @@ use tracing::{debug, error, info, warn};
 use crate::config::WorkerConfig;
 use crate::connection::ProtoConnection;
 
-use crate::credentials::CredentialStore;
+use crate::connection::handshake::perform_handshake;
 use crate::executor::{JobExecutor, WorkerEvaluator};
-use crate::handshake::perform_handshake;
-use crate::job::JobUpdater;
-use crate::scorer::JobScorer;
-use crate::store::LocalNixStore;
+use crate::nix::store::LocalNixStore;
+use crate::proto::credentials::CredentialStore;
+use crate::proto::job::JobUpdater;
+use crate::proto::scorer::JobScorer;
 
 /// The running worker instance.
 pub struct Worker {
@@ -48,13 +48,8 @@ impl Worker {
             .context("failed to load or generate persistent worker ID")?;
         let peer_tokens = config.peer_tokens();
 
-        let handshake = perform_handshake(
-            &mut conn,
-            peer_id,
-            peer_tokens,
-            config.capabilities(),
-        )
-        .await?;
+        let handshake =
+            perform_handshake(&mut conn, peer_id, peer_tokens, config.capabilities()).await?;
 
         // Record the server's protocol version on the connection object.
         conn.set_server_version(handshake.server_version);
@@ -109,7 +104,8 @@ impl Worker {
             .context("failed to load or generate persistent worker ID")?;
         let peer_tokens = config.peer_tokens();
 
-        let handshake = perform_handshake(&mut conn, peer_id, peer_tokens, config.capabilities()).await?;
+        let handshake =
+            perform_handshake(&mut conn, peer_id, peer_tokens, config.capabilities()).await?;
         conn.set_server_version(handshake.server_version);
         info!(
             negotiated = ?handshake.negotiated,
@@ -171,12 +167,13 @@ impl Worker {
         );
 
         if handshake.negotiated.build {
-            self.conn.send(ClientMessage::WorkerCapabilities {
-                architectures: vec![],
-                system_features: vec![],
-                max_concurrent_builds: self.config.max_concurrent_builds,
-            })
-            .await?;
+            self.conn
+                .send(ClientMessage::WorkerCapabilities {
+                    architectures: vec![],
+                    system_features: vec![],
+                    max_concurrent_builds: self.config.max_concurrent_builds,
+                })
+                .await?;
         }
 
         self.conn.send(ClientMessage::RequestJobList).await?;
@@ -204,8 +201,14 @@ impl Worker {
             };
 
             match msg {
-                ServerMessage::JobListChunk { candidates, is_final } => {
-                    debug!(count = candidates.len(), is_final, "received job list chunk");
+                ServerMessage::JobListChunk {
+                    candidates,
+                    is_final,
+                } => {
+                    debug!(
+                        count = candidates.len(),
+                        is_final, "received job list chunk"
+                    );
                     if self.draining {
                         // Don't request any new work while draining.
                         continue;
@@ -237,7 +240,11 @@ impl Worker {
                     // TODO: cancel any locally-queued (not yet started) candidates.
                 }
 
-                ServerMessage::AssignJob { job_id, job, timeout_secs: _ } => {
+                ServerMessage::AssignJob {
+                    job_id,
+                    job,
+                    timeout_secs: _,
+                } => {
                     if self.draining {
                         // Politely decline: we are winding down.
                         warn!(%job_id, "rejecting assigned job — draining");
@@ -283,19 +290,35 @@ impl Worker {
                     self.credentials.store(kind, data);
                 }
 
-                ServerMessage::NarPush { job_id, store_path, data: _, offset, is_final } => {
+                ServerMessage::NarPush {
+                    job_id,
+                    store_path,
+                    data: _,
+                    offset,
+                    is_final,
+                } => {
                     debug!(%job_id, %store_path, offset, is_final, "received NAR chunk from server");
                     // TODO(1.4): reassemble and import into local nix store.
                 }
 
-                ServerMessage::PresignedDownload { job_id, store_path, url: _ } => {
+                ServerMessage::PresignedDownload {
+                    job_id,
+                    store_path,
+                    url: _,
+                } => {
                     debug!(%job_id, %store_path, "received presigned download URL");
                     // TODO(1.4): download NAR from S3 and import into local store.
                 }
 
-                ServerMessage::PresignedUpload { job_id, store_path, url, method, headers } => {
+                ServerMessage::PresignedUpload {
+                    job_id,
+                    store_path,
+                    url,
+                    method,
+                    headers,
+                } => {
                     debug!(%job_id, %store_path, %method, "received presigned upload URL");
-                    if let Err(e) = crate::nar::upload_presigned(
+                    if let Err(e) = crate::proto::nar::upload_presigned(
                         &job_id,
                         &store_path,
                         &url,
@@ -325,20 +348,27 @@ impl Worker {
                 }
 
                 ServerMessage::AuthChallenge { peers } => {
-                    debug!(?peers, "mid-connection AuthChallenge — sending AuthResponse");
+                    debug!(
+                        ?peers,
+                        "mid-connection AuthChallenge — sending AuthResponse"
+                    );
                     let peer_tokens = self.config.peer_tokens();
                     let tokens = WorkerConfig::resolve_tokens_for_challenge(&peer_tokens, &peers);
-                    if let Err(e) = self.conn
-                        .send(ClientMessage::AuthResponse { tokens })
-                        .await
-                    {
+                    if let Err(e) = self.conn.send(ClientMessage::AuthResponse { tokens }).await {
                         error!(error = %e, "failed to send AuthResponse");
                         break;
                     }
                 }
 
-                ServerMessage::AuthUpdate { authorized_peers, failed_peers } => {
-                    info!(authorized = authorized_peers.len(), failed = failed_peers.len(), "auth updated");
+                ServerMessage::AuthUpdate {
+                    authorized_peers,
+                    failed_peers,
+                } => {
+                    info!(
+                        authorized = authorized_peers.len(),
+                        failed = failed_peers.len(),
+                        "auth updated"
+                    );
                     for fp in &failed_peers {
                         warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
                     }
@@ -358,7 +388,9 @@ impl Worker {
                     .await
             }
             Job::Build(build_job) => {
-                self.executor.execute_build_job(build_job, &mut updater).await
+                self.executor
+                    .execute_build_job(build_job, &mut updater)
+                    .await
             }
         }
     }
@@ -380,15 +412,15 @@ fn load_or_generate_id(data_dir: &str) -> Result<String> {
         let raw = fs::read_to_string(&id_path)
             .with_context(|| format!("failed to read '{}'", id_path.display()))?;
         let id = raw.trim().to_owned();
-        id.parse::<uuid::Uuid>()
-            .with_context(|| format!("'{}' contains an invalid UUID: {:?}", id_path.display(), id))?;
+        id.parse::<uuid::Uuid>().with_context(|| {
+            format!("'{}' contains an invalid UUID: {:?}", id_path.display(), id)
+        })?;
         info!(path = %id_path.display(), %id, "loaded persistent worker ID");
         return Ok(id);
     }
 
     let id = uuid::Uuid::new_v4().to_string();
-    fs::write(&id_path, &id)
-        .with_context(|| format!("failed to write '{}'", id_path.display()))?;
+    fs::write(&id_path, &id).with_context(|| format!("failed to write '{}'", id_path.display()))?;
     info!(path = %id_path.display(), %id, "generated and persisted new worker ID");
     Ok(id)
 }
@@ -408,7 +440,8 @@ mod tests {
         let data_dir = dir.path().to_string_lossy().to_string();
         let id = load_or_generate_id(&data_dir).expect("should generate id");
         // Must be a valid UUID
-        id.parse::<uuid::Uuid>().expect("generated id must be a valid UUID");
+        id.parse::<uuid::Uuid>()
+            .expect("generated id must be a valid UUID");
         // File must exist
         let id_path = dir.path().join("worker-id");
         assert!(id_path.exists(), "worker-id file should be created");

@@ -15,17 +15,19 @@ pub mod state_machine;
 pub mod storage;
 pub mod types;
 
+use ci::ReqwestWebhookClient;
 use db::connect_db;
-use storage::EmailService;
-use storage::{FileLogStorage, S3LogStorage};
-use storage::NarStore;
 use executer::LocalNixStoreProvider;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, ActiveModelTrait, ActiveValue::Set, IntoActiveModel};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+};
 use state::load_and_apply_state;
 use std::path::Path;
 use std::sync::Arc;
+use storage::EmailService;
+use storage::NarStore;
+use storage::{FileLogStorage, S3LogStorage};
 use types::*;
-use ci::ReqwestWebhookClient;
 
 pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     println!("Starting Gradient Server on {}:{}", cli.ip, cli.port);
@@ -71,10 +73,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
                     }
                 }
                 if count > 0 {
-                    println!(
-                        "Capped keep_evaluations to {} on {} project(s)",
-                        max, count
-                    );
+                    println!("Capped keep_evaluations to {} on {} project(s)", max, count);
                 }
             }
             Err(e) => eprintln!("Failed to query projects for keep_evaluations cap: {}", e),
@@ -91,7 +90,8 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
 
     let nix_store: Arc<dyn executer::NixStoreProvider> =
         Arc::new(LocalNixStoreProvider::new(cli.max_nixdaemon_connections));
-    let web_nix_store: Arc<dyn executer::NixStoreProvider> = Arc::new(LocalNixStoreProvider::new(1));
+    let web_nix_store: Arc<dyn executer::NixStoreProvider> =
+        Arc::new(LocalNixStoreProvider::new(1));
 
     let webhook_client = match ReqwestWebhookClient::new() {
         Ok(c) => c,

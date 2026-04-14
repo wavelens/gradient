@@ -6,13 +6,13 @@
 
 use super::SourceError;
 use crate::types::*;
-use base64::{Engine, engine::general_purpose};
 use anyhow::Result;
+use base64::{Engine, engine::general_purpose};
+use ed25519_compact::KeyPair;
 use ssh_key::{
     Algorithm, LineEnding, PrivateKey, private::Ed25519Keypair, private::Ed25519PrivateKey,
     private::KeypairData, public::Ed25519PublicKey,
 };
-use ed25519_compact::KeyPair;
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -87,8 +87,9 @@ pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), SourceE
 
     let public_key_openssh = format!("{} {}", Algorithm::Ed25519.as_str(), public_key_data);
 
-    let encrypted_private_key = crypter::encrypt_with_password(secret.expose(), &private_key_openssh)
-        .ok_or(SourceError::CryptographicOperation)?;
+    let encrypted_private_key =
+        crypter::encrypt_with_password(secret.expose(), &private_key_openssh)
+            .ok_or(SourceError::CryptographicOperation)?;
 
     let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_private_key);
 

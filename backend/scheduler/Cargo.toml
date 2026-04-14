@@ -1,5 +1,5 @@
 [package]
-name = "proto"
+name = "scheduler"
 version = "1.0.0"
 edition = "2024"
 publish = false
@@ -7,25 +7,17 @@ license = "AGPL-3.0"
 authors = ["Wavelens GmbH <info@wavelens.io>"]
 
 [lib]
-name = "proto"
+name = "scheduler"
 path = "src/lib.rs"
 
 [dependencies]
-axum          = { version = "0.8", features = ["ws"] }
 gradient-core = { path = "../core", package = "core" }
-scheduler     = { path = "../scheduler" }
 entity        = { workspace = true }
 anyhow        = { workspace = true }
-async-trait   = { workspace = true }
 chrono        = { workspace = true }
-rkyv          = { workspace = true }
-serde         = { workspace = true }
-sha2          = { workspace = true }
-hex           = { workspace = true }
 sea-orm       = { workspace = true }
 tokio         = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
-tokio-tungstenite = { workspace = true }
-futures       = { workspace = true }
+serde         = { workspace = true }
 tracing       = { workspace = true }
 uuid          = { workspace = true }
 

@@ -16,7 +16,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use super::types::{BuildItem, BuildsQuery, EvaluationMessageResponse, EvaluationResponse, PaginatedBuilds};
+use super::types::{
+    BuildItem, BuildsQuery, EvaluationMessageResponse, EvaluationResponse, PaginatedBuilds,
+};
 
 pub async fn get_evaluation(
     state: State<Arc<ServerState>>,
@@ -239,7 +241,10 @@ pub async fn get_evaluation_builds(
     fn display_name(path: &str) -> &str {
         let filename = path.rsplit('/').next().unwrap_or(path);
         let stripped = filename.strip_suffix(".drv").unwrap_or(filename);
-        stripped.split_once('-').map(|(_, rest)| rest).unwrap_or(stripped)
+        stripped
+            .split_once('-')
+            .map(|(_, rest)| rest)
+            .unwrap_or(stripped)
     }
     builds.sort_by(|a, b| {
         status_rank(&a.status)
@@ -281,20 +286,26 @@ pub async fn get_evaluation_messages(
         EProject::find_by_id(project_id)
             .one(&state.db)
             .await?
-            .ok_or_else(|| WebError::InternalServerError("Evaluation data inconsistency".to_string()))?
+            .ok_or_else(|| {
+                WebError::InternalServerError("Evaluation data inconsistency".to_string())
+            })?
             .organization
     } else {
         EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
             .one(&state.db)
             .await?
-            .ok_or_else(|| WebError::InternalServerError("Direct build data inconsistency".to_string()))?
+            .ok_or_else(|| {
+                WebError::InternalServerError("Direct build data inconsistency".to_string())
+            })?
             .organization
     };
     let organization = EOrganization::find_by_id(organization_id)
         .one(&state.db)
         .await?
-        .ok_or_else(|| WebError::InternalServerError("Organization data inconsistency".to_string()))?;
+        .ok_or_else(|| {
+            WebError::InternalServerError("Organization data inconsistency".to_string())
+        })?;
 
     let can_access = if organization.public {
         true

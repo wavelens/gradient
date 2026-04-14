@@ -8,7 +8,7 @@ description = "Nix-based Continuous Integration System"
 repository = "https://github.com/wavelens/gradient"
 
 [workspace]
-members = [".", "core", "web", "cache", "entity", "migration", "proto", "test-support", "worker"]
+members = [".", "core", "web", "cache", "entity", "migration", "proto", "scheduler", "test-support", "worker"]
 default-members = [".", "worker"]
 resolver = "2"
 

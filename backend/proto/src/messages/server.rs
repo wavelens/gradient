@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::types::proto::GradientCapabilities;
+use gradient_core::types::proto::{CredentialKind, GradientCapabilities, Job, JobCandidate};
 use rkyv::{Archive, Deserialize, Serialize};
-
-use super::jobs::Job;
-use super::types::{CredentialKind, JobCandidate};
 
 /// A peer that failed authentication during the challenge-response flow.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]

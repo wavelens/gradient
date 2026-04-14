@@ -86,7 +86,10 @@ mod tests {
     #[test]
     fn store_and_retrieve_signing_key() {
         let store = CredentialStore::new();
-        store.store(CredentialKind::SigningKey, b"cache.example.com:AAAA".to_vec());
+        store.store(
+            CredentialKind::SigningKey,
+            b"cache.example.com:AAAA".to_vec(),
+        );
         let key = store.signing_key().expect("signing key should be present");
         assert_eq!(key.expose(), "cache.example.com:AAAA");
     }
@@ -132,7 +135,9 @@ mod tests {
         let clone = store.clone();
         // Store via clone, retrieve via original.
         clone.store(CredentialKind::SigningKey, b"shared".to_vec());
-        let key = store.signing_key().expect("original should see cloned value");
+        let key = store
+            .signing_key()
+            .expect("original should see cloned value");
         assert_eq!(key.expose(), "shared");
     }
 }

@@ -7,8 +7,8 @@
 mod provisioning;
 
 use entity::organization_cache::CacheSubscriptionMode;
-use serde::{Deserialize, Serialize};
 use sea_orm::DatabaseConnection;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 

@@ -31,7 +31,11 @@ pub struct WorkerConfig {
 
     /// Directory for persistent worker state (worker ID file, etc.).
     /// Defaults to `/var/lib/gradient-worker`. Must be writable.
-    #[arg(long, env = "GRADIENT_WORKER_DATA_DIR", default_value = "/var/lib/gradient-worker")]
+    #[arg(
+        long,
+        env = "GRADIENT_WORKER_DATA_DIR",
+        default_value = "/var/lib/gradient-worker"
+    )]
     pub data_dir: String,
 
     /// Re-exec as a Nix evaluator subprocess (internal — do not set manually).
@@ -44,11 +48,14 @@ pub struct WorkerConfig {
     pub eval_workers: usize,
 
     /// Maximum number of simultaneous builds.
-    #[arg(long, env = "GRADIENT_WORKER_MAX_CONCURRENT_BUILDS", default_value_t = 1)]
+    #[arg(
+        long,
+        env = "GRADIENT_WORKER_MAX_CONCURRENT_BUILDS",
+        default_value_t = 1
+    )]
     pub max_concurrent_builds: u32,
 
     // ── Logging ───────────────────────────────────────────────────────────────
-
     #[arg(long, env = "GRADIENT_LOG_LEVEL", default_value = "info")]
     pub log_level: String,
 
@@ -62,7 +69,6 @@ pub struct WorkerConfig {
     pub proto_log_level: Option<String>,
 
     // ── Network ───────────────────────────────────────────────────────────────
-
     /// Accept incoming `/proto` connections from the server (reverse-proxy mode).
     #[arg(long, env = "GRADIENT_WORKER_DISCOVERABLE", default_value = "false")]
     pub discoverable: bool,
@@ -72,14 +78,21 @@ pub struct WorkerConfig {
     pub port: u16,
 
     // ── Capabilities ──────────────────────────────────────────────────────────
-
     /// Relay work and NAR traffic between workers and servers (federation).
     /// Requires `--discoverable`.
-    #[arg(long, env = "GRADIENT_WORKER_CAPABILITY_FEDERATE", default_value = "false")]
+    #[arg(
+        long,
+        env = "GRADIENT_WORKER_CAPABILITY_FEDERATE",
+        default_value = "false"
+    )]
     pub capability_federate: bool,
 
     /// Prefetch flake inputs and sources.
-    #[arg(long, env = "GRADIENT_WORKER_CAPABILITY_FETCH", default_value = "false")]
+    #[arg(
+        long,
+        env = "GRADIENT_WORKER_CAPABILITY_FETCH",
+        default_value = "false"
+    )]
     pub capability_fetch: bool,
 
     /// Run Nix flake evaluations.
@@ -87,7 +100,11 @@ pub struct WorkerConfig {
     pub capability_eval: bool,
 
     /// Execute Nix store builds locally.
-    #[arg(long, env = "GRADIENT_WORKER_CAPABILITY_BUILD", default_value = "false")]
+    #[arg(
+        long,
+        env = "GRADIENT_WORKER_CAPABILITY_BUILD",
+        default_value = "false"
+    )]
     pub capability_build: bool,
 
     /// Sign store paths and upload signatures.

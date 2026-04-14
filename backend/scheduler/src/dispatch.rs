@@ -23,13 +23,16 @@ use gradient_core::ci::TriggerError;
 use gradient_core::sources::{check_project_updates, get_commit_info};
 use gradient_core::types::input::vec_to_hex;
 use gradient_core::types::*;
-use sea_orm::{ActiveModelTrait as _, ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QueryOrder, QuerySelect, RelationTrait};
+use sea_orm::{
+    ActiveModelTrait as _, ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QueryOrder,
+    QuerySelect, RelationTrait,
+};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::messages::{BuildJob, BuildTask, FlakeJob, FlakeTask};
-use super::jobs::{PendingBuildJob, PendingEvalJob};
 use super::Scheduler;
+use super::jobs::{PendingBuildJob, PendingEvalJob};
+use gradient_core::types::proto::{BuildJob, BuildTask, FlakeJob, FlakeTask};
 
 /// Spawns all dispatch loops as detached tokio tasks.
 pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
@@ -60,7 +63,9 @@ async fn project_poll_loop(scheduler: Arc<Scheduler>) {
 /// calls `check_project_updates` to compare the remote HEAD with the last
 /// evaluated commit. If an update is found, creates a new `Queued` evaluation
 /// via `trigger_evaluation`.
-pub(crate) async fn poll_projects_for_evaluations(scheduler: &Arc<Scheduler>) -> anyhow::Result<()> {
+pub(crate) async fn poll_projects_for_evaluations(
+    scheduler: &Arc<Scheduler>,
+) -> anyhow::Result<()> {
     let state = &scheduler.state;
     let threshold_time =
         Utc::now().naive_utc() - chrono::Duration::seconds(state.cli.evaluation_timeout);
@@ -98,7 +103,9 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Arc<Scheduler>) ->
     projects.extend(new_projects);
 
     for project in &projects {
-        let (has_update, commit_hash) = match check_project_updates(Arc::clone(state), project).await {
+        let (has_update, commit_hash) = match check_project_updates(Arc::clone(state), project)
+            .await
+        {
             Ok(result) => result,
             Err(e) => {
                 warn!(project = %project.name, error = %e, "failed to check project for updates");
@@ -189,7 +196,11 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Arc<Scheduler>) -> anyhow:
         let commit_sha = vec_to_hex(&commit.hash);
 
         let flake_job = FlakeJob {
-            tasks: vec![FlakeTask::FetchFlake, FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations],
+            tasks: vec![
+                FlakeTask::FetchFlake,
+                FlakeTask::EvaluateFlake,
+                FlakeTask::EvaluateDerivations,
+            ],
             repository: eval.repository.clone(),
             commit: commit_sha,
             wildcards: vec![eval.wildcard.clone()],
@@ -259,7 +270,10 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Arc<Scheduler>) -> anyhow:
         "#,
     );
 
-    let builds = EBuild::find().from_raw_sql(builds_sql).all(&state.db).await?;
+    let builds = EBuild::find()
+        .from_raw_sql(builds_sql)
+        .all(&state.db)
+        .await?;
 
     for build in builds {
         let job_id = format!("build:{}", build.id);
@@ -268,7 +282,10 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Arc<Scheduler>) -> anyhow:
             continue;
         }
 
-        let derivation = match EDerivation::find_by_id(build.derivation).one(&state.db).await? {
+        let derivation = match EDerivation::find_by_id(build.derivation)
+            .one(&state.db)
+            .await?
+        {
             Some(d) => d,
             None => {
                 error!(build_id = %build.id, "derivation not found for build");
@@ -276,7 +293,10 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Arc<Scheduler>) -> anyhow:
             }
         };
 
-        let eval = match EEvaluation::find_by_id(build.evaluation).one(&state.db).await? {
+        let eval = match EEvaluation::find_by_id(build.evaluation)
+            .one(&state.db)
+            .await?
+        {
             Some(e) => e,
             None => {
                 error!(build_id = %build.id, "evaluation not found for build");

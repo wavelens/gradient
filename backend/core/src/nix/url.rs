@@ -33,10 +33,7 @@ pub struct RepositoryUrl {
 
 impl RepositoryUrl {
     fn normalize(url: &str) -> String {
-        if url.starts_with("ssh://")
-            || url.starts_with("http://")
-            || url.starts_with("https://")
-        {
+        if url.starts_with("ssh://") || url.starts_with("http://") || url.starts_with("https://") {
             format!("git+{}", url)
         } else {
             url.to_string()
@@ -114,7 +111,9 @@ pub struct NixFlakeUrl {
 impl NixFlakeUrl {
     /// Build a `NixFlakeUrl` from a raw repository URL and a 40-character commit hash.
     pub fn new(repository_url: &str, commit_hash: &str) -> Result<Self, InputError> {
-        repository_url.parse::<RepositoryUrl>()?.with_rev(commit_hash)
+        repository_url
+            .parse::<RepositoryUrl>()?
+            .with_rev(commit_hash)
     }
 
     /// The normalized repository URL (without the `?rev=…` suffix).
@@ -193,14 +192,20 @@ mod tests {
     fn nix_url_ssh_scp_style() {
         let u = NixFlakeUrl::new("git@github.com:Wavelens/Gradient.git", REV).unwrap();
         assert_eq!(u.url(), "git@github.com:Wavelens/Gradient.git");
-        assert_eq!(u.to_string(), format!("git@github.com:Wavelens/Gradient.git?rev={REV}"));
+        assert_eq!(
+            u.to_string(),
+            format!("git@github.com:Wavelens/Gradient.git?rev={REV}")
+        );
     }
 
     #[test]
     fn nix_url_https_gets_git_plus_prefix() {
         let u = NixFlakeUrl::new("https://github.com/Wavelens/Gradient.git", REV).unwrap();
         assert_eq!(u.url(), "git+https://github.com/Wavelens/Gradient.git");
-        assert_eq!(u.to_string(), format!("git+https://github.com/Wavelens/Gradient.git?rev={REV}"));
+        assert_eq!(
+            u.to_string(),
+            format!("git+https://github.com/Wavelens/Gradient.git?rev={REV}")
+        );
     }
 
     #[test]
@@ -223,6 +228,9 @@ mod tests {
     fn with_rev_roundtrip() {
         let r: RepositoryUrl = "https://github.com/foo/bar.git".parse().unwrap();
         let u = r.with_rev(REV).unwrap();
-        assert_eq!(u.to_string(), format!("git+https://github.com/foo/bar.git?rev={REV}"));
+        assert_eq!(
+            u.to_string(),
+            format!("git+https://github.com/foo/bar.git?rev={REV}")
+        );
     }
 }

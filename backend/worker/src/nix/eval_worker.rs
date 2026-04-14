@@ -19,8 +19,8 @@
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
 
-use crate::flake::{discover_derivations, get_derivation_path};
-use crate::nix_eval::{NixEvaluator, escape_nix_str};
+use crate::nix::flake::{discover_derivations, get_derivation_path};
+use crate::nix::nix_eval::{NixEvaluator, escape_nix_str};
 
 /// Request from parent → worker. One JSON object per line on the worker's stdin.
 #[derive(Debug, Serialize, Deserialize)]
@@ -63,7 +63,9 @@ pub enum EvalResponse {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         warnings: Vec<String>,
     },
-    Err { message: String },
+    Err {
+        message: String,
+    },
 }
 
 /// One element of a `ResolveOk` payload. Either `drv_path` is set (success)
@@ -168,9 +170,8 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                 let mut all_warnings = Vec::new();
                 let mut items = Vec::with_capacity(attrs.len());
                 for attr in attrs {
-                    let (result, warnings) = capture_warnings_during(|| {
-                        get_derivation_path(ev, &repository, &attr)
-                    });
+                    let (result, warnings) =
+                        capture_warnings_during(|| get_derivation_path(ev, &repository, &attr));
                     all_warnings.extend(warnings);
                     match result {
                         Ok((drv, references)) => items.push(ResolvedItem {
@@ -336,7 +337,10 @@ mod tests {
     #[test]
     fn eval_response_serde_roundtrip() {
         let responses: Vec<EvalResponse> = vec![
-            EvalResponse::ListOk { attrs: vec!["packages.x86_64-linux.hello".into()], warnings: vec![] },
+            EvalResponse::ListOk {
+                attrs: vec!["packages.x86_64-linux.hello".into()],
+                warnings: vec![],
+            },
             EvalResponse::ResolveOk {
                 items: vec![ResolvedItem {
                     attr: "packages.x86_64-linux.hello".into(),
@@ -346,8 +350,13 @@ mod tests {
                 }],
                 warnings: vec![],
             },
-            EvalResponse::AttrNamesOk { keys: vec!["x86_64-linux".into()], warnings: vec![] },
-            EvalResponse::Err { message: "something went wrong".into() },
+            EvalResponse::AttrNamesOk {
+                keys: vec!["x86_64-linux".into()],
+                warnings: vec![],
+            },
+            EvalResponse::Err {
+                message: "something went wrong".into(),
+            },
         ];
 
         for resp in &responses {

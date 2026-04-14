@@ -317,8 +317,13 @@ mod tests {
 
     #[test]
     fn exclusion_pattern_valid() {
-        let w: Wildcard = "packages.*.*,!packages.x86_64-linux.broken".parse().unwrap();
-        assert_eq!(w.patterns(), &["packages.*.*", "!packages.x86_64-linux.broken"]);
+        let w: Wildcard = "packages.*.*,!packages.x86_64-linux.broken"
+            .parse()
+            .unwrap();
+        assert_eq!(
+            w.patterns(),
+            &["packages.*.*", "!packages.x86_64-linux.broken"]
+        );
     }
 
     #[test]
@@ -328,12 +333,18 @@ mod tests {
 
     #[test]
     fn exclusion_with_hash_rejected() {
-        assert!("packages.*.*,!packages.x86_64-linux.#".parse::<Wildcard>().is_err());
+        assert!(
+            "packages.*.*,!packages.x86_64-linux.#"
+                .parse::<Wildcard>()
+                .is_err()
+        );
     }
 
     #[test]
     fn exclusion_with_quoted_segment_valid() {
-        let w: Wildcard = r#"packages.*.*,!packages.x86_64-linux."broken.pkg""#.parse().unwrap();
+        let w: Wildcard = r#"packages.*.*,!packages.x86_64-linux."broken.pkg""#
+            .parse()
+            .unwrap();
         assert_eq!(w.patterns().len(), 2);
     }
 
@@ -366,7 +377,9 @@ mod tests {
 
     #[test]
     fn eval_str_include_and_exclude() {
-        let w: Wildcard = "packages.*.*,!packages.x86_64-linux.broken".parse().unwrap();
+        let w: Wildcard = "packages.*.*,!packages.x86_64-linux.broken"
+            .parse()
+            .unwrap();
         assert_eq!(
             w.get_eval_str(),
             r#"{ "include" = [ [ "packages" "*" ] ]; "exclude" = [ [ "packages" "x86_64-linux" "broken" ] ]; }"#,

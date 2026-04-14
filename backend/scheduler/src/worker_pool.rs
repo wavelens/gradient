@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use uuid::Uuid;
 
-use crate::messages::GradientCapabilities;
+use gradient_core::types::proto::GradientCapabilities;
 
 /// Metadata for a single connected worker.
 #[derive(Debug)]
@@ -183,12 +183,7 @@ mod tests {
     fn test_update_capabilities() {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new());
-        pool.update_capabilities(
-            "w1",
-            vec!["x86_64-linux".into()],
-            vec!["kvm".into()],
-            4,
-        );
+        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec!["kvm".into()], 4);
 
         let workers = pool.all_workers();
         assert_eq!(workers.len(), 1);

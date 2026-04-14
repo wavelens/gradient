@@ -33,9 +33,9 @@ pub mod prelude {
     pub use crate::fakes::job_reporter::{RecordingJobReporter, ReportedEvent};
     pub use crate::fakes::mock_server::{MockProtoServer, MockServerConn};
     pub use crate::fakes::store_fixture::{StoreFixture, load_store};
+    pub use crate::fakes::webhooks::RecordingWebhookClient;
     pub use crate::fakes::worker_store::FakeWorkerStore;
     pub use crate::fixtures::*;
     pub use crate::log_storage::NoopLogStorage;
-    pub use crate::fakes::webhooks::RecordingWebhookClient;
     pub use crate::state::{test_state, test_state_recorded};
 }

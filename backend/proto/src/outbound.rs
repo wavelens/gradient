@@ -24,7 +24,7 @@ use tracing::{debug, error, info, warn};
 use entity::worker_registration::{Column, Entity as EWorkerRegistration};
 
 use crate::handler::{ProtoSocket, handle_socket};
-use crate::scheduler::Scheduler;
+use scheduler::Scheduler;
 
 /// Spawn the outbound connection loop as a detached tokio task.
 pub fn start_outbound_loop(scheduler: Arc<Scheduler>) {
@@ -61,7 +61,9 @@ async fn connect_to_registered_workers(
     // Deduplicate by worker_id — multiple orgs can register the same worker.
     let mut seen = HashSet::new();
     for reg in registrations {
-        let Some(url) = reg.url.as_deref() else { continue };
+        let Some(url) = reg.url.as_deref() else {
+            continue;
+        };
         if url.is_empty() || !seen.insert(reg.worker_id.clone()) {
             continue;
         }
@@ -88,17 +90,19 @@ async fn connect_to_registered_workers(
         tokio::spawn(async move {
             debug!(%worker_id, %url, "connecting outbound to worker");
 
-            let result = tokio::time::timeout(
-                Duration::from_secs(10),
-                connect_async(&url),
-            )
-            .await;
+            let result = tokio::time::timeout(Duration::from_secs(10), connect_async(&url)).await;
 
             match result {
                 Ok(Ok((stream, _response))) => {
                     info!(%worker_id, %url, "outbound connection established");
                     let socket = ProtoSocket::Tungstenite(stream);
-                    handle_socket(socket, Arc::clone(&scheduler.state), Arc::clone(&scheduler), true).await;
+                    handle_socket(
+                        socket,
+                        Arc::clone(&scheduler.state),
+                        Arc::clone(&scheduler),
+                        true,
+                    )
+                    .await;
                     info!(%worker_id, "outbound connection closed");
                 }
                 Ok(Err(e)) => {

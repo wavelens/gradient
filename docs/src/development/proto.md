@@ -359,7 +359,7 @@ Each job is a sequence of **tasks** executed in order. If any task fails, the re
 
 ### FlakeJob
 
-Requires negotiated capability: `fetch` and/or `eval`. The server includes only the tasks the worker's capabilities allow. A fetch-only worker gets just `FetchFlake`; an eval-only worker gets `EvaluateFlake` + `EvaluateDerivations` (server must have already fetched); a worker with both gets the full chain.
+Requires negotiated capability: `fetch` and/or `eval`. The server includes only the tasks the worker's capabilities allow. A fetch-only worker gets just `FetchFlake`; an eval-only worker gets `EvaluateFlake` + `EvaluateDerivations` (server or other worker must have already fetched); a worker with both gets the full chain.
 
 ```mermaid
 graph LR

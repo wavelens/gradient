@@ -59,12 +59,10 @@ fn request_job_list_roundtrip() {
 #[test]
 fn job_list_chunk_roundtrip() {
     let original = ServerMessage::JobListChunk {
-        candidates: vec![
-            JobCandidate {
-                job_id: "550e8400-e29b-41d4-a716-446655440000".into(),
-                required_paths: vec!["/nix/store/abc-foo".into()],
-            },
-        ],
+        candidates: vec![JobCandidate {
+            job_id: "550e8400-e29b-41d4-a716-446655440000".into(),
+            required_paths: vec!["/nix/store/abc-foo".into()],
+        }],
         is_final: false,
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();

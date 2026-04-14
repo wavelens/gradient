@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use gradient_core::executer::strip_nix_store_prefix;
 use tracing::debug;
 
-use crate::nix_eval::{NixEvaluator, escape_nix_str};
+use crate::nix::nix_eval::{NixEvaluator, escape_nix_str};
 
 /// The eval.nix expression embedded at compile time.
 const EVAL_NIX: &str = include_str!("eval.nix");
@@ -116,10 +116,7 @@ pub(super) fn discover_derivations(
 ) -> Result<Vec<String>> {
     let escaped_repo = escape_nix_str(repository);
     let wildcard_ref = build_wildcard_nix_expr(wildcards);
-    let expr = format!(
-        "({}) \"{}\" {}",
-        EVAL_NIX, escaped_repo, wildcard_ref
-    );
+    let expr = format!("({}) \"{}\" {}", EVAL_NIX, escaped_repo, wildcard_ref);
 
     debug!(wildcards = ?wildcards, "discovering derivations via eval.nix");
 
@@ -163,7 +160,10 @@ mod tests {
 
     #[test]
     fn split_attr_path_simple() {
-        assert_eq!(split_attr_path("packages.x86_64-linux.hello"), vec!["packages", "x86_64-linux", "hello"]);
+        assert_eq!(
+            split_attr_path("packages.x86_64-linux.hello"),
+            vec!["packages", "x86_64-linux", "hello"]
+        );
     }
 
     #[test]
@@ -227,7 +227,10 @@ mod tests {
 
     #[test]
     fn build_wildcard_nix_expr_mixed() {
-        let patterns = vec!["packages.*.*".to_string(), "!packages.x86_64-linux.broken".to_string()];
+        let patterns = vec![
+            "packages.*.*".to_string(),
+            "!packages.x86_64-linux.broken".to_string(),
+        ];
         let result = build_wildcard_nix_expr(&patterns);
         // Include should have the positive pattern
         assert!(result.contains("\"include\" = ["));

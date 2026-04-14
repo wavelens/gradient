@@ -13,7 +13,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::debug;
 
-use crate::eval_worker::{EvalRequest, EvalResponse, ResolvedItem};
+use crate::nix::eval_worker::{EvalRequest, EvalResponse, ResolvedItem};
 
 /// Handle to a single live eval-worker subprocess.
 ///

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{user_can_edit, ProjectResponse};
+use super::{ProjectResponse, user_can_edit};
 use crate::authorization::MaybeUser;
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
@@ -210,7 +210,9 @@ pub async fn put(
         return Err(WebError::already_exists("Project Name"));
     }
 
-    let evaluation_wildcard = body.evaluation_wildcard.trim()
+    let evaluation_wildcard = body
+        .evaluation_wildcard
+        .trim()
         .parse::<Wildcard>()
         .map_err(|e| WebError::BadRequest(e.to_string()))?
         .to_string();
@@ -382,7 +384,8 @@ pub async fn patch_project(
     }
 
     if let Some(evaluation_wildcard) = body.evaluation_wildcard {
-        let evaluation_wildcard = evaluation_wildcard.trim()
+        let evaluation_wildcard = evaluation_wildcard
+            .trim()
             .parse::<Wildcard>()
             .map_err(|e| WebError::BadRequest(e.to_string()))?
             .to_string();
@@ -407,10 +410,18 @@ pub async fn patch_project(
 
     // CI reporter — treat empty string as "remove" (set to None)
     if let Some(ci_type) = body.ci_reporter_type {
-        aproject.ci_reporter_type = Set(if ci_type.is_empty() { None } else { Some(ci_type) });
+        aproject.ci_reporter_type = Set(if ci_type.is_empty() {
+            None
+        } else {
+            Some(ci_type)
+        });
     }
     if let Some(ci_url) = body.ci_reporter_url {
-        aproject.ci_reporter_url = Set(if ci_url.is_empty() { None } else { Some(ci_url) });
+        aproject.ci_reporter_url = Set(if ci_url.is_empty() {
+            None
+        } else {
+            Some(ci_url)
+        });
     }
     if let Some(ci_token) = body.ci_reporter_token {
         if ci_token.is_empty() {

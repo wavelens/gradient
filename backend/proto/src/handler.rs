@@ -13,17 +13,20 @@ use axum::extract::{Extension, State};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use futures::{SinkExt, StreamExt};
-use gradient_core::types::ServerState;
+use gradient_core::types::*;
 use rkyv::rancor::Error as RkyvError;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tokio::net::TcpStream;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message as TungsteniteMessage};
+use tokio_tungstenite::{
+    MaybeTlsStream, WebSocketStream, tungstenite::Message as TungsteniteMessage,
+};
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use crate::messages::{
     ClientMessage, GradientCapabilities, JobUpdateKind, PROTO_VERSION, ServerMessage,
 };
-use crate::scheduler::Scheduler;
+use scheduler::Scheduler;
 
 /// Returns the axum [`Router`] that serves the `/proto` WebSocket endpoint.
 ///
@@ -38,9 +41,7 @@ async fn ws_upgrade(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| {
-        handle_socket(ProtoSocket::Axum(socket), state, scheduler, false)
-    })
+    ws.on_upgrade(move |socket| handle_socket(ProtoSocket::Axum(socket), state, scheduler, false))
 }
 
 // ── Socket abstraction ───────────────────────────────────────────────────────
@@ -117,18 +118,27 @@ pub(crate) async fn handle_socket(
     info!(server_initiated, "WebSocket connection opened");
 
     if !server_initiated && !state.cli.discoverable {
-        send_reject(&mut socket, 403, "server is not accepting connections".into()).await;
+        send_reject(
+            &mut socket,
+            403,
+            "server is not accepting connections".into(),
+        )
+        .await;
         return;
     }
 
     // ── Handshake ─────────────────────────────────────────────────────────────
 
-    let Some(init_msg) = recv_client_msg(&mut socket).await else { return };
+    let Some(init_msg) = recv_client_msg(&mut socket).await else {
+        return;
+    };
 
     let (client_version, client_capabilities, peer_id) = match init_msg {
-        ClientMessage::InitConnection { version, capabilities, id } => {
-            (version, capabilities, id)
-        }
+        ClientMessage::InitConnection {
+            version,
+            capabilities,
+            id,
+        } => (version, capabilities, id),
         _ => {
             send_error(&mut socket, 400, "expected InitConnection".into()).await;
             return;
@@ -154,7 +164,9 @@ pub(crate) async fn handle_socket(
 
     if send_server_msg(
         &mut socket,
-        &ServerMessage::AuthChallenge { peers: registered_peers.iter().map(|(id, _)| id.clone()).collect() },
+        &ServerMessage::AuthChallenge {
+            peers: registered_peers.iter().map(|(id, _)| id.clone()).collect(),
+        },
     )
     .await
     .is_err()
@@ -171,8 +183,7 @@ pub(crate) async fn handle_socket(
         None => return,
     };
 
-    let (authorized_peers, failed_peers) =
-        validate_tokens(&registered_peers, &auth_response);
+    let (authorized_peers, failed_peers) = validate_tokens(&registered_peers, &auth_response);
 
     // Require at least one authorized peer unless no peers are registered
     // (open/discoverable mode with no registrations).
@@ -262,19 +273,23 @@ pub(crate) async fn handle_socket(
             ClientMessage::AuthResponse { tokens } => {
                 // Mid-connection reauth response.
                 let registered_peers = lookup_registered_peers(&state, &peer_id).await;
-                let (authorized_peers, failed_peers) =
-                    validate_tokens(&registered_peers, &tokens);
+                let (authorized_peers, failed_peers) = validate_tokens(&registered_peers, &tokens);
 
                 // Update the scheduler's peer filter for this worker.
                 let updated_uuids: HashSet<Uuid> = authorized_peers
                     .iter()
                     .filter_map(|s| s.parse().ok())
                     .collect();
-                scheduler.update_authorized_peers(&peer_id, updated_uuids).await;
+                scheduler
+                    .update_authorized_peers(&peer_id, updated_uuids)
+                    .await;
 
                 if send_server_msg(
                     &mut socket,
-                    &ServerMessage::AuthUpdate { authorized_peers, failed_peers },
+                    &ServerMessage::AuthUpdate {
+                        authorized_peers,
+                        failed_peers,
+                    },
                 )
                 .await
                 .is_err()
@@ -284,10 +299,19 @@ pub(crate) async fn handle_socket(
             }
 
             // ── Capability advertisement ──────────────────────────────────
-            ClientMessage::WorkerCapabilities { architectures, system_features, max_concurrent_builds } => {
+            ClientMessage::WorkerCapabilities {
+                architectures,
+                system_features,
+                max_concurrent_builds,
+            } => {
                 debug!(%peer_id, ?architectures, ?system_features, max_concurrent_builds, "WorkerCapabilities");
                 scheduler
-                    .update_worker_capabilities(&peer_id, architectures, system_features, max_concurrent_builds)
+                    .update_worker_capabilities(
+                        &peer_id,
+                        architectures,
+                        system_features,
+                        max_concurrent_builds,
+                    )
                     .await;
             }
 
@@ -296,7 +320,10 @@ pub(crate) async fn handle_socket(
                 debug!(%peer_id, "RequestJobList");
                 let candidates = scheduler.get_job_candidates(&peer_id).await;
                 let is_final = true;
-                let chunk = ServerMessage::JobListChunk { candidates, is_final };
+                let chunk = ServerMessage::JobListChunk {
+                    candidates,
+                    is_final,
+                };
                 if send_server_msg(&mut socket, &chunk).await.is_err() {
                     break;
                 }
@@ -306,6 +333,15 @@ pub(crate) async fn handle_socket(
             ClientMessage::RequestJobChunk { scores, is_final } => {
                 debug!(%peer_id, count = scores.len(), is_final, "RequestJobChunk");
                 if let Some(assignment) = scheduler.consider_scores(&peer_id, scores).await {
+                    // Deliver credentials before the job assignment.
+                    send_credentials_for_job(
+                        &mut socket,
+                        &state,
+                        &assignment.job,
+                        assignment.peer_id,
+                    )
+                    .await;
+
                     let msg = ServerMessage::AssignJob {
                         job_id: assignment.job_id,
                         job: assignment.job,
@@ -318,7 +354,11 @@ pub(crate) async fn handle_socket(
             }
 
             // ── Job accept / reject ───────────────────────────────────────
-            ClientMessage::AssignJobResponse { job_id, accepted, reason } => {
+            ClientMessage::AssignJobResponse {
+                job_id,
+                accepted,
+                reason,
+            } => {
                 if accepted {
                     info!(%peer_id, %job_id, "job accepted");
                     // Nothing extra needed — scheduler already marked it active.
@@ -333,24 +373,33 @@ pub(crate) async fn handle_socket(
                 debug!(%peer_id, %job_id, ?update, "JobUpdate");
                 match update {
                     JobUpdateKind::Fetching => {
-                        scheduler.handle_eval_status_update(
-                            &job_id,
-                            entity::evaluation::EvaluationStatus::Fetching,
-                        ).await;
+                        scheduler
+                            .handle_eval_status_update(
+                                &job_id,
+                                entity::evaluation::EvaluationStatus::Fetching,
+                            )
+                            .await;
                     }
                     JobUpdateKind::EvaluatingFlake => {
-                        scheduler.handle_eval_status_update(
-                            &job_id,
-                            entity::evaluation::EvaluationStatus::EvaluatingFlake,
-                        ).await;
+                        scheduler
+                            .handle_eval_status_update(
+                                &job_id,
+                                entity::evaluation::EvaluationStatus::EvaluatingFlake,
+                            )
+                            .await;
                     }
                     JobUpdateKind::EvaluatingDerivations => {
-                        scheduler.handle_eval_status_update(
-                            &job_id,
-                            entity::evaluation::EvaluationStatus::EvaluatingDerivation,
-                        ).await;
+                        scheduler
+                            .handle_eval_status_update(
+                                &job_id,
+                                entity::evaluation::EvaluationStatus::EvaluatingDerivation,
+                            )
+                            .await;
                     }
-                    JobUpdateKind::EvalResult { derivations, warnings } => {
+                    JobUpdateKind::EvalResult {
+                        derivations,
+                        warnings,
+                    } => {
                         if let Err(e) = scheduler
                             .handle_eval_result(&job_id, derivations, warnings)
                             .await
@@ -397,7 +446,11 @@ pub(crate) async fn handle_socket(
             }
 
             // ── Log streaming ─────────────────────────────────────────────
-            ClientMessage::LogChunk { job_id, task_index, data } => {
+            ClientMessage::LogChunk {
+                job_id,
+                task_index,
+                data,
+            } => {
                 debug!(%peer_id, %job_id, task_index, bytes = data.len(), "LogChunk");
                 if let Err(e) = scheduler.append_log(&job_id, task_index, data).await {
                     debug!(%peer_id, %job_id, error = %e, "log append failed");
@@ -410,20 +463,121 @@ pub(crate) async fn handle_socket(
                 // TODO: look up each path in NarStore; respond NarPush or PresignedDownload.
             }
 
-            ClientMessage::NarPush { job_id, store_path, data, offset, is_final } => {
+            ClientMessage::NarPush {
+                job_id,
+                store_path,
+                data,
+                offset,
+                is_final,
+            } => {
                 debug!(%peer_id, %job_id, %store_path, offset, is_final, bytes = data.len(), "NarPush");
                 // TODO: write chunk to NarStore; on is_final verify hash + import.
             }
 
-            ClientMessage::NarReady { job_id, store_path, nar_size, nar_hash } => {
+            ClientMessage::NarReady {
+                job_id,
+                store_path,
+                nar_size,
+                nar_hash,
+            } => {
                 debug!(%peer_id, %job_id, %store_path, nar_size, %nar_hash, "NarReady");
-                // TODO: record path info; add_signatures if needed.
+                if let Err(e) =
+                    scheduler::build::handle_nar_ready(&state, &store_path, nar_size, &nar_hash)
+                        .await
+                {
+                    error!(%peer_id, %job_id, error = %e, "handle_nar_ready failed");
+                }
             }
         }
     }
 
     scheduler.unregister_worker(&peer_id).await;
     info!(%peer_id, "WebSocket connection closed");
+}
+
+// ── Credential delivery ──────────────────────────────────────────────────────
+
+/// Send credentials the worker needs to execute the job.
+///
+/// - **FlakeJob with FetchFlake**: sends the org's SSH private key for cloning
+///   private repositories.
+/// - **BuildJob with Sign**: sends the cache's signing key.
+async fn send_credentials_for_job(
+    socket: &mut ProtoSocket,
+    state: &ServerState,
+    job: &gradient_core::types::proto::Job,
+    org_id: Uuid,
+) {
+    use gradient_core::types::proto::{CredentialKind, FlakeTask, Job};
+
+    match job {
+        Job::Flake(flake_job) => {
+            if !flake_job.tasks.contains(&FlakeTask::FetchFlake) {
+                return;
+            }
+            // Look up the org's SSH private key.
+            match EOrganization::find_by_id(org_id).one(&state.db).await {
+                Ok(Some(org)) => {
+                    match gradient_core::sources::ssh_key::decrypt_ssh_private_key(
+                        state.cli.crypt_secret_file.clone(),
+                        org,
+                        &state.cli.serve_url,
+                    ) {
+                        Ok((private_key, _public_key)) => {
+                            let _ = send_server_msg(
+                                socket,
+                                &ServerMessage::Credential {
+                                    kind: CredentialKind::SshKey,
+                                    data: private_key.into_bytes(),
+                                },
+                            )
+                            .await;
+                            debug!(%org_id, "SSH key credential sent");
+                        }
+                        Err(e) => {
+                            debug!(%org_id, error = %e, "no SSH key for org (may be HTTPS repo)");
+                        }
+                    }
+                }
+                Ok(None) => warn!(%org_id, "org not found for SSH key lookup"),
+                Err(e) => warn!(%org_id, error = %e, "failed to fetch org for SSH key"),
+            }
+        }
+        Job::Build(build_job) => {
+            if build_job.sign.is_none() {
+                return;
+            }
+            // Look up a signing key from the org's caches.
+            // Find caches associated with this org that have signing keys.
+            match EOrganizationCache::find()
+                .filter(COrganizationCache::Organization.eq(org_id))
+                .all(&state.db)
+                .await
+            {
+                Ok(org_caches) => {
+                    for oc in org_caches {
+                        match ECache::find_by_id(oc.cache).one(&state.db).await {
+                            Ok(Some(cache)) if !cache.private_key.is_empty() => {
+                                let _ = send_server_msg(
+                                    socket,
+                                    &ServerMessage::Credential {
+                                        kind: CredentialKind::SigningKey,
+                                        data: cache.private_key.into_bytes(),
+                                    },
+                                )
+                                .await;
+                                debug!(cache_name = %cache.name, "signing key credential sent");
+                                break;
+                            }
+                            Ok(_) => {}
+                            Err(e) => warn!(error = %e, "failed to fetch cache for signing key"),
+                        }
+                    }
+                }
+                Err(e) => warn!(%org_id, error = %e, "failed to fetch org caches for signing key"),
+            }
+        }
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -468,7 +622,10 @@ async fn lookup_registered_peers(state: &ServerState, worker_id: &str) -> Vec<(S
         .all(&state.db)
         .await
     {
-        Ok(rows) => rows.into_iter().map(|r| (r.peer_id.to_string(), r.token_hash)).collect(),
+        Ok(rows) => rows
+            .into_iter()
+            .map(|r| (r.peer_id.to_string(), r.token_hash))
+            .collect(),
         Err(e) => {
             warn!(error = %e, %worker_id, "failed to look up registered peers");
             vec![]
@@ -514,7 +671,10 @@ fn validate_tokens(
     (authorized, failed)
 }
 
-fn negotiate_capabilities(state: &ServerState, client: GradientCapabilities) -> GradientCapabilities {
+fn negotiate_capabilities(
+    state: &ServerState,
+    client: GradientCapabilities,
+) -> GradientCapabilities {
     GradientCapabilities {
         core: true,
         cache: state.cli.serve_cache,
@@ -537,7 +697,15 @@ mod tests {
     }
 
     fn all_caps(val: bool) -> GradientCapabilities {
-        GradientCapabilities { core: val, cache: val, federate: val, fetch: val, eval: val, build: val, sign: val }
+        GradientCapabilities {
+            core: val,
+            cache: val,
+            federate: val,
+            fetch: val,
+            eval: val,
+            build: val,
+            sign: val,
+        }
     }
 
     fn make_state(serve_cache: bool, federate_proto: bool) -> ServerState {
@@ -591,9 +759,9 @@ mod tests {
             ("peer-c".to_string(), sha256_hex("token-c")),
         ];
         let auth = vec![
-            ("peer-a".to_string(), "token-a".to_string()),  // correct
-            ("peer-b".to_string(), "wrong".to_string()),    // wrong hash
-            // peer-c missing
+            ("peer-a".to_string(), "token-a".to_string()), // correct
+            ("peer-b".to_string(), "wrong".to_string()),   // wrong hash
+                                                           // peer-c missing
         ];
         let (authorized, failed) = validate_tokens(&registered, &auth);
         assert_eq!(authorized, vec!["peer-a"]);
@@ -613,9 +781,7 @@ mod tests {
     #[test]
     fn validate_tokens_extra_tokens_ignored() {
         // auth_tokens has entries for peers not in registered_peers — they are ignored
-        let auth = vec![
-            ("unknown-peer".to_string(), "some-token".to_string()),
-        ];
+        let auth = vec![("unknown-peer".to_string(), "some-token".to_string())];
         let (authorized, failed) = validate_tokens(&[], &auth);
         assert!(authorized.is_empty());
         assert!(failed.is_empty());
@@ -662,7 +828,15 @@ mod tests {
     #[test]
     fn negotiate_capabilities_passthrough_fields() {
         let state = make_state(false, false);
-        let client = GradientCapabilities { core: false, cache: false, federate: false, fetch: true, eval: true, build: true, sign: true };
+        let client = GradientCapabilities {
+            core: false,
+            cache: false,
+            federate: false,
+            fetch: true,
+            eval: true,
+            build: true,
+            sign: true,
+        };
         let result = negotiate_capabilities(&state, client);
         assert!(result.fetch);
         assert!(result.eval);

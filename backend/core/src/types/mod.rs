@@ -22,11 +22,11 @@ pub use self::nix_cache::*;
 pub use self::secret::{SecretBytes, SecretString};
 pub use self::wildcard::*;
 
-use super::storage::email::EmailSender;
+use super::ci::webhook::WebhookClient;
+use super::executer::pool::NixStoreProvider;
 use super::storage::LogStorage;
 use super::storage::NarStore;
-use super::executer::pool::NixStoreProvider;
-use super::ci::webhook::WebhookClient;
+use super::storage::email::EmailSender;
 use clap::Parser;
 use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
@@ -145,7 +145,7 @@ pub struct Cli {
     #[arg(
         long,
         env = "GRADIENT_MAX_EVALUATIONS_PER_WORKER",
-        default_value = "20"
+        default_value = "1"
     )]
     pub max_evaluations_per_worker: usize,
     /// Number of top-level derivations whose closure BFS runs in parallel
@@ -191,7 +191,11 @@ pub struct Cli {
     pub s3_prefix: String,
     /// Public URL of the Gradient frontend, used to build links in CI status
     /// reports (e.g. `https://gradient.example.com`). Defaults to `serve_url`.
-    #[arg(long, env = "GRADIENT_FRONTEND_URL", default_value = "http://127.0.0.1:8000")]
+    #[arg(
+        long,
+        env = "GRADIENT_FRONTEND_URL",
+        default_value = "http://127.0.0.1:8000"
+    )]
     pub frontend_url: String,
 
     // ── GitHub App options ────────────────────────────────────────────────────

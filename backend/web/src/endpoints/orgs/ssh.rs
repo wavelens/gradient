@@ -10,8 +10,8 @@ use axum::{Extension, Json};
 use core::db::get_organization_by_name;
 use core::sources::{format_public_key, generate_ssh_key};
 use core::types::*;
-use sea_orm::ActiveValue::Set;
 use sea_orm::ActiveModelTrait;
+use sea_orm::ActiveValue::Set;
 use std::sync::Arc;
 
 pub async fn get_organization_ssh(

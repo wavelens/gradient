@@ -21,6 +21,7 @@ proto             = { workspace = true }
 
 anyhow            = { workspace = true }
 clap              = { workspace = true }
+git2              = { workspace = true }
 async-trait       = { workspace = true }
 base64            = { workspace = true }
 bytes             = { workspace = true }

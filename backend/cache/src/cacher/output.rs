@@ -9,9 +9,7 @@ use chrono::Utc;
 use core::sources::get_path_from_derivation_output;
 use core::types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 use uuid::Uuid;

@@ -4,11 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::types::proto::GradientCapabilities;
+use gradient_core::types::proto::{CandidateScore, GradientCapabilities, JobUpdateKind};
 use rkyv::{Archive, Deserialize, Serialize};
-
-use super::jobs::JobUpdateKind;
-use super::types::CandidateScore;
 
 /// Messages sent from the client (worker / federated peer) to the server.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -73,7 +70,10 @@ pub enum ClientMessage {
 
     /// Incremental progress update for an in-flight job.
     /// The server maps these directly to `EvaluationStatus` / `BuildStatus`.
-    JobUpdate { job_id: String, update: JobUpdateKind },
+    JobUpdate {
+        job_id: String,
+        update: JobUpdateKind,
+    },
 
     /// All tasks in a job completed successfully.
     /// Results were already sent via [`ClientMessage::JobUpdate`].
@@ -87,7 +87,11 @@ pub enum ClientMessage {
     Draining,
 
     /// Build log lines from an in-flight task.  Fire-and-forget.
-    LogChunk { job_id: String, task_index: u32, data: Vec<u8> },
+    LogChunk {
+        job_id: String,
+        task_index: u32,
+        data: Vec<u8>,
+    },
 
     /// Request specific store paths from the server (direct NAR mode).
     NarRequest { job_id: String, paths: Vec<String> },

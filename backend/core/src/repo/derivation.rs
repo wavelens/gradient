@@ -7,11 +7,11 @@
 //! Pure database operations for derivation-related tables.
 
 use anyhow::Result;
+use sea_orm::DatabaseConnection;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
     QuerySelect,
 };
-use sea_orm::DatabaseConnection;
 use uuid::Uuid;
 
 use crate::types::*;
@@ -28,10 +28,14 @@ impl<'db> DerivationRepo<'db> {
     /// Insert derivation rows in 1 000-row batches.
     pub async fn insert_derivations(&self, derivations: Vec<MDerivation>) -> Result<()> {
         const BATCH_SIZE: usize = 1000;
-        let active: Vec<ADerivation> =
-            derivations.into_iter().map(|d| d.into_active_model()).collect();
+        let active: Vec<ADerivation> = derivations
+            .into_iter()
+            .map(|d| d.into_active_model())
+            .collect();
         for chunk in active.chunks(BATCH_SIZE) {
-            EDerivation::insert_many(chunk.to_vec()).exec(self.db).await?;
+            EDerivation::insert_many(chunk.to_vec())
+                .exec(self.db)
+                .await?;
         }
         Ok(())
     }
@@ -40,7 +44,9 @@ impl<'db> DerivationRepo<'db> {
     pub async fn insert_outputs(&self, outputs: Vec<ADerivationOutput>) -> Result<()> {
         const BATCH_SIZE: usize = 1000;
         for chunk in outputs.chunks(BATCH_SIZE) {
-            EDerivationOutput::insert_many(chunk.to_vec()).exec(self.db).await?;
+            EDerivationOutput::insert_many(chunk.to_vec())
+                .exec(self.db)
+                .await?;
         }
         Ok(())
     }
@@ -51,7 +57,9 @@ impl<'db> DerivationRepo<'db> {
         let active: Vec<ADerivationDependency> =
             deps.into_iter().map(|d| d.into_active_model()).collect();
         for chunk in active.chunks(BATCH_SIZE) {
-            EDerivationDependency::insert_many(chunk.to_vec()).exec(self.db).await?;
+            EDerivationDependency::insert_many(chunk.to_vec())
+                .exec(self.db)
+                .await?;
         }
         Ok(())
     }
@@ -88,10 +96,7 @@ impl<'db> DerivationRepo<'db> {
     }
 
     /// Find all outputs by store path.
-    pub async fn find_output_by_path(
-        &self,
-        store_path: &str,
-    ) -> Result<Option<MDerivationOutput>> {
+    pub async fn find_output_by_path(&self, store_path: &str) -> Result<Option<MDerivationOutput>> {
         let output = EDerivationOutput::find()
             .filter(CDerivationOutput::Output.eq(store_path))
             .one(self.db)

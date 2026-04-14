@@ -42,7 +42,10 @@ pub struct BuildStateMachine;
 
 impl BuildStateMachine {
     /// Returns `Ok(to)` if the transition is valid, `Err` otherwise.
-    pub fn validate(from: BuildStatus, to: BuildStatus) -> Result<BuildStatus, InvalidBuildTransition> {
+    pub fn validate(
+        from: BuildStatus,
+        to: BuildStatus,
+    ) -> Result<BuildStatus, InvalidBuildTransition> {
         if from == to {
             return Ok(to);
         }
@@ -50,8 +53,11 @@ impl BuildStateMachine {
         // Terminal states — nothing can move away from these.
         let from_is_terminal = matches!(
             from,
-            BuildStatus::Completed | BuildStatus::Substituted | BuildStatus::Failed
-                | BuildStatus::Aborted | BuildStatus::DependencyFailed
+            BuildStatus::Completed
+                | BuildStatus::Substituted
+                | BuildStatus::Failed
+                | BuildStatus::Aborted
+                | BuildStatus::DependencyFailed
         );
         if from_is_terminal {
             return Err(InvalidBuildTransition { from, to });
@@ -77,8 +83,11 @@ impl BuildStateMachine {
     pub fn is_terminal(status: &BuildStatus) -> bool {
         matches!(
             status,
-            BuildStatus::Completed | BuildStatus::Substituted | BuildStatus::Failed
-                | BuildStatus::Aborted | BuildStatus::DependencyFailed
+            BuildStatus::Completed
+                | BuildStatus::Substituted
+                | BuildStatus::Failed
+                | BuildStatus::Aborted
+                | BuildStatus::DependencyFailed
         )
     }
 }
@@ -109,7 +118,11 @@ mod tests {
 
     #[test]
     fn build_sm_any_nonterminal_to_aborted() {
-        for from in [BuildStatus::Created, BuildStatus::Queued, BuildStatus::Building] {
+        for from in [
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+        ] {
             assert!(
                 BuildStateMachine::validate(from.clone(), BuildStatus::Aborted).is_ok(),
                 "{from:?} → Aborted should be valid"
@@ -119,7 +132,11 @@ mod tests {
 
     #[test]
     fn build_sm_any_nonterminal_to_dep_failed() {
-        for from in [BuildStatus::Created, BuildStatus::Queued, BuildStatus::Building] {
+        for from in [
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+        ] {
             assert!(
                 BuildStateMachine::validate(from.clone(), BuildStatus::DependencyFailed).is_ok(),
                 "{from:?} → DependencyFailed should be valid"
@@ -138,7 +155,11 @@ mod tests {
         ];
         for from in &terminals {
             // Try transitioning to every non-same status
-            for to in [BuildStatus::Created, BuildStatus::Queued, BuildStatus::Building] {
+            for to in [
+                BuildStatus::Created,
+                BuildStatus::Queued,
+                BuildStatus::Building,
+            ] {
                 assert!(
                     BuildStateMachine::validate(from.clone(), to.clone()).is_err(),
                     "{from:?} → {to:?} should be rejected"
@@ -149,7 +170,12 @@ mod tests {
 
     #[test]
     fn build_sm_same_state_ok() {
-        for s in [BuildStatus::Created, BuildStatus::Queued, BuildStatus::Building, BuildStatus::Completed] {
+        for s in [
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+            BuildStatus::Completed,
+        ] {
             assert!(BuildStateMachine::validate(s.clone(), s).is_ok());
         }
     }
@@ -161,11 +187,27 @@ mod tests {
 
     #[test]
     fn build_sm_is_terminal() {
-        for s in [BuildStatus::Completed, BuildStatus::Substituted, BuildStatus::Failed, BuildStatus::Aborted, BuildStatus::DependencyFailed] {
-            assert!(BuildStateMachine::is_terminal(&s), "{s:?} should be terminal");
+        for s in [
+            BuildStatus::Completed,
+            BuildStatus::Substituted,
+            BuildStatus::Failed,
+            BuildStatus::Aborted,
+            BuildStatus::DependencyFailed,
+        ] {
+            assert!(
+                BuildStateMachine::is_terminal(&s),
+                "{s:?} should be terminal"
+            );
         }
-        for s in [BuildStatus::Created, BuildStatus::Queued, BuildStatus::Building] {
-            assert!(!BuildStateMachine::is_terminal(&s), "{s:?} should not be terminal");
+        for s in [
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+        ] {
+            assert!(
+                !BuildStateMachine::is_terminal(&s),
+                "{s:?} should not be terminal"
+            );
         }
     }
 }

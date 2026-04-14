@@ -52,7 +52,10 @@ pub(super) async fn validate_cached_outputs(state: Arc<ServerState>) -> Result<(
     }
 
     if reset > 0 {
-        info!(count = reset, "Reset is_cached for outputs with missing NARs");
+        info!(
+            count = reset,
+            "Reset is_cached for outputs with missing NARs"
+        );
     }
     Ok(())
 }

@@ -406,9 +406,16 @@ mod tests {
 
     #[test]
     fn match_pattern_prefix_suffix() {
-        let candidates = ["packages.x86_64-linux", "packages.aarch64-linux", "checks.x86_64-linux"];
+        let candidates = [
+            "packages.x86_64-linux",
+            "packages.aarch64-linux",
+            "checks.x86_64-linux",
+        ];
         let result = match_pattern("packages.*", candidates.iter().copied());
-        assert_eq!(result, vec!["packages.x86_64-linux", "packages.aarch64-linux"]);
+        assert_eq!(
+            result,
+            vec!["packages.x86_64-linux", "packages.aarch64-linux"]
+        );
     }
 
     #[test]
@@ -426,9 +433,16 @@ mod tests {
 
     #[test]
     fn match_pattern_prefix_and_suffix() {
-        let candidates = ["checks.x86_64-linux.mytest", "checks.aarch64-linux.mytest", "checks.x86_64-linux.other"];
+        let candidates = [
+            "checks.x86_64-linux.mytest",
+            "checks.aarch64-linux.mytest",
+            "checks.x86_64-linux.other",
+        ];
         let result = match_pattern("checks.*.mytest", candidates.iter().copied());
-        assert_eq!(result, vec!["checks.x86_64-linux.mytest", "checks.aarch64-linux.mytest"]);
+        assert_eq!(
+            result,
+            vec!["checks.x86_64-linux.mytest", "checks.aarch64-linux.mytest"]
+        );
     }
 
     // ── quote_if_needed ───────────────────────────────────────────────────────

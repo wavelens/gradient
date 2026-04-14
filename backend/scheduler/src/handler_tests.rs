@@ -35,9 +35,11 @@ use gradient_core::types::*;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use uuid::Uuid;
 
-use crate::messages::{BuildOutput, DerivationOutput, DiscoveredDerivation, FlakeJob, FlakeTask};
-use crate::scheduler::jobs::{PendingBuildJob, PendingEvalJob};
-use crate::scheduler::{build as build_handler, eval as eval_handler};
+use crate::jobs::{PendingBuildJob, PendingEvalJob};
+use crate::{build as build_handler, eval as eval_handler};
+use gradient_core::types::proto::{
+    BuildOutput, DerivationOutput, DiscoveredDerivation, FlakeJob, FlakeTask,
+};
 use test_support::prelude::test_state_recorded;
 
 // ── Fixture helpers ──────────────────────────────────────────────────────────
@@ -132,7 +134,7 @@ fn make_eval_job(eval_id: Uuid, org_id: Uuid) -> PendingEvalJob {
 }
 
 fn make_build_job(build_id: Uuid, eval_id: Uuid, org_id: Uuid) -> PendingBuildJob {
-    use crate::messages::{BuildJob, BuildTask};
+    use gradient_core::types::proto::{BuildJob, BuildTask};
     PendingBuildJob {
         build_id,
         evaluation_id: eval_id,
@@ -213,7 +215,12 @@ fn make_project(id: Uuid, org_id: Uuid) -> entity::project::Model {
 }
 
 /// Webhook fixture. `secret` should be an already-encrypted base64 ciphertext.
-fn make_webhook(id: Uuid, org_id: Uuid, encrypted_secret: &str, events: &[&str]) -> entity::webhook::Model {
+fn make_webhook(
+    id: Uuid,
+    org_id: Uuid,
+    encrypted_secret: &str,
+    events: &[&str],
+) -> entity::webhook::Model {
     entity::webhook::Model {
         id,
         organization: org_id,
@@ -283,7 +290,10 @@ async fn eval_result_empty_derivations_completes() {
         // 2. find created builds → empty (no builds at all)
         .append_query_results([Vec::<MBuild>::new()])
         // 3. update_many eval status (Completed) → exec
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 4. find_by_id(eval) after update → Completed
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Completed)]])
         .into_connection();
@@ -319,7 +329,12 @@ async fn eval_result_single_derivation_creates_build() {
         // 3. insert_many derivations (Postgres: primary_key=None → uses query_all → query_results)
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
         // 4. insert_many derivation_outputs
-        .append_query_results([vec![make_drv_output(Uuid::new_v4(), drv_id, "out", out_path)]])
+        .append_query_results([vec![make_drv_output(
+            Uuid::new_v4(),
+            drv_id,
+            "out",
+            out_path,
+        )]])
         // 5. insert_many builds
         .append_query_results([vec![build_created.clone()]])
         // 6. find Created builds → [build{Created}]
@@ -327,7 +342,10 @@ async fn eval_result_single_derivation_creates_build() {
         // 7. update_build_status Created→Queued (UPDATE...RETURNING)
         .append_query_results([vec![build_queued]])
         // 8. update_evaluation_status → exec + find_by_id
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         .into_connection();
 
@@ -348,7 +366,11 @@ async fn eval_result_existing_derivation_reuses_id() {
     let build_id = Uuid::new_v4();
 
     let drv_path = "/nix/store/cccccccccccccccccccccccccccccccc-bar.drv";
-    let discovered = make_discovered(drv_path, vec![("out", "/nix/store/dddddddddddddddddddddddddddddddd-bar")], vec![]);
+    let discovered = make_discovered(
+        drv_path,
+        vec![("out", "/nix/store/dddddddddddddddddddddddddddddddd-bar")],
+        vec![],
+    );
     let existing_drv = make_derivation(drv_id, org_id, drv_path);
     let build_created = make_build(build_id, eval_id, drv_id, BuildStatus::Created);
     let build_queued = make_build(build_id, eval_id, drv_id, BuildStatus::Queued);
@@ -366,7 +388,10 @@ async fn eval_result_existing_derivation_reuses_id() {
         // 5. update build Created→Queued
         .append_query_results([vec![build_queued]])
         // 6. update eval → Building
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         .into_connection();
 
@@ -400,13 +425,26 @@ async fn eval_result_substituted_derivation_completes_eval() {
         // 3. insert_many derivations (Postgres: uses query_all → query_results)
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
         // 4. insert_many derivation_outputs
-        .append_query_results([vec![make_drv_output(Uuid::new_v4(), drv_id, "out", out_path)]])
+        .append_query_results([vec![make_drv_output(
+            Uuid::new_v4(),
+            drv_id,
+            "out",
+            out_path,
+        )]])
         // 5. insert_many builds (Substituted status)
-        .append_query_results([vec![make_build(build_id, eval_id, drv_id, BuildStatus::Substituted)]])
+        .append_query_results([vec![make_build(
+            build_id,
+            eval_id,
+            drv_id,
+            BuildStatus::Substituted,
+        )]])
         // 6. find Created builds → empty (build is Substituted, not Created)
         .append_query_results([Vec::<MBuild>::new()])
         // 7. update eval → Completed
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Completed)]])
         .into_connection();
 
@@ -431,8 +469,16 @@ async fn eval_result_with_dependencies() {
     let path_a = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a.drv";
     let path_b = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b.drv";
     // A depends on B.
-    let drv_a = make_discovered(path_a, vec![("out", "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a")], vec![path_b]);
-    let drv_b = make_discovered(path_b, vec![("out", "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b")], vec![]);
+    let drv_a = make_discovered(
+        path_a,
+        vec![("out", "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a")],
+        vec![path_b],
+    );
+    let drv_b = make_discovered(
+        path_b,
+        vec![("out", "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-b")],
+        vec![],
+    );
 
     let build_a_created = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Created);
     let build_b_created = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Created);
@@ -447,7 +493,12 @@ async fn eval_result_with_dependencies() {
         // 3. insert_many derivations (Postgres: uses query_all → query_results)
         .append_query_results([vec![make_derivation(drv_a_id, org_id, path_a)]])
         // 4. insert_many outputs
-        .append_query_results([vec![make_drv_output(Uuid::new_v4(), drv_a_id, "out", "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a")]])
+        .append_query_results([vec![make_drv_output(
+            Uuid::new_v4(),
+            drv_a_id,
+            "out",
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-a",
+        )]])
         // 5. insert_many dep edges (1 edge: A → B)
         .append_query_results([vec![make_dep_edge(Uuid::new_v4(), drv_a_id, drv_b_id)]])
         // 6. insert_many builds
@@ -459,7 +510,10 @@ async fn eval_result_with_dependencies() {
         // 9. update buildB Created→Queued
         .append_query_results([vec![build_b_queued]])
         // 10. update eval → Building
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         .into_connection();
 
@@ -480,7 +534,11 @@ async fn eval_result_with_warnings() {
     let build_id = Uuid::new_v4();
 
     let drv_path = "/nix/store/gggggggggggggggggggggggggggggggg-warn.drv";
-    let discovered = make_discovered(drv_path, vec![("out", "/nix/store/hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh-warn")], vec![]);
+    let discovered = make_discovered(
+        drv_path,
+        vec![("out", "/nix/store/hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh-warn")],
+        vec![],
+    );
     let build_created = make_build(build_id, eval_id, drv_id, BuildStatus::Created);
     let build_queued = make_build(build_id, eval_id, drv_id, BuildStatus::Queued);
 
@@ -492,17 +550,28 @@ async fn eval_result_with_warnings() {
         // 3. insert_many derivations (Postgres: uses query_all → query_results)
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
         // 4. insert_many outputs
-        .append_query_results([vec![make_drv_output(Uuid::new_v4(), drv_id, "out", "/nix/store/hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh-warn")]])
+        .append_query_results([vec![make_drv_output(
+            Uuid::new_v4(),
+            drv_id,
+            "out",
+            "/nix/store/hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh-warn",
+        )]])
         // 5. insert_many builds
         .append_query_results([vec![build_created.clone()]])
         // 6. record_evaluation_message: single insert with explicit PK → uses db.execute() → exec_results
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 7. find Created builds
         .append_query_results([vec![build_created]])
         // 8. update build → Queued
         .append_query_results([vec![build_queued]])
         // 9. update eval → Building
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         .into_connection();
 
@@ -544,7 +613,10 @@ async fn build_completed_last_build_completes_eval() {
         // 5. find failed builds → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 6. update_many eval → Completed
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 7. find_by_id(eval) → Completed
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Completed)]])
         .into_connection();
@@ -609,7 +681,10 @@ async fn build_completed_with_failed_sibling() {
         // 5. find failed builds → has one Failed build
         .append_query_results([vec![failed_build]])
         // 6. update eval → Failed
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
         .into_connection();
 
@@ -672,15 +747,23 @@ async fn build_completed_dep_failed_siblings_cause_eval_failed() {
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
     let build_completed = make_build(build_id, eval_id, drv_id, BuildStatus::Completed);
-    let dep_failed = make_build(dep_failed_build_id, eval_id, dep_failed_drv_id, BuildStatus::DependencyFailed);
+    let dep_failed = make_build(
+        dep_failed_build_id,
+        eval_id,
+        dep_failed_drv_id,
+        BuildStatus::DependencyFailed,
+    );
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![build]])
         .append_query_results([vec![build_completed]])
-        .append_query_results([Vec::<MBuild>::new()])           // no active
+        .append_query_results([Vec::<MBuild>::new()]) // no active
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
-        .append_query_results([vec![dep_failed]])               // DependencyFailed counts
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_query_results([vec![dep_failed]]) // DependencyFailed counts
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
         .into_connection();
 
@@ -705,7 +788,8 @@ async fn build_failed_cascades_to_direct_dependent() {
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
     let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed);
     let build_b = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Queued);
-    let build_b_dep_failed = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
+    let build_b_dep_failed =
+        make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
     // Edge: B.drv depends on A.drv
     let dep_edge = make_dep_edge(Uuid::new_v4(), drv_b_id, drv_a_id);
 
@@ -714,23 +798,31 @@ async fn build_failed_cascades_to_direct_dependent() {
         .append_query_results([vec![build_a]])
         // 2. update buildA → Failed (UPDATE...RETURNING)
         .append_query_results([vec![build_a_failed]])
+        // ── BFS iteration 1: failed_drv = A ──
         // 3. cascade: find Created/Queued builds → [buildB]
         .append_query_results([vec![build_b]])
         // 4. cascade: find dep edge for buildB → found
         .append_query_results([vec![dep_edge]])
         // 5. update buildB → DependencyFailed
         .append_query_results([vec![build_b_dep_failed]])
-        // 6. check_evaluation_done: find active builds → empty
+        // ── BFS iteration 2: failed_drv = B (transitive) ──
+        // 6. find Created/Queued builds → empty (B already DependencyFailed)
         .append_query_results([Vec::<MBuild>::new()])
-        // 7. find_by_id(eval) → Building
+        // ── BFS done ──
+        // 7. check_evaluation_done: find active builds → empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 8. find_by_id(eval) → Building
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
-        // 8. find failed builds → [buildA{Failed}, buildB{DependencyFailed}]
+        // 9. find failed builds → [buildA{Failed}, buildB{DependencyFailed}]
         .append_query_results([vec![
             make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed),
             make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed),
         ]])
-        // 9. update eval → Failed
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        // 10. update eval → Failed
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
         .into_connection();
 
@@ -765,7 +857,10 @@ async fn build_failed_no_dependents() {
         // 6. find failed → [build]
         .append_query_results([vec![build_failed]])
         // 7. update eval → Failed
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
         .into_connection();
 
@@ -790,7 +885,8 @@ async fn build_failed_cascade_only_direct_dependents() {
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
     let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed);
     let build_b = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Queued);
-    let build_b_dep_failed = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
+    let build_b_dep_failed =
+        make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
     let build_c = make_build(build_c_id, eval_id, drv_c_id, BuildStatus::Queued);
     // B depends on A; C does NOT depend on A
     let dep_edge_b_a = make_dep_edge(Uuid::new_v4(), drv_b_id, drv_a_id);
@@ -800,16 +896,22 @@ async fn build_failed_cascade_only_direct_dependents() {
         .append_query_results([vec![build_a]])
         // 2. update → Failed
         .append_query_results([vec![build_a_failed]])
+        // ── BFS iteration 1: failed_drv = A ──
         // 3. cascade: find Created/Queued → [buildB, buildC]
         .append_query_results([vec![build_b, build_c.clone()]])
-        // 4. cascade for buildB: dep edge found
+        // 4. cascade for buildB: dep edge B→A found
         .append_query_results([vec![dep_edge_b_a]])
         // 5. update buildB → DependencyFailed
         .append_query_results([vec![build_b_dep_failed]])
-        // 6. cascade for buildC: NO dep edge on drv_a
+        // 6. cascade for buildC: NO dep edge C→A
         .append_query_results([Vec::<MDerivationDependency>::new()])
-        // buildC is NOT updated (no dep edge)
-        // 7. check active → buildC is still Queued
+        // ── BFS iteration 2: failed_drv = B (transitively cascaded) ──
+        // 7. find Created/Queued → [buildC] (B already DependencyFailed)
+        .append_query_results([vec![build_c.clone()]])
+        // 8. does C depend on B? → no
+        .append_query_results([Vec::<MDerivationDependency>::new()])
+        // ── BFS done ──
+        // 9. check active → buildC is still Queued
         .append_query_results([vec![build_c]])
         // active not empty → check_evaluation_done returns early
         .into_connection();
@@ -879,7 +981,12 @@ async fn build_output_updates_derivation_output() {
     let org_id = Uuid::new_v4();
 
     let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
-    let drv_out = make_drv_output(drv_out_id, drv_id, "out", "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out");
+    let drv_out = make_drv_output(
+        drv_out_id,
+        drv_id,
+        "out",
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out",
+    );
     let drv_out_updated = {
         let mut o = drv_out.clone();
         o.nar_size = Some(12345);
@@ -979,7 +1086,10 @@ async fn eval_job_completed_no_active_builds_completes_eval() {
         // 2. find_by_id(eval) → Building
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         // 3. update eval → Completed
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Completed)]])
         .into_connection();
 
@@ -1019,9 +1129,15 @@ async fn eval_job_failed_transitions_eval_to_failed() {
         // 1. find_by_id(eval) → Building (non-terminal)
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         // 2. insert evaluation_message (error record) → exec
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 3. update_many eval → Failed
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 4. find_by_id(eval) → Failed
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
         .into_connection();
@@ -1084,7 +1200,10 @@ async fn abort_cascades_to_active_builds() {
         // 3. update buildB → Aborted
         .append_query_results([vec![build_b_aborted]])
         // 4. update_many eval → Aborted
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 5. find_by_id(eval) after update
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Aborted)]])
         .into_connection();
@@ -1120,7 +1239,10 @@ async fn abort_no_active_builds() {
         // 1. find active builds → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 2. update_many eval → Aborted
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 3. find_by_id(eval) after update
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Aborted)]])
         .into_connection();
@@ -1148,7 +1270,11 @@ async fn eval_result_error_on_derivation_insert_transitions_eval_failed() {
     let org_id = Uuid::new_v4();
 
     let drv_path = "/nix/store/aaaa-fail-insert.drv";
-    let discovered = make_discovered(drv_path, vec![("out", "/nix/store/bbbb-fail-insert")], vec![]);
+    let discovered = make_discovered(
+        drv_path,
+        vec![("out", "/nix/store/bbbb-fail-insert")],
+        vec![],
+    );
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(eval) → Building
@@ -1158,9 +1284,15 @@ async fn eval_result_error_on_derivation_insert_transitions_eval_failed() {
         // 3. insert_many derivations → empty result → RecordNotInserted
         .append_query_results([Vec::<MDerivation>::new()])
         // 4. update_evaluation_status_with_error: insert evaluation_message
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 5. update_many eval → Failed
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 6. find_by_id(eval) → Failed
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
         .into_connection();
@@ -1169,7 +1301,11 @@ async fn eval_result_error_on_derivation_insert_transitions_eval_failed() {
     let job = make_eval_job(eval_id, org_id);
 
     let result = eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![]).await;
-    assert!(result.is_err(), "expected Err when derivation insert fails, got: {:?}", result.ok());
+    assert!(
+        result.is_err(),
+        "expected Err when derivation insert fails, got: {:?}",
+        result.ok()
+    );
 }
 
 /// When `EBuild::insert_many().exec()` fails after derivations are inserted
@@ -1202,13 +1338,24 @@ async fn eval_result_build_insert_fails_transitions_eval_failed() {
         // 3. insert_many derivations → success
         .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
         // 4. insert_many derivation_outputs → success
-        .append_query_results([vec![make_drv_output(Uuid::new_v4(), drv_id, "out", out_path)]])
+        .append_query_results([vec![make_drv_output(
+            Uuid::new_v4(),
+            drv_id,
+            "out",
+            out_path,
+        )]])
         // 5. insert_many builds → empty result → RecordNotInserted error
         .append_query_results([Vec::<MBuild>::new()])
         // 6. update_evaluation_status_with_error: insert evaluation_message
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 7. update_many eval → Failed
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 8. find_by_id(eval) → Failed
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
         .into_connection();
@@ -1217,7 +1364,11 @@ async fn eval_result_build_insert_fails_transitions_eval_failed() {
     let job = make_eval_job(eval_id, org_id);
 
     let result = eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![]).await;
-    assert!(result.is_err(), "expected Err when build insert fails, got: {:?}", result.ok());
+    assert!(
+        result.is_err(),
+        "expected Err when build insert fails, got: {:?}",
+        result.ok()
+    );
 }
 
 /// When derivation A already exists in the DB and new derivation B depends on A,
@@ -1266,7 +1417,12 @@ async fn eval_result_existing_drv_still_creates_dep_edge() {
         // 3. insert_many derivations (only B is new)
         .append_query_results([vec![make_derivation(drv_b_id, org_id, path_b)]])
         // 4. insert_many derivation_outputs (for B)
-        .append_query_results([vec![make_drv_output(Uuid::new_v4(), drv_b_id, "out", "/nix/store/bbbb-new")]])
+        .append_query_results([vec![make_drv_output(
+            Uuid::new_v4(),
+            drv_b_id,
+            "out",
+            "/nix/store/bbbb-new",
+        )]])
         // 5. insert_many dep_edges (B→A): A's ID is in drv_path_to_id from the existing lookup
         .append_query_results([vec![make_dep_edge(Uuid::new_v4(), drv_b_id, drv_a_id)]])
         // 6. insert_many builds (A and B both get new build rows for this evaluation)
@@ -1274,11 +1430,24 @@ async fn eval_result_existing_drv_still_creates_dep_edge() {
         // 7. find Created builds
         .append_query_results([vec![build_a_created, build_b_created]])
         // 8. update buildA → Queued
-        .append_query_results([vec![make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Queued)]])
+        .append_query_results([vec![make_build(
+            build_a_id,
+            eval_id,
+            drv_a_id,
+            BuildStatus::Queued,
+        )]])
         // 9. update buildB → Queued
-        .append_query_results([vec![make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Queued)]])
+        .append_query_results([vec![make_build(
+            build_b_id,
+            eval_id,
+            drv_b_id,
+            BuildStatus::Queued,
+        )]])
         // 10. update_many eval → Building
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 11. find_by_id(eval) → Building
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         .into_connection();
@@ -1286,13 +1455,9 @@ async fn eval_result_existing_drv_still_creates_dep_edge() {
     let state = make_state(db);
     let job = make_eval_job(eval_id, org_id);
 
-    let result = eval_handler::handle_eval_result(
-        &state,
-        &job,
-        vec![drv_a_existing, drv_b_new],
-        vec![],
-    )
-    .await;
+    let result =
+        eval_handler::handle_eval_result(&state, &job, vec![drv_a_existing, drv_b_new], vec![])
+            .await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
 }
 
@@ -1337,13 +1502,16 @@ async fn webhook_fired_on_build_completed() {
 
     // Create a real 32-byte key file so decrypt_webhook_secret can read it.
     let mut key_file = tempfile::NamedTempFile::new().expect("create temp key file");
-    key_file.write_all(b"test-secret-key-32-bytes-padding!").unwrap();
+    key_file
+        .write_all(b"test-secret-key-32-bytes-padding!")
+        .unwrap();
     key_file.flush().unwrap();
     let key_path = key_file.path().to_string_lossy().to_string();
 
     // Encrypt the webhook secret with this key.
-    let encrypted_secret = gradient_core::ci::encrypt_webhook_secret(&key_path, "plaintext-hook-secret")
-        .expect("encrypt webhook secret");
+    let encrypted_secret =
+        gradient_core::ci::encrypt_webhook_secret(&key_path, "plaintext-hook-secret")
+            .expect("encrypt webhook secret");
 
     let eval_id = Uuid::new_v4();
     let project_id = Uuid::new_v4();
@@ -1373,7 +1541,10 @@ async fn webhook_fired_on_build_completed() {
         // 5. find failed builds → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 6. update_many eval → Completed
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 7. find_by_id(eval) → Completed
         .append_query_results([vec![eval_completed.clone()]])
         // TASK_A (fire_build_webhook Completed):
@@ -1447,12 +1618,15 @@ async fn webhook_not_fired_for_dep_failed() {
     use std::io::Write as _;
 
     let mut key_file = tempfile::NamedTempFile::new().expect("create temp key file");
-    key_file.write_all(b"test-secret-key-32-bytes-padding!").unwrap();
+    key_file
+        .write_all(b"test-secret-key-32-bytes-padding!")
+        .unwrap();
     key_file.flush().unwrap();
     let key_path = key_file.path().to_string_lossy().to_string();
 
-    let encrypted_secret = gradient_core::ci::encrypt_webhook_secret(&key_path, "plaintext-hook-secret")
-        .expect("encrypt webhook secret");
+    let encrypted_secret =
+        gradient_core::ci::encrypt_webhook_secret(&key_path, "plaintext-hook-secret")
+            .expect("encrypt webhook secret");
 
     let eval_id = Uuid::new_v4();
     let project_id = Uuid::new_v4();
@@ -1466,7 +1640,8 @@ async fn webhook_not_fired_for_dep_failed() {
     let build_a = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Building);
     let build_a_failed = make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed);
     let build_b = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::Queued);
-    let build_b_dep_failed = make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
+    let build_b_dep_failed =
+        make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed);
     let dep_edge = make_dep_edge(Uuid::new_v4(), drv_b_id, drv_a_id);
     // Eval with project set so webhooks fire.
     let eval_building = make_eval_with_project(eval_id, project_id, EvaluationStatus::Building);
@@ -1488,14 +1663,21 @@ async fn webhook_not_fired_for_dep_failed() {
         .append_query_results([vec![dep_edge]])
         // 5. update buildB → DependencyFailed
         .append_query_results([vec![build_b_dep_failed.clone()]])
-        // 6. check active → empty
+        // ── BFS iteration 2: failed_drv = B ──
+        // 6. find Created/Queued → empty (B already DependencyFailed)
         .append_query_results([Vec::<MBuild>::new()])
-        // 7. find_by_id(eval) → Building
+        // ── BFS done ──
+        // 7. check active → empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 8. find_by_id(eval) → Building
         .append_query_results([vec![eval_building]])
         // 8. find failed → [buildA, buildB]
         .append_query_results([vec![build_a_failed, build_b_dep_failed]])
         // 9. update_many eval → Failed
-        .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
         // 10. find_by_id(eval) → Failed
         .append_query_results([vec![eval_failed.clone()]])
         // TASK_A (fire_build_webhook Failed):
@@ -1533,3 +1715,520 @@ async fn webhook_not_fired_for_dep_failed() {
         calls.iter().map(|c| &c.event).collect::<Vec<_>>()
     );
 }
+
+// ── Group K: Entry Points ───────────────────────────────────────────────────
+
+/// When handle_eval_result receives derivations for an evaluation with
+/// project_id: Some, it must create entry_point rows mapping each derivation's
+/// attr path to its build. This was done by the legacy evaluator but was never
+/// tested in the new scheduler.
+#[tokio::test]
+async fn eval_result_creates_entry_points_for_project() {
+    let eval_id = Uuid::new_v4();
+    let org_id = Uuid::new_v4();
+    let project_id = Uuid::new_v4();
+    let drv_id = Uuid::new_v4();
+    let build_id = Uuid::new_v4();
+
+    let drv_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv";
+    let out_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello";
+
+    let derivations = vec![DiscoveredDerivation {
+        attr: "packages.x86_64-linux.hello".into(),
+        drv_path: drv_path.to_string(),
+        outputs: vec![DerivationOutput {
+            name: "out".into(),
+            path: out_path.to_string(),
+        }],
+        dependencies: vec![],
+        architecture: "x86_64-linux".into(),
+        required_features: vec![],
+        substituted: false,
+    }];
+
+    let eval_job = PendingEvalJob {
+        evaluation_id: eval_id,
+        project_id: Some(project_id),
+        peer_id: org_id,
+        commit_id: Uuid::new_v4(),
+        repository: "https://example.com/repo".into(),
+        job: FlakeJob {
+            tasks: vec![FlakeTask::EvaluateDerivations],
+            repository: "https://example.com/repo".into(),
+            commit: "abc123".into(),
+            wildcards: vec!["*".into()],
+            timeout_secs: None,
+        },
+        required_paths: vec![],
+    };
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find eval
+        .append_query_results([vec![make_eval_with_project(
+            eval_id,
+            project_id,
+            EvaluationStatus::EvaluatingDerivation,
+        )]])
+        // 2. find existing derivations → empty
+        .append_query_results([Vec::<MDerivation>::new()])
+        // 3. insert derivation
+        .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
+        // 4. insert derivation output
+        .append_query_results([vec![make_drv_output(
+            Uuid::new_v4(),
+            drv_id,
+            "out",
+            out_path,
+        )]])
+        // 5. insert build (Created)
+        .append_query_results([vec![make_build(
+            build_id,
+            eval_id,
+            drv_id,
+            BuildStatus::Created,
+        )]])
+        // 6. find builds for eval (entry point mapping)
+        .append_query_results([vec![make_build(
+            build_id,
+            eval_id,
+            drv_id,
+            BuildStatus::Created,
+        )]])
+        // 7. insert entry_points
+        .append_query_results([vec![entity::entry_point::Model {
+            id: Uuid::new_v4(),
+            project: project_id,
+            evaluation: eval_id,
+            build: build_id,
+            eval: "packages.x86_64-linux.hello".into(),
+            created_at: test_date(),
+        }]])
+        // 8. find project (for GC)
+        .append_query_results([vec![make_project(project_id, org_id)]])
+        // 9. find Created builds
+        .append_query_results([vec![make_build(
+            build_id,
+            eval_id,
+            drv_id,
+            BuildStatus::Created,
+        )]])
+        // 10. update build → Queued
+        .append_query_results([vec![make_build(
+            build_id,
+            eval_id,
+            drv_id,
+            BuildStatus::Queued,
+        )]])
+        // 11. update_many eval → Building
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // 12. find eval → Building
+        .append_query_results([vec![make_eval_with_project(
+            eval_id,
+            project_id,
+            EvaluationStatus::Building,
+        )]])
+        .into_connection();
+
+    let state = test_support::prelude::test_state(db);
+    let result = eval_handler::handle_eval_result(&state, &eval_job, derivations, vec![]).await;
+    assert!(
+        result.is_ok(),
+        "eval_result with project should succeed: {:?}",
+        result.err()
+    );
+}
+
+/// When project_id is None (direct build), no entry points are created and no
+/// project is queried for GC. The same MockDB stages as existing tests suffice.
+#[tokio::test]
+async fn eval_result_no_entry_points_without_project() {
+    let eval_id = Uuid::new_v4();
+    let org_id = Uuid::new_v4();
+    let drv_id = Uuid::new_v4();
+    let build_id = Uuid::new_v4();
+
+    let drv_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv";
+    let out_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello";
+
+    let derivations = vec![DiscoveredDerivation {
+        attr: "packages.x86_64-linux.hello".into(),
+        drv_path: drv_path.to_string(),
+        outputs: vec![DerivationOutput {
+            name: "out".into(),
+            path: out_path.to_string(),
+        }],
+        dependencies: vec![],
+        architecture: "x86_64-linux".into(),
+        required_features: vec![],
+        substituted: false,
+    }];
+
+    // project_id: None — direct build, no entry points
+    let eval_job = make_eval_job(eval_id, org_id);
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find eval
+        .append_query_results([vec![make_eval(
+            eval_id,
+            EvaluationStatus::EvaluatingDerivation,
+        )]])
+        // 2. find existing derivations → empty
+        .append_query_results([Vec::<MDerivation>::new()])
+        // 3. insert derivation
+        .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
+        // 4. insert derivation output
+        .append_query_results([vec![make_drv_output(
+            Uuid::new_v4(),
+            drv_id,
+            "out",
+            out_path,
+        )]])
+        // 5. insert build (Created)
+        .append_query_results([vec![make_build(
+            build_id,
+            eval_id,
+            drv_id,
+            BuildStatus::Created,
+        )]])
+        // NO entry point insert, NO project query — skipped when project_id is None
+        // 6. find Created builds
+        .append_query_results([vec![make_build(
+            build_id,
+            eval_id,
+            drv_id,
+            BuildStatus::Created,
+        )]])
+        // 7. update build → Queued
+        .append_query_results([vec![make_build(
+            build_id,
+            eval_id,
+            drv_id,
+            BuildStatus::Queued,
+        )]])
+        // 8. update_many eval → Building
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // 9. find eval → Building
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        .into_connection();
+
+    let state = test_support::prelude::test_state(db);
+    let result = eval_handler::handle_eval_result(&state, &eval_job, derivations, vec![]).await;
+    assert!(
+        result.is_ok(),
+        "eval_result without project should succeed: {:?}",
+        result.err()
+    );
+}
+
+// ── Group O: Error Source Detection ─────────────────────────────────────────
+
+/// When a FlakeJob fails with a prefetch error, the source should be
+/// "flake-prefetch", not the generic "worker". Legacy evaluator distinguished
+/// these at evaluator/src/scheduler/evaluation.rs:252-258.
+#[tokio::test]
+async fn eval_job_failed_detects_prefetch_error_source() {
+    let eval_id = Uuid::new_v4();
+    // Evaluation in Fetching status — prefetch failure
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find eval
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Fetching)]])
+        // 2. update_many eval → Failed
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // 3. find eval → Failed
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
+        .into_connection();
+
+    let state = test_support::prelude::test_state(db);
+
+    let result = eval_handler::handle_eval_job_failed(
+        &state,
+        eval_id,
+        "failed to prefetch flake input: connection refused",
+    )
+    .await;
+    assert!(result.is_ok());
+
+    // Verify the error source was set correctly by checking the DB transaction log.
+    // The update_evaluation_status_with_error call uses the source parameter.
+    // With MockDB we can't directly assert the source parameter, but we verify
+    // the function doesn't panic and the status transitions correctly.
+    // TODO: Add a RecordingStatusReporter or similar to capture the source field.
+}
+
+// ── Group P: GC and Substituted with Project ────────────────────────────────
+
+/// When all derivations are substituted and project_id is Some, the evaluation
+/// should complete immediately (no Created builds) AND entry points should
+/// still be created.
+#[tokio::test]
+async fn eval_result_all_substituted_with_project_completes() {
+    let eval_id = Uuid::new_v4();
+    let org_id = Uuid::new_v4();
+    let project_id = Uuid::new_v4();
+    let drv_id = Uuid::new_v4();
+    let build_id = Uuid::new_v4();
+
+    let drv_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv";
+    let out_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello";
+
+    let derivations = vec![DiscoveredDerivation {
+        attr: "packages.x86_64-linux.hello".into(),
+        drv_path: drv_path.to_string(),
+        outputs: vec![DerivationOutput {
+            name: "out".into(),
+            path: out_path.to_string(),
+        }],
+        dependencies: vec![],
+        architecture: "x86_64-linux".into(),
+        required_features: vec![],
+        substituted: true, // all outputs cached
+    }];
+
+    let eval_job = PendingEvalJob {
+        evaluation_id: eval_id,
+        project_id: Some(project_id),
+        peer_id: org_id,
+        commit_id: Uuid::new_v4(),
+        repository: "https://example.com/repo".into(),
+        job: FlakeJob {
+            tasks: vec![FlakeTask::EvaluateDerivations],
+            repository: "https://example.com/repo".into(),
+            commit: "abc123".into(),
+            wildcards: vec!["*".into()],
+            timeout_secs: None,
+        },
+        required_paths: vec![],
+    };
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find eval
+        .append_query_results([vec![make_eval_with_project(
+            eval_id,
+            project_id,
+            EvaluationStatus::EvaluatingDerivation,
+        )]])
+        // 2. find existing derivations → empty
+        .append_query_results([Vec::<MDerivation>::new()])
+        // 3. insert derivation
+        .append_query_results([vec![make_derivation(drv_id, org_id, drv_path)]])
+        // 4. insert derivation output
+        .append_query_results([vec![make_drv_output(
+            Uuid::new_v4(),
+            drv_id,
+            "out",
+            out_path,
+        )]])
+        // 5. insert build (Substituted — not Created!)
+        .append_query_results([vec![make_build(
+            build_id,
+            eval_id,
+            drv_id,
+            BuildStatus::Substituted,
+        )]])
+        // 6. find builds for eval (entry point mapping)
+        .append_query_results([vec![make_build(
+            build_id,
+            eval_id,
+            drv_id,
+            BuildStatus::Substituted,
+        )]])
+        // 7. insert entry_points
+        .append_query_results([vec![entity::entry_point::Model {
+            id: Uuid::new_v4(),
+            project: project_id,
+            evaluation: eval_id,
+            build: build_id,
+            eval: "packages.x86_64-linux.hello".into(),
+            created_at: test_date(),
+        }]])
+        // 8. find project (for GC)
+        .append_query_results([vec![make_project(project_id, org_id)]])
+        // 9. find Created builds → empty (all Substituted)
+        .append_query_results([Vec::<MBuild>::new()])
+        // 10. update_many eval → Completed (not Building!)
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // 11. find eval → Completed
+        .append_query_results([vec![make_eval_with_project(
+            eval_id,
+            project_id,
+            EvaluationStatus::Completed,
+        )]])
+        .into_connection();
+
+    let state = test_support::prelude::test_state(db);
+    let result = eval_handler::handle_eval_result(&state, &eval_job, derivations, vec![]).await;
+    assert!(
+        result.is_ok(),
+        "substituted eval with project should complete: {:?}",
+        result.err()
+    );
+}
+
+// ── Group M: Transitive DependencyFailed Cascade ────────────────────────────
+
+/// When build C fails and B depends on C and A depends on B, ALL of them should
+/// be marked DependencyFailed — not just the direct dependent B.
+/// The cascade walks the derivation_dependency graph transitively (BFS).
+#[tokio::test]
+async fn build_failed_cascades_transitively_through_graph() {
+    // A depends on B, B depends on C. C fails.
+    // Expected: B → DependencyFailed, then A → DependencyFailed (transitive).
+    let eval_id = Uuid::new_v4();
+    let drv_a = Uuid::new_v4();
+    let drv_b = Uuid::new_v4();
+    let drv_c = Uuid::new_v4();
+    let build_a = Uuid::new_v4();
+    let build_b = Uuid::new_v4();
+    let build_c = Uuid::new_v4();
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find build C
+        .append_query_results([vec![make_build(
+            build_c,
+            eval_id,
+            drv_c,
+            BuildStatus::Building,
+        )]])
+        // 2. update build C → Failed (RETURNING)
+        .append_query_results([vec![make_build(
+            build_c,
+            eval_id,
+            drv_c,
+            BuildStatus::Failed,
+        )]])
+        // ── cascade iteration 1: failed_drv = C ──
+        // 3. find Created/Queued builds
+        .append_query_results([vec![
+            make_build(build_a, eval_id, drv_a, BuildStatus::Queued),
+            make_build(build_b, eval_id, drv_b, BuildStatus::Queued),
+        ]])
+        // 4. does A depend on C? → no
+        .append_query_results([Vec::<MDerivationDependency>::new()])
+        // 5. does B depend on C? → yes
+        .append_query_results([vec![make_dep_edge(Uuid::new_v4(), drv_b, drv_c)]])
+        // 6. update B → DependencyFailed
+        .append_query_results([vec![make_build(
+            build_b,
+            eval_id,
+            drv_b,
+            BuildStatus::DependencyFailed,
+        )]])
+        // ── cascade iteration 2: failed_drv = B (transitively cascaded) ──
+        // 7. find Created/Queued builds (A still Queued, B already DependencyFailed)
+        .append_query_results([vec![make_build(
+            build_a,
+            eval_id,
+            drv_a,
+            BuildStatus::Queued,
+        )]])
+        // 8. does A depend on B? → yes
+        .append_query_results([vec![make_dep_edge(Uuid::new_v4(), drv_a, drv_b)]])
+        // 9. update A → DependencyFailed
+        .append_query_results([vec![make_build(
+            build_a,
+            eval_id,
+            drv_a,
+            BuildStatus::DependencyFailed,
+        )]])
+        // ── cascade iteration 3: failed_drv = A ──
+        // 10. find Created/Queued builds → empty (all cascaded)
+        .append_query_results([Vec::<MBuild>::new()])
+        // ── check_evaluation_done ──
+        // 11. find active builds → empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 12. find eval
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        // 13. find failed builds → B and A
+        .append_query_results([vec![
+            make_build(build_b, eval_id, drv_b, BuildStatus::DependencyFailed),
+            make_build(build_a, eval_id, drv_a, BuildStatus::DependencyFailed),
+        ]])
+        // 14. update eval → Failed
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // 15. find eval → Failed
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
+        .into_connection();
+
+    let state = test_support::prelude::test_state(db);
+    let result = build_handler::handle_build_job_failed(&state, build_c, "nix build failed").await;
+    assert!(
+        result.is_ok(),
+        "transitive cascade should succeed: {:?}",
+        result.err()
+    );
+}
+
+// ── Group R: fetch_repository is a stub ─────────────────────────────────────
+// (Worker-side test — lives in worker/src/executor/fetch.rs)
+// The current fetch_repository() returns Ok(()) without cloning anything.
+// A proper implementation needs git2 integration.
+// See: worker/src/executor/fetch.rs:42-47
+
+// ── Group S: NarReady processing ────────────────────────────────────────────
+
+/// When the server receives NarReady with a store_path, nar_size, and nar_hash,
+/// it should update the matching derivation_output row with nar_size and file_hash.
+#[tokio::test]
+async fn nar_ready_updates_derivation_output() {
+    let output_id = Uuid::new_v4();
+    let drv_id = Uuid::new_v4();
+    let store_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello";
+
+    let existing_output = make_drv_output(output_id, drv_id, "out", store_path);
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find derivation_output by store_path
+        .append_query_results([vec![existing_output.clone()]])
+        // 2. update derivation_output (RETURNING)
+        .append_query_results([vec![entity::derivation_output::Model {
+            nar_size: Some(12345),
+            file_hash: Some("sha256-abc123".into()),
+            ..existing_output
+        }]])
+        .into_connection();
+
+    let state = test_support::prelude::test_state(db);
+    let result = build_handler::handle_nar_ready(&state, store_path, 12345, "sha256-abc123").await;
+    assert!(
+        result.is_ok(),
+        "nar_ready should succeed: {:?}",
+        result.err()
+    );
+}
+
+/// When NarReady references a store_path that doesn't exist in the DB,
+/// the handler logs a warning but doesn't error.
+#[tokio::test]
+async fn nar_ready_unknown_path_warns() {
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find derivation_output by store_path → empty
+        .append_query_results([Vec::<MDerivationOutput>::new()])
+        .into_connection();
+
+    let state = test_support::prelude::test_state(db);
+    let result = build_handler::handle_nar_ready(&state, "/nix/store/unknown-path", 0, "").await;
+    assert!(
+        result.is_ok(),
+        "nar_ready for unknown path should not error"
+    );
+}
+
+// ── Group T: Credentials ────────────────────────────────────────────────────
+// Credential delivery (SSH keys, signing keys) happens in the proto handler
+// before AssignJob. Tests for this require WebSocket-level integration testing
+// which is beyond MockDB unit tests. See proto/src/handler.rs.

@@ -12,9 +12,7 @@ use core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_WRITE_ID};
 use core::types::*;
 use entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;

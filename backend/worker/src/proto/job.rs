@@ -11,9 +11,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use proto::messages::{
-    BuildOutput, ClientMessage, DiscoveredDerivation, JobUpdateKind,
-};
+use proto::messages::{BuildOutput, ClientMessage, DiscoveredDerivation, JobUpdateKind};
 use tracing::debug;
 
 use crate::connection::ProtoConnection;
@@ -50,8 +48,11 @@ impl<'a> JobUpdater<'a> {
         derivations: Vec<DiscoveredDerivation>,
         warnings: Vec<String>,
     ) -> Result<()> {
-        self.send_update(JobUpdateKind::EvalResult { derivations, warnings })
-            .await
+        self.send_update(JobUpdateKind::EvalResult {
+            derivations,
+            warnings,
+        })
+        .await
     }
 
     pub async fn report_building(&mut self, build_id: String) -> Result<()> {
@@ -87,7 +88,9 @@ impl<'a> JobUpdater<'a> {
 
     pub async fn complete(self) -> Result<()> {
         self.conn
-            .send(ClientMessage::JobCompleted { job_id: self.job_id.clone() })
+            .send(ClientMessage::JobCompleted {
+                job_id: self.job_id.clone(),
+            })
             .await
     }
 
@@ -175,7 +178,9 @@ mod tests {
                 $server_body
             });
 
-            let conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
+            let conn = crate::connection::ProtoConnection::open(&url)
+                .await
+                .unwrap();
             let job_id: String = $job_id.to_owned();
             (conn, server_task, job_id)
         }};
@@ -203,7 +208,11 @@ mod tests {
         let (mut conn, server_task, job_id) = server_then_client!("job-eval", |sc| {
             let msg = sc.recv().await.unwrap();
             if let ClientMessage::JobUpdate {
-                update: JobUpdateKind::EvalResult { derivations, warnings },
+                update:
+                    JobUpdateKind::EvalResult {
+                        derivations,
+                        warnings,
+                    },
                 ..
             } = msg
             {
@@ -215,7 +224,10 @@ mod tests {
         });
 
         let mut updater = JobUpdater::new(job_id, &mut conn);
-        updater.report_eval_result(vec![], vec!["warn1".to_owned()]).await.unwrap();
+        updater
+            .report_eval_result(vec![], vec!["warn1".to_owned()])
+            .await
+            .unwrap();
         server_task.await.unwrap();
     }
 
@@ -223,7 +235,12 @@ mod tests {
     async fn updater_send_log_chunk() {
         let (mut conn, server_task, job_id) = server_then_client!("job-log", |sc| {
             let msg = sc.recv().await.unwrap();
-            if let ClientMessage::LogChunk { job_id, task_index, data } = msg {
+            if let ClientMessage::LogChunk {
+                job_id,
+                task_index,
+                data,
+            } = msg
+            {
                 assert_eq!(job_id, "job-log");
                 assert_eq!(task_index, 3);
                 assert_eq!(data, b"hello log".to_vec());
@@ -233,7 +250,10 @@ mod tests {
         });
 
         let mut updater = JobUpdater::new(job_id, &mut conn);
-        updater.send_log_chunk(3, b"hello log".to_vec()).await.unwrap();
+        updater
+            .send_log_chunk(3, b"hello log".to_vec())
+            .await
+            .unwrap();
         server_task.await.unwrap();
     }
 
@@ -266,7 +286,10 @@ mod tests {
         });
 
         let updater = JobUpdater::new(job_id, &mut conn);
-        updater.fail("something went wrong".to_owned()).await.unwrap();
+        updater
+            .fail("something went wrong".to_owned())
+            .await
+            .unwrap();
         server_task.await.unwrap();
     }
 }

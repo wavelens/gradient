@@ -70,7 +70,10 @@ pub fn encrypt_webhook_secret(crypt_secret_file: &str, plaintext: &str) -> Resul
 }
 
 /// Decrypts a base64-encoded ciphertext produced by `encrypt_webhook_secret`.
-pub fn decrypt_webhook_secret(crypt_secret_file: &str, encoded: &str) -> Result<crate::types::SecretString, String> {
+pub fn decrypt_webhook_secret(
+    crypt_secret_file: &str,
+    encoded: &str,
+) -> Result<crate::types::SecretString, String> {
     let key = load_secret_bytes(crypt_secret_file);
     let ciphertext = general_purpose::STANDARD
         .decode(encoded)
@@ -316,7 +319,10 @@ mod tests {
     #[test]
     fn sign_payload_has_sha256_prefix() {
         let sig = sign_webhook_payload("secret", "body");
-        assert!(sig.starts_with("sha256="), "expected sha256= prefix, got: {sig}");
+        assert!(
+            sig.starts_with("sha256="),
+            "expected sha256= prefix, got: {sig}"
+        );
     }
 
     #[test]

@@ -305,10 +305,12 @@ mod tests {
         );
         assert!(!fixture.derivations.is_empty());
         // The entry point should be in the derivations list.
-        assert!(fixture
-            .derivations
-            .iter()
-            .any(|d| d.drv_path == fixture.entry_point));
+        assert!(
+            fixture
+                .derivations
+                .iter()
+                .any(|d| d.drv_path == fixture.entry_point)
+        );
     }
 
     #[test]
@@ -393,7 +395,10 @@ mod tests {
             }
             waves += 1;
             // Safety: shouldn't take more waves than derivations.
-            assert!(waves <= total, "convergence loop exceeded total derivations");
+            assert!(
+                waves <= total,
+                "convergence loop exceeded total derivations"
+            );
         }
 
         // Everything should be built now.
@@ -411,8 +416,16 @@ mod tests {
         fixture2.mark_all_built();
         fixture2.remove_random_subtrees(0.3, 12345);
 
-        let built1: HashSet<String> = fixture1.built().iter().map(|d| d.drv_path.clone()).collect();
-        let built2: HashSet<String> = fixture2.built().iter().map(|d| d.drv_path.clone()).collect();
+        let built1: HashSet<String> = fixture1
+            .built()
+            .iter()
+            .map(|d| d.drv_path.clone())
+            .collect();
+        let built2: HashSet<String> = fixture2
+            .built()
+            .iter()
+            .map(|d| d.drv_path.clone())
+            .collect();
         assert_eq!(built1, built2);
     }
 

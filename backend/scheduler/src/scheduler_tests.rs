@@ -12,10 +12,10 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::messages::{CandidateScore, FlakeJob, FlakeTask, GradientCapabilities};
+use gradient_core::types::proto::{CandidateScore, FlakeJob, FlakeTask, GradientCapabilities};
 
-use super::jobs::PendingEvalJob;
 use super::Scheduler;
+use super::jobs::PendingEvalJob;
 
 /// Create a scheduler backed by a mock DB that returns empty results.
 fn test_scheduler() -> Arc<Scheduler> {
@@ -73,7 +73,11 @@ async fn test_candidates_filtered_by_authorized_peers() {
     let peer_b = Uuid::new_v4();
 
     scheduler
-        .register_worker("w1", GradientCapabilities::default(), HashSet::from([peer_a]))
+        .register_worker(
+            "w1",
+            GradientCapabilities::default(),
+            HashSet::from([peer_a]),
+        )
         .await;
 
     scheduler
@@ -165,10 +169,22 @@ async fn test_worker_disconnect_requeues_jobs() {
 
     // Assign both via fallback (no required paths).
     scheduler
-        .consider_scores("w1", vec![CandidateScore { job_id: "j1".into(), missing: 0 }])
+        .consider_scores(
+            "w1",
+            vec![CandidateScore {
+                job_id: "j1".into(),
+                missing: 0,
+            }],
+        )
         .await;
     scheduler
-        .consider_scores("w1", vec![CandidateScore { job_id: "j2".into(), missing: 0 }])
+        .consider_scores(
+            "w1",
+            vec![CandidateScore {
+                job_id: "j2".into(),
+                missing: 0,
+            }],
+        )
         .await;
 
     assert_eq!(scheduler.pending_job_count().await, 0);
@@ -194,7 +210,11 @@ async fn test_update_authorized_peers_expands_access() {
 
     // Worker starts authorized for peer_a only.
     scheduler
-        .register_worker("w1", GradientCapabilities::default(), HashSet::from([peer_a]))
+        .register_worker(
+            "w1",
+            GradientCapabilities::default(),
+            HashSet::from([peer_a]),
+        )
         .await;
 
     scheduler
@@ -228,7 +248,13 @@ async fn test_draining_worker_still_has_assigned_jobs() {
         .await;
 
     scheduler
-        .consider_scores("w1", vec![CandidateScore { job_id: "j1".into(), missing: 0 }])
+        .consider_scores(
+            "w1",
+            vec![CandidateScore {
+                job_id: "j1".into(),
+                missing: 0,
+            }],
+        )
         .await;
 
     scheduler.mark_worker_draining("w1").await;

@@ -9,11 +9,11 @@ use crate::fakes::email::InMemoryEmailSender;
 use crate::fakes::nix_store::FakeNixStoreProvider;
 use crate::fakes::webhooks::RecordingWebhookClient;
 use crate::log_storage::NoopLogStorage;
+use gradient_core::ci::WebhookClient;
+use gradient_core::executer::NixStoreProvider;
 use gradient_core::storage::EmailSender;
 use gradient_core::storage::NarStore;
-use gradient_core::executer::NixStoreProvider;
 use gradient_core::types::ServerState;
-use gradient_core::ci::WebhookClient;
 use sea_orm::DatabaseConnection;
 use std::sync::Arc;
 

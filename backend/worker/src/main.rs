@@ -6,17 +6,9 @@
 
 mod config;
 mod connection;
-mod credentials;
-mod eval_worker;
 mod executor;
-mod flake;
-mod handshake;
-mod job;
-mod listener;
-mod nar;
-mod nix_eval;
-mod scorer;
-mod store;
+mod nix;
+mod proto;
 mod traits;
 mod worker;
 mod worker_pool;
@@ -45,7 +37,7 @@ fn main() -> Result<()> {
     // Re-exec as eval subprocess when launched with the internal flag.
     // The Nix C API (Boehm GC) must run single-threaded, isolated from Tokio.
     if config.eval_worker {
-        return eval_worker::run_eval_worker().map_err(anyhow::Error::from);
+        return nix::eval_worker::run_eval_worker().map_err(anyhow::Error::from);
     }
 
     let rt = tokio::runtime::Runtime::new()?;
@@ -56,7 +48,7 @@ fn main() -> Result<()> {
         if config.discoverable {
             let listener_config = config.clone();
             tokio::spawn(async move {
-                if let Err(e) = listener::start_listener(listener_config).await {
+                if let Err(e) = connection::listener::start_listener(listener_config).await {
                     error!(error = %e, "listener failed");
                 }
             });

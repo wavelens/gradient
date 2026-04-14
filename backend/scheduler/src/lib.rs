@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Proto scheduler — tracks connected workers and dispatches jobs.
+//! Job scheduler — tracks connected workers and dispatches eval/build jobs.
 //!
-//! Lives inside the `proto` crate to share message types without a circular
-//! dependency. Injected into the axum router as an `Extension<Arc<Scheduler>>`.
+//! Injected into the axum router as an `Extension<Arc<Scheduler>>`.
 
 pub mod build;
+pub mod ci;
 pub mod dispatch;
 pub mod eval;
 pub mod jobs;
@@ -26,7 +26,7 @@ use uuid::Uuid;
 use gradient_core::types::*;
 use sea_orm::EntityTrait;
 
-use crate::messages::{
+use gradient_core::types::proto::{
     BuildOutput, CandidateScore, DiscoveredDerivation, GradientCapabilities, JobCandidate,
 };
 
@@ -45,7 +45,8 @@ mod scheduler_tests;
 /// The shared scheduler — clone freely (all fields are `Arc`s).
 #[derive(Clone)]
 pub struct Scheduler {
-    pub(crate) state: Arc<ServerState>,
+    /// Shared application state (DB, CLI config, etc.).
+    pub state: Arc<ServerState>,
     worker_pool: Arc<RwLock<WorkerPool>>,
     job_tracker: Arc<RwLock<JobTracker>>,
 }
@@ -65,12 +66,11 @@ impl Scheduler {
         }
     }
 
-    /// Spawn background eval/build dispatch loops and outbound worker connections.
+    /// Spawn background project polling, eval dispatch, and build dispatch loops.
     ///
     /// Call once after creating the scheduler, before serving requests.
     pub fn start(self: &Arc<Self>) {
         dispatch::start_dispatch_loops(Arc::clone(self));
-        crate::outbound::start_outbound_loop(Arc::clone(self));
     }
 
     // ── Worker lifecycle ──────────────────────────────────────────────────────
@@ -107,10 +107,12 @@ impl Scheduler {
         system_features: Vec<String>,
         max_concurrent_builds: u32,
     ) {
-        self.worker_pool
-            .write()
-            .await
-            .update_capabilities(peer_id, architectures, system_features, max_concurrent_builds);
+        self.worker_pool.write().await.update_capabilities(
+            peer_id,
+            architectures,
+            system_features,
+            max_concurrent_builds,
+        );
         debug!(%peer_id, "worker capabilities updated");
     }
 
@@ -131,11 +133,17 @@ impl Scheduler {
     // ── Job queue ─────────────────────────────────────────────────────────────
 
     pub async fn enqueue_eval_job(&self, job_id: String, job: PendingEvalJob) -> JobCandidate {
-        self.job_tracker.write().await.add_pending(job_id, PendingJob::Eval(job))
+        self.job_tracker
+            .write()
+            .await
+            .add_pending(job_id, PendingJob::Eval(job))
     }
 
     pub async fn enqueue_build_job(&self, job_id: String, job: PendingBuildJob) -> JobCandidate {
-        self.job_tracker.write().await.add_pending(job_id, PendingJob::Build(job))
+        self.job_tracker
+            .write()
+            .await
+            .add_pending(job_id, PendingJob::Build(job))
     }
 
     /// Returns pending job candidates visible to the given worker,
@@ -162,19 +170,21 @@ impl Scheduler {
         // Snapshot authorized peers (read lock, short-lived).
         let authorized: Option<HashSet<Uuid>> = {
             let pool = self.worker_pool.read().await;
-            pool.authorized_peers_for(peer_id).and_then(|p| {
-                if p.is_empty() { None } else { Some(p.clone()) }
-            })
+            pool.authorized_peers_for(peer_id)
+                .and_then(|p| if p.is_empty() { None } else { Some(p.clone()) })
         };
 
         // Try score-based assignment (missing: 0).
-        let assignment = self
-            .job_tracker
-            .write()
-            .await
-            .receive_scores(peer_id, authorized.as_ref(), scores);
+        let assignment =
+            self.job_tracker
+                .write()
+                .await
+                .receive_scores(peer_id, authorized.as_ref(), scores);
         if let Some(ref a) = assignment {
-            self.worker_pool.write().await.assign_job(peer_id, &a.job_id);
+            self.worker_pool
+                .write()
+                .await
+                .assign_job(peer_id, &a.job_id);
             info!(%peer_id, job_id = %a.job_id, "job assigned via scoring");
             return assignment;
         }
@@ -185,7 +195,10 @@ impl Scheduler {
             .await
             .take_empty_required(peer_id, authorized.as_ref());
         if let Some(ref a) = fallback {
-            self.worker_pool.write().await.assign_job(peer_id, &a.job_id);
+            self.worker_pool
+                .write()
+                .await
+                .assign_job(peer_id, &a.job_id);
             info!(%peer_id, job_id = %a.job_id, "job assigned (no required paths)");
         }
         fallback
@@ -206,31 +219,68 @@ impl Scheduler {
         job_id: &str,
         new_status: entity::evaluation::EvaluationStatus,
     ) {
-        let evaluation_id = {
+        let (evaluation_id, project_id) = {
             let tracker = self.job_tracker.read().await;
             match tracker.active_job(job_id) {
-                Some(PendingJob::Eval(j)) => j.evaluation_id,
+                Some(PendingJob::Eval(j)) => (j.evaluation_id, j.project_id),
                 _ => return,
             }
         };
-        match EEvaluation::find_by_id(evaluation_id).one(&self.state.db).await {
+        match EEvaluation::find_by_id(evaluation_id)
+            .one(&self.state.db)
+            .await
+        {
             Ok(Some(eval)) => {
-                gradient_core::db::update_evaluation_status(Arc::clone(&self.state), eval, new_status).await;
+                // Report CI "Running" when evaluation starts (first status transition).
+                if new_status == entity::evaluation::EvaluationStatus::Fetching
+                    && let Some(pid) = project_id
+                {
+                    let state = Arc::clone(&self.state);
+                    let repo = eval.repository.clone();
+                    let commit_id = eval.commit;
+                    tokio::spawn(async move {
+                        ci::report_ci_for_evaluation(
+                            state,
+                            pid,
+                            commit_id,
+                            &repo,
+                            evaluation_id,
+                            gradient_core::ci::CiStatus::Running,
+                        )
+                        .await;
+                    });
+                }
+                gradient_core::db::update_evaluation_status(
+                    Arc::clone(&self.state),
+                    eval,
+                    new_status,
+                )
+                .await;
             }
             Ok(None) => warn!(%evaluation_id, "evaluation not found for status update"),
-            Err(e) => warn!(error = %e, %evaluation_id, "failed to fetch evaluation for status update"),
+            Err(e) => {
+                warn!(error = %e, %evaluation_id, "failed to fetch evaluation for status update")
+            }
         }
     }
 
     pub async fn handle_build_status_update(&self, build_id_str: &str) {
         let build_id = match build_id_str.parse::<Uuid>() {
             Ok(id) => id,
-            Err(_) => { warn!(%build_id_str, "invalid build_id in Building update"); return; }
+            Err(_) => {
+                warn!(%build_id_str, "invalid build_id in Building update");
+                return;
+            }
         };
         use entity::build::BuildStatus;
         match EBuild::find_by_id(build_id).one(&self.state.db).await {
             Ok(Some(build)) => {
-                gradient_core::db::update_build_status(Arc::clone(&self.state), build, BuildStatus::Building).await;
+                gradient_core::db::update_build_status(
+                    Arc::clone(&self.state),
+                    build,
+                    BuildStatus::Building,
+                )
+                .await;
             }
             Ok(None) => warn!(%build_id, "build not found for Building status update"),
             Err(e) => warn!(error = %e, %build_id, "failed to fetch build for status update"),
@@ -328,10 +378,11 @@ impl Scheduler {
         let build_id_str = {
             let tracker = self.job_tracker.read().await;
             match tracker.active_job(job_id) {
-                Some(PendingJob::Build(j)) => {
-                    j.job.builds.get(task_index as usize)
-                        .map(|t| t.build_id.clone())
-                }
+                Some(PendingJob::Build(j)) => j
+                    .job
+                    .builds
+                    .get(task_index as usize)
+                    .map(|t| t.build_id.clone()),
                 _ => None,
             }
         };

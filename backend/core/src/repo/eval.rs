@@ -13,10 +13,8 @@ use anyhow::Result;
 use chrono::Utc;
 use entity::evaluation::EvaluationStatus;
 use entity::evaluation_message::MessageLevel;
-use sea_orm::{
-    ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter,
-};
 use sea_orm::DatabaseConnection;
+use sea_orm::{ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use uuid::Uuid;
 
 use crate::types::*;
@@ -37,11 +35,7 @@ impl<'db> EvalRepo<'db> {
 
     /// Atomically update the evaluation status, guarding against overwriting
     /// a terminal state. Returns the number of rows affected (0 = already terminal).
-    pub async fn update_status_guarded(
-        &self,
-        id: Uuid,
-        status: EvaluationStatus,
-    ) -> Result<u64> {
+    pub async fn update_status_guarded(&self, id: Uuid, status: EvaluationStatus) -> Result<u64> {
         let now = Utc::now().naive_utc();
         let res = EEvaluation::update_many()
             .col_expr(CEvaluation::Status, sea_orm::sea_query::Expr::value(status))

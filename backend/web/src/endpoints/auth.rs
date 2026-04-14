@@ -12,8 +12,8 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
-use core::types::consts::*;
 use core::storage::generate_verification_token;
+use core::types::consts::*;
 use core::types::input::{validate_display_name, validate_password, validate_username};
 use core::types::*;
 use email_address::EmailAddress;
@@ -286,7 +286,10 @@ pub async fn get_oidc_callback(
 
 pub async fn post_logout(state: State<Arc<ServerState>>) -> WebResult<Response> {
     let secure = if state.cli.use_tls { "; Secure" } else { "" };
-    let clear_cookie = format!("jwt_token=; HttpOnly{}; SameSite=Strict; Path=/; Max-Age=0", secure);
+    let clear_cookie = format!(
+        "jwt_token=; HttpOnly{}; SameSite=Strict; Path=/; Max-Age=0",
+        secure
+    );
     let res = BaseResponse {
         error: false,
         message: "Logout Successfully".to_string(),

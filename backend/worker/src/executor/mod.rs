@@ -19,9 +19,9 @@ use anyhow::Result;
 use proto::messages::{BuildJob, FlakeJob, FlakeTask};
 use tracing::instrument;
 
-use crate::credentials::CredentialStore;
-use crate::job::JobUpdater;
-use crate::store::LocalNixStore;
+use crate::nix::store::LocalNixStore;
+use crate::proto::credentials::CredentialStore;
+use crate::proto::job::JobUpdater;
 
 pub use eval::WorkerEvaluator;
 
@@ -36,8 +36,16 @@ pub struct JobExecutor {
 }
 
 impl JobExecutor {
-    pub fn new(store: LocalNixStore, evaluator: WorkerEvaluator, credentials: CredentialStore) -> Self {
-        Self { store, evaluator, credentials }
+    pub fn new(
+        store: LocalNixStore,
+        evaluator: WorkerEvaluator,
+        credentials: CredentialStore,
+    ) -> Self {
+        Self {
+            store,
+            evaluator,
+            credentials,
+        }
     }
 
     /// Execute a `FlakeJob` (fetch → eval-flake → eval-derivations).
@@ -50,11 +58,17 @@ impl JobExecutor {
     ) -> Result<()> {
         for task in &job.tasks {
             match task {
-                FlakeTask::FetchFlake => fetch::fetch_repository(&job, updater as &mut dyn proto::traits::JobReporter, credentials).await?,
+                FlakeTask::FetchFlake => {
+                    fetch::fetch_repository(
+                        &job,
+                        updater as &mut dyn proto::traits::JobReporter,
+                        credentials,
+                    )
+                    .await?
+                }
                 FlakeTask::EvaluateFlake => eval::evaluate_flake(&job, updater).await?,
                 FlakeTask::EvaluateDerivations => {
-                    eval::evaluate_derivations(&self.evaluator, &self.store, &job, updater)
-                        .await?;
+                    eval::evaluate_derivations(&self.evaluator, &self.store, &job, updater).await?;
                 }
             }
         }

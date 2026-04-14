@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use uuid::Uuid;
 
-use crate::messages::{FlakeJob, BuildJob, Job, JobCandidate, CandidateScore};
+use gradient_core::types::proto::{BuildJob, CandidateScore, FlakeJob, Job, JobCandidate};
 
 #[derive(Debug, Clone)]
 pub struct PendingEvalJob {
@@ -81,6 +81,8 @@ impl PendingJob {
 pub struct Assignment {
     pub job_id: String,
     pub job: Job,
+    /// Organization UUID that owns this job — used for credential lookup.
+    pub peer_id: Uuid,
 }
 
 #[derive(Debug, Default)]
@@ -106,9 +108,7 @@ impl JobTracker {
     pub fn candidates_for_worker(&self, authorized: Option<&HashSet<Uuid>>) -> Vec<JobCandidate> {
         self.pending
             .iter()
-            .filter(|(_, job)| {
-                authorized.is_none_or(|peers| peers.contains(&job.peer_id()))
-            })
+            .filter(|(_, job)| authorized.is_none_or(|peers| peers.contains(&job.peer_id())))
             .map(|(id, job)| job.as_candidate(id))
             .collect()
     }
@@ -131,9 +131,10 @@ impl JobTracker {
             };
             // Skip jobs this worker is not authorized for.
             if let Some(peers) = authorized
-                && !peers.contains(&job.peer_id()) {
-                    continue;
-                }
+                && !peers.contains(&job.peer_id())
+            {
+                continue;
+            }
             worker_scores.insert(score.job_id.clone(), score.missing);
             match &best {
                 None => best = Some((score.job_id, score.missing)),
@@ -178,8 +179,10 @@ impl JobTracker {
         let assignment = Assignment {
             job_id: job_id.to_owned(),
             job: job.clone().into_job(),
+            peer_id: job.peer_id(),
         };
-        self.active.insert(job_id.to_owned(), (peer_id.to_owned(), job));
+        self.active
+            .insert(job_id.to_owned(), (peer_id.to_owned(), job));
         Some(assignment)
     }
 
@@ -229,7 +232,7 @@ impl JobTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{BuildJob, BuildTask, FlakeJob, FlakeTask};
+    use gradient_core::types::proto::{BuildJob, BuildTask, FlakeJob, FlakeTask};
 
     fn eval_job(peer: Uuid) -> PendingJob {
         PendingJob::Eval(PendingEvalJob {
@@ -304,7 +307,10 @@ mod tests {
         let assignment = tracker.receive_scores(
             "w1",
             None,
-            vec![CandidateScore { job_id: "j1".into(), missing: 0 }],
+            vec![CandidateScore {
+                job_id: "j1".into(),
+                missing: 0,
+            }],
         );
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id, "j1");
@@ -321,7 +327,10 @@ mod tests {
         let assignment = tracker.receive_scores(
             "w1",
             None,
-            vec![CandidateScore { job_id: "j1".into(), missing: 5 }],
+            vec![CandidateScore {
+                job_id: "j1".into(),
+                missing: 5,
+            }],
         );
         assert!(assignment.is_none());
         assert_eq!(tracker.pending_count(), 1);

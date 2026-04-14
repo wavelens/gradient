@@ -22,8 +22,9 @@ use tracing::Span;
 
 use core::types::ServerState;
 use endpoints::{workers, *};
+use proto::proto_router;
+use scheduler::Scheduler;
 use std::sync::Arc;
-use proto::{proto_router, Scheduler};
 
 /// Build the Axum router with all routes and middleware layered on.
 ///
@@ -318,6 +319,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
 
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
     scheduler.start();
+    proto::outbound::start_outbound_loop(Arc::clone(&scheduler));
 
     let mut app = Router::new()
         .nest("/api/v1", api)

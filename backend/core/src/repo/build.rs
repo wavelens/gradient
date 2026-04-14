@@ -12,11 +12,11 @@
 use anyhow::Result;
 use chrono::Utc;
 use entity::build::BuildStatus;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel,
-    PaginatorTrait, QueryFilter,
-};
 use sea_orm::DatabaseConnection;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
+    QueryFilter,
+};
 use std::collections::HashSet;
 use std::time::Duration;
 use uuid::Uuid;

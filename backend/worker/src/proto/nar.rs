@@ -25,7 +25,6 @@ use tracing::{debug, info};
 
 use crate::connection::ProtoConnection;
 
-
 /// Chunk size for direct NAR streaming (64 KiB).
 const NAR_CHUNK_SIZE: usize = 64 * 1024;
 
@@ -33,11 +32,7 @@ const NAR_CHUNK_SIZE: usize = 64 * 1024;
 /// in [`NAR_CHUNK_SIZE`]-byte chunks via [`ClientMessage::NarPush`].
 ///
 /// This is the "direct" transfer mode — no S3 involved.
-pub async fn push_direct(
-    job_id: &str,
-    store_path: &str,
-    conn: &mut ProtoConnection,
-) -> Result<()> {
+pub async fn push_direct(job_id: &str, store_path: &str, conn: &mut ProtoConnection) -> Result<()> {
     debug!(store_path, "NAR direct push");
 
     let mut nar_stream = harmonia_nar::NarByteStream::new(store_path.to_owned().into());
@@ -47,7 +42,9 @@ pub async fn push_direct(
 
     while let Some(chunk_result) = nar_stream.next().await {
         let chunk = chunk_result.context("NAR stream error")?;
-        encoder.write_all(&chunk).context("zstd compression failed")?;
+        encoder
+            .write_all(&chunk)
+            .context("zstd compression failed")?;
 
         let buf = encoder.get_mut();
         while buf.len() >= NAR_CHUNK_SIZE {
@@ -89,7 +86,11 @@ pub async fn push_direct(
     })
     .await?;
 
-    info!(store_path, compressed_bytes = offset, "direct NAR push complete");
+    info!(
+        store_path,
+        compressed_bytes = offset,
+        "direct NAR push complete"
+    );
     Ok(())
 }
 
@@ -110,12 +111,14 @@ pub async fn upload_presigned(
 
     // --- 1. Pack + compress the NAR into memory ---
     let mut nar_stream = harmonia_nar::NarByteStream::new(store_path.to_owned().into());
-    let mut encoder = zstd::stream::Encoder::new(Vec::new(), 6)
-        .context("failed to create zstd encoder")?;
+    let mut encoder =
+        zstd::stream::Encoder::new(Vec::new(), 6).context("failed to create zstd encoder")?;
 
     while let Some(chunk_result) = nar_stream.next().await {
         let chunk = chunk_result.context("NAR stream error")?;
-        encoder.write_all(&chunk).context("zstd compression failed")?;
+        encoder
+            .write_all(&chunk)
+            .context("zstd compression failed")?;
     }
 
     let compressed = encoder.finish().context("failed to finish zstd encoder")?;
@@ -128,6 +131,7 @@ pub async fn upload_presigned(
     let client = reqwest::Client::new();
     let http_method = reqwest::Method::from_bytes(method.as_bytes())
         .with_context(|| format!("invalid HTTP method: {method}"))?;
+
     let mut req = client
         .request(http_method, url)
         .header("Content-Type", "application/x-nix-nar")
@@ -137,7 +141,10 @@ pub async fn upload_presigned(
         req = req.header(name.as_str(), value.as_str());
     }
 
-    let resp = req.send().await.context("HTTP request to presigned URL failed")?;
+    let resp = req
+        .send()
+        .await
+        .context("HTTP request to presigned URL failed")?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -165,8 +172,7 @@ mod tests {
 
     /// Create a temporary directory with a single file and return its path.
     fn make_temp_store_path() -> std::path::PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("gradient-nar-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("gradient-nar-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("hello"), b"gradient nar test data").unwrap();
         dir
@@ -186,17 +192,29 @@ mod tests {
 
             loop {
                 let msg = sc.recv().await.unwrap();
-                if let ClientMessage::NarPush { data, offset, is_final, .. } = msg {
+                if let ClientMessage::NarPush {
+                    data,
+                    offset,
+                    is_final,
+                    ..
+                } = msg
+                {
                     let done = is_final;
                     chunks.push((data, offset, is_final));
-                    if done { break; }
+                    if done {
+                        break;
+                    }
                 } else {
                     panic!("expected NarPush, got {msg:?}");
                 }
             }
 
             // At least one non-empty data chunk + one final empty chunk.
-            assert!(chunks.len() >= 2, "expected at least 2 chunks, got {}", chunks.len());
+            assert!(
+                chunks.len() >= 2,
+                "expected at least 2 chunks, got {}",
+                chunks.len()
+            );
 
             let last = chunks.last().unwrap();
             assert!(last.2, "last chunk must be final");
@@ -209,8 +227,12 @@ mod tests {
             }
         });
 
-        let mut conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
-        push_direct("job-123", &store_path_str, &mut conn).await.unwrap();
+        let mut conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
+        push_direct("job-123", &store_path_str, &mut conn)
+            .await
+            .unwrap();
 
         server_task.await.unwrap();
         let _ = std::fs::remove_dir_all(&store_path);
@@ -232,7 +254,9 @@ mod tests {
                 let msg = sc.recv().await.unwrap();
                 if let ClientMessage::NarPush { data, is_final, .. } = msg {
                     all_data.extend_from_slice(&data);
-                    if is_final { break; }
+                    if is_final {
+                        break;
+                    }
                 }
             }
 
@@ -242,8 +266,12 @@ mod tests {
             assert!(!decoded.is_empty(), "decompressed NAR should not be empty");
         });
 
-        let mut conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
-        push_direct("job-123", &store_path_str, &mut conn).await.unwrap();
+        let mut conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
+        push_direct("job-123", &store_path_str, &mut conn)
+            .await
+            .unwrap();
 
         server_task.await.unwrap();
         let _ = std::fs::remove_dir_all(&store_path);
@@ -265,7 +293,9 @@ mod tests {
             let mut total = 0;
             loop {
                 let n = stream.read(&mut buf[total..]).await.unwrap();
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 total += n;
                 // Look for \r\n\r\n (end of HTTP headers).
                 if buf[..total].windows(4).any(|w| w == b"\r\n\r\n") {
@@ -273,7 +303,10 @@ mod tests {
                 }
             }
             // Reply 200 OK.
-            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").await.unwrap();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .unwrap();
             // Return the received bytes (headers + body prefix).
             buf[..total].to_vec()
         });
@@ -294,17 +327,28 @@ mod tests {
         let server_task = tokio::spawn(async move {
             let mut sc = server.accept().await;
             let msg = sc.recv().await.unwrap();
-            if let ClientMessage::NarReady { job_id, store_path: sp, nar_size, nar_hash } = msg {
+            if let ClientMessage::NarReady {
+                job_id,
+                store_path: sp,
+                nar_size,
+                nar_hash,
+            } = msg
+            {
                 assert_eq!(job_id, "job-xyz");
                 assert!(!sp.is_empty());
                 assert!(nar_size > 0, "nar_size should be nonzero");
-                assert!(nar_hash.starts_with("sha256:"), "nar_hash should be sha256: SRI, got {nar_hash}");
+                assert!(
+                    nar_hash.starts_with("sha256:"),
+                    "nar_hash should be sha256: SRI, got {nar_hash}"
+                );
             } else {
                 panic!("expected NarReady, got {msg:?}");
             }
         });
 
-        let mut conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
+        let mut conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
         upload_presigned("job-xyz", &store_path_str, &http_url, "PUT", &[], &mut conn)
             .await
             .unwrap();

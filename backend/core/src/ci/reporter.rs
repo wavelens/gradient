@@ -220,7 +220,11 @@ impl GithubReporter {
             .build()
             .context("Failed to build HTTP client for GithubReporter")?;
 
-        Ok(Self { base_url, token: token.into(), client })
+        Ok(Self {
+            base_url,
+            token: token.into(),
+            client,
+        })
     }
 }
 
@@ -348,7 +352,11 @@ pub fn parse_owner_repo(repository_url: &str) -> Option<(String, String)> {
         .strip_prefix("git+")
         .unwrap_or(repository_url);
 
-    let path = if let Some(rest) = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).or_else(|| url.strip_prefix("git://")) {
+    let path = if let Some(rest) = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .or_else(|| url.strip_prefix("git://"))
+    {
         // https://host/owner/repo.git → "host/owner/repo.git" → take after first '/'
         rest.split_once('/')?.1
     } else if let Some(colon_pos) = url.find(':') {

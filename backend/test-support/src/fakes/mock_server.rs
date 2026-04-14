@@ -17,8 +17,8 @@ use futures::{SinkExt, StreamExt};
 use proto::messages::{ClientMessage, ServerMessage};
 use rkyv::rancor::Error as RkyvError;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_tungstenite::{accept_async, WebSocketStream};
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{WebSocketStream, accept_async};
 
 /// A mock WebSocket server bound to a random local port.
 pub struct MockProtoServer {
@@ -45,7 +45,9 @@ impl MockProtoServer {
     /// Accept one incoming WebSocket connection.
     pub async fn accept(&self) -> MockServerConn {
         let (stream, _) = self.listener.accept().await.expect("accept failed");
-        let socket = accept_async(stream).await.expect("WebSocket handshake failed");
+        let socket = accept_async(stream)
+            .await
+            .expect("WebSocket handshake failed");
         MockServerConn { socket }
     }
 }
@@ -58,8 +60,8 @@ pub struct MockServerConn {
 impl MockServerConn {
     /// Send a [`ServerMessage`] to the connected client.
     pub async fn send(&mut self, msg: ServerMessage) -> Result<()> {
-        let bytes = rkyv::to_bytes::<RkyvError>(&msg)
-            .context("failed to serialise ServerMessage")?;
+        let bytes =
+            rkyv::to_bytes::<RkyvError>(&msg).context("failed to serialise ServerMessage")?;
         self.socket
             .send(Message::Binary(bytes.to_vec().into()))
             .await

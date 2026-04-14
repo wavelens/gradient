@@ -16,17 +16,16 @@
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use crate::worker_pool::WorkerPoolResolver;
+use anyhow::{Context, Result};
 use gradient_core::db::parse_drv;
 use gradient_core::nix::DerivationResolver;
 use proto::messages::{DerivationOutput, DiscoveredDerivation, FlakeJob};
 use tracing::{debug, warn};
 
-use crate::job::JobUpdater;
-use crate::store::LocalNixStore;
+use crate::nix::store::LocalNixStore;
+use crate::proto::job::JobUpdater;
 use crate::traits::{DrvReader, FsDrvReader, JobReporter, WorkerStore};
-
 
 /// Drives Nix evaluation inside the worker.
 ///
@@ -232,8 +231,8 @@ pub async fn evaluate_derivations_with(
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use test_support::prelude::*;
     use test_support::fakes::derivation_resolver::FakeDerivationResolver;
+    use test_support::prelude::*;
 
     fn fixture_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -283,13 +282,20 @@ mod tests {
         // Should have EvaluatingDerivations + EvalResult events.
         assert_eq!(reporter.len(), 2);
 
-        if let ReportedEvent::EvalResult { derivations, warnings } = reporter.last_eval_result().unwrap() {
+        if let ReportedEvent::EvalResult {
+            derivations,
+            warnings,
+        } = reporter.last_eval_result().unwrap()
+        {
             // All derivations from the fixture should be discovered.
             assert_eq!(derivations.len(), fixture.derivations.len());
             // Nothing is built → nothing substituted.
             assert!(derivations.iter().all(|d| !d.substituted));
             // Entry point should have the attr set.
-            let entry = derivations.iter().find(|d| d.drv_path == fixture.entry_point).unwrap();
+            let entry = derivations
+                .iter()
+                .find(|d| d.drv_path == fixture.entry_point)
+                .unwrap();
             assert_eq!(entry.attr, "hello");
             // Warnings should be empty for a valid fixture.
             assert!(warnings.is_empty(), "unexpected warnings: {:?}", warnings);
@@ -314,7 +320,8 @@ mod tests {
             .await
             .unwrap();
 
-        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap() {
+        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap()
+        {
             let substituted_count = derivations.iter().filter(|d| d.substituted).count();
             let not_substituted = derivations.iter().filter(|d| !d.substituted).count();
             assert!(substituted_count > 0, "some should be substituted");
@@ -348,7 +355,8 @@ mod tests {
             .await
             .unwrap();
 
-        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap() {
+        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap()
+        {
             assert!(
                 derivations.iter().all(|d| d.substituted),
                 "all should be substituted when everything is built"
@@ -370,7 +378,8 @@ mod tests {
             .await
             .unwrap();
 
-        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap() {
+        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap()
+        {
             assert!(derivations.is_empty());
         } else {
             panic!("expected EvalResult");
@@ -392,9 +401,19 @@ mod tests {
             .await
             .unwrap();
 
-        if let ReportedEvent::EvalResult { derivations, warnings } = reporter.last_eval_result().unwrap() {
-            assert!(derivations.is_empty(), "no derivations should be discovered");
-            assert!(!warnings.is_empty(), "should have a warning about missing drv");
+        if let ReportedEvent::EvalResult {
+            derivations,
+            warnings,
+        } = reporter.last_eval_result().unwrap()
+        {
+            assert!(
+                derivations.is_empty(),
+                "no derivations should be discovered"
+            );
+            assert!(
+                !warnings.is_empty(),
+                "should have a warning about missing drv"
+            );
             assert!(
                 warnings[0].contains("nonexistent.drv"),
                 "warning should mention the missing path: {:?}",
@@ -417,22 +436,30 @@ mod tests {
             .await
             .unwrap();
 
-        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap() {
+        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap()
+        {
             // Build a dependency map from the eval result.
             let eval_deps: std::collections::HashMap<&str, Vec<&str>> = derivations
                 .iter()
-                .map(|d| (d.drv_path.as_str(), d.dependencies.iter().map(|s| s.as_str()).collect()))
+                .map(|d| {
+                    (
+                        d.drv_path.as_str(),
+                        d.dependencies.iter().map(|s| s.as_str()).collect(),
+                    )
+                })
                 .collect();
 
             // Compare against fixture tree.
             for drv in &fixture.derivations {
-                let eval_dep_list = eval_deps.get(drv.drv_path.as_str())
+                let eval_dep_list = eval_deps
+                    .get(drv.drv_path.as_str())
                     .unwrap_or_else(|| panic!("missing {} in eval result", drv.drv_path));
                 let fixture_dep_list = fixture.tree.get(&drv.drv_path).unwrap();
 
                 let mut eval_sorted: Vec<&str> = eval_dep_list.clone();
                 eval_sorted.sort();
-                let mut fixture_sorted: Vec<&str> = fixture_dep_list.iter().map(|s| s.as_str()).collect();
+                let mut fixture_sorted: Vec<&str> =
+                    fixture_dep_list.iter().map(|s| s.as_str()).collect();
                 fixture_sorted.sort();
 
                 assert_eq!(
@@ -446,4 +473,3 @@ mod tests {
         }
     }
 }
-

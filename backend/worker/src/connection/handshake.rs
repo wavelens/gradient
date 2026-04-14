@@ -12,7 +12,7 @@
 //! it is not configured to accept.
 
 use anyhow::{Context, Result, bail};
-use proto::messages::{ClientMessage, GradientCapabilities, ServerMessage, PROTO_VERSION};
+use proto::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
 use tracing::{debug, info};
 
 use crate::config::WorkerConfig;
@@ -80,7 +80,12 @@ pub async fn perform_handshake(
         .context("server closed the connection without responding")?;
 
     match ack {
-        ServerMessage::InitAck { version, capabilities: negotiated, authorized_peers, failed_peers } => {
+        ServerMessage::InitAck {
+            version,
+            capabilities: negotiated,
+            authorized_peers,
+            failed_peers,
+        } => {
             info!(
                 server_version = version,
                 client_version = PROTO_VERSION,
@@ -93,7 +98,10 @@ pub async fn perform_handshake(
                     tracing::warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
                 }
             }
-            Ok(HandshakeResult { negotiated, server_version: version })
+            Ok(HandshakeResult {
+                negotiated,
+                server_version: version,
+            })
         }
         ServerMessage::Reject { code, reason } => {
             bail!("server rejected connection (code {code}): {reason}");
@@ -131,13 +139,19 @@ mod tests {
         }
     }
 
-    async fn run_server(mut sc: MockServerConn, challenge_peers: Vec<String>, response: ServerMessage) {
+    async fn run_server(
+        mut sc: MockServerConn,
+        challenge_peers: Vec<String>,
+        response: ServerMessage,
+    ) {
         // Receive InitConnection.
         let _ = sc.recv().await.unwrap();
         // Send AuthChallenge.
-        sc.send(ServerMessage::AuthChallenge { peers: challenge_peers })
-            .await
-            .unwrap();
+        sc.send(ServerMessage::AuthChallenge {
+            peers: challenge_peers,
+        })
+        .await
+        .unwrap();
         // Receive AuthResponse.
         let _ = sc.recv().await.unwrap();
         // Send final response.
@@ -161,7 +175,9 @@ mod tests {
             run_server(sc, vec!["peer-1".to_owned()], ack).await;
         });
 
-        let mut conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
+        let mut conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
         let result = perform_handshake(
             &mut conn,
             "worker-id".to_owned(),
@@ -194,12 +210,17 @@ mod tests {
             .unwrap();
         });
 
-        let mut conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
+        let mut conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
         let err = perform_handshake(&mut conn, "wid".to_owned(), vec![], no_caps())
             .await
             .unwrap_err();
 
-        assert!(err.to_string().contains("banned"), "unexpected error: {err}");
+        assert!(
+            err.to_string().contains("banned"),
+            "unexpected error: {err}"
+        );
         server_task.await.unwrap();
     }
 
@@ -223,12 +244,17 @@ mod tests {
             .unwrap();
         });
 
-        let mut conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
+        let mut conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
         let err = perform_handshake(&mut conn, "wid".to_owned(), vec![], no_caps())
             .await
             .unwrap_err();
 
-        assert!(err.to_string().contains("bad token"), "unexpected error: {err}");
+        assert!(
+            err.to_string().contains("bad token"),
+            "unexpected error: {err}"
+        );
         server_task.await.unwrap();
     }
 
@@ -244,7 +270,9 @@ mod tests {
             sc.send(ServerMessage::Draining).await.unwrap();
         });
 
-        let mut conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
+        let mut conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
         let err = perform_handshake(&mut conn, "wid".to_owned(), vec![], no_caps())
             .await
             .unwrap_err();
@@ -292,7 +320,9 @@ mod tests {
         });
 
         let peer_tokens = vec![("*".to_owned(), "wild-tok".to_owned())];
-        let mut conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
+        let mut conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
         let _ = perform_handshake(&mut conn, "wid".to_owned(), peer_tokens, no_caps())
             .await
             .unwrap();

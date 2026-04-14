@@ -4,19 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! WebSocket client connection to the Gradient server.
-//!
-//! [`ProtoConnection`] wraps a `tokio_tungstenite` stream and provides typed
-//! send/receive over rkyv-serialised [`proto::messages`] frames.
+//! WebSocket connection management: client connections, handshake, and listener.
+
+pub mod handshake;
+pub mod listener;
 
 use anyhow::{Context, Result};
+use futures::SinkExt;
+use futures::StreamExt;
 use proto::messages::{ClientMessage, ServerMessage};
 use rkyv::rancor::Error as RkyvError;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
 use tracing::{debug, instrument, warn};
-use futures::SinkExt;
-use futures::StreamExt;
 
 /// Internal enum to abstract over client-initiated and server-accepted sockets.
 enum ProtoStream {
@@ -37,18 +37,24 @@ pub struct ProtoConnection {
 impl ProtoConnection {
     /// Open a WebSocket connection to `url` and return the raw stream.
     /// The caller is responsible for completing the handshake via
-    /// [`crate::handshake::perform_handshake`].
+    /// [`crate::connection::handshake::perform_handshake`].
     #[instrument(skip_all, fields(%url))]
     pub async fn open(url: &str) -> Result<Self> {
         let (socket, _) = connect_async(url)
             .await
             .with_context(|| format!("failed to connect to {url}"))?;
-        Ok(Self { server_version: 0, socket: ProtoStream::Client(socket) })
+        Ok(Self {
+            server_version: 0,
+            socket: ProtoStream::Client(socket),
+        })
     }
 
     /// Wrap an already-accepted WebSocket stream (server connected to us).
     pub fn from_accepted(socket: WebSocketStream<TcpStream>) -> Self {
-        Self { server_version: 0, socket: ProtoStream::Accepted(socket) }
+        Self {
+            server_version: 0,
+            socket: ProtoStream::Accepted(socket),
+        }
     }
 
     /// Record the protocol version the server reported in `InitAck`.
@@ -64,8 +70,8 @@ impl ProtoConnection {
 
     /// Send a typed [`ClientMessage`] to the server.
     pub async fn send(&mut self, msg: ClientMessage) -> Result<()> {
-        let bytes = rkyv::to_bytes::<RkyvError>(&msg)
-            .context("failed to serialise ClientMessage")?;
+        let bytes =
+            rkyv::to_bytes::<RkyvError>(&msg).context("failed to serialise ClientMessage")?;
         let frame = Message::Binary(bytes.to_vec().into());
         match &mut self.socket {
             ProtoStream::Client(ws) => ws.send(frame).await.context("WebSocket send failed")?,
@@ -105,8 +111,12 @@ impl ProtoConnection {
     /// Close the connection gracefully.
     pub async fn close(&mut self) {
         match &mut self.socket {
-            ProtoStream::Client(ws) => { let _ = ws.close(None).await; }
-            ProtoStream::Accepted(ws) => { let _ = ws.close(None).await; }
+            ProtoStream::Client(ws) => {
+                let _ = ws.close(None).await;
+            }
+            ProtoStream::Accepted(ws) => {
+                let _ = ws.close(None).await;
+            }
         }
     }
 

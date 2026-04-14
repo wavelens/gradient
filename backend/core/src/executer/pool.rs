@@ -8,9 +8,9 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::stream::{FuturesUnordered, StreamExt};
 use harmonia_protocol::daemon_wire::types2::GCAction;
-use harmonia_store_remote::DaemonStore as _;
 use harmonia_store_core::signature::Signature;
 use harmonia_store_core::store_path::StorePath;
+use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::fmt::CommonHash as _;
 use std::collections::HashMap;
 
@@ -114,11 +114,16 @@ where
         .map_err(|e| anyhow::anyhow!("query_derivation_output_map failed: {}", e))?;
     Ok(output_map
         .into_iter()
-        .filter_map(|(name, sp_opt)| sp_opt.map(|sp| (name.to_string(), format!("/nix/store/{}", sp))))
+        .filter_map(|(name, sp_opt)| {
+            sp_opt.map(|sp| (name.to_string(), format!("/nix/store/{}", sp)))
+        })
         .collect())
 }
 
-pub async fn get_pathinfo(path: String, guard: &mut PooledConnectionGuard) -> Result<Option<PathInfo>> {
+pub async fn get_pathinfo(
+    path: String,
+    guard: &mut PooledConnectionGuard,
+) -> Result<Option<PathInfo>> {
     let store_path = StorePath::from_base_path(strip_store_prefix(&path))
         .map_err(|e| anyhow::anyhow!("Invalid store path {}: {}", path, e))?;
     let info = guard
@@ -143,7 +148,9 @@ pub async fn get_build_outputs_from_derivation(
 
     let mut outputs = Vec::new();
     for (output_name, output_store_path_opt) in &output_map {
-        let Some(output_store_path) = output_store_path_opt else { continue };
+        let Some(output_store_path) = output_store_path_opt else {
+            continue;
+        };
         let output_path_str = format!("/nix/store/{}", output_store_path);
         if let Some(vi) = guard
             .client()
@@ -229,7 +236,8 @@ pub struct LocalNixStoreProvider {
 
 impl std::fmt::Debug for LocalNixStoreProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalNixStoreProvider").finish_non_exhaustive()
+        f.debug_struct("LocalNixStoreProvider")
+            .finish_non_exhaustive()
     }
 }
 
@@ -347,9 +355,7 @@ impl NixStoreProvider for LocalNixStoreProvider {
 }
 
 /// Convert harmonia's `UnkeyedValidPathInfo` into our local `PathInfo`.
-pub fn convert_valid_path_info(
-    vi: &harmonia_store_remote::UnkeyedValidPathInfo,
-) -> PathInfo {
+pub fn convert_valid_path_info(vi: &harmonia_store_remote::UnkeyedValidPathInfo) -> PathInfo {
     PathInfo {
         deriver: vi.deriver.as_ref().map(|d| d.to_string()),
         references: vi.references.iter().map(|r| r.to_string()).collect(),

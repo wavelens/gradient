@@ -5,20 +5,17 @@
  */
 
 pub mod client;
-pub mod jobs;
 pub mod server;
-pub mod types;
 
+// Job and scheduling types live in core::types::proto — re-exported here for
+// backward compatibility so existing `proto::messages::FlakeJob` paths still work.
 pub use client::ClientMessage;
-pub use gradient_core::types::proto::GradientCapabilities;
-pub use jobs::{
-    BuildJob, BuildTask, CompressTask, FlakeJob, FlakeTask, Job, JobUpdateKind, SignTask,
+pub use gradient_core::types::proto::{
+    BuildJob, BuildOutput, BuildTask, CandidateScore, CompressTask, CredentialKind,
+    DerivationOutput, DiscoveredDerivation, FlakeJob, FlakeTask, GradientCapabilities, Job,
+    JobCandidate, JobUpdateKind, SignTask,
 };
 pub use server::{FailedPeer, ServerMessage};
-pub use types::{
-    BuildOutput, CandidateScore, CredentialKind, DerivationOutput, DiscoveredDerivation,
-    JobCandidate,
-};
 
 /// Wire protocol version implemented by this build.
 pub const PROTO_VERSION: u16 = 1;

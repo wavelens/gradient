@@ -49,8 +49,7 @@ pub async fn update_build_status(
             let webhook_state = Arc::clone(&state);
             let webhook_build = updated_build.clone();
             tokio::spawn(async move {
-                crate::ci::fire_build_webhook(webhook_state, webhook_build, webhook_status)
-                    .await;
+                crate::ci::fire_build_webhook(webhook_state, webhook_build, webhook_status).await;
             });
 
             // Finalize the build log on terminal state transitions so backends
@@ -106,10 +105,7 @@ pub async fn update_evaluation_status(
             CEvaluation::Status,
             sea_orm::sea_query::Expr::value(status.clone()),
         )
-        .col_expr(
-            CEvaluation::UpdatedAt,
-            sea_orm::sea_query::Expr::value(now),
-        )
+        .col_expr(CEvaluation::UpdatedAt, sea_orm::sea_query::Expr::value(now))
         .filter(CEvaluation::Id.eq(evaluation.id))
         .filter(
             Condition::all()

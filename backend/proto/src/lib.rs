@@ -7,7 +7,6 @@
 pub mod handler;
 pub mod messages;
 pub mod outbound;
-pub mod scheduler;
 pub mod traits;
 
 #[cfg(test)]
@@ -15,4 +14,7 @@ mod tests;
 
 pub use handler::proto_router;
 pub use messages::{ClientMessage, PROTO_VERSION, ServerMessage};
-pub use scheduler::{Scheduler, WorkerInfo};
+
+// Re-export from the scheduler crate for backward compatibility.
+pub use scheduler::Scheduler;
+pub use scheduler::WorkerInfo;

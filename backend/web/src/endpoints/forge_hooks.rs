@@ -19,11 +19,11 @@ use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
+use core::ci::decrypt_webhook_secret;
 use core::ci::{TriggerError, trigger_evaluation};
 use core::ci::{verify_gitea_signature, verify_github_signature};
 use core::types::input::load_secret;
 use core::types::*;
-use core::ci::decrypt_webhook_secret;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::Deserialize;
@@ -80,7 +80,9 @@ pub async fn github_app_webhook(
 ) -> impl IntoResponse {
     // 1. Verify HMAC signature.
     let Some(ref secret_file) = state.cli.github_app_webhook_secret_file else {
-        warn!("GitHub App webhook received but GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE is not configured");
+        warn!(
+            "GitHub App webhook received but GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE is not configured"
+        );
         return StatusCode::SERVICE_UNAVAILABLE;
     };
     let secret = load_secret(secret_file);
@@ -126,7 +128,9 @@ async fn handle_github_push(state: &Arc<ServerState>, body: &[u8]) {
     };
 
     // Skip tag pushes and deletions.
-    if !payload.git_ref.starts_with("refs/heads/") || payload.after == "0000000000000000000000000000000000000000" {
+    if !payload.git_ref.starts_with("refs/heads/")
+        || payload.after == "0000000000000000000000000000000000000000"
+    {
         return;
     }
 
@@ -191,7 +195,11 @@ async fn handle_github_installation(state: &Arc<ServerState>, body: &[u8]) {
             info!(installation_id, org_name = %github_login, "GitHub App installed on organization");
         }
     } else {
-        let sender_login = payload.sender.as_ref().map(|s| s.login.as_str()).unwrap_or("unknown");
+        let sender_login = payload
+            .sender
+            .as_ref()
+            .map(|s| s.login.as_str())
+            .unwrap_or("unknown");
         warn!(
             github_login = %github_login,
             sender = %sender_login,
@@ -231,13 +239,14 @@ pub async fn forge_webhook(
         return StatusCode::SERVICE_UNAVAILABLE;
     };
 
-    let plaintext_secret = match decrypt_webhook_secret(&state.cli.crypt_secret_file, encrypted_secret) {
-        Ok(s) => s,
-        Err(e) => {
-            warn!(error = %e, org = %org_name, "Failed to decrypt forge_webhook_secret");
-            return StatusCode::INTERNAL_SERVER_ERROR;
-        }
-    };
+    let plaintext_secret =
+        match decrypt_webhook_secret(&state.cli.crypt_secret_file, encrypted_secret) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, org = %org_name, "Failed to decrypt forge_webhook_secret");
+                return StatusCode::INTERNAL_SERVER_ERROR;
+            }
+        };
 
     // Verify signature — method varies by forge.
     let verified = match forge.as_str() {
@@ -310,7 +319,9 @@ async fn handle_gitea_push(state: &Arc<ServerState>, body: &[u8]) {
         }
     };
 
-    if !payload.git_ref.starts_with("refs/heads/") || payload.after == "0000000000000000000000000000000000000000" {
+    if !payload.git_ref.starts_with("refs/heads/")
+        || payload.after == "0000000000000000000000000000000000000000"
+    {
         return;
     }
 
@@ -355,7 +366,9 @@ async fn handle_gitlab_push(state: &Arc<ServerState>, body: &[u8]) {
         }
     };
 
-    if !payload.git_ref.starts_with("refs/heads/") || payload.after == "0000000000000000000000000000000000000000" {
+    if !payload.git_ref.starts_with("refs/heads/")
+        || payload.after == "0000000000000000000000000000000000000000"
+    {
         return;
     }
 
@@ -404,9 +417,7 @@ async fn trigger_for_repo_urls(
 
     for project in projects {
         let repo_normalised = normalise(&project.repository);
-        let matches = normalised_candidates
-            .iter()
-            .any(|c| c == &repo_normalised);
+        let matches = normalised_candidates.iter().any(|c| c == &repo_normalised);
 
         if !matches {
             continue;
@@ -467,7 +478,8 @@ pub async fn post_forge_webhook_secret(
 
     if !user_can_edit(&state, user.id, org.id).await? {
         return Err(WebError::Forbidden(
-            "You do not have permission to manage forge webhooks for this organization.".to_string(),
+            "You do not have permission to manage forge webhooks for this organization."
+                .to_string(),
         ));
     }
 
@@ -475,8 +487,10 @@ pub async fn post_forge_webhook_secret(
     let secret_bytes: [u8; 32] = rand::rng().random();
     let plaintext = hex::encode(secret_bytes);
 
-    let encrypted = encrypt_webhook_secret(&state.cli.crypt_secret_file, &plaintext)
-        .map_err(|e| WebError::InternalServerError(format!("Failed to encrypt webhook secret: {e}")))?;
+    let encrypted =
+        encrypt_webhook_secret(&state.cli.crypt_secret_file, &plaintext).map_err(|e| {
+            WebError::InternalServerError(format!("Failed to encrypt webhook secret: {e}"))
+        })?;
 
     let mut active = org.into_active_model();
     active.forge_webhook_secret = Set(Some(encrypted));
