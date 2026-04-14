@@ -12,8 +12,8 @@ pub mod server;
 pub use client::ClientMessage;
 pub use gradient_core::types::proto::{
     BuildJob, BuildOutput, BuildTask, CandidateScore, CompressTask, CredentialKind,
-    DerivationOutput, DiscoveredDerivation, FlakeJob, FlakeTask, GradientCapabilities, Job,
-    JobCandidate, JobUpdateKind, SignTask,
+    DerivationOutput, DiscoveredDerivation, FetchedInput, FlakeJob, FlakeTask,
+    GradientCapabilities, Job, JobCandidate, JobUpdateKind, SignTask,
 };
 pub use server::{FailedPeer, ServerMessage};
 

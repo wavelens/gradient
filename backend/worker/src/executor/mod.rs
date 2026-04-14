@@ -49,6 +49,10 @@ impl JobExecutor {
     }
 
     /// Execute a `FlakeJob` (fetch → eval-flake → eval-derivations).
+    ///
+    /// When `FetchFlake` and eval tasks are in the same job, the local clone
+    /// path from the fetch is reused for evaluation — the repo is cloned
+    /// exactly once.
     #[instrument(skip_all, fields(tasks = ?job.tasks))]
     pub async fn execute_flake_job(
         &self,
@@ -56,19 +60,31 @@ impl JobExecutor {
         updater: &mut JobUpdater<'_>,
         credentials: &CredentialStore,
     ) -> Result<()> {
+        // If FetchFlake runs, it stores the local checkout path here so
+        // subsequent eval tasks use it instead of the remote URL.
+        let mut local_flake_path: Option<String> = None;
+
         for task in &job.tasks {
             match task {
                 FlakeTask::FetchFlake => {
-                    fetch::fetch_repository(
+                    let path = fetch::fetch_repository(
                         &job,
                         updater as &mut dyn proto::traits::JobReporter,
                         credentials,
                     )
-                    .await?
+                    .await?;
+                    local_flake_path = Some(path);
                 }
                 FlakeTask::EvaluateFlake => eval::evaluate_flake(&job, updater).await?,
                 FlakeTask::EvaluateDerivations => {
-                    eval::evaluate_derivations(&self.evaluator, &self.store, &job, updater).await?;
+                    eval::evaluate_derivations(
+                        &self.evaluator,
+                        &self.store,
+                        &job,
+                        local_flake_path.as_deref(),
+                        updater,
+                    )
+                    .await?;
                 }
             }
         }

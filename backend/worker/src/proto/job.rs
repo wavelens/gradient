@@ -11,7 +11,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use proto::messages::{BuildOutput, ClientMessage, DiscoveredDerivation, JobUpdateKind};
+use proto::messages::{BuildOutput, ClientMessage, DiscoveredDerivation, FetchedInput, JobUpdateKind};
 use tracing::debug;
 
 use crate::connection::ProtoConnection;
@@ -33,6 +33,11 @@ impl<'a> JobUpdater<'a> {
 
     pub async fn report_fetching(&mut self) -> Result<()> {
         self.send_update(JobUpdateKind::Fetching).await
+    }
+
+    pub async fn report_fetch_result(&mut self, fetched_paths: Vec<FetchedInput>) -> Result<()> {
+        self.send_update(JobUpdateKind::FetchResult { fetched_paths })
+            .await
     }
 
     pub async fn report_evaluating_flake(&mut self) -> Result<()> {
@@ -118,6 +123,10 @@ impl<'a> JobUpdater<'a> {
 impl JobReporter for JobUpdater<'_> {
     async fn report_fetching(&mut self) -> Result<()> {
         self.report_fetching().await
+    }
+
+    async fn report_fetch_result(&mut self, fetched_paths: Vec<FetchedInput>) -> Result<()> {
+        self.report_fetch_result(fetched_paths).await
     }
 
     async fn report_evaluating_flake(&mut self) -> Result<()> {

@@ -198,9 +198,9 @@ in {
       services.gradient-worker = {
         wantedBy = [ "multi-user.target" ];
         after = [ "network.target" ];
-
         serviceConfig = {
           ExecStart = "${lib.getBin cfg.package}/bin/gradient-worker";
+          StateDirectory = "gradient-worker";
           User = "gradient-worker";
           Group = "gradient-worker";
           PrivateTmp = true;

@@ -66,9 +66,18 @@ pub async fn evaluate_derivations(
     evaluator: &WorkerEvaluator,
     store: &LocalNixStore,
     job: &FlakeJob,
+    local_flake_path: Option<&str>,
     updater: &mut JobUpdater<'_>,
 ) -> Result<()> {
-    evaluate_derivations_with(&*evaluator.resolver, store, &FsDrvReader, job, updater).await
+    evaluate_derivations_with(
+        &*evaluator.resolver,
+        store,
+        &FsDrvReader,
+        job,
+        local_flake_path,
+        updater,
+    )
+    .await
 }
 
 /// Testable version of [`evaluate_derivations`] that accepts trait objects.
@@ -76,22 +85,30 @@ pub async fn evaluate_derivations(
 /// All concrete dependencies are replaced with trait objects so this function
 /// can be exercised in unit tests with fakes (no real nix-daemon, no real
 /// filesystem, no real WebSocket connection).
+///
+/// When `local_flake_path` is `Some`, the evaluator uses `path:<local_path>`
+/// as the flake reference instead of building a remote URL from
+/// `job.repository` + `job.commit`. This is the case when `FetchFlake` already
+/// cloned the repo in the same `FlakeJob`.
 pub async fn evaluate_derivations_with(
     resolver: &dyn DerivationResolver,
     store: &dyn WorkerStore,
     drv_reader: &dyn DrvReader,
     job: &FlakeJob,
+    local_flake_path: Option<&str>,
     updater: &mut dyn JobReporter,
 ) -> Result<()> {
     updater.report_evaluating_derivations().await?;
 
-    // Build a commit-pinned Nix flake URL (e.g. `git+git://server/test?rev=<hash>`).
-    // This ensures the evaluator fetches exactly the commit the server detected,
-    // and that `git://` URLs are normalised to the `git+git://` scheme that Nix
-    // understands.
-    let repo = gradient_core::nix::NixFlakeUrl::new(&job.repository, &job.commit)
-        .map(|u| u.to_string())
-        .unwrap_or_else(|_| job.repository.clone());
+    // Use the local clone from FetchFlake if available, otherwise build a
+    // commit-pinned remote URL.
+    let repo = if let Some(path) = local_flake_path {
+        format!("path:{}", path)
+    } else {
+        gradient_core::nix::NixFlakeUrl::new(&job.repository, &job.commit)
+            .map(|u| u.to_string())
+            .unwrap_or_else(|_| job.repository.clone())
+    };
     let wildcards = job.wildcards.clone();
 
     // ── Step 1: discover attr paths ──────────────────────────────────────────
@@ -281,7 +298,7 @@ mod tests {
         let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, &mut reporter)
+        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
             .await
             .unwrap();
 
@@ -322,7 +339,7 @@ mod tests {
         let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, &mut reporter)
+        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
             .await
             .unwrap();
 
@@ -357,7 +374,7 @@ mod tests {
         let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, &mut reporter)
+        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
             .await
             .unwrap();
 
@@ -380,7 +397,7 @@ mod tests {
         let job = make_flake_job("https://example.com/empty");
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, &mut reporter)
+        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
             .await
             .unwrap();
 
@@ -403,7 +420,7 @@ mod tests {
         let job = make_flake_job("repo");
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, &mut reporter)
+        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
             .await
             .unwrap();
 
@@ -438,7 +455,7 @@ mod tests {
         let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, &mut reporter)
+        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
             .await
             .unwrap();
 

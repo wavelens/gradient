@@ -230,6 +230,7 @@ pub(crate) async fn handle_socket(
     let reauth_notify = scheduler
         .register_worker(&peer_id, negotiated.clone(), authorized_peer_uuids)
         .await;
+    let job_notify = scheduler.job_notify();
 
     // ── Dispatch loop ─────────────────────────────────────────────────────────
 
@@ -255,6 +256,23 @@ pub(crate) async fn handle_socket(
                 .is_err()
                 {
                     break;
+                }
+                continue;
+            }
+            _ = job_notify.notified() => {
+                // New jobs enqueued — push candidates to this worker.
+                let candidates = scheduler.get_job_candidates(&peer_id).await;
+                if !candidates.is_empty() {
+                    debug!(%peer_id, count = candidates.len(), "pushing job offer");
+                    if send_server_msg(
+                        &mut socket,
+                        &ServerMessage::JobOffer { candidates },
+                    )
+                    .await
+                    .is_err()
+                    {
+                        break;
+                    }
                 }
                 continue;
             }
@@ -400,6 +418,10 @@ pub(crate) async fn handle_socket(
                                 entity::evaluation::EvaluationStatus::Fetching,
                             )
                             .await;
+                    }
+                    JobUpdateKind::FetchResult { fetched_paths } => {
+                        debug!(%peer_id, %job_id, count = fetched_paths.len(), "FetchResult");
+                        // TODO: record fetched input paths and upload NARs to cache.
                     }
                     JobUpdateKind::EvaluatingFlake => {
                         scheduler

@@ -21,12 +21,16 @@ use crate::proto::credentials::CredentialStore;
 
 /// Clone (or update) the repository referenced by `job` at the specified commit.
 ///
+/// Returns the local path to the cloned checkout so the evaluator can use it
+/// instead of fetching the remote URL again (which Nix may not support for all
+/// protocols, e.g. `git://`).
+///
 /// `credentials` may contain an SSH private key for private repository access.
 pub async fn fetch_repository(
     job: &FlakeJob,
     updater: &mut dyn JobReporter,
     credentials: &CredentialStore,
-) -> Result<()> {
+) -> Result<String> {
     updater.report_fetching().await?;
 
     let url = job.repository.clone();
@@ -42,7 +46,7 @@ pub async fn fetch_repository(
         .context("fetch task panicked")?
 }
 
-fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<()> {
+fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<String> {
     let temp_dir = std::env::temp_dir().join(format!("gradient-fetch-{}", uuid::Uuid::new_v4()));
 
     let mut callbacks = RemoteCallbacks::new();
@@ -82,7 +86,7 @@ fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<
         .context("set_head_detached failed")?;
 
     info!(path = %temp_dir.display(), %commit, "repository cloned");
-    Ok(())
+    Ok(temp_dir.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]

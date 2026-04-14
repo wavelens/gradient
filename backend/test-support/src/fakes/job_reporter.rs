@@ -8,13 +8,16 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use proto::messages::{BuildOutput, DiscoveredDerivation};
+use proto::messages::{BuildOutput, DiscoveredDerivation, FetchedInput};
 use proto::traits::JobReporter;
 
 /// A reported event captured by [`RecordingJobReporter`].
 #[derive(Debug, Clone)]
 pub enum ReportedEvent {
     Fetching,
+    FetchResult {
+        fetched_paths: Vec<FetchedInput>,
+    },
     EvaluatingFlake,
     EvaluatingDerivations,
     EvalResult {
@@ -69,6 +72,12 @@ impl RecordingJobReporter {
 impl JobReporter for RecordingJobReporter {
     async fn report_fetching(&mut self) -> Result<()> {
         self.events.push(ReportedEvent::Fetching);
+        Ok(())
+    }
+
+    async fn report_fetch_result(&mut self, fetched_paths: Vec<FetchedInput>) -> Result<()> {
+        self.events
+            .push(ReportedEvent::FetchResult { fetched_paths });
         Ok(())
     }
 

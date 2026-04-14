@@ -100,6 +100,9 @@ pub struct SignTask {
 #[rkyv(derive(Debug, PartialEq))]
 pub enum JobUpdateKind {
     Fetching,
+    FetchResult {
+        fetched_paths: Vec<FetchedInput>,
+    },
     EvaluatingFlake,
     EvaluatingDerivations,
     EvalResult {
@@ -115,6 +118,15 @@ pub enum JobUpdateKind {
     },
     Compressing,
     Signing,
+}
+
+/// A flake input fetched during the `FetchFlake` task.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct FetchedInput {
+    pub store_path: String,
+    pub nar_hash: String,
+    pub nar_size: u64,
 }
 
 // ── Scheduling types ─────────────────────────────────────────────────────────

@@ -12,7 +12,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::messages::{BuildOutput, DiscoveredDerivation};
+use crate::messages::{BuildOutput, DiscoveredDerivation, FetchedInput};
 
 // ── Store access ─────────────────────────────────────────────────────────────
 
@@ -49,6 +49,7 @@ pub trait DrvReader: Send + Sync {
 #[async_trait]
 pub trait JobReporter: Send {
     async fn report_fetching(&mut self) -> Result<()>;
+    async fn report_fetch_result(&mut self, fetched_paths: Vec<FetchedInput>) -> Result<()>;
     async fn report_evaluating_flake(&mut self) -> Result<()>;
     async fn report_evaluating_derivations(&mut self) -> Result<()>;
     async fn report_eval_result(

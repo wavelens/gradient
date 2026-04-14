@@ -49,6 +49,9 @@ pub struct Scheduler {
     pub state: Arc<ServerState>,
     worker_pool: Arc<RwLock<WorkerPool>>,
     job_tracker: Arc<RwLock<JobTracker>>,
+    /// Signalled when new jobs are enqueued so handler dispatch loops can push
+    /// `JobOffer` messages to connected workers.
+    job_notify: Arc<tokio::sync::Notify>,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -63,6 +66,7 @@ impl Scheduler {
             state,
             worker_pool: Arc::new(RwLock::new(WorkerPool::new())),
             job_tracker: Arc::new(RwLock::new(JobTracker::new())),
+            job_notify: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
@@ -144,17 +148,29 @@ impl Scheduler {
     // ── Job queue ─────────────────────────────────────────────────────────────
 
     pub async fn enqueue_eval_job(&self, job_id: String, job: PendingEvalJob) -> JobCandidate {
-        self.job_tracker
+        let candidate = self
+            .job_tracker
             .write()
             .await
-            .add_pending(job_id, PendingJob::Eval(job))
+            .add_pending(job_id, PendingJob::Eval(job));
+        self.job_notify.notify_waiters();
+        candidate
     }
 
     pub async fn enqueue_build_job(&self, job_id: String, job: PendingBuildJob) -> JobCandidate {
-        self.job_tracker
+        let candidate = self
+            .job_tracker
             .write()
             .await
-            .add_pending(job_id, PendingJob::Build(job))
+            .add_pending(job_id, PendingJob::Build(job));
+        self.job_notify.notify_waiters();
+        candidate
+    }
+
+    /// Returns a handle that handler dispatch loops can `await` on to be woken
+    /// when new jobs are enqueued in the scheduler.
+    pub fn job_notify(&self) -> Arc<tokio::sync::Notify> {
+        Arc::clone(&self.job_notify)
     }
 
     /// Returns pending job candidates visible to the given worker,

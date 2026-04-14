@@ -369,9 +369,39 @@ graph LR
 
 | Task | Requires | Input (from server) | Output (from worker) |
 |------|----------|---------------------|----------------------|
-| **FetchFlake** | `fetch` | `repository` (flake URL), `commit` (SHA), SSH credential | — |
+| **FetchFlake** | `fetch` | `repository` (flake URL), `commit` (SHA), SSH credential | `FetchResult` — local clone path, fetched flake inputs as compressed NARs |
 | **EvaluateFlake** | `eval` | `wildcards` (attribute patterns), `timeout` (seconds) | `attrs: Vec<String>` — discovered attribute paths |
 | **EvaluateDerivations** | `eval` | (uses attrs from previous task) | `derivations: Vec<DiscoveredDerivation>` — drv paths, outputs, closure, required features |
+
+When `FetchFlake` and `EvaluateFlake`/`EvaluateDerivations` are in the **same `FlakeJob`**, the worker reuses the local clone from the fetch step for evaluation. The repository is cloned exactly once; subsequent eval tasks operate on the local checkout. This guarantees the eval runs against the same commit the server detected and avoids a second remote fetch (which would fail for protocols Nix doesn't natively support, e.g. `git://`).
+
+When the tasks are in **separate jobs** (e.g. a fetch-only worker and an eval-only worker), the eval worker receives the flake inputs as NARs from the server/cache before evaluation starts. The flake reference is then a Nix store path rather than a remote URL.
+
+#### FetchFlake
+
+The fetch step performs three things:
+
+1. **Clone** the repository at the specified commit using libgit2 (handles SSH keys, `git://`, `https://`).
+2. **Prefetch flake inputs** by running `nix flake lock` on the checkout, pulling all transitive inputs into the local Nix store.
+3. **Report `FetchResult`** with the list of fetched store paths. These paths are the flake's locked inputs — the server can upload them to the binary cache so other workers or eval-only workers can substitute them.
+
+```rust
+FetchResult {
+    fetched_paths: Vec<FetchedInput>,    // flake inputs now in the worker's store
+}
+
+FetchedInput {
+    store_path: String,                  // /nix/store/xxx-source
+    nar_hash: String,                    // sha256:xxx (SRI)
+    nar_size: u64,                       // compressed NAR bytes
+}
+```
+
+The server processes `FetchResult` by:
+1. Recording the fetched input paths for the evaluation.
+2. Optionally uploading the NARs to the binary cache (so eval-only workers or future builds can substitute them without re-fetching from upstream).
+
+This makes the fetch step a first-class evaluation phase with its own database status (`Fetching`), not just a side effect. The fetched inputs flow into `EvaluateDerivations` as known-substituted paths.
 
 ```rust
 DiscoveredDerivation {
@@ -398,6 +428,13 @@ sequenceDiagram
     participant W as Worker
     participant S as Server
 
+    W->>S: JobUpdate::Fetching
+    Note over W: clone repo, prefetch flake inputs
+    W->>S: JobUpdate::FetchResult { fetched_paths }
+    Note right of S: records inputs, uploads to cache
+    W->>S: JobUpdate::EvaluatingFlake
+    Note over W: nix eval (uses local clone)
+    W->>S: JobUpdate::EvaluatingDerivations
     W->>S: JobUpdate::EvalResult (batch 1: 50 derivations, 12 substituted)
     Note right of S: inserts rows, marks substituted,<br/>queues signing for substituted outputs
     W->>S: JobUpdate::EvalResult (batch 2: 30 derivations)
@@ -564,6 +601,9 @@ Workers send `JobUpdate` messages to report progress. The server maps these dire
 enum JobUpdateKind {
     // FlakeJob phases → EvaluationStatus
     Fetching,                                           // → Fetching
+    FetchResult {                                       // fetch completed — report fetched inputs
+        fetched_paths: Vec<FetchedInput>,                // flake inputs now in the worker's store
+    },
     EvaluatingFlake,                                    // → EvaluatingFlake
     EvaluatingDerivations,                              // → EvaluatingDerivation
     EvalResult {                                        // incremental batch (can be sent multiple times)
@@ -576,6 +616,12 @@ enum JobUpdateKind {
     BuildOutput { build_id: Uuid, outputs: Vec<BuildOutput> }, // per-derivation result
     Compressing,                                        // packing outputs into zstd NARs (no DB status change)
     Signing,                                            // (no DB status change)
+}
+
+struct FetchedInput {
+    store_path: String,                 // /nix/store/xxx-source
+    nar_hash: String,                   // sha256:xxx (SRI)
+    nar_size: u64,                      // NAR bytes
 }
 
 struct BuildOutput {
@@ -593,6 +639,7 @@ struct BuildOutput {
 | `JobUpdateKind` | DB Entity | Status set |
 |-----------------|-----------|------------|
 | `Fetching` | `evaluation` | `Fetching` (8) |
+| `FetchResult` | `evaluation` | Stays `Fetching`; records fetched input paths, uploads NARs to cache |
 | `EvaluatingFlake` | `evaluation` | `EvaluatingFlake` (1) |
 | `EvaluatingDerivations` | `evaluation` | `EvaluatingDerivation` (2) |
 | `EvalResult` | `evaluation` + `derivation` + `build` + `evaluation_message` | Inserts rows per batch; substituted → `Substituted` (7), rest → `Created` (0). First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. |
