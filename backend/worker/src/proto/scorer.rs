@@ -151,7 +151,7 @@ impl Default for JobScorer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::traits::WorkerStore;
+    use proto::traits::WorkerStore;
     use test_support::prelude::*;
 
     #[tokio::test]

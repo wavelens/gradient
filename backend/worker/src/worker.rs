@@ -75,7 +75,7 @@ impl Worker {
         conn.send(ClientMessage::RequestJobList).await?;
 
         let store = LocalNixStore::connect().await?;
-        let evaluator = WorkerEvaluator::new(config.eval_workers, 0);
+        let evaluator = WorkerEvaluator::new(config.eval_workers, config.max_evals_per_worker);
         let executor = JobExecutor::new(
             store,
             evaluator,
@@ -125,7 +125,7 @@ impl Worker {
         conn.send(ClientMessage::RequestJobList).await?;
 
         let store = LocalNixStore::connect().await?;
-        let evaluator = WorkerEvaluator::new(config.eval_workers, 0);
+        let evaluator = WorkerEvaluator::new(config.eval_workers, config.max_evals_per_worker);
         let executor = JobExecutor::new(
             store,
             evaluator,

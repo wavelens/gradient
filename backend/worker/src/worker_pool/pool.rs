@@ -122,6 +122,7 @@ impl EvalWorker {
         repository: String,
         path: String,
     ) -> Result<Vec<String>> {
+        self.evaluations_served += 1;
         match self
             .request(&EvalRequest::AttrNames { repository, path })
             .await?

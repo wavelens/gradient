@@ -63,6 +63,12 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_WORKER_EVAL_WORKERS", default_value_t = 1)]
     pub eval_workers: usize,
 
+    /// Recycle an eval-worker subprocess after serving this many list/resolve/attr_names
+    /// calls. Nix's Boehm GC never releases memory back to the OS; recycling is the
+    /// only way to bound memory usage. Set to 0 to disable recycling.
+    #[arg(long, env = "GRADIENT_MAX_EVALUATIONS_PER_WORKER", default_value_t = 1)]
+    pub max_evals_per_worker: usize,
+
     /// Maximum number of simultaneous builds.
     #[arg(
         long,
@@ -247,6 +253,7 @@ mod tests {
             binpath_ssh: "ssh".to_owned(),
             eval_worker: false,
             eval_workers: 1,
+            max_evals_per_worker: 1,
             max_concurrent_builds: 1,
             log_level: "info".to_owned(),
             eval_log_level: None,
@@ -320,6 +327,7 @@ mod tests {
             binpath_ssh: "ssh".to_owned(),
             eval_worker: false,
             eval_workers: 1,
+            max_evals_per_worker: 1,
             max_concurrent_builds: 1,
             log_level: "info".to_owned(),
             eval_log_level: None,
@@ -377,6 +385,7 @@ mod tests {
             binpath_ssh: "ssh".to_owned(),
             eval_worker: false,
             eval_workers: 1,
+            max_evals_per_worker: 1,
             max_concurrent_builds: 1,
             log_level: "info".to_owned(),
             eval_log_level: None,

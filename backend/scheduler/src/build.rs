@@ -16,7 +16,7 @@ use gradient_core::types::*;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::jobs::PendingBuildJob;
@@ -90,9 +90,9 @@ pub async fn handle_nar_ready(
             info!(store_path, nar_size, "NarReady recorded");
         }
     } else {
-        warn!(
+        debug!(
             store_path,
-            "NarReady for unknown store path — no derivation_output found"
+            "NarReady for store path not in derivation_output (expected for source paths)"
         );
     }
 

@@ -154,7 +154,7 @@ async fn archive_flake(
         None
     };
 
-    let mut child = cmd.spawn().context("failed to spawn nix flake archive")?;
+    let child = cmd.spawn().context("failed to spawn nix flake archive")?;
 
     // Spawn into a separate task so abort_handle can cancel it (dropping child,
     // which triggers kill_on_drop) independently of the await future.
@@ -233,7 +233,7 @@ async fn query_path_info(
         cmd.arg(path);
     }
 
-    let mut child = cmd.spawn().context("failed to spawn nix path-info")?;
+    let child = cmd.spawn().context("failed to spawn nix path-info")?;
 
     let path_info_task = tokio::spawn(async move { child.wait_with_output().await });
     let abort_handle = path_info_task.abort_handle();

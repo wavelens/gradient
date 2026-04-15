@@ -44,8 +44,6 @@ impl JobUpdater {
         Self { job_id, writer, cache_waiters }
     }
 
-    pub fn job_id(&self) -> &str { &self.job_id }
-
     pub async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode) -> Result<Vec<CachedPath>> {
         let (tx, rx) = oneshot::channel();
         self.cache_waiters.lock().unwrap().insert(self.job_id.clone(), tx);
@@ -57,29 +55,12 @@ impl JobUpdater {
         rx.await.map_err(|_| anyhow::anyhow!("cache waiter dropped — connection closed?"))
     }
 
-    pub fn report_fetching(&self) -> Result<()> {
-        self.send_update(JobUpdateKind::Fetching)
-    }
-
     pub fn report_fetch_result(&self, fetched_paths: Vec<FetchedInput>) -> Result<()> {
         self.send_update(JobUpdateKind::FetchResult { fetched_paths })
     }
 
     pub fn report_evaluating_flake(&self) -> Result<()> {
         self.send_update(JobUpdateKind::EvaluatingFlake)
-    }
-
-    pub fn report_evaluating_derivations(&self) -> Result<()> {
-        self.send_update(JobUpdateKind::EvaluatingDerivations)
-    }
-
-    pub fn report_eval_result(
-        &self,
-        derivations: Vec<DiscoveredDerivation>,
-        warnings: Vec<String>,
-        errors: Vec<String>,
-    ) -> Result<()> {
-        self.send_update(JobUpdateKind::EvalResult { derivations, warnings, errors })
     }
 
     pub fn report_building(&self, build_id: String) -> Result<()> {
@@ -96,22 +77,6 @@ impl JobUpdater {
 
     pub fn report_signing(&self) -> Result<()> {
         self.send_update(JobUpdateKind::Signing)
-    }
-
-    pub fn send_log_chunk(&self, task_index: u32, data: Vec<u8>) -> Result<()> {
-        self.writer.send(ClientMessage::LogChunk {
-            job_id: self.job_id.clone(),
-            task_index,
-            data,
-        })
-    }
-
-    pub fn complete(&self) -> Result<()> {
-        self.writer.send(ClientMessage::JobCompleted { job_id: self.job_id.clone() })
-    }
-
-    pub fn fail(&self, error: String) -> Result<()> {
-        self.writer.send(ClientMessage::JobFailed { job_id: self.job_id.clone(), error })
     }
 
     fn send_update(&self, update: JobUpdateKind) -> Result<()> {
@@ -231,7 +196,10 @@ mod tests {
         });
 
         let (updater, _reader) = make_updater(job_id, conn);
-        updater.report_fetching().unwrap();
+        updater.writer.send(ClientMessage::JobUpdate {
+            job_id: updater.job_id.clone(),
+            update: JobUpdateKind::Fetching,
+        }).unwrap();
         server_task.await.unwrap();
     }
 
@@ -258,9 +226,14 @@ mod tests {
         });
 
         let (updater, _reader) = make_updater(job_id, conn);
-        updater
-            .report_eval_result(vec![], vec!["warn1".to_owned()], vec![])
-            .unwrap();
+        updater.writer.send(ClientMessage::JobUpdate {
+            job_id: updater.job_id.clone(),
+            update: JobUpdateKind::EvalResult {
+                derivations: vec![],
+                warnings: vec!["warn1".to_owned()],
+                errors: vec![],
+            },
+        }).unwrap();
         server_task.await.unwrap();
     }
 
@@ -283,9 +256,11 @@ mod tests {
         });
 
         let (updater, _reader) = make_updater(job_id, conn);
-        updater
-            .send_log_chunk(3, b"hello log".to_vec())
-            .unwrap();
+        updater.writer.send(ClientMessage::LogChunk {
+            job_id: updater.job_id.clone(),
+            task_index: 3,
+            data: b"hello log".to_vec(),
+        }).unwrap();
         server_task.await.unwrap();
     }
 
@@ -301,7 +276,7 @@ mod tests {
         });
 
         let (updater, _reader) = make_updater(job_id, conn);
-        updater.complete().unwrap();
+        updater.writer.send(ClientMessage::JobCompleted { job_id: updater.job_id.clone() }).unwrap();
         server_task.await.unwrap();
     }
 
@@ -318,9 +293,10 @@ mod tests {
         });
 
         let (updater, _reader) = make_updater(job_id, conn);
-        updater
-            .fail("something went wrong".to_owned())
-            .unwrap();
+        updater.writer.send(ClientMessage::JobFailed {
+            job_id: updater.job_id.clone(),
+            error: "something went wrong".to_owned(),
+        }).unwrap();
         server_task.await.unwrap();
     }
 }

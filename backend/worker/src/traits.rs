@@ -6,7 +6,7 @@
 
 //! Re-exports trait abstractions from proto and provides production implementations.
 
-pub use proto::traits::{DrvReader, JobReporter, WorkerStore};
+pub use proto::traits::{DrvReader, JobReporter};
 
 use anyhow::Result;
 use async_trait::async_trait;

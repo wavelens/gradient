@@ -110,30 +110,6 @@ impl ProtoConnection {
         }
     }
 
-    /// Close the connection gracefully.
-    pub async fn close(&mut self) {
-        match &mut self.socket {
-            ProtoStream::Client(ws) => {
-                let _ = ws.close(None).await;
-            }
-            ProtoStream::Accepted(ws) => {
-                let _ = ws.close(None).await;
-            }
-        }
-    }
-
-    /// Reconnect to a (possibly different) URL, resetting the server version.
-    /// Used by the main reconnect loop after a clean or unclean disconnect.
-    pub async fn reconnect(&mut self, url: &str) -> Result<()> {
-        self.close().await;
-        let (socket, _) = connect_async(url)
-            .await
-            .with_context(|| format!("failed to reconnect to {url}"))?;
-        self.socket = ProtoStream::Client(socket);
-        self.server_version = 0;
-        Ok(())
-    }
-
     /// Split into a cloneable [`ProtoWriter`] and a [`ProtoReader`].
     ///
     /// Spawns a background task that drains the writer channel and forwards
@@ -147,7 +123,6 @@ impl ProtoConnection {
             Item = Result<Message, tokio_tungstenite::tungstenite::Error>
         > + Send>>;
 
-        let server_version = self.server_version;
         let (sink, stream): (BoxSink, BoxStream) = match self.socket {
             ProtoStream::Client(ws) => {
                 let (s, r) = ws.split();
@@ -178,7 +153,7 @@ impl ProtoConnection {
 
         (
             ProtoWriter { tx },
-            ProtoReader { server_version, stream: Box::pin(stream) },
+            ProtoReader { stream: Box::pin(stream) },
         )
     }
 }
@@ -200,7 +175,6 @@ impl ProtoWriter {
 
 /// Read-only half produced by [`ProtoConnection::split`].
 pub struct ProtoReader {
-    server_version: u16,
     stream: std::pin::Pin<Box<dyn futures::Stream<
         Item = Result<tokio_tungstenite::tungstenite::Message,
                       tokio_tungstenite::tungstenite::Error>
@@ -208,9 +182,6 @@ pub struct ProtoReader {
 }
 
 impl ProtoReader {
-    pub fn server_version(&self) -> u16 { self.server_version }
-    pub fn set_server_version(&mut self, v: u16) { self.server_version = v; }
-
     pub async fn recv(&mut self) -> anyhow::Result<Option<ServerMessage>> {
         loop {
             match self.stream.next().await {

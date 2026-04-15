@@ -24,8 +24,7 @@ use gradient_core::sources::{check_project_updates, get_commit_info};
 use gradient_core::types::input::vec_to_hex;
 use gradient_core::types::*;
 use sea_orm::{
-    ActiveModelTrait as _, ColumnTrait, Condition, EntityTrait, JoinType, QueryFilter, QueryOrder,
-    QuerySelect, RelationTrait,
+    ActiveModelTrait as _, ColumnTrait, EntityTrait, QueryFilter,
 };
 
 /// Fallback poll interval for projects whose org has a forge webhook configured.
