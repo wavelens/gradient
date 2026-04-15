@@ -19,6 +19,18 @@ in {
         type = lib.types.package;
         description = "Nix package to use for evaluation and fetching. The `nix` binary from this package is passed to the worker as `GRADIENT_BINPATH_NIX`.";
       };
+      git = lib.mkOption {
+        default = config.programs.git.package;
+        defaultText = lib.literalExpression "config.programs.git.package";
+        type = lib.types.package;
+        description = "Git package. Required by the worker's repository cloning code (libgit2 may spawn git subprocesses).";
+      };
+      ssh = lib.mkOption {
+        default = config.programs.ssh.package;
+        defaultText = lib.literalExpression "config.programs.ssh.package";
+        type = lib.types.package;
+        description = "OpenSSH package. Passed as GIT_SSH_COMMAND so nix flake archive can fetch private flake inputs.";
+      };
     };
 
     configureNginx = lib.mkEnableOption "Nginx reverse proxy for the worker listener";
@@ -191,12 +203,10 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
-    assertions = [
-      {
-        assertion = cfg.capabilities.federate -> cfg.discoverable;
-        message = "services.gradient.worker: capabilities.federate requires discoverable to be enabled";
-      }
-    ];
+    assertions = [{
+      assertion = cfg.capabilities.federate -> cfg.discoverable;
+      message = "services.gradient.worker: capabilities.federate requires discoverable to be enabled";
+    }];
 
     systemd = {
       tmpfiles.settings."10-gradient"."/nix/var/nix/gcroots/gradient".d = {
@@ -208,6 +218,12 @@ in {
       services.gradient-worker = {
         wantedBy = [ "multi-user.target" ];
         after = [ "network.target" ];
+        path = [
+          cfg.packages.git
+          cfg.packages.nix
+          cfg.packages.ssh
+        ];
+
         serviceConfig = {
           ExecStart = lib.getExe' cfg.packages.gradient "gradient-worker";
           StateDirectory = "gradient-worker";
@@ -240,6 +256,7 @@ in {
           XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
           GRADIENT_WORKER_DATA_DIR   = cfg.baseDir;
           GRADIENT_BINPATH_NIX       = lib.getExe' cfg.packages.nix "nix";
+          GRADIENT_BINPATH_SSH       = lib.getExe' cfg.packages.ssh "ssh";
         } // lib.optionalAttrs (cfg.serverUrl != null) {
           GRADIENT_WORKER_SERVER_URL = cfg.serverUrl;
         } // lib.optionalAttrs (cfg.peersFile != null) {

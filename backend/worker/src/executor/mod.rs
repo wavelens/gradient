@@ -33,6 +33,7 @@ pub struct JobExecutor {
     pub(crate) evaluator: WorkerEvaluator,
     pub(crate) credentials: CredentialStore,
     pub(crate) binpath_nix: String,
+    pub(crate) binpath_ssh: String,
 }
 
 impl JobExecutor {
@@ -41,12 +42,14 @@ impl JobExecutor {
         evaluator: WorkerEvaluator,
         credentials: CredentialStore,
         binpath_nix: String,
+        binpath_ssh: String,
     ) -> Self {
         Self {
             store,
             evaluator,
             credentials,
             binpath_nix,
+            binpath_ssh,
         }
     }
 
@@ -74,6 +77,7 @@ impl JobExecutor {
                         updater as &mut dyn proto::traits::JobReporter,
                         credentials,
                         &self.binpath_nix,
+                        &self.binpath_ssh,
                     )
                     .await?;
                     // Push each fetched input as a zstd-compressed NAR to the

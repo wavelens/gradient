@@ -49,6 +49,11 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_BINPATH_NIX", default_value = "nix")]
     pub binpath_nix: String,
 
+    /// Path to the `ssh` binary. Used as `GIT_SSH_COMMAND` when nix fetches
+    /// private flake inputs. Defaults to `ssh` (resolved via `PATH`).
+    #[arg(long, env = "GRADIENT_BINPATH_SSH", default_value = "ssh")]
+    pub binpath_ssh: String,
+
     /// Re-exec as a Nix evaluator subprocess (internal — do not set manually).
     #[arg(long, env = "GRADIENT_EVAL_WORKER", hide = true)]
     pub eval_worker: bool,
@@ -239,6 +244,7 @@ mod tests {
             data_dir: String::new(),
             worker_id: None,
             binpath_nix: "nix".to_owned(),
+            binpath_ssh: "ssh".to_owned(),
             eval_worker: false,
             eval_workers: 1,
             max_concurrent_builds: 1,
@@ -311,6 +317,7 @@ mod tests {
             data_dir: String::new(),
             worker_id: None,
             binpath_nix: "nix".to_owned(),
+            binpath_ssh: "ssh".to_owned(),
             eval_worker: false,
             eval_workers: 1,
             max_concurrent_builds: 1,
@@ -367,6 +374,7 @@ mod tests {
             data_dir: String::new(),
             worker_id: None,
             binpath_nix: "nix".to_owned(),
+            binpath_ssh: "ssh".to_owned(),
             eval_worker: false,
             eval_workers: 1,
             max_concurrent_builds: 1,

@@ -15,6 +15,7 @@
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
+use tempfile::NamedTempFile;
 use git2::RemoteCallbacks;
 use proto::messages::{FetchedInput, FlakeJob};
 use proto::traits::JobReporter;
@@ -37,6 +38,7 @@ pub async fn fetch_repository(
     updater: &mut dyn JobReporter,
     credentials: &CredentialStore,
     binpath_nix: &str,
+    binpath_ssh: &str,
 ) -> Result<(String, Vec<FetchedInput>)> {
     updater.report_fetching().await?;
 
@@ -48,10 +50,12 @@ pub async fn fetch_repository(
 
     debug!(%url, %commit, has_ssh_key = ssh_key.is_some(), "fetching repository");
 
-    let tmp_path =
-        tokio::task::spawn_blocking(move || clone_and_checkout(&url, &commit, ssh_key.as_deref()))
-            .await
-            .context("fetch task panicked")??;
+    let ssh_key_for_clone = ssh_key.clone();
+    let tmp_path = tokio::task::spawn_blocking(move || {
+        clone_and_checkout(&url, &commit, ssh_key_for_clone.as_deref())
+    })
+    .await
+    .context("fetch task panicked")??;
 
     // Archive the flake source and all locked inputs into the nix store via a
     // subprocess (so fetching goes through the nix daemon with proper network
@@ -60,7 +64,8 @@ pub async fn fetch_repository(
     // reference — instead of the git checkout in /tmp.
     let flake_ref = format!("git+file://{}?rev={}", tmp_path, job.commit);
     let binpath_nix = binpath_nix.to_owned();
-    match archive_flake(&flake_ref, &binpath_nix).await {
+    let binpath_ssh = binpath_ssh.to_owned();
+    match archive_flake(&flake_ref, &binpath_nix, &binpath_ssh, ssh_key.as_deref()).await {
         Ok((source_path, fetched_inputs)) => {
             info!(%source_path, inputs = fetched_inputs.len(), "flake archived to nix store");
             Ok((source_path, fetched_inputs))
@@ -75,12 +80,42 @@ pub async fn fetch_repository(
 /// Run `nix flake archive --json` and collect all store paths (source + all
 /// transitive flake inputs).  Returns the source store path and metadata for
 /// every archived path obtained from `nix path-info`.
+///
+/// When `ssh_key` is `Some`, the key is written to a mode-600 temp file and
+/// `GIT_SSH_COMMAND` is set on the subprocess so libfetchers can clone private
+/// `git+ssh` inputs.  The temp file is deleted when this function returns.
 async fn archive_flake(
     flake_ref: &str,
     binpath_nix: &str,
+    binpath_ssh: &str,
+    ssh_key: Option<&str>,
 ) -> Result<(String, Vec<FetchedInput>)> {
-    let output = tokio::process::Command::new(binpath_nix)
-        .args(["flake", "archive", "--json", flake_ref])
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut cmd = tokio::process::Command::new(binpath_nix);
+    cmd.args(["flake", "archive", "--json", flake_ref]);
+
+    // Write the SSH key to a temp file (mode 0600) and set GIT_SSH_COMMAND so
+    // that nix's libfetchers picks it up when cloning git+ssh inputs.  The
+    // _key_file guard ensures the file is deleted when this scope exits.
+    let _key_file: Option<NamedTempFile> = if let Some(key) = ssh_key {
+        let kf = NamedTempFile::with_suffix(".key")
+            .context("failed to create SSH key temp file")?;
+        std::fs::set_permissions(kf.path(), std::fs::Permissions::from_mode(0o600))
+            .context("failed to chmod SSH key file")?;
+        std::fs::write(kf.path(), key.as_bytes()).context("failed to write SSH key file")?;
+        let ssh_command = format!(
+            "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
+            binpath_ssh,
+            kf.path().display()
+        );
+        cmd.env("GIT_SSH_COMMAND", ssh_command);
+        Some(kf)
+    } else {
+        None
+    };
+
+    let output = cmd
         .output()
         .await
         .context("failed to spawn nix flake archive")?;
@@ -247,7 +282,7 @@ mod tests {
         let mut reporter = RecordingJobReporter::new();
 
         // This will fail with a git error (fake URL), but it should report Fetching first.
-        let result = fetch_repository(&job, &mut reporter, &credentials, "nix").await;
+        let result = fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh").await;
 
         assert_eq!(reporter.len(), 1);
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
@@ -265,7 +300,7 @@ mod tests {
         );
 
         let mut reporter = RecordingJobReporter::new();
-        let result = fetch_repository(&job, &mut reporter, &credentials, "nix").await;
+        let result = fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh").await;
 
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
         assert!(result.is_err()); // fake URL
@@ -341,7 +376,7 @@ mod tests {
         let credentials = crate::proto::credentials::CredentialStore::new();
         let mut reporter = RecordingJobReporter::new();
 
-        let result = fetch_repository(&job, &mut reporter, &credentials, "nix").await;
+        let result = fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh").await;
         assert!(
             result.is_ok(),
             "fetch should clone real repo: {:?}",

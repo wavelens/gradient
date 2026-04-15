@@ -78,7 +78,7 @@ impl Worker {
             0, // max_evals_per_worker: 0 = no recycling limit by default
         );
         let credentials = CredentialStore::new();
-        let executor = JobExecutor::new(store, evaluator, credentials.clone(), config.binpath_nix.clone());
+        let executor = JobExecutor::new(store, evaluator, credentials.clone(), config.binpath_nix.clone(), config.binpath_ssh.clone());
 
         Ok(Self {
             config,
@@ -127,7 +127,7 @@ impl Worker {
         let store = LocalNixStore::connect().await?;
         let evaluator = WorkerEvaluator::new(config.eval_workers, 0);
         let credentials = CredentialStore::new();
-        let executor = JobExecutor::new(store, evaluator, credentials.clone(), config.binpath_nix.clone());
+        let executor = JobExecutor::new(store, evaluator, credentials.clone(), config.binpath_nix.clone(), config.binpath_ssh.clone());
 
         Ok(Self {
             config,

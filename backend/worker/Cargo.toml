@@ -44,8 +44,8 @@ tokio-tungstenite = { workspace = true }
 tracing           = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid              = { workspace = true }
+tempfile          = "3"
 zstd              = { workspace = true }
 
 [dev-dependencies]
-tempfile     = "3.27"
 test-support = { path = "../test-support" }
