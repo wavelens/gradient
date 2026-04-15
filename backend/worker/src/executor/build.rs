@@ -17,8 +17,7 @@ use gradient_core::executer::path_utils::{nix_store_path, strip_nix_store_prefix
 use gradient_core::sources::get_hash_from_path;
 use harmonia_protocol::build_result::BuildResultInner;
 use harmonia_protocol::daemon_wire::types2::BuildMode;
-use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT, StructuredAttrs};
-use harmonia_store_core::derived_path::OutputName;
+use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT};
 use harmonia_store_core::store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use proto::messages::{BuildOutput, BuildTask};
@@ -51,21 +50,19 @@ pub async fn build_derivation(
         parse_drv(&drv_bytes).with_context(|| format!("parse .drv file: {}", full_drv_path))?;
 
     // ── Build BasicDerivation for harmonia ────────────────────────────────────
-    // Acquire the pool guard first so we can query output paths from the daemon
-    // before building — mirroring the old scheduler which always provided
-    // concrete InputAddressed paths rather than Deferred/CAFixed variants.
+    // Output paths are taken directly from the .drv file.
     // Sending Deferred outputs causes the daemon to return CA paths like
     // `sha256:hash-name` in its response, which harmonia cannot parse.
     let harmonia_path = StorePath::from_base_path(strip_store_prefix(&full_drv_path))
         .map_err(|e| anyhow::anyhow!("invalid store path {}: {}", full_drv_path, e))?;
+
+    let basic_drv = get_basic_derivation(&full_drv_path, &drv)?;
 
     let mut guard = store
         .pool()
         .acquire()
         .await
         .map_err(|e| anyhow::anyhow!("acquire local store for build: {}", e))?;
-
-    let basic_drv = get_basic_derivation(&full_drv_path, &harmonia_path, &drv, guard.client()).await?;
 
     debug!(
         drv = %task.drv_path,
@@ -131,34 +128,35 @@ pub async fn build_derivation(
 
 /// Construct a harmonia [`BasicDerivation`] from a parsed drv file.
 ///
-/// Output paths are queried from the nix-daemon via `query_derivation_output_map`
-/// so that every output is always `InputAddressed` with a concrete store path.
-/// Sending `Deferred` or `CAFixed` outputs causes the daemon to return CA paths
-/// (`sha256:hash-name`) in its build response, which harmonia cannot parse.
+/// Output paths are taken directly from the `.drv` file:
+/// - non-empty `path` → `InputAddressed` (concrete store path)
+/// - empty `path` → `Deferred` (floating CA derivation)
+///
+/// This avoids calling `query_derivation_output_map`, which fails on some
+/// daemon versions that return full `/nix/store/...` paths where harmonia
+/// expects bare `hash-name` paths.
 ///
 /// Structured attributes (`__json`) are moved from the env map to
 /// `structured_attrs` so the daemon handles them correctly.
-async fn get_basic_derivation<R, W>(
+fn get_basic_derivation(
     full_drv_path: &str,
-    harmonia_path: &StorePath,
     drv: &gradient_core::db::Derivation,
-    client: &mut gradient_core::executer::GenericDaemonClient<R, W>,
-) -> Result<BasicDerivation>
-where
-    R: tokio::io::AsyncRead + std::fmt::Debug + Unpin + Send + 'static,
-    W: tokio::io::AsyncWrite + std::fmt::Debug + Unpin + Send + 'static,
-{
-    // ── Query concrete output paths from the daemon ───────────────────────────
-    let output_map: BTreeMap<OutputName, Option<StorePath>> = client
-        .query_derivation_output_map(harmonia_path)
-        .await
-        .map_err(|e| anyhow::anyhow!("query_derivation_output_map for {}: {}", full_drv_path, e))?;
-
+) -> Result<BasicDerivation> {
+    // ── Build outputs from .drv data ──────────────────────────────────────────
     let mut outputs: BTreeMap<_, _> = BTreeMap::new();
-    for (output_name, sp_opt) in output_map {
-        let drv_output = match sp_opt {
-            Some(sp) => DerivationOutput::InputAddressed(sp),
-            None => DerivationOutput::Deferred,
+    for o in &drv.outputs {
+        let output_name = o
+            .name
+            .parse()
+            .with_context(|| format!("invalid output name '{}' in {}", o.name, full_drv_path))?;
+        let drv_output = if o.path.is_empty() {
+            DerivationOutput::Deferred
+        } else {
+            let base = strip_nix_store_prefix(o.path.as_str());
+            let sp = StorePath::from_base_path(&base).with_context(|| {
+                format!("invalid output path '{}' in {}", o.path, full_drv_path)
+            })?;
+            DerivationOutput::InputAddressed(sp)
         };
         outputs.insert(output_name, drv_output);
     }
@@ -181,14 +179,9 @@ where
         .collect();
 
     // ── Structured attributes ─────────────────────────────────────────────────
-    // The raw `.drv` env may contain `__json` as a plain string. Move it to
-    // `structured_attrs` so the daemon handles it correctly, and filter it from
-    // the env map (Nix C++ does the same during serialisation).
-    let structured_attrs = drv
-        .environment
-        .get("__json")
-        .and_then(|v| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(v).ok())
-        .map(|attrs| StructuredAttrs { attrs });
+    // harmonia's NixSerialize for BasicDerivation never writes `structured_attrs`
+    // to the wire — only `env` is sent. The `__json` key in env is what the Nix
+    // daemon reads for structured-attrs derivations, so leave it in place.
 
     // Extract the name from the drv path ("hash-name.drv" → "name.drv").
     let base = strip_nix_store_prefix(full_drv_path);
@@ -209,9 +202,8 @@ where
         env: drv
             .environment
             .iter()
-            .filter(|(k, _)| k.as_str() != "__json")
             .map(|(k, v)| (Bytes::from(k.clone()), Bytes::from(v.clone())))
             .collect(),
-        structured_attrs,
+        structured_attrs: None,
     })
 }
