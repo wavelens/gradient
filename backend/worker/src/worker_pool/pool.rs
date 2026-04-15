@@ -44,8 +44,10 @@ impl EvalWorker {
             .kill_on_drop(true)
             .spawn()
             .context("spawning eval worker subprocess")?;
+
         let stdin = child.stdin.take().context("worker stdin missing")?;
         let stdout = BufReader::new(child.stdout.take().context("worker stdout missing")?);
+
         Ok(Self {
             child,
             stdin,
@@ -65,6 +67,7 @@ impl EvalWorker {
             .write_all(&bytes)
             .await
             .context("writing to eval worker stdin")?;
+
         self.stdin
             .flush()
             .await
@@ -76,9 +79,11 @@ impl EvalWorker {
             .read_line(&mut self.line)
             .await
             .context("reading eval worker response")?;
+
         if n == 0 {
             anyhow::bail!("eval worker closed pipe");
         }
+
         serde_json::from_str(self.line.trim_end()).context("parsing eval worker response")
     }
 
@@ -249,6 +254,7 @@ impl Drop for PooledEvalWorker {
                 drop(worker);
                 return;
             }
+
             if self.healthy
                 && let Ok(mut idle) = self.idle.lock()
             {

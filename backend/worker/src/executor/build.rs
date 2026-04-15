@@ -17,8 +17,8 @@ use gradient_core::executer::path_utils::{nix_store_path, strip_nix_store_prefix
 use gradient_core::sources::get_hash_from_path;
 use harmonia_protocol::build_result::BuildResultInner;
 use harmonia_protocol::daemon_wire::types2::BuildMode;
-use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT};
-use harmonia_store_core::store_path::ContentAddress;
+use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT, StructuredAttrs};
+use harmonia_store_core::derived_path::OutputName;
 use harmonia_store_core::store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use proto::messages::{BuildOutput, BuildTask};
@@ -51,9 +51,11 @@ pub async fn build_derivation(
         parse_drv(&drv_bytes).with_context(|| format!("parse .drv file: {}", full_drv_path))?;
 
     // ── Build BasicDerivation for harmonia ────────────────────────────────────
-    let basic_drv = get_basic_derivation(&task.drv_path, &drv)?;
-
-    // ── Call local nix-daemon ─────────────────────────────────────────────────
+    // Acquire the pool guard first so we can query output paths from the daemon
+    // before building — mirroring the old scheduler which always provided
+    // concrete InputAddressed paths rather than Deferred/CAFixed variants.
+    // Sending Deferred outputs causes the daemon to return CA paths like
+    // `sha256:hash-name` in its response, which harmonia cannot parse.
     let harmonia_path = StorePath::from_base_path(strip_store_prefix(&full_drv_path))
         .map_err(|e| anyhow::anyhow!("invalid store path {}: {}", full_drv_path, e))?;
 
@@ -63,11 +65,32 @@ pub async fn build_derivation(
         .await
         .map_err(|e| anyhow::anyhow!("acquire local store for build: {}", e))?;
 
+    let basic_drv = get_basic_derivation(&full_drv_path, &harmonia_path, &drv, guard.client()).await?;
+
+    debug!(
+        drv = %task.drv_path,
+        platform = %drv.system,
+        builder = %drv.builder,
+        outputs = ?drv.outputs.iter().map(|o| &o.name).collect::<Vec<_>>(),
+        input_drvs = drv.input_derivations.len(),
+        input_srcs = drv.input_sources.len(),
+        env_keys = ?drv.environment.keys().collect::<Vec<_>>(),
+        "sending BasicDerivation to nix-daemon"
+    );
+
     let result = guard
         .client()
         .build_derivation(&harmonia_path, &basic_drv, BuildMode::Normal)
         .await
-        .map_err(|e| anyhow::anyhow!("build_derivation failed for {}: {}", task.drv_path, e))?;
+        .map_err(|e| anyhow::anyhow!(
+            "build_derivation failed for {} (platform={}, builder={}, outputs=[{}], env_keys=[{}]): {}",
+            task.drv_path,
+            drv.system,
+            drv.builder,
+            drv.outputs.iter().map(|o| o.name.as_str()).collect::<Vec<_>>().join(", "),
+            drv.environment.keys().cloned().collect::<Vec<_>>().join(", "),
+            e,
+        ))?;
 
     // ── Process build result ──────────────────────────────────────────────────
     let outputs = match &result.inner {
@@ -107,70 +130,68 @@ pub async fn build_derivation(
 }
 
 /// Construct a harmonia [`BasicDerivation`] from a parsed drv file.
-fn get_basic_derivation(
-    drv_path: &str,
+///
+/// Output paths are queried from the nix-daemon via `query_derivation_output_map`
+/// so that every output is always `InputAddressed` with a concrete store path.
+/// Sending `Deferred` or `CAFixed` outputs causes the daemon to return CA paths
+/// (`sha256:hash-name`) in its build response, which harmonia cannot parse.
+///
+/// Structured attributes (`__json`) are moved from the env map to
+/// `structured_attrs` so the daemon handles them correctly.
+async fn get_basic_derivation<R, W>(
+    full_drv_path: &str,
+    harmonia_path: &StorePath,
     drv: &gradient_core::db::Derivation,
-) -> Result<BasicDerivation> {
+    client: &mut gradient_core::executer::GenericDaemonClient<R, W>,
+) -> Result<BasicDerivation>
+where
+    R: tokio::io::AsyncRead + std::fmt::Debug + Unpin + Send + 'static,
+    W: tokio::io::AsyncWrite + std::fmt::Debug + Unpin + Send + 'static,
+{
+    // ── Query concrete output paths from the daemon ───────────────────────────
+    let output_map: BTreeMap<OutputName, Option<StorePath>> = client
+        .query_derivation_output_map(harmonia_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("query_derivation_output_map for {}: {}", full_drv_path, e))?;
+
     let mut outputs: BTreeMap<_, _> = BTreeMap::new();
-    for o in &drv.outputs {
-        let output_name = o
-            .name
-            .parse()
-            .with_context(|| format!("invalid output name: {}", o.name))?;
-
-        let drv_output = if !o.hash_algo.is_empty() && !o.hash.is_empty() {
-            // Fixed-output derivation (FOD): the hash_algo field is either
-            // "sha256" (flat) or "r:sha256" (recursive/NAR hash).
-            let (recursive, algo_str) = o
-                .hash_algo
-                .strip_prefix("r:")
-                .map(|rest| (true, rest))
-                .unwrap_or((false, &o.hash_algo));
-
-            let algorithm: harmonia_utils_hash::Algorithm = algo_str
-                .parse()
-                .with_context(|| format!("unknown hash algorithm: {}", o.hash_algo))?;
-
-            let hash =
-                harmonia_utils_hash::fmt::Base16::parse(algorithm, &o.hash)
-                    .or_else(|_| harmonia_utils_hash::fmt::Base32::parse(algorithm, &o.hash))
-                    .with_context(|| {
-                        format!("invalid hash for output {}: {}", o.name, o.hash)
-                    })?;
-
-            let ca = if recursive {
-                ContentAddress::Recursive(hash)
-            } else {
-                ContentAddress::Flat(hash)
-            };
-
-            DerivationOutput::CAFixed(ca)
-        } else if o.path.is_empty() {
-            DerivationOutput::Deferred
-        } else {
-            let sp = StorePath::from_base_path(strip_store_prefix(&o.path))
-                .with_context(|| format!("invalid output store path: {}", o.path))?;
-
-            DerivationOutput::InputAddressed(sp)
+    for (output_name, sp_opt) in output_map {
+        let drv_output = match sp_opt {
+            Some(sp) => DerivationOutput::InputAddressed(sp),
+            None => DerivationOutput::Deferred,
         };
         outputs.insert(output_name, drv_output);
     }
 
-    // Input derivation outputs + input sources → flat StorePath set.
+    // ── Input sources (no .drv paths — those are already built) ──────────────
     let inputs: harmonia_store_core::store_path::StorePathSet = drv
-        .input_derivations
+        .input_sources
         .iter()
-        .map(|(p, _)| p.as_str())
-        .chain(drv.input_sources.iter().map(String::as_str))
         .filter_map(|p| {
             let full = nix_store_path(p);
             let base = strip_nix_store_prefix(&full).to_owned();
-            StorePath::from_base_path(&base).ok()
+            match StorePath::from_base_path(&base) {
+                Ok(sp) => Some(sp),
+                Err(e) => {
+                    warn!(path = %p, error = %e, "skipping input_src: not a valid store path");
+                    None
+                }
+            }
         })
         .collect();
 
-    // Extract the name component from the drv path (e.g. "hash-name.drv" → "name.drv").
-    let base = strip_nix_store_prefix(drv_path);
+    // ── Structured attributes ─────────────────────────────────────────────────
+    // The raw `.drv` env may contain `__json` as a plain string. Move it to
+    // `structured_attrs` so the daemon handles it correctly, and filter it from
+    // the env map (Nix C++ does the same during serialisation).
+    let structured_attrs = drv
+        .environment
+        .get("__json")
+        .and_then(|v| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(v).ok())
+        .map(|attrs| StructuredAttrs { attrs });
+
+    // Extract the name from the drv path ("hash-name.drv" → "name.drv").
+    let base = strip_nix_store_prefix(full_drv_path);
     let drv_name = base
         .find('-')
         .map(|i| base[i + 1..].to_owned())
@@ -188,147 +209,9 @@ fn get_basic_derivation(
         env: drv
             .environment
             .iter()
+            .filter(|(k, _)| k.as_str() != "__json")
             .map(|(k, v)| (Bytes::from(k.clone()), Bytes::from(v.clone())))
             .collect(),
-        structured_attrs: None,
+        structured_attrs,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use gradient_core::db::{Derivation, DerivationOutput};
-    use harmonia_store_core::derivation::DerivationOutput as HarmoniaOutput;
-
-    fn empty_drv() -> Derivation {
-        Derivation {
-            outputs: vec![],
-            input_derivations: vec![],
-            input_sources: vec![],
-            system: "x86_64-linux".into(),
-            builder: "/bin/sh".into(),
-            args: vec![],
-            environment: Default::default(),
-        }
-    }
-
-    #[test]
-    fn build_basic_drv_empty_path_deferred() {
-        let mut drv = empty_drv();
-        drv.outputs = vec![DerivationOutput {
-            name: "out".into(),
-            path: "".into(),
-            hash_algo: "".into(),
-            hash: "".into(),
-        }];
-
-        let basic = get_basic_derivation("aaaa-hello.drv", &drv).unwrap();
-        let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
-        let out = basic
-            .outputs
-            .get(&out_name)
-            .expect("output 'out' not found");
-
-        assert!(
-            matches!(out, HarmoniaOutput::Deferred),
-            "empty path → Deferred"
-        );
-    }
-
-    #[test]
-    fn build_basic_drv_nonempty_path_input_addressed() {
-        let mut drv = empty_drv();
-        // nix store path hashes are 32 nix-base32 chars
-        drv.outputs = vec![DerivationOutput {
-            name: "out".into(),
-            path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".into(),
-            hash_algo: "".into(),
-            hash: "".into(),
-        }];
-
-        let basic =
-            get_basic_derivation("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello.drv", &drv).unwrap();
-
-        let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
-        let out = basic
-            .outputs
-            .get(&out_name)
-            .expect("output 'out' not found");
-        assert!(
-            matches!(out, HarmoniaOutput::InputAddressed(_)),
-            "non-empty path → InputAddressed"
-        );
-    }
-
-    #[test]
-    fn build_basic_drv_fixed_output_flat() {
-        let mut drv = empty_drv();
-        // Fixed-output derivation with flat sha256 hash (like fetchurl).
-        // 64 hex chars = 32 bytes = sha256.
-        drv.outputs = vec![DerivationOutput {
-            name: "out".into(),
-            path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source.tar.gz".into(),
-            hash_algo: "sha256".into(),
-            hash: "0000000000000000000000000000000000000000000000000000000000000000".into(),
-        }];
-
-        drv.builder = "builtin:fetchurl".into();
-        let basic = get_basic_derivation("aaaa-source.tar.gz.drv", &drv).unwrap();
-        let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
-        let out = basic.outputs.get(&out_name).expect("output 'out' not found");
-
-        assert!(
-            matches!(out, HarmoniaOutput::CAFixed(_)),
-            "FOD with sha256 hash → CAFixed, got {:?}",
-            out,
-        );
-    }
-
-    #[test]
-    fn build_basic_drv_fixed_output_recursive() {
-        let mut drv = empty_drv();
-        // Fixed-output derivation with recursive (NAR) sha256 hash.
-        drv.outputs = vec![DerivationOutput {
-            name: "out".into(),
-            path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source".into(),
-            hash_algo: "r:sha256".into(),
-            hash: "0000000000000000000000000000000000000000000000000000000000000000".into(),
-        }];
-
-        drv.builder = "builtin:fetchurl".into();
-        let basic = get_basic_derivation("aaaa-source.drv", &drv).unwrap();
-        let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
-        let out = basic.outputs.get(&out_name).expect("output 'out' not found");
-
-        match out {
-            HarmoniaOutput::CAFixed(ca) => {
-                assert!(
-                    matches!(ca, ContentAddress::Recursive(_)),
-                    "r:sha256 → Recursive, got {:?}",
-                    ca,
-                );
-            }
-            other => panic!("expected CAFixed, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn build_basic_drv_name_extraction() {
-        let drv = empty_drv();
-        // nix store path hashes are 32 nix-base32 chars
-        let basic = get_basic_derivation(
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv",
-            &drv,
-        )
-        .unwrap();
-        assert_eq!(basic.name.as_ref(), "hello.drv");
-    }
-
-    #[test]
-    fn build_basic_drv_no_dash_full_base() {
-        // If there's no '-' in the base path, use the full base as the name.
-        let drv = empty_drv();
-        let basic = get_basic_derivation("nodashname.drv", &drv).unwrap();
-        assert_eq!(basic.name.as_ref(), "nodashname.drv");
-    }
 }
