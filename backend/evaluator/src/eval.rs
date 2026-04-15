@@ -182,8 +182,7 @@ pub async fn evaluate(
     // serialises the find-or-create of every derivation via per-path
     // OnceCells, so two walkers seeing the same transitive dep produce
     // exactly one `MDerivation` row.
-    let parallelism = state.cli.eval_closure_parallelism.max(1);
-    let semaphore = Arc::new(Semaphore::new(parallelism));
+    let semaphore = Arc::new(Semaphore::new(1));
 
     let mut tasks: FuturesUnordered<_> = resolved
         .into_iter()

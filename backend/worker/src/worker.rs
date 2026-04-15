@@ -9,16 +9,20 @@
 //! [`Worker`] connects to the Gradient server, performs the handshake,
 //! registers capabilities, and then drives the job dispatch loop.
 //!
-//! The `run()` method returns when the connection closes or the server signals
-//! `Draining`.  The reconnect loop lives in `main.rs`.
+//! The `run()` method splits the connection so the recv loop stays live
+//! while jobs execute in separate tasks.  [`ServerMessage::AbortJob`] fires
+//! a `watch` channel that the executor checks between subprocess steps.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use proto::messages::{ClientMessage, Job, ServerMessage};
+use proto::messages::{CachedPath, ClientMessage, Job, ServerMessage};
+use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
 use crate::connection::ProtoConnection;
-
 use crate::connection::handshake::perform_handshake;
 use crate::executor::{JobExecutor, WorkerEvaluator};
 use crate::nix::store::LocalNixStore;
@@ -29,12 +33,13 @@ use crate::proto::scorer::JobScorer;
 /// The running worker instance.
 pub struct Worker {
     config: WorkerConfig,
-    conn: ProtoConnection,
+    /// `None` while `run()` is active (it takes ownership of the connection).
+    conn: Option<ProtoConnection>,
     executor: JobExecutor,
     scorer: JobScorer,
+    /// Shared across clones so `Credential` messages update the running job.
     credentials: CredentialStore,
-    /// Set to `true` after the server sends `Draining`. While draining the
-    /// worker finishes any in-flight job but rejects new assignments.
+    /// Set to `true` after the server sends `Draining`.
     draining: bool,
 }
 
@@ -51,7 +56,6 @@ impl Worker {
         let handshake =
             perform_handshake(&mut conn, peer_id, peer_tokens, config.capabilities()).await?;
 
-        // Record the server's protocol version on the connection object.
         conn.set_server_version(handshake.server_version);
         info!(
             negotiated = ?handshake.negotiated,
@@ -59,41 +63,37 @@ impl Worker {
             "capabilities negotiated"
         );
 
-        // If the server granted build capability, advertise our build capacity.
         if handshake.negotiated.build {
             conn.send(ClientMessage::WorkerCapabilities {
-                architectures: vec![], // TODO: detect from nix-daemon
+                architectures: vec![],
                 system_features: vec![],
                 max_concurrent_builds: config.max_concurrent_builds,
             })
             .await?;
         }
 
-        // Fetch the initial job candidate list.
         conn.send(ClientMessage::RequestJobList).await?;
 
         let store = LocalNixStore::connect().await?;
-        let evaluator = WorkerEvaluator::new(
-            config.eval_workers,
-            0, // max_evals_per_worker: 0 = no recycling limit by default
+        let evaluator = WorkerEvaluator::new(config.eval_workers, 0);
+        let executor = JobExecutor::new(
+            store,
+            evaluator,
+            config.binpath_nix.clone(),
+            config.binpath_ssh.clone(),
         );
-        let credentials = CredentialStore::new();
-        let executor = JobExecutor::new(store, evaluator, credentials.clone(), config.binpath_nix.clone(), config.binpath_ssh.clone());
 
         Ok(Self {
             config,
-            conn,
+            conn: Some(conn),
             executor,
             scorer: JobScorer::new(),
-            credentials,
+            credentials: CredentialStore::new(),
             draining: false,
         })
     }
 
     /// Accept an incoming server-initiated WebSocket connection.
-    ///
-    /// Called by the listener when `discoverable = true`. Runs the same
-    /// handshake and capability negotiation as [`Self::connect`].
     pub async fn from_accepted(
         ws: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
         config: WorkerConfig,
@@ -126,57 +126,60 @@ impl Worker {
 
         let store = LocalNixStore::connect().await?;
         let evaluator = WorkerEvaluator::new(config.eval_workers, 0);
-        let credentials = CredentialStore::new();
-        let executor = JobExecutor::new(store, evaluator, credentials.clone(), config.binpath_nix.clone(), config.binpath_ssh.clone());
+        let executor = JobExecutor::new(
+            store,
+            evaluator,
+            config.binpath_nix.clone(),
+            config.binpath_ssh.clone(),
+        );
 
         Ok(Self {
             config,
-            conn,
+            conn: Some(conn),
             executor,
             scorer: JobScorer::new(),
-            credentials,
+            credentials: CredentialStore::new(),
             draining: false,
         })
     }
 
-    /// Re-use an existing [`ProtoConnection`] that has already been reconnected.
-    ///
-    /// Called by the reconnect loop in `main.rs` after `reconnect()` succeeds and
-    /// the handshake has been re-performed.
+    /// Reconnect to the server: close any existing connection, open a fresh one,
+    /// perform the handshake, and store it for the next `run()` call.
     pub async fn reconnect(&mut self) -> Result<()> {
-        self.conn.reconnect(&self.config.server_url).await?;
         self.draining = false;
+
+        let mut conn = ProtoConnection::open(&self.config.server_url).await?;
 
         let peer_id = load_or_generate_id(&self.config.data_dir, self.config.worker_id.as_deref())
             .context("failed to load persistent worker ID")?;
         let peer_tokens = self.config.peer_tokens();
 
         let handshake = perform_handshake(
-            &mut self.conn,
+            &mut conn,
             peer_id,
             peer_tokens,
             self.config.capabilities(),
         )
         .await?;
 
-        self.conn.set_server_version(handshake.server_version);
+        conn.set_server_version(handshake.server_version);
         info!(
             negotiated = ?handshake.negotiated,
-            server_version = self.conn.server_version(),
+            server_version = conn.server_version(),
             "reconnected and re-negotiated capabilities"
         );
 
         if handshake.negotiated.build {
-            self.conn
-                .send(ClientMessage::WorkerCapabilities {
-                    architectures: vec![],
-                    system_features: vec![],
-                    max_concurrent_builds: self.config.max_concurrent_builds,
-                })
-                .await?;
+            conn.send(ClientMessage::WorkerCapabilities {
+                architectures: vec![],
+                system_features: vec![],
+                max_concurrent_builds: self.config.max_concurrent_builds,
+            })
+            .await?;
         }
 
-        self.conn.send(ClientMessage::RequestJobList).await?;
+        conn.send(ClientMessage::RequestJobList).await?;
+        self.conn = Some(conn);
         Ok(())
     }
 
@@ -185,199 +188,72 @@ impl Worker {
         self.draining
     }
 
-    /// Main dispatch loop — runs until the connection closes or the server
-    /// signals `Draining`.  Returns `Ok(())` on a clean disconnect so the
-    /// caller can decide whether to reconnect.
+    /// Main dispatch loop.
+    ///
+    /// Splits the connection so the recv loop stays live while jobs run in
+    /// separate tasks.  Jobs are spawned with a `watch::Receiver<bool>` abort
+    /// signal; `AbortJob` messages fire the corresponding sender.
+    ///
+    /// Returns `Ok(())` on a clean disconnect so the caller can reconnect.
     pub async fn run(&mut self) -> Result<()> {
+        let conn = self.conn.take().context("run() called without a connection")?;
+        let (writer, mut reader) = conn.split();
+
+        // Shared: job tasks register a oneshot here when awaiting CacheStatus.
+        let cache_waiters: Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
+        // Abort senders: keyed by job_id; job tasks hold the receiver.
+        let mut abort_senders: HashMap<String, watch::Sender<bool>> = HashMap::new();
+
+        // Channel used by job tasks to report completion back to the dispatch loop.
+        let (done_tx, mut done_rx) =
+            mpsc::unbounded_channel::<(String, Result<()>)>();
+
         info!("entering dispatch loop");
 
         loop {
-            let msg = match self.conn.recv().await? {
-                Some(m) => m,
-                None => {
-                    info!("server closed connection");
-                    break;
-                }
-            };
+            tokio::select! {
+                biased;
 
-            match msg {
-                ServerMessage::JobListChunk {
-                    candidates,
-                    is_final,
-                } => {
-                    debug!(
-                        count = candidates.len(),
-                        is_final, "received job list chunk"
-                    );
-                    if self.draining {
-                        // Don't request any new work while draining.
-                        continue;
-                    }
-                    let scores = self.scorer.score_candidates(&self.executor.store, &candidates).await?;
-                    self.conn
-                        .send(ClientMessage::RequestJobChunk { scores, is_final })
-                        .await?;
-                }
-
-                ServerMessage::JobOffer { candidates } => {
-                    debug!(count = candidates.len(), "received job offer");
-                    if self.draining {
-                        continue;
-                    }
-                    let scores = self.scorer.score_candidates(&self.executor.store, &candidates).await?;
-                    if !scores.is_empty() {
-                        self.conn
-                            .send(ClientMessage::RequestJobChunk {
-                                scores,
-                                is_final: true,
-                            })
-                            .await?;
-                    }
-                }
-
-                ServerMessage::RevokeJob { job_ids } => {
-                    debug!(?job_ids, "jobs revoked");
-                    // TODO: cancel any locally-queued (not yet started) candidates.
-                }
-
-                ServerMessage::AssignJob {
-                    job_id,
-                    job,
-                    timeout_secs: _,
-                } => {
-                    if self.draining {
-                        // Politely decline: we are winding down.
-                        warn!(%job_id, "rejecting assigned job — draining");
-                        self.conn
-                            .send(ClientMessage::AssignJobResponse {
-                                job_id,
-                                accepted: false,
-                                reason: Some("worker is draining".to_owned()),
-                            })
-                            .await?;
-                        continue;
-                    }
-
-                    info!(%job_id, "job assigned — accepting");
-                    self.conn
-                        .send(ClientMessage::AssignJobResponse {
-                            job_id: job_id.clone(),
-                            accepted: true,
-                            reason: None,
-                        })
-                        .await?;
-
-                    let result = self.execute_job(&job_id, job).await;
+                // A job task finished — send the result to the server.
+                Some((job_id, result)) = done_rx.recv() => {
+                    abort_senders.remove(&job_id);
+                    cache_waiters.lock().unwrap().remove(&job_id);
                     self.credentials.clear();
 
-                    let updater = JobUpdater::new(job_id.clone(), &mut self.conn);
                     match result {
-                        Ok(()) => updater.complete().await?,
+                        Ok(()) => {
+                            info!(%job_id, "job completed");
+                            writer.send(ClientMessage::JobCompleted { job_id })?;
+                        }
                         Err(e) => {
                             error!(%job_id, error = %e, "job failed");
-                            updater.fail(e.to_string()).await?;
+                            writer.send(ClientMessage::JobFailed {
+                                job_id,
+                                error: e.to_string(),
+                            })?;
                         }
                     }
                 }
 
-                ServerMessage::AbortJob { job_id, reason } => {
-                    warn!(%job_id, %reason, "job aborted by server");
-                    // TODO: interrupt any in-progress task for this job_id.
-                }
+                // Receive next server message.
+                msg_result = reader.recv() => {
+                    let msg = match msg_result? {
+                        Some(m) => m,
+                        None => {
+                            info!("server closed connection");
+                            break;
+                        }
+                    };
 
-                ServerMessage::Credential { kind, data } => {
-                    debug!(?kind, "received credential");
-                    self.credentials.store(kind, data);
-                }
-
-                ServerMessage::NarPush {
-                    job_id,
-                    store_path,
-                    data: _,
-                    offset,
-                    is_final,
-                } => {
-                    debug!(%job_id, %store_path, offset, is_final, "received NAR chunk from server");
-                    // TODO(1.4): reassemble and import into local nix store.
-                }
-
-                ServerMessage::PresignedDownload {
-                    job_id,
-                    store_path,
-                    url: _,
-                } => {
-                    debug!(%job_id, %store_path, "received presigned download URL");
-                    // TODO(1.4): download NAR from S3 and import into local store.
-                }
-
-                ServerMessage::PresignedUpload {
-                    job_id,
-                    store_path,
-                    url,
-                    method,
-                    headers,
-                } => {
-                    debug!(%job_id, %store_path, %method, "received presigned upload URL");
-                    if let Err(e) = crate::proto::nar::upload_presigned(
-                        &job_id,
-                        &store_path,
-                        &url,
-                        &method,
-                        &headers,
-                        &mut self.conn,
-                    )
-                    .await
-                    {
-                        error!(%job_id, %store_path, error = %e, "presigned NAR upload failed");
-                    }
-                }
-
-                ServerMessage::Draining => {
-                    info!("server is draining; finishing in-flight work then disconnecting");
-                    self.draining = true;
-                    // The loop continues so we can finish any already-accepted job,
-                    // but new assignments will be declined above.
-                }
-
-                ServerMessage::Error { code, message } => {
-                    error!(code, %message, "protocol error from server");
-                }
-
-                ServerMessage::InitAck { .. } | ServerMessage::Reject { .. } => {
-                    warn!("unexpected handshake message in dispatch loop — ignoring");
-                }
-
-                ServerMessage::AuthChallenge { peers } => {
-                    debug!(
-                        ?peers,
-                        "mid-connection AuthChallenge — sending AuthResponse"
-                    );
-                    let peer_tokens = self.config.peer_tokens();
-                    let tokens = WorkerConfig::resolve_tokens_for_challenge(&peer_tokens, &peers);
-                    if let Err(e) = self.conn.send(ClientMessage::AuthResponse { tokens }).await {
-                        error!(error = %e, "failed to send AuthResponse");
-                        break;
-                    }
-                }
-
-                ServerMessage::AuthUpdate {
-                    authorized_peers,
-                    failed_peers,
-                } => {
-                    info!(
-                        authorized = authorized_peers.len(),
-                        failed = failed_peers.len(),
-                        "auth updated"
-                    );
-                    for fp in &failed_peers {
-                        warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
-                    }
-                }
-
-                ServerMessage::CacheStatus { job_id, cached } => {
-                    // CacheStatus is normally consumed inline by the eval code
-                    // via query_cache(). If it arrives here, it's out of order.
-                    warn!(%job_id, count = cached.len(), "unexpected CacheStatus in dispatch loop");
+                    self.handle_message(
+                        msg,
+                        &writer,
+                        &cache_waiters,
+                        &mut abort_senders,
+                        &done_tx,
+                    ).await?;
                 }
             }
         }
@@ -385,19 +261,214 @@ impl Worker {
         Ok(())
     }
 
-    async fn execute_job(&mut self, job_id: &str, job: Job) -> Result<()> {
-        let mut updater = JobUpdater::new(job_id.to_owned(), &mut self.conn);
-        match job {
-            Job::Flake(flake_job) => {
-                self.executor
-                    .execute_flake_job(flake_job, &mut updater, &self.credentials)
-                    .await
+    /// Handle a single [`ServerMessage`] inside the dispatch loop.
+    async fn handle_message(
+        &mut self,
+        msg: ServerMessage,
+        writer: &crate::connection::ProtoWriter,
+        cache_waiters: &Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>>,
+        abort_senders: &mut HashMap<String, watch::Sender<bool>>,
+        done_tx: &mpsc::UnboundedSender<(String, Result<()>)>,
+    ) -> Result<()> {
+        match msg {
+            ServerMessage::JobListChunk {
+                candidates,
+                is_final,
+            } => {
+                debug!(count = candidates.len(), is_final, "received job list chunk");
+                if self.draining {
+                    return Ok(());
+                }
+                let scores = self
+                    .scorer
+                    .score_candidates(&self.executor.store, &candidates)
+                    .await?;
+                writer.send(ClientMessage::RequestJobChunk { scores, is_final })?;
             }
-            Job::Build(build_job) => {
-                self.executor
-                    .execute_build_job(build_job, &mut updater)
-                    .await
+
+            ServerMessage::JobOffer { candidates } => {
+                debug!(count = candidates.len(), "received job offer");
+                if self.draining {
+                    return Ok(());
+                }
+                let scores = self
+                    .scorer
+                    .score_candidates(&self.executor.store, &candidates)
+                    .await?;
+                if !scores.is_empty() {
+                    writer.send(ClientMessage::RequestJobChunk {
+                        scores,
+                        is_final: true,
+                    })?;
+                }
             }
+
+            ServerMessage::RevokeJob { job_ids } => {
+                debug!(?job_ids, "jobs revoked");
+                // TODO: cancel any locally-queued (not yet started) candidates.
+            }
+
+            ServerMessage::AssignJob {
+                job_id,
+                job,
+                timeout_secs: _,
+            } => {
+                if self.draining {
+                    warn!(%job_id, "rejecting assigned job — draining");
+                    writer.send(ClientMessage::AssignJobResponse {
+                        job_id,
+                        accepted: false,
+                        reason: Some("worker is draining".to_owned()),
+                    })?;
+                    return Ok(());
+                }
+
+                info!(%job_id, "job assigned — accepting");
+                writer.send(ClientMessage::AssignJobResponse {
+                    job_id: job_id.clone(),
+                    accepted: true,
+                    reason: None,
+                })?;
+
+                // Set up abort signal for this job.
+                let (abort_tx, abort_rx) = watch::channel(false);
+                abort_senders.insert(job_id.clone(), abort_tx);
+
+                // Spawn the job task.
+                let executor = self.executor.clone();
+                let credentials = self.credentials.clone();
+                let job_writer = writer.clone();
+                let job_cache_waiters = cache_waiters.clone();
+                let job_done_tx = done_tx.clone();
+                let jid = job_id.clone();
+
+                tokio::spawn(async move {
+                    let mut updater = JobUpdater::new(jid.clone(), job_writer, job_cache_waiters);
+                    let result = run_job(executor, job, &mut updater, &credentials, abort_rx).await;
+                    let _ = job_done_tx.send((jid, result));
+                });
+            }
+
+            ServerMessage::AbortJob { job_id, reason } => {
+                warn!(%job_id, %reason, "job aborted by server");
+                if let Some(tx) = abort_senders.get(&job_id) {
+                    let _ = tx.send(true);
+                }
+            }
+
+            ServerMessage::Credential { kind, data } => {
+                debug!(?kind, "received credential");
+                self.credentials.store(kind, data);
+            }
+
+            ServerMessage::NarPush {
+                job_id,
+                store_path,
+                data: _,
+                offset,
+                is_final,
+            } => {
+                debug!(%job_id, %store_path, offset, is_final, "received NAR chunk from server");
+                // TODO(1.4): reassemble and import into local nix store.
+            }
+
+            ServerMessage::PresignedDownload {
+                job_id,
+                store_path,
+                url: _,
+            } => {
+                debug!(%job_id, %store_path, "received presigned download URL");
+                // TODO(1.4): download NAR from S3 and import into local store.
+            }
+
+            ServerMessage::PresignedUpload {
+                job_id,
+                store_path,
+                url,
+                method,
+                headers,
+            } => {
+                debug!(%job_id, %store_path, %method, "received presigned upload URL");
+                if let Err(e) = crate::proto::nar::upload_presigned(
+                    &job_id,
+                    &store_path,
+                    &url,
+                    &method,
+                    &headers,
+                    writer,
+                )
+                .await
+                {
+                    error!(%job_id, %store_path, error = %e, "presigned NAR upload failed");
+                }
+            }
+
+            ServerMessage::Draining => {
+                info!("server is draining; finishing in-flight work then disconnecting");
+                self.draining = true;
+            }
+
+            ServerMessage::Error { code, message } => {
+                error!(code, %message, "protocol error from server");
+            }
+
+            ServerMessage::InitAck { .. } | ServerMessage::Reject { .. } => {
+                warn!("unexpected handshake message in dispatch loop — ignoring");
+            }
+
+            ServerMessage::AuthChallenge { peers } => {
+                debug!(?peers, "mid-connection AuthChallenge — sending AuthResponse");
+                let peer_tokens = self.config.peer_tokens();
+                let tokens = WorkerConfig::resolve_tokens_for_challenge(&peer_tokens, &peers);
+                writer.send(ClientMessage::AuthResponse { tokens })?;
+            }
+
+            ServerMessage::AuthUpdate {
+                authorized_peers,
+                failed_peers,
+            } => {
+                info!(
+                    authorized = authorized_peers.len(),
+                    failed = failed_peers.len(),
+                    "auth updated"
+                );
+                for fp in &failed_peers {
+                    warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
+                }
+            }
+
+            ServerMessage::CacheStatus { job_id, cached } => {
+                // Route to the waiting job task, if any.
+                if let Some(tx) = cache_waiters.lock().unwrap().remove(&job_id) {
+                    let _ = tx.send(cached);
+                } else {
+                    warn!(%job_id, count = cached.len(), "unexpected CacheStatus — no waiter");
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Execute a single job inside a spawned task.
+async fn run_job(
+    executor: JobExecutor,
+    job: Job,
+    updater: &mut JobUpdater,
+    credentials: &CredentialStore,
+    abort: watch::Receiver<bool>,
+) -> Result<()> {
+    match job {
+        Job::Flake(flake_job) => {
+            executor
+                .execute_flake_job(flake_job, updater, credentials, abort)
+                .await
+        }
+        Job::Build(build_job) => {
+            executor
+                .execute_build_job(build_job, updater, credentials)
+                .await
         }
     }
 }
@@ -493,7 +564,8 @@ mod tests {
         fs::write(&id_path, &file_id).unwrap();
         let override_id = uuid::Uuid::new_v4().to_string();
         let data_dir = dir.path().to_string_lossy().to_string();
-        let result = load_or_generate_id(&data_dir, Some(&override_id)).expect("override should work");
+        let result =
+            load_or_generate_id(&data_dir, Some(&override_id)).expect("override should work");
         assert_eq!(result, override_id, "override must win over file");
     }
 

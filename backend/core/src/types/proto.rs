@@ -58,6 +58,9 @@ pub struct FlakeJob {
     pub commit: String,
     pub wildcards: Vec<String>,
     pub timeout_secs: Option<u64>,
+    /// When set, the worker signs all fetched store paths after pushing their
+    /// NARs.  Requires a `SigningKey` credential to be delivered before the job.
+    pub sign: Option<SignTask>,
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -133,6 +136,9 @@ pub struct FetchedInput {
     pub store_path: String,
     pub nar_hash: String,
     pub nar_size: u64,
+    /// Ed25519 signature produced by the `sign` step, if present.
+    /// Format: `<key-name>:<base64>` — the standard Nix narinfo signature format.
+    pub signature: Option<String>,
 }
 
 // ── Scheduling types ─────────────────────────────────────────────────────────
@@ -147,23 +153,52 @@ pub struct CacheInfo {
     pub nar_size: u64,
 }
 
-/// A store path available to the worker, returned in [`CacheStatus`].
+/// Query mode for [`CacheQuery`].
 ///
-/// When `url` is `None` the path is in the local Gradient cache — the worker
-/// fetches it via `NarRequest` / `PresignedDownload` as usual.
+/// Controls what the server returns in [`CacheStatus`] beyond the basic
+/// cached/uncached flag.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum QueryMode {
+    /// Return only paths that are already in the cache (`cached: true`).
+    /// No presigned URLs are generated.  This is the default and is used
+    /// during evaluation to determine which derivations are substituted.
+    #[default]
+    Normal,
+    /// Return cached paths with a presigned S3 GET URL in `url`.
+    /// When `url` is `None`, the worker should download via `NarRequest`.
+    /// Used by build workers to fetch required store paths.
+    Pull,
+    /// Return **all** queried paths.  Uncached paths include a presigned S3
+    /// PUT URL in `url` so the worker can upload directly to S3.
+    /// When `url` is `None` for an uncached path, the worker should upload via
+    /// `NarPush`.  Cached paths have `cached: true` and no URL (skip them).
+    /// Used after `FetchFlake` to push fetched inputs to the server cache.
+    Push,
+}
+
+/// A store path entry returned in [`CacheStatus`].
 ///
-/// When `url` is `Some` the path was found in an upstream external Nix binary
-/// cache; the worker downloads the NAR directly from that absolute URL, then
-/// compresses and signs it before uploading to the Gradient cache.
+/// `cached` indicates whether the path is already in the Gradient cache.
+/// `url` provides a presigned S3 URL (GET for [`QueryMode::Pull`], PUT for
+/// [`QueryMode::Push`]); `None` means use the direct WebSocket transfer
+/// (`NarRequest` / `NarPush`) instead.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct CachedPath {
     pub path: String,
+    /// `true` if the path is present in the Gradient cache (local or upstream).
+    pub cached: bool,
     /// Compressed NAR size on disk (bytes). `None` if not yet recorded.
     pub file_size: Option<u64>,
     /// Uncompressed NAR size (bytes). `None` if not yet recorded.
     pub nar_size: Option<u64>,
-    /// Absolute NAR URL for upstream paths; `None` for local Gradient cache.
+    /// Presigned S3 URL for direct transfer.
+    ///
+    /// - [`QueryMode::Pull`]: GET URL to download the NAR from S3.
+    /// - [`QueryMode::Push`]: PUT URL to upload the NAR to S3 (only set when
+    ///   `cached` is `false`).
+    /// - `None`: use WebSocket direct transfer (`NarRequest` or `NarPush`).
     pub url: Option<String>,
 }
 

@@ -5,8 +5,8 @@
  */
 
 use crate::messages::{
-    ClientMessage, FlakeJob, FlakeTask, GradientCapabilities, Job, JobCandidate, PROTO_VERSION,
-    RequiredPath, ServerMessage,
+    CachedPath, ClientMessage, FlakeJob, FlakeTask, GradientCapabilities, Job, JobCandidate,
+    QueryMode, RequiredPath, ServerMessage, PROTO_VERSION,
 };
 use rkyv::rancor::Error as RkyvError;
 
@@ -127,12 +127,95 @@ fn assign_job_roundtrip() {
             commit: "abc123".into(),
             wildcards: vec!["packages.*".into()],
             timeout_secs: Some(300),
+            sign: None,
         }),
         timeout_secs: Some(600),
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
     assert_eq!(decoded, original);
+}
+
+#[test]
+fn cache_query_normal_roundtrip() {
+    let original = ClientMessage::CacheQuery {
+        job_id: "job-1".into(),
+        paths: vec!["/nix/store/aaaa-hello".into()],
+        mode: QueryMode::Normal,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn cache_query_push_roundtrip() {
+    let original = ClientMessage::CacheQuery {
+        job_id: "job-2".into(),
+        paths: vec![
+            "/nix/store/aaaa-foo".into(),
+            "/nix/store/bbbb-bar".into(),
+        ],
+        mode: QueryMode::Push,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn cache_query_pull_roundtrip() {
+    let original = ClientMessage::CacheQuery {
+        job_id: "job-3".into(),
+        paths: vec!["/nix/store/cccc-baz".into()],
+        mode: QueryMode::Pull,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn cache_status_roundtrip() {
+    let original = ServerMessage::CacheStatus {
+        job_id: "job-4".into(),
+        cached: vec![
+            CachedPath {
+                path: "/nix/store/aaaa-foo".into(),
+                cached: true,
+                file_size: Some(1024),
+                nar_size: Some(4096),
+                url: None,
+            },
+            CachedPath {
+                path: "/nix/store/bbbb-bar".into(),
+                cached: false,
+                file_size: None,
+                nar_size: None,
+                url: Some("https://s3.example.com/nars/bb/bb.nar.zst".into()),
+            },
+        ],
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
+fn cached_path_not_cached_no_url() {
+    // Represents an uncached path in Push mode with local (non-S3) storage.
+    let cp = CachedPath {
+        path: "/nix/store/aaaa-hello".into(),
+        cached: false,
+        file_size: None,
+        nar_size: None,
+        url: None,
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&cp).unwrap();
+    let decoded = rkyv::from_bytes::<CachedPath, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, cp);
+    assert!(!decoded.cached);
+    assert!(decoded.url.is_none());
 }
 
 // ── Sanity checks ─────────────────────────────────────────────────────────────

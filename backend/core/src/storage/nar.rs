@@ -20,6 +20,9 @@ pub struct NarStore {
     prefix: String,
     /// Set only for local storage; used by the orphan-file cleanup scan.
     local_base: Option<String>,
+    /// S3 store — held separately to enable presigned URL generation via the
+    /// [`object_store::signer::Signer`] trait.  `None` for local-disk stores.
+    s3_signer: Option<Arc<object_store::aws::AmazonS3>>,
 }
 
 impl NarStore {
@@ -46,6 +49,7 @@ impl NarStore {
             inner: Arc::new(store),
             prefix: String::new(),
             local_base: Some(base_path.to_string()),
+            s3_signer: None,
         })
     }
 
@@ -79,6 +83,7 @@ impl NarStore {
         }
 
         let store = builder.build().context("Failed to create S3 NAR storage")?;
+        let store = Arc::new(store);
 
         let normalized_prefix = if prefix.is_empty() || prefix.ends_with('/') {
             prefix.to_string()
@@ -87,9 +92,10 @@ impl NarStore {
         };
 
         Ok(Self {
-            inner: Arc::new(store),
+            inner: Arc::clone(&store) as Arc<dyn ObjectStore>,
             prefix: normalized_prefix,
             local_base: None,
+            s3_signer: Some(store),
         })
     }
 
@@ -157,6 +163,61 @@ impl NarStore {
     /// Returns the local base path when using local-disk storage; `None` for S3.
     pub fn local_base(&self) -> Option<&str> {
         self.local_base.as_deref()
+    }
+
+    /// Generate a presigned GET URL valid for `expires_in` for the NAR
+    /// identified by `hash`.
+    ///
+    /// Returns `None` for local-disk stores. Returns `Some(url_string)` for
+    /// S3-backed stores so workers can download directly without routing data
+    /// through the Gradient server.
+    pub async fn presigned_get_url(
+        &self,
+        hash: &str,
+        expires_in: std::time::Duration,
+    ) -> Result<Option<String>> {
+        use object_store::signer::Signer as _;
+
+        let signer = match &self.s3_signer {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        let path = self.object_path(hash);
+        let url = signer
+            .signed_url(reqwest::Method::GET, &path, expires_in)
+            .await
+            .context("failed to generate presigned GET URL")?;
+
+        Ok(Some(url.to_string()))
+    }
+
+    /// Generate a presigned PUT URL valid for `expires_in` for the NAR
+    /// identified by `hash`.
+    ///
+    /// Returns `None` for local-disk stores (no presigning needed — the server
+    /// accepts direct `NarPush` WebSocket frames).  Returns `Some(url_string)`
+    /// for S3-backed stores so workers can upload directly to S3 without
+    /// routing all NAR data through the Gradient server.
+    pub async fn presigned_put_url(
+        &self,
+        hash: &str,
+        expires_in: std::time::Duration,
+    ) -> Result<Option<String>> {
+        use object_store::signer::Signer as _;
+
+        let signer = match &self.s3_signer {
+            Some(s) => s,
+            None => return Ok(None),
+        };
+
+        let path = self.object_path(hash);
+        let url = signer
+            .signed_url(reqwest::Method::PUT, &path, expires_in)
+            .await
+            .context("failed to generate presigned PUT URL")?;
+
+        Ok(Some(url.to_string()))
     }
 
     /// Lists all NAR hashes currently present in the store (both local and S3).

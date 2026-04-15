@@ -216,6 +216,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             commit: commit_sha,
             wildcards: vec![eval.wildcard.clone()],
             timeout_secs: None,
+            sign: None,
         };
 
         let organization_id = organization_id_for_eval(state, &eval).await;

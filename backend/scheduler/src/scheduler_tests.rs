@@ -40,6 +40,7 @@ fn eval_job(peer: Uuid) -> PendingEvalJob {
             commit: "abc123".into(),
             wildcards: vec!["*".into()],
             timeout_secs: None,
+            sign: None,
         },
         required_paths: vec![],
     }

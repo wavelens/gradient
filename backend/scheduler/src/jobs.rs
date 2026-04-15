@@ -271,6 +271,7 @@ mod tests {
                 commit: "abc123".into(),
                 wildcards: vec!["*".into()],
                 timeout_secs: None,
+            sign: None,
             },
             required_paths: vec![],
         })

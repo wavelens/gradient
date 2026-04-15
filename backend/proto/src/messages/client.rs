@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::types::proto::{CandidateScore, GradientCapabilities, JobUpdateKind};
+use gradient_core::types::proto::{CandidateScore, GradientCapabilities, JobUpdateKind, QueryMode};
 use rkyv::{Archive, Deserialize, Serialize};
 
 /// Messages sent from the client (worker / federated peer) to the server.
@@ -116,10 +116,17 @@ pub enum ClientMessage {
         nar_hash: String,
     },
 
-    /// Bulk query: which of these output store paths are already in the cache?
+    /// Bulk query against the server cache.
+    ///
     /// Server responds with [`super::server::ServerMessage::CacheStatus`].
+    /// [`QueryMode`] controls what the server returns beyond the cached flag:
+    /// - `Normal` — only paths already in the cache (no URLs).
+    /// - `Pull`   — cached paths with presigned S3 GET URLs (or `url: None` for local).
+    /// - `Push`   — all paths; uncached ones include presigned S3 PUT URLs (or `url: None`).
     CacheQuery {
         job_id: String,
         paths: Vec<String>,
+        /// Defaults to [`QueryMode::Normal`] when deserialized from an older client.
+        mode: QueryMode,
     },
 }

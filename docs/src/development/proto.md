@@ -382,9 +382,21 @@ graph LR
 
 | Task | Requires | Input (from server) | Output (from worker) |
 |------|----------|---------------------|----------------------|
-| **FetchFlake** | `fetch` | `repository` (flake URL), `commit` (SHA), SSH credential | NARs pushed via `NarPush`, then `FetchResult` — nix store source path (falls back to temp git checkout), fetched flake inputs metadata |
+| **FetchFlake** | `fetch` | `repository` (flake URL), `commit` (SHA), SSH credential; signing key credential when `sign` is set | NARs pushed via `NarPush`, then `FetchResult` — nix store source path (falls back to temp git checkout), fetched flake inputs metadata; `signature` set on each `FetchedInput` when signed |
+| **Sign** | `sign` | (implicit — fetched store paths, signing key from credential) | Ed25519 signatures embedded in `FetchedInput.signature` within `FetchResult` |
 | **EvaluateFlake** | `eval` | `wildcards` (attribute patterns), `timeout` (seconds) | `attrs: Vec<String>` — discovered attribute paths |
 | **EvaluateDerivations** | `eval` | (uses attrs from previous task) | `derivations: Vec<DiscoveredDerivation>` — drv paths, outputs, closure, required features |
+
+```rust
+FlakeJob {
+    tasks: Vec<FlakeTask>,               // [FetchFlake, EvaluateFlake, EvaluateDerivations] — subset per worker capability
+    repository: String,                  // flake URL (https://, git+ssh://, etc.)
+    commit: String,                      // exact commit SHA to fetch and evaluate
+    wildcards: Vec<String>,              // attribute patterns for EvaluateFlake (e.g. ["packages.*.*"])
+    timeout_secs: Option<u64>,           // None = use server default (GRADIENT_EVALUATION_TIMEOUT)
+    sign: Option<SignTask>,              // when set: sign fetched store paths and embed signatures in FetchResult
+}
+```
 
 When `FetchFlake` and `EvaluateFlake`/`EvaluateDerivations` are in the **same `FlakeJob`**, the worker reuses the local clone from the fetch step for evaluation. The repository is cloned exactly once; subsequent eval tasks operate on the local checkout. This guarantees the eval runs against the same commit the server detected and avoids a second remote fetch (which would fail for protocols Nix doesn't natively support, e.g. `git://`).
 
@@ -392,12 +404,13 @@ When the tasks are in **separate jobs** (e.g. a fetch-only worker and an eval-on
 
 #### FetchFlake
 
-The fetch step performs four things:
+The fetch step performs up to five things:
 
 1. **Clone** the repository at the specified commit using libgit2 (handles SSH keys, `git://`, `https://`).
 2. **Archive** the flake source and all locked transitive inputs into the local Nix store by running `nix flake archive --json`. This goes through the nix daemon (subprocess) so network fetching and store-write access work correctly. Returns the nix store source path (e.g. `/nix/store/xxx-source`) and all input paths with their `narHash`/`narSize` from `nix path-info`.
-3. **Push NARs** for the source and every archived input to the server via `NarPush` (zstd-compressed, 64 KiB chunks). The server can store these so eval-only workers or future builds can substitute them without re-fetching from upstream.
-4. **Report `FetchResult`** with the metadata for all pushed paths.
+3. **Filter and push NARs** — before uploading, the worker sends `CacheQuery { mode: Push }` for all fetched paths. The server responds with a single `CacheStatus` containing all paths with `cached: bool` and optional transfer URLs. Already-cached paths (`cached: true`) are skipped. For **S3 mode**: uncached paths include a presigned PUT URL (`url: Some`); the worker uploads directly to S3 and confirms with `NarReady`. For **local mode** (`url: None`): uncached paths are pushed as chunked `NarPush` frames; the server buffers chunks per store path and writes to `NarStore` on `is_final`.
+4. **Sign** (optional, when `FlakeJob.sign` is set) — the worker signs each fetched store path using the Ed25519 signing key delivered via `Credential { kind: SigningKey }`. Signatures are embedded directly in `FetchedInput.signature` — no extra round trip. This avoids re-downloading NARs later when the server needs to verify cache integrity.
+5. **Report `FetchResult`** with the metadata (and optional signatures) for all pushed paths.
 
 If `nix flake archive` fails (e.g. network unavailable), the worker falls back to the temporary git checkout path and reports an empty `fetched_paths` list — evaluation may still succeed if inputs are already cached from a previous run.
 
@@ -410,10 +423,12 @@ FetchedInput {
     store_path: String,                  // /nix/store/xxx-source
     nar_hash: String,                    // sha256:xxx (SRI)
     nar_size: u64,                       // uncompressed NAR bytes
+    signature: Option<String>,           // Ed25519 signature when FlakeJob.sign is set
+                                         // format: "<key-name>:<base64>" (standard Nix narinfo format)
 }
 ```
 
-The server processes `FetchResult` by recording the fetched input paths for the evaluation. NARs were already pushed ahead of this message via `NarPush`.
+The server processes `FetchResult` by recording the fetched input paths for the evaluation. NARs were already pushed ahead of this message via `NarPush`. When `signature` is present, the server inserts the signature into `derivation_output_signature` so future workers can verify cache integrity without re-downloading the NAR.
 
 When `FetchFlake` and `EvaluateDerivations` are in the **same job**, the evaluator uses the nix store source path directly as `path:/nix/store/xxx` — a pure, content-addressed reference that does not require a network fetch. On fallback (temp checkout), `git+file://...?rev=` is used instead to keep Nix in pure evaluation mode.
 
@@ -435,7 +450,52 @@ The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`
 
 #### Cache Query
 
-During `EvaluateDerivations`, the worker discovers output store paths and needs to know which ones the server already has cached. Rather than checking the worker's local Nix store (which is irrelevant — the server serves the cache, not the worker), the worker performs a bulk query against the server's cache:
+`CacheQuery` is used throughout the job lifecycle to check cache state and obtain transfer URLs. The `mode` field controls what the server returns:
+
+| Mode | Use case | Server returns |
+|------|----------|----------------|
+| `Normal` | Eval: mark derivations as substituted | Only cached paths (`cached: true`), no URLs |
+| `Pull` | Build: fetch required store paths | Cached paths with presigned S3 GET URL (or `url: None` for local — use `NarRequest`) |
+| `Push` | Fetch: upload new inputs | **All** queried paths; uncached ones include presigned S3 PUT URL (or `url: None` — use `NarPush`) |
+
+```rust
+// Worker → Server
+CacheQuery {
+    job_id: String,
+    paths: Vec<String>,                 // store paths to query
+    mode: QueryMode,                    // default: Normal
+}
+
+enum QueryMode {
+    Normal,   // return only cached paths — no URLs generated
+    Pull,     // return cached paths with presigned GET URL (S3) or None (local)
+    Push,     // return all paths; uncached get presigned PUT URL (S3) or None (local)
+}
+
+// Server → Worker
+CacheStatus {
+    job_id: String,
+    cached: Vec<CachedPath>,
+}
+
+CachedPath {
+    path: String,                       // /nix/store/xxx-name
+    cached: bool,                       // true = path is in the Gradient cache
+    file_size: Option<u64>,             // compressed NAR size on disk (bytes)
+    nar_size: Option<u64>,              // uncompressed NAR size (bytes)
+    url: Option<String>,                // presigned S3 URL (mode-dependent; see below)
+                                        // None = use WebSocket direct transfer instead
+}
+```
+
+**`url` semantics by mode:**
+
+- `Normal` — always `None`.
+- `Pull` + `cached: true` — presigned GET URL for S3-backed stores; `None` for local (use `NarRequest`).
+- `Push` + `cached: false` — presigned PUT URL for S3-backed stores; `None` for local (use `NarPush`).
+- `Push` + `cached: true` — always `None` (path is already in cache; skip upload).
+
+**`Normal` mode during `EvaluateDerivations`:**
 
 ```mermaid
 sequenceDiagram
@@ -443,40 +503,15 @@ sequenceDiagram
     participant S as Server
 
     Note over W: closure walk discovers output paths
-    W->>S: CacheQuery { paths: [A, B, C, D, E] }
+    W->>S: CacheQuery { mode: Normal, paths: [A, B, C, D, E] }
     Note right of S: checks NAR store (S3 / local)
-    S->>W: CacheStatus { cached: [A, C] }
+    S->>W: CacheStatus { cached: [{A,cached:true}, {C,cached:true}] }
     Note over W: marks A,C derivations as substituted
 ```
 
-```rust
-// Worker → Server
-CacheQuery {
-    job_id: String,
-    paths: Vec<String>,                 // output store paths to check
-}
+The server checks its local NAR store first. For paths not found locally, it fetches `.narinfo` from any upstream external caches configured for the org (`org → organization_cache → cache → cache_upstream`). Found upstream paths are returned with `cached: true` and `url: Some(absolute_nar_url)`.
 
-// Server → Worker
-CacheStatus {
-    job_id: String,
-    cached: Vec<CachedPath>,            // all available paths (local + upstream)
-}
-
-CachedPath {
-    path: String,                       // /nix/store/xxx-name
-    file_size: Option<u64>,             // compressed NAR size on disk (bytes)
-    nar_size: Option<u64>,              // uncompressed NAR size (bytes)
-    url: Option<String>,                // None = local Gradient cache
-                                        // Some = absolute NAR URL from upstream cache
-}
-```
-
-The query is batched — the worker collects output paths during the BFS walk and sends them in one or a few `CacheQuery` messages. The server responds with a single `CacheStatus` containing all available paths:
-
-1. **Local cache** — paths with `is_cached = true` in the Gradient NAR store (`url: None`).
-2. **Upstream caches** — for paths not found locally, the server fetches `.narinfo` from any external upstream caches configured for the org (`org → organization_cache → cache → cache_upstream`). Found paths are included with `url: Some(absolute_nar_url)`.
-
-The worker marks derivations as `substituted` for all entries in `cached` regardless of `url`. For upstream paths (`url: Some`), the worker downloads the NAR directly from the provided URL, then compresses and signs it before uploading to the Gradient cache.
+The worker marks derivations as `substituted` for all entries with `cached: true` regardless of `url`. For upstream paths (`url: Some`), the worker downloads the NAR directly from the provided URL, then compresses and signs it before uploading to the Gradient cache.
 
 ### Cache Verification
 
@@ -503,9 +538,18 @@ sequenceDiagram
 
     W->>S: JobUpdate::Fetching
     Note over W: clone repo, nix flake archive → nix store
-    W->>S: NarPush { source + inputs (zstd, 64 KiB chunks) }
-    W->>S: JobUpdate::FetchResult { fetched_paths }
-    Note right of S: records input paths
+    W->>S: CacheQuery { mode: Push, paths: [source + all inputs] }
+    alt S3 mode
+        S->>W: CacheStatus { [{A,cached:false,url:s3}, {B,cached:false,url:s3}, {C,cached:true}, {D,cached:true}] }
+        W->>S3: PUT A, PUT B (direct to S3)
+        W->>S: NarReady { path:A }, NarReady { path:B }
+    else local mode
+        S->>W: CacheStatus { [{A,cached:false,url:None}, {B,cached:false,url:None}, {C,cached:true}, {D,cached:true}] }
+        W->>S: NarPush { path:A, ... }, NarPush { path:B, ... }
+    end
+    Note over W: sign fetched paths (if FlakeJob.sign is set)
+    W->>S: JobUpdate::FetchResult { fetched_paths (with signatures) }
+    Note right of S: records input paths + signatures
     W->>S: JobUpdate::EvaluatingFlake
     Note over W: nix eval (uses local clone)
     W->>S: JobUpdate::EvaluatingDerivations
@@ -595,7 +639,7 @@ sequenceDiagram
 
 The `required_paths` were already sent in `JobCandidate` during the offer phase. The worker cached the missing set while scoring, so `NarRequest` is immediate after `AssignJob` — no second store query needed.
 
-The server pre-computes `required_paths` from the evaluation's `derivation_dependency` and `derivation_output` tables — no `.drv` parsing on either side for dependency resolution. The worker only parses `.drv` to construct `BasicDerivation` for the actual `build_derivation` daemon call.
+The server pre-computes `required_paths` from the evaluation's `derivation_dependency` and `derivation_output` tables — no `.drv` parsing on either side for dependency resolution. The worker parses `.drv` files to get expected output paths; it invokes `nix-store --realise` as a subprocess to build each derivation (this avoids a protocol incompatibility in harmonia's `BuildDerivation` RPC with Nix ≥ 2.34).
 
 If any derivation in the chain fails, the worker skips the rest and reports `JobFailed` — the server cascades `DependencyFailed` to downstream builds.
 
@@ -632,8 +676,7 @@ enum ServerMessage {
     PresignedDownload { job_id: Uuid, store_path: String, url: String },
 
     // Cache queries
-    NixDownload { job_id: String, path: String, url: String }, // upstream path found; sent before CacheStatus
-    CacheStatus { job_id: String, cached: Vec<CachedPath> },   // local hits; terminator for CacheQuery response
+    CacheStatus { job_id: String, cached: Vec<CachedPath> },   // response to CacheQuery
 }
 
 struct FailedPeer { peer_id: Uuid, reason: String }
@@ -671,8 +714,10 @@ enum ClientMessage {
     NarReady { job_id: Uuid, store_path: String, nar_size: u64, nar_hash: String },
 
     // Cache queries
-    CacheQuery { job_id: String, paths: Vec<String> },  // "which of these are already cached?"
+    CacheQuery { job_id: String, paths: Vec<String>, mode: QueryMode },  // see QueryMode
 }
+
+enum QueryMode { Normal, Pull, Push }  // default: Normal
 ```
 
 ---
@@ -706,7 +751,9 @@ enum JobUpdateKind {
 struct FetchedInput {
     store_path: String,                 // /nix/store/xxx-source
     nar_hash: String,                   // sha256:xxx (SRI)
-    nar_size: u64,                      // NAR bytes
+    nar_size: u64,                      // uncompressed NAR bytes
+    signature: Option<String>,          // Ed25519 signature; set when FlakeJob.sign is present
+                                        // format: "<key-name>:<base64>" (standard Nix narinfo format)
 }
 
 struct BuildOutput {
@@ -724,7 +771,7 @@ struct BuildOutput {
 | `JobUpdateKind` | DB Entity | Status set |
 |-----------------|-----------|------------|
 | `Fetching` | `evaluation` | `Fetching` (8) |
-| `FetchResult` | `evaluation` | Stays `Fetching`; records fetched input paths (NARs already pushed ahead of this message via `NarPush`) |
+| `FetchResult` | `evaluation` | Stays `Fetching`; records fetched input paths and signatures (NARs already pushed ahead of this message via `NarPush`). When `FetchedInput.signature` is present, inserts signature into `derivation_output_signature`. |
 | `EvaluatingFlake` | `evaluation` | `EvaluatingFlake` (1) |
 | `EvaluatingDerivations` | `evaluation` | `EvaluatingDerivation` (2) |
 | `EvalResult` | `evaluation` + `derivation` + `build` + `entry_point` + `evaluation_message` | Inserts rows per batch; substituted → `Substituted` (7), rest → `Created` (0) → `Queued` (1). Creates `entry_point` rows for root derivations (non-empty `attr`). Immediately dispatches ready builds to workers. First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. Errors stored as `evaluation_message` rows with level `Error`; if `derivations` is empty and `errors` is non-empty, evaluation is immediately marked `Failed`. |
@@ -741,35 +788,33 @@ struct BuildOutput {
 
 Two modes, chosen by the server based on `NarStore` configuration. Both support **batched transfers** — the server sends all NARs for a job at once (e.g. all inputs for a build chain), avoiding per-path round trips.
 
-### Direct Mode
+### Worker → Server (upload, FetchFlake)
 
-NAR data flows as chunked `NarPush` messages over the WebSocket. Data is zstd-compressed. Default chunk size: 64 KiB. Multiple NARs can be interleaved — each chunk is tagged with `store_path`.
+Before uploading fetched flake inputs, the worker sends `CacheQuery { mode: Push }` to filter out paths that are already cached and obtain upload URLs for uncached paths.
+
+The server responds with a single `CacheStatus` containing **all** queried paths:
+- `cached: true` — path is already in the cache; worker skips it.
+- `cached: false, url: Some(presigned_put)` — S3 mode; worker uploads directly to S3.
+- `cached: false, url: None` — local mode; worker uses `NarPush` WebSocket frames.
+
+**Local mode** — uncached paths have `url: None`; worker uses `NarPush`:
 
 ```mermaid
 sequenceDiagram
     participant W as Worker
     participant S as Server
 
-    rect rgb(230, 240, 255)
-    Note over W,S: Batch input download (server → worker)
-    S-->>W: NarPush {path:A, offset:0}
-    S-->>W: NarPush {path:B, offset:0}
-    S-->>W: NarPush {path:A, is_final}
-    S-->>W: NarPush {path:B, is_final}
-    end
-
-    rect rgb(230, 255, 230)
-    Note over W,S: Batch output upload (worker → server)
-    W-->>S: NarPush {path:X, offset:0}
-    W-->>S: NarPush {path:X, is_final}
-    W-->>S: NarPush {path:Y, offset:0}
-    W-->>S: NarPush {path:Y, is_final}
-    end
+    W->>S: CacheQuery { mode: Push, paths: [A, B, C] }
+    Note right of S: B already cached
+    S->>W: CacheStatus { cached: [{A,cached:false,url:None}, {B,cached:true}, {C,cached:false,url:None}] }
+    W-->>S: NarPush {path:A, offset:0, data:...}
+    W-->>S: NarPush {path:A, is_final}
+    W-->>S: NarPush {path:C, offset:0, data:...}
+    W-->>S: NarPush {path:C, is_final}
+    Note right of S: stores in local NarStore
 ```
 
-### S3 Mode
-
-Server sends presigned URLs in bulk. Worker uploads/downloads directly via HTTP in parallel, then confirms each.
+**S3 mode** — uncached paths have `url: Some(presigned_put)`; worker uploads directly to S3:
 
 ```mermaid
 sequenceDiagram
@@ -777,25 +822,16 @@ sequenceDiagram
     participant S as Server
     participant S3 as S3
 
-    rect rgb(230, 240, 255)
-    Note over W,S3: Batch input download
-    S->>W: PresignedDownload {path:A}
-    S->>W: PresignedDownload {path:B}
-    S->>W: PresignedDownload {path:C}
-    W->>S3: GET A, GET B, GET C (parallel)
-    S3->>W: responses
-    end
-
-    rect rgb(230, 255, 230)
-    Note over W,S3: Batch output upload
-    S->>W: PresignedUpload {path:X}
-    S->>W: PresignedUpload {path:Y}
-    W->>S3: PUT X, PUT Y (parallel)
-    S3->>W: 200 OK
-    W->>S: NarReady {path:X, hash, size}
-    W->>S: NarReady {path:Y, hash, size}
-    end
+    W->>S: CacheQuery mode=Push paths=[A, B, C]
+    Note right of S: B already cached; generates presigned PUT URLs for A, C
+    S->>W: CacheStatus [A: cached=false url=s3, B: cached=true, C: cached=false url=s3]
+    W->>S3: PUT A (direct, no data through server)
+    W->>S: NarReady path=A
+    W->>S3: PUT C
+    W->>S: NarReady path=C
 ```
+
+### Server → Worker (download, BuildJob)
 
 The worker drives NAR requests — it knows what it needs to build, checks its local store, and asks the server for only the missing paths:
 
@@ -805,6 +841,18 @@ NarRequest { job_id: Uuid, paths: Vec<String> }
 ```
 
 The server responds with batched `NarPush` (direct mode) or `PresignedDownload` (S3 mode) for the requested paths. This avoids the server needing to know the worker's store state.
+
+```mermaid
+sequenceDiagram
+    participant W as Worker
+    participant S as Server
+
+    W->>S: NarRequest { paths: [X, Y] }
+    S-->>W: NarPush {path:X, offset:0}
+    S-->>W: NarPush {path:Y, offset:0}
+    S-->>W: NarPush {path:X, is_final}
+    S-->>W: NarPush {path:Y, is_final}
+```
 
 **Source selection in federated setups:** when multiple peers hold a requested NAR, the server prefers direct workers over federation proxies (fewer network hops), minimizing relay latency and bandwidth. If S3 is configured and the NAR is cached there, S3 is always preferred (direct HTTP, no relay).
 
@@ -996,7 +1044,7 @@ The server sends credentials to workers before tasks that need them:
 | Credential | Used by | Contents |
 |------------|---------|----------|
 | `SshKey` | `FetchFlake` task | Organization's SSH private key for cloning private repos |
-| `SigningKey` | `Sign` task | Cache Ed25519 secret key for signing store paths |
+| `SigningKey` | `FetchFlake` task (when `FlakeJob.sign` is set), `Sign` task in `BuildJob` | Cache Ed25519 secret key for signing store paths |
 
 Credentials are encrypted in transit (TLS). Workers MUST:
 - Keep credentials in memory only — never write to disk

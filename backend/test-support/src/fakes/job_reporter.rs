@@ -8,7 +8,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use proto::messages::{BuildOutput, CachedPath, DiscoveredDerivation, FetchedInput};
+use proto::messages::{BuildOutput, CachedPath, DiscoveredDerivation, FetchedInput, QueryMode};
 use proto::traits::JobReporter;
 
 /// A reported event captured by [`RecordingJobReporter`].
@@ -80,17 +80,26 @@ impl RecordingJobReporter {
 
 #[async_trait]
 impl JobReporter for RecordingJobReporter {
-    async fn query_cache(&mut self, paths: Vec<String>) -> Result<Vec<CachedPath>> {
-        let cached: std::collections::HashSet<&str> =
+    async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode) -> Result<Vec<CachedPath>> {
+        let cached_set: std::collections::HashSet<&str> =
             self.cached_paths.iter().map(|s| s.as_str()).collect();
         Ok(paths
             .into_iter()
-            .filter(|p| cached.contains(p.as_str()))
-            .map(|path| CachedPath {
-                path,
-                file_size: None,
-                nar_size: None,
-                url: None,
+            .filter_map(|path| {
+                let is_cached = cached_set.contains(path.as_str());
+                // Normal/Pull: return only cached paths.
+                // Push: return all paths with cached flag.
+                if is_cached || matches!(mode, QueryMode::Push) {
+                    Some(CachedPath {
+                        path,
+                        cached: is_cached,
+                        file_size: None,
+                        nar_size: None,
+                        url: None,
+                    })
+                } else {
+                    None
+                }
             })
             .collect())
     }

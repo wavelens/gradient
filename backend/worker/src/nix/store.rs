@@ -22,6 +22,7 @@ use proto::traits::WorkerStore;
 const DEFAULT_DAEMON_SOCKET: &str = "/nix/var/nix/daemon-socket/socket";
 
 /// Thin wrapper around a harmonia `ConnectionPool` for the worker's local nix-daemon.
+#[derive(Clone)]
 pub struct LocalNixStore {
     pool: ConnectionPool,
 }

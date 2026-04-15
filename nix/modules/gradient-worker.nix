@@ -128,7 +128,7 @@ in {
       maxConcurrentBuilds = lib.mkOption {
         description = "Maximum number of concurrent builds";
         type = lib.types.ints.positive;
-        default = 100;
+        default = 10;
       };
 
       maxNixdaemonConnections = lib.mkOption {
@@ -156,12 +156,6 @@ in {
         description = "Maximum number of simultaneous proto WebSocket connections";
         type = lib.types.ints.positive;
         default = 1;
-      };
-
-      evalClosureParallelism = lib.mkOption {
-        description = "Number of top-level derivations whose dependency closure is walked in parallel";
-        type = lib.types.ints.positive;
-        default = 8;
       };
 
       logLevel = lib.mkOption {
@@ -272,7 +266,6 @@ in {
           GRADIENT_MAX_NIXDAEMON_CONNECTIONS          = toString cfg.settings.maxNixdaemonConnections;
           GRADIENT_WORKER_EVAL_WORKERS                = toString cfg.settings.evalWorkers;
           GRADIENT_MAX_EVALUATIONS_PER_WORKER         = toString cfg.settings.maxEvaluationsPerWorker;
-          GRADIENT_EVAL_CLOSURE_PARALLELISM           = toString cfg.settings.evalClosureParallelism;
           GRADIENT_MAX_PROTO_CONNECTIONS              = toString cfg.settings.maxProtoConnections;
           GRADIENT_WORKER_CAPABILITY_FEDERATE         = lib.boolToString cfg.capabilities.federate;
           GRADIENT_WORKER_CAPABILITY_FETCH            = lib.boolToString cfg.capabilities.fetch;

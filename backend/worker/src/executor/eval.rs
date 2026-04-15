@@ -23,6 +23,8 @@ use gradient_core::nix::DerivationResolver;
 use proto::messages::{DerivationOutput, DiscoveredDerivation, FlakeJob};
 use tracing::{debug, warn};
 
+use proto::messages::QueryMode;
+
 use crate::proto::job::JobUpdater;
 use crate::traits::{DrvReader, FsDrvReader, JobReporter};
 
@@ -43,12 +45,21 @@ impl WorkerEvaluator {
     }
 }
 
+impl Clone for WorkerEvaluator {
+    fn clone(&self) -> Self {
+        Self { resolver: self.resolver.clone() }
+    }
+}
+
 /// Advance status to `EvaluatingFlake`.
 ///
 /// Attr discovery is done inside [`evaluate_derivations`] since the server
 /// only cares about the final [`DiscoveredDerivation`] list.
-pub async fn evaluate_flake(_job: &FlakeJob, updater: &mut JobUpdater<'_>) -> Result<()> {
-    updater.report_evaluating_flake().await
+pub async fn evaluate_flake(_job: &FlakeJob, updater: &mut JobUpdater) -> Result<()> {
+    // Rebind as &JobUpdater so the inherent &self method wins over the &mut self
+    // trait method that async_trait generates.
+    let updater: &JobUpdater = updater;
+    updater.report_evaluating_flake()
 }
 
 /// Walk the full derivation closure and report [`DiscoveredDerivation`]s to
@@ -65,7 +76,7 @@ pub async fn evaluate_derivations(
     evaluator: &WorkerEvaluator,
     job: &FlakeJob,
     local_flake_path: Option<&str>,
-    updater: &mut JobUpdater<'_>,
+    updater: &mut JobUpdater,
 ) -> Result<()> {
     evaluate_derivations_with(
         &*evaluator.resolver,
@@ -246,7 +257,7 @@ pub async fn evaluate_derivations_with(
         // Ask the server which outputs are available — local cache (url: None)
         // or upstream external caches (url: Some). Both are treated as substituted.
         let cached_paths = updater
-            .query_cache(all_output_paths.clone())
+            .query_cache(all_output_paths.clone(), QueryMode::Normal)
             .await
             .unwrap_or_else(|e| {
                 warn!(error = %e, "cache query failed; treating all paths as uncached");
@@ -310,6 +321,7 @@ mod tests {
             commit: "abc123".into(),
             wildcards: vec!["*".into()],
             timeout_secs: None,
+            sign: None,
         }
     }
 

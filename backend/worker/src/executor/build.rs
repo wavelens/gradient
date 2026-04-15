@@ -35,9 +35,9 @@ use crate::proto::job::JobUpdater;
 pub async fn build_derivation(
     store: &LocalNixStore,
     task: &BuildTask,
-    updater: &mut JobUpdater<'_>,
+    updater: &mut JobUpdater,
 ) -> Result<()> {
-    updater.report_building(task.build_id.clone()).await?;
+    updater.report_building(task.build_id.clone())?;
 
     let full_drv_path = nix_store_path(&task.drv_path);
     debug!(drv = %full_drv_path, "building derivation locally");
@@ -51,7 +51,7 @@ pub async fn build_derivation(
         parse_drv(&drv_bytes).with_context(|| format!("parse .drv file: {}", full_drv_path))?;
 
     // ── Build BasicDerivation for harmonia ────────────────────────────────────
-    let basic_drv = build_basic_derivation(&task.drv_path, &drv)?;
+    let basic_drv = get_basic_derivation(&task.drv_path, &drv)?;
 
     // ── Call local nix-daemon ─────────────────────────────────────────────────
     let harmonia_path = StorePath::from_base_path(strip_store_prefix(&full_drv_path))
@@ -95,6 +95,7 @@ pub async fn build_derivation(
             }
             out
         }
+
         BuildResultInner::Failure(f) => {
             let msg = String::from_utf8_lossy(&f.error_msg);
             warn!(drv = %task.drv_path, error = %msg, "build failed");
@@ -102,13 +103,11 @@ pub async fn build_derivation(
         }
     };
 
-    updater
-        .report_build_output(task.build_id.clone(), outputs)
-        .await
+    updater.report_build_output(task.build_id.clone(), outputs)
 }
 
 /// Construct a harmonia [`BasicDerivation`] from a parsed drv file.
-fn build_basic_derivation(
+fn get_basic_derivation(
     drv_path: &str,
     drv: &gradient_core::db::Derivation,
 ) -> Result<BasicDerivation> {
@@ -118,6 +117,7 @@ fn build_basic_derivation(
             .name
             .parse()
             .with_context(|| format!("invalid output name: {}", o.name))?;
+
         let drv_output = if !o.hash_algo.is_empty() && !o.hash.is_empty() {
             // Fixed-output derivation (FOD): the hash_algo field is either
             // "sha256" (flat) or "r:sha256" (recursive/NAR hash).
@@ -126,26 +126,31 @@ fn build_basic_derivation(
                 .strip_prefix("r:")
                 .map(|rest| (true, rest))
                 .unwrap_or((false, &o.hash_algo));
+
             let algorithm: harmonia_utils_hash::Algorithm = algo_str
                 .parse()
                 .with_context(|| format!("unknown hash algorithm: {}", o.hash_algo))?;
+
             let hash =
                 harmonia_utils_hash::fmt::Base16::parse(algorithm, &o.hash)
                     .or_else(|_| harmonia_utils_hash::fmt::Base32::parse(algorithm, &o.hash))
                     .with_context(|| {
                         format!("invalid hash for output {}: {}", o.name, o.hash)
                     })?;
+
             let ca = if recursive {
                 ContentAddress::Recursive(hash)
             } else {
                 ContentAddress::Flat(hash)
             };
+
             DerivationOutput::CAFixed(ca)
         } else if o.path.is_empty() {
             DerivationOutput::Deferred
         } else {
             let sp = StorePath::from_base_path(strip_store_prefix(&o.path))
                 .with_context(|| format!("invalid output store path: {}", o.path))?;
+
             DerivationOutput::InputAddressed(sp)
         };
         outputs.insert(output_name, drv_output);
@@ -216,12 +221,14 @@ mod tests {
             hash_algo: "".into(),
             hash: "".into(),
         }];
-        let basic = build_basic_derivation("aaaa-hello.drv", &drv).unwrap();
+
+        let basic = get_basic_derivation("aaaa-hello.drv", &drv).unwrap();
         let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
         let out = basic
             .outputs
             .get(&out_name)
             .expect("output 'out' not found");
+
         assert!(
             matches!(out, HarmoniaOutput::Deferred),
             "empty path → Deferred"
@@ -238,8 +245,10 @@ mod tests {
             hash_algo: "".into(),
             hash: "".into(),
         }];
+
         let basic =
-            build_basic_derivation("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello.drv", &drv).unwrap();
+            get_basic_derivation("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello.drv", &drv).unwrap();
+
         let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
         let out = basic
             .outputs
@@ -262,10 +271,12 @@ mod tests {
             hash_algo: "sha256".into(),
             hash: "0000000000000000000000000000000000000000000000000000000000000000".into(),
         }];
+
         drv.builder = "builtin:fetchurl".into();
-        let basic = build_basic_derivation("aaaa-source.tar.gz.drv", &drv).unwrap();
+        let basic = get_basic_derivation("aaaa-source.tar.gz.drv", &drv).unwrap();
         let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
         let out = basic.outputs.get(&out_name).expect("output 'out' not found");
+
         assert!(
             matches!(out, HarmoniaOutput::CAFixed(_)),
             "FOD with sha256 hash → CAFixed, got {:?}",
@@ -283,10 +294,12 @@ mod tests {
             hash_algo: "r:sha256".into(),
             hash: "0000000000000000000000000000000000000000000000000000000000000000".into(),
         }];
+
         drv.builder = "builtin:fetchurl".into();
-        let basic = build_basic_derivation("aaaa-source.drv", &drv).unwrap();
+        let basic = get_basic_derivation("aaaa-source.drv", &drv).unwrap();
         let out_name: harmonia_store_core::derived_path::OutputName = "out".parse().unwrap();
         let out = basic.outputs.get(&out_name).expect("output 'out' not found");
+
         match out {
             HarmoniaOutput::CAFixed(ca) => {
                 assert!(
@@ -303,7 +316,7 @@ mod tests {
     fn build_basic_drv_name_extraction() {
         let drv = empty_drv();
         // nix store path hashes are 32 nix-base32 chars
-        let basic = build_basic_derivation(
+        let basic = get_basic_derivation(
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv",
             &drv,
         )
@@ -315,7 +328,7 @@ mod tests {
     fn build_basic_drv_no_dash_full_base() {
         // If there's no '-' in the base path, use the full base as the name.
         let drv = empty_drv();
-        let basic = build_basic_derivation("nodashname.drv", &drv).unwrap();
+        let basic = get_basic_derivation("nodashname.drv", &drv).unwrap();
         assert_eq!(basic.name.as_ref(), "nodashname.drv");
     }
 }

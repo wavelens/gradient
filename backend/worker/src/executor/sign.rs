@@ -34,9 +34,9 @@ pub async fn sign_outputs(
     store: &LocalNixStore,
     credentials: &CredentialStore,
     task: &SignTask,
-    updater: &mut JobUpdater<'_>,
+    updater: &mut JobUpdater,
 ) -> Result<()> {
-    updater.report_signing().await?;
+    updater.report_signing()?;
 
     let key_secret = credentials
         .signing_key()

@@ -15,9 +15,14 @@ pub mod eval;
 pub mod fetch;
 pub mod sign;
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use proto::messages::{BuildJob, FlakeJob, FlakeTask};
+use tokio::sync::watch;
 use tracing::instrument;
+
+use proto::messages::QueryMode;
 
 use crate::nix::store::LocalNixStore;
 use crate::proto::{credentials::CredentialStore, job::JobUpdater, nar};
@@ -28,10 +33,13 @@ pub use eval::WorkerEvaluator;
 ///
 /// Each method corresponds to one `Job` variant from the proto spec.
 /// Results and status updates are sent back through [`JobUpdater`].
+///
+/// Arc-wraps the store and evaluator so the executor can be cheaply cloned
+/// and moved into spawned job tasks.
+#[derive(Clone)]
 pub struct JobExecutor {
-    pub(crate) store: LocalNixStore,
-    pub(crate) evaluator: WorkerEvaluator,
-    pub(crate) credentials: CredentialStore,
+    pub(crate) store: Arc<LocalNixStore>,
+    pub(crate) evaluator: Arc<WorkerEvaluator>,
     pub(crate) binpath_nix: String,
     pub(crate) binpath_ssh: String,
 }
@@ -40,14 +48,12 @@ impl JobExecutor {
     pub fn new(
         store: LocalNixStore,
         evaluator: WorkerEvaluator,
-        credentials: CredentialStore,
         binpath_nix: String,
         binpath_ssh: String,
     ) -> Self {
         Self {
-            store,
-            evaluator,
-            credentials,
+            store: Arc::new(store),
+            evaluator: Arc::new(evaluator),
             binpath_nix,
             binpath_ssh,
         }
@@ -62,8 +68,9 @@ impl JobExecutor {
     pub async fn execute_flake_job(
         &self,
         job: FlakeJob,
-        updater: &mut JobUpdater<'_>,
+        updater: &mut JobUpdater,
         credentials: &CredentialStore,
+        abort: watch::Receiver<bool>,
     ) -> Result<()> {
         // If FetchFlake runs, it stores the local checkout path here so
         // subsequent eval tasks use it instead of the remote URL.
@@ -78,22 +85,66 @@ impl JobExecutor {
                         credentials,
                         &self.binpath_nix,
                         &self.binpath_ssh,
+                        abort.clone(),
                     )
                     .await?;
-                    // Push each fetched input as a zstd-compressed NAR to the
-                    // server's cache before reporting the result.
-                    for fi in &fetched_inputs {
-                        if let Err(e) =
-                            nar::push_direct(&updater.job_id, &fi.store_path, updater.conn).await
+
+                    let all_paths: Vec<String> =
+                        fetched_inputs.iter().map(|fi| fi.store_path.clone()).collect();
+
+                    let cache_entries = if all_paths.is_empty() {
+                        vec![]
+                    } else {
+                        match updater.query_cache(all_paths.clone(), QueryMode::Push).await {
+                            Ok(c) => c,
+                            Err(e) => {
+                                tracing::warn!(error = %e, "CacheQuery failed; will attempt direct push for all paths");
+                                // Treat all paths as uncached with no URL.
+                                all_paths.iter().map(|p| proto::messages::CachedPath {
+                                    path: p.clone(),
+                                    cached: false,
+                                    file_size: None,
+                                    nar_size: None,
+                                    url: None,
+                                }).collect()
+                            }
+                        }
+                    };
+
+                    for cp in &cache_entries {
+                        if cp.cached {
+                            tracing::debug!(store_path = %cp.path, "skipping NAR push — already cached");
+                            continue;
+                        }
+                        if let Some(url) = &cp.url {
+                            // S3 presigned upload.
+                            if let Err(e) = nar::upload_presigned(
+                                &updater.job_id,
+                                &cp.path,
+                                url,
+                                "PUT",
+                                &[],
+                                &updater.writer,
+                            )
+                            .await
+                            {
+                                tracing::warn!(
+                                    store_path = %cp.path,
+                                    error = %e,
+                                    "presigned NAR upload failed; continuing"
+                                );
+                            }
+                        } else if let Err(e) =
+                            nar::push_direct(&updater.job_id, &cp.path, &updater.writer).await
                         {
                             tracing::warn!(
-                                store_path = %fi.store_path,
+                                store_path = %cp.path,
                                 error = %e,
                                 "failed to push NAR for fetched input; continuing"
                             );
                         }
                     }
-                    updater.report_fetch_result(fetched_inputs).await?;
+                    updater.report_fetch_result(fetched_inputs)?;
                     local_flake_path = Some(path);
                 }
                 FlakeTask::EvaluateFlake => eval::evaluate_flake(&job, updater).await?,
@@ -116,7 +167,8 @@ impl JobExecutor {
     pub async fn execute_build_job(
         &self,
         job: BuildJob,
-        updater: &mut JobUpdater<'_>,
+        updater: &mut JobUpdater,
+        credentials: &CredentialStore,
     ) -> Result<()> {
         for build_task in &job.builds {
             build::build_derivation(&self.store, build_task, updater).await?;
@@ -127,7 +179,7 @@ impl JobExecutor {
         }
 
         if let Some(sign_task) = &job.sign {
-            sign::sign_outputs(&self.store, &self.credentials, sign_task, updater).await?;
+            sign::sign_outputs(&self.store, credentials, sign_task, updater).await?;
         }
 
         Ok(())

@@ -23,12 +23,12 @@ use crate::proto::nar;
 pub async fn compress_outputs(
     _store: &LocalNixStore,
     task: &CompressTask,
-    updater: &mut JobUpdater<'_>,
+    updater: &mut JobUpdater,
 ) -> Result<()> {
-    updater.report_compressing().await?;
+    updater.report_compressing()?;
 
     for store_path in &task.store_paths {
-        nar::push_direct(&updater.job_id.clone(), store_path, updater.conn).await?;
+        nar::push_direct(&updater.job_id.clone(), store_path, &updater.writer).await?;
         info!(store_path, "compressed and pushed NAR");
     }
 

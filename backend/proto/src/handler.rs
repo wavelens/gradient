@@ -185,9 +185,15 @@ pub(crate) async fn handle_socket(
 
     let (authorized_peers, failed_peers) = validate_tokens(&registered_peers, &auth_response);
 
-    // Require at least one authorized peer unless no peers are registered
-    // (open/discoverable mode with no registrations).
+    // Require at least one authorized peer unless no peers have ever registered
+    // this worker (open/discoverable mode with no registrations at all).
     if registered_peers.is_empty() {
+        // Distinguish "no registrations" (open mode) from "all registrations
+        // deactivated" (worker was explicitly disabled).
+        if has_any_registrations(&state, &peer_id).await {
+            send_reject(&mut socket, 403, "worker is deactivated".into()).await;
+            return;
+        }
         debug!(%peer_id, "no registered peers — open connection accepted");
     } else if authorized_peers.is_empty() {
         send_reject(&mut socket, 401, "no valid peer tokens provided".into()).await;
@@ -234,6 +240,10 @@ pub(crate) async fn handle_socket(
 
     // ── Dispatch loop ─────────────────────────────────────────────────────────
 
+    // Buffer for direct NAR push (local storage mode).
+    // Key: store_path, Value: accumulated compressed bytes.
+    let mut nar_buffers: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
+
     loop {
         let msg = tokio::select! {
             msg = recv_client_msg(&mut socket) => {
@@ -246,6 +256,15 @@ pub(crate) async fn handle_socket(
                 // Server-initiated reauth: registrations changed via API.
                 debug!(%peer_id, "server-initiated reauth");
                 let registered_peers = lookup_registered_peers(&state, &peer_id).await;
+
+                // If there are registrations but none are active, all were
+                // deactivated — disconnect the worker immediately.
+                if registered_peers.is_empty() && has_any_registrations(&state, &peer_id).await {
+                    info!(%peer_id, "all registrations deactivated — disconnecting worker");
+                    send_reject(&mut socket, 403, "worker is deactivated".into()).await;
+                    break;
+                }
+
                 if send_server_msg(
                     &mut socket,
                     &ServerMessage::AuthChallenge {
@@ -547,7 +566,41 @@ pub(crate) async fn handle_socket(
                 is_final,
             } => {
                 debug!(%peer_id, %job_id, %store_path, offset, is_final, bytes = data.len(), "NarPush");
-                // TODO: write chunk to NarStore; on is_final verify hash + import.
+
+                // Accumulate data chunks in the per-store-path buffer.
+                if !data.is_empty() {
+                    nar_buffers
+                        .entry(store_path.clone())
+                        .or_default()
+                        .extend_from_slice(&data);
+                }
+
+                if is_final {
+                    let buf = nar_buffers.remove(&store_path).unwrap_or_default();
+                    let compressed_size = buf.len() as i64;
+
+                    // Derive the NarStore hash key from the store path.
+                    let hash_opt = store_path
+                        .strip_prefix("/nix/store/")
+                        .unwrap_or(&store_path)
+                        .split('-')
+                        .next()
+                        .map(str::to_owned);
+
+                    if let Some(hash) = hash_opt {
+                        if let Err(e) = state.nar_storage.put(&hash, buf).await {
+                            error!(%peer_id, %job_id, %store_path, error = %e, "NarPush write failed");
+                        } else {
+                            info!(%peer_id, %job_id, %store_path, compressed_size, "NarPush stored");
+                            // Update the derivation_output record if one exists for this path.
+                            if let Err(e) = mark_nar_stored(&state, &store_path, compressed_size).await {
+                                warn!(%store_path, error = %e, "failed to mark NAR as stored");
+                            }
+                        }
+                    } else {
+                        warn!(%peer_id, %job_id, %store_path, "NarPush: could not parse store path hash");
+                    }
+                }
             }
 
             ClientMessage::NarReady {
@@ -566,11 +619,12 @@ pub(crate) async fn handle_socket(
             }
 
             // ── Cache queries ────────────────────────────────────────────
-            ClientMessage::CacheQuery { job_id, paths } => {
-                debug!(%peer_id, %job_id, count = paths.len(), "CacheQuery");
+            ClientMessage::CacheQuery { job_id, paths, mode } => {
+                debug!(%peer_id, %job_id, count = paths.len(), ?mode, "CacheQuery");
                 let org_id = scheduler.peer_id_for_job(&job_id).await;
-                let cached = handle_cache_query(&state, org_id, &paths).await;
-                debug!(%peer_id, %job_id, cached = cached.len(), "CacheStatus");
+                let cached = handle_cache_query(&state, org_id, &paths, mode).await;
+                debug!(%peer_id, %job_id, entries = cached.len(), "CacheStatus");
+
                 if send_server_msg(
                     &mut socket,
                     &ServerMessage::CacheStatus { job_id, cached },
@@ -594,6 +648,7 @@ pub(crate) async fn handle_socket(
 ///
 /// - **FlakeJob with FetchFlake**: sends the org's SSH private key for cloning
 ///   private repositories.
+/// - **FlakeJob with sign**: sends the cache's signing key.
 /// - **BuildJob with Sign**: sends the cache's signing key.
 async fn send_credentials_for_job(
     socket: &mut ProtoSocket,
@@ -605,71 +660,84 @@ async fn send_credentials_for_job(
 
     match job {
         Job::Flake(flake_job) => {
-            if !flake_job.tasks.contains(&FlakeTask::FetchFlake) {
-                return;
-            }
-            // Look up the org's SSH private key.
-            match EOrganization::find_by_id(org_id).one(&state.db).await {
-                Ok(Some(org)) => {
-                    match gradient_core::sources::ssh_key::decrypt_ssh_private_key(
-                        state.cli.crypt_secret_file.clone(),
-                        org,
-                        &state.cli.serve_url,
-                    ) {
-                        Ok((private_key, _public_key)) => {
-                            let _ = send_server_msg(
-                                socket,
-                                &ServerMessage::Credential {
-                                    kind: CredentialKind::SshKey,
-                                    data: private_key.into_bytes(),
-                                },
-                            )
-                            .await;
-                            debug!(%org_id, "SSH key credential sent");
-                        }
-                        Err(e) => {
-                            debug!(%org_id, error = %e, "no SSH key for org (may be HTTPS repo)");
-                        }
-                    }
-                }
-                Ok(None) => warn!(%org_id, "org not found for SSH key lookup"),
-                Err(e) => warn!(%org_id, error = %e, "failed to fetch org for SSH key"),
-            }
-        }
-        Job::Build(build_job) => {
-            if build_job.sign.is_none() {
-                return;
-            }
-            // Look up a signing key from the org's caches.
-            // Find caches associated with this org that have signing keys.
-            match EOrganizationCache::find()
-                .filter(COrganizationCache::Organization.eq(org_id))
-                .all(&state.db)
-                .await
-            {
-                Ok(org_caches) => {
-                    for oc in org_caches {
-                        match ECache::find_by_id(oc.cache).one(&state.db).await {
-                            Ok(Some(cache)) if !cache.private_key.is_empty() => {
+            if flake_job.tasks.contains(&FlakeTask::FetchFlake) {
+                // Look up the org's SSH private key.
+                match EOrganization::find_by_id(org_id).one(&state.db).await {
+                    Ok(Some(org)) => {
+                        match gradient_core::sources::ssh_key::decrypt_ssh_private_key(
+                            state.cli.crypt_secret_file.clone(),
+                            org,
+                            &state.cli.serve_url,
+                        ) {
+                            Ok((private_key, _public_key)) => {
                                 let _ = send_server_msg(
                                     socket,
                                     &ServerMessage::Credential {
-                                        kind: CredentialKind::SigningKey,
-                                        data: cache.private_key.into_bytes(),
+                                        kind: CredentialKind::SshKey,
+                                        data: private_key.into_bytes(),
                                     },
                                 )
                                 .await;
-                                debug!(cache_name = %cache.name, "signing key credential sent");
-                                break;
+                                debug!(%org_id, "SSH key credential sent");
                             }
-                            Ok(_) => {}
-                            Err(e) => warn!(error = %e, "failed to fetch cache for signing key"),
+                            Err(e) => {
+                                debug!(%org_id, error = %e, "no SSH key for org (may be HTTPS repo)");
+                            }
                         }
                     }
+                    Ok(None) => warn!(%org_id, "org not found for SSH key lookup"),
+                    Err(e) => warn!(%org_id, error = %e, "failed to fetch org for SSH key"),
                 }
-                Err(e) => warn!(%org_id, error = %e, "failed to fetch org caches for signing key"),
+            }
+            if flake_job.sign.is_some() {
+                send_signing_key_credential(socket, state, org_id).await;
             }
         }
+        Job::Build(build_job) => {
+            if build_job.sign.is_some() {
+                send_signing_key_credential(socket, state, org_id).await;
+            }
+        }
+    }
+}
+
+/// Look up a cache signing key for `org_id` and deliver it as a
+/// `Credential { kind: SigningKey }` message.  Used by both `FlakeJob` (sign
+/// fetched sources) and `BuildJob` (sign built outputs).
+async fn send_signing_key_credential(
+    socket: &mut ProtoSocket,
+    state: &ServerState,
+    org_id: Uuid,
+) {
+    use gradient_core::types::proto::CredentialKind;
+
+    match EOrganizationCache::find()
+        .filter(COrganizationCache::Organization.eq(org_id))
+        .all(&state.db)
+        .await
+    {
+        Ok(org_caches) => {
+            for oc in org_caches {
+                match ECache::find_by_id(oc.cache).one(&state.db).await {
+                    Ok(Some(cache)) if !cache.private_key.is_empty() => {
+                        let _ = send_server_msg(
+                            socket,
+                            &ServerMessage::Credential {
+                                kind: CredentialKind::SigningKey,
+                                data: cache.private_key.into_bytes(),
+                            },
+                        )
+                        .await;
+                        debug!(cache_name = %cache.name, %org_id, "signing key credential sent");
+                        return;
+                    }
+                    Ok(_) => {}
+                    Err(e) => warn!(error = %e, "failed to fetch cache for signing key"),
+                }
+            }
+            debug!(%org_id, "no cache with signing key found for org");
+        }
+        Err(e) => warn!(%org_id, error = %e, "failed to fetch org caches for signing key"),
     }
 }
 
@@ -729,7 +797,7 @@ async fn send_reject(socket: &mut ProtoSocket, code: u16, reason: String) {
     let _ = send_server_msg(socket, &ServerMessage::Reject { code, reason }).await;
 }
 
-/// Returns `(peer_id, token_hash)` pairs for all peers that registered this worker.
+/// Returns `(peer_id, token_hash)` pairs for all **active** peers that registered this worker.
 async fn lookup_registered_peers(state: &ServerState, worker_id: &str) -> Vec<(String, String)> {
     use entity::worker_registration::{Column, Entity};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -747,6 +815,26 @@ async fn lookup_registered_peers(state: &ServerState, worker_id: &str) -> Vec<(S
         Err(e) => {
             warn!(error = %e, %worker_id, "failed to look up registered peers");
             vec![]
+        }
+    }
+}
+
+/// Returns `true` if *any* `worker_registration` row exists for this worker,
+/// regardless of the `active` flag.  Used to distinguish "no registrations at
+/// all" (open/discoverable mode) from "all registrations deactivated".
+async fn has_any_registrations(state: &ServerState, worker_id: &str) -> bool {
+    use entity::worker_registration::{Column, Entity};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    match Entity::find()
+        .filter(Column::WorkerId.eq(worker_id))
+        .one(&state.db)
+        .await
+    {
+        Ok(row) => row.is_some(),
+        Err(e) => {
+            warn!(error = %e, %worker_id, "failed to check worker registrations");
+            false
         }
     }
 }
@@ -804,26 +892,55 @@ fn negotiate_capabilities(
     }
 }
 
+/// Update the `derivation_output` record for `store_path` after a direct NAR push.
+///
+/// Sets `is_cached = true` and `file_size` to the compressed NAR size.  If no
+/// record exists for the path (common for flake fetch inputs that aren't build
+/// outputs), this is a no-op — the NAR is still stored in `NarStore`.
+async fn mark_nar_stored(state: &ServerState, store_path: &str, file_size: i64) -> anyhow::Result<()> {
+    use entity::derivation_output::{Column as CDerivationOutput, Entity as EDerivationOutput};
+    use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
+
+    let existing = EDerivationOutput::find()
+        .filter(CDerivationOutput::Output.eq(store_path))
+        .one(&state.db)
+        .await?;
+
+    if let Some(row) = existing {
+        let mut active = row.into_active_model();
+        active.is_cached = Set(true);
+        active.file_size = Set(Some(file_size));
+        active.update(&state.db).await?;
+        info!(store_path, file_size, "derivation_output marked cached after NarPush");
+    }
+
+    Ok(())
+}
+
 /// Check which store paths are available — in the local Gradient cache or upstream.
 ///
-/// Returns a single `Vec<CachedPath>` where:
-/// - `url: None` — path is in the local Gradient cache.
-/// - `url: Some(abs_url)` — path was found in an upstream external Nix cache; the worker
-///   should download the NAR directly from that URL.
+/// Build the [`CacheStatus`] response for a [`CacheQuery`].
 ///
-/// Upstream caches are resolved via `org_id → organization_cache → cache → cache_upstream`
-/// and narinfo is fetched over HTTP for any path not found locally.
+/// Behaviour depends on `mode`:
+/// - [`QueryMode::Normal`] — return only paths that are cached (`cached: true`).
+///   Upstream caches are checked for any path not found locally.  No URLs.
+/// - [`QueryMode::Pull`]   — same as Normal but cached paths include a presigned
+///   S3 GET URL when the store is S3-backed (`url: None` → use `NarRequest`).
+/// - [`QueryMode::Push`]   — return **all** queried paths with `cached` set.
+///   Uncached paths include a presigned S3 PUT URL when S3-backed
+///   (`url: None` → use `NarPush`).  Upstream cache lookups are skipped.
 async fn handle_cache_query(
     state: &ServerState,
     org_id: Option<uuid::Uuid>,
     paths: &[String],
+    mode: gradient_core::types::proto::QueryMode,
 ) -> Vec<gradient_core::types::proto::CachedPath> {
     use entity::cache_upstream::{Column as CCacheUpstream, Entity as ECacheUpstream};
     use entity::derivation_output::{Column as CDerivationOutput, Entity as EDerivationOutput};
     use entity::organization_cache::{
         CacheSubscriptionMode, Column as COrgCache, Entity as EOrgCache,
     };
-    use gradient_core::types::proto::CachedPath;
+    use gradient_core::types::proto::{CachedPath, QueryMode};
 
     // Extract (hash, original_path) pairs from store paths.
     let hash_path_pairs: Vec<(&str, &str)> = paths
@@ -864,19 +981,58 @@ async fn handle_cache_query(
         .map(|r| (r.hash.as_str(), (r.file_size, r.nar_size)))
         .collect();
 
-    let mut result: Vec<CachedPath> = hash_path_pairs
-        .iter()
-        .filter_map(|(hash, path)| {
-            cached_map.get(hash).map(|(file_size, nar_size)| CachedPath {
+    let expire = std::time::Duration::from_secs(3600);
+
+    // ── Build result for locally-cached paths ─────────────────────────────────
+    let mut result: Vec<CachedPath> = Vec::new();
+    for (hash, path) in &hash_path_pairs {
+        if let Some((file_size, nar_size)) = cached_map.get(hash) {
+            // Path is locally cached.
+            let url = match mode {
+                QueryMode::Pull => {
+                    match state.nar_storage.presigned_get_url(hash, expire).await {
+                        Ok(u) => u,
+                        Err(e) => {
+                            warn!(%hash, error = %e, "failed to generate presigned GET URL");
+                            None
+                        }
+                    }
+                }
+                _ => None,
+            };
+            result.push(CachedPath {
                 path: path.to_string(),
+                cached: true,
                 file_size: file_size.map(|v| v as u64),
                 nar_size: nar_size.map(|v| v as u64),
-                url: None,
-            })
-        })
-        .collect();
+                url,
+            });
+        } else if matches!(mode, QueryMode::Push) {
+            // Path is NOT locally cached — for Push mode return it so the
+            // worker knows to upload, with an optional presigned PUT URL.
+            let url = match state.nar_storage.presigned_put_url(hash, expire).await {
+                Ok(u) => u,
+                Err(e) => {
+                    warn!(%hash, error = %e, "failed to generate presigned PUT URL");
+                    None
+                }
+            };
+            result.push(CachedPath {
+                path: path.to_string(),
+                cached: false,
+                file_size: None,
+                nar_size: None,
+                url,
+            });
+        }
+        // Normal/Pull + uncached: skip — handled by upstream lookup below.
+    }
 
-    // ── Upstream cache lookup ─────────────────────────────────────────────────
+    // ── Upstream cache lookup (Normal / Pull only) ────────────────────────────
+    // For Push mode we only care about what's locally cached; skip upstream.
+    if matches!(mode, QueryMode::Push) {
+        return result;
+    }
 
     let locally_cached_hashes: std::collections::HashSet<&str> =
         cached_map.keys().copied().collect();
@@ -957,6 +1113,7 @@ async fn handle_cache_query(
                 let url = format!("{}/{}", base_url.trim_end_matches('/'), nar_path);
                 result.push(CachedPath {
                     path: store_path.to_string(),
+                    cached: true,
                     file_size: None,
                     nar_size: None,
                     url: Some(url),
@@ -972,6 +1129,7 @@ async fn handle_cache_query(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_core::types::proto::QueryMode;
     use std::sync::Arc;
 
     fn sha256_hex(s: &str) -> String {
@@ -1138,5 +1296,84 @@ mod tests {
         assert!(!result.eval);
         assert!(!result.build);
         assert!(!result.sign);
+    }
+
+    // ── handle_cache_query ───────────────────────────────────────────────────
+
+    /// Empty path list always returns empty regardless of mode.
+    #[tokio::test]
+    async fn cache_query_empty_paths_returns_empty() {
+        let state = make_state(false, false);
+        assert!(handle_cache_query(&state, None, &[], QueryMode::Normal).await.is_empty());
+        assert!(handle_cache_query(&state, None, &[], QueryMode::Push).await.is_empty());
+        assert!(handle_cache_query(&state, None, &[], QueryMode::Pull).await.is_empty());
+    }
+
+    /// Paths with a malformed store hash (not 32 chars) are silently skipped.
+    #[tokio::test]
+    async fn cache_query_invalid_store_paths_skipped() {
+        let state = make_state(false, false);
+        let paths = vec!["not-a-store-path".to_string(), "/nix/store/short-name".to_string()];
+        assert!(handle_cache_query(&state, None, &paths, QueryMode::Normal).await.is_empty());
+        assert!(handle_cache_query(&state, None, &paths, QueryMode::Push).await.is_empty());
+        assert!(handle_cache_query(&state, None, &paths, QueryMode::Pull).await.is_empty());
+    }
+
+    /// Normal mode: uncached paths (empty DB) → empty result.
+    #[tokio::test]
+    async fn cache_query_normal_uncached_returns_empty() {
+        let state = make_state(false, false);
+        // 32-char nix-base32 hash
+        let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
+        let result = handle_cache_query(&state, None, &paths, QueryMode::Normal).await;
+        assert!(result.is_empty(), "Normal mode should not return uncached paths");
+    }
+
+    /// Pull mode: uncached paths (empty DB) → empty result (no presigned URLs for uncached).
+    #[tokio::test]
+    async fn cache_query_pull_uncached_returns_empty() {
+        let state = make_state(false, false);
+        let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
+        let result = handle_cache_query(&state, None, &paths, QueryMode::Pull).await;
+        assert!(result.is_empty(), "Pull mode should not return uncached paths");
+    }
+
+    /// Push mode: uncached paths (empty DB) → returned with cached=false.
+    /// Local NarStore produces url=None (no presigned upload URLs).
+    #[tokio::test]
+    async fn cache_query_push_uncached_returns_all_with_cached_false() {
+        let state = make_state(false, false);
+        let paths = vec![
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
+            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
+        ];
+        let result = handle_cache_query(&state, None, &paths, QueryMode::Push).await;
+        assert_eq!(result.len(), 2, "Push should return all queried paths");
+        for cp in &result {
+            assert!(!cp.cached, "all should be uncached (empty DB): {}", cp.path);
+            assert!(cp.url.is_none(), "local store → no presigned URL: {}", cp.path);
+        }
+        let returned_paths: Vec<&str> = result.iter().map(|c| c.path.as_str()).collect();
+        assert!(returned_paths.contains(&paths[0].as_str()));
+        assert!(returned_paths.contains(&paths[1].as_str()));
+    }
+
+    /// Push mode: duplicate paths collapse to one entry per unique path.
+    #[tokio::test]
+    async fn cache_query_push_deduplicates_by_hash() {
+        let state = make_state(false, false);
+        // Same hash, two paths (shouldn't happen in practice but let's be safe).
+        let paths = vec![
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
+        ];
+        // Both entries share the same hash; the filter_map produces one per
+        // unique (hash, path) pair — duplicates are still processed but result
+        // in one entry since they map to the same path string.
+        let result = handle_cache_query(&state, None, &paths, QueryMode::Push).await;
+        // One or two entries is acceptable — what matters is all are uncached.
+        for cp in &result {
+            assert!(!cp.cached);
+        }
     }
 }

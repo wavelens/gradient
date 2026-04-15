@@ -23,7 +23,7 @@ use proto::messages::ClientMessage;
 use sha2::{Digest, Sha256};
 use tracing::{debug, info};
 
-use crate::connection::ProtoConnection;
+use crate::connection::ProtoWriter;
 
 /// Chunk size for direct NAR streaming (64 KiB).
 const NAR_CHUNK_SIZE: usize = 64 * 1024;
@@ -32,7 +32,7 @@ const NAR_CHUNK_SIZE: usize = 64 * 1024;
 /// in [`NAR_CHUNK_SIZE`]-byte chunks via [`ClientMessage::NarPush`].
 ///
 /// This is the "direct" transfer mode — no S3 involved.
-pub async fn push_direct(job_id: &str, store_path: &str, conn: &mut ProtoConnection) -> Result<()> {
+pub async fn push_direct(job_id: &str, store_path: &str, writer: &ProtoWriter) -> Result<()> {
     debug!(store_path, "NAR direct push");
 
     let mut nar_stream = harmonia_nar::NarByteStream::new(store_path.to_owned().into());
@@ -50,14 +50,13 @@ pub async fn push_direct(job_id: &str, store_path: &str, conn: &mut ProtoConnect
         while buf.len() >= NAR_CHUNK_SIZE {
             let part: Vec<u8> = buf.drain(..NAR_CHUNK_SIZE).collect();
             let len = part.len() as u64;
-            conn.send(ClientMessage::NarPush {
+            writer.send(ClientMessage::NarPush {
                 job_id: job_id.to_owned(),
                 store_path: store_path.to_owned(),
                 data: part,
                 offset,
                 is_final: false,
-            })
-            .await?;
+            })?;
             offset += len;
         }
     }
@@ -65,26 +64,24 @@ pub async fn push_direct(job_id: &str, store_path: &str, conn: &mut ProtoConnect
     let remaining = encoder.finish().context("failed to finish zstd encoder")?;
     if !remaining.is_empty() {
         let len = remaining.len() as u64;
-        conn.send(ClientMessage::NarPush {
+        writer.send(ClientMessage::NarPush {
             job_id: job_id.to_owned(),
             store_path: store_path.to_owned(),
             data: remaining,
             offset,
             is_final: false,
-        })
-        .await?;
+        })?;
         offset += len;
     }
 
     // Empty final chunk signals end-of-path.
-    conn.send(ClientMessage::NarPush {
+    writer.send(ClientMessage::NarPush {
         job_id: job_id.to_owned(),
         store_path: store_path.to_owned(),
         data: vec![],
         offset,
         is_final: true,
-    })
-    .await?;
+    })?;
 
     info!(
         store_path,
@@ -105,7 +102,7 @@ pub async fn upload_presigned(
     url: &str,
     method: &str,
     headers: &[(String, String)],
-    conn: &mut ProtoConnection,
+    writer: &ProtoWriter,
 ) -> Result<()> {
     debug!(store_path, method, "presigned NAR upload");
 
@@ -153,13 +150,12 @@ pub async fn upload_presigned(
     }
 
     // --- 3. Confirm to the server ---
-    conn.send(ClientMessage::NarReady {
+    writer.send(ClientMessage::NarReady {
         job_id: job_id.to_owned(),
         store_path: store_path.to_owned(),
         nar_size,
         nar_hash,
-    })
-    .await?;
+    })?;
 
     info!(store_path, nar_size, "presigned NAR upload complete");
     Ok(())
@@ -234,10 +230,11 @@ mod tests {
             }
         });
 
-        let mut conn = crate::connection::ProtoConnection::open(&url)
+        let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
-        push_direct("job-123", &store_path_str, &mut conn)
+        let (writer, _reader) = conn.split();
+        push_direct("job-123", &store_path_str, &writer)
             .await
             .unwrap();
 
@@ -273,10 +270,11 @@ mod tests {
             assert!(!decoded.is_empty(), "decompressed NAR should not be empty");
         });
 
-        let mut conn = crate::connection::ProtoConnection::open(&url)
+        let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
-        push_direct("job-123", &store_path_str, &mut conn)
+        let (writer, _reader) = conn.split();
+        push_direct("job-123", &store_path_str, &writer)
             .await
             .unwrap();
 
@@ -353,10 +351,11 @@ mod tests {
             }
         });
 
-        let mut conn = crate::connection::ProtoConnection::open(&url)
+        let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
-        upload_presigned("job-xyz", &store_path_str, &http_url, "PUT", &[], &mut conn)
+        let (writer, _reader) = conn.split();
+        upload_presigned("job-xyz", &store_path_str, &http_url, "PUT", &[], &writer)
             .await
             .unwrap();
 

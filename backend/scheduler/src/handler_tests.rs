@@ -128,6 +128,7 @@ fn make_eval_job(eval_id: Uuid, org_id: Uuid) -> PendingEvalJob {
             commit: "abc123".into(),
             wildcards: vec!["*".into()],
             timeout_secs: None,
+            sign: None,
         },
         required_paths: vec![],
     }
@@ -1759,6 +1760,7 @@ async fn eval_result_creates_entry_points_for_project() {
             commit: "abc123".into(),
             wildcards: vec!["*".into()],
             timeout_secs: None,
+            sign: None,
         },
         required_paths: vec![],
     };
@@ -2006,6 +2008,7 @@ async fn eval_result_all_substituted_with_project_completes() {
             commit: "abc123".into(),
             wildcards: vec!["*".into()],
             timeout_secs: None,
+            sign: None,
         },
         required_paths: vec![],
     };

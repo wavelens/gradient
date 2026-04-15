@@ -19,9 +19,31 @@ use tempfile::NamedTempFile;
 use git2::RemoteCallbacks;
 use proto::messages::{FetchedInput, FlakeJob};
 use proto::traits::JobReporter;
-use tracing::{debug, info, warn};
+use tokio::sync::watch;
+use tracing::{debug, info};
 
 use crate::proto::credentials::CredentialStore;
+
+/// Future that resolves only when the abort signal becomes `true`.
+///
+/// Uses `changed()` + `borrow()` (not `wait_for`) to avoid holding a
+/// non-`Send` `Ref<'_, bool>` guard across an await point.
+///
+/// If the sender is dropped (e.g. in tests using a receiver without a sender),
+/// the future parks forever instead of treating the drop as an abort.
+async fn abort_true(abort: &mut watch::Receiver<bool>) {
+    loop {
+        match abort.changed().await {
+            Ok(()) => {
+                if *abort.borrow() {
+                    return;
+                }
+            }
+            // Sender dropped — treat as "no abort", park forever.
+            Err(_) => std::future::pending::<()>().await,
+        }
+    }
+}
 
 /// Clone the repository referenced by `job`, archive it and all flake inputs
 /// into the Nix store, and return the nix store source path together with
@@ -30,16 +52,20 @@ use crate::proto::credentials::CredentialStore;
 /// The caller is responsible for pushing the NARs (via `nar::push_direct`) and
 /// reporting the result to the server (via `report_fetch_result`).
 ///
-/// If `nix flake archive` fails, falls back to the temporary git checkout path
-/// with an empty input list so evaluation can still proceed (e.g. when inputs
-/// are already cached from a previous run).
+/// `abort` is a watch channel receiver; when its value becomes `true` the
+/// function returns an error immediately (or kills any running subprocess).
 pub async fn fetch_repository(
     job: &FlakeJob,
     updater: &mut dyn JobReporter,
     credentials: &CredentialStore,
     binpath_nix: &str,
     binpath_ssh: &str,
+    mut abort: watch::Receiver<bool>,
 ) -> Result<(String, Vec<FetchedInput>)> {
+    if *abort.borrow() {
+        anyhow::bail!("job aborted");
+    }
+
     updater.report_fetching().await?;
 
     let url = job.repository.clone();
@@ -51,11 +77,19 @@ pub async fn fetch_repository(
     debug!(%url, %commit, has_ssh_key = ssh_key.is_some(), "fetching repository");
 
     let ssh_key_for_clone = ssh_key.clone();
-    let tmp_path = tokio::task::spawn_blocking(move || {
+    let clone_task = tokio::task::spawn_blocking(move || {
         clone_and_checkout(&url, &commit, ssh_key_for_clone.as_deref())
-    })
-    .await
-    .context("fetch task panicked")??;
+    });
+
+    let tmp_path = tokio::select! {
+        biased;
+        _ = abort_true(&mut abort) => {
+            anyhow::bail!("job aborted during git clone");
+        }
+        result = clone_task => {
+            result.context("fetch task panicked")??
+        }
+    };
 
     // Archive the flake source and all locked inputs into the nix store via a
     // subprocess (so fetching goes through the nix daemon with proper network
@@ -65,16 +99,17 @@ pub async fn fetch_repository(
     let flake_ref = format!("git+file://{}?rev={}", tmp_path, job.commit);
     let binpath_nix = binpath_nix.to_owned();
     let binpath_ssh = binpath_ssh.to_owned();
-    match archive_flake(&flake_ref, &binpath_nix, &binpath_ssh, ssh_key.as_deref()).await {
+    match archive_flake(&flake_ref, &binpath_nix, &binpath_ssh, ssh_key.as_deref(), abort).await {
         Ok((source_path, fetched_inputs)) => {
             info!(%source_path, inputs = fetched_inputs.len(), "flake archived to nix store");
             Ok((source_path, fetched_inputs))
         }
-        Err(e) => {
-            warn!(error = %e, "nix flake archive failed; falling back to git checkout path");
-            Ok((tmp_path, vec![]))
-        }
+        Err(e) => Err(e),
     }
+}
+
+fn parse_nix_json(stdout: &[u8], cmd: &str) -> Result<serde_json::Value> {
+    serde_json::from_slice(stdout).with_context(|| format!("failed to parse {cmd} JSON"))
 }
 
 /// Run `nix flake archive --json` and collect all store paths (source + all
@@ -89,11 +124,15 @@ async fn archive_flake(
     binpath_nix: &str,
     binpath_ssh: &str,
     ssh_key: Option<&str>,
+    mut abort: watch::Receiver<bool>,
 ) -> Result<(String, Vec<FetchedInput>)> {
     use std::os::unix::fs::PermissionsExt;
 
     let mut cmd = tokio::process::Command::new(binpath_nix);
     cmd.args(["flake", "archive", "--json", flake_ref]);
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    cmd.kill_on_drop(true);
 
     // Write the SSH key to a temp file (mode 0600) and set GIT_SSH_COMMAND so
     // that nix's libfetchers picks it up when cloning git+ssh inputs.  The
@@ -115,18 +154,32 @@ async fn archive_flake(
         None
     };
 
-    let output = cmd
-        .output()
-        .await
-        .context("failed to spawn nix flake archive")?;
+    let mut child = cmd.spawn().context("failed to spawn nix flake archive")?;
+
+    // Spawn into a separate task so abort_handle can cancel it (dropping child,
+    // which triggers kill_on_drop) independently of the await future.
+    let archive_task = tokio::spawn(async move { child.wait_with_output().await });
+    let abort_handle = archive_task.abort_handle();
+
+    let output = tokio::select! {
+        biased;
+        _ = abort_true(&mut abort) => {
+            abort_handle.abort();
+            anyhow::bail!("job aborted during nix flake archive");
+        }
+        result = archive_task => {
+            result
+                .context("nix flake archive task panicked")?
+                .context("failed to run nix flake archive")?
+        }
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("nix flake archive failed: {}", stderr.trim());
     }
 
-    let json: serde_json::Value =
-        serde_json::from_slice(&output.stdout).context("failed to parse nix flake archive JSON")?;
+    let json: serde_json::Value = parse_nix_json(&output.stdout, "nix flake archive")?;
 
     let source_path = json["path"]
         .as_str()
@@ -139,7 +192,7 @@ async fn archive_flake(
     collect_input_paths(&json, &mut all_paths);
 
     let all_paths: Vec<String> = all_paths.into_iter().collect();
-    let fetched_inputs = query_path_info(&all_paths, binpath_nix).await?;
+    let fetched_inputs = query_path_info(&all_paths, binpath_nix, abort).await?;
 
     Ok((source_path, fetched_inputs))
 }
@@ -162,29 +215,48 @@ fn collect_input_paths(node: &serde_json::Value, paths: &mut HashSet<String>) {
 /// Supports both the legacy object output (`{"/nix/store/xxx": {...}}`) and the
 /// modern array output (`[{"path": "/nix/store/xxx", ...}]`) from newer Nix
 /// versions.
-async fn query_path_info(paths: &[String], binpath_nix: &str) -> Result<Vec<FetchedInput>> {
+async fn query_path_info(
+    paths: &[String],
+    binpath_nix: &str,
+    mut abort: watch::Receiver<bool>,
+) -> Result<Vec<FetchedInput>> {
     if paths.is_empty() {
         return Ok(vec![]);
     }
 
     let mut cmd = tokio::process::Command::new(binpath_nix);
     cmd.arg("path-info").arg("--json");
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    cmd.kill_on_drop(true);
     for path in paths {
         cmd.arg(path);
     }
 
-    let output = cmd
-        .output()
-        .await
-        .context("failed to spawn nix path-info")?;
+    let mut child = cmd.spawn().context("failed to spawn nix path-info")?;
+
+    let path_info_task = tokio::spawn(async move { child.wait_with_output().await });
+    let abort_handle = path_info_task.abort_handle();
+
+    let output = tokio::select! {
+        biased;
+        _ = abort_true(&mut abort) => {
+            abort_handle.abort();
+            anyhow::bail!("job aborted during nix path-info");
+        }
+        result = path_info_task => {
+            result
+                .context("nix path-info task panicked")?
+                .context("failed to run nix path-info")?
+        }
+    };
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("nix path-info failed: {}", stderr.trim());
     }
 
-    let json: serde_json::Value =
-        serde_json::from_slice(&output.stdout).context("failed to parse nix path-info JSON")?;
+    let json: serde_json::Value = parse_nix_json(&output.stdout, "nix path-info")?;
 
     let mut inputs = Vec::new();
 
@@ -196,6 +268,7 @@ async fn query_path_info(paths: &[String], binpath_nix: &str) -> Result<Vec<Fetc
                     store_path: store_path.to_owned(),
                     nar_hash: entry["narHash"].as_str().unwrap_or("").to_owned(),
                     nar_size: entry["narSize"].as_u64().unwrap_or(0),
+                    signature: None,
                 });
             }
         }
@@ -206,6 +279,7 @@ async fn query_path_info(paths: &[String], binpath_nix: &str) -> Result<Vec<Fetc
                 store_path: store_path.clone(),
                 nar_hash: info["narHash"].as_str().unwrap_or("").to_owned(),
                 nar_size: info["narSize"].as_u64().unwrap_or(0),
+                signature: None,
             });
         }
     }
@@ -272,7 +346,12 @@ mod tests {
             commit: "abc123".into(),
             wildcards: vec![],
             timeout_secs: None,
+            sign: None,
         }
+    }
+
+    fn no_abort() -> watch::Receiver<bool> {
+        watch::channel(false).1
     }
 
     #[tokio::test]
@@ -282,7 +361,7 @@ mod tests {
         let mut reporter = RecordingJobReporter::new();
 
         // This will fail with a git error (fake URL), but it should report Fetching first.
-        let result = fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh").await;
+        let result = fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
 
         assert_eq!(reporter.len(), 1);
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
@@ -300,16 +379,16 @@ mod tests {
         );
 
         let mut reporter = RecordingJobReporter::new();
-        let result = fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh").await;
+        let result = fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
 
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
         assert!(result.is_err()); // fake URL
     }
 
-    /// fetch_repository must actually clone the repository.
-    /// This test creates a real local git repo and verifies the clone happens.
-    /// The nix store archive will fail (no nix available in unit test context),
-    /// so the fallback tmp path is returned — still verifies the clone succeeds.
+    /// fetch_repository clones the repo then runs nix flake archive.
+    /// In a unit-test context nix is unavailable, so the whole fetch fails —
+    /// this verifies the git clone step is reached (Fetching event emitted)
+    /// and that the error propagates rather than silently falling back.
     #[tokio::test]
     async fn fetch_repository_actually_clones() {
         use std::process::Command;
@@ -317,73 +396,39 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let repo_dir = tmp.path().join("repo");
 
-        // Create a git repository with one commit
         let rd = repo_dir.to_str().unwrap();
-        Command::new("git")
-            .args(["init", rd, "-b", "main"])
-            .output()
-            .unwrap();
-
+        Command::new("git").args(["init", rd, "-b", "main"]).output().unwrap();
         std::fs::write(repo_dir.join("flake.nix"), "{}").unwrap();
-        Command::new("git")
-            .args(["-C", rd, "add", "."])
-            .output()
-            .unwrap();
-
+        Command::new("git").args(["-C", rd, "add", "."]).output().unwrap();
         let commit_out = Command::new("git")
-            .args([
-                "-C",
-                rd,
-                "-c",
-                "user.name=test",
-                "-c",
-                "user.email=t@t",
-                "-c",
-                "commit.gpgsign=false",
-                "commit",
-                "-m",
-                "init",
-            ])
+            .args(["-C", rd, "-c", "user.name=test", "-c", "user.email=t@t",
+                   "-c", "commit.gpgsign=false", "commit", "-m", "init"])
             .output()
             .unwrap();
+        assert!(commit_out.status.success(), "git commit failed: {}", String::from_utf8_lossy(&commit_out.stderr));
 
-        assert!(
-            commit_out.status.success(),
-            "git commit failed: {}",
-            String::from_utf8_lossy(&commit_out.stderr)
-        );
-
-        let sha_output = Command::new("git")
-            .args(["-C", rd, "rev-parse", "HEAD"])
-            .output()
-            .unwrap();
-
-        assert!(sha_output.status.success(), "git rev-parse failed");
-        let sha = String::from_utf8(sha_output.stdout)
-            .unwrap()
-            .trim()
-            .to_string();
-
+        let sha = String::from_utf8(
+            Command::new("git").args(["-C", rd, "rev-parse", "HEAD"]).output().unwrap().stdout
+        ).unwrap().trim().to_string();
         assert!(sha.len() == 40, "expected 40-char SHA, got: {sha}");
+
         let job = FlakeJob {
             tasks: vec![FlakeTask::FetchFlake],
             repository: format!("file://{}", repo_dir.display()),
             commit: sha,
             wildcards: vec![],
             timeout_secs: None,
+            sign: None,
         };
 
         let credentials = crate::proto::credentials::CredentialStore::new();
         let mut reporter = RecordingJobReporter::new();
 
-        let result = fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh").await;
-        assert!(
-            result.is_ok(),
-            "fetch should clone real repo: {:?}",
-            result.err()
-        );
-        // The result is a (path, inputs) tuple — path should be non-empty.
-        let (path, _inputs) = result.unwrap();
-        assert!(!path.is_empty(), "returned path should be non-empty");
+        // Clone succeeds; nix flake archive fails (nix not available in test context).
+        // Without the fallback, the error propagates.
+        let result = fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
+        assert!(result.is_err(), "expected error when nix is unavailable");
+        // The Fetching event was still emitted before the failure.
+        assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
     }
 }
