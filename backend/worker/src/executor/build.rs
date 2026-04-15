@@ -80,12 +80,8 @@ pub async fn build_derivation(
         .build_derivation(&harmonia_path, &basic_drv, BuildMode::Normal)
         .await
         .map_err(|e| anyhow::anyhow!(
-            "build_derivation failed for {} (platform={}, builder={}, outputs=[{}], env_keys=[{}]): {}",
+            "build_derivation failed for {}: {}",
             task.drv_path,
-            drv.system,
-            drv.builder,
-            drv.outputs.iter().map(|o| o.name.as_str()).collect::<Vec<_>>().join(", "),
-            drv.environment.keys().cloned().collect::<Vec<_>>().join(", "),
             e,
         ))?;
 
@@ -161,8 +157,11 @@ fn get_basic_derivation(
         outputs.insert(output_name, drv_output);
     }
 
-    // ── Input sources (no .drv paths — those are already built) ──────────────
-    let inputs: harmonia_store_core::store_path::StorePathSet = drv
+    // ── Input paths: input_sources + output paths of input_derivations ────────
+    // The daemon needs all direct inputs present in the store before building.
+    // input_sources are plain store paths; input_derivations map drv→outputs,
+    // so we read each input .drv to resolve the concrete output paths.
+    let mut inputs: harmonia_store_core::store_path::StorePathSet = drv
         .input_sources
         .iter()
         .filter_map(|p| {
@@ -177,6 +176,36 @@ fn get_basic_derivation(
             }
         })
         .collect();
+
+    for (input_drv_path, _output_names) in &drv.input_derivations {
+        let input_full = nix_store_path(input_drv_path);
+        let input_bytes = match std::fs::read(&input_full) {
+            Ok(b) => b,
+            Err(e) => {
+                warn!(drv = %input_full, error = %e, "cannot read input .drv for inputs");
+                continue;
+            }
+        };
+        let input_drv = match parse_drv(&input_bytes) {
+            Ok(d) => d,
+            Err(e) => {
+                warn!(drv = %input_full, error = %e, "cannot parse input .drv for inputs");
+                continue;
+            }
+        };
+        for o in &input_drv.outputs {
+            if o.path.is_empty() {
+                continue;
+            }
+            let base = strip_nix_store_prefix(&o.path);
+            match StorePath::from_base_path(&base) {
+                Ok(sp) => { inputs.insert(sp); }
+                Err(e) => {
+                    warn!(path = %o.path, error = %e, "skipping input drv output: not a valid store path");
+                }
+            }
+        }
+    }
 
     // ── Structured attributes ─────────────────────────────────────────────────
     // harmonia's NixSerialize for BasicDerivation never writes `structured_attrs`

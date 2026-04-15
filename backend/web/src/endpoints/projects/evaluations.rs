@@ -27,6 +27,14 @@ use std::sync::Arc;
 use tokio::fs;
 use uuid::Uuid;
 
+#[derive(Deserialize, Default)]
+pub struct EvaluateRequest {
+    /// Optional mode controlling how the evaluation is triggered.
+    /// `"restart_failed"` skips fetch+eval and re-queues failed builds from the
+    /// most recent evaluation. Omit or `null` for a normal evaluation.
+    pub mode: Option<String>,
+}
+
 /// Build an [`EvaluationSummary`] for a single evaluation row.
 pub(super) async fn evaluation_to_summary(
     state: &Arc<ServerState>,
@@ -109,6 +117,7 @@ pub async fn post_project_evaluate(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
+    body: Option<Json<EvaluateRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (_organization, project): (MOrganization, MProject) = get_project_by_name(
         state.0.clone(),
@@ -118,6 +127,27 @@ pub async fn post_project_evaluate(
     )
     .await?
     .ok_or_else(|| WebError::not_found("Project"))?;
+
+    let mode = body.as_ref().and_then(|b| b.mode.as_deref());
+
+    if mode == Some("restart_failed") {
+        core::ci::trigger_restart_builds(&state.db, &project)
+            .await
+            .map_err(|e| match e {
+                core::ci::TriggerError::AlreadyInProgress => {
+                    WebError::BadRequest("Evaluation already in progress".to_string())
+                }
+                core::ci::TriggerError::NoPreviousEvaluation => {
+                    WebError::BadRequest("No previous evaluation to restart from".to_string())
+                }
+                core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
+            })?;
+
+        return Ok(Json(BaseResponse {
+            error: false,
+            message: "Restarting failed builds".to_string(),
+        }));
+    }
 
     let mut project_for_check = project.clone();
     project_for_check.force_evaluation = true;
@@ -137,15 +167,16 @@ pub async fn post_project_evaluate(
             core::ci::TriggerError::AlreadyInProgress => {
                 WebError::BadRequest("Evaluation already in progress".to_string())
             }
+            core::ci::TriggerError::NoPreviousEvaluation => {
+                WebError::InternalServerError("Unexpected error".to_string())
+            }
             core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
         })?;
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: "Evaluation started".to_string(),
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 /// `GET /projects/{organization}/{project}/evaluations`

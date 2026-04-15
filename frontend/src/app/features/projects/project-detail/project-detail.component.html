@@ -39,14 +39,13 @@
       <div class="header-actions">
         @if (authService.isAuthenticated()) {
           @if (proj.can_edit) {
-            <button
-              pButton
+            <p-splitButton
               label="Start Evaluation"
               icon="pi pi-play"
-              (click)="startEvaluation()"
-              [loading]="starting()"
+              (onClick)="startEvaluation()"
+              [model]="evalMenuItems"
               [disabled]="starting()"
-            ></button>
+            />
             <button
               pButton
               label="Settings"

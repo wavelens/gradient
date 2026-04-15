@@ -287,6 +287,7 @@ where
             lower.contains("warning:")
         })
         .map(|l| l.trim().to_string())
+        .filter(|l| !l.contains("SQLite database") || !l.contains("is busy"))
         .collect();
 
     (result, warnings)

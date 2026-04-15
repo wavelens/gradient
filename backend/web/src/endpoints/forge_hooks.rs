@@ -442,6 +442,7 @@ async fn trigger_for_repo_urls(
             Err(TriggerError::AlreadyInProgress) => {
                 debug!(project_id = %project.id, "Evaluation already in progress, skipping webhook trigger");
             }
+            Err(TriggerError::NoPreviousEvaluation) => {}
             Err(TriggerError::Db(e)) => {
                 warn!(error = %e, project_id = %project.id, "DB error triggering evaluation from forge webhook");
             }

@@ -65,6 +65,10 @@ export class ProjectsService {
     return this.api.post<string>(`projects/${organization}/${project}/evaluate`);
   }
 
+  restartFailedBuilds(organization: string, project: string): Observable<string> {
+    return this.api.post<string>(`projects/${organization}/${project}/evaluate`, { mode: 'restart_failed' });
+  }
+
   abortEvaluation(organization: string, project: string, evaluationId: string): Observable<string> {
     return this.api.post<string>(`evals/${evaluationId}`, { method: 'abort' });
   }

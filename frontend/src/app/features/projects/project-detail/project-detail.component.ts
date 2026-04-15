@@ -9,6 +9,8 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
+import { SplitButtonModule } from 'primeng/splitbutton';
+import { MenuItem } from 'primeng/api';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
@@ -22,6 +24,7 @@ import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, 
     CommonModule,
     RouterModule,
     ButtonModule,
+    SplitButtonModule,
     LoadingSpinnerComponent,
     EmptyStateComponent,
   ],
@@ -38,6 +41,14 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   entryPoints = signal<EntryPointSummary[]>([]);
   starting = signal(false);
   tick = signal(Date.now());
+
+  evalMenuItems: MenuItem[] = [
+    {
+      label: 'Restart Failed Builds',
+      icon: 'pi pi-refresh',
+      command: () => this.restartFailedBuilds(),
+    },
+  ];
 
   orgName = '';
   projectName = '';
@@ -110,6 +121,19 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       },
       error: (error) => {
         console.error('Failed to start evaluation:', error);
+        this.starting.set(false);
+      },
+    });
+  }
+
+  restartFailedBuilds(): void {
+    this.starting.set(true);
+    this.projectsService.restartFailedBuilds(this.orgName, this.projectName).subscribe({
+      next: () => {
+        this.loadProjectData(false);
+      },
+      error: (error) => {
+        console.error('Failed to restart failed builds:', error);
         this.starting.set(false);
       },
     });

@@ -10,10 +10,12 @@
 use crate::types::consts::NULL_TIME;
 use crate::types::*;
 use chrono::Utc;
+use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter,
+    QueryOrder,
 };
 use thiserror::Error;
 use uuid::Uuid;
@@ -22,6 +24,8 @@ use uuid::Uuid;
 pub enum TriggerError {
     #[error("evaluation already in progress for this project")]
     AlreadyInProgress,
+    #[error("no previous evaluation found to restart from")]
+    NoPreviousEvaluation,
     #[error("database error: {0}")]
     Db(#[from] sea_orm::DbErr),
 }
@@ -92,6 +96,123 @@ pub async fn trigger_evaluation(
     aproject.update(db).await?;
 
     Ok(evaluation)
+}
+
+/// Creates a new `Building` evaluation that skips the fetch+eval phase and
+/// re-runs only the failed builds from the most recent evaluation.
+///
+/// Status mapping from the previous build:
+/// - `Completed` | `Substituted` → `Substituted`  (already in the cache; no rebuild needed)
+/// - everything else             → `Queued`        (rebuild)
+///
+/// Entry points are copied from the previous evaluation and linked to the new builds.
+/// The scheduler's build-dispatch loop will pick up the `Queued` builds on its next tick.
+pub async fn trigger_restart_builds(
+    db: &DatabaseConnection,
+    project: &MProject,
+) -> Result<MEvaluation, TriggerError> {
+    // Guard: reject if an evaluation is already in progress.
+    let in_progress = EEvaluation::find()
+        .filter(CEvaluation::Project.eq(project.id))
+        .filter(
+            Condition::any()
+                .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
+                .add(CEvaluation::Status.eq(EvaluationStatus::Fetching))
+                .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingFlake))
+                .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingDerivation))
+                .add(CEvaluation::Status.eq(EvaluationStatus::Building))
+                .add(CEvaluation::Status.eq(EvaluationStatus::Waiting)),
+        )
+        .one(db)
+        .await?;
+
+    if in_progress.is_some() {
+        return Err(TriggerError::AlreadyInProgress);
+    }
+
+    // Find the most recent evaluation for the project.
+    let prev_eval = EEvaluation::find()
+        .filter(CEvaluation::Project.eq(project.id))
+        .order_by_desc(CEvaluation::CreatedAt)
+        .one(db)
+        .await?
+        .ok_or(TriggerError::NoPreviousEvaluation)?;
+
+    let now = Utc::now().naive_utc();
+
+    // Create a new evaluation that starts directly in `Building` state.
+    let new_eval_id = Uuid::new_v4();
+    let aevaluation = AEvaluation {
+        id: Set(new_eval_id),
+        project: Set(Some(project.id)),
+        repository: Set(prev_eval.repository.clone()),
+        commit: Set(prev_eval.commit),
+        wildcard: Set(prev_eval.wildcard.clone()),
+        status: Set(EvaluationStatus::Building),
+        previous: Set(Some(prev_eval.id)),
+        next: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+    let new_eval = aevaluation.insert(db).await?;
+
+    // Load all builds from the previous evaluation.
+    let prev_builds = EBuild::find()
+        .filter(CBuild::Evaluation.eq(prev_eval.id))
+        .all(db)
+        .await?;
+
+    // Create new builds for the new evaluation and track old→new build ID mapping.
+    let mut build_id_map: std::collections::HashMap<Uuid, Uuid> =
+        std::collections::HashMap::with_capacity(prev_builds.len());
+
+    for prev_build in &prev_builds {
+        let new_status = match prev_build.status {
+            BuildStatus::Completed | BuildStatus::Substituted => BuildStatus::Substituted,
+            _ => BuildStatus::Queued,
+        };
+        let new_build_id = Uuid::new_v4();
+        let abuild = ABuild {
+            id: Set(new_build_id),
+            evaluation: Set(new_eval_id),
+            derivation: Set(prev_build.derivation),
+            status: Set(new_status),
+            server: Set(None),
+            log_id: Set(None),
+            build_time_ms: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        abuild.insert(db).await?;
+        build_id_map.insert(prev_build.id, new_build_id);
+    }
+
+    // Copy entry points from the previous evaluation, remapping build IDs.
+    let prev_entry_points = EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.eq(prev_eval.id))
+        .all(db)
+        .await?;
+
+    for prev_ep in prev_entry_points {
+        if let Some(&new_build_id) = build_id_map.get(&prev_ep.build) {
+            let aep = AEntryPoint {
+                id: Set(Uuid::new_v4()),
+                project: Set(prev_ep.project),
+                evaluation: Set(new_eval_id),
+                build: Set(new_build_id),
+                eval: Set(prev_ep.eval),
+                created_at: Set(now),
+            };
+            aep.insert(db).await?;
+        }
+    }
+
+    // Update the project to point at the new evaluation.
+    let mut aproject: AProject = project.clone().into();
+    aproject.last_evaluation = Set(Some(new_eval_id));
+    aproject.update(db).await?;
+
+    Ok(new_eval)
 }
 
 #[cfg(test)]
