@@ -23,9 +23,8 @@ use gradient_core::nix::DerivationResolver;
 use proto::messages::{DerivationOutput, DiscoveredDerivation, FlakeJob};
 use tracing::{debug, warn};
 
-use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
-use crate::traits::{DrvReader, FsDrvReader, JobReporter, WorkerStore};
+use crate::traits::{DrvReader, FsDrvReader, JobReporter};
 
 /// Drives Nix evaluation inside the worker.
 ///
@@ -60,18 +59,16 @@ pub async fn evaluate_flake(_job: &FlakeJob, updater: &mut JobUpdater<'_>) -> Re
 /// 2. Resolve attrs to .drv paths (via eval worker pool)
 /// 3. BFS from root .drv paths through `inputDrvs` references
 /// 4. For each .drv: read file, extract outputs/arch/features
-/// 5. Check local store for substitution status
+/// 5. Query server cache, mark substituted derivations
 /// 6. Send `EvalResult` with the full derivation set
 pub async fn evaluate_derivations(
     evaluator: &WorkerEvaluator,
-    store: &LocalNixStore,
     job: &FlakeJob,
     local_flake_path: Option<&str>,
     updater: &mut JobUpdater<'_>,
 ) -> Result<()> {
     evaluate_derivations_with(
         &*evaluator.resolver,
-        store,
         &FsDrvReader,
         job,
         local_flake_path,
@@ -92,7 +89,6 @@ pub async fn evaluate_derivations(
 /// cloned the repo in the same `FlakeJob`.
 pub async fn evaluate_derivations_with(
     resolver: &dyn DerivationResolver,
-    store: &dyn WorkerStore,
     drv_reader: &dyn DrvReader,
     job: &FlakeJob,
     local_flake_path: Option<&str>,
@@ -229,10 +225,9 @@ pub async fn evaluate_derivations_with(
         });
     }
 
-    // ── Step 5: query server cache and local store ────────────────────────
-    // Collect all output paths, query the server's cache to determine which
-    // derivations are already cached (substituted), and check the local store
-    // to identify paths the worker is missing (for future NAR fetching).
+    // ── Step 5: query server cache ────────────────────────────────────────
+    // Collect all output paths and query the server's cache to determine
+    // which derivations are already available (substituted).
     let all_output_paths: Vec<String> = discovered
         .iter()
         .flat_map(|d| d.outputs.iter().map(|o| o.path.clone()))
@@ -251,23 +246,6 @@ pub async fn evaluate_derivations_with(
 
         let cached_set: HashSet<&str> = cached_paths.iter().map(|c| c.path.as_str()).collect();
 
-        // Check local store to find paths missing on this worker.
-        let mut locally_missing: Vec<String> = Vec::new();
-        for path in &all_output_paths {
-            match store.has_path(path).await {
-                Ok(true) => {}
-                _ => locally_missing.push(path.clone()),
-            }
-        }
-
-        if !locally_missing.is_empty() {
-            debug!(
-                missing = locally_missing.len(),
-                total = all_output_paths.len(),
-                "output paths missing from local store"
-            );
-        }
-
         // Mark derivations whose outputs are all in the server's cache.
         for drv in &mut discovered {
             if !drv.outputs.is_empty()
@@ -283,8 +261,7 @@ pub async fn evaluate_derivations_with(
         debug!(
             total = discovered.len(),
             substituted = discovered.iter().filter(|d| d.substituted).count(),
-            locally_missing = locally_missing.len(),
-            "cache query and local store check complete"
+            "cache query complete"
         );
     }
 
@@ -324,31 +301,30 @@ mod tests {
         }
     }
 
-    /// Set up resolver, drv_reader, and store from a StoreFixture.
+    /// Set up resolver and drv_reader from a StoreFixture.
     fn setup_from_fixture(
         fixture: &StoreFixture,
         repo: &str,
         attr: &str,
-    ) -> (FakeDerivationResolver, FakeDrvReader, FakeWorkerStore) {
+    ) -> (FakeDerivationResolver, FakeDrvReader) {
         let resolver = FakeDerivationResolver::new()
             .with_flake_attrs(repo, vec![attr.to_string()])
             .with_drv_path(repo, attr, fixture.entry_point.clone());
 
         let drv_reader = FakeDrvReader::from_raw_drvs(fixture.raw_drvs.clone());
-        let store = FakeWorkerStore::from_present_paths(fixture.store.present_paths());
 
-        (resolver, drv_reader, store)
+        (resolver, drv_reader)
     }
 
     #[tokio::test]
     async fn test_eval_closure_walk_empty_store() {
         let fixture = load_store(&fixture_dir());
         let repo = "https://example.com/repo";
-        let (resolver, drv_reader, store) = setup_from_fixture(&fixture, repo, "hello");
+        let (resolver, drv_reader) = setup_from_fixture(&fixture, repo, "hello");
         let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
+        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
             .await
             .unwrap();
 
@@ -385,13 +361,13 @@ mod tests {
         fixture.remove_random_subtrees(0.5, 42);
 
         let repo = "https://example.com/repo";
-        let (resolver, drv_reader, store) = setup_from_fixture(&fixture, repo, "hello");
+        let (resolver, drv_reader) = setup_from_fixture(&fixture, repo, "hello");
         let job = make_flake_job(repo);
         // Simulate the same subset being cached on the server.
         let cached: Vec<String> = fixture.store.present_paths().into_iter().collect();
         let mut reporter = RecordingJobReporter::new().with_cached_paths(cached);
 
-        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
+        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
             .await
             .unwrap();
 
@@ -422,13 +398,13 @@ mod tests {
         fixture.mark_all_built();
 
         let repo = "https://example.com/repo";
-        let (resolver, drv_reader, store) = setup_from_fixture(&fixture, repo, "hello");
+        let (resolver, drv_reader) = setup_from_fixture(&fixture, repo, "hello");
         let job = make_flake_job(repo);
         // Simulate all output paths being present in the server's cache.
         let cached: Vec<String> = fixture.store.present_paths().into_iter().collect();
         let mut reporter = RecordingJobReporter::new().with_cached_paths(cached);
 
-        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
+        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
             .await
             .unwrap();
 
@@ -447,11 +423,10 @@ mod tests {
     async fn test_eval_empty_attrs() {
         let resolver = FakeDerivationResolver::new();
         let drv_reader = FakeDrvReader::new();
-        let store = FakeWorkerStore::new();
         let job = make_flake_job("https://example.com/empty");
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
+        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
             .await
             .unwrap();
 
@@ -470,11 +445,10 @@ mod tests {
             .with_flake_attrs("repo", vec!["pkg".into()])
             .with_drv_path("repo", "pkg", "/nix/store/nonexistent.drv");
         let drv_reader = FakeDrvReader::new(); // No drvs loaded
-        let store = FakeWorkerStore::new();
         let job = make_flake_job("repo");
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
+        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
             .await
             .unwrap();
 
@@ -505,11 +479,11 @@ mod tests {
     async fn test_eval_dependencies_match_fixture() {
         let fixture = load_store(&fixture_dir());
         let repo = "https://example.com/repo";
-        let (resolver, drv_reader, store) = setup_from_fixture(&fixture, repo, "hello");
+        let (resolver, drv_reader) = setup_from_fixture(&fixture, repo, "hello");
         let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &store, &drv_reader, &job, None, &mut reporter)
+        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
             .await
             .unwrap();
 

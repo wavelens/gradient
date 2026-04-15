@@ -79,7 +79,6 @@ impl JobExecutor {
                 FlakeTask::EvaluateDerivations => {
                     eval::evaluate_derivations(
                         &self.evaluator,
-                        &self.store,
                         &job,
                         local_flake_path.as_deref(),
                         updater,

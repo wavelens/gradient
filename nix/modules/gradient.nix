@@ -343,12 +343,6 @@ in {
         "systemd-tmpfiles-setup.service"
       ] ++ lib.optional cfg.configurePostgres "postgresql.target";
 
-      path = [
-        cfg.packages.nix
-        cfg.packages.ssh
-        cfg.packages.git
-      ];
-
       serviceConfig = {
         ExecStart = lib.getExe cfg.packages.server;
         StateDirectory = "gradient";
@@ -454,15 +448,6 @@ in {
         GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE = "%d/gradient_github_app_private_key";
         GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE = "%d/gradient_github_app_webhook_secret";
       };
-    };
-
-    nix.settings = {
-      trusted-users = [ "gradient" ];
-      experimental-features = [
-        "nix-command"
-        "flakes"
-        "ca-derivations"
-      ];
     };
 
     services = {

@@ -82,8 +82,11 @@ fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<
     repo.checkout_tree(tree.as_object(), Some(&mut co))
         .context("checkout failed")?;
 
-    repo.set_head_detached(oid)
-        .context("set_head_detached failed")?;
+    // Leave HEAD on the default branch that git set during clone.  The Nix
+    // evaluator uses `git+file://?rev=<commit>` so it reads file content from
+    // the git object database at the pinned revision; HEAD is only used for
+    // metadata.  Detaching HEAD (set_head_detached) causes Nix to warn
+    // "could not read HEAD ref, using 'master'".
 
     info!(path = %temp_dir.display(), %commit, "repository cloned");
     Ok(temp_dir.to_string_lossy().into_owned())

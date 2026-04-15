@@ -199,7 +199,7 @@ in {
         wantedBy = [ "multi-user.target" ];
         after = [ "network.target" ];
         serviceConfig = {
-          ExecStart = "${lib.getBin cfg.package}/bin/gradient-worker";
+          ExecStart = lib.getExe' cfg.package "gradient-worker";
           StateDirectory = "gradient-worker";
           User = "gradient-worker";
           Group = "gradient-worker";
@@ -261,6 +261,15 @@ in {
           GRADIENT_PROTO_LOG_LEVEL = cfg.settings.logLevel.proto;
         };
       };
+    };
+
+    nix.settings = {
+      trusted-users = [ "gradient-worker" ];
+      experimental-features = [
+        "nix-command"
+        "flakes"
+        "ca-derivations"
+      ];
     };
 
     services.nginx = lib.mkIf cfg.configureNginx {
