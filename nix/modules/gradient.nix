@@ -49,26 +49,6 @@ in {
       packages = {
         server = lib.mkPackageOption pkgs "gradient" { };
         frontend = lib.mkPackageOption pkgs "gradient-frontend" { };
-        nix = lib.mkOption {
-          default = config.nix.package;
-          defaultText = lib.literalExpression "config.nix.package";
-          type = lib.types.package;
-          description = "Nix package to use";
-        };
-
-        ssh = lib.mkOption {
-          default = config.programs.ssh.package;
-          defaultText = lib.literalExpression "config.programs.ssh.package";
-          type = lib.types.package;
-          description = "OpenSSH package to use";
-        };
-
-        git = lib.mkOption {
-          default = config.programs.git.package;
-          defaultText = lib.literalExpression "config.programs.git.package";
-          type = lib.types.package;
-          description = "Git package to use";
-        };
       };
 
       domain = lib.mkOption {
@@ -391,8 +371,6 @@ in {
         GRADIENT_FRONTEND_URL = cfg.frontend.url;
         GRADIENT_BASE_PATH = cfg.baseDir;
         GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
-        GRADIENT_BINPATH_NIX = lib.getExe cfg.packages.nix;
-        GRADIENT_BINPATH_SSH = lib.getExe' cfg.packages.ssh "ssh";
         GRADIENT_OIDC_ENABLED = lib.boolToString cfg.oidc.enable;
         GRADIENT_ENABLE_REGISTRATION = lib.boolToString cfg.settings.enableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";

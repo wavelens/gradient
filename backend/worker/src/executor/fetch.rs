@@ -4,33 +4,40 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Fetch task — clone the repository to a local working directory.
+//! Fetch task — clone the repository, archive it into the Nix store, and
+//! upload the source + all flake inputs to the Gradient cache.
 //!
 //! Private repositories are accessed using the SSH private key delivered by the
 //! server as a [`proto::messages::ServerMessage::Credential`] with
 //! [`proto::messages::CredentialKind::SshKey`].  The key is available via
 //! [`CredentialStore::ssh_key`] before this step executes.
 
+use std::collections::HashSet;
+
 use anyhow::{Context, Result};
 use git2::RemoteCallbacks;
-use proto::messages::FlakeJob;
+use proto::messages::{FetchedInput, FlakeJob};
 use proto::traits::JobReporter;
 use tracing::{debug, info, warn};
 
 use crate::proto::credentials::CredentialStore;
 
-/// Clone (or update) the repository referenced by `job` at the specified commit.
+/// Clone the repository referenced by `job`, archive it and all flake inputs
+/// into the Nix store, and return the nix store source path together with
+/// metadata for every archived path.
 ///
-/// Returns the local path to the cloned checkout so the evaluator can use it
-/// instead of fetching the remote URL again (which Nix may not support for all
-/// protocols, e.g. `git://`).
+/// The caller is responsible for pushing the NARs (via `nar::push_direct`) and
+/// reporting the result to the server (via `report_fetch_result`).
 ///
-/// `credentials` may contain an SSH private key for private repository access.
+/// If `nix flake archive` fails, falls back to the temporary git checkout path
+/// with an empty input list so evaluation can still proceed (e.g. when inputs
+/// are already cached from a previous run).
 pub async fn fetch_repository(
     job: &FlakeJob,
     updater: &mut dyn JobReporter,
     credentials: &CredentialStore,
-) -> Result<String> {
+    binpath_nix: &str,
+) -> Result<(String, Vec<FetchedInput>)> {
     updater.report_fetching().await?;
 
     let url = job.repository.clone();
@@ -41,38 +48,39 @@ pub async fn fetch_repository(
 
     debug!(%url, %commit, has_ssh_key = ssh_key.is_some(), "fetching repository");
 
-    let path =
+    let tmp_path =
         tokio::task::spawn_blocking(move || clone_and_checkout(&url, &commit, ssh_key.as_deref()))
             .await
             .context("fetch task panicked")??;
 
-    // Prefetch all locked flake inputs into the local nix store so that the
-    // Nix C API evaluator (used during drvPath resolution) does not need to
-    // make network requests.  The C API runs in-process and cannot go through
-    // the nix daemon for fetching; if an input isn't already present in the
-    // store, evaluation fails even for public repos.
-    //
-    // `nix flake archive` follows flake.lock, fetches every transitive input
-    // through the daemon (which has proper network and store-write access), and
-    // puts them in /nix/store.  Failure is non-fatal: evaluation may still
-    // succeed if all required inputs are already cached from a previous run.
-    let flake_ref = format!("git+file://{}?rev={}", path, job.commit);
-    match prefetch_flake_inputs(&flake_ref).await {
-        Ok(()) => info!(%flake_ref, "flake inputs prefetched"),
-        Err(e) => warn!(error = %e, %flake_ref, "flake input prefetch failed; evaluation may fail if inputs are not cached"),
+    // Archive the flake source and all locked inputs into the nix store via a
+    // subprocess (so fetching goes through the nix daemon with proper network
+    // and store-write access).  Returns the nix store source path so the
+    // evaluator can use `path:/nix/store/xxx` — a pure, content-addressed
+    // reference — instead of the git checkout in /tmp.
+    let flake_ref = format!("git+file://{}?rev={}", tmp_path, job.commit);
+    let binpath_nix = binpath_nix.to_owned();
+    match archive_flake(&flake_ref, &binpath_nix).await {
+        Ok((source_path, fetched_inputs)) => {
+            info!(%source_path, inputs = fetched_inputs.len(), "flake archived to nix store");
+            Ok((source_path, fetched_inputs))
+        }
+        Err(e) => {
+            warn!(error = %e, "nix flake archive failed; falling back to git checkout path");
+            Ok((tmp_path, vec![]))
+        }
     }
-
-    updater.report_fetch_result(vec![]).await?;
-
-    Ok(path)
 }
 
-/// Run `nix flake archive` to materialise all locked inputs into the local
-/// nix store.  This must use a subprocess (not the C API) so that input
-/// fetching goes through the nix daemon and has proper permissions.
-async fn prefetch_flake_inputs(flake_ref: &str) -> Result<()> {
-    let output = tokio::process::Command::new("nix")
-        .args(["flake", "archive", flake_ref])
+/// Run `nix flake archive --json` and collect all store paths (source + all
+/// transitive flake inputs).  Returns the source store path and metadata for
+/// every archived path obtained from `nix path-info`.
+async fn archive_flake(
+    flake_ref: &str,
+    binpath_nix: &str,
+) -> Result<(String, Vec<FetchedInput>)> {
+    let output = tokio::process::Command::new(binpath_nix)
+        .args(["flake", "archive", "--json", flake_ref])
         .output()
         .await
         .context("failed to spawn nix flake archive")?;
@@ -82,7 +90,92 @@ async fn prefetch_flake_inputs(flake_ref: &str) -> Result<()> {
         anyhow::bail!("nix flake archive failed: {}", stderr.trim());
     }
 
-    Ok(())
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("failed to parse nix flake archive JSON")?;
+
+    let source_path = json["path"]
+        .as_str()
+        .context("nix flake archive JSON missing 'path' field")?
+        .to_owned();
+
+    // Collect every store path referenced by the archive output (deduplicated).
+    let mut all_paths: HashSet<String> = HashSet::new();
+    all_paths.insert(source_path.clone());
+    collect_input_paths(&json, &mut all_paths);
+
+    let all_paths: Vec<String> = all_paths.into_iter().collect();
+    let fetched_inputs = query_path_info(&all_paths, binpath_nix).await?;
+
+    Ok((source_path, fetched_inputs))
+}
+
+/// Recursively walk the `inputs` tree from `nix flake archive --json` output
+/// and insert every `path` value into `paths`.
+fn collect_input_paths(node: &serde_json::Value, paths: &mut HashSet<String>) {
+    if let Some(inputs) = node["inputs"].as_object() {
+        for input in inputs.values() {
+            if let Some(path) = input["path"].as_str() {
+                paths.insert(path.to_owned());
+            }
+            collect_input_paths(input, paths);
+        }
+    }
+}
+
+/// Query `narHash` and `narSize` for each store path via `nix path-info --json`.
+///
+/// Supports both the legacy object output (`{"/nix/store/xxx": {...}}`) and the
+/// modern array output (`[{"path": "/nix/store/xxx", ...}]`) from newer Nix
+/// versions.
+async fn query_path_info(paths: &[String], binpath_nix: &str) -> Result<Vec<FetchedInput>> {
+    if paths.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut cmd = tokio::process::Command::new(binpath_nix);
+    cmd.arg("path-info").arg("--json");
+    for path in paths {
+        cmd.arg(path);
+    }
+
+    let output = cmd
+        .output()
+        .await
+        .context("failed to spawn nix path-info")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("nix path-info failed: {}", stderr.trim());
+    }
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("failed to parse nix path-info JSON")?;
+
+    let mut inputs = Vec::new();
+
+    if let Some(arr) = json.as_array() {
+        // Modern Nix: array of objects with a "path" key.
+        for entry in arr {
+            if let Some(store_path) = entry["path"].as_str() {
+                inputs.push(FetchedInput {
+                    store_path: store_path.to_owned(),
+                    nar_hash: entry["narHash"].as_str().unwrap_or("").to_owned(),
+                    nar_size: entry["narSize"].as_u64().unwrap_or(0),
+                });
+            }
+        }
+    } else if let Some(obj) = json.as_object() {
+        // Legacy Nix: object keyed by store path.
+        for (store_path, info) in obj {
+            inputs.push(FetchedInput {
+                store_path: store_path.clone(),
+                nar_hash: info["narHash"].as_str().unwrap_or("").to_owned(),
+                nar_size: info["narSize"].as_u64().unwrap_or(0),
+            });
+        }
+    }
+
+    Ok(inputs)
 }
 
 fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<String> {
@@ -154,7 +247,7 @@ mod tests {
         let mut reporter = RecordingJobReporter::new();
 
         // This will fail with a git error (fake URL), but it should report Fetching first.
-        let result = fetch_repository(&job, &mut reporter, &credentials).await;
+        let result = fetch_repository(&job, &mut reporter, &credentials, "nix").await;
 
         assert_eq!(reporter.len(), 1);
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
@@ -172,7 +265,7 @@ mod tests {
         );
 
         let mut reporter = RecordingJobReporter::new();
-        let result = fetch_repository(&job, &mut reporter, &credentials).await;
+        let result = fetch_repository(&job, &mut reporter, &credentials, "nix").await;
 
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
         assert!(result.is_err()); // fake URL
@@ -180,6 +273,8 @@ mod tests {
 
     /// fetch_repository must actually clone the repository.
     /// This test creates a real local git repo and verifies the clone happens.
+    /// The nix store archive will fail (no nix available in unit test context),
+    /// so the fallback tmp path is returned — still verifies the clone succeeds.
     #[tokio::test]
     async fn fetch_repository_actually_clones() {
         use std::process::Command;
@@ -246,11 +341,14 @@ mod tests {
         let credentials = crate::proto::credentials::CredentialStore::new();
         let mut reporter = RecordingJobReporter::new();
 
-        let result = fetch_repository(&job, &mut reporter, &credentials).await;
+        let result = fetch_repository(&job, &mut reporter, &credentials, "nix").await;
         assert!(
             result.is_ok(),
             "fetch should clone real repo: {:?}",
             result.err()
         );
+        // The result is a (path, inputs) tuple — path should be non-empty.
+        let (path, _inputs) = result.unwrap();
+        assert!(!path.is_empty(), "returned path should be non-empty");
     }
 }

@@ -41,8 +41,6 @@ pub fn test_cli_with_crypt(crypt_secret_file: String) -> Cli {
         crypt_secret_file,
         jwt_secret_file: "test-jwt".into(),
         serve_cache: false,
-        binpath_nix: "nix".into(),
-        binpath_ssh: "ssh".into(),
         report_errors: false,
         email_enabled: false,
         email_require_verification: false,

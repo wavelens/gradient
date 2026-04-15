@@ -10,7 +10,17 @@
 in {
   options.services.gradient.worker = {
     enable = lib.mkEnableOption "Gradient worker";
-    package = lib.mkPackageOption pkgs "gradient" { };
+
+    packages = {
+      gradient = lib.mkPackageOption pkgs "gradient" { };
+      nix = lib.mkOption {
+        default = config.nix.package;
+        defaultText = lib.literalExpression "config.nix.package";
+        type = lib.types.package;
+        description = "Nix package to use for evaluation and fetching. The `nix` binary from this package is passed to the worker as `GRADIENT_BINPATH_NIX`.";
+      };
+    };
+
     configureNginx = lib.mkEnableOption "Nginx reverse proxy for the worker listener";
     useTls = lib.mkEnableOption "TLS" // { default = true; };
     discoverable = lib.mkEnableOption "listen for incoming connections from servers";
@@ -199,7 +209,7 @@ in {
         wantedBy = [ "multi-user.target" ];
         after = [ "network.target" ];
         serviceConfig = {
-          ExecStart = lib.getExe' cfg.package "gradient-worker";
+          ExecStart = lib.getExe' cfg.packages.gradient "gradient-worker";
           StateDirectory = "gradient-worker";
           User = "gradient-worker";
           Group = "gradient-worker";
@@ -229,6 +239,7 @@ in {
           NIX_REMOTE = "daemon";
           XDG_CACHE_HOME = "${cfg.baseDir}/www/.cache";
           GRADIENT_WORKER_DATA_DIR   = cfg.baseDir;
+          GRADIENT_BINPATH_NIX       = lib.getExe' cfg.packages.nix "nix";
         } // lib.optionalAttrs (cfg.serverUrl != null) {
           GRADIENT_WORKER_SERVER_URL = cfg.serverUrl;
         } // lib.optionalAttrs (cfg.peersFile != null) {

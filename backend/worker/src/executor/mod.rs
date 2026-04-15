@@ -20,8 +20,7 @@ use proto::messages::{BuildJob, FlakeJob, FlakeTask};
 use tracing::instrument;
 
 use crate::nix::store::LocalNixStore;
-use crate::proto::credentials::CredentialStore;
-use crate::proto::job::JobUpdater;
+use crate::proto::{credentials::CredentialStore, job::JobUpdater, nar};
 
 pub use eval::WorkerEvaluator;
 
@@ -33,6 +32,7 @@ pub struct JobExecutor {
     pub(crate) store: LocalNixStore,
     pub(crate) evaluator: WorkerEvaluator,
     pub(crate) credentials: CredentialStore,
+    pub(crate) binpath_nix: String,
 }
 
 impl JobExecutor {
@@ -40,11 +40,13 @@ impl JobExecutor {
         store: LocalNixStore,
         evaluator: WorkerEvaluator,
         credentials: CredentialStore,
+        binpath_nix: String,
     ) -> Self {
         Self {
             store,
             evaluator,
             credentials,
+            binpath_nix,
         }
     }
 
@@ -67,12 +69,27 @@ impl JobExecutor {
         for task in &job.tasks {
             match task {
                 FlakeTask::FetchFlake => {
-                    let path = fetch::fetch_repository(
+                    let (path, fetched_inputs) = fetch::fetch_repository(
                         &job,
                         updater as &mut dyn proto::traits::JobReporter,
                         credentials,
+                        &self.binpath_nix,
                     )
                     .await?;
+                    // Push each fetched input as a zstd-compressed NAR to the
+                    // server's cache before reporting the result.
+                    for fi in &fetched_inputs {
+                        if let Err(e) =
+                            nar::push_direct(&updater.job_id, &fi.store_path, updater.conn).await
+                        {
+                            tracing::warn!(
+                                store_path = %fi.store_path,
+                                error = %e,
+                                "failed to push NAR for fetched input; continuing"
+                            );
+                        }
+                    }
+                    updater.report_fetch_result(fetched_inputs).await?;
                     local_flake_path = Some(path);
                 }
                 FlakeTask::EvaluateFlake => eval::evaluate_flake(&job, updater).await?,

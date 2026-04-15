@@ -168,8 +168,6 @@ pub fn test_cli() -> Cli {
         crypt_secret_file: "test-secret".into(),   // tests/fixtures/test-secret
         jwt_secret_file: "test-jwt".into(),        // tests/fixtures/test-jwt
         serve_cache: false,
-        binpath_nix: "nix".into(),
-        binpath_ssh: "ssh".into(),
         report_errors: false,
         email_enabled: false,
         email_require_verification: false,

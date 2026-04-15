@@ -95,10 +95,6 @@ pub struct Cli {
     pub jwt_secret_file: String,
     #[arg(long, env = "GRADIENT_SERVE_CACHE", default_value = "false")]
     pub serve_cache: bool,
-    #[arg(long, env = "GRADIENT_BINPATH_NIX", default_value = "nix")]
-    pub binpath_nix: String,
-    #[arg(long, env = "GRADIENT_BINPATH_SSH", default_value = "ssh")]
-    pub binpath_ssh: String,
     #[arg(long, env = "GRADIENT_REPORT_ERRORS", default_value = "false")]
     pub report_errors: bool,
     #[arg(long, env = "GRADIENT_EMAIL_ENABLED", default_value = "false")]

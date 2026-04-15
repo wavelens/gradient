@@ -45,6 +45,10 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_WORKER_ID")]
     pub worker_id: Option<String>,
 
+    /// Path to the `nix` binary. Defaults to `nix` (resolved via `PATH`).
+    #[arg(long, env = "GRADIENT_BINPATH_NIX", default_value = "nix")]
+    pub binpath_nix: String,
+
     /// Re-exec as a Nix evaluator subprocess (internal — do not set manually).
     #[arg(long, env = "GRADIENT_EVAL_WORKER", hide = true)]
     pub eval_worker: bool,
@@ -234,6 +238,7 @@ mod tests {
             peers_file: None,
             data_dir: String::new(),
             worker_id: None,
+            binpath_nix: "nix".to_owned(),
             eval_worker: false,
             eval_workers: 1,
             max_concurrent_builds: 1,
@@ -305,6 +310,7 @@ mod tests {
             peers_file: None,
             data_dir: String::new(),
             worker_id: None,
+            binpath_nix: "nix".to_owned(),
             eval_worker: false,
             eval_workers: 1,
             max_concurrent_builds: 1,
@@ -360,6 +366,7 @@ mod tests {
             peers_file: Some(path.clone()),
             data_dir: String::new(),
             worker_id: None,
+            binpath_nix: "nix".to_owned(),
             eval_worker: false,
             eval_workers: 1,
             max_concurrent_builds: 1,

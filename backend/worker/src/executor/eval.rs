@@ -99,15 +99,21 @@ pub async fn evaluate_derivations_with(
     // Use the local clone from FetchFlake if available, otherwise build a
     // commit-pinned remote URL.
     //
-    // Prefer `git+file://` over `path:` for local clones: `path:` puts Nix
-    // into impure evaluation mode, which lets `builtins.fetchGit` (and similar
-    // builtins) attempt live network fetches.  Those IO failures are NOT
-    // catchable by `builtins.tryEval`, so a single module with an un-pinned
-    // `fetchGit` call crashes the whole evaluation.  `git+file://?rev=` keeps
-    // Nix in pure mode: `builtins.fetchGit` without a `rev` then throws a
-    // regular exception that `tryEval` can handle gracefully.
+    // When FetchFlake archived the repo into the Nix store (via `nix flake
+    // archive`), the returned path starts with `/nix/store/`.  Nix store paths
+    // are content-addressed and immutable, so `path:/nix/store/xxx` is valid in
+    // pure evaluation mode — we use it directly.
+    //
+    // When FetchFlake fell back to a temporary git checkout in /tmp, use
+    // `git+file://?rev=` to keep Nix in pure mode: `path:/tmp/...` would switch
+    // Nix to impure mode, allowing `builtins.fetchGit` calls without a `rev` to
+    // attempt live network fetches that are not catchable by `builtins.tryEval`.
     let repo = if let Some(path) = local_flake_path {
-        format!("git+file://{}?rev={}", path, job.commit)
+        if path.starts_with("/nix/store/") {
+            format!("path:{}", path)
+        } else {
+            format!("git+file://{}?rev={}", path, job.commit)
+        }
     } else {
         gradient_core::nix::NixFlakeUrl::new(&job.repository, &job.commit)
             .map(|u| u.to_string())
@@ -340,6 +346,7 @@ mod tests {
         if let ReportedEvent::EvalResult {
             derivations,
             warnings,
+            ..
         } = reporter.last_eval_result().unwrap()
         {
             // All derivations from the fixture should be discovered.
@@ -461,6 +468,7 @@ mod tests {
         if let ReportedEvent::EvalResult {
             derivations,
             warnings,
+            ..
         } = reporter.last_eval_result().unwrap()
         {
             assert!(

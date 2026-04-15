@@ -382,7 +382,7 @@ graph LR
 
 | Task | Requires | Input (from server) | Output (from worker) |
 |------|----------|---------------------|----------------------|
-| **FetchFlake** | `fetch` | `repository` (flake URL), `commit` (SHA), SSH credential | `FetchResult` — local clone path, fetched flake inputs as compressed NARs |
+| **FetchFlake** | `fetch` | `repository` (flake URL), `commit` (SHA), SSH credential | NARs pushed via `NarPush`, then `FetchResult` — nix store source path (falls back to temp git checkout), fetched flake inputs metadata |
 | **EvaluateFlake** | `eval` | `wildcards` (attribute patterns), `timeout` (seconds) | `attrs: Vec<String>` — discovered attribute paths |
 | **EvaluateDerivations** | `eval` | (uses attrs from previous task) | `derivations: Vec<DiscoveredDerivation>` — drv paths, outputs, closure, required features |
 
@@ -392,29 +392,30 @@ When the tasks are in **separate jobs** (e.g. a fetch-only worker and an eval-on
 
 #### FetchFlake
 
-The fetch step performs three things:
+The fetch step performs four things:
 
 1. **Clone** the repository at the specified commit using libgit2 (handles SSH keys, `git://`, `https://`).
-2. **Prefetch flake inputs** by running `nix flake lock` on the checkout, pulling all transitive inputs into the local Nix store.
-3. **Report `FetchResult`** with the list of fetched store paths. These paths are the flake's locked inputs — the server can upload them to the binary cache so other workers or eval-only workers can substitute them.
+2. **Archive** the flake source and all locked transitive inputs into the local Nix store by running `nix flake archive --json`. This goes through the nix daemon (subprocess) so network fetching and store-write access work correctly. Returns the nix store source path (e.g. `/nix/store/xxx-source`) and all input paths with their `narHash`/`narSize` from `nix path-info`.
+3. **Push NARs** for the source and every archived input to the server via `NarPush` (zstd-compressed, 64 KiB chunks). The server can store these so eval-only workers or future builds can substitute them without re-fetching from upstream.
+4. **Report `FetchResult`** with the metadata for all pushed paths.
+
+If `nix flake archive` fails (e.g. network unavailable), the worker falls back to the temporary git checkout path and reports an empty `fetched_paths` list — evaluation may still succeed if inputs are already cached from a previous run.
 
 ```rust
 FetchResult {
-    fetched_paths: Vec<FetchedInput>,    // flake inputs now in the worker's store
+    fetched_paths: Vec<FetchedInput>,    // source + flake inputs archived into the nix store
 }
 
 FetchedInput {
     store_path: String,                  // /nix/store/xxx-source
     nar_hash: String,                    // sha256:xxx (SRI)
-    nar_size: u64,                       // compressed NAR bytes
+    nar_size: u64,                       // uncompressed NAR bytes
 }
 ```
 
-The server processes `FetchResult` by:
-1. Recording the fetched input paths for the evaluation.
-2. Optionally uploading the NARs to the binary cache (so eval-only workers or future builds can substitute them without re-fetching from upstream).
+The server processes `FetchResult` by recording the fetched input paths for the evaluation. NARs were already pushed ahead of this message via `NarPush`.
 
-This makes the fetch step a first-class evaluation phase with its own database status (`Fetching`), not just a side effect. The fetched inputs flow into `EvaluateDerivations` as known-substituted paths.
+When `FetchFlake` and `EvaluateDerivations` are in the **same job**, the evaluator uses the nix store source path directly as `path:/nix/store/xxx` — a pure, content-addressed reference that does not require a network fetch. On fallback (temp checkout), `git+file://...?rev=` is used instead to keep Nix in pure evaluation mode.
 
 ```rust
 DiscoveredDerivation {
@@ -501,9 +502,10 @@ sequenceDiagram
     participant S as Server
 
     W->>S: JobUpdate::Fetching
-    Note over W: clone repo, prefetch flake inputs
+    Note over W: clone repo, nix flake archive → nix store
+    W->>S: NarPush { source + inputs (zstd, 64 KiB chunks) }
     W->>S: JobUpdate::FetchResult { fetched_paths }
-    Note right of S: records inputs, uploads to cache
+    Note right of S: records input paths
     W->>S: JobUpdate::EvaluatingFlake
     Note over W: nix eval (uses local clone)
     W->>S: JobUpdate::EvaluatingDerivations
@@ -722,7 +724,7 @@ struct BuildOutput {
 | `JobUpdateKind` | DB Entity | Status set |
 |-----------------|-----------|------------|
 | `Fetching` | `evaluation` | `Fetching` (8) |
-| `FetchResult` | `evaluation` | Stays `Fetching`; records fetched input paths, uploads NARs to cache |
+| `FetchResult` | `evaluation` | Stays `Fetching`; records fetched input paths (NARs already pushed ahead of this message via `NarPush`) |
 | `EvaluatingFlake` | `evaluation` | `EvaluatingFlake` (1) |
 | `EvaluatingDerivations` | `evaluation` | `EvaluatingDerivation` (2) |
 | `EvalResult` | `evaluation` + `derivation` + `build` + `entry_point` + `evaluation_message` | Inserts rows per batch; substituted → `Substituted` (7), rest → `Created` (0) → `Queued` (1). Creates `entry_point` rows for root derivations (non-empty `attr`). Immediately dispatches ready builds to workers. First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. Errors stored as `evaluation_message` rows with level `Error`; if `derivations` is empty and `errors` is non-empty, evaluation is immediately marked `Failed`. |
