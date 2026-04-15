@@ -113,7 +113,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route(
             "/orgs/{organization}/workers/{worker_id}",
-            delete(orgs::delete_org_worker),
+            patch(orgs::patch_org_worker).delete(orgs::delete_org_worker),
         )
         .route("/projects/{organization}", put(projects::put))
         .route(

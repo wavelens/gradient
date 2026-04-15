@@ -28,6 +28,9 @@ pub struct Model {
     /// When set, the server connects outbound to this URL instead of waiting for
     /// the worker to connect inbound.
     pub url: Option<String>,
+    /// When false, the server will refuse to authenticate this registration and
+    /// will not dispatch jobs to this worker.
+    pub active: bool,
     pub created_at: NaiveDateTime,
 }
 

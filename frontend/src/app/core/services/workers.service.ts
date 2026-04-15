@@ -21,6 +21,10 @@ export class WorkersService {
     return this.api.post<WorkerRegistration>(`orgs/${org}/workers`, { worker_id: workerId, url: url || undefined, token: token || undefined });
   }
 
+  setWorkerActive(org: string, workerId: string, active: boolean): Observable<string> {
+    return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, { active });
+  }
+
   deleteWorker(org: string, workerId: string): Observable<string> {
     return this.api.delete<string>(`orgs/${org}/workers/${workerId}`);
   }

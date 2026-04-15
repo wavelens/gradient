@@ -47,8 +47,11 @@ export class WorkersComponent implements OnInit {
   loading = signal(true);
   registering = signal(false);
   deletingId = signal<string | null>(null);
+  togglingId = signal<string | null>(null);
   showRegisterDialog = signal(false);
   showTokenDialog = signal(false);
+  showToggleWarningDialog = signal(false);
+  pendingToggleWorker = signal<Worker | null>(null);
   errorMessage = signal<string | null>(null);
 
   orgName = '';
@@ -134,6 +137,40 @@ export class WorkersComponent implements OnInit {
         this.deletingId.set(null);
       },
     });
+  }
+
+  requestToggleWorker(worker: Worker): void {
+    this.pendingToggleWorker.set(worker);
+    if (worker.live && worker.active) {
+      // Worker is connected and being deactivated — warn user
+      this.showToggleWarningDialog.set(true);
+    } else {
+      this.confirmToggleWorker();
+    }
+  }
+
+  confirmToggleWorker(): void {
+    const worker = this.pendingToggleWorker();
+    if (!worker) return;
+    this.showToggleWarningDialog.set(false);
+    this.togglingId.set(worker.worker_id);
+    this.workersService.setWorkerActive(this.orgName, worker.worker_id, !worker.active).subscribe({
+      next: () => {
+        this.togglingId.set(null);
+        this.pendingToggleWorker.set(null);
+        this.loadWorkers();
+      },
+      error: (err) => {
+        console.error('Failed to toggle worker active state:', err);
+        this.togglingId.set(null);
+        this.pendingToggleWorker.set(null);
+      },
+    });
+  }
+
+  cancelToggleWorker(): void {
+    this.showToggleWarningDialog.set(false);
+    this.pendingToggleWorker.set(null);
   }
 
   copyToken(): void {

@@ -26,6 +26,7 @@ export interface WorkerLiveInfo {
 export interface Worker {
   worker_id: string;
   managed: boolean;
+  active: boolean;
   registered_at?: string;
   /** WebSocket URL where the worker accepts incoming server connections. */
   url?: string;

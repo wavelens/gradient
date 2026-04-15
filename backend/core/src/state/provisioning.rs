@@ -667,6 +667,7 @@ async fn apply_workers(
                 token_hash: Set(token_hash),
                 managed: Set(true),
                 url: Set(url),
+                active: Set(true),
                 created_at: Set(now),
             };
             reg.insert(db).await?;

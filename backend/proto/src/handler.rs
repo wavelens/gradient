@@ -463,9 +463,10 @@ pub(crate) async fn handle_socket(
                     JobUpdateKind::EvalResult {
                         derivations,
                         warnings,
+                        errors,
                     } => {
                         if let Err(e) = scheduler
-                            .handle_eval_result(&job_id, derivations, warnings)
+                            .handle_eval_result(&job_id, derivations, warnings, errors)
                             .await
                         {
                             error!(%peer_id, %job_id, error = %e, "handle_eval_result failed");
@@ -735,6 +736,7 @@ async fn lookup_registered_peers(state: &ServerState, worker_id: &str) -> Vec<(S
 
     match Entity::find()
         .filter(Column::WorkerId.eq(worker_id))
+        .filter(Column::Active.eq(true))
         .all(&state.db)
         .await
     {

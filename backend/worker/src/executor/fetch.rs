@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use git2::RemoteCallbacks;
 use proto::messages::FlakeJob;
 use proto::traits::JobReporter;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::proto::credentials::CredentialStore;
 
@@ -41,9 +41,48 @@ pub async fn fetch_repository(
 
     debug!(%url, %commit, has_ssh_key = ssh_key.is_some(), "fetching repository");
 
-    tokio::task::spawn_blocking(move || clone_and_checkout(&url, &commit, ssh_key.as_deref()))
+    let path =
+        tokio::task::spawn_blocking(move || clone_and_checkout(&url, &commit, ssh_key.as_deref()))
+            .await
+            .context("fetch task panicked")??;
+
+    // Prefetch all locked flake inputs into the local nix store so that the
+    // Nix C API evaluator (used during drvPath resolution) does not need to
+    // make network requests.  The C API runs in-process and cannot go through
+    // the nix daemon for fetching; if an input isn't already present in the
+    // store, evaluation fails even for public repos.
+    //
+    // `nix flake archive` follows flake.lock, fetches every transitive input
+    // through the daemon (which has proper network and store-write access), and
+    // puts them in /nix/store.  Failure is non-fatal: evaluation may still
+    // succeed if all required inputs are already cached from a previous run.
+    let flake_ref = format!("git+file://{}?rev={}", path, job.commit);
+    match prefetch_flake_inputs(&flake_ref).await {
+        Ok(()) => info!(%flake_ref, "flake inputs prefetched"),
+        Err(e) => warn!(error = %e, %flake_ref, "flake input prefetch failed; evaluation may fail if inputs are not cached"),
+    }
+
+    updater.report_fetch_result(vec![]).await?;
+
+    Ok(path)
+}
+
+/// Run `nix flake archive` to materialise all locked inputs into the local
+/// nix store.  This must use a subprocess (not the C API) so that input
+/// fetching goes through the nix daemon and has proper permissions.
+async fn prefetch_flake_inputs(flake_ref: &str) -> Result<()> {
+    let output = tokio::process::Command::new("nix")
+        .args(["flake", "archive", flake_ref])
+        .output()
         .await
-        .context("fetch task panicked")?
+        .context("failed to spawn nix flake archive")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("nix flake archive failed: {}", stderr.trim());
+    }
+
+    Ok(())
 }
 
 fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<String> {

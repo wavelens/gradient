@@ -86,15 +86,28 @@
               @if (worker.live?.draining) {
                 <span class="badge badge-draining">Draining</span>
               }
+              @if (!worker.active) {
+                <span class="badge badge-inactive">Inactive</span>
+              }
               <span class="badge" [class.badge-connected]="worker.live" [class.badge-offline]="!worker.live">
                 {{ worker.live ? 'Connected' : 'Offline' }}
               </span>
               <button
                 pButton
+                [label]="worker.active ? 'Deactivate' : 'Activate'"
+                [icon]="worker.active ? 'pi pi-pause' : 'pi pi-play'"
+                [severity]="worker.active ? 'warn' : 'success'"
+                size="small"
+                [disabled]="worker.managed || togglingId() !== null || deletingId() !== null"
+                [loading]="togglingId() === worker.worker_id"
+                (click)="requestToggleWorker(worker)"
+              ></button>
+              <button
+                pButton
                 label="Delete"
                 icon="pi pi-trash"
                 severity="danger"
-                [disabled]="worker.managed || deletingId() !== null"
+                [disabled]="worker.managed || deletingId() !== null || togglingId() !== null"
                 [loading]="deletingId() === worker.worker_id"
                 (click)="deleteWorker(worker)"
               ></button>
@@ -175,6 +188,28 @@
       [loading]="registering()"
       [disabled]="registering() || !newWorkerId.trim()"
     ></button>
+  </ng-template>
+</p-dialog>
+
+<!-- Deactivate Warning Dialog -->
+<p-dialog
+  header="Deactivate Connected Worker"
+  [(visible)]="showToggleWarningDialog"
+  [modal]="true"
+  [style]="{ width: '440px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <div class="dialog-warning">
+    <span class="material-symbols-outlined">warning</span>
+    <p>
+      This worker is currently <strong>connected</strong>. Deactivating it will immediately disconnect it and
+      <strong>abort all active jobs</strong> assigned to this organization. Are you sure?
+    </p>
+  </div>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="cancelToggleWorker()"></button>
+    <button pButton label="Deactivate" icon="pi pi-pause" severity="warn" (click)="confirmToggleWorker()"></button>
   </ng-template>
 </p-dialog>
 

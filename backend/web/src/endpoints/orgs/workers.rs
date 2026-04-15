@@ -48,12 +48,18 @@ pub struct RegisterWorkerResponse {
 pub struct OrgWorkerEntry {
     pub worker_id: String,
     pub registered_at: NaiveDateTime,
+    pub active: bool,
     /// WebSocket URL where the worker accepts incoming server connections.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     /// Present when the worker is currently connected to this server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live: Option<WorkerLiveInfo>,
+}
+
+#[derive(Deserialize)]
+pub struct PatchWorkerRequest {
+    pub active: bool,
 }
 
 #[derive(Serialize)]
@@ -117,6 +123,7 @@ pub async fn post_org_worker(
         token_hash: Set(token_hash),
         managed: Set(false),
         url: Set(body.url),
+        active: Set(true),
         created_at: Set(Utc::now().naive_utc()),
     };
     row.insert(&state.db).await?;
@@ -174,6 +181,7 @@ pub async fn get_org_workers(
             OrgWorkerEntry {
                 worker_id: reg.worker_id,
                 registered_at: reg.created_at,
+                active: reg.active,
                 url: reg.url,
                 live,
             }
@@ -183,6 +191,39 @@ pub async fn get_org_workers(
     Ok(Json(BaseResponse {
         error: false,
         message: entries,
+    }))
+}
+
+pub async fn patch_org_worker(
+    state: State<Arc<ServerState>>,
+    Path((organization, worker_id)): Path<(String, String)>,
+    Extension(user): Extension<MUser>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
+    Json(body): Json<PatchWorkerRequest>,
+) -> WebResult<Json<BaseResponse<String>>> {
+    let org = get_organization_by_name(Arc::clone(&state), user.id, organization)
+        .await
+        .map_err(|e| WebError::InternalServerError(e.to_string()))?
+        .ok_or_else(|| WebError::not_found("organization"))?;
+
+    let reg = EWorkerRegistration::find()
+        .filter(worker_registration::Column::PeerId.eq(org.id))
+        .filter(worker_registration::Column::WorkerId.eq(&worker_id))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("worker registration"))?;
+
+    let mut active_model: AWorkerRegistration = reg.into();
+    active_model.active = Set(body.active);
+    active_model.update(&state.db).await?;
+
+    // Trigger re-auth so the worker is accepted or kicked immediately.
+    scheduler.request_reauth(&worker_id).await;
+
+    let status = if body.active { "activated" } else { "deactivated" };
+    Ok(Json(BaseResponse {
+        error: false,
+        message: format!("worker '{}' {}", worker_id, status),
     }))
 }
 

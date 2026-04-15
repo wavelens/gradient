@@ -322,6 +322,7 @@ impl Scheduler {
         job_id: &str,
         derivations: Vec<DiscoveredDerivation>,
         warnings: Vec<String>,
+        errors: Vec<String>,
     ) -> Result<()> {
         let job = {
             let tracker = self.job_tracker.read().await;
@@ -334,7 +335,7 @@ impl Scheduler {
                 }
             }
         };
-        eval::handle_eval_result(&self.state, &job, derivations, warnings).await?;
+        eval::handle_eval_result(&self.state, &job, derivations, warnings, errors).await?;
         // Immediately dispatch newly-queued builds so workers don't have to
         // wait for the next build_dispatch_loop iteration (5 seconds).
         if let Err(e) = dispatch::dispatch_ready_builds(self).await {

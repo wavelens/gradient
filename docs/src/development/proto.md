@@ -690,7 +690,8 @@ enum JobUpdateKind {
     EvaluatingDerivations,                              // → EvaluatingDerivation
     EvalResult {                                        // incremental batch (can be sent multiple times)
         derivations: Vec<DiscoveredDerivation>,
-        warnings: Vec<String>,                          // Nix evaluation warnings (captured from stderr)
+        warnings: Vec<String>,                          // Nix evaluation warnings (captured from stderr, e.g. deprecations)
+        errors: Vec<String>,                            // hard per-attr resolution failures; non-empty → evaluation marked Failed
     },
 
     // BuildJob phases → BuildStatus
@@ -724,7 +725,7 @@ struct BuildOutput {
 | `FetchResult` | `evaluation` | Stays `Fetching`; records fetched input paths, uploads NARs to cache |
 | `EvaluatingFlake` | `evaluation` | `EvaluatingFlake` (1) |
 | `EvaluatingDerivations` | `evaluation` | `EvaluatingDerivation` (2) |
-| `EvalResult` | `evaluation` + `derivation` + `build` + `entry_point` + `evaluation_message` | Inserts rows per batch; substituted → `Substituted` (7), rest → `Created` (0) → `Queued` (1). Creates `entry_point` rows for root derivations (non-empty `attr`). Immediately dispatches ready builds to workers. First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. |
+| `EvalResult` | `evaluation` + `derivation` + `build` + `entry_point` + `evaluation_message` | Inserts rows per batch; substituted → `Substituted` (7), rest → `Created` (0) → `Queued` (1). Creates `entry_point` rows for root derivations (non-empty `attr`). Immediately dispatches ready builds to workers. First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. Errors stored as `evaluation_message` rows with level `Error`; if `derivations` is empty and `errors` is non-empty, evaluation is immediately marked `Failed`. |
 | `Building` | `build` | `Building` (2) — per derivation in chain |
 | `BuildOutput` | `build` + `derivation_output` | `Completed` (3); updates output hash/size/path |
 | `Compressing` | — | No status change; informational — packing outputs into zstd NARs |

@@ -2151,6 +2151,44 @@ paths:
           type: string
         description: Worker ID to unregister
 
+    patch:
+      tags: [workers]
+      summary: Activate or deactivate a worker registration
+      description: |
+        Sets the `active` flag on a worker registration. Deactivating a worker
+        triggers an immediate re-auth request, causing the worker to be disconnected
+        if it is currently connected. Active jobs may be aborted.
+      operationId: patchOrgWorker
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [active]
+              properties:
+                active:
+                  type: boolean
+                  description: Set to false to deactivate the worker, true to reactivate it
+      responses:
+        '200':
+          description: Worker activation state updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
     delete:
       tags: [workers]
       summary: Unregister a worker from an organization
@@ -3236,7 +3274,7 @@ components:
 
     OrgWorkerEntry:
       type: object
-      required: [worker_id, registered_at]
+      required: [worker_id, registered_at, active]
       properties:
         worker_id:
           type: string
@@ -3245,6 +3283,9 @@ components:
           type: string
           format: date-time
           description: When this worker was registered under the organization
+        active:
+          type: boolean
+          description: Whether the worker is allowed to authenticate and receive jobs
         url:
           type: string
           nullable: true

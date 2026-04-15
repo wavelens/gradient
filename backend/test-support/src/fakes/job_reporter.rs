@@ -23,6 +23,7 @@ pub enum ReportedEvent {
     EvalResult {
         derivations: Vec<DiscoveredDerivation>,
         warnings: Vec<String>,
+        errors: Vec<String>,
     },
     Building {
         build_id: String,
@@ -119,10 +120,12 @@ impl JobReporter for RecordingJobReporter {
         &mut self,
         derivations: Vec<DiscoveredDerivation>,
         warnings: Vec<String>,
+        errors: Vec<String>,
     ) -> Result<()> {
         self.events.push(ReportedEvent::EvalResult {
             derivations,
             warnings,
+            errors,
         });
         Ok(())
     }

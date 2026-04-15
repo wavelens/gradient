@@ -124,7 +124,7 @@ pub async fn evaluate_derivations_with(
 
     if attrs.is_empty() {
         warn!("no derivations found for evaluation");
-        updater.report_eval_result(vec![], warnings).await?;
+        updater.report_eval_result(vec![], warnings, vec![]).await?;
         return Ok(());
     }
 
@@ -136,20 +136,23 @@ pub async fn evaluate_derivations_with(
     warnings.extend(resolve_warnings);
 
     // Build (attr, drv_path) pairs from successful resolutions.
+    // Per-attr failures are hard errors (not Nix warnings) — they prevent the
+    // derivation from being built at all, so they go into `errors`.
     let mut root_drvs: Vec<(String, String)> = Vec::new();
+    let mut errors: Vec<String> = Vec::new();
     for (attr, result) in resolved {
         match result {
             Ok((drv_path, _refs)) => root_drvs.push((attr, drv_path)),
             Err(e) => {
                 warn!(attr, error = %e, "failed to resolve attr; skipping");
-                warnings.push(format!("failed to resolve {attr}: {e}"));
+                errors.push(format!("failed to resolve {attr}: {e}"));
             }
         }
     }
 
     if root_drvs.is_empty() {
         warn!("all attr resolutions failed");
-        updater.report_eval_result(vec![], warnings).await?;
+        updater.report_eval_result(vec![], warnings, errors).await?;
         return Ok(());
     }
 
@@ -267,14 +270,17 @@ pub async fn evaluate_derivations_with(
 
     warnings.sort_unstable();
     warnings.dedup();
+    errors.sort_unstable();
+    errors.dedup();
 
     debug!(
         discovered = discovered.len(),
         warnings = warnings.len(),
+        errors = errors.len(),
         "closure walk complete"
     );
 
-    updater.report_eval_result(discovered, warnings).await
+    updater.report_eval_result(discovered, warnings, errors).await
 }
 
 #[cfg(test)]

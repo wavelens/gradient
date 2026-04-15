@@ -108,7 +108,12 @@ pub enum JobUpdateKind {
     EvaluatingDerivations,
     EvalResult {
         derivations: Vec<DiscoveredDerivation>,
+        /// Nix stderr warnings (deprecations, etc.) — informational.
         warnings: Vec<String>,
+        /// Hard errors that prevented derivation resolution (e.g. per-attr
+        /// `.drvPath` evaluation failures).  A non-empty list should cause
+        /// the evaluation to be marked `Failed` server-side.
+        errors: Vec<String>,
     },
     Building {
         build_id: String,

@@ -76,10 +76,12 @@ impl<'a> JobUpdater<'a> {
         &mut self,
         derivations: Vec<DiscoveredDerivation>,
         warnings: Vec<String>,
+        errors: Vec<String>,
     ) -> Result<()> {
         self.send_update(JobUpdateKind::EvalResult {
             derivations,
             warnings,
+            errors,
         })
         .await
     }
@@ -169,8 +171,9 @@ impl JobReporter for JobUpdater<'_> {
         &mut self,
         derivations: Vec<DiscoveredDerivation>,
         warnings: Vec<String>,
+        errors: Vec<String>,
     ) -> Result<()> {
-        self.report_eval_result(derivations, warnings).await
+        self.report_eval_result(derivations, warnings, errors).await
     }
 
     async fn report_building(&mut self, build_id: String) -> Result<()> {
@@ -249,12 +252,14 @@ mod tests {
                     JobUpdateKind::EvalResult {
                         derivations,
                         warnings,
+                        errors,
                     },
                 ..
             } = msg
             {
                 assert_eq!(derivations.len(), 0);
                 assert_eq!(warnings, vec!["warn1".to_owned()]);
+                assert!(errors.is_empty());
             } else {
                 panic!("expected EvalResult, got {msg:?}");
             }
@@ -262,7 +267,7 @@ mod tests {
 
         let mut updater = JobUpdater::new(job_id, &mut conn);
         updater
-            .report_eval_result(vec![], vec!["warn1".to_owned()])
+            .report_eval_result(vec![], vec!["warn1".to_owned()], vec![])
             .await
             .unwrap();
         server_task.await.unwrap();

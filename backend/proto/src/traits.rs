@@ -61,6 +61,7 @@ pub trait JobReporter: Send {
         &mut self,
         derivations: Vec<DiscoveredDerivation>,
         warnings: Vec<String>,
+        errors: Vec<String>,
     ) -> Result<()>;
     async fn report_building(&mut self, build_id: String) -> Result<()>;
     async fn report_build_output(

@@ -35,6 +35,7 @@ pub async fn handle_eval_result(
     job: &PendingEvalJob,
     derivations: Vec<DiscoveredDerivation>,
     warnings: Vec<String>,
+    errors: Vec<String>,
 ) -> Result<()> {
     let evaluation_id = job.evaluation_id;
     let organization_id = job.peer_id;
@@ -56,6 +57,7 @@ pub async fn handle_eval_result(
         %evaluation_id,
         derivation_count = derivations.len(),
         warning_count = warnings.len(),
+        error_count = errors.len(),
         "processing eval result from worker",
     );
 
@@ -242,6 +244,31 @@ pub async fn handle_eval_result(
             Some("nix-eval".to_string()),
         )
         .await;
+    }
+
+    // Hard errors (per-attr resolution failures).
+    for error in &errors {
+        record_evaluation_message(
+            state,
+            evaluation_id,
+            MessageLevel::Error,
+            error.clone(),
+            Some("nix-eval".to_string()),
+        )
+        .await;
+    }
+
+    // If all attrs failed and nothing was resolved, mark evaluation as Failed.
+    if derivations.is_empty() && !errors.is_empty() {
+        update_evaluation_status_with_error(
+            Arc::clone(state),
+            evaluation,
+            EvaluationStatus::Failed,
+            format!("{} attr(s) failed to resolve", errors.len()),
+            Some("nix-eval".to_string()),
+        )
+        .await;
+        return Ok(());
     }
 
     // Entry points — map each discovered derivation to its wildcard/attr.
