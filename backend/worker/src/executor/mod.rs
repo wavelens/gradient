@@ -179,6 +179,7 @@ impl JobExecutor {
                         &job,
                         local_flake_path.as_deref(),
                         updater,
+                        &mut abort.clone(),
                     )
                     .await?;
                 }

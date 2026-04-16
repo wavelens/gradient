@@ -23,7 +23,20 @@ use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_core::db::parse_drv;
 use gradient_core::nix::DerivationResolver;
 use proto::messages::{DerivationOutput, DiscoveredDerivation, FlakeJob};
+use tokio::sync::watch;
 use tracing::{debug, info, warn};
+
+/// Abort error returned from the eval pipeline when the dispatch loop fires
+/// the watch signal in response to a server-side `AbortJob`. Bubbles up as a
+/// regular `Err`, which the worker translates into `JobFailed` — the server's
+/// `handle_eval_job_failed` then no-ops because the eval is already
+/// `Aborted` from the API call.
+const ABORT_ERR: &str = "evaluation aborted by server";
+
+/// Returns true if the dispatch loop has flipped the abort watch to `true`.
+fn is_aborted(abort: &mut watch::Receiver<bool>) -> bool {
+    *abort.borrow_and_update()
+}
 
 /// How many `.drv` files to read+parse concurrently inside a single BFS wave.
 /// Reading a `.drv` is async filesystem IO, so the sequential walk would only
@@ -92,6 +105,7 @@ pub async fn evaluate_derivations(
     job: &FlakeJob,
     local_flake_path: Option<&str>,
     updater: &mut JobUpdater,
+    abort: &mut watch::Receiver<bool>,
 ) -> Result<()> {
     evaluate_derivations_with(
         &*evaluator.resolver,
@@ -99,6 +113,7 @@ pub async fn evaluate_derivations(
         job,
         local_flake_path,
         updater,
+        abort,
     )
     .await
 }
@@ -146,7 +161,11 @@ pub async fn evaluate_derivations_with(
     job: &FlakeJob,
     local_flake_path: Option<&str>,
     updater: &mut dyn JobReporter,
+    abort: &mut watch::Receiver<bool>,
 ) -> Result<()> {
+    if is_aborted(abort) {
+        anyhow::bail!(ABORT_ERR);
+    }
     updater.report_evaluating_derivations().await?;
 
     // Use the local clone from FetchFlake if available, otherwise build a
@@ -176,10 +195,27 @@ pub async fn evaluate_derivations_with(
 
     // ── Step 1: discover attr paths ──────────────────────────────────────────
     debug!(repo = %repo, "listing flake derivations");
-    let (attrs, mut warnings) = resolver
+    let (attrs, mut warnings) = match resolver
         .list_flake_derivations(repo.clone(), wildcards)
         .await
-        .context("list_flake_derivations failed")?;
+    {
+        Ok(v) => v,
+        Err(e) => {
+            // Surface the underlying Nix evaluation error as an
+            // `EvalResult { errors: [...] }` so the server records it as an
+            // `evaluation_message` row visible in the UI. The chained error
+            // string from anyhow includes the eval-worker subprocess stderr
+            // (the actual `error: …` lines from nix). Without this report,
+            // only the `JobFailed.error` summary makes it to the server,
+            // which the UI shows as a single opaque line.
+            let err_msg = format!("list_flake_derivations failed: {:#}", e);
+            warn!(error = %err_msg, "reporting eval error to server");
+            let _ = updater
+                .report_eval_result(vec![], vec![], vec![err_msg])
+                .await;
+            return Err(e).context("list_flake_derivations failed");
+        }
+    };
 
     if attrs.is_empty() {
         warn!("no derivations found for evaluation");
@@ -187,11 +223,29 @@ pub async fn evaluate_derivations_with(
         return Ok(());
     }
 
+    if is_aborted(abort) {
+        anyhow::bail!(ABORT_ERR);
+    }
+
     // ── Step 2: resolve attr paths → drv paths ───────────────────────────────
-    let (resolved, resolve_warnings) = resolver
+    let (resolved, resolve_warnings) = match resolver
         .resolve_derivation_paths(repo.clone(), attrs.clone())
         .await
-        .context("resolve_derivation_paths failed")?;
+    {
+        Ok(v) => v,
+        Err(e) => {
+            // Same as above for resolve: surface the error to the server
+            // before bubbling up so it doesn't only show as a JobFailed
+            // summary. Forward any warnings collected so far so they don't
+            // get lost just because the next step blew up.
+            let err_msg = format!("resolve_derivation_paths failed: {:#}", e);
+            warn!(error = %err_msg, "reporting eval error to server");
+            let _ = updater
+                .report_eval_result(vec![], warnings, vec![err_msg])
+                .await;
+            return Err(e).context("resolve_derivation_paths failed");
+        }
+    };
     warnings.extend(resolve_warnings);
 
     // Build (attr, drv_path) pairs from successful resolutions.
@@ -243,6 +297,14 @@ pub async fn evaluate_derivations_with(
     // of the per-derivation cost — running waves concurrently scales the walk
     // from "one inflight read at a time" to many.
     while !queue.is_empty() {
+        // Honour AbortJob promptly — checked at every wave boundary so a
+        // long-running closure walk on a multi-thousand-derivation flake
+        // can still be aborted cleanly from the API. The check is cheap
+        // (single mutex-free atomic load on the watch channel).
+        if is_aborted(abort) {
+            anyhow::bail!(ABORT_ERR);
+        }
+
         // Drain a wave from the queue, preserving BFS order within the wave.
         let wave_size = queue.len().min(DRV_READ_CONCURRENCY);
         let mut wave: Vec<(Option<String>, String)> = Vec::with_capacity(wave_size);
@@ -391,6 +453,15 @@ mod tests {
     }
 
     /// Set up resolver and drv_reader from a StoreFixture.
+    /// Tests don't fire abort: hand back a receiver from a sender we drop on
+    /// the floor. `is_aborted` reads `*borrow_and_update()` which stays
+    /// `false` (the initial value) — the sender being dropped doesn't flip
+    /// it, so abort never triggers in tests.
+    fn never_abort() -> watch::Receiver<bool> {
+        let (_tx, rx) = watch::channel(false);
+        rx
+    }
+
     fn setup_from_fixture(
         fixture: &StoreFixture,
         repo: &str,
@@ -413,7 +484,7 @@ mod tests {
         let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
+        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
             .await
             .unwrap();
 
@@ -448,7 +519,7 @@ mod tests {
         let cached: Vec<String> = fixture.store.present_paths().into_iter().collect();
         let mut reporter = RecordingJobReporter::new().with_cached_paths(cached);
 
-        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
+        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
             .await
             .unwrap();
 
@@ -481,7 +552,7 @@ mod tests {
         let cached: Vec<String> = fixture.store.present_paths().into_iter().collect();
         let mut reporter = RecordingJobReporter::new().with_cached_paths(cached);
 
-        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
+        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
             .await
             .unwrap();
 
@@ -499,7 +570,7 @@ mod tests {
         let job = make_flake_job("https://example.com/empty");
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
+        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
             .await
             .unwrap();
 
@@ -524,7 +595,7 @@ mod tests {
         let job = make_flake_job("repo");
         let mut reporter = RecordingJobReporter::new();
 
-        let err = evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
+        let err = evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
             .await
             .expect_err("missing .drv must abort the eval");
         let msg = format!("{err:#}");
@@ -538,6 +609,35 @@ mod tests {
         );
     }
 
+    /// When the abort watch is flipped before eval starts, the function
+    /// returns immediately without doing any work. Regression guard for
+    /// "aborting jobs does not work when in EvaluatingDerivation state" —
+    /// previously `evaluate_derivations_with` ignored the abort signal
+    /// entirely.
+    #[tokio::test]
+    async fn test_eval_aborts_when_signal_set_before_start() {
+        let fixture = load_store(&fixture_dir());
+        let repo = "https://example.com/repo";
+        let (resolver, drv_reader) = setup_from_fixture(&fixture, repo, "hello");
+        let job = make_flake_job(repo);
+        let mut reporter = RecordingJobReporter::new();
+
+        let (tx, rx) = watch::channel(false);
+        let mut abort = rx;
+        tx.send(true).unwrap();
+
+        let err = evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut abort)
+            .await
+            .expect_err("aborted eval must return Err");
+        assert!(
+            format!("{err:#}").contains("aborted by server"),
+            "error should mention abort: {err:#}"
+        );
+        // We should have bailed before sending an EvaluatingDerivations
+        // status update, so the reporter records nothing.
+        assert!(reporter.is_empty(), "reporter should not see any events");
+    }
+
     #[tokio::test]
     async fn test_eval_dependencies_match_fixture() {
         let fixture = load_store(&fixture_dir());
@@ -546,7 +646,7 @@ mod tests {
         let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
+        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
             .await
             .unwrap();
 

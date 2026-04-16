@@ -18,7 +18,8 @@ use gradient_core::executer::path_utils::{nix_store_path, strip_nix_store_prefix
 use gradient_core::sources::get_hash_from_path;
 use harmonia_protocol::build_result::BuildResultInner;
 use harmonia_protocol::daemon_wire::types2::BuildMode;
-use harmonia_protocol::log::{Field, LogMessage, ResultType};
+use harmonia_protocol::log::{Field, LogMessage, ResultType, Verbosity};
+use harmonia_protocol::types::ClientOptions;
 use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT};
 use harmonia_store_core::store_path::{ContentAddress, ContentAddressMethod, StorePath};
 use harmonia_utils_hash::{Algorithm, Hash};
@@ -85,6 +86,23 @@ pub async fn build_derivation(
         env_keys = ?drv.environment.keys().collect::<Vec<_>>(),
         "sending BasicDerivation to nix-daemon"
     );
+
+    // ── Crank up daemon verbosity so it actually emits BuildLogLine ──────────
+    // Default `ClientOptions::verbose_build` is `Verbosity::Error`, which
+    // makes the daemon suppress per-line build stdout/stderr (BuildLogLine
+    // results, type 101). Without this every build log stream comes back
+    // with only structured Progress / SetPhase / activity events and the
+    // user sees an empty build log. Talkative (4) is the level `nix-build`
+    // uses by default for showing build output.
+    let mut opts = ClientOptions::default();
+    opts.verbose_build = Verbosity::Talkative;
+    opts.verbosity = Verbosity::Notice;
+    if let Err(e) = guard.client().set_options(&opts).await {
+        warn!(
+            error = %e,
+            "set_options(verbose_build=Talkative) failed; build logs may be empty"
+        );
+    }
 
     // ── Drive the daemon and stream logs back to the server ──────────────────
     // `build_derivation` returns `impl ResultLog = Stream<Item = LogMessage> + Future`.
