@@ -50,12 +50,13 @@ sequenceDiagram
 ```
 
 **Rejection reasons:**
-- Server rejects when no peers have registered this worker ID (unknown worker)
-- Server rejects a federated peer when `federate` is not enabled on the server
-- Server rejects a worker whose capabilities are all disabled after negotiation (nothing useful to do)
-- Server rejects a duplicate connection (same worker ID already connected)
-- Server rejects when all peer tokens fail validation
-- Worker rejects a server it does not trust (e.g. unknown server identity, policy mismatch)
+
+ - Server rejects when no peers have registered this worker ID (unknown worker)
+ - Server rejects a unknown peer (not authorized) when `federate` is not enabled on the server
+ - Server rejects a worker whose capabilities are all disabled after negotiation (nothing useful to do)
+ - Server rejects a duplicate connection (same worker ID already connected)
+ - Server rejects when all peer tokens fail validation
+ - Worker rejects a server it does not trust (e.g. unknown server identity, policy mismatch)
 
 ### Peer Identity
 
@@ -70,10 +71,10 @@ InitConnection {
 ```
 
 The `id` enables:
-- **Reconnect matching** — on reconnect after server restart, the server matches the peer to its previous session and reassigns orphaned jobs immediately instead of waiting for the grace period.
-- **Duplicate detection** — the server rejects a second connection with the same `id`. One WebSocket connection per worker per server instance.
-- **Admin visibility** — the server tracks connected peers by ID for the frontend UI (list workers, their capabilities, assigned jobs, status).
-- **Logging** — all log lines and job assignments reference the peer ID for debugging.
+ - **Reconnect matching** — on reconnect after server restart, the server matches the peer to its previous session and reassigns orphaned jobs immediately instead of waiting for the grace period.
+ - **Duplicate detection** — the server rejects a second connection with the same `id`. One WebSocket connection per worker per server instance.
+ - **Admin visibility** — the server tracks connected peers by ID for the frontend UI (list workers, their capabilities, assigned jobs, status).
+ - **Logging** — all log lines and job assignments reference the peer ID for debugging.
 
 On first connection with an unknown `id`, the server rejects — a worker must be registered by at least one peer before it can connect. On reconnect with a known ID, the server resumes the session.
 
@@ -87,9 +88,9 @@ Mutual consent: the peer registers the worker ID (peer consents), the worker hol
 
 ### Setup (before connection)
 
-1. A peer (org admin, cache owner, or proxy) registers a worker ID → server generates a token for that `(peer, worker_id)` pair
-2. The peer gives the token to the worker operator
-3. Worker operator adds `peer_id → token` to worker config
+ 1. A peer (org admin, cache owner, or proxy) registers a worker ID → server generates a token for that `(peer, worker_id)` pair
+ 2. The peer gives the token to the worker operator
+ 3. Worker operator adds `peer_id → token` to worker config
 
 ```yaml
 # worker config
@@ -118,9 +119,9 @@ AuthResponse {
 The server validates each token independently. The worker is authorized for every peer whose token is valid. If some tokens fail, the connection continues with the successful peers — only a total failure causes `Reject`.
 
 What authorization means depends on the peer type:
-- **Org** — worker receives jobs from that org's projects
-- **Cache** — worker can serve/pull from that cache
-- **Proxy** — worker is part of the proxy's pool
+ - **Org** — worker receives jobs from that org's projects
+ - **Cache** — worker can serve/pull from that cache
+ - **Proxy** — worker is part of the proxy's pool
 
 ### Reauth
 
@@ -170,8 +171,8 @@ The server allows only **one WebSocket connection per worker ID per instance**. 
 
 The `GET /api/v1/workers` endpoint shows all connected workers and their status. Access is controlled by:
 
-- **Superuser users** — users with the `superuser` flag set on their account can always access the endpoint
-- **`GRADIENT_GLOBAL_STATS_PUBLIC=true`** — when set, the workers/stats endpoints are publicly visible without authentication
+ - **Superuser users** — users with the `superuser` flag set on their account can always access the endpoint
+ - **`GRADIENT_GLOBAL_STATS_PUBLIC=true`** — when set, the workers/stats endpoints are publicly visible without authentication
 
 **Version negotiation:** the server accepts any `client_version <= PROTO_VERSION`. If the client sends a higher version, the server responds with `Reject { code: 400 }`.
 
@@ -206,9 +207,10 @@ Architectures are free-form strings (e.g. `"x86_64-linux"`, `"aarch64-linux"`) �
 When the server dispatches a build, it checks that the build's target architecture is present in the worker's `architectures` and all `required_features` are present in the worker's `system_features`. For example, a build targeting `aarch64-linux` with `required_features: ["kvm"]` requires a worker with `"aarch64-linux"` in `architectures` and `"kvm"` in `system_features`.
 
 **Federation proxy behavior:** a proxy with `federate` enabled connects upstream as a single worker. It **aggregates** the capabilities of all its downstream workers:
-- `GradientCapabilities` (in `InitConnection`) — OR of all downstream workers' capabilities (if any worker can build, the proxy advertises `build`)
-- `system_features` — union of all downstream features (sorted by total capacity)
-- `max_concurrent_builds` — sum of all downstream workers' slots
+
+ - `GradientCapabilities` (in `InitConnection`) — OR of all downstream workers' capabilities (if any worker can build, the proxy advertises `build`)
+ - `system_features` — union of all downstream features (sorted by total capacity)
+ - `max_concurrent_builds` — sum of all downstream workers' slots
 
 The upstream server sees the proxy as one powerful worker. The proxy handles internal job routing to its downstream workers transparently.
 
@@ -270,7 +272,7 @@ The server treats `Draining` as "do not assign new jobs to this worker". The wor
 
 ## Job Dispatch
 
-Job dispatch uses **eager push + pull-based claiming**. The server pushes job candidates to eligible workers as soon as they become available. Workers score them in the background, then claim work when they have capacity. The server assigns each job to the best-scoring worker and revokes it from the rest.
+Job dispatch uses **eager push + pull-based claiming**. The server pushes **new** job candidates to eligible workers as they become available. Workers keep all received candidates in memory, score them against the local Nix store, and send back only **new or changed** scores. The server also keeps all scores in memory per worker. Both sides maintain a persistent view of the candidate/score state, enabling efficient delta-based communication and seamless recovery after server restarts.
 
 Jobs are scoped to the worker's authorized peers — a worker only receives candidates from peers (orgs, caches) it has successfully authenticated against.
 
@@ -283,35 +285,80 @@ sequenceDiagram
     participant S as Server
 
     Note over S: new jobs become available
-    S->>W1: JobOffer { candidates }
-    S->>W2: JobOffer { candidates }
-    Note over W1: scores against local store (background)
-    Note over W2: scores against local store (background)
+    S->>W1: JobOffer { candidates: [J1, J2] }
+    S->>W2: JobOffer { candidates: [J1, J2] }
+    Note over W1: adds to local cache, scores in background
+    Note over W2: adds to local cache, scores in background
 
-    W1->>S: RequestJobChunk { scores: [{id, missing_count:3, missing_nar_size:150MB}], is_final: false }
-    W2->>S: RequestJobChunk { scores: [{id, missing_count:0, missing_nar_size:0}], is_final: false }
-    Note over S: Worker B has missing_nar_size:0 — assign immediately
-    S->>W2: AssignJob { job_id, job }
-    S->>W1: RevokeJob { job_id }
-    Note over W1: removes from local candidate cache
-    W1->>S: RequestJobChunk { scores: [...], is_final: true }
-    W2->>S: RequestJobChunk { scores: [...], is_final: true }
+    W1->>S: RequestJobChunk { scores: [{J1, missing:3, 150MB}, {J2, missing:1, 50MB}] }
+    W2->>S: RequestJobChunk { scores: [{J1, missing:0, 0}, {J2, missing:2, 200MB}] }
+
+    W1->>S: RequestJob { kind: Build }
+    W2->>S: RequestJob { kind: Build }
+    Note over S: Worker B best for J1 — assign
+    S->>W2: AssignJob { job_id: J1 }
+    S->>W1: RevokeJob { job_ids: [J1] }
+    Note over W1: removes J1 from local cache
+    Note over S: Worker A best for J2 — assign
+    S->>W1: AssignJob { job_id: J2 }
+    Note over W1: got AssignJob — still has slots, request again
+    W1->>S: RequestJob { kind: Build }
+    Note over W2: got AssignJob — still has slots, request again
+    W2->>S: RequestJob { kind: Build }
+
+    Note over S: new job J3 arrives
+    S->>W1: JobOffer { candidates: [J3] }
+    S->>W2: JobOffer { candidates: [J3] }
+    W1->>S: RequestJobChunk { scores: [{J3, missing:0, 0}] }
+    Note over S: Worker A already requested, best score — assign
+    S->>W1: AssignJob { job_id: J3 }
+    W1->>S: RequestJob { kind: Build }
 ```
 
 ### How It Works
 
-1. **`JobOffer`** (server → workers, pushed eagerly) — as soon as a job enters the queue (e.g. evaluation discovers new builds, or a build's dependencies complete), the server pushes it to all connected workers whose negotiated capabilities and advertised system features match, and who are authorized for the job's peer (org). Each candidate includes `required_paths` (with optional `CacheInfo` for paths in the server's cache) so workers can score locally. The server dispatches builds immediately after three events: evaluation result (new builds queued), build completion (dependent builds unlocked), and build failure (cascade frees blocked builds). A background dispatch loop (5-second interval) acts as a safety net.
+ 1. **`JobOffer`** (server → workers, delta-only) — the server pushes only **new** candidates that the worker hasn't seen yet. Workers accumulate candidates in a persistent local cache. Each candidate includes `required_paths` (with optional `CacheInfo` for paths in the server's cache) so workers can score locally. The server dispatches builds immediately after three events: evaluation result (new builds queued), build completion (dependent builds unlocked), and build failure (cascade frees blocked builds). A background dispatch loop (5-second interval) acts as a safety net.
+ 2. **Workers score in the background** — on receiving `JobOffer`, the worker adds candidates to its local cache and scores them against the local Nix store. Scores are kept in memory. After a build completes (populating store paths), the worker re-scores affected candidates whose `required_paths` overlap with the new outputs.
+ 3. **`RequestJobChunk`** (worker → server, delta-only) — the worker sends only **new or changed** scores. A score changes when a path becomes available in the local store (e.g. after a build). The server accumulates scores per worker in memory. There is no `is_final` flag — scores stream continuously as they change.
+ 4. **`RequestJob`** (worker → server, pull-based) — the worker signals it has capacity for **one** job. `kind` specifies whether it wants a `FlakeJob` or `BuildJob`. The server either responds with `AssignJob` immediately (if a matching job with good scores exists) or marks internally that this worker needs a job and assigns one when available. On receiving `AssignJob`, the worker immediately sends another `RequestJob` if it still has capacity — this naturally fills all available slots. Workers also re-send `RequestJob` every **10 seconds** as a heartbeat if no `AssignJob` arrived, ensuring the server recovers the "worker needs work" state after a restart without persistent storage.
+ 5. **`AssignJob`** (server → winning worker) — the server compares scores across all workers that have requested a job. Lowest `missing_nar_size` wins (fewest bytes to download). Ties are broken by `missing_count`, then by fewest assigned jobs. The server may assign as soon as it sees an optimal score (e.g. `missing_nar_size: 0`).
+ 6. **`RevokeJob`** (server → losing workers) — all other workers that had this candidate in their cache are told to remove it. Workers delete the candidate and its score from their local cache.
 
-2. **Workers score in the background** — on receiving `JobOffer`, the worker checks its local Nix store against each candidate's `required_paths` and caches the result. This is a fast local operation (no network I/O) and happens continuously, not on-demand.
+### State Recovery
 
-3. **`RequestJobChunk`** (worker → server, streamed as scores are computed) — as the worker scores candidates against its local store, it sends batches of scores incrementally. `is_final: true` marks the last chunk. The server can start making decisions before all scores arrive — e.g. a `missing: 0` score can trigger immediate assignment.
+Both sides persist candidate/score state in memory across the connection. After a server restart, the server has lost its in-memory score state. Two recovery messages enable resync without re-sending all candidates:
 
-4. **`AssignJob`** (server → winning worker) — the server compares scores across all workers that want the same job. Lowest `missing_nar_size` wins (fewest bytes to download). Ties are broken by `missing_count`, then by fewest assigned jobs. The server may assign before all workers have sent `is_final` if a score is clearly optimal (e.g. `missing_nar_size: 0`).
+ - **`RequestAllCandidates`** (worker → server) — the worker asks the server to re-send all active candidates. Used on reconnect when the worker's local cache might be stale (e.g. the server revoked candidates while the worker was disconnected). The server responds with a `JobOffer` containing all current candidates for this worker.
+ - **`RequestAllScores`** (server → worker) — the server asks the worker to re-send all its current scores. Used after server restart to rebuild the in-memory score table. The worker responds with a `RequestJobChunk` containing all scores from its local cache.
 
-5. **`RevokeJob`** (server → losing workers) — all other workers that had this candidate in their cache are told to remove it.
+```mermaid
+sequenceDiagram
+    participant W as Worker
+    participant S as Server
+
+    Note over W: executing job, has candidates [J2, J4, J5] cached
+    S-xW: server restarts
+    W->>S: InitConnection { id }
+    S->>W: InitAck
+    W->>S: WorkerCapabilities
+    W->>S: JobCompleted { buffered job }
+    S->>W: RequestAllScores
+    W->>S: RequestJobChunk { scores: [{J2, ...}, {J4, ...}, {J5, ...}] }
+    Note over S: score table rebuilt
+    W->>S: RequestAllCandidates
+    S->>W: JobOffer { candidates: [J2, J4, J5, J6] }
+    W->>S: RequestJobChunk { scores: [{J6, ...}] }
+    W->>S: RequestJob { kind: Build }
+    Note over S: assigns best-scoring job
+    S->>W: AssignJob { job_id: J2 }
+    Note over W: got AssignJob — still has slots
+    W->>S: RequestJob { kind: Build }
+    Note over W: 10s heartbeat, no AssignJob yet
+    W->>S: RequestJob { kind: Build }
+```
 
 ```rust
-// Server → Worker (pushed eagerly)
+// Server → Worker (pushed eagerly, delta-only — only new candidates)
 JobOffer {
     candidates: Vec<JobCandidate>,
 }
@@ -337,11 +384,25 @@ RevokeJob {
     job_ids: Vec<Uuid>,
 }
 
-// Worker → Server (streamed as scores are computed)
+// Server → Worker (after server restart — ask worker to re-send all scores)
+RequestAllScores,
+
+// Worker → Server (delta-only — only new or changed scores)
 RequestJobChunk {
-    scores: Vec<CandidateScore>,        // batch of scores from local store check
-    is_final: bool,                     // true = worker is done scoring
+    scores: Vec<CandidateScore>,        // batch of new/changed scores
 }
+
+// Worker → Server (pull-based — "I have capacity for one job")
+// Sent again immediately after AssignJob if worker still has slots.
+// Re-sent every 10s as heartbeat if no AssignJob arrived.
+RequestJob {
+    kind: JobKind,                      // FlakeJob or BuildJob
+}
+
+enum JobKind { Flake, Build }
+
+// Worker → Server (after reconnect — ask server to re-send all active candidates)
+RequestAllCandidates,
 
 CandidateScore {
     job_id: Uuid,
@@ -353,16 +414,19 @@ CandidateScore {
 
 ### Benefits
 
-- **No scoring round-trip at request time** — workers pre-score candidates as offers arrive and stream scores incrementally.
-- **Early assignment** — server can assign as soon as it sees an optimal score (e.g. `missing: 0`) without waiting for all workers to finish scoring. For non-obvious cases, it waits for `is_final` from all workers before deciding.
-- **Optimal assignment** — server sees all workers' scores before deciding. A worker that already has 90% of the closure cached (lower `missing_nar_size`) gets the job over one that needs everything.
-- **Large build trees handled incrementally** — as evaluation discovers derivations in batches (`EvalResult`), the server pushes new `JobOffer`s immediately. Workers start scoring while evaluation is still in progress.
+ - **No scoring round-trip at request time** — workers pre-score candidates as offers arrive and stream score deltas continuously.
+ - **Minimal bandwidth** — only new candidates and changed scores are sent. After initial sync, traffic is proportional to changes, not total candidate count.
+ - **Early assignment** — server can assign as soon as it sees an optimal score (e.g. `missing: 0`) without waiting for all workers to finish scoring.
+ - **Optimal assignment** — server sees all workers' scores before deciding. A worker that already has 90% of the closure cached (lower `missing_nar_size`) gets the job over one that needs everything.
+ - **Large build trees handled incrementally** — as evaluation discovers derivations in batches (`EvalResult`), the server pushes new `JobOffer`s immediately. Workers start scoring while evaluation is still in progress.
+ - **Re-scoring after builds** — when a build completes and populates the worker's store, affected candidate scores automatically improve. The worker sends updated scores, potentially claiming jobs it previously scored poorly on.
+ - **Seamless server restart** — `RequestAllScores` + `RequestAllCandidates` rebuild state without re-evaluating everything from scratch.
 
 ### Edge Cases
 
-- **Single eligible worker:** server skips scoring and sends `AssignJob` directly with the `JobOffer` — no `RequestJobChunk`/`RevokeJob` overhead.
-- **Worker disconnects with cached offers:** server simply doesn't receive scores from that worker. No cleanup needed — offers are stateless on the server side.
-- **Stale scores:** if a worker's store changes between scoring and `RequestJobChunk` (e.g. another job populated paths), the score is conservative (overestimates missing). The server can re-offer revoked jobs if no worker claims them.
+ - **Single eligible worker:** server skips scoring and sends `AssignJob` directly with the `JobOffer` — no `RequestJobChunk`/`RevokeJob` overhead.
+ - **Worker disconnects with cached offers:** the server drops the worker's score entries from memory. On reconnect, `RequestAllScores` rebuilds them.
+ - **Stale scores:** if a worker's store changes between scoring and `RequestJobChunk` (e.g. another job populated paths), the worker detects the change and sends an updated score. The server always uses the latest score per worker.
 
 ---
 
@@ -406,11 +470,11 @@ When the tasks are in **separate jobs** (e.g. a fetch-only worker and an eval-on
 
 The fetch step performs up to five things:
 
-1. **Clone** the repository at the specified commit using libgit2 (handles SSH keys, `git://`, `https://`).
-2. **Archive** the flake source and all locked transitive inputs into the local Nix store by running `nix flake archive --json`. This goes through the nix daemon (subprocess) so network fetching and store-write access work correctly. Returns the nix store source path (e.g. `/nix/store/xxx-source`) and all input paths with their `narHash`/`narSize` from `nix path-info`.
-3. **Filter and push NARs** — before uploading, the worker sends `CacheQuery { mode: Push }` for all fetched paths. The server responds with a single `CacheStatus` containing all paths with `cached: bool` and optional transfer URLs. Already-cached paths (`cached: true`) are skipped. For **S3 mode**: uncached paths include a presigned PUT URL (`url: Some`); the worker uploads directly to S3 and confirms with `NarReady`. For **local mode** (`url: None`): uncached paths are pushed as chunked `NarPush` frames; the server buffers chunks per store path and writes to `NarStore` on `is_final`.
-4. **Sign** (optional, when `FlakeJob.sign` is set) — the worker signs each fetched store path using the Ed25519 signing key delivered via `Credential { kind: SigningKey }`. Signatures are embedded directly in `FetchedInput.signature` — no extra round trip. This avoids re-downloading NARs later when the server needs to verify cache integrity.
-5. **Report `FetchResult`** with the metadata (and optional signatures) for all pushed paths.
+ 1. **Clone** the repository at the specified commit using libgit2 (handles SSH keys, `git://`, `https://`).
+ 2. **Archive** the flake source and all locked transitive inputs into the local Nix store by running `nix flake archive --json`. This goes through the nix daemon (subprocess) so network fetching and store-write access work correctly. Returns the nix store source path (e.g. `/nix/store/xxx-source`) and all input paths with their `narHash`/`narSize` from `nix path-info`.
+ 3. **Filter and push NARs** — before uploading, the worker sends `CacheQuery { mode: Push }` for all fetched paths. The server responds with a single `CacheStatus` containing all paths with `cached: bool` and optional transfer URLs. Already-cached paths (`cached: true`) are skipped. For **S3 mode**: uncached paths include a presigned PUT URL (`url: Some`); the worker uploads directly to S3 and confirms with `NarReady`. For **local mode** (`url: None`): uncached paths are pushed as chunked `NarPush` frames; the server buffers chunks per store path and writes to `NarStore` on `is_final`.
+ 4. **Sign** (optional, when `FlakeJob.sign` is set) — the worker signs each fetched store path using the Ed25519 signing key delivered via `Credential { kind: SigningKey }`. Signatures are embedded directly in `FetchedInput.signature` — no extra round trip. This avoids re-downloading NARs later when the server needs to verify cache integrity.
+ 5. **Report `FetchResult`** with the metadata (and optional signatures) for all pushed paths.
 
 If `nix flake archive` fails (e.g. network unavailable), the worker falls back to the temporary git checkout path and reports an empty `fetched_paths` list — evaluation may still succeed if inputs are already cached from a previous run.
 
@@ -519,11 +583,11 @@ After a build completes, the server **verifies** that the build outputs are pres
 
 The flow for getting build outputs into the cache:
 
-1. **Worker builds** the derivation and has the outputs in its local store.
-2. **Worker compresses** outputs into zstd NARs (if `compress` task is in the `BuildJob`).
-3. **Worker uploads** NARs to the server via `NarPush` (direct mode) or to S3 via `PresignedUpload`.
-4. **Server records** the NAR metadata (hash, size) and verifies the NAR is present in cache storage.
-5. **Server signs** the path (if a signing key is configured for the org's cache).
+ 1. **Worker builds** the derivation and has the outputs in its local store.
+ 2. **Worker compresses** outputs into zstd NARs (if `compress` task is in the `BuildJob`).
+ 3. **Worker uploads** NARs to the server via `NarPush` (direct mode) or to S3 via `PresignedUpload`.
+ 4. **Server records** the NAR metadata (hash, size) and verifies the NAR is present in cache storage.
+ 5. **Server signs** the path (if a signing key is configured for the org's cache).
 
 The server does **not** use `ensure_path` or GC roots. All cached content lives in the NAR store (S3 or local files), not in the server's Nix store.
 
@@ -564,10 +628,11 @@ sequenceDiagram
 ```
 
 The server processes each batch immediately:
-1. Insert `derivation`, `derivation_output`, `derivation_dependency` rows.
-2. Insert `build` rows — `Substituted` for derivations the worker marked as `substituted` (confirmed in cache), `Created` for the rest.
-3. Create **entry points** for root derivations (those with a non-empty `attr`) — transitive dependencies are not tracked as entry points. Entry points map user-facing packages to their builds for CI reporting and the frontend UI.
-4. Transition non-substituted builds from `Created` → `Queued` and **immediately dispatch** them to the in-memory job tracker. Workers are notified via `JobOffer` without waiting for the background dispatch loop.
+
+ 1. Insert `derivation`, `derivation_output`, `derivation_dependency` rows.
+ 2. Insert `build` rows — `Substituted` for derivations the worker marked as `substituted` (confirmed in cache), `Created` for the rest.
+ 3. Create **entry points** for root derivations (those with a non-empty `attr`) — transitive dependencies are not tracked as entry points. Entry points map user-facing packages to their builds for CI reporting and the frontend UI.
+ 4. Transition non-substituted builds from `Created` → `Queued` and **immediately dispatch** them to the in-memory job tracker. Workers are notified via `JobOffer` without waiting for the background dispatch loop.
 
 This means builds can start **while evaluation is still in progress**, significantly reducing end-to-end latency for large closures.
 
@@ -659,10 +724,11 @@ enum ServerMessage {
     Error { code: u16, message: String },
 
     // Job dispatch
-    JobOffer { candidates: Vec<JobCandidate> },  // pushed eagerly as jobs become available
+    JobOffer { candidates: Vec<JobCandidate> },  // delta-only: only new candidates
     RevokeJob { job_ids: Vec<Uuid> },            // remove candidates assigned to another worker
     AssignJob { job_id: Uuid, job: Job, timeout_secs: Option<u64> },
     AbortJob { job_id: Uuid, reason: String },
+    RequestAllScores,                           // after server restart: ask worker to re-send all scores
     Draining,                                   // server shutting down; finish work, buffer results, delay reconnect
 
     // Credentials (sent before or alongside AssignJob)
@@ -696,10 +762,11 @@ enum ClientMessage {
     AssignJobResponse { job_id: Uuid, accepted: bool, reason: Option<String> },
 
     // Job dispatch
-    RequestJobChunk {                           // streamed as scores are computed
-        scores: Vec<CandidateScore>,            // batch of scores
-        is_final: bool,                         // true = done scoring
+    RequestJobChunk {                           // delta-only: new or changed scores
+        scores: Vec<CandidateScore>,
     },
+    RequestJob { kind: JobKind },                  // "I have capacity for one job" — re-sent every 10s as heartbeat
+    RequestAllCandidates,                       // after reconnect: ask server to re-send all active candidates
     JobUpdate { job_id: Uuid, update: JobUpdateKind },
     JobCompleted { job_id: Uuid },              // all tasks done; results already sent via JobUpdate
     JobFailed { job_id: Uuid, error: String },
@@ -794,9 +861,10 @@ Two modes, chosen by the server based on `NarStore` configuration. Both support 
 Before uploading fetched flake inputs, the worker sends `CacheQuery { mode: Push }` to filter out paths that are already cached and obtain upload URLs for uncached paths.
 
 The server responds with a single `CacheStatus` containing **all** queried paths:
-- `cached: true` — path is already in the cache; worker skips it.
-- `cached: false, url: Some(presigned_put)` — S3 mode; worker uploads directly to S3.
-- `cached: false, url: None` — local mode; worker uses `NarPush` WebSocket frames.
+
+ - `cached: true` — path is already in the cache; worker skips it.
+ - `cached: false, url: Some(presigned_put)` — S3 mode; worker uploads directly to S3.
+ - `cached: false, url: None` — local mode; worker uses `NarPush` WebSocket frames.
 
 **Local mode** — uncached paths have `url: None`; worker uses `NarPush`:
 
@@ -894,8 +962,9 @@ The server assigns jobs based on priority. Workers do not need to know the prior
 **Evaluation queue:** FIFO by `created_at`, up to `max_concurrent_evaluations` (default: 10) in parallel. `force_evaluation` projects are picked up immediately.
 
 **Build queue:** ordered by:
-1. Dependency count descending — builds with more dependents (integration builds) start first
-2. `updated_at` ascending — older builds drain first
+
+ 1. Dependency count descending — builds with more dependents (integration builds) start first
+ 2. `updated_at` ascending — older builds drain first
 
 Builds are only eligible when all dependency builds are `Completed` or `Substituted`. The server matches eligible builds to `RequestJobChunk` by checking that the build's target system and required features are all present in the worker's `system_features`.
 
@@ -903,12 +972,12 @@ Builds are only eligible when all dependency builds are `Completed` or `Substitu
 
 ## Federation
 
-Federation connects Gradient instances to each other. A server with `federate` enabled can connect to other servers using the same proto protocol — it authenticates using the standard challenge-response, and the remote peer (org, cache, or proxy) sees it as a single worker/cache.
+Federation connects Gradient instances or workers to each other. A server with `federate` enabled can connect to other servers using the same proto protocol — it authenticates using the standard challenge-response, and the remote peer (org, cache, or proxy) sees it as a single worker/cache.
 
-There is no special "proxy" type. Federation can happen in two ways:
+Federation can happen in two ways:
 
-- **`gradient-proxy`** — a lightweight binary that only federates. It has no local orgs, no UI, no database. Workers authenticate to it with a simple proxy-level token. It connects to upstream servers, authenticating against their peers. The proxy **detaches** the worker↔peer relationship: all its workers serve all authorized peers. The proxy itself is a peer — it registers workers and issues them tokens.
-- **A full Gradient server** — a server with its own orgs, projects, and workers. Its orgs and caches are peers that individually control which external workers/servers get tokens, deciding what to expose.
+ - **`gradient-proxy`** — a lightweight binary that only federates. It has no local orgs, no UI, no database. Workers authenticate to it with a simple proxy-level token. It connects to upstream servers, authenticating against their peers. The proxy **detaches** the worker↔peer relationship: all its workers serve all authorized peers. The proxy itself is a peer — it registers workers and issues them tokens.
+ - **A full Gradient server** — a server with its own orgs, projects, and workers. Its orgs and caches are peers that individually control which external workers/servers get tokens, deciding what to expose.
 
 ### How it works
 
@@ -983,9 +1052,6 @@ The upstream server sees one peer. Internal routing is the federation peer's pro
 
 Caches behind a federation peer are exposed upstream. When a remote peer's build needs a NAR, the upstream server can request it from the federation peer, which serves it from its cache or downstream workers.
 
-- **`gradient-proxy`** — exposes all downstream caches (no access control layer)
-- **Full server** — each cache is a peer that controls which external connections can access it
-
 ### Access control summary
 
 | | `gradient-proxy` | Full Gradient server |
@@ -1001,11 +1067,11 @@ Caches behind a federation peer are exposed upstream. When a remote peer's build
 
 When a worker receives a `SignTask`, it performs pure-Rust Ed25519 signing locally:
 
-1. For each store path, query local store for `PathInfo` (NAR hash, NAR size, references).
-2. Convert NAR hash from SRI format (`sha256-<base64>`) to Nix format (`sha256:<nix-base32>`).
-3. Compute fingerprint: `fingerprint_path(store_path, nar_hash, nar_size, references)`.
-4. Sign fingerprint with the cache's Ed25519 secret key (received via `Credential::SigningKey`).
-5. Return signatures in `JobCompleted`.
+ 1. For each store path, query local store for `PathInfo` (NAR hash, NAR size, references).
+ 2. Convert NAR hash from SRI format (`sha256-<base64>`) to Nix format (`sha256:<nix-base32>`).
+ 3. Compute fingerprint: `fingerprint_path(store_path, nar_hash, nar_size, references)`.
+ 4. Sign fingerprint with the cache's Ed25519 secret key (received via `Credential::SigningKey`).
+ 5. Return signatures in `JobCompleted`.
 
 The server inserts signatures into `cached_path` rows and calls `add_signatures` on its local store.
 
@@ -1022,9 +1088,10 @@ After a successful build, the worker checks for `<output>/nix-support/hydra-buil
 When a build fails (`JobFailed` or `AbortJob`), the server walks reverse `derivation_dependency` edges within the same evaluation and marks all dependent builds as `DependencyFailed` (6). This is a server-side graph walk — workers are not notified about cascaded failures unless they hold an in-flight job for an affected build, in which case they receive `AbortJob`.
 
 The evaluation's final status is determined by aggregating all build statuses:
-- All `Completed` or `Substituted` → `Evaluation::Completed`
-- Any `Failed` → `Evaluation::Failed`
-- Any `Aborted` or `DependencyFailed` (and none in-progress) → `Evaluation::Aborted`
+
+ - All `Completed` or `Substituted` → `Evaluation::Completed`
+ - Any `Failed` → `Evaluation::Failed`
+ - Any `Aborted` or `DependencyFailed` (and none in-progress) → `Evaluation::Aborted`
 
 ---
 
@@ -1052,9 +1119,10 @@ The server sends credentials to workers before tasks that need them:
 | `SigningKey` | `FetchFlake` task (when `FlakeJob.sign` is set), `Sign` task in `BuildJob` | Cache Ed25519 secret key for signing store paths |
 
 Credentials are encrypted in transit (TLS). Workers MUST:
-- Keep credentials in memory only — never write to disk
-- Zeroize memory on drop
-- Discard credentials when the job completes or the connection closes
+
+ - Keep credentials in memory only — never write to disk
+ - Zeroize memory on drop
+ - Discard credentials when the job completes or the connection closes
 
 ---
 
@@ -1097,39 +1165,50 @@ graph TD
 When the server restarts (deploy, crash, maintenance), workers experience a WebSocket disconnect. The protocol is designed so no work is lost:
 
 **Worker behavior:**
-1. Detect disconnect (WebSocket close or missed pong).
-2. **Keep running in-progress jobs** — do not abort immediately. Results are buffered locally.
-3. Reconnect with exponential backoff: 1s → 2s → 4s → ... → 60s max, with jitter.
-4. On reconnect, send `InitConnection` + `WorkerCapabilities` (full re-handshake).
-5. Send `JobUpdate`/`JobCompleted`/`JobFailed` for any jobs that progressed or finished during the outage. The server matches these by `job_id`.
-6. Resume `RequestJobChunk` loop for free capacity slots.
+
+ 1. Detect disconnect (WebSocket close or missed pong).
+ 2. **Keep running in-progress jobs** — do not abort immediately. Results are buffered locally.
+ 3. **Keep candidate cache and scores in memory** — do not discard.
+ 4. Reconnect with exponential backoff: 1s → 2s → 4s → ... → 60s max, with jitter.
+ 5. On reconnect, send `InitConnection` + `WorkerCapabilities` (full re-handshake).
+ 6. Send `JobUpdate`/`JobCompleted`/`JobFailed` for any jobs that progressed or finished during the outage. The server matches these by `job_id`.
+ 7. Send `RequestAllCandidates` to resync the candidate cache (server may have revoked or added candidates during the outage).
+ 8. Respond to `RequestAllScores` with all cached scores so the server can rebuild its in-memory score table.
 
 **Server behavior on startup:**
-1. Scan for orphaned jobs: any `build` with status `Building` (2) or `evaluation` with status `Fetching`/`EvaluatingFlake`/`EvaluatingDerivation` that has no connected worker.
-2. Wait a **grace period** (default: 120s) for workers to reconnect and report results.
-3. After the grace period, mark remaining orphaned jobs as `Failed` and re-queue them.
+
+ 1. Scan for orphaned jobs: any `build` with status `Building` (2) or `evaluation` with status `Fetching`/`EvaluatingFlake`/`EvaluatingDerivation` that has no connected worker.
+ 2. Wait a **grace period** (default: 120s) for workers to reconnect and report results.
+ 3. After the grace period, mark remaining orphaned jobs as `Failed` and re-queue them.
+ 4. Send `RequestAllScores` to each reconnected worker to rebuild the in-memory score table.
 
 ```mermaid
 sequenceDiagram
     participant W as Worker
     participant S as Server
 
-    Note over W: executing job...
+    Note over W: executing job, candidates [J2,J4,J5] cached
     S-xW: server goes down
-    W--xS: reconnect (backoff)
     W--xS: reconnect (backoff)
     Note over S: server comes back
     W->>S: InitConnection { id }
     S->>W: InitAck
     W->>S: WorkerCapabilities
-    W->>S: JobCompleted { job_id }
-    Note right of W: buffered result
-    Note right of S: matches id,<br/>reassigns orphaned jobs
-    W->>S: RequestJobChunk
-    Note right of W: ready for more
+    W->>S: JobCompleted { buffered job }
+    S->>W: RequestAllScores
+    W->>S: RequestJobChunk { scores: [{J2,...},{J4,...},{J5,...}] }
+    Note over S: score table rebuilt
+    W->>S: RequestAllCandidates
+    S->>W: JobOffer { candidates: [J2,J4,J5,J6] }
+    W->>S: RequestJobChunk { scores: [{J6,...}] }
+    W->>S: RequestJob { kind: Build }
+    Note over S: assigns best job
+    S->>W: AssignJob { job_id: J2 }
+    Note over W: got AssignJob — still has slots
+    W->>S: RequestJob { kind: Build }
 ```
 
-This means short server restarts (< grace period) cause **zero job loss** — workers buffer results and replay them on reconnect.
+This means short server restarts (< grace period) cause **zero job loss** — workers buffer results and replay them on reconnect. Score state is rebuilt in a single round-trip via `RequestAllScores` + `RequestAllCandidates`. The 10-second `RequestJob` heartbeat ensures the server recovers the "worker needs work" state even if it restarts and loses that information.
 
 ### Graceful Server Shutdown
 
@@ -1148,9 +1227,10 @@ sequenceDiagram
 ```
 
 On receiving `ServerMessage::Draining`, workers:
-1. Stop sending `RequestJobChunk` — no new work.
-2. Finish in-flight jobs and send results.
-3. After the connection closes, wait before reconnecting (e.g. 30s) to give the server time to restart.
+
+ 1. Stop sending `RequestJobChunk` — no new work.
+ 2. Finish in-flight jobs and send results.
+ 3. After the connection closes, wait before reconnecting (e.g. 30s) to give the server time to restart.
 
 This is distinct from a crash (unexpected disconnect) where workers reconnect immediately with exponential backoff. `Draining` tells workers the disconnect is planned.
 
@@ -1174,6 +1254,6 @@ This is distinct from a crash (unexpected disconnect) where workers reconnect im
 
 ## Versioning
 
-- `PROTO_VERSION` (currently `1`) is incremented on breaking wire changes.
-- Server accepts any `client_version == PROTO_VERSION`.
-- New capabilities are gated by `GradientCapabilities` flags, not version numbers.
+ - `PROTO_VERSION` (currently `1`) is incremented on breaking wire changes.
+ - Server accepts any `client_version == PROTO_VERSION`.
+ - New capabilities are gated by `GradientCapabilities` flags, not version numbers.

@@ -128,7 +128,7 @@ in {
       maxConcurrentBuilds = lib.mkOption {
         description = "Maximum number of concurrent builds";
         type = lib.types.ints.positive;
-        default = 10;
+        default = 8;
       };
 
       maxNixdaemonConnections = lib.mkOption {
@@ -140,7 +140,7 @@ in {
       evalWorkers = lib.mkOption {
         description = "Number of Nix evaluator subprocesses";
         type = lib.types.ints.positive;
-        default = 4;
+        default = 8;
       };
 
       maxEvaluationsPerWorker = lib.mkOption {

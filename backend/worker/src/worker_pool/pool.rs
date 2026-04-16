@@ -48,6 +48,17 @@ impl EvalWorker {
         let stdin = child.stdin.take().context("worker stdin missing")?;
         let stdout = BufReader::new(child.stdout.take().context("worker stdout missing")?);
 
+        // Mark the subprocess as the preferred OOM-kill target so that the kernel
+        // sacrifices eval workers (which hold large Nix/Boehm-GC heaps) before
+        // the parent process or other services when memory runs low.
+        #[cfg(target_os = "linux")]
+        if let Some(pid) = child.id() {
+            let path = format!("/proc/{pid}/oom_score_adj");
+            if let Err(e) = std::fs::write(&path, "600") {
+                tracing::warn!(pid, "failed to set oom_score_adj for eval worker: {e}");
+            }
+        }
+
         Ok(Self {
             child,
             stdin,
