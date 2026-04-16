@@ -110,6 +110,14 @@ impl WorkerPool {
         self.workers.get(id).map(|w| &w.authorized_peers)
     }
 
+    /// Returns `(architectures, system_features)` for a connected worker.
+    /// Returns `None` if the worker is not connected.
+    pub fn build_caps_for(&self, id: &str) -> Option<(Vec<String>, Vec<String>)> {
+        self.workers
+            .get(id)
+            .map(|w| (w.architectures.clone(), w.system_features.clone()))
+    }
+
     pub fn update_capabilities(
         &mut self,
         id: &str,

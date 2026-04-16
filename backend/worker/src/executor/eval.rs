@@ -220,23 +220,27 @@ pub async fn evaluate_derivations_with(
     }
 
     while let Some((attr, drv_path)) = queue.pop_front() {
-        let drv_bytes = match drv_reader.read_drv(&drv_path).await {
-            Ok(b) => b,
-            Err(e) => {
-                warn!(drv = %drv_path, error = %e, "failed to read .drv file; skipping");
-                warnings.push(format!("cannot read {drv_path}: {e}"));
-                continue;
-            }
-        };
+        // CRITICAL: A silent `continue` here would drop the derivation **and its
+        // entire dependency subtree** from the closure walk. The server would
+        // then never learn about those missing dependencies, never insert
+        // `derivation_dependency` edges to them, and the dispatch SQL would
+        // happily release the parent build for execution — at which point the
+        // nix-daemon would fail with "1 dependency failed" because the dep was
+        // never built. Fail the evaluation loudly so the underlying problem is
+        // surfaced instead of silently producing a broken build graph.
+        let drv_bytes = drv_reader.read_drv(&drv_path).await.with_context(|| {
+            format!(
+                "cannot read .drv {drv_path} during closure walk; aborting eval to avoid \
+                 silently dropping dependencies"
+            )
+        })?;
 
-        let drv = match parse_drv(&drv_bytes) {
-            Ok(d) => d,
-            Err(e) => {
-                warn!(drv = %drv_path, error = %e, "failed to parse .drv file; skipping");
-                warnings.push(format!("cannot parse {drv_path}: {e}"));
-                continue;
-            }
-        };
+        let drv = parse_drv(&drv_bytes).with_context(|| {
+            format!(
+                "cannot parse .drv {drv_path} during closure walk; aborting eval to avoid \
+                 silently dropping dependencies"
+            )
+        })?;
 
         // Enqueue input derivations (BFS).
         for (input_drv, _outputs) in &drv.input_derivations {
@@ -439,8 +443,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_eval_missing_drv_warns() {
+    async fn test_eval_missing_drv_fails_loudly() {
         // Resolver resolves an attr to a drv path that doesn't exist in the reader.
+        // Silently skipping would drop dependency edges and let the dispatcher
+        // release the parent build prematurely, so we MUST surface this as a
+        // hard eval failure instead of a warning.
         let resolver = FakeDerivationResolver::new()
             .with_flake_attrs("repo", vec!["pkg".into()])
             .with_drv_path("repo", "pkg", "/nix/store/nonexistent.drv");
@@ -448,32 +455,18 @@ mod tests {
         let job = make_flake_job("repo");
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
+        let err = evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter)
             .await
-            .unwrap();
-
-        if let ReportedEvent::EvalResult {
-            derivations,
-            warnings,
-            ..
-        } = reporter.last_eval_result().unwrap()
-        {
-            assert!(
-                derivations.is_empty(),
-                "no derivations should be discovered"
-            );
-            assert!(
-                !warnings.is_empty(),
-                "should have a warning about missing drv"
-            );
-            assert!(
-                warnings[0].contains("nonexistent.drv"),
-                "warning should mention the missing path: {:?}",
-                warnings
-            );
-        } else {
-            panic!("expected EvalResult");
-        }
+            .expect_err("missing .drv must abort the eval");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("nonexistent.drv"),
+            "error should mention the missing path: {msg}"
+        );
+        assert!(
+            msg.contains("aborting eval"),
+            "error should explain the abort: {msg}"
+        );
     }
 
     #[tokio::test]

@@ -289,6 +289,9 @@ lifecycle. Tests exercise the state machine directly without any async runtime.
 | `test_worker_disconnected_requeues` | Assign 2 jobs to "w1", disconnect: both return to pending |
 | `test_take_empty_required` | Job with empty `required_paths` is taken; job with paths is not |
 | `test_contains_job_both_maps` | `contains_job()` finds a job in both pending and active states |
+| `test_candidates_filtered_by_architecture` | x86_64 worker only sees `x86_64-linux` and `builtin` build candidates; `aarch64-linux` builds are hidden |
+| `test_take_first_of_kind_skips_wrong_arch` | Pull-based `RequestJob { kind: Build }` does not assign builds whose architecture isn't in the worker's `architectures` |
+| `test_take_first_of_kind_requires_features` | Build requiring `kvm` is only assigned to a worker with `kvm` in its `system_features` |
 
 ---
 
@@ -483,7 +486,7 @@ nix-daemon, filesystem, or WebSocket connection.
 | `test_eval_partial_substitution` | 50% random built: substituted flags exactly match fixture `is_built()` for every derivation |
 | `test_eval_all_substituted` | All built: every derivation is `substituted: true` |
 | `test_eval_empty_attrs` | No attrs from resolver: empty `EvalResult`, no errors |
-| `test_eval_missing_drv_warns` | Resolver points to a non-existent `.drv`: warning emitted, no panic |
+| `test_eval_missing_drv_fails_loudly` | Resolver points to a non-existent `.drv`: BFS aborts with a hard error so the server doesn't see a truncated dependency graph |
 | `test_eval_dependencies_match_fixture` | Dependency lists in `EvalResult` exactly match the fixture's adjacency tree |
 
 ---

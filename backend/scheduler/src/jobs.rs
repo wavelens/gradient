@@ -35,6 +35,33 @@ pub struct PendingBuildJob {
     pub peer_id: Uuid,
     pub job: BuildJob,
     pub required_paths: Vec<RequiredPath>,
+    /// Nix system string the build's target derivation must run on
+    /// (e.g. `"x86_64-linux"`, `"aarch64-linux"`, `"builtin"`).
+    pub architecture: String,
+    /// Nix system features the build needs (e.g. `["kvm", "big-parallel"]`).
+    pub required_features: Vec<String>,
+}
+
+/// A connected worker's build-relevant capabilities, used to gate which
+/// build jobs are eligible for assignment.
+#[derive(Debug, Clone, Default)]
+pub struct WorkerBuildCaps {
+    pub architectures: Vec<String>,
+    pub system_features: Vec<String>,
+}
+
+impl WorkerBuildCaps {
+    /// Returns true when this worker can execute a build with the given
+    /// `architecture` and `required_features`. `"builtin"` derivations
+    /// (`builtin:fetchurl` etc.) run on any architecture.
+    pub fn can_build(&self, architecture: &str, required_features: &[String]) -> bool {
+        let arch_ok =
+            architecture == "builtin" || self.architectures.iter().any(|a| a == architecture);
+        let features_ok = required_features
+            .iter()
+            .all(|f| self.system_features.iter().any(|sf| sf == f));
+        arch_ok && features_ok
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +119,20 @@ pub struct Assignment {
     pub peer_id: Uuid,
 }
 
+/// Returns true when `job` is either an eval job (no arch constraint) or a
+/// build job whose architecture/features the worker can satisfy. If `caps` is
+/// `None`, capability checks are skipped (used for tests / open mode).
+fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerBuildCaps>) -> bool {
+    match (job, caps) {
+        // No capability info known → don't block (legacy behaviour for callers
+        // that don't supply caps, e.g. unit tests for unrelated logic).
+        (_, None) => true,
+        // Eval jobs aren't gated by build caps.
+        (PendingJob::Eval(_), Some(_)) => true,
+        (PendingJob::Build(j), Some(c)) => c.can_build(&j.architecture, &j.required_features),
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct JobTracker {
     pending: HashMap<String, PendingJob>,
@@ -110,12 +151,22 @@ impl JobTracker {
         candidate
     }
 
-    /// Returns all pending job candidates that the worker is authorized to receive.
-    /// Pass `None` to get all candidates (open/no-peer-restriction mode).
-    pub fn candidates_for_worker(&self, authorized: Option<&HashSet<Uuid>>) -> Vec<JobCandidate> {
+    /// Returns all pending job candidates that the worker is authorized to receive
+    /// AND can execute. `caps` filters build jobs to those matching the worker's
+    /// architectures and system features; eval jobs are always eligible.
+    /// Pass `None` for `authorized` to disable peer filtering (open mode).
+    /// Pass `None` for `caps` to disable capability filtering (e.g. eval-only worker).
+    pub fn candidates_for_worker(
+        &self,
+        authorized: Option<&HashSet<Uuid>>,
+        caps: Option<&WorkerBuildCaps>,
+    ) -> Vec<JobCandidate> {
         self.pending
             .iter()
-            .filter(|(_, job)| authorized.is_none_or(|peers| peers.contains(&job.peer_id())))
+            .filter(|(_, job)| {
+                authorized.is_none_or(|peers| peers.contains(&job.peer_id()))
+                    && job_eligible_for_caps(job, caps)
+            })
             .map(|(id, job)| job.as_candidate(id))
             .collect()
     }
@@ -131,6 +182,7 @@ impl JobTracker {
         &mut self,
         peer_id: &str,
         authorized: Option<&HashSet<Uuid>>,
+        caps: Option<&WorkerBuildCaps>,
         scores: Vec<CandidateScore>,
     ) -> Option<Assignment> {
         let worker_scores = self.scores.entry(peer_id.to_owned()).or_default();
@@ -145,6 +197,10 @@ impl JobTracker {
             if let Some(peers) = authorized
                 && !peers.contains(&job.peer_id())
             {
+                continue;
+            }
+            // Skip builds whose architecture/features the worker can't satisfy.
+            if !job_eligible_for_caps(job, caps) {
                 continue;
             }
             worker_scores.insert(score.job_id.clone(), score.missing_count);
@@ -164,12 +220,14 @@ impl JobTracker {
         self.assign_pending(peer_id, &job_id)
     }
 
-    /// Assign the first pending job matching `kind`, restricted to authorized peers.
+    /// Assign the first pending job matching `kind`, restricted to authorized peers
+    /// and to builds the worker can execute (matching arch + features).
     /// Used for pull-based `RequestJob` dispatch (no scoring needed).
     pub fn take_first_of_kind(
         &mut self,
         peer_id: &str,
         authorized: Option<&HashSet<Uuid>>,
+        caps: Option<&WorkerBuildCaps>,
         kind: &JobKind,
     ) -> Option<Assignment> {
         let job_id = self
@@ -181,17 +239,20 @@ impl JobTracker {
                         (kind, j),
                         (JobKind::Flake, PendingJob::Eval(_)) | (JobKind::Build, PendingJob::Build(_))
                     )
+                    && job_eligible_for_caps(j, caps)
             })
             .map(|(id, _)| id.clone())
             .next()?;
         self.assign_pending(peer_id, &job_id)
     }
 
-    /// Assign any pending job with no required paths, restricted to authorized peers.
+    /// Assign any pending job with no required paths, restricted to authorized peers
+    /// and to builds the worker can execute.
     pub fn take_empty_required(
         &mut self,
         peer_id: &str,
         authorized: Option<&HashSet<Uuid>>,
+        caps: Option<&WorkerBuildCaps>,
     ) -> Option<Assignment> {
         let job_id = self
             .pending
@@ -199,6 +260,7 @@ impl JobTracker {
             .filter(|(_, j)| {
                 j.required_paths().is_empty()
                     && authorized.is_none_or(|peers| peers.contains(&j.peer_id()))
+                    && job_eligible_for_caps(j, caps)
             })
             .map(|(id, _)| id.clone())
             .next()?;
@@ -323,6 +385,15 @@ mod tests {
     }
 
     fn build_job(peer: Uuid, required: Vec<RequiredPath>) -> PendingJob {
+        build_job_arch(peer, required, "x86_64-linux", vec![])
+    }
+
+    fn build_job_arch(
+        peer: Uuid,
+        required: Vec<RequiredPath>,
+        architecture: &str,
+        required_features: Vec<String>,
+    ) -> PendingJob {
         PendingJob::Build(PendingBuildJob {
             build_id: Uuid::new_v4(),
             evaluation_id: Uuid::new_v4(),
@@ -336,6 +407,8 @@ mod tests {
                 sign: None,
             },
             required_paths: required,
+            architecture: architecture.into(),
+            required_features,
         })
     }
 
@@ -347,7 +420,7 @@ mod tests {
         tracker.add_pending("j2".into(), eval_job(peer));
         tracker.add_pending("j3".into(), build_job(peer, vec![]));
 
-        let candidates = tracker.candidates_for_worker(None);
+        let candidates = tracker.candidates_for_worker(None, None);
         assert_eq!(candidates.len(), 3);
         assert_eq!(tracker.pending_count(), 3);
     }
@@ -363,9 +436,79 @@ mod tests {
         let mut authorized = HashSet::new();
         authorized.insert(peer_a);
 
-        let candidates = tracker.candidates_for_worker(Some(&authorized));
+        let candidates = tracker.candidates_for_worker(Some(&authorized), None);
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].job_id, "ja");
+    }
+
+    #[test]
+    fn test_candidates_filtered_by_architecture() {
+        let mut tracker = JobTracker::new();
+        let peer = Uuid::new_v4();
+        // x86_64 build
+        tracker.add_pending("x86".into(), build_job_arch(peer, vec![], "x86_64-linux", vec![]));
+        // aarch64 build
+        tracker.add_pending("arm".into(), build_job_arch(peer, vec![], "aarch64-linux", vec![]));
+        // builtin builds run anywhere
+        tracker.add_pending("any".into(), build_job_arch(peer, vec![], "builtin", vec![]));
+
+        let x86_caps = WorkerBuildCaps {
+            architectures: vec!["x86_64-linux".into()],
+            system_features: vec![],
+        };
+        let candidates = tracker.candidates_for_worker(None, Some(&x86_caps));
+        let mut ids: Vec<_> = candidates.iter().map(|c| c.job_id.clone()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["any".to_string(), "x86".to_string()]);
+    }
+
+    #[test]
+    fn test_take_first_of_kind_skips_wrong_arch() {
+        let mut tracker = JobTracker::new();
+        let peer = Uuid::new_v4();
+        tracker.add_pending(
+            "arm".into(),
+            build_job_arch(peer, vec![], "aarch64-linux", vec![]),
+        );
+        let x86_caps = WorkerBuildCaps {
+            architectures: vec!["x86_64-linux".into()],
+            system_features: vec![],
+        };
+        // Worker requesting Build → arm-only build is filtered out → no assignment.
+        let assignment =
+            tracker.take_first_of_kind("w1", None, Some(&x86_caps), &JobKind::Build);
+        assert!(assignment.is_none());
+        assert_eq!(tracker.pending_count(), 1);
+    }
+
+    #[test]
+    fn test_take_first_of_kind_requires_features() {
+        let mut tracker = JobTracker::new();
+        let peer = Uuid::new_v4();
+        tracker.add_pending(
+            "kvm".into(),
+            build_job_arch(peer, vec![], "x86_64-linux", vec!["kvm".into()]),
+        );
+        let no_kvm = WorkerBuildCaps {
+            architectures: vec!["x86_64-linux".into()],
+            system_features: vec![],
+        };
+        let with_kvm = WorkerBuildCaps {
+            architectures: vec!["x86_64-linux".into()],
+            system_features: vec!["kvm".into()],
+        };
+        // Worker without kvm — no assignment.
+        assert!(
+            tracker
+                .take_first_of_kind("w1", None, Some(&no_kvm), &JobKind::Build)
+                .is_none()
+        );
+        // Worker with kvm — assigned.
+        assert!(
+            tracker
+                .take_first_of_kind("w2", None, Some(&with_kvm), &JobKind::Build)
+                .is_some()
+        );
     }
 
     #[test]
@@ -385,6 +528,7 @@ mod tests {
 
         let assignment = tracker.receive_scores(
             "w1",
+            None,
             None,
             vec![CandidateScore {
                 job_id: "j1".into(),
@@ -417,6 +561,7 @@ mod tests {
         let assignment = tracker.receive_scores(
             "w1",
             None,
+            None,
             vec![CandidateScore {
                 job_id: "j1".into(),
                 missing_count: 5,
@@ -436,7 +581,7 @@ mod tests {
         tracker.add_pending("j1".into(), eval_job(peer));
 
         // Assign it.
-        let assignment = tracker.take_empty_required("w1", None);
+        let assignment = tracker.take_empty_required("w1", None, None);
         assert!(assignment.is_some());
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
@@ -447,7 +592,7 @@ mod tests {
         assert_eq!(tracker.active_count(), 0);
 
         // Should reappear in candidates.
-        let candidates = tracker.candidates_for_worker(None);
+        let candidates = tracker.candidates_for_worker(None, None);
         assert_eq!(candidates.len(), 1);
     }
 
@@ -458,8 +603,8 @@ mod tests {
         tracker.add_pending("j1".into(), eval_job(peer));
         tracker.add_pending("j2".into(), eval_job(peer));
 
-        tracker.take_empty_required("w1", None);
-        tracker.take_empty_required("w1", None);
+        tracker.take_empty_required("w1", None, None);
+        tracker.take_empty_required("w1", None, None);
         assert_eq!(tracker.active_count(), 2);
         assert_eq!(tracker.pending_count(), 0);
 
@@ -487,7 +632,7 @@ mod tests {
         // Job with no required paths — should be taken.
         tracker.add_pending("j2".into(), eval_job(peer));
 
-        let assignment = tracker.take_empty_required("w1", None);
+        let assignment = tracker.take_empty_required("w1", None, None);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id, "j2");
     }
@@ -502,9 +647,9 @@ mod tests {
         tracker.add_pending("jb1".into(), eval_job(org_b));
 
         // Assign all three to worker w1.
-        tracker.take_empty_required("w1", None);
-        tracker.take_empty_required("w1", None);
-        tracker.take_empty_required("w1", None);
+        tracker.take_empty_required("w1", None, None);
+        tracker.take_empty_required("w1", None, None);
+        tracker.take_empty_required("w1", None, None);
         assert_eq!(tracker.active_jobs().count(), 3);
 
         // Revoke only org_a.
@@ -523,7 +668,7 @@ mod tests {
         let mut tracker = JobTracker::new();
         let org_a = Uuid::new_v4();
         tracker.add_pending("j1".into(), eval_job(org_a));
-        tracker.take_empty_required("w1", None);
+        tracker.take_empty_required("w1", None, None);
 
         let aborted = tracker.drain_peer_jobs_on_worker("w1", &HashSet::new());
         assert!(aborted.is_empty());
@@ -538,7 +683,7 @@ mod tests {
         assert!(tracker.contains_job("j1"));
         assert!(!tracker.contains_job("j2"));
 
-        tracker.take_empty_required("w1", None);
+        tracker.take_empty_required("w1", None, None);
         // Now in active, not pending — should still be "contained".
         assert!(tracker.contains_job("j1"));
     }

@@ -336,12 +336,42 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
             sign: None,
         };
 
+        // Look up the feature names this derivation requires, so the scheduler
+        // can route the build only to a worker whose system_features superset it.
+        let required_features: Vec<String> = match EDerivationFeature::find()
+            .filter(CDerivationFeature::Derivation.eq(derivation.id))
+            .all(&state.db)
+            .await
+        {
+            Ok(edges) if edges.is_empty() => vec![],
+            Ok(edges) => {
+                let feature_ids: Vec<Uuid> = edges.into_iter().map(|e| e.feature).collect();
+                match EFeature::find()
+                    .filter(CFeature::Id.is_in(feature_ids))
+                    .all(&state.db)
+                    .await
+                {
+                    Ok(rows) => rows.into_iter().map(|f| f.name).collect(),
+                    Err(e) => {
+                        warn!(error = %e, build_id = %build.id, "failed to load feature names; assuming none");
+                        vec![]
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, build_id = %build.id, "failed to load required features; assuming none");
+                vec![]
+            }
+        };
+
         let pending = PendingBuildJob {
             build_id: build.id,
             evaluation_id: build.evaluation,
             peer_id,
             job: build_job,
             required_paths: vec![],
+            architecture: derivation.architecture.clone(),
+            required_features,
         };
 
         scheduler.enqueue_build_job(job_id.clone(), pending).await;

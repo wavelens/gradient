@@ -207,20 +207,27 @@ impl Scheduler {
     /// Used for `RequestJobList` / `RequestAllCandidates` (full snapshot).
     /// Also marks all returned IDs as sent so delta pushes skip them.
     pub async fn get_job_candidates(&self, worker_id: &str) -> Vec<JobCandidate> {
-        let authorized = {
+        let (authorized, caps) = {
             let pool = self.worker_pool.read().await;
             let auth = pool.authorized_peers_for(worker_id);
-            if auth.is_some_and(|p| !p.is_empty()) {
+            let authorized = if auth.is_some_and(|p| !p.is_empty()) {
                 auth.cloned()
             } else {
                 None
-            }
+            };
+            let caps = pool.build_caps_for(worker_id).map(|(a, f)| {
+                jobs::WorkerBuildCaps {
+                    architectures: a,
+                    system_features: f,
+                }
+            });
+            (authorized, caps)
         };
         let candidates = self
             .job_tracker
             .read()
             .await
-            .candidates_for_worker(authorized.as_ref());
+            .candidates_for_worker(authorized.as_ref(), caps.as_ref());
         // Mark all as sent so the next delta push skips them.
         let ids: Vec<String> = candidates.iter().map(|c| c.job_id.clone()).collect();
         self.worker_pool
@@ -234,7 +241,7 @@ impl Scheduler {
     /// Used for incremental `JobOffer` pushes after `job_notify`.
     /// Marks the returned IDs as sent.
     pub async fn get_new_job_candidates(&self, worker_id: &str) -> Vec<JobCandidate> {
-        let (authorized, sent) = {
+        let (authorized, sent, caps) = {
             let pool = self.worker_pool.read().await;
             let auth = pool.authorized_peers_for(worker_id);
             let authorized = if auth.is_some_and(|p| !p.is_empty()) {
@@ -246,13 +253,19 @@ impl Scheduler {
                 .sent_candidates_for(worker_id)
                 .cloned()
                 .unwrap_or_default();
-            (authorized, sent)
+            let caps = pool.build_caps_for(worker_id).map(|(a, f)| {
+                jobs::WorkerBuildCaps {
+                    architectures: a,
+                    system_features: f,
+                }
+            });
+            (authorized, sent, caps)
         };
         let all = self
             .job_tracker
             .read()
             .await
-            .candidates_for_worker(authorized.as_ref());
+            .candidates_for_worker(authorized.as_ref(), caps.as_ref());
         let new_candidates: Vec<JobCandidate> = all
             .into_iter()
             .filter(|c| !sent.contains(&c.job_id))
@@ -275,17 +288,25 @@ impl Scheduler {
     /// free slot.  Returns `Some(Assignment)` if a matching pending job was
     /// found and claimed; `None` if no such job exists yet.
     pub async fn request_job(&self, peer_id: &str, kind: JobKind) -> Option<Assignment> {
-        let authorized: Option<HashSet<Uuid>> = {
+        let (authorized, caps) = {
             let pool = self.worker_pool.read().await;
-            pool.authorized_peers_for(peer_id)
-                .and_then(|p| if p.is_empty() { None } else { Some(p.clone()) })
+            let authorized: Option<HashSet<Uuid>> = pool
+                .authorized_peers_for(peer_id)
+                .and_then(|p| if p.is_empty() { None } else { Some(p.clone()) });
+            let caps = pool.build_caps_for(peer_id).map(|(a, f)| {
+                jobs::WorkerBuildCaps {
+                    architectures: a,
+                    system_features: f,
+                }
+            });
+            (authorized, caps)
         };
 
         let assignment = self
             .job_tracker
             .write()
             .await
-            .take_first_of_kind(peer_id, authorized.as_ref(), &kind);
+            .take_first_of_kind(peer_id, authorized.as_ref(), caps.as_ref(), &kind);
 
         if let Some(ref a) = assignment {
             self.worker_pool
@@ -302,19 +323,28 @@ impl Scheduler {
         peer_id: &str,
         scores: Vec<CandidateScore>,
     ) -> Option<Assignment> {
-        // Snapshot authorized peers (read lock, short-lived).
-        let authorized: Option<HashSet<Uuid>> = {
+        // Snapshot authorized peers + build caps (read lock, short-lived).
+        let (authorized, caps) = {
             let pool = self.worker_pool.read().await;
-            pool.authorized_peers_for(peer_id)
-                .and_then(|p| if p.is_empty() { None } else { Some(p.clone()) })
+            let authorized: Option<HashSet<Uuid>> = pool
+                .authorized_peers_for(peer_id)
+                .and_then(|p| if p.is_empty() { None } else { Some(p.clone()) });
+            let caps = pool.build_caps_for(peer_id).map(|(a, f)| {
+                jobs::WorkerBuildCaps {
+                    architectures: a,
+                    system_features: f,
+                }
+            });
+            (authorized, caps)
         };
 
         // Try score-based assignment (missing: 0).
-        let assignment =
-            self.job_tracker
-                .write()
-                .await
-                .receive_scores(peer_id, authorized.as_ref(), scores);
+        let assignment = self.job_tracker.write().await.receive_scores(
+            peer_id,
+            authorized.as_ref(),
+            caps.as_ref(),
+            scores,
+        );
         if let Some(ref a) = assignment {
             self.worker_pool
                 .write()
@@ -324,11 +354,11 @@ impl Scheduler {
             return assignment;
         }
         // Fallback: assign any job with no required paths.
-        let fallback = self
-            .job_tracker
-            .write()
-            .await
-            .take_empty_required(peer_id, authorized.as_ref());
+        let fallback = self.job_tracker.write().await.take_empty_required(
+            peer_id,
+            authorized.as_ref(),
+            caps.as_ref(),
+        );
         if let Some(ref a) = fallback {
             self.worker_pool
                 .write()

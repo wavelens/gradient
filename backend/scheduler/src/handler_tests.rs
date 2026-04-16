@@ -150,6 +150,8 @@ fn make_build_job(build_id: Uuid, eval_id: Uuid, org_id: Uuid) -> PendingBuildJo
             sign: None,
         },
         required_paths: vec![],
+        architecture: "x86_64-linux".into(),
+        required_features: vec![],
     }
 }
 
