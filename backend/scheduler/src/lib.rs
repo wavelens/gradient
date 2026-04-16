@@ -515,7 +515,14 @@ impl Scheduler {
         let job = self.job_tracker.write().await.remove_active(job_id);
         match job {
             Some(PendingJob::Eval(j)) => {
-                eval::handle_eval_job_completed(&self.state, j.evaluation_id).await
+                let result = eval::handle_eval_job_completed(&self.state, j.evaluation_id).await;
+                // The eval just promoted any newly-discovered builds from
+                // Created → Queued; kick off dispatch immediately so workers
+                // don't have to wait for the next build_dispatch_loop tick.
+                if let Err(e) = dispatch::dispatch_ready_builds(self).await {
+                    warn!(error = %e, "immediate build dispatch after eval completion failed");
+                }
+                result
             }
             Some(PendingJob::Build(j)) => {
                 let result =

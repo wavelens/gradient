@@ -186,6 +186,11 @@ fn cache_status_roundtrip() {
                 file_size: Some(1024),
                 nar_size: Some(4096),
                 url: None,
+                nar_hash: Some("sha256:0000000000000000000000000000000000000000000000000000".into()),
+                references: Some(vec!["/nix/store/cccc-dep".into()]),
+                signatures: Some(vec!["cache.example.com-1:abcd".into()]),
+                deriver: Some("/nix/store/aaaa-foo.drv".into()),
+                ca: None,
             },
             CachedPath {
                 path: "/nix/store/bbbb-bar".into(),
@@ -193,6 +198,11 @@ fn cache_status_roundtrip() {
                 file_size: None,
                 nar_size: None,
                 url: Some("https://s3.example.com/nars/bb/bb.nar.zst".into()),
+                nar_hash: None,
+                references: None,
+                signatures: None,
+                deriver: None,
+                ca: None,
             },
         ],
     };
@@ -210,6 +220,11 @@ fn cached_path_not_cached_no_url() {
         file_size: None,
         nar_size: None,
         url: None,
+        nar_hash: None,
+        references: None,
+        signatures: None,
+        deriver: None,
+        ca: None,
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&cp).unwrap();
     let decoded = rkyv::from_bytes::<CachedPath, RkyvError>(&bytes).unwrap();

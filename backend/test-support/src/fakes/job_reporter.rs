@@ -111,6 +111,11 @@ impl JobReporter for RecordingJobReporter {
                         file_size: None,
                         nar_size: None,
                         url: None,
+                        nar_hash: None,
+                        references: None,
+                        signatures: None,
+                        deriver: None,
+                        ca: None,
                     })
                 } else {
                     None

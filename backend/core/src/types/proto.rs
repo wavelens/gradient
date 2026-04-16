@@ -183,6 +183,12 @@ pub enum QueryMode {
 /// `url` provides a presigned S3 URL (GET for [`QueryMode::Pull`], PUT for
 /// [`QueryMode::Push`]); `None` means use the direct WebSocket transfer
 /// (`NarRequest` / `NarPush`) instead.
+///
+/// In [`QueryMode::Pull`] (worker fetching dep NARs into its local store), the
+/// `nar_hash` / `references` / `signatures` / `deriver` / `ca` fields carry the
+/// path info the worker needs to construct a `ValidPathInfo` and call
+/// `add_to_store_nar` on its local nix-daemon. They are `None` for other
+/// modes and for uncached paths.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct CachedPath {
@@ -200,6 +206,21 @@ pub struct CachedPath {
     ///   `cached` is `false`).
     /// - `None`: use WebSocket direct transfer (`NarRequest` or `NarPush`).
     pub url: Option<String>,
+    /// SHA-256 of the uncompressed NAR in `sha256:<nix32>` format.
+    /// Populated for cached paths in [`QueryMode::Pull`].
+    pub nar_hash: Option<String>,
+    /// Other store paths this path references (full `/nix/store/...` paths).
+    /// Populated for cached paths in [`QueryMode::Pull`].
+    pub references: Option<Vec<String>>,
+    /// Cache signatures in narinfo wire format `<key-name>:<base64>`.
+    /// Populated for cached paths in [`QueryMode::Pull`].
+    pub signatures: Option<Vec<String>>,
+    /// Optional deriver: the `.drv` path that produced this output (full path).
+    /// Populated for cached paths in [`QueryMode::Pull`] when known.
+    pub deriver: Option<String>,
+    /// Content-addressed identifier (e.g. `fixed:r:sha256:<hash>` for FOD).
+    /// Populated for cached paths in [`QueryMode::Pull`] when the path is CA.
+    pub ca: Option<String>,
 }
 
 /// A store path required by a job candidate, with optional cache metadata.

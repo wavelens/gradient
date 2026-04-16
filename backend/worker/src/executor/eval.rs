@@ -19,10 +19,19 @@ use std::time::Instant;
 
 use crate::worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
+use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_core::db::parse_drv;
 use gradient_core::nix::DerivationResolver;
 use proto::messages::{DerivationOutput, DiscoveredDerivation, FlakeJob};
 use tracing::{debug, info, warn};
+
+/// How many `.drv` files to read+parse concurrently inside a single BFS wave.
+/// Reading a `.drv` is async filesystem IO, so the sequential walk would only
+/// keep one in-flight read at a time and bottleneck on round-trip latency.
+/// Pulling a wave of paths and resolving them in parallel cuts wall-clock
+/// closure-walk time by roughly the concurrency factor for IO-bound stores
+/// (network FS, slow disks). Cap kept low to avoid open-fd / kernel pressure.
+const DRV_READ_CONCURRENCY: usize = 32;
 
 use proto::messages::QueryMode;
 
@@ -227,76 +236,110 @@ pub async fn evaluate_derivations_with(
     let walk_start = Instant::now();
     let mut walked: usize = 0;
 
-    while let Some((attr, drv_path)) = queue.pop_front() {
-        // CRITICAL: A silent `continue` here would drop the derivation **and its
-        // entire dependency subtree** from the closure walk. The server would
-        // then never learn about those missing dependencies, never insert
-        // `derivation_dependency` edges to them, and the dispatch SQL would
-        // happily release the parent build for execution — at which point the
-        // nix-daemon would fail with "1 dependency failed" because the dep was
-        // never built. Fail the evaluation loudly so the underlying problem is
-        // surfaced instead of silently producing a broken build graph.
-        let drv_bytes = drv_reader.read_drv(&drv_path).await.with_context(|| {
-            format!(
-                "cannot read .drv {drv_path} during closure walk; aborting eval to avoid \
-                 silently dropping dependencies"
-            )
-        })?;
+    // Drive the BFS in waves: drain up to DRV_READ_CONCURRENCY items from the
+    // queue, read+parse them concurrently, then fold the results back into
+    // `batch` / `visited` / `queue` sequentially (so those structures need no
+    // locking). Reading a single `.drv` is async filesystem IO and almost all
+    // of the per-derivation cost — running waves concurrently scales the walk
+    // from "one inflight read at a time" to many.
+    while !queue.is_empty() {
+        // Drain a wave from the queue, preserving BFS order within the wave.
+        let wave_size = queue.len().min(DRV_READ_CONCURRENCY);
+        let mut wave: Vec<(Option<String>, String)> = Vec::with_capacity(wave_size);
+        for _ in 0..wave_size {
+            wave.push(queue.pop_front().expect("wave_size <= queue.len()"));
+        }
 
-        let drv = parse_drv(&drv_bytes).with_context(|| {
-            format!(
-                "cannot parse .drv {drv_path} during closure walk; aborting eval to avoid \
-                 silently dropping dependencies"
-            )
-        })?;
+        // Read + parse every .drv in the wave concurrently. Indices keep the
+        // results aligned with `wave` so later sequential processing is
+        // deterministic and BFS order is preserved across waves.
+        // CRITICAL: A read or parse failure must abort the eval — silently
+        // dropping a derivation drops its entire dep subtree from the closure
+        // walk, so the server never sees those dependencies, the dispatch
+        // SQL releases the parent prematurely, and the nix-daemon then dies
+        // with "1 dependency failed".
+        let mut futs = wave
+            .iter()
+            .enumerate()
+            .map(|(i, (_, drv_path))| {
+                let drv_path = drv_path.clone();
+                async move {
+                    let bytes = drv_reader.read_drv(&drv_path).await.with_context(|| {
+                        format!(
+                            "cannot read .drv {drv_path} during closure walk; aborting eval \
+                             to avoid silently dropping dependencies"
+                        )
+                    })?;
+                    let parsed = parse_drv(&bytes).with_context(|| {
+                        format!(
+                            "cannot parse .drv {drv_path} during closure walk; aborting eval \
+                             to avoid silently dropping dependencies"
+                        )
+                    })?;
+                    Ok::<_, anyhow::Error>((i, parsed))
+                }
+            })
+            .collect::<FuturesUnordered<_>>();
 
-        // Enqueue input derivations (BFS).
-        for (input_drv, _outputs) in &drv.input_derivations {
-            if visited.insert(input_drv.clone()) {
-                queue.push_back((None, input_drv.clone()));
+        let mut parsed: Vec<Option<gradient_core::db::Derivation>> =
+            (0..wave.len()).map(|_| None).collect();
+        while let Some(result) = futs.next().await {
+            let (i, drv) = result?;
+            parsed[i] = Some(drv);
+        }
+        drop(futs); // release any borrows of drv_reader before re-using it
+
+        for ((attr, drv_path), drv_opt) in wave.into_iter().zip(parsed) {
+            let drv = drv_opt.expect("every wave slot was filled");
+
+            // Enqueue input derivations (BFS frontier expansion).
+            for (input_drv, _outputs) in &drv.input_derivations {
+                if visited.insert(input_drv.clone()) {
+                    queue.push_back((None, input_drv.clone()));
+                }
             }
-        }
 
-        let outputs: Vec<DerivationOutput> = drv
-            .outputs
-            .iter()
-            .filter(|o| !o.path.is_empty())
-            .map(|o| DerivationOutput { name: o.name.clone(), path: o.path.clone() })
-            .collect();
+            let outputs: Vec<DerivationOutput> = drv
+                .outputs
+                .iter()
+                .filter(|o| !o.path.is_empty())
+                .map(|o| DerivationOutput { name: o.name.clone(), path: o.path.clone() })
+                .collect();
 
-        let dependencies: Vec<String> = drv
-            .input_derivations
-            .iter()
-            .map(|(p, _)| p.clone())
-            .collect();
+            let dependencies: Vec<String> = drv
+                .input_derivations
+                .iter()
+                .map(|(p, _)| p.clone())
+                .collect();
 
-        batch.push(DiscoveredDerivation {
-            attr: attr.unwrap_or_default(),
-            drv_path: drv_path.clone(),
-            outputs,
-            dependencies,
-            architecture: drv.system.clone(),
-            required_features: drv.required_system_features(),
-            substituted: false,
-        });
+            batch.push(DiscoveredDerivation {
+                attr: attr.unwrap_or_default(),
+                drv_path: drv_path.clone(),
+                outputs,
+                dependencies,
+                architecture: drv.system.clone(),
+                required_features: drv.required_system_features(),
+                substituted: false,
+            });
 
-        walked += 1;
-        // Heartbeat log every 500 derivations so the operator can tell
-        // "slow eval" apart from "stuck eval".
-        if walked.is_multiple_of(500) {
-            info!(
-                walked,
-                queued = queue.len(),
-                elapsed_secs = walk_start.elapsed().as_secs(),
-                "closure walk progress"
-            );
-        }
+            walked += 1;
+            // Heartbeat log every 500 derivations so the operator can tell
+            // "slow eval" apart from "stuck eval".
+            if walked.is_multiple_of(500) {
+                info!(
+                    walked,
+                    queued = queue.len(),
+                    elapsed_secs = walk_start.elapsed().as_secs(),
+                    "closure walk progress"
+                );
+            }
 
-        // Flush a mid-walk batch once it reaches EVAL_BATCH_SIZE.
-        if batch.len() >= EVAL_BATCH_SIZE {
-            mark_substituted(&mut batch, updater).await;
-            debug!(count = batch.len(), remaining = queue.len(), "flushing eval batch");
-            updater.report_eval_result(std::mem::take(&mut batch), vec![], vec![]).await?;
+            // Flush a mid-walk batch once it reaches EVAL_BATCH_SIZE.
+            if batch.len() >= EVAL_BATCH_SIZE {
+                mark_substituted(&mut batch, updater).await;
+                debug!(count = batch.len(), remaining = queue.len(), "flushing eval batch");
+                updater.report_eval_result(std::mem::take(&mut batch), vec![], vec![]).await?;
+            }
         }
     }
 

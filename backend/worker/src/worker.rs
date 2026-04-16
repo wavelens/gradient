@@ -289,15 +289,26 @@ impl Worker {
                     if !self.draining {
                         let active_eval = job_kinds.values().filter(|k| **k == JobKind::Flake).count() as u32;
                         let active_build = job_kinds.values().filter(|k| **k == JobKind::Build).count() as u32;
-                        if active_eval < max_eval {
-                            if let Err(e) = writer.send(ClientMessage::RequestJob { kind: JobKind::Flake }) {
-                                warn!(error = %e, "heartbeat RequestJob Flake send failed");
-                            }
+                        let want_eval = active_eval < max_eval;
+                        let want_build = active_build < max_build;
+                        info!(
+                            active_eval,
+                            max_eval,
+                            active_build,
+                            max_build,
+                            request_eval = want_eval,
+                            request_build = want_build,
+                            "heartbeat tick"
+                        );
+                        if want_eval
+                            && let Err(e) = writer.send(ClientMessage::RequestJob { kind: JobKind::Flake })
+                        {
+                            warn!(error = %e, "heartbeat RequestJob Flake send failed");
                         }
-                        if active_build < max_build {
-                            if let Err(e) = writer.send(ClientMessage::RequestJob { kind: JobKind::Build }) {
-                                warn!(error = %e, "heartbeat RequestJob Build send failed");
-                            }
+                        if want_build
+                            && let Err(e) = writer.send(ClientMessage::RequestJob { kind: JobKind::Build })
+                        {
+                            warn!(error = %e, "heartbeat RequestJob Build send failed");
                         }
                     }
                 }

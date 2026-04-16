@@ -1400,12 +1400,25 @@ async fn handle_cache_query(
                 }
                 _ => None,
             };
+            // For Pull mode, look up the cached_path row to get the import
+            // metadata (nar_hash / references / ca) and any matching signatures
+            // so the worker can construct a `ValidPathInfo` and call
+            // `add_to_store_nar` on its local nix-daemon.
+            let (nar_hash, references, signatures, deriver, ca) = match mode {
+                QueryMode::Pull => fetch_pull_metadata(state, hash).await,
+                _ => (None, None, None, None, None),
+            };
             result.push(CachedPath {
                 path: path.to_string(),
                 cached: true,
                 file_size: file_size.map(|v| v as u64),
                 nar_size: nar_size.map(|v| v as u64),
                 url,
+                nar_hash,
+                references,
+                signatures,
+                deriver,
+                ca,
             });
         } else if matches!(mode, QueryMode::Push) {
             // Path is NOT locally cached — for Push mode return it so the
@@ -1423,6 +1436,11 @@ async fn handle_cache_query(
                 file_size: None,
                 nar_size: None,
                 url,
+                nar_hash: None,
+                references: None,
+                signatures: None,
+                deriver: None,
+                ca: None,
             });
         }
         // Normal/Pull + uncached: skip — handled by upstream lookup below.
@@ -1511,12 +1529,23 @@ async fn handle_cache_query(
                 .find_map(|l| l.strip_prefix("URL: ").map(str::trim))
             {
                 let url = format!("{}/{}", base_url.trim_end_matches('/'), nar_path);
+                // Upstream-served paths: we don't have the import metadata
+                // locally. For Pull-mode workers this means they can't import
+                // via add_to_store_nar without first parsing the upstream
+                // narinfo themselves; the URL points at the upstream NAR
+                // directly so they can fall back to `nix copy`/substituter
+                // semantics if needed.
                 result.push(CachedPath {
                     path: store_path.to_string(),
                     cached: true,
                     file_size: None,
                     nar_size: None,
                     url: Some(url),
+                    nar_hash: None,
+                    references: None,
+                    signatures: None,
+                    deriver: None,
+                    ca: None,
                 });
                 continue 'paths;
             }
@@ -1524,6 +1553,92 @@ async fn handle_cache_query(
     }
 
     result
+}
+
+/// Resolve the import metadata (`nar_hash`, `references`, `signatures`,
+/// `deriver`, `ca`) that a worker needs to construct a `ValidPathInfo` and
+/// call `add_to_store_nar` on its local nix-daemon.
+///
+/// Returns `(None, None, None, None, None)` if no `cached_path` row exists
+/// for `hash` (the path was cached but the metadata side-table is empty —
+/// rare; the worker will then fall back to whatever the URL serves).
+async fn fetch_pull_metadata(
+    state: &ServerState,
+    hash: &str,
+) -> (
+    Option<String>,        // nar_hash
+    Option<Vec<String>>,   // references (full /nix/store/... paths)
+    Option<Vec<String>>,   // signatures (narinfo wire format)
+    Option<String>,        // deriver
+    Option<String>,        // ca
+) {
+    let cached_row = match ECachedPath::find()
+        .filter(CCachedPath::Hash.eq(hash))
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return (None, None, None, None, None),
+        Err(e) => {
+            warn!(%hash, error = %e, "failed to load cached_path for Pull metadata");
+            return (None, None, None, None, None);
+        }
+    };
+
+    // `references` is stored space-separated in `hash-name` form; expand to
+    // full `/nix/store/...` paths so the worker doesn't have to.
+    let references = cached_row.references.as_ref().map(|s| {
+        s.split_whitespace()
+            .map(|r| {
+                if r.starts_with("/nix/store/") {
+                    r.to_owned()
+                } else {
+                    format!("/nix/store/{}", r)
+                }
+            })
+            .collect::<Vec<_>>()
+    });
+
+    // Collect every populated signature for this cached_path.
+    let signatures = match ECachedPathSignature::find()
+        .filter(CCachedPathSignature::CachedPath.eq(cached_row.id))
+        .all(&state.db)
+        .await
+    {
+        Ok(rows) => {
+            let sigs: Vec<String> = rows.into_iter().filter_map(|r| r.signature).collect();
+            if sigs.is_empty() { None } else { Some(sigs) }
+        }
+        Err(e) => {
+            warn!(%hash, error = %e, "failed to load cached_path signatures");
+            None
+        }
+    };
+
+    // `deriver` isn't stored on cached_path; resolve it via the
+    // derivation_output → derivation chain when this path is a build output.
+    let deriver = match EDerivationOutput::find()
+        .filter(CDerivationOutput::Hash.eq(hash))
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(out)) => match EDerivation::find_by_id(out.derivation)
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(d)) => Some(d.derivation_path),
+            _ => None,
+        },
+        _ => None,
+    };
+
+    (
+        cached_row.nar_hash,
+        references,
+        signatures,
+        deriver,
+        cached_row.ca,
+    )
 }
 
 #[cfg(test)]

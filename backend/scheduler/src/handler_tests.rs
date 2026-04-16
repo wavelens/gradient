@@ -1080,20 +1080,33 @@ async fn build_output_unknown_build_errors() {
 // ── Group E: handle_eval_job_completed / handle_eval_job_failed ──────────────
 
 /// When no active builds remain and the eval is still Building,
-/// `handle_eval_job_completed` transitions it to Completed via
-/// `check_evaluation_done` (which also checks for failed builds).
+/// `handle_eval_job_completed` (no active builds, no failures): promotes any
+/// Created → Queued (none here), flips eval EvaluatingDerivation → Building,
+/// then `check_evaluation_done` immediately closes it as Completed.
 #[tokio::test]
 async fn eval_job_completed_no_active_builds_completes_eval() {
     let eval_id = Uuid::new_v4();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. find active builds → empty
+        // 1. find Created builds → empty
         .append_query_results([Vec::<MBuild>::new()])
-        // 2. find_by_id(eval) → Building
+        // 2. find_by_id(eval) → EvaluatingDerivation
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::EvaluatingDerivation)]])
+        // 3. update_many eval → Building
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // 4. find_by_id(eval) → Building
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
-        // 3. find failed builds → empty
+        // ── check_evaluation_done ──
+        // 5. find active builds → empty
         .append_query_results([Vec::<MBuild>::new()])
-        // 4. update eval → Completed
+        // 6. find_by_id(eval) → Building
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        // 7. find failed builds → empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 8. update_many eval → Completed
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -1107,8 +1120,8 @@ async fn eval_job_completed_no_active_builds_completes_eval() {
 }
 
 /// When the eval job completes but a build has failed, the eval transitions
-/// to Failed (not Completed). This is the regression fix for the bug where a
-/// failed build was being silently masked into a Completed evaluation.
+/// to Failed (not Completed). Regression guard: a failed build must not be
+/// silently masked into a Completed evaluation.
 #[tokio::test]
 async fn eval_job_completed_with_failed_build_marks_eval_failed() {
     let eval_id = Uuid::new_v4();
@@ -1118,13 +1131,25 @@ async fn eval_job_completed_with_failed_build_marks_eval_failed() {
     let failed_build = make_build(build_id, eval_id, drv_id, BuildStatus::Failed);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. find active builds → empty (all builds are terminal)
+        // 1. find Created builds → empty
         .append_query_results([Vec::<MBuild>::new()])
-        // 2. find_by_id(eval) → Building
+        // 2. find_by_id(eval) → EvaluatingDerivation
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::EvaluatingDerivation)]])
+        // 3. update_many eval → Building
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // 4. find_by_id(eval) → Building
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
-        // 3. find failed builds → [failed_build]
+        // ── check_evaluation_done ──
+        // 5. find active builds → empty (all terminal)
+        .append_query_results([Vec::<MBuild>::new()])
+        // 6. find_by_id(eval) → Building
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        // 7. find failed builds → [failed_build]
         .append_query_results([vec![failed_build]])
-        // 4. update eval → Failed
+        // 8. update_many eval → Failed
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -1137,8 +1162,10 @@ async fn eval_job_completed_with_failed_build_marks_eval_failed() {
     assert!(result.is_ok());
 }
 
-/// When active builds still exist, `handle_eval_job_completed` is a no-op
-/// (the eval will complete once the last build finishes).
+/// When the eval job ends and builds are still pending,
+/// `handle_eval_job_completed` promotes any `Created` builds to `Queued`,
+/// flips the evaluation to `Building`, and then `check_evaluation_done`
+/// returns early because builds are still in flight.
 #[tokio::test]
 async fn eval_job_completed_active_builds_remain_noop() {
     let eval_id = Uuid::new_v4();
@@ -1148,9 +1175,20 @@ async fn eval_job_completed_active_builds_remain_noop() {
     let active_build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. find active builds → still has some
+        // 1. find Created builds (to promote to Queued) → none
+        .append_query_results([Vec::<MBuild>::new()])
+        // 2. find_by_id(eval) → still in EvaluatingDerivation
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::EvaluatingDerivation)]])
+        // 3. update_many eval → Building
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // 4. find_by_id(eval) → Building (after update)
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        // 5. check_evaluation_done: find active builds → has the still-Building one
         .append_query_results([vec![active_build]])
-        // no further queries
+        // (early return — no further queries)
         .into_connection();
 
     let state = make_state(db);

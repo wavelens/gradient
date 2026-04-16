@@ -20,7 +20,7 @@ use gradient_core::db::{
 use gradient_core::sources::get_hash_from_path;
 use gradient_core::types::*;
 use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use super::build::check_evaluation_done;
@@ -392,24 +392,20 @@ pub async fn handle_eval_result(
         }
     }
 
-    // Transition Created → Queued for any new builds in this batch.
-    let created = EBuild::find()
-        .filter(CBuild::Evaluation.eq(evaluation_id))
-        .filter(CBuild::Status.eq(BuildStatus::Created))
-        .all(&state.db)
-        .await
-        .unwrap_or_default();
-
-    for build in created {
-        update_build_status(Arc::clone(state), build, BuildStatus::Queued).await;
-    }
-
-    // Always move evaluation to Building once results are flowing in. The final
-    // Completed/Failed transition happens via `check_evaluation_done` once the
-    // eval job ends and every build has reached a terminal state — so a
-    // failing build never causes the evaluation to be marked Completed.
-    info!(%evaluation_id, "eval result processed; builds queued");
-    update_evaluation_status(Arc::clone(state), evaluation, EvaluationStatus::Building).await;
+    // No status transitions while batches are still streaming in: the
+    // evaluation stays in `EvaluatingDerivation` and builds stay in `Created`
+    // (or `Substituted`). Transitioning here would prematurely flip the
+    // evaluation to `Building` and mark builds `Queued` while the worker is
+    // still walking the closure — making the dispatcher race against
+    // half-discovered dependency edges. The Created → Queued and
+    // EvaluatingDerivation → Building transitions happen exactly once, in
+    // `handle_eval_job_completed`, after the worker has sent every batch.
+    debug!(
+        %evaluation_id,
+        new_derivations = derivations.len(),
+        "eval batch persisted; awaiting more batches"
+    );
+    let _ = evaluation; // keep `evaluation` available for the early-fail path above
     Ok(())
 }
 
@@ -417,9 +413,38 @@ pub async fn handle_eval_job_completed(
     state: &Arc<ServerState>,
     evaluation_id: Uuid,
 ) -> Result<()> {
-    // Defer the Completed/Failed decision to `check_evaluation_done` so failed
-    // builds are honoured. If builds are still pending it returns early; the
-    // final transition then happens from `handle_build_job_completed`/`failed`.
+    // The worker is done sending batches, so the evaluation's build set is
+    // now final. Promote every `Created` build to `Queued` so the dispatcher
+    // can pick them up, then move the evaluation into `Building`.
+    let created = EBuild::find()
+        .filter(CBuild::Evaluation.eq(evaluation_id))
+        .filter(CBuild::Status.eq(BuildStatus::Created))
+        .all(&state.db)
+        .await
+        .unwrap_or_default();
+    let queued_now = created.len();
+    for build in created {
+        update_build_status(Arc::clone(state), build, BuildStatus::Queued).await;
+    }
+
+    if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
+        .one(&state.db)
+        .await?
+        && matches!(
+            eval.status,
+            EvaluationStatus::EvaluatingFlake | EvaluationStatus::EvaluatingDerivation
+        )
+    {
+        info!(
+            %evaluation_id,
+            queued = queued_now,
+            "eval job complete; promoting evaluation to Building"
+        );
+        update_evaluation_status(Arc::clone(state), eval, EvaluationStatus::Building).await;
+    }
+
+    // If every build was already terminal (e.g. all Substituted), close the
+    // evaluation out via the shared decision function.
     check_evaluation_done(state, evaluation_id).await
 }
 
