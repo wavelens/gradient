@@ -10,7 +10,7 @@ use core::sources::{format_cache_key, get_hash_from_path, get_path_from_derivati
 use core::types::*;
 use harmonia_store_core::signature::{SecretKey, fingerprint_path};
 use harmonia_store_core::store_path::{StoreDir, StorePath};
-use sea_orm::ActiveModelTrait;
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use sea_orm::ActiveValue::Set;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -115,16 +115,59 @@ pub async fn sign_derivation_output(
         .map(|i| sig_str[i + 1..].to_string())
         .unwrap_or(sig_str);
 
-    let row = ADerivationOutputSignature {
+    // Find or create the cached_path row, then insert the signature.
+    let (hash, package) = match get_hash_from_path(path.clone()) {
+        Ok(v) => v,
+        Err(e) => {
+            error!(error = %e, "Failed to parse path for cached_path");
+            return;
+        }
+    };
+
+    let cached_path_row = match ECachedPath::find()
+        .filter(CCachedPath::Hash.eq(&hash))
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            let am = ACachedPath {
+                id: Set(Uuid::new_v4()),
+                store_path: Set(path.clone()),
+                hash: Set(hash),
+                package: Set(package),
+                file_hash: Set(output.file_hash.clone()),
+                file_size: Set(output.file_size),
+                nar_size: Set(Some(pathinfo.nar_size as i64)),
+                nar_hash: Set(Some(pathinfo.nar_hash.clone())),
+                references: Set(None),
+                ca: Set(None),
+                created_at: Set(Utc::now().naive_utc()),
+            };
+            match am.insert(&state.db).await {
+                Ok(row) => row,
+                Err(e) => {
+                    error!(error = %e, "Failed to insert cached_path");
+                    return;
+                }
+            }
+        }
+        Err(e) => {
+            error!(error = %e, "Failed to query cached_path");
+            return;
+        }
+    };
+
+    let sig_row = ACachedPathSignature {
         id: Set(Uuid::new_v4()),
-        derivation_output: Set(output.id),
+        cached_path: Set(cached_path_row.id),
         cache: Set(cache.id),
-        signature: Set(signature),
+        signature: Set(Some(signature)),
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    if let Err(e) = row.insert(&state.db).await {
-        error!(error = %e, "Failed to insert derivation output signature");
+    if let Err(e) = sig_row.insert(&state.db).await {
+        error!(error = %e, "Failed to insert cached_path_signature");
     }
 }
 

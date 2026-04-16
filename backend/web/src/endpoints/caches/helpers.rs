@@ -142,16 +142,28 @@ pub(super) async fn get_nar_by_hash(
         return Err(WebError::not_found("Path"));
     }
 
-    let build_output_signature = EDerivationOutputSignature::find()
+    // Look up signature via cached_path → cached_path_signature for this cache.
+    let cached_path_row = ECachedPath::find()
+        .filter(CCachedPath::Hash.eq(hash.clone()))
+        .one(&state.db)
+        .await
+        .map_err(WebError::from)?
+        .ok_or_else(|| WebError::not_found("CachedPath"))?;
+
+    let cached_path_sig = ECachedPathSignature::find()
         .filter(
             Condition::all()
-                .add(CDerivationOutputSignature::Cache.eq(cache.id))
-                .add(CDerivationOutputSignature::DerivationOutput.eq(build_output.clone().id)),
+                .add(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
+                .add(CCachedPathSignature::Cache.eq(cache.id)),
         )
         .one(&state.db)
         .await
         .map_err(WebError::from)?
         .ok_or_else(|| WebError::not_found("Signature"))?;
+
+    let signature = cached_path_sig
+        .signature
+        .ok_or_else(|| WebError::not_found("Signature not yet computed"))?;
 
     let path = get_path_from_derivation_output(build_output.clone());
 
@@ -182,7 +194,7 @@ pub(super) async fn get_nar_by_hash(
 
     let sig = format!(
         "{}-{}:{}",
-        sig_url, cache.name, build_output_signature.signature
+        sig_url, cache.name, signature
     );
 
     let file_hash = build_output

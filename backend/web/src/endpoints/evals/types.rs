@@ -26,6 +26,10 @@ pub struct BuildItem {
 pub struct PaginatedBuilds {
     pub builds: Vec<BuildItem>,
     pub total: usize,
+    /// Number of builds with status Building, Queued, Failed, Aborted, or DependencyFailed.
+    /// The frontend uses this to know how many pages to pre-fetch so all active builds are
+    /// in memory (required for correct log streaming and status-transition detection).
+    pub active_count: usize,
 }
 
 #[derive(Deserialize, Debug, Default)]

@@ -98,13 +98,25 @@ pub(super) async fn sign_missing_signatures(state: Arc<ServerState>) -> Result<(
         };
 
         for cache in active_caches {
-            let already_signed = EDerivationOutputSignature::find()
-                .filter(CDerivationOutputSignature::DerivationOutput.eq(output.id))
-                .filter(CDerivationOutputSignature::Cache.eq(cache.id))
+            let (hash, _) = match core::sources::get_hash_from_path(output.output.clone()) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let already_signed = match ECachedPath::find()
+                .filter(CCachedPath::Hash.eq(&hash))
                 .one(&state.db)
                 .await
-                .unwrap_or(None)
-                .is_some();
+            {
+                Ok(Some(cp)) => ECachedPathSignature::find()
+                    .filter(CCachedPathSignature::CachedPath.eq(cp.id))
+                    .filter(CCachedPathSignature::Cache.eq(cache.id))
+                    .one(&state.db)
+                    .await
+                    .unwrap_or(None)
+                    .and_then(|s| s.signature)
+                    .is_some(),
+                _ => false,
+            };
 
             if !already_signed {
                 sign_derivation_output(Arc::clone(&state), cache, output.clone()).await;

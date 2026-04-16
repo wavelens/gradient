@@ -116,6 +116,21 @@ pub enum ClientMessage {
         nar_hash: String,
     },
 
+    /// Worker has finished uploading a NAR (via NarPush or presigned S3) and
+    /// reports metadata so the server can update `cached_path` / `derivation_output`.
+    NarUploaded {
+        job_id: String,
+        store_path: String,
+        /// SHA-256 hash of the compressed NAR file (`sha256:<hex>`).
+        file_hash: String,
+        /// Size in bytes of the compressed NAR file.
+        file_size: u64,
+        /// Size in bytes of the uncompressed NAR.
+        nar_size: u64,
+        /// Hash of the uncompressed NAR (`sha256:<nix32>` or SRI format).
+        nar_hash: String,
+    },
+
     /// Bulk query against the server cache.
     ///
     /// Server responds with [`super::server::ServerMessage::CacheStatus`].

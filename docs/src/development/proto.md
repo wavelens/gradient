@@ -428,7 +428,7 @@ FetchedInput {
 }
 ```
 
-The server processes `FetchResult` by recording the fetched input paths for the evaluation. NARs were already pushed ahead of this message via `NarPush`. When `signature` is present, the server inserts the signature into `derivation_output_signature` so future workers can verify cache integrity without re-downloading the NAR.
+The server processes `FetchResult` by creating `cached_path` rows for each fetched input (one per cache the org subscribes to). NARs were already pushed ahead of this message via `NarPush`/presigned upload. When `signature` is present, it is stored directly on the `cached_path` row. The worker then sends `NarUploaded` with the compressed file's hash and size, which the server records on the `cached_path` row so narinfo can be served.
 
 When `FetchFlake` and `EvaluateDerivations` are in the **same job**, the evaluator uses the nix store source path directly as `path:/nix/store/xxx` — a pure, content-addressed reference that does not require a network fetch. On fallback (temp checkout), `git+file://...?rev=` is used instead to keep Nix in pure evaluation mode.
 
@@ -712,6 +712,7 @@ enum ClientMessage {
     NarRequest { job_id: Uuid, paths: Vec<String> },    // "send me these paths"
     NarPush { job_id: Uuid, store_path: String, data: Vec<u8>, offset: u64, is_final: bool },
     NarReady { job_id: Uuid, store_path: String, nar_size: u64, nar_hash: String },
+    NarUploaded { job_id: Uuid, store_path: String, file_hash: String, file_size: u64 },
 
     // Cache queries
     CacheQuery { job_id: String, paths: Vec<String>, mode: QueryMode },  // see QueryMode
@@ -771,7 +772,7 @@ struct BuildOutput {
 | `JobUpdateKind` | DB Entity | Status set |
 |-----------------|-----------|------------|
 | `Fetching` | `evaluation` | `Fetching` (8) |
-| `FetchResult` | `evaluation` | Stays `Fetching`; records fetched input paths and signatures (NARs already pushed ahead of this message via `NarPush`). When `FetchedInput.signature` is present, inserts signature into `derivation_output_signature`. |
+| `FetchResult` | `evaluation` + `cached_path` | Stays `Fetching`; creates `cached_path` rows for each fetched input (one per org cache) with `nar_hash`, `nar_size`, and `signature`. NARs already pushed ahead of this message. `NarUploaded` fills in `file_hash`/`file_size`. |
 | `EvaluatingFlake` | `evaluation` | `EvaluatingFlake` (1) |
 | `EvaluatingDerivations` | `evaluation` | `EvaluatingDerivation` (2) |
 | `EvalResult` | `evaluation` + `derivation` + `build` + `entry_point` + `evaluation_message` | Inserts rows per batch; substituted → `Substituted` (7), rest → `Created` (0) → `Queued` (1). Creates `entry_point` rows for root derivations (non-empty `attr`). Immediately dispatches ready builds to workers. First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. Errors stored as `evaluation_message` rows with level `Error`; if `derivations` is empty and `errors` is non-empty, evaluation is immediately marked `Failed`. |
@@ -809,9 +810,11 @@ sequenceDiagram
     S->>W: CacheStatus { cached: [{A,cached:false,url:None}, {B,cached:true}, {C,cached:false,url:None}] }
     W-->>S: NarPush {path:A, offset:0, data:...}
     W-->>S: NarPush {path:A, is_final}
+    W->>S: NarUploaded {path:A, file_hash, file_size}
     W-->>S: NarPush {path:C, offset:0, data:...}
     W-->>S: NarPush {path:C, is_final}
-    Note right of S: stores in local NarStore
+    W->>S: NarUploaded {path:C, file_hash, file_size}
+    Note right of S: stores in local NarStore,<br/>updates cached_path rows
 ```
 
 **S3 mode** — uncached paths have `url: Some(presigned_put)`; worker uploads directly to S3:
@@ -827,8 +830,10 @@ sequenceDiagram
     S->>W: CacheStatus [A: cached=false url=s3, B: cached=true, C: cached=false url=s3]
     W->>S3: PUT A (direct, no data through server)
     W->>S: NarReady path=A
+    W->>S: NarUploaded {path:A, file_hash, file_size}
     W->>S3: PUT C
     W->>S: NarReady path=C
+    W->>S: NarUploaded {path:C, file_hash, file_size}
 ```
 
 ### Server → Worker (download, BuildJob)
@@ -1002,7 +1007,7 @@ When a worker receives a `SignTask`, it performs pure-Rust Ed25519 signing local
 4. Sign fingerprint with the cache's Ed25519 secret key (received via `Credential::SigningKey`).
 5. Return signatures in `JobCompleted`.
 
-The server inserts signatures into `derivation_output_signature` and calls `add_signatures` on its local store.
+The server inserts signatures into `cached_path` rows and calls `add_signatures` on its local store.
 
 ---
 

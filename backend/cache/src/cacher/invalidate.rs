@@ -56,18 +56,30 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
             .await
             .with_context(|| format!("Failed to remove cached NAR for {}", hash))?;
 
-        let signatures = EDerivationOutputSignature::find()
-            .filter(CDerivationOutputSignature::DerivationOutput.eq(output.id))
+        // Delete cached_path + signatures for this output.
+        let cached_paths = ECachedPath::find()
+            .filter(CCachedPath::Hash.eq(&hash))
             .all(&state.db)
             .await
-            .context("Failed to find derivation output signatures")?;
+            .context("Failed to find cached_path rows")?;
 
-        for signature in signatures {
-            let asignature = signature.into_active_model();
-            asignature
+        for cp in &cached_paths {
+            let sigs = ECachedPathSignature::find()
+                .filter(CCachedPathSignature::CachedPath.eq(cp.id))
+                .all(&state.db)
+                .await
+                .unwrap_or_default();
+            for sig in sigs {
+                sig.into_active_model()
+                    .delete(&state.db)
+                    .await
+                    .context("Failed to delete signature")?;
+            }
+            cp.clone()
+                .into_active_model()
                 .delete(&state.db)
                 .await
-                .context("Failed to delete signature")?;
+                .context("Failed to delete cached_path")?;
         }
 
         // Drop cache_derivation rows for this derivation in every cache,

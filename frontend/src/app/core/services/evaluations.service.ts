@@ -41,6 +41,8 @@ export interface BuildItem {
 export interface PaginatedBuilds {
   builds: BuildItem[];
   total: number;
+  /** Builds in Building/Queued/Failed/Aborted/DependencyFailed state — all must be in memory for correct log streaming. */
+  active_count: number;
 }
 
 export interface BuildProduct {

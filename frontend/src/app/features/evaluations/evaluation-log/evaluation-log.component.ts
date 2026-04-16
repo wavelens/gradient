@@ -57,15 +57,15 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   showScrollBtn = signal(false);
   duration = signal('0:00');
   totalBuildsCount = signal(0);
+  activeBuildsCount = signal(0);
   private tick = signal(0);
 
   orgName = '';
   evaluationId = '';
   private initialBuildId: string | null = null;
 
-  completedBuilds = computed(() =>
-    this.builds().filter(b => b.status === 'Completed' || b.status === 'Substituted').length
-  );
+  // Derived from backend totals — accurate regardless of how many builds are loaded.
+  completedBuildsCount = computed(() => this.totalBuildsCount() - this.activeBuildsCount());
 
   queuedCount = computed(() =>
     this.builds().filter(b => b.status === 'Queued').length
@@ -96,9 +96,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private buildRevealTimer?: ReturnType<typeof setInterval>;
   private pendingLogLines: string[] = [];
   private logDrainTimer?: ReturnType<typeof setInterval>;
-  private readonly PAGE_SIZE = 200;
+  private readonly PAGE_SIZE = 1000;
   private totalBuilds = 0;
-  private loadedBuildsCount = 0;
   private loadingMore = false;
 
   ngOnInit(): void {
@@ -164,13 +163,14 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   loadBuilds(): void {
-    // On initial load or poll: always fetch the first page to get fresh
-    // statuses for active builds (which sort to the top). The total count
-    // tells us if more pages exist for infinite scroll.
-    this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, 0).subscribe({
+    // On initial load: use PAGE_SIZE. On polls: use max(PAGE_SIZE, activeBuildsCount)
+    // so that all active builds (which sort to the top) are always refreshed.
+    const limit = Math.max(this.PAGE_SIZE, this.activeBuildsCount());
+    this.evalService.getBuilds(this.evaluationId, limit, 0).subscribe({
       next: (result) => {
         this.totalBuilds = result.total;
         this.totalBuildsCount.set(result.total);
+        this.activeBuildsCount.set(result.active_count);
         const prevSelected = this.selectedBuild();
 
         // Merge: keep any already-loaded builds beyond the first page,
@@ -180,7 +180,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
         // Only keep beyond-page builds that aren't in the fresh result
         // (they may have changed status and moved into the first page)
         this.builds.set(this.sortBuilds([...result.builds, ...beyondFirstPage]));
-        this.loadedBuildsCount = Math.max(this.builds().length, result.builds.length);
 
         const newSelected = this.selectedBuild();
         const isEvaluating = this.evaluation()?.status === 'Fetching' || this.evaluation()?.status === 'EvaluatingFlake' || this.evaluation()?.status === 'EvaluatingDerivation';
@@ -262,17 +261,31 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
             this.selectBuild(target, true);
           }
         }
+
+        // Auto-fetch more pages until all active builds are in memory.
+        // This ensures status transitions and log streaming work for every build.
+        if (this.builds().length < result.active_count && !this.loadingMore) {
+          this.doLoadMore();
+        }
       },
     });
   }
 
+  /** Triggered by scroll proximity — pre-fetches next page before user hits bottom. */
   loadMoreBuilds(): void {
-    if (this.loadingMore || this.loadedBuildsCount >= this.totalBuilds) return;
-    this.loadingMore = true;
+    if (this.loadingMore || this.builds().length >= this.totalBuilds) return;
+    this.doLoadMore();
+  }
 
-    this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, this.loadedBuildsCount).subscribe({
+  private doLoadMore(): void {
+    if (this.loadingMore || this.builds().length >= this.totalBuilds) return;
+    this.loadingMore = true;
+    const offset = this.builds().length;
+
+    this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, offset).subscribe({
       next: (result) => {
         this.totalBuilds = result.total;
+        this.activeBuildsCount.set(result.active_count);
         if (result.builds.length > 0) {
           const existingIds = new Set(this.builds().map(b => b.id));
           const newBuilds = result.builds.filter(b => !existingIds.has(b.id));
@@ -280,9 +293,24 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
             this.builds.update(current => this.sortBuilds([...current, ...newBuilds]));
             this.visibleBuilds.update(current => this.sortBuilds([...current, ...newBuilds]));
           }
-          this.loadedBuildsCount += result.builds.length;
         }
         this.loadingMore = false;
+
+        // Resolve pending initialBuildId that may have been beyond the first page
+        if (this.initialBuildId) {
+          const target = this.builds().find(b => b.id === this.initialBuildId);
+          if (target) {
+            this.initialBuildId = null;
+            this.selectBuild(target, true);
+          }
+        }
+
+        // Continue fetching if there are still active builds not yet in memory
+        const stillNeedsMore = this.builds().length < result.active_count
+          || (this.initialBuildId !== null && this.builds().length < this.totalBuilds);
+        if (stillNeedsMore) {
+          this.doLoadMore();
+        }
       },
       error: () => {
         this.loadingMore = false;
@@ -589,8 +617,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   onBuildsScroll(event: Event): void {
     const el = event.target as HTMLElement;
-    // Trigger loading more when within 200px of the bottom
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
+    // Pre-fetch next page when within 500px of the bottom to avoid user waiting
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 500) {
       this.loadMoreBuilds();
     }
   }
@@ -735,7 +763,6 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.logHtml.set('');
     this.isInitialBuildsLoad = true;
     this.totalBuilds = 0;
-    this.loadedBuildsCount = 0;
     this.loadingMore = false;
     this.evaluationId = id;
     this.router.navigate(['/organization', this.orgName, 'log', id]);

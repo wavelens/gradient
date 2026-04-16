@@ -113,6 +113,7 @@ pub async fn handle_eval_result(
                 nar_size: Set(None),
                 is_cached: Set(false),
                 has_artefacts: Set(false),
+                cached_path: Set(None),
                 created_at: Set(now),
             });
         }

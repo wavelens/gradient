@@ -25,6 +25,10 @@ pub struct Model {
     pub nar_size: Option<i64>,
     pub is_cached: bool,
     pub has_artefacts: bool,
+    /// Link to the `cached_path` row when this output is cached.
+    /// Replaces the old `derivation_output_signature` join — the signature
+    /// lives on `cached_path` directly.
+    pub cached_path: Option<Uuid>,
     pub created_at: NaiveDateTime,
 }
 
@@ -36,6 +40,12 @@ pub enum Relation {
         to = "super::derivation::Column::Id"
     )]
     Derivation,
+    #[sea_orm(
+        belongs_to = "super::cached_path::Entity",
+        from = "Column::CachedPath",
+        to = "super::cached_path::Column::Id"
+    )]
+    CachedPath,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

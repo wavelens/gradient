@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
-import { SplitButtonModule } from 'primeng/splitbutton';
+import { MenuModule } from 'primeng/menu';
 import { MenuItem } from 'primeng/api';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -24,7 +24,7 @@ import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, 
     CommonModule,
     RouterModule,
     ButtonModule,
-    SplitButtonModule,
+    MenuModule,
     LoadingSpinnerComponent,
     EmptyStateComponent,
   ],

@@ -288,6 +288,7 @@ pub async fn get_evaluation_builds(
     });
 
     let total = builds.len();
+    let active_count = builds.iter().filter(|b| status_rank(&b.status) < 4).count();
     let offset = query.offset.unwrap_or(0).min(total);
     let limit = query.limit.unwrap_or(total);
     let page = builds.into_iter().skip(offset).take(limit).collect();
@@ -297,6 +298,7 @@ pub async fn get_evaluation_builds(
         message: PaginatedBuilds {
             builds: page,
             total,
+            active_count,
         },
     };
 

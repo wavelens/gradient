@@ -7,6 +7,9 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use chrono::Timelike;
+use sea_orm::ActiveModelTrait;
+
 use axum::Router;
 use axum::extract::ws::{Message as AxumMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::{Extension, State};
@@ -461,7 +464,16 @@ pub(crate) async fn handle_socket(
                     }
                     JobUpdateKind::FetchResult { fetched_paths } => {
                         debug!(%peer_id, %job_id, count = fetched_paths.len(), "FetchResult");
-                        // TODO: record fetched input paths and upload NARs to cache.
+                        if let Err(e) = record_fetched_paths(
+                            &state,
+                            &scheduler,
+                            &job_id,
+                            &fetched_paths,
+                        )
+                        .await
+                        {
+                            warn!(%job_id, error = %e, "failed to record fetched paths in cache");
+                        }
                     }
                     JobUpdateKind::EvaluatingFlake => {
                         scheduler
@@ -592,10 +604,8 @@ pub(crate) async fn handle_socket(
                             error!(%peer_id, %job_id, %store_path, error = %e, "NarPush write failed");
                         } else {
                             info!(%peer_id, %job_id, %store_path, compressed_size, "NarPush stored");
-                            // Update the derivation_output record if one exists for this path.
-                            if let Err(e) = mark_nar_stored(&state, &store_path, compressed_size).await {
-                                warn!(%store_path, error = %e, "failed to mark NAR as stored");
-                            }
+                            // NarUploaded (sent by worker after this) handles
+                            // mark_nar_stored and cache metrics.
                         }
                     } else {
                         warn!(%peer_id, %job_id, %store_path, "NarPush: could not parse store path hash");
@@ -615,6 +625,26 @@ pub(crate) async fn handle_socket(
                         .await
                 {
                     error!(%peer_id, %job_id, error = %e, "handle_nar_ready failed");
+                }
+                // NarUploaded (sent by worker after this) handles
+                // mark_nar_stored and cache metrics.
+            }
+
+            ClientMessage::NarUploaded {
+                job_id,
+                store_path,
+                file_hash,
+                file_size,
+                nar_size,
+                nar_hash,
+            } => {
+                debug!(%peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, "NarUploaded");
+                let file_size_i64 = file_size as i64;
+                if let Err(e) = mark_nar_stored(&state, &store_path, file_size_i64, Some(&file_hash), Some(nar_size as i64), Some(&nar_hash)).await {
+                    warn!(%store_path, error = %e, "failed to mark NAR as stored");
+                }
+                if let Err(e) = record_nar_push_metric(&state, &scheduler, &job_id, file_size_i64).await {
+                    debug!(error = %e, "failed to record cache metric for NarUploaded");
                 }
             }
 
@@ -892,15 +922,195 @@ fn negotiate_capabilities(
     }
 }
 
-/// Update the `derivation_output` record for `store_path` after a direct NAR push.
+/// Create `cached_path` rows for source paths pushed during evaluation.
 ///
-/// Sets `is_cached = true` and `file_size` to the compressed NAR size.  If no
-/// record exists for the path (common for flake fetch inputs that aren't build
-/// outputs), this is a no-op — the NAR is still stored in `NarStore`.
-async fn mark_nar_stored(state: &ServerState, store_path: &str, file_size: i64) -> anyhow::Result<()> {
+/// Resolves `job_id → org → caches` and creates one `cached_path` row per
+/// cache for each fetched input. The worker-provided signature (if any) is
+/// stored directly — it was produced with the cache's signing key that was
+/// sent to the worker during handshake.
+async fn record_fetched_paths(
+    state: &ServerState,
+    scheduler: &Scheduler,
+    job_id: &str,
+    fetched_paths: &[gradient_core::types::proto::FetchedInput],
+) -> anyhow::Result<()> {
+    use entity::cached_path::{ActiveModel as ACachedPath, Column as CCachedPath, Entity as ECachedPath};
+    use entity::organization_cache::{Column as COrgCache, Entity as EOrgCache};
+    use gradient_core::sources::get_hash_from_path;
+    use sea_orm::{ActiveModelTrait, Set};
+
+    if fetched_paths.is_empty() {
+        return Ok(());
+    }
+
+    let org_id = scheduler
+        .peer_id_for_job(job_id)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("no peer for job {}", job_id))?;
+
+    let org_caches = EOrgCache::find()
+        .filter(COrgCache::Organization.eq(org_id))
+        .all(&state.db)
+        .await?;
+
+    if org_caches.is_empty() {
+        return Ok(());
+    }
+
+    let now = chrono::Utc::now().naive_utc();
+
+    for fi in fetched_paths {
+        let (hash, package) = match get_hash_from_path(fi.store_path.clone()) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(store_path = %fi.store_path, error = %e, "cannot parse fetched path");
+                continue;
+            }
+        };
+
+        // Find or create the cached_path row (one per unique hash).
+        let cached_path_row = match ECachedPath::find()
+            .filter(CCachedPath::Hash.eq(&hash))
+            .one(&state.db)
+            .await?
+        {
+            Some(row) => row,
+            None => {
+                let am = ACachedPath {
+                    id: Set(uuid::Uuid::new_v4()),
+                    store_path: Set(fi.store_path.clone()),
+                    hash: Set(hash.clone()),
+                    package: Set(package.clone()),
+                    file_hash: Set(None),
+                    file_size: Set(None),
+                    nar_size: Set(Some(fi.nar_size as i64)),
+                    nar_hash: Set(Some(fi.nar_hash.clone())),
+                    references: Set(None),
+                    ca: Set(None),
+                    created_at: Set(now),
+                };
+                match am.insert(&state.db).await {
+                    Ok(row) => row,
+                    Err(e) => {
+                        warn!(store_path = %fi.store_path, error = %e, "failed to insert cached_path");
+                        continue;
+                    }
+                }
+            }
+        };
+
+        // Create a cached_path_signature row per cache (with optional signature).
+        for oc in &org_caches {
+            use entity::cached_path_signature::{
+                Column as CCachedPathSig, Entity as ECachedPathSig,
+            };
+
+            let existing = ECachedPathSig::find()
+                .filter(CCachedPathSig::CachedPath.eq(cached_path_row.id))
+                .filter(CCachedPathSig::Cache.eq(oc.cache))
+                .one(&state.db)
+                .await?;
+
+            if existing.is_some() {
+                continue;
+            }
+
+            let sig_row = ACachedPathSignature {
+                id: Set(uuid::Uuid::new_v4()),
+                cached_path: Set(cached_path_row.id),
+                cache: Set(oc.cache),
+                signature: Set(fi.signature.clone()),
+                created_at: Set(now),
+            };
+            if let Err(e) = sig_row.insert(&state.db).await {
+                warn!(store_path = %fi.store_path, cache = %oc.cache, error = %e, "failed to insert cached_path_signature");
+            }
+        }
+    }
+
+    info!(count = fetched_paths.len(), %org_id, "recorded fetched paths in cache");
+    Ok(())
+}
+
+/// Record a cache metric entry for a NAR push (direct or presigned).
+///
+/// Resolves `job_id → org → cache` and increments the traffic counter.
+async fn record_nar_push_metric(
+    state: &ServerState,
+    scheduler: &Scheduler,
+    job_id: &str,
+    bytes: i64,
+) -> anyhow::Result<()> {
+    use entity::cache_metric::{
+        ActiveModel as ACacheMetric, Column as CCacheMetric, Entity as ECacheMetric,
+    };
+    use entity::organization_cache::{Column as COrgCache, Entity as EOrgCache};
+    use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
+
+    let org_id = scheduler
+        .peer_id_for_job(job_id)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("no peer for job {}", job_id))?;
+
+    let org_cache = EOrgCache::find()
+        .filter(COrgCache::Organization.eq(org_id))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("no cache for org {}", org_id))?;
+
+    let cache_id = org_cache.cache;
+    let now = chrono::Utc::now().naive_utc();
+    let bucket = now
+        .with_second(0)
+        .and_then(|t: chrono::NaiveDateTime| t.with_nanosecond(0))
+        .unwrap_or(now);
+
+    match ECacheMetric::find()
+        .filter(CCacheMetric::Cache.eq(cache_id))
+        .filter(CCacheMetric::BucketTime.eq(bucket))
+        .one(&state.db)
+        .await?
+    {
+        Some(metric) => {
+            let mut am: ACacheMetric = metric.into_active_model();
+            am.bytes_sent = Set(am.bytes_sent.unwrap() + bytes);
+            am.nar_count = Set(am.nar_count.unwrap() + 1);
+            am.update(&state.db).await?;
+        }
+        None => {
+            let am = ACacheMetric {
+                id: Set(uuid::Uuid::new_v4()),
+                cache: Set(cache_id),
+                bucket_time: Set(bucket),
+                bytes_sent: Set(bytes),
+                nar_count: Set(1),
+            };
+            am.insert(&state.db).await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Update the `derivation_output` or `cached_path` record for `store_path`
+/// after a direct NAR push.
+///
+/// Sets `is_cached = true` and `file_size` on `derivation_output` if one
+/// exists. Also updates `file_size` and `file_hash` on any matching
+/// `cached_path` rows (used for source paths pushed during eval).
+async fn mark_nar_stored(
+    state: &ServerState,
+    store_path: &str,
+    file_size: i64,
+    file_hash: Option<&str>,
+    nar_size: Option<i64>,
+    nar_hash: Option<&str>,
+) -> anyhow::Result<()> {
+    use entity::cached_path::{Column as CCachedPath, Entity as ECachedPath};
     use entity::derivation_output::{Column as CDerivationOutput, Entity as EDerivationOutput};
     use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
 
+    // Update derivation_output if one exists.
     let existing = EDerivationOutput::find()
         .filter(CDerivationOutput::Output.eq(store_path))
         .one(&state.db)
@@ -912,6 +1122,36 @@ async fn mark_nar_stored(state: &ServerState, store_path: &str, file_size: i64) 
         active.file_size = Set(Some(file_size));
         active.update(&state.db).await?;
         info!(store_path, file_size, "derivation_output marked cached after NarPush");
+    }
+
+    // Update cached_path rows (source paths).
+    let hash = store_path
+        .strip_prefix("/nix/store/")
+        .unwrap_or(store_path)
+        .split('-')
+        .next()
+        .unwrap_or("");
+
+    if !hash.is_empty() {
+        let cached_rows = ECachedPath::find()
+            .filter(CCachedPath::Hash.eq(hash))
+            .all(&state.db)
+            .await?;
+
+        for row in cached_rows {
+            let mut active = row.into_active_model();
+            active.file_size = Set(Some(file_size));
+            if let Some(fh) = file_hash {
+                active.file_hash = Set(Some(fh.to_owned()));
+            }
+            if let Some(ns) = nar_size {
+                active.nar_size = Set(Some(ns));
+            }
+            if let Some(nh) = nar_hash {
+                active.nar_hash = Set(Some(nh.to_owned()));
+            }
+            active.update(&state.db).await?;
+        }
     }
 
     Ok(())
@@ -976,10 +1216,70 @@ async fn handle_cache_query(
         }
     };
 
-    let cached_map: std::collections::HashMap<&str, (Option<i64>, Option<i64>)> = cached_rows
+    let mut cached_map: std::collections::HashMap<&str, (Option<i64>, Option<i64>)> = cached_rows
         .iter()
         .map(|r| (r.hash.as_str(), (r.file_size, r.nar_size)))
         .collect();
+
+    // Also check cached_path table for source paths.
+    let cached_path_rows = match entity::cached_path::Entity::find()
+        .filter(entity::cached_path::Column::Hash.is_in(hashes.clone()))
+        .all(&state.db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, "CacheQuery cached_path lookup failed");
+            vec![]
+        }
+    };
+
+    for cp in &cached_path_rows {
+        // Only mark as cached if file_hash is set (NAR was actually uploaded).
+        if cp.file_hash.is_some() {
+            cached_map
+                .entry(cp.hash.as_str())
+                .or_insert((cp.file_size, cp.nar_size));
+        }
+    }
+
+    // For Push mode: ensure cached_path_signature rows exist for the org's caches
+    // so signing jobs get created for already-cached paths.
+    if matches!(mode, QueryMode::Push) {
+        if let Some(oid) = org_id {
+            let org_caches = EOrgCache::find()
+                .filter(COrgCache::Organization.eq(oid))
+                .all(&state.db)
+                .await
+                .unwrap_or_default();
+
+            for cp in &cached_path_rows {
+                for oc in &org_caches {
+                    use entity::cached_path_signature::{
+                        Column as CCachedPathSig, Entity as ECachedPathSig,
+                    };
+                    let exists = ECachedPathSig::find()
+                        .filter(CCachedPathSig::CachedPath.eq(cp.id))
+                        .filter(CCachedPathSig::Cache.eq(oc.cache))
+                        .one(&state.db)
+                        .await
+                        .unwrap_or(None)
+                        .is_some();
+
+                    if !exists {
+                        let sig_row = ACachedPathSignature {
+                            id: sea_orm::ActiveValue::Set(uuid::Uuid::new_v4()),
+                            cached_path: sea_orm::ActiveValue::Set(cp.id),
+                            cache: sea_orm::ActiveValue::Set(oc.cache),
+                            signature: sea_orm::ActiveValue::Set(None),
+                            created_at: sea_orm::ActiveValue::Set(chrono::Utc::now().naive_utc()),
+                        };
+                        let _ = sig_row.insert(&state.db).await;
+                    }
+                }
+            }
+        }
+    }
 
     let expire = std::time::Duration::from_secs(3600);
 

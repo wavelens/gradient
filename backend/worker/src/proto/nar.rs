@@ -38,10 +38,15 @@ pub async fn push_direct(job_id: &str, store_path: &str, writer: &ProtoWriter) -
     let mut nar_stream = harmonia_nar::NarByteStream::new(store_path.to_owned().into());
     let mut encoder = zstd::stream::Encoder::new(Vec::with_capacity(NAR_CHUNK_SIZE * 2), 6)
         .context("failed to create zstd encoder")?;
+    let mut file_hasher = Sha256::new();
+    let mut nar_hasher = Sha256::new();
     let mut offset: u64 = 0;
+    let mut nar_size: u64 = 0;
 
     while let Some(chunk_result) = nar_stream.next().await {
         let chunk = chunk_result.context("NAR stream error")?;
+        nar_hasher.update(&chunk);
+        nar_size += chunk.len() as u64;
         encoder
             .write_all(&chunk)
             .context("zstd compression failed")?;
@@ -50,6 +55,7 @@ pub async fn push_direct(job_id: &str, store_path: &str, writer: &ProtoWriter) -
         while buf.len() >= NAR_CHUNK_SIZE {
             let part: Vec<u8> = buf.drain(..NAR_CHUNK_SIZE).collect();
             let len = part.len() as u64;
+            file_hasher.update(&part);
             writer.send(ClientMessage::NarPush {
                 job_id: job_id.to_owned(),
                 store_path: store_path.to_owned(),
@@ -64,6 +70,7 @@ pub async fn push_direct(job_id: &str, store_path: &str, writer: &ProtoWriter) -
     let remaining = encoder.finish().context("failed to finish zstd encoder")?;
     if !remaining.is_empty() {
         let len = remaining.len() as u64;
+        file_hasher.update(&remaining);
         writer.send(ClientMessage::NarPush {
             job_id: job_id.to_owned(),
             store_path: store_path.to_owned(),
@@ -83,9 +90,23 @@ pub async fn push_direct(job_id: &str, store_path: &str, writer: &ProtoWriter) -
         is_final: true,
     })?;
 
+    let file_hash = format!("sha256:{}", hex::encode(file_hasher.finalize()));
+    let nar_hash = format!("sha256:{}", hex::encode(nar_hasher.finalize()));
+
+    // Report metadata so the server can update cache records.
+    writer.send(ClientMessage::NarUploaded {
+        job_id: job_id.to_owned(),
+        store_path: store_path.to_owned(),
+        file_hash: file_hash.clone(),
+        file_size: offset,
+        nar_size,
+        nar_hash,
+    })?;
+
     info!(
         store_path,
         compressed_bytes = offset,
+        %file_hash,
         "direct NAR push complete"
     );
     Ok(())
@@ -110,19 +131,24 @@ pub async fn upload_presigned(
     let mut nar_stream = harmonia_nar::NarByteStream::new(store_path.to_owned().into());
     let mut encoder =
         zstd::stream::Encoder::new(Vec::new(), 6).context("failed to create zstd encoder")?;
+    let mut nar_hasher = Sha256::new();
+    let mut nar_size: u64 = 0;
 
     while let Some(chunk_result) = nar_stream.next().await {
         let chunk = chunk_result.context("NAR stream error")?;
+        nar_hasher.update(&chunk);
+        nar_size += chunk.len() as u64;
         encoder
             .write_all(&chunk)
             .context("zstd compression failed")?;
     }
 
     let compressed = encoder.finish().context("failed to finish zstd encoder")?;
-    let nar_size = compressed.len() as u64;
-    let nar_hash = format!("sha256:{}", hex::encode(Sha256::digest(&compressed)));
+    let file_size = compressed.len() as u64;
+    let file_hash = format!("sha256:{}", hex::encode(Sha256::digest(&compressed)));
+    let nar_hash = format!("sha256:{}", hex::encode(nar_hasher.finalize()));
 
-    info!(store_path, nar_size, "uploading NAR to presigned URL");
+    info!(store_path, file_size, nar_size, "uploading NAR to presigned URL");
 
     // --- 2. HTTP request to the presigned URL ---
     let client = reqwest::Client::new();
@@ -153,11 +179,20 @@ pub async fn upload_presigned(
     writer.send(ClientMessage::NarReady {
         job_id: job_id.to_owned(),
         store_path: store_path.to_owned(),
+        nar_size: file_size,
+        nar_hash: file_hash.clone(),
+    })?;
+
+    writer.send(ClientMessage::NarUploaded {
+        job_id: job_id.to_owned(),
+        store_path: store_path.to_owned(),
+        file_hash,
+        file_size,
         nar_size,
         nar_hash,
     })?;
 
-    info!(store_path, nar_size, "presigned NAR upload complete");
+    info!(store_path, file_size, nar_size, "presigned NAR upload complete");
     Ok(())
 }
 
