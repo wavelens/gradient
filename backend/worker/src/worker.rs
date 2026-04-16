@@ -272,15 +272,19 @@ impl Worker {
                         }
                     }
 
-                    // A slot opened — immediately request a replacement job.
+                    // A slot opened — chain one more request.
                     if !self.draining {
                         let kind = completed_kind.unwrap_or(JobKind::Build);
-                        writer.send(ClientMessage::RequestJob { kind })?;
+                        let active = job_kinds.values().filter(|k| **k == kind).count() as u32;
+                        let max = match &kind { JobKind::Flake => max_eval, JobKind::Build => max_build };
+                        if active < max {
+                            writer.send(ClientMessage::RequestJob { kind })?;
+                        }
                     }
                 }
 
-                // Heartbeat: re-send one RequestJob per kind that still has a
-                // free slot, in case the server lost our previous requests.
+                // Heartbeat: re-signal capacity in case previous RequestJob
+                // messages were lost (e.g. server restart).
                 _ = heartbeat.tick() => {
                     if !self.draining {
                         let active_eval = job_kinds.values().filter(|k| **k == JobKind::Flake).count() as u32;
@@ -439,6 +443,22 @@ impl Worker {
                     Job::Build(_) => JobKind::Build,
                 };
 
+                // Enforce concurrency limits — reject if already at max.
+                let active_count = job_kinds.values().filter(|k| **k == kind).count() as u32;
+                let max = match &kind {
+                    JobKind::Flake => max_eval,
+                    JobKind::Build => max_build,
+                };
+                if active_count >= max {
+                    warn!(%job_id, ?kind, active = active_count, limit = max, "rejecting assigned job — at capacity");
+                    writer.send(ClientMessage::AssignJobResponse {
+                        job_id,
+                        accepted: false,
+                        reason: Some(format!("at capacity ({}/{})", active_count, max)),
+                    })?;
+                    return Ok(());
+                }
+
                 info!(%job_id, ?kind, "job assigned — accepting");
                 writer.send(ClientMessage::AssignJobResponse {
                     job_id: job_id.clone(),
@@ -470,13 +490,8 @@ impl Worker {
                     let _ = job_done_tx.send((jid, result));
                 });
 
-                // Immediately re-signal capacity if we still have free slots.
-                let active_count = job_kinds.values().filter(|k| **k == kind).count() as u32;
-                let max = match kind {
-                    JobKind::Flake => max_eval,
-                    JobKind::Build => max_build,
-                };
-                if active_count < max {
+                // Chain one more request if still under capacity.
+                if active_count + 1 < max {
                     writer.send(ClientMessage::RequestJob { kind })?;
                 }
             }

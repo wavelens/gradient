@@ -234,6 +234,28 @@ impl JobTracker {
         self.active.get(job_id).map(|(_, j)| j)
     }
 
+    /// Move all active jobs assigned to `worker_id` that belong to any of
+    /// `revoked_peers` back to the pending queue.  Returns the job IDs so the
+    /// caller can send `AbortJob` messages to the worker.
+    pub fn drain_peer_jobs_on_worker(
+        &mut self,
+        worker_id: &str,
+        revoked_peers: &HashSet<Uuid>,
+    ) -> Vec<String> {
+        let to_requeue: Vec<String> = self
+            .active
+            .iter()
+            .filter(|(_, (w, job))| w == worker_id && revoked_peers.contains(&job.peer_id()))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for job_id in &to_requeue {
+            if let Some((_, job)) = self.active.remove(job_id) {
+                self.pending.insert(job_id.clone(), job);
+            }
+        }
+        to_requeue
+    }
+
     pub fn worker_disconnected(&mut self, peer_id: &str) -> Vec<String> {
         self.scores.remove(peer_id);
         let orphaned: Vec<String> = self
@@ -468,6 +490,44 @@ mod tests {
         let assignment = tracker.take_empty_required("w1", None);
         assert!(assignment.is_some());
         assert_eq!(assignment.unwrap().job_id, "j2");
+    }
+
+    #[test]
+    fn test_drain_peer_jobs_on_worker_aborts_only_revoked_org() {
+        let mut tracker = JobTracker::new();
+        let org_a = Uuid::new_v4();
+        let org_b = Uuid::new_v4();
+        tracker.add_pending("ja1".into(), eval_job(org_a));
+        tracker.add_pending("ja2".into(), eval_job(org_a));
+        tracker.add_pending("jb1".into(), eval_job(org_b));
+
+        // Assign all three to worker w1.
+        tracker.take_empty_required("w1", None);
+        tracker.take_empty_required("w1", None);
+        tracker.take_empty_required("w1", None);
+        assert_eq!(tracker.active_jobs().count(), 3);
+
+        // Revoke only org_a.
+        let revoked = HashSet::from([org_a]);
+        let aborted = tracker.drain_peer_jobs_on_worker("w1", &revoked);
+        aborted.iter().for_each(|id| assert!(id.starts_with("ja")));
+        assert_eq!(aborted.len(), 2);
+
+        // org_b job is still active; org_a jobs are back in pending.
+        assert_eq!(tracker.active_jobs().count(), 1);
+        assert_eq!(tracker.pending_count(), 2);
+    }
+
+    #[test]
+    fn test_drain_peer_jobs_on_worker_empty_revoked() {
+        let mut tracker = JobTracker::new();
+        let org_a = Uuid::new_v4();
+        tracker.add_pending("j1".into(), eval_job(org_a));
+        tracker.take_empty_required("w1", None);
+
+        let aborted = tracker.drain_peer_jobs_on_worker("w1", &HashSet::new());
+        assert!(aborted.is_empty());
+        assert_eq!(tracker.active_jobs().count(), 1);
     }
 
     #[test]

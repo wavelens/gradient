@@ -170,8 +170,8 @@ impl JobExecutor {
         updater: &mut JobUpdater,
         credentials: &CredentialStore,
     ) -> Result<()> {
-        for build_task in &job.builds {
-            build::build_derivation(&self.store, build_task, updater).await?;
+        for (index, build_task) in job.builds.iter().enumerate() {
+            build::build_derivation(&self.store, build_task, index as u32, updater).await?;
         }
 
         if let Some(compress_task) = &job.compress {

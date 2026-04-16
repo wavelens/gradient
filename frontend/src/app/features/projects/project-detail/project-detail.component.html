@@ -39,23 +39,22 @@
       <div class="header-actions">
         @if (authService.isAuthenticated()) {
           @if (proj.can_edit) {
-            <div class="p-buttongroup">
-              <button
-                pButton
-                label="Start Evaluation"
-                icon="pi pi-play"
-                (click)="startEvaluation()"
-                [loading]="starting()"
-                [disabled]="starting()"
-              ></button>
-              <button
-                pButton
-                icon="pi pi-chevron-down"
-                (click)="evalMenu.toggle($event)"
-                [disabled]="starting()"
-              ></button>
-            </div>
-            <p-menu #evalMenu [model]="evalMenuItems" [popup]="true" />
+            <button
+              pButton
+              label="Start Evaluation"
+              icon="pi pi-play"
+              (click)="startEvaluation()"
+              [loading]="starting()"
+              [disabled]="starting()"
+            ></button>
+            <button
+              pButton
+              label="Restart Failed Builds"
+              icon="pi pi-refresh"
+              severity="secondary"
+              (click)="restartFailedBuilds()"
+              [disabled]="starting()"
+            ></button>
             <button
               pButton
               label="Settings"

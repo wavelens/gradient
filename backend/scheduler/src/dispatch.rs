@@ -260,12 +260,15 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
 pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Result<()> {
     let state = &scheduler.state;
 
-    // Ready builds: status = Queued AND no unsatisfied dependencies.
+    // Ready builds: status = Queued AND every dependency build is Completed (3) or Substituted (7).
+    // Ordered by dependency count desc (integration builds first), then by age.
     let builds_sql = sea_orm::Statement::from_string(
         sea_orm::DbBackend::Postgres,
         r#"
             SELECT b.*
             FROM public.build b
+            LEFT JOIN public.derivation_dependency dd
+                ON dd.derivation = b.derivation
             WHERE b.status = 1
             AND NOT EXISTS (
                 SELECT 1
@@ -277,7 +280,8 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
                     AND (dep_build.id IS NULL
                         OR (dep_build.status != 3 AND dep_build.status != 7))
             )
-            ORDER BY b.updated_at ASC
+            GROUP BY b.id
+            ORDER BY COUNT(dd.dependency) DESC, b.updated_at ASC
         "#,
     );
 

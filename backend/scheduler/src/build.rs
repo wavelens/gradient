@@ -164,7 +164,15 @@ async fn cascade_dependency_failed(
     Ok(())
 }
 
-async fn check_evaluation_done(state: &Arc<ServerState>, evaluation_id: Uuid) -> Result<()> {
+/// Transitions the evaluation to its final state if all builds are done.
+///
+/// Returns early if any build is still active (Created/Queued/Building) or if
+/// the evaluation is not in `Building` state. Otherwise sets `Failed` when at
+/// least one build failed (Failed or DependencyFailed), else `Completed`.
+pub(crate) async fn check_evaluation_done(
+    state: &Arc<ServerState>,
+    evaluation_id: Uuid,
+) -> Result<()> {
     let active = EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation_id))
         .filter(CBuild::Status.is_in(vec![

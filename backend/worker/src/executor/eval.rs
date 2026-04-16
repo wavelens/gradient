@@ -62,16 +62,21 @@ pub async fn evaluate_flake(_job: &FlakeJob, updater: &mut JobUpdater) -> Result
     updater.report_evaluating_flake()
 }
 
+/// Number of derivations to accumulate before flushing a mid-walk `EvalResult`.
+const EVAL_BATCH_SIZE: usize = 50;
+
 /// Walk the full derivation closure and report [`DiscoveredDerivation`]s to
-/// the server.
+/// the server incrementally.
 ///
 /// This is the main evaluation step:
 /// 1. Discover attr paths (via eval worker pool)
 /// 2. Resolve attrs to .drv paths (via eval worker pool)
 /// 3. BFS from root .drv paths through `inputDrvs` references
 /// 4. For each .drv: read file, extract outputs/arch/features
-/// 5. Query server cache, mark substituted derivations
-/// 6. Send `EvalResult` with the full derivation set
+/// 5. Every `EVAL_BATCH_SIZE` derivations: query server cache, mark
+///    substituted, send `EvalResult` so the server can start queuing builds
+///    while the walk continues
+/// 6. Final flush with any remainder + accumulated warnings/errors
 pub async fn evaluate_derivations(
     evaluator: &WorkerEvaluator,
     job: &FlakeJob,
@@ -86,6 +91,33 @@ pub async fn evaluate_derivations(
         updater,
     )
     .await
+}
+
+/// Query the server cache for `batch`'s output paths and set `substituted`
+/// on any derivation whose outputs are all present in the cache.
+async fn mark_substituted(batch: &mut Vec<DiscoveredDerivation>, updater: &mut dyn JobReporter) {
+    let output_paths: Vec<String> = batch
+        .iter()
+        .flat_map(|d| d.outputs.iter().map(|o| o.path.clone()))
+        .collect();
+    if output_paths.is_empty() {
+        return;
+    }
+    let cached = updater
+        .query_cache(output_paths, QueryMode::Normal)
+        .await
+        .unwrap_or_else(|e| {
+            warn!(error = %e, "cache query failed; treating all paths as uncached");
+            vec![]
+        });
+    let cached_set: HashSet<&str> = cached.iter().map(|c| c.path.as_str()).collect();
+    for drv in batch.iter_mut() {
+        if !drv.outputs.is_empty()
+            && drv.outputs.iter().all(|o| cached_set.contains(o.path.as_str()))
+        {
+            drv.substituted = true;
+        }
+    }
 }
 
 /// Testable version of [`evaluate_derivations`] that accepts trait objects.
@@ -173,10 +205,11 @@ pub async fn evaluate_derivations_with(
         return Ok(());
     }
 
-    // ── Step 3+4: BFS closure walk ────────────────────────────────────────────
-    // Start from all root drv paths. For each node: read the .drv file to get
-    // inputs, outputs, architecture, features; then enqueue inputs.
-    let mut discovered: Vec<DiscoveredDerivation> = Vec::new();
+    // ── Step 3+4+5: BFS closure walk with incremental EvalResult flushing ───────
+    // Start from all root drv paths.  Every EVAL_BATCH_SIZE derivations the
+    // worker queries the server cache and sends an EvalResult so the server can
+    // start queuing builds while the walk continues.
+    let mut batch: Vec<DiscoveredDerivation> = Vec::new();
     let mut visited: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<(Option<String>, String)> = VecDeque::new(); // (attr, drv_path)
 
@@ -212,92 +245,51 @@ pub async fn evaluate_derivations_with(
             }
         }
 
-        // Map outputs.
         let outputs: Vec<DerivationOutput> = drv
             .outputs
             .iter()
             .filter(|o| !o.path.is_empty())
-            .map(|o| DerivationOutput {
-                name: o.name.clone(),
-                path: o.path.clone(),
-            })
+            .map(|o| DerivationOutput { name: o.name.clone(), path: o.path.clone() })
             .collect();
 
-        let architecture = drv.system.clone();
-
-        // Collect dependencies (just the drv paths, no output info needed here).
         let dependencies: Vec<String> = drv
             .input_derivations
             .iter()
             .map(|(p, _)| p.clone())
             .collect();
 
-        let required_features = drv.required_system_features();
-
-        discovered.push(DiscoveredDerivation {
+        batch.push(DiscoveredDerivation {
             attr: attr.unwrap_or_default(),
             drv_path: drv_path.clone(),
             outputs,
             dependencies,
-            architecture,
-            required_features,
-            substituted: false, // set after cache query below
+            architecture: drv.system.clone(),
+            required_features: drv.required_system_features(),
+            substituted: false,
         });
-    }
 
-    // ── Step 5: query server cache ────────────────────────────────────────
-    // Collect all output paths and query the server's cache to determine
-    // which derivations are already available (substituted).
-    let all_output_paths: Vec<String> = discovered
-        .iter()
-        .flat_map(|d| d.outputs.iter().map(|o| o.path.clone()))
-        .collect();
-
-    if !all_output_paths.is_empty() {
-        // Ask the server which outputs are available — local cache (url: None)
-        // or upstream external caches (url: Some). Both are treated as substituted.
-        let cached_paths = updater
-            .query_cache(all_output_paths.clone(), QueryMode::Normal)
-            .await
-            .unwrap_or_else(|e| {
-                warn!(error = %e, "cache query failed; treating all paths as uncached");
-                vec![]
-            });
-
-        let cached_set: HashSet<&str> = cached_paths.iter().map(|c| c.path.as_str()).collect();
-
-        // Mark derivations whose outputs are all in the server's cache.
-        for drv in &mut discovered {
-            if !drv.outputs.is_empty()
-                && drv
-                    .outputs
-                    .iter()
-                    .all(|o| cached_set.contains(o.path.as_str()))
-            {
-                drv.substituted = true;
-            }
+        // Flush a mid-walk batch once it reaches EVAL_BATCH_SIZE.
+        if batch.len() >= EVAL_BATCH_SIZE {
+            mark_substituted(&mut batch, updater).await;
+            debug!(count = batch.len(), remaining = queue.len(), "flushing eval batch");
+            updater.report_eval_result(std::mem::take(&mut batch), vec![], vec![]).await?;
         }
-
-        debug!(
-            total = discovered.len(),
-            substituted = discovered.iter().filter(|d| d.substituted).count(),
-            "cache query complete"
-        );
     }
 
+    // ── Final flush: remaining derivations + accumulated warnings/errors ──────
     warnings.sort_unstable();
     warnings.dedup();
     errors.sort_unstable();
     errors.dedup();
 
+    mark_substituted(&mut batch, updater).await;
     debug!(
-        discovered = discovered.len(),
+        count = batch.len(),
         warnings = warnings.len(),
         errors = errors.len(),
-        "closure walk complete"
+        "closure walk complete — flushing final batch"
     );
-
-    updater.report_eval_result(discovered, warnings, errors).await
+    updater.report_eval_result(batch, warnings, errors).await
 }
 
 #[cfg(test)]
@@ -352,29 +344,20 @@ mod tests {
             .await
             .unwrap();
 
-        // Should have EvaluatingDerivations + EvalResult events.
-        assert_eq!(reporter.len(), 2);
+        // Should have at least EvaluatingDerivations + one EvalResult.
+        assert!(reporter.len() >= 2);
 
-        if let ReportedEvent::EvalResult {
-            derivations,
-            warnings,
-            ..
-        } = reporter.last_eval_result().unwrap()
-        {
-            // All derivations from the fixture should be discovered.
-            assert_eq!(derivations.len(), fixture.derivations.len());
-            // Nothing is built → nothing substituted.
-            assert!(derivations.iter().all(|d| !d.substituted));
-            // Entry point should have the attr set.
-            let entry = derivations
-                .iter()
-                .find(|d| d.drv_path == fixture.entry_point)
-                .unwrap();
-            assert_eq!(entry.attr, "hello");
-            // Warnings should be empty for a valid fixture.
+        let all = reporter.all_eval_derivations();
+        // All derivations from the fixture should be discovered across all batches.
+        assert_eq!(all.len(), fixture.derivations.len());
+        // Nothing is built → nothing substituted.
+        assert!(all.iter().all(|d| !d.substituted));
+        // Entry point should have the attr set.
+        let entry = all.iter().find(|d| d.drv_path == fixture.entry_point).unwrap();
+        assert_eq!(entry.attr, "hello");
+        // Warnings should be empty for a valid fixture (check final batch).
+        if let ReportedEvent::EvalResult { warnings, .. } = reporter.last_eval_result().unwrap() {
             assert!(warnings.is_empty(), "unexpected warnings: {:?}", warnings);
-        } else {
-            panic!("expected EvalResult");
         }
     }
 
@@ -396,24 +379,20 @@ mod tests {
             .await
             .unwrap();
 
-        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap()
-        {
-            let substituted_count = derivations.iter().filter(|d| d.substituted).count();
-            let not_substituted = derivations.iter().filter(|d| !d.substituted).count();
-            assert!(substituted_count > 0, "some should be substituted");
-            assert!(not_substituted > 0, "some should not be substituted");
+        let all = reporter.all_eval_derivations();
+        let substituted_count = all.iter().filter(|d| d.substituted).count();
+        let not_substituted = all.iter().filter(|d| !d.substituted).count();
+        assert!(substituted_count > 0, "some should be substituted");
+        assert!(not_substituted > 0, "some should not be substituted");
 
-            // Verify substituted flags match the fixture's built state.
-            for drv in derivations {
-                let is_built = fixture.built().iter().any(|b| b.drv_path == drv.drv_path);
-                assert_eq!(
-                    drv.substituted, is_built,
-                    "substituted mismatch for {}: got {} expected {}",
-                    drv.drv_path, drv.substituted, is_built
-                );
-            }
-        } else {
-            panic!("expected EvalResult");
+        // Verify substituted flags match the fixture's built state.
+        for drv in &all {
+            let is_built = fixture.built().iter().any(|b| b.drv_path == drv.drv_path);
+            assert_eq!(
+                drv.substituted, is_built,
+                "substituted mismatch for {}: got {} expected {}",
+                drv.drv_path, drv.substituted, is_built
+            );
         }
     }
 
@@ -433,15 +412,11 @@ mod tests {
             .await
             .unwrap();
 
-        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap()
-        {
-            assert!(
-                derivations.iter().all(|d| d.substituted),
-                "all should be substituted when everything is cached"
-            );
-        } else {
-            panic!("expected EvalResult");
-        }
+        let all = reporter.all_eval_derivations();
+        assert!(
+            all.iter().all(|d| d.substituted),
+            "all should be substituted when everything is cached"
+        );
     }
 
     #[tokio::test]
@@ -513,10 +488,10 @@ mod tests {
             .await
             .unwrap();
 
-        if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap()
+        let all = reporter.all_eval_derivations();
         {
-            // Build a dependency map from the eval result.
-            let eval_deps: std::collections::HashMap<&str, Vec<&str>> = derivations
+            // Build a dependency map from all eval result batches.
+            let eval_deps: std::collections::HashMap<&str, Vec<&str>> = all
                 .iter()
                 .map(|d| {
                     (
@@ -545,8 +520,6 @@ mod tests {
                     drv.drv_path
                 );
             }
-        } else {
-            panic!("expected EvalResult");
         }
     }
 }

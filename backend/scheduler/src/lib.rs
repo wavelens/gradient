@@ -109,6 +109,33 @@ impl Scheduler {
         debug!(%peer_id, "authorized peers updated");
     }
 
+    /// Abort all active jobs on `worker_id` that belong to any of `revoked_peers`.
+    /// Jobs are moved back to pending so they can be re-assigned to another worker.
+    pub async fn abort_org_jobs_on_worker(&self, worker_id: &str, revoked_peers: &HashSet<Uuid>) {
+        if revoked_peers.is_empty() {
+            return;
+        }
+        let job_ids = self
+            .job_tracker
+            .write()
+            .await
+            .drain_peer_jobs_on_worker(worker_id, revoked_peers);
+        if job_ids.is_empty() {
+            return;
+        }
+        let pool = self.worker_pool.read().await;
+        for job_id in &job_ids {
+            pool.send_abort(worker_id, job_id.clone(), "org deactivated worker".to_owned());
+        }
+        info!(
+            %worker_id,
+            aborted = job_ids.len(),
+            "aborted jobs for revoked org(s) on worker"
+        );
+        // Notify other workers that these jobs are available again.
+        self.job_notify.notify_waiters();
+    }
+
     /// Signal a connected worker that its registrations have changed,
     /// triggering a server-initiated re-authentication.
     pub async fn request_reauth(&self, worker_id: &str) {

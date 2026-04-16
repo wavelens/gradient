@@ -161,17 +161,17 @@ async fn aggregate_storage(
 ) -> Result<Vec<StorageMetricPoint>, WebError> {
     let sql = format!(
         r#"SELECT gs.period,
-                  COALESCE(COUNT(bos.id),      0)::bigint AS packages,
-                  COALESCE(SUM(bo.file_size),  0)::bigint AS bytes
+                  COALESCE(COUNT(cps.id),      0)::bigint AS packages,
+                  COALESCE(SUM(cp.file_size),  0)::bigint AS bytes
            FROM generate_series(
                date_trunc('{trunc_unit}', NOW() AT TIME ZONE 'UTC') - INTERVAL '{back_interval}',
                date_trunc('{trunc_unit}', NOW() AT TIME ZONE 'UTC'),
                INTERVAL '1 {trunc_unit}'
            ) AS gs(period)
-           LEFT JOIN derivation_output_signature bos
-               ON date_trunc('{trunc_unit}', bos.created_at) = gs.period
-              AND bos.cache = $1
-           LEFT JOIN derivation_output bo ON bo.id = bos.derivation_output
+           LEFT JOIN cached_path_signature cps
+               ON date_trunc('{trunc_unit}', cps.created_at) = gs.period
+              AND cps.cache = $1
+           LEFT JOIN cached_path cp ON cp.id = cps.cached_path
            GROUP BY gs.period
            ORDER BY gs.period"#,
         trunc_unit = trunc_unit,
@@ -225,12 +225,12 @@ pub async fn get_cache_stats(
         .db
         .query_one(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            r#"SELECT COALESCE(SUM(bo.file_size), 0)::bigint AS total_bytes,
-                      COALESCE(SUM(bo.nar_size),  0)::bigint AS total_nar_bytes,
-                      COUNT(bos.id)::bigint                   AS total_packages
-               FROM derivation_output_signature bos
-               JOIN derivation_output bo ON bo.id = bos.derivation_output
-               WHERE bos.cache = $1"#,
+            r#"SELECT COALESCE(SUM(cp.file_size), 0)::bigint AS total_bytes,
+                      COALESCE(SUM(cp.nar_size),  0)::bigint AS total_nar_bytes,
+                      COUNT(cps.id)::bigint                   AS total_packages
+               FROM cached_path_signature cps
+               JOIN cached_path cp ON cp.id = cps.cached_path
+               WHERE cps.cache = $1"#,
             [sea_orm::Value::Uuid(Some(Box::new(cache.id)))],
         ))
         .await

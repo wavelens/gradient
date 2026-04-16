@@ -12,16 +12,19 @@
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
+use futures::StreamExt as _;
 use gradient_core::db::parse_drv;
 use gradient_core::executer::path_utils::{nix_store_path, strip_nix_store_prefix};
 use gradient_core::sources::get_hash_from_path;
 use harmonia_protocol::build_result::BuildResultInner;
 use harmonia_protocol::daemon_wire::types2::BuildMode;
+use harmonia_protocol::log::{Field, LogMessage, ResultType};
 use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT};
 use harmonia_store_core::store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use proto::messages::{BuildOutput, BuildTask};
 use std::collections::BTreeMap;
+use std::pin::pin;
 use tracing::{debug, info, warn};
 
 use crate::nix::store::{LocalNixStore, strip_store_prefix};
@@ -31,9 +34,12 @@ use crate::proto::job::JobUpdater;
 ///
 /// Reports [`JobUpdateKind::Building`] at start and
 /// [`JobUpdateKind::BuildOutput`] with the realised outputs on success.
+/// Streams build log lines to the server via `LogChunk` messages while the
+/// daemon is running.
 pub async fn build_derivation(
     store: &LocalNixStore,
     task: &BuildTask,
+    task_index: u32,
     updater: &mut JobUpdater,
 ) -> Result<()> {
     updater.report_building(task.build_id.clone())?;
@@ -75,15 +81,27 @@ pub async fn build_derivation(
         "sending BasicDerivation to nix-daemon"
     );
 
-    let result = guard
+    // ── Drive the daemon and stream logs back to the server ──────────────────
+    // `build_derivation` returns `impl ResultLog = Stream<Item = LogMessage> + Future`.
+    // We must consume the stream first; only then is the future ready with the
+    // BuildResult. Forward stdout/stderr-bearing log messages to the server as
+    // `LogChunk` frames so they end up in the build's log_storage.
+    let logs = guard
         .client()
-        .build_derivation(&harmonia_path, &basic_drv, BuildMode::Normal)
-        .await
-        .map_err(|e| anyhow::anyhow!(
-            "build_derivation failed for {}: {}",
-            task.drv_path,
-            e,
-        ))?;
+        .build_derivation(&harmonia_path, &basic_drv, BuildMode::Normal);
+    let mut logs = pin!(logs);
+    while let Some(msg) = logs.next().await {
+        if let Some(line) = log_message_to_text(&msg)
+            && let Err(e) = updater.send_log_chunk(task_index, line.into_bytes())
+        {
+            // Log streaming is best-effort — never fail the build because the
+            // server connection hiccupped.
+            warn!(error = %e, "failed to forward build log chunk; continuing");
+        }
+    }
+    let result = logs.await.map_err(|e| {
+        anyhow::anyhow!("build_derivation failed for {}: {}", task.drv_path, e)
+    })?;
 
     // ── Process build result ──────────────────────────────────────────────────
     let outputs = match &result.inner {
@@ -120,6 +138,42 @@ pub async fn build_derivation(
     };
 
     updater.report_build_output(task.build_id.clone(), outputs)
+}
+
+/// Extract a forwardable log line from a harmonia daemon log message.
+///
+/// Returns:
+/// - `Message`: the high-level message text (errors, warnings, status notes).
+/// - `BuildLogLine`/`PostBuildLogLine` results: the raw stdout/stderr line
+///   from the build sandbox or post-build hook (the actual build log).
+///
+/// All other variants (StartActivity / StopActivity / progress results) are
+/// noisy structured events that don't belong in the user-facing build log.
+fn log_message_to_text(msg: &LogMessage) -> Option<String> {
+    match msg {
+        LogMessage::Message(m) => {
+            let mut s = String::from_utf8_lossy(&m.text).into_owned();
+            s.push('\n');
+            Some(s)
+        }
+        LogMessage::Result(r)
+            if matches!(
+                r.result_type,
+                ResultType::BuildLogLine | ResultType::PostBuildLogLine
+            ) =>
+        {
+            // BuildLogLine/PostBuildLogLine results carry the line as the first String field.
+            r.fields.iter().find_map(|f| match f {
+                Field::String(b) => {
+                    let mut s = String::from_utf8_lossy(b).into_owned();
+                    s.push('\n');
+                    Some(s)
+                }
+                _ => None,
+            })
+        }
+        _ => None,
+    }
 }
 
 /// Construct a harmonia [`BasicDerivation`] from a parsed drv file.

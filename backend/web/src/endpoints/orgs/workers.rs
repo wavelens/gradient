@@ -217,7 +217,15 @@ pub async fn patch_org_worker(
     active_model.active = Set(body.active);
     active_model.update(&state.db).await?;
 
-    // Trigger re-auth so the worker is accepted or kicked immediately.
+    // When deactivating: abort in-flight jobs from this org on the worker
+    // before triggering reauth, so the worker stops them immediately.
+    if !body.active {
+        let org_set = std::collections::HashSet::from([org.id]);
+        scheduler.abort_org_jobs_on_worker(&worker_id, &org_set).await;
+    }
+
+    // Trigger re-auth so the worker's authorized peer set is updated
+    // (or the worker is kicked if all registrations are now inactive).
     scheduler.request_reauth(&worker_id).await;
 
     let status = if body.active { "activated" } else { "deactivated" };
@@ -247,6 +255,10 @@ pub async fn delete_org_worker(
     if result.rows_affected == 0 {
         return Err(WebError::not_found("worker registration"));
     }
+
+    // Abort in-flight jobs from this org on the worker before triggering reauth.
+    let org_set = std::collections::HashSet::from([org.id]);
+    scheduler.abort_org_jobs_on_worker(&worker_id, &org_set).await;
 
     // Trigger re-auth so the worker loses authorization for the removed peer.
     scheduler.request_reauth(&worker_id).await;

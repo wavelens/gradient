@@ -76,7 +76,21 @@ The `id` enables:
  - **Admin visibility** — the server tracks connected peers by ID for the frontend UI (list workers, their capabilities, assigned jobs, status).
  - **Logging** — all log lines and job assignments reference the peer ID for debugging.
 
-On first connection with an unknown `id`, the server rejects — a worker must be registered by at least one peer before it can connect. On reconnect with a known ID, the server resumes the session.
+### Negotiation
+
+**Version:** the server accepts any `client_version <= PROTO_VERSION`. If the client sends a higher version, the server responds with `Reject { code: 400 }`.
+
+**Capabilities:** each `GradientCapabilities` field is AND-ed — a capability is active only if both sides support it. Two fields are server-authoritative:
+
+| Capability | Who controls | Description |
+|------------|--------------|-------------|
+| `core`     | Server only  | Always `true` on the server, always `false` on workers |
+| `federate` | AND          | Relay work and NAR traffic between peers |
+| `fetch`    | AND          | Prefetch flake inputs and clone repositories |
+| `eval`     | AND          | Run Nix flake evaluations |
+| `build`    | AND          | Execute Nix store builds |
+| `sign`     | AND          | Sign store paths and upload signatures |
+| `cache`    | Server only  | Server serves as a binary cache (`GRADIENT_SERVE_CACHE`) |
 
 ---
 
@@ -173,20 +187,6 @@ The `GET /api/v1/workers` endpoint shows all connected workers and their status.
 
  - **Superuser users** — users with the `superuser` flag set on their account can always access the endpoint
  - **`GRADIENT_GLOBAL_STATS_PUBLIC=true`** — when set, the workers/stats endpoints are publicly visible without authentication
-
-**Version negotiation:** the server accepts any `client_version <= PROTO_VERSION`. If the client sends a higher version, the server responds with `Reject { code: 400 }`.
-
-**Capability negotiation:** each `GradientCapabilities` field is AND-ed — a capability is active only if both sides support it. Two fields are server-authoritative:
-
-| Capability | Who controls | Description |
-|------------|--------------|-------------|
-| `core`     | Server only  | Always `true` on the server, always `false` on workers |
-| `federate` | AND          | Relay work and NAR traffic between peers |
-| `fetch`    | AND          | Prefetch flake inputs and clone repositories |
-| `eval`     | AND          | Run Nix flake evaluations |
-| `build`    | AND          | Execute Nix store builds |
-| `sign`     | AND          | Sign store paths and upload signatures |
-| `cache`    | Server only  | Server serves as a binary cache (`GRADIENT_SERVE_CACHE`) |
 
 ---
 
@@ -463,7 +463,7 @@ FlakeJob {
 }
 ```
 
-When `FetchFlake` and `EvaluateFlake`/`EvaluateDerivations` are in the **same `FlakeJob`**, the worker reuses the local clone from the fetch step for evaluation. The repository is cloned exactly once; subsequent eval tasks operate on the local checkout. This guarantees the eval runs against the same commit the server detected and avoids a second remote fetch (which would fail for protocols Nix doesn't natively support, e.g. `git://`).
+When `FetchFlake` and `EvaluateFlake`/`EvaluateDerivations` are in the **same `FlakeJob`**, the worker reuses the local clone from the fetch step for evaluation. The repository is cloned exactly once; subsequent eval tasks reference the source as `path:/nix/store/xxx` — a pure, content-addressed reference. On fallback (temp checkout), `git+file://...?rev=` is used to keep Nix in pure evaluation mode. This guarantees the eval runs against the same commit the server detected and avoids a second remote fetch (which would fail for protocols Nix doesn't natively support, e.g. `git://`).
 
 When the tasks are in **separate jobs** (e.g. a fetch-only worker and an eval-only worker), the eval worker receives the flake inputs as NARs from the server/cache before evaluation starts. The flake reference is then a Nix store path rather than a remote URL.
 
@@ -493,9 +493,6 @@ FetchedInput {
 }
 ```
 
-The server processes `FetchResult` by creating `cached_path` rows for each fetched input (one per cache the org subscribes to). NARs were already pushed ahead of this message via `NarPush`/presigned upload. When `signature` is present, it is stored directly on the `cached_path` row. The worker then sends `NarUploaded` with the compressed file's hash and size, which the server records on the `cached_path` row so narinfo can be served.
-
-When `FetchFlake` and `EvaluateDerivations` are in the **same job**, the evaluator uses the nix store source path directly as `path:/nix/store/xxx` — a pure, content-addressed reference that does not require a network fetch. On fallback (temp checkout), `git+file://...?rev=` is used instead to keep Nix in pure evaluation mode.
 
 ```rust
 DiscoveredDerivation {
@@ -655,8 +652,6 @@ BuildJob {
     builds: Vec<BuildTask>,
     compress: Option<CompressTask>,     // pack outputs into zstd NARs before signing
     sign: Option<SignTask>,
-    // required_paths is NOT here — it was already sent in JobCandidate during the offer phase.
-    // The worker cached the missing set while scoring.
 }
 
 BuildTask {
@@ -680,7 +675,7 @@ SignTask {
 | **Compress** | `build` | `store_paths` — outputs to pack | zstd-compressed NARs ready for upload |
 | **Sign** | `sign` | `store_paths`, signing key credential | `signatures: Vec<Signature>` — per-output Ed25519 signatures |
 
-**NAR transfer flow (zero extra round trips — worker already knows what's missing from scoring):**
+**NAR transfer flow:**
 
 ```mermaid
 sequenceDiagram
@@ -705,7 +700,7 @@ sequenceDiagram
 
 The `required_paths` were already sent in `JobCandidate` during the offer phase. The worker cached the missing set while scoring, so `NarRequest` is immediate after `AssignJob` — no second store query needed.
 
-The server pre-computes `required_paths` from the evaluation's `derivation_dependency` and `derivation_output` tables — no `.drv` parsing on either side for dependency resolution. The worker parses `.drv` files to get expected output paths; it invokes `nix-store --realise` as a subprocess to build each derivation (this avoids a protocol incompatibility in harmonia's `BuildDerivation` RPC with Nix ≥ 2.34).
+The server pre-computes `required_paths` from the evaluation's `derivation_dependency` and `derivation_output` tables — no `.drv` parsing on either side for dependency resolution. The worker parses each `.drv` file locally to construct a `BasicDerivation` and drives the build through harmonia's `BuildDerivation` RPC against the local nix-daemon. The daemon's log stream is consumed in parallel and forwarded to the server via `LogChunk` frames so the build log is captured live.
 
 If any derivation in the chain fails, the worker skips the rest and reports `JobFailed` — the server cascades `DependencyFailed` to downstream builds.
 
@@ -896,7 +891,7 @@ sequenceDiagram
     participant S3 as S3
 
     W->>S: CacheQuery mode=Push paths=[A, B, C]
-    Note right of S: B already cached; generates presigned PUT URLs for A, C
+    Note right of S: B already cached, generates presigned PUT URLs for A, C
     S->>W: CacheStatus [A: cached=false url=s3, B: cached=true, C: cached=false url=s3]
     W->>S3: PUT A (direct, no data through server)
     W->>S: NarReady path=A
@@ -1230,7 +1225,7 @@ sequenceDiagram
 
 On receiving `ServerMessage::Draining`, workers:
 
- 1. Stop sending `RequestJobChunk` — no new work.
+ 1. Stop sending `RequestJob` — no new work.
  2. Finish in-flight jobs and send results.
  3. After the connection closes, wait before reconnecting (e.g. 30s) to give the server time to restart.
 

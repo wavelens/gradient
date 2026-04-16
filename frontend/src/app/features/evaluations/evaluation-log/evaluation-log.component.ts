@@ -163,9 +163,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   }
 
   loadBuilds(): void {
-    // On initial load: use PAGE_SIZE. On polls: use max(PAGE_SIZE, activeBuildsCount)
-    // so that all active builds (which sort to the top) are always refreshed.
-    const limit = Math.max(this.PAGE_SIZE, this.activeBuildsCount());
+    // Initial load uses PAGE_SIZE for speed. Subsequent polls fetch ALL builds so that
+    // builds which changed sort rank (e.g. Building → Completed moves from rank 0 to rank 4)
+    // are never left in `beyondFirstPage` with a stale status.
+    const limit = this.isInitialBuildsLoad
+      ? this.PAGE_SIZE
+      : Math.max(this.PAGE_SIZE, this.totalBuilds, this.activeBuildsCount());
     this.evalService.getBuilds(this.evaluationId, limit, 0).subscribe({
       next: (result) => {
         this.totalBuilds = result.total;

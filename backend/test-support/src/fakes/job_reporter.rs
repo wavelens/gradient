@@ -76,6 +76,21 @@ impl RecordingJobReporter {
             .rev()
             .find(|e| matches!(e, ReportedEvent::EvalResult { .. }))
     }
+
+    /// Collect all derivations across every `EvalResult` event (incremental batches).
+    pub fn all_eval_derivations(&self) -> Vec<&DiscoveredDerivation> {
+        self.events
+            .iter()
+            .filter_map(|e| {
+                if let ReportedEvent::EvalResult { derivations, .. } = e {
+                    Some(derivations.iter())
+                } else {
+                    None
+                }
+            })
+            .flatten()
+            .collect()
+    }
 }
 
 #[async_trait]

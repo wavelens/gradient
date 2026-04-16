@@ -35,6 +35,7 @@
             <span class="dot"></span>
             {{ getStatusLabel(ev.status) }}
           </span>
+          <span class="builds-count">{{ completedBuildsCount() }}/{{ totalBuildsCount() }}</span>
         </div>
       </div>
 
@@ -125,10 +126,6 @@
           <div class="info-metric">
             <span class="metric-label">Duration</span>
             <span class="metric-value">{{ duration() }}</span>
-          </div>
-          <div class="info-metric">
-            <span class="metric-label">Builds</span>
-            <span class="metric-value">{{ completedBuildsCount() }}/{{ totalBuildsCount() }}</span>
           </div>
           @if (ev.status === 'Building' && (buildingCount() > 0 || queuedCount() > 0)) {
             <div class="info-metric">

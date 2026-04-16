@@ -1410,7 +1410,8 @@ with a valid `id: Uuid`.
 
 | Test | Scenario | What it checks |
 |------|----------|---------------|
-| `eval_job_completed_no_active_builds_completes_eval` | Eval job done, no active builds | Eval → Completed |
+| `eval_job_completed_no_active_builds_completes_eval` | Eval job done, no active builds, no failed builds | Eval → Completed via `check_evaluation_done` |
+| `eval_job_completed_with_failed_build_marks_eval_failed` | Eval job done, no active builds, but at least one Failed build | Eval → Failed (regression guard against the bug where a failed build was masked into Completed) |
 | `eval_job_completed_active_builds_remain_noop` | Active builds still running | No status change (eval will complete when last build finishes) |
 | `eval_job_failed_transitions_eval_to_failed` | Eval job crashed | `evaluation_message` error row inserted; eval → Failed |
 | `eval_job_failed_terminal_eval_noop` | Eval already Completed | Terminal guard prevents overwrite; no status change |

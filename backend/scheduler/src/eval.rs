@@ -23,6 +23,7 @@ use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{error, info};
 use uuid::Uuid;
 
+use super::build::check_evaluation_done;
 use super::ci::report_ci_for_entry_points;
 use super::jobs::PendingEvalJob;
 use gradient_core::ci::CiStatus;
@@ -150,6 +151,29 @@ pub async fn handle_eval_result(
     }
 
     // Dependency edges.
+    // Dependencies may reference derivations from previous EvalResult batches
+    // that are already in the DB but not in the current drv_path_to_id map.
+    // Look them up now so no edges are silently dropped.
+    let missing_dep_paths: Vec<String> = derivations
+        .iter()
+        .flat_map(|d| d.dependencies.iter())
+        .filter(|p| !drv_path_to_id.contains_key(*p))
+        .cloned()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    if !missing_dep_paths.is_empty() {
+        let extra: Vec<MDerivation> = EDerivation::find()
+            .filter(CDerivation::Organization.eq(organization_id))
+            .filter(CDerivation::DerivationPath.is_in(missing_dep_paths))
+            .all(&state.db)
+            .await
+            .context("query dependency derivations")?;
+        for d in extra {
+            drv_path_to_id.entry(d.derivation_path).or_insert(d.id);
+        }
+    }
+
     let mut dep_edges: Vec<ADerivationDependency> = Vec::new();
     for d in &derivations {
         let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
@@ -166,8 +190,21 @@ pub async fn handle_eval_result(
         }
     }
     if !dep_edges.is_empty() {
+        // Edges have a UNIQUE (derivation, dependency) index, so re-evaluating
+        // a derivation we've seen before would otherwise blow up the entire
+        // chunk and lose any genuinely new edges in it. ON CONFLICT DO NOTHING
+        // makes the insert idempotent.
         for chunk in dep_edges.chunks(BATCH_SIZE) {
             if let Err(e) = EDerivationDependency::insert_many(chunk.to_vec())
+                .on_conflict(
+                    sea_orm::sea_query::OnConflict::columns([
+                        CDerivationDependency::Derivation,
+                        CDerivationDependency::Dependency,
+                    ])
+                    .do_nothing()
+                    .to_owned(),
+                )
+                .do_nothing()
                 .exec(&state.db)
                 .await
             {
@@ -355,7 +392,7 @@ pub async fn handle_eval_result(
         }
     }
 
-    // Transition Created → Queued.
+    // Transition Created → Queued for any new builds in this batch.
     let created = EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation_id))
         .filter(CBuild::Status.eq(BuildStatus::Created))
@@ -363,15 +400,14 @@ pub async fn handle_eval_result(
         .await
         .unwrap_or_default();
 
-    if created.is_empty() {
-        update_evaluation_status(Arc::clone(state), evaluation, EvaluationStatus::Completed).await;
-        return Ok(());
-    }
-
     for build in created {
         update_build_status(Arc::clone(state), build, BuildStatus::Queued).await;
     }
 
+    // Always move evaluation to Building once results are flowing in. The final
+    // Completed/Failed transition happens via `check_evaluation_done` once the
+    // eval job ends and every build has reached a terminal state — so a
+    // failing build never causes the evaluation to be marked Completed.
     info!(%evaluation_id, "eval result processed; builds queued");
     update_evaluation_status(Arc::clone(state), evaluation, EvaluationStatus::Building).await;
     Ok(())
@@ -381,26 +417,10 @@ pub async fn handle_eval_job_completed(
     state: &Arc<ServerState>,
     evaluation_id: Uuid,
 ) -> Result<()> {
-    let active = EBuild::find()
-        .filter(CBuild::Evaluation.eq(evaluation_id))
-        .filter(CBuild::Status.is_in(vec![
-            BuildStatus::Created,
-            BuildStatus::Queued,
-            BuildStatus::Building,
-        ]))
-        .all(&state.db)
-        .await
-        .unwrap_or_default();
-
-    if active.is_empty()
-        && let Some(eval) = EEvaluation::find_by_id(evaluation_id)
-            .one(&state.db)
-            .await?
-        && eval.status == EvaluationStatus::Building
-    {
-        update_evaluation_status(Arc::clone(state), eval, EvaluationStatus::Completed).await;
-    }
-    Ok(())
+    // Defer the Completed/Failed decision to `check_evaluation_done` so failed
+    // builds are honoured. If builds are still pending it returns early; the
+    // final transition then happens from `handle_build_job_completed`/`failed`.
+    check_evaluation_done(state, evaluation_id).await
 }
 
 pub async fn handle_eval_job_failed(

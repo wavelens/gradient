@@ -79,6 +79,16 @@ impl JobUpdater {
         self.send_update(JobUpdateKind::Signing)
     }
 
+    /// Forward a chunk of build log output to the server. Sync — returns
+    /// immediately after the message is enqueued in the writer's mpsc channel.
+    pub fn send_log_chunk(&self, task_index: u32, data: Vec<u8>) -> Result<()> {
+        self.writer.send(ClientMessage::LogChunk {
+            job_id: self.job_id.clone(),
+            task_index,
+            data,
+        })
+    }
+
     fn send_update(&self, update: JobUpdateKind) -> Result<()> {
         debug!(job_id = %self.job_id, ?update, "sending job update");
         self.writer.send(ClientMessage::JobUpdate {

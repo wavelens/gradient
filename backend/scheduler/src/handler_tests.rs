@@ -1078,7 +1078,8 @@ async fn build_output_unknown_build_errors() {
 // ── Group E: handle_eval_job_completed / handle_eval_job_failed ──────────────
 
 /// When no active builds remain and the eval is still Building,
-/// `handle_eval_job_completed` transitions it to Completed.
+/// `handle_eval_job_completed` transitions it to Completed via
+/// `check_evaluation_done` (which also checks for failed builds).
 #[tokio::test]
 async fn eval_job_completed_no_active_builds_completes_eval() {
     let eval_id = Uuid::new_v4();
@@ -1088,12 +1089,45 @@ async fn eval_job_completed_no_active_builds_completes_eval() {
         .append_query_results([Vec::<MBuild>::new()])
         // 2. find_by_id(eval) → Building
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
-        // 3. update eval → Completed
+        // 3. find failed builds → empty
+        .append_query_results([Vec::<MBuild>::new()])
+        // 4. update eval → Completed
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
         }])
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Completed)]])
+        .into_connection();
+
+    let state = make_state(db);
+    let result = eval_handler::handle_eval_job_completed(&state, eval_id).await;
+    assert!(result.is_ok());
+}
+
+/// When the eval job completes but a build has failed, the eval transitions
+/// to Failed (not Completed). This is the regression fix for the bug where a
+/// failed build was being silently masked into a Completed evaluation.
+#[tokio::test]
+async fn eval_job_completed_with_failed_build_marks_eval_failed() {
+    let eval_id = Uuid::new_v4();
+    let drv_id = Uuid::new_v4();
+    let build_id = Uuid::new_v4();
+
+    let failed_build = make_build(build_id, eval_id, drv_id, BuildStatus::Failed);
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find active builds → empty (all builds are terminal)
+        .append_query_results([Vec::<MBuild>::new()])
+        // 2. find_by_id(eval) → Building
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        // 3. find failed builds → [failed_build]
+        .append_query_results([vec![failed_build]])
+        // 4. update eval → Failed
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
         .into_connection();
 
     let state = make_state(db);

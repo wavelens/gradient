@@ -9,8 +9,6 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
-import { MenuModule } from 'primeng/menu';
-import { MenuItem } from 'primeng/api';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
@@ -24,7 +22,6 @@ import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, 
     CommonModule,
     RouterModule,
     ButtonModule,
-    MenuModule,
     LoadingSpinnerComponent,
     EmptyStateComponent,
   ],
@@ -41,14 +38,6 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   entryPoints = signal<EntryPointSummary[]>([]);
   starting = signal(false);
   tick = signal(Date.now());
-
-  evalMenuItems: MenuItem[] = [
-    {
-      label: 'Restart Failed Builds',
-      icon: 'pi pi-refresh',
-      command: () => this.restartFailedBuilds(),
-    },
-  ];
 
   orgName = '';
   projectName = '';
