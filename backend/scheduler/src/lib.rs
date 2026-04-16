@@ -159,6 +159,13 @@ impl Scheduler {
             max_concurrent_builds,
         );
         debug!(%peer_id, "worker capabilities updated");
+        // Capabilities just changed — a build that was previously "no worker
+        // can do this" might now be servable, or vice-versa. Re-evaluate
+        // every in-flight evaluation's Waiting/Building gate immediately
+        // instead of waiting for the next dispatch tick.
+        if let Err(e) = self.reconcile_waiting_state().await {
+            warn!(error = %e, "reconcile_waiting_state after capability update failed");
+        }
     }
 
     pub async fn unregister_worker(&self, peer_id: &str) {
@@ -168,6 +175,26 @@ impl Scheduler {
         if total > 0 {
             info!(%peer_id, orphaned_jobs = total, "worker disconnected; jobs re-queued");
         }
+        // A worker leaving may strand evaluations whose remaining builds
+        // only it could service.
+        if let Err(e) = self.reconcile_waiting_state().await {
+            warn!(error = %e, "reconcile_waiting_state after worker unregister failed");
+        }
+    }
+
+    /// Snapshot every connected worker's `(architectures, system_features)`
+    /// and reconcile each in-flight evaluation's `Building`/`Waiting` status.
+    /// See [`build::reconcile_waiting_state`].
+    pub async fn reconcile_waiting_state(&self) -> Result<()> {
+        let caps: Vec<(Vec<String>, Vec<String>)> = self
+            .worker_pool
+            .read()
+            .await
+            .all_workers()
+            .into_iter()
+            .map(|w| (w.architectures, w.system_features))
+            .collect();
+        build::reconcile_waiting_state(&self.state, &caps).await
     }
 
     pub async fn mark_worker_draining(&self, peer_id: &str) {
@@ -521,6 +548,14 @@ impl Scheduler {
                 // don't have to wait for the next build_dispatch_loop tick.
                 if let Err(e) = dispatch::dispatch_ready_builds(self).await {
                     warn!(error = %e, "immediate build dispatch after eval completion failed");
+                }
+                // The new builds may target architectures / features that
+                // none of the currently-connected workers can satisfy; flag
+                // the eval as `Waiting` so the UI surfaces "no worker is
+                // configured for these builds" instead of a stalled
+                // `Building` spinner.
+                if let Err(e) = self.reconcile_waiting_state().await {
+                    warn!(error = %e, "reconcile_waiting_state after eval completion failed");
                 }
                 result
             }

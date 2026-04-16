@@ -254,6 +254,13 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
         if let Err(e) = dispatch_ready_builds(&scheduler).await {
             error!(error = %e, "build dispatch error");
         }
+        // After dispatching, reconcile each in-flight evaluation's
+        // Building/Waiting state so the UI reflects "no worker can pick this
+        // up" (or recovers when a worker comes back online). Cheap when
+        // there are no in-flight evals.
+        if let Err(e) = scheduler.reconcile_waiting_state().await {
+            error!(error = %e, "reconcile_waiting_state in dispatch loop failed");
+        }
     }
 }
 

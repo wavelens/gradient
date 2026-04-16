@@ -31,7 +31,7 @@ use tracing::{debug, info, warn};
 /// Pulling a wave of paths and resolving them in parallel cuts wall-clock
 /// closure-walk time by roughly the concurrency factor for IO-bound stores
 /// (network FS, slow disks). Cap kept low to avoid open-fd / kernel pressure.
-const DRV_READ_CONCURRENCY: usize = 32;
+const DRV_READ_CONCURRENCY: usize = 64;
 
 use proto::messages::QueryMode;
 

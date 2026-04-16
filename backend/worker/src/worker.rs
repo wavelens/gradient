@@ -317,7 +317,7 @@ impl Worker {
                         let active_build = job_kinds.values().filter(|k| **k == JobKind::Build).count() as u32;
                         let want_eval = active_eval < max_eval;
                         let want_build = active_build < max_build;
-                        info!(
+                        debug!(
                             active_eval,
                             max_eval,
                             active_build,

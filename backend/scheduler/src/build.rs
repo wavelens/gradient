@@ -215,3 +215,138 @@ pub(crate) async fn check_evaluation_done(
     update_evaluation_status(Arc::clone(state), eval, target).await;
     Ok(())
 }
+
+/// Sweep every in-flight evaluation (`Building` or `Waiting`) and reconcile
+/// its status against the current set of connected workers' capabilities.
+///
+/// - `Building` → `Waiting` when **none** of the eval's still-pending builds
+///   has a connected worker whose `architectures` + `system_features` can
+///   satisfy it. Surfaces "no worker configured for these builds" in the UI
+///   instead of leaving the eval stuck silently.
+/// - `Waiting` → `Building` when **any** pending build now has a matching
+///   worker (e.g. an aarch64 worker just connected, or an existing worker
+///   added a new system feature via re-advertised capabilities).
+///
+/// Cheap: one query for the small set of in-flight evals, one query for
+/// their non-terminal builds + derivations, one query for required features.
+/// Worker caps are taken as a snapshot from the in-memory pool. Safe to call
+/// from the dispatch loop and from worker-capability change hooks.
+pub async fn reconcile_waiting_state(
+    state: &Arc<ServerState>,
+    worker_caps: &[(Vec<String>, Vec<String>)],
+) -> Result<()> {
+    use std::collections::HashMap;
+
+    let evals = EEvaluation::find()
+        .filter(
+            CEvaluation::Status
+                .is_in(vec![EvaluationStatus::Building, EvaluationStatus::Waiting]),
+        )
+        .all(&state.db)
+        .await
+        .context("fetch in-flight evaluations")?;
+    if evals.is_empty() {
+        return Ok(());
+    }
+
+    for eval in evals {
+        let pending_builds = EBuild::find()
+            .filter(CBuild::Evaluation.eq(eval.id))
+            .filter(CBuild::Status.is_in(vec![
+                BuildStatus::Created,
+                BuildStatus::Queued,
+                BuildStatus::Building,
+            ]))
+            .all(&state.db)
+            .await
+            .context("fetch pending builds")?;
+
+        if pending_builds.is_empty() {
+            // Nothing left to gate — terminal-status decision happens in
+            // `check_evaluation_done`, not here.
+            continue;
+        }
+
+        // Load the derivations these builds reference so we know each one's
+        // target architecture, then look up their required features.
+        let drv_ids: Vec<Uuid> = pending_builds.iter().map(|b| b.derivation).collect();
+        let drvs = EDerivation::find()
+            .filter(CDerivation::Id.is_in(drv_ids.clone()))
+            .all(&state.db)
+            .await
+            .context("fetch derivations for pending builds")?;
+        let drv_by_id: HashMap<Uuid, MDerivation> =
+            drvs.into_iter().map(|d| (d.id, d)).collect();
+
+        // Required features: derivation_feature → feature.name.
+        let edges = EDerivationFeature::find()
+            .filter(CDerivationFeature::Derivation.is_in(drv_ids.clone()))
+            .all(&state.db)
+            .await
+            .context("fetch derivation_feature edges")?;
+        let mut features_by_drv: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+        for e in &edges {
+            features_by_drv
+                .entry(e.derivation)
+                .or_default()
+                .push(e.feature);
+        }
+        let feature_ids: Vec<Uuid> = edges.iter().map(|e| e.feature).collect();
+        let feature_rows = if feature_ids.is_empty() {
+            vec![]
+        } else {
+            EFeature::find()
+                .filter(CFeature::Id.is_in(feature_ids))
+                .all(&state.db)
+                .await
+                .context("fetch feature names")?
+        };
+        let feature_name: HashMap<Uuid, String> =
+            feature_rows.into_iter().map(|f| (f.id, f.name)).collect();
+
+        // For each pending build, ask: does any connected worker satisfy
+        // (build's arch ∈ worker.architectures) ∧ (every required feature ∈
+        // worker.system_features)?
+        let any_buildable = pending_builds.iter().any(|b| {
+            let drv = match drv_by_id.get(&b.derivation) {
+                Some(d) => d,
+                None => return false,
+            };
+            let required: Vec<&str> = features_by_drv
+                .get(&b.derivation)
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(|i| feature_name.get(i).map(String::as_str))
+                        .collect()
+                })
+                .unwrap_or_default();
+            worker_caps.iter().any(|(arch, feats)| {
+                let arch_ok = drv.architecture == "builtin"
+                    || arch.iter().any(|a| a == &drv.architecture);
+                let feats_ok = required
+                    .iter()
+                    .all(|f| feats.iter().any(|sf| sf == f));
+                arch_ok && feats_ok
+            })
+        });
+
+        let target = if any_buildable {
+            EvaluationStatus::Building
+        } else {
+            EvaluationStatus::Waiting
+        };
+        if eval.status != target {
+            info!(
+                evaluation_id = %eval.id,
+                from = ?eval.status,
+                to = ?target,
+                pending = pending_builds.len(),
+                workers = worker_caps.len(),
+                "reconciling evaluation waiting state"
+            );
+            update_evaluation_status(Arc::clone(state), eval, target).await;
+        }
+    }
+
+    Ok(())
+}
