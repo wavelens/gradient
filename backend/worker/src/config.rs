@@ -69,10 +69,19 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_MAX_EVALUATIONS_PER_WORKER", default_value_t = 1)]
     pub max_evals_per_worker: usize,
 
+    /// Maximum number of simultaneous evaluations.
+    /// Defaults to `eval_workers` (one eval job per evaluator subprocess).
+    #[arg(
+        long,
+        env = "GRADIENT_MAX_CONCURRENT_EVALUATIONS",
+        default_value_t = 1
+    )]
+    pub max_concurrent_evaluations: u32,
+
     /// Maximum number of simultaneous builds.
     #[arg(
         long,
-        env = "GRADIENT_WORKER_MAX_CONCURRENT_BUILDS",
+        env = "GRADIENT_MAX_CONCURRENT_BUILDS",
         default_value_t = 1
     )]
     pub max_concurrent_builds: u32,
@@ -254,6 +263,7 @@ mod tests {
             eval_worker: false,
             eval_workers: 1,
             max_evals_per_worker: 1,
+            max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
             log_level: "info".to_owned(),
             eval_log_level: None,
@@ -328,6 +338,7 @@ mod tests {
             eval_worker: false,
             eval_workers: 1,
             max_evals_per_worker: 1,
+            max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
             log_level: "info".to_owned(),
             eval_log_level: None,
@@ -386,6 +397,7 @@ mod tests {
             eval_worker: false,
             eval_workers: 1,
             max_evals_per_worker: 1,
+            max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
             log_level: "info".to_owned(),
             eval_log_level: None,

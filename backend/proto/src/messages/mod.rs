@@ -13,7 +13,8 @@ pub use client::ClientMessage;
 pub use gradient_core::types::proto::{
     BuildJob, BuildOutput, BuildTask, CacheInfo, CachedPath, CandidateScore, CompressTask,
     CredentialKind, DerivationOutput, DiscoveredDerivation, FetchedInput, FlakeJob, FlakeTask,
-    GradientCapabilities, Job, JobCandidate, JobUpdateKind, QueryMode, RequiredPath, SignTask,
+    GradientCapabilities, Job, JobCandidate, JobKind, JobUpdateKind, QueryMode, RequiredPath,
+    SignTask,
 };
 pub use server::{FailedPeer, ServerMessage};
 

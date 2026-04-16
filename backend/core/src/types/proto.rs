@@ -280,3 +280,15 @@ pub enum CredentialKind {
     SshKey,
     SigningKey,
 }
+
+/// Discriminates between the two schedulable job kinds.
+///
+/// Used in [`RequestJob`] to let the worker signal capacity per job type.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum JobKind {
+    /// Flake evaluation job (fetch / eval).
+    Flake,
+    /// Nix build job.
+    Build,
+}

@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use proto::messages::{CachedPath, ClientMessage, Job, ServerMessage};
+use proto::messages::{CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage};
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, error, info, warn};
 
@@ -41,6 +41,13 @@ pub struct Worker {
     credentials: CredentialStore,
     /// Set to `true` after the server sends `Draining`.
     draining: bool,
+    /// Local cache of job candidates received from the server.
+    /// Updated on `JobListChunk` and `JobOffer`; entries removed on `RevokeJob`.
+    /// Used to re-score and respond to `RequestAllScores` after a server restart.
+    candidates: HashMap<String, proto::messages::JobCandidate>,
+    /// Last known score per candidate (keyed by job_id).
+    /// Used to filter `RequestJobChunk` to only changed scores.
+    last_scores: HashMap<String, proto::messages::CandidateScore>,
 }
 
 impl Worker {
@@ -73,6 +80,9 @@ impl Worker {
         }
 
         conn.send(ClientMessage::RequestJobList).await?;
+        // Signal initial capacity — one per kind; re-sends after each AssignJob fill remaining slots.
+        conn.send(ClientMessage::RequestJob { kind: JobKind::Flake }).await?;
+        conn.send(ClientMessage::RequestJob { kind: JobKind::Build }).await?;
 
         let store = LocalNixStore::connect().await?;
         let evaluator = WorkerEvaluator::new(config.eval_workers, config.max_evals_per_worker);
@@ -90,6 +100,8 @@ impl Worker {
             scorer: JobScorer::new(),
             credentials: CredentialStore::new(),
             draining: false,
+            candidates: HashMap::new(),
+            last_scores: HashMap::new(),
         })
     }
 
@@ -123,6 +135,9 @@ impl Worker {
         }
 
         conn.send(ClientMessage::RequestJobList).await?;
+        // Signal initial capacity — one per kind; re-sends after each AssignJob fill remaining slots.
+        conn.send(ClientMessage::RequestJob { kind: JobKind::Flake }).await?;
+        conn.send(ClientMessage::RequestJob { kind: JobKind::Build }).await?;
 
         let store = LocalNixStore::connect().await?;
         let evaluator = WorkerEvaluator::new(config.eval_workers, config.max_evals_per_worker);
@@ -140,6 +155,8 @@ impl Worker {
             scorer: JobScorer::new(),
             credentials: CredentialStore::new(),
             draining: false,
+            candidates: HashMap::new(),
+            last_scores: HashMap::new(),
         })
     }
 
@@ -179,6 +196,10 @@ impl Worker {
         }
 
         conn.send(ClientMessage::RequestJobList).await?;
+        // Signal initial capacity — one per kind; re-sends after each AssignJob fill remaining slots.
+        conn.send(ClientMessage::RequestJob { kind: JobKind::Flake }).await?;
+        conn.send(ClientMessage::RequestJob { kind: JobKind::Build }).await?;
+
         self.conn = Some(conn);
         Ok(())
     }
@@ -206,9 +227,22 @@ impl Worker {
         // Abort senders: keyed by job_id; job tasks hold the receiver.
         let mut abort_senders: HashMap<String, watch::Sender<bool>> = HashMap::new();
 
+        // Job kind tracking — needed to know which capacity counter to update
+        // when a job completes and to re-send the right RequestJob kind.
+        let mut job_kinds: HashMap<String, JobKind> = HashMap::new();
+
         // Channel used by job tasks to report completion back to the dispatch loop.
         let (done_tx, mut done_rx) =
             mpsc::unbounded_channel::<(String, Result<()>)>();
+
+        // 10-second heartbeat: re-signal capacity to the server in case a
+        // previous RequestJob was lost (e.g. server restart).
+        let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(10));
+        // Consume the first instant tick so the loop starts cleanly.
+        heartbeat.tick().await;
+
+        let max_eval = self.config.max_concurrent_evaluations;
+        let max_build = self.config.max_concurrent_builds;
 
         info!("entering dispatch loop");
 
@@ -222,6 +256,8 @@ impl Worker {
                     cache_waiters.lock().unwrap().remove(&job_id);
                     self.credentials.clear();
 
+                    let completed_kind = job_kinds.remove(&job_id);
+
                     match result {
                         Ok(()) => {
                             info!(%job_id, "job completed");
@@ -233,6 +269,31 @@ impl Worker {
                                 job_id,
                                 error: e.to_string(),
                             })?;
+                        }
+                    }
+
+                    // A slot opened — immediately request a replacement job.
+                    if !self.draining {
+                        let kind = completed_kind.unwrap_or(JobKind::Build);
+                        writer.send(ClientMessage::RequestJob { kind })?;
+                    }
+                }
+
+                // Heartbeat: re-send one RequestJob per kind that still has a
+                // free slot, in case the server lost our previous requests.
+                _ = heartbeat.tick() => {
+                    if !self.draining {
+                        let active_eval = job_kinds.values().filter(|k| **k == JobKind::Flake).count() as u32;
+                        let active_build = job_kinds.values().filter(|k| **k == JobKind::Build).count() as u32;
+                        if active_eval < max_eval {
+                            if let Err(e) = writer.send(ClientMessage::RequestJob { kind: JobKind::Flake }) {
+                                warn!(error = %e, "heartbeat RequestJob Flake send failed");
+                            }
+                        }
+                        if active_build < max_build {
+                            if let Err(e) = writer.send(ClientMessage::RequestJob { kind: JobKind::Build }) {
+                                warn!(error = %e, "heartbeat RequestJob Build send failed");
+                            }
                         }
                     }
                 }
@@ -252,6 +313,9 @@ impl Worker {
                         &writer,
                         &cache_waiters,
                         &mut abort_senders,
+                        &mut job_kinds,
+                        max_eval,
+                        max_build,
                         &done_tx,
                     ).await?;
                 }
@@ -262,12 +326,16 @@ impl Worker {
     }
 
     /// Handle a single [`ServerMessage`] inside the dispatch loop.
+    #[allow(clippy::too_many_arguments)]
     async fn handle_message(
         &mut self,
         msg: ServerMessage,
         writer: &crate::connection::ProtoWriter,
         cache_waiters: &Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>>,
         abort_senders: &mut HashMap<String, watch::Sender<bool>>,
+        job_kinds: &mut HashMap<String, JobKind>,
+        max_eval: u32,
+        max_build: u32,
         done_tx: &mpsc::UnboundedSender<(String, Result<()>)>,
     ) -> Result<()> {
         match msg {
@@ -279,11 +347,32 @@ impl Worker {
                 if self.draining {
                     return Ok(());
                 }
+                // Cache the candidates for future re-scoring (e.g. RequestAllScores).
+                for c in &candidates {
+                    self.candidates.insert(c.job_id.clone(), c.clone());
+                }
                 let scores = self
                     .scorer
                     .score_candidates(&self.executor.store, &candidates)
                     .await?;
-                writer.send(ClientMessage::RequestJobChunk { scores, is_final })?;
+                // Record scores as baseline for future delta filtering.
+                for s in &scores {
+                    self.last_scores.insert(s.job_id.clone(), s.clone());
+                }
+                // Paginate at 1 000 scores per message; honour the upstream is_final.
+                if is_final {
+                    send_score_chunks(writer, scores)?;
+                } else {
+                    // Non-final chunk from a multi-chunk JobListChunk — accumulate.
+                    // We'll send after is_final arrives; for now send each page
+                    // as non-final.
+                    for chunk in scores.chunks(1_000) {
+                        writer.send(ClientMessage::RequestJobChunk {
+                            scores: chunk.to_vec(),
+                            is_final: false,
+                        })?;
+                    }
+                }
             }
 
             ServerMessage::JobOffer { candidates } => {
@@ -291,21 +380,42 @@ impl Worker {
                 if self.draining {
                     return Ok(());
                 }
-                let scores = self
-                    .scorer
-                    .score_candidates(&self.executor.store, &candidates)
-                    .await?;
-                if !scores.is_empty() {
-                    writer.send(ClientMessage::RequestJobChunk {
-                        scores,
-                        is_final: true,
-                    })?;
+                // Only score candidates that are new or updated (not already cached
+                // with the same content). The server sends delta-only JobOffers so
+                // this is typically all of them, but guard against duplicates.
+                let new_candidates: Vec<JobCandidate> = candidates
+                    .into_iter()
+                    .filter(|c| {
+                        let already = self.candidates.get(&c.job_id);
+                        already != Some(c)
+                    })
+                    .collect();
+                for c in &new_candidates {
+                    self.candidates.insert(c.job_id.clone(), c.clone());
+                }
+                if !new_candidates.is_empty() {
+                    let scores = self
+                        .scorer
+                        .score_candidates(&self.executor.store, &new_candidates)
+                        .await?;
+                    // Only send scores that are new or changed vs. baseline.
+                    let changed: Vec<_> = scores
+                        .into_iter()
+                        .filter(|s| self.last_scores.get(&s.job_id) != Some(s))
+                        .collect();
+                    for s in &changed {
+                        self.last_scores.insert(s.job_id.clone(), s.clone());
+                    }
+                    send_score_chunks(writer, changed)?;
                 }
             }
 
             ServerMessage::RevokeJob { job_ids } => {
                 debug!(?job_ids, "jobs revoked");
-                // TODO: cancel any locally-queued (not yet started) candidates.
+                for id in &job_ids {
+                    self.candidates.remove(id);
+                    self.last_scores.remove(id);
+                }
             }
 
             ServerMessage::AssignJob {
@@ -323,12 +433,24 @@ impl Worker {
                     return Ok(());
                 }
 
-                info!(%job_id, "job assigned — accepting");
+                // Determine job kind for capacity tracking.
+                let kind = match &job {
+                    Job::Flake(_) => JobKind::Flake,
+                    Job::Build(_) => JobKind::Build,
+                };
+
+                info!(%job_id, ?kind, "job assigned — accepting");
                 writer.send(ClientMessage::AssignJobResponse {
                     job_id: job_id.clone(),
                     accepted: true,
                     reason: None,
                 })?;
+
+                // Track the kind so done_rx can re-send the right RequestJob.
+                job_kinds.insert(job_id.clone(), kind.clone());
+                // Remove from candidate cache and score baseline — job is no longer pending.
+                self.candidates.remove(&job_id);
+                self.last_scores.remove(&job_id);
 
                 // Set up abort signal for this job.
                 let (abort_tx, abort_rx) = watch::channel(false);
@@ -347,6 +469,16 @@ impl Worker {
                     let result = run_job(executor, job, &mut updater, &credentials, abort_rx).await;
                     let _ = job_done_tx.send((jid, result));
                 });
+
+                // Immediately re-signal capacity if we still have free slots.
+                let active_count = job_kinds.values().filter(|k| **k == kind).count() as u32;
+                let max = match kind {
+                    JobKind::Flake => max_eval,
+                    JobKind::Build => max_build,
+                };
+                if active_count < max {
+                    writer.send(ClientMessage::RequestJob { kind })?;
+                }
             }
 
             ServerMessage::AbortJob { job_id, reason } => {
@@ -403,6 +535,29 @@ impl Worker {
                 }
             }
 
+            ServerMessage::RequestAllScores => {
+                debug!(count = self.candidates.len(), "RequestAllScores — re-scoring all cached candidates");
+                let all: Vec<JobCandidate> = self.candidates.values().cloned().collect();
+                let fresh_scores = if all.is_empty() {
+                    vec![]
+                } else {
+                    self.scorer
+                        .score_candidates(&self.executor.store, &all)
+                        .await?
+                };
+                // Send only scores that differ from the server's last known values.
+                let changed: Vec<_> = fresh_scores
+                    .into_iter()
+                    .filter(|s| self.last_scores.get(&s.job_id) != Some(s))
+                    .collect();
+                for s in &changed {
+                    self.last_scores.insert(s.job_id.clone(), s.clone());
+                }
+                // Always send at least one final chunk so the server knows
+                // the worker completed the re-score pass.
+                send_score_chunks(writer, changed)?;
+            }
+
             ServerMessage::Draining => {
                 info!("server is draining; finishing in-flight work then disconnecting");
                 self.draining = true;
@@ -449,6 +604,32 @@ impl Worker {
 
         Ok(())
     }
+}
+
+/// Send `scores` as one or more `RequestJobChunk` messages, paginated at
+/// 1 000 entries.  The last (or only) message has `is_final: true`.
+/// An empty `scores` vec still sends one empty final chunk so the server
+/// knows the scoring pass completed.
+fn send_score_chunks(
+    writer: &crate::connection::ProtoWriter,
+    scores: Vec<proto::messages::CandidateScore>,
+) -> anyhow::Result<()> {
+    if scores.is_empty() {
+        writer.send(ClientMessage::RequestJobChunk {
+            scores: vec![],
+            is_final: true,
+        })?;
+        return Ok(());
+    }
+    let chunks: Vec<_> = scores.chunks(1_000).collect();
+    let total = chunks.len();
+    for (i, chunk) in chunks.into_iter().enumerate() {
+        writer.send(ClientMessage::RequestJobChunk {
+            scores: chunk.to_vec(),
+            is_final: i + 1 == total,
+        })?;
+    }
+    Ok(())
 }
 
 /// Execute a single job inside a spawned task.

@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use gradient_core::types::proto::{
-    BuildJob, CandidateScore, FlakeJob, Job, JobCandidate, RequiredPath,
+    BuildJob, CandidateScore, FlakeJob, Job, JobCandidate, JobKind, RequiredPath,
 };
 
 #[derive(Debug, Clone)]
@@ -161,6 +161,29 @@ impl JobTracker {
         }
 
         let (job_id, _, _) = best?;
+        self.assign_pending(peer_id, &job_id)
+    }
+
+    /// Assign the first pending job matching `kind`, restricted to authorized peers.
+    /// Used for pull-based `RequestJob` dispatch (no scoring needed).
+    pub fn take_first_of_kind(
+        &mut self,
+        peer_id: &str,
+        authorized: Option<&HashSet<Uuid>>,
+        kind: &JobKind,
+    ) -> Option<Assignment> {
+        let job_id = self
+            .pending
+            .iter()
+            .filter(|(_, j)| {
+                authorized.is_none_or(|peers| peers.contains(&j.peer_id()))
+                    && matches!(
+                        (kind, j),
+                        (JobKind::Flake, PendingJob::Eval(_)) | (JobKind::Build, PendingJob::Build(_))
+                    )
+            })
+            .map(|(id, _)| id.clone())
+            .next()?;
         self.assign_pending(peer_id, &job_id)
     }
 

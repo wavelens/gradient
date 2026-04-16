@@ -27,7 +27,7 @@ use gradient_core::types::*;
 use sea_orm::EntityTrait;
 
 use gradient_core::types::proto::{
-    BuildOutput, CandidateScore, DiscoveredDerivation, GradientCapabilities, JobCandidate,
+    BuildOutput, CandidateScore, DiscoveredDerivation, GradientCapabilities, JobCandidate, JobKind,
 };
 
 use jobs::{Assignment, JobTracker, PendingBuildJob, PendingEvalJob, PendingJob};
@@ -176,21 +176,99 @@ impl Scheduler {
         Arc::clone(&self.job_notify)
     }
 
-    /// Returns pending job candidates visible to the given worker,
-    /// filtered by its authorized peer set.
+    /// Returns ALL pending job candidates visible to the given worker.
+    /// Used for `RequestJobList` / `RequestAllCandidates` (full snapshot).
+    /// Also marks all returned IDs as sent so delta pushes skip them.
     pub async fn get_job_candidates(&self, worker_id: &str) -> Vec<JobCandidate> {
-        let pool = self.worker_pool.read().await;
-        let authorized = pool.authorized_peers_for(worker_id);
-        // Empty authorized set = open mode, show all.
-        let filter = if authorized.is_some_and(|p| !p.is_empty()) {
-            authorized
-        } else {
-            None
+        let authorized = {
+            let pool = self.worker_pool.read().await;
+            let auth = pool.authorized_peers_for(worker_id);
+            if auth.is_some_and(|p| !p.is_empty()) {
+                auth.cloned()
+            } else {
+                None
+            }
         };
-        self.job_tracker.read().await.candidates_for_worker(filter)
+        let candidates = self
+            .job_tracker
+            .read()
+            .await
+            .candidates_for_worker(authorized.as_ref());
+        // Mark all as sent so the next delta push skips them.
+        let ids: Vec<String> = candidates.iter().map(|c| c.job_id.clone()).collect();
+        self.worker_pool
+            .write()
+            .await
+            .mark_candidates_sent(worker_id, &ids);
+        candidates
+    }
+
+    /// Returns only NEW pending job candidates (not yet sent to this worker).
+    /// Used for incremental `JobOffer` pushes after `job_notify`.
+    /// Marks the returned IDs as sent.
+    pub async fn get_new_job_candidates(&self, worker_id: &str) -> Vec<JobCandidate> {
+        let (authorized, sent) = {
+            let pool = self.worker_pool.read().await;
+            let auth = pool.authorized_peers_for(worker_id);
+            let authorized = if auth.is_some_and(|p| !p.is_empty()) {
+                auth.cloned()
+            } else {
+                None
+            };
+            let sent = pool
+                .sent_candidates_for(worker_id)
+                .cloned()
+                .unwrap_or_default();
+            (authorized, sent)
+        };
+        let all = self
+            .job_tracker
+            .read()
+            .await
+            .candidates_for_worker(authorized.as_ref());
+        let new_candidates: Vec<JobCandidate> = all
+            .into_iter()
+            .filter(|c| !sent.contains(&c.job_id))
+            .collect();
+        if !new_candidates.is_empty() {
+            let ids: Vec<String> = new_candidates.iter().map(|c| c.job_id.clone()).collect();
+            self.worker_pool
+                .write()
+                .await
+                .mark_candidates_sent(worker_id, &ids);
+        }
+        new_candidates
     }
 
     // ── Scoring / assignment ──────────────────────────────────────────────────
+
+    /// Try to directly assign a job of `kind` to `peer_id` without scoring.
+    ///
+    /// Called when the worker sends `RequestJob { kind }` to signal it has a
+    /// free slot.  Returns `Some(Assignment)` if a matching pending job was
+    /// found and claimed; `None` if no such job exists yet.
+    pub async fn request_job(&self, peer_id: &str, kind: JobKind) -> Option<Assignment> {
+        let authorized: Option<HashSet<Uuid>> = {
+            let pool = self.worker_pool.read().await;
+            pool.authorized_peers_for(peer_id)
+                .and_then(|p| if p.is_empty() { None } else { Some(p.clone()) })
+        };
+
+        let assignment = self
+            .job_tracker
+            .write()
+            .await
+            .take_first_of_kind(peer_id, authorized.as_ref(), &kind);
+
+        if let Some(ref a) = assignment {
+            self.worker_pool
+                .write()
+                .await
+                .assign_job(peer_id, &a.job_id);
+            info!(%peer_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob");
+        }
+        assignment
+    }
 
     pub async fn consider_scores(
         &self,
@@ -237,6 +315,11 @@ impl Scheduler {
     pub async fn job_rejected(&self, peer_id: &str, job_id: &str) {
         self.worker_pool.write().await.release_job(peer_id, job_id);
         self.job_tracker.write().await.release_to_pending(job_id);
+        // Clear the sent-candidate flag so the job shows up in the next delta push.
+        self.worker_pool
+            .write()
+            .await
+            .remove_sent_candidate(job_id);
         info!(%peer_id, %job_id, "job rejected; re-queued");
     }
 

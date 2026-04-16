@@ -26,6 +26,10 @@ pub struct ConnectedWorker {
     /// Peer IDs (org/cache/proxy UUIDs) this worker is authorized for.
     /// Empty means no peers registered this worker (open/discoverable mode).
     pub authorized_peers: HashSet<Uuid>,
+    /// Job IDs that have already been sent to this worker as candidates.
+    /// Used to implement delta-only `JobOffer` — only IDs not in this set
+    /// are included in the next push.
+    pub sent_candidates: HashSet<String>,
     /// Signalled by the API when registrations change and the worker should
     /// re-authenticate without disconnecting.
     pub reauth_notify: Arc<Notify>,
@@ -67,6 +71,7 @@ impl WorkerPool {
                 assigned_jobs: HashSet::new(),
                 draining: false,
                 authorized_peers,
+                sent_candidates: HashSet::new(),
                 reauth_notify: Arc::clone(&notify),
                 abort_tx,
             },
@@ -130,6 +135,28 @@ impl WorkerPool {
         if let Some(w) = self.workers.get_mut(id) {
             w.draining = true;
         }
+    }
+
+    /// Mark a batch of job IDs as sent to `worker_id` so they are not
+    /// re-included in the next delta `JobOffer`.
+    pub fn mark_candidates_sent(&mut self, worker_id: &str, job_ids: &[String]) {
+        if let Some(w) = self.workers.get_mut(worker_id) {
+            w.sent_candidates.extend(job_ids.iter().cloned());
+        }
+    }
+
+    /// Remove a single job ID from all workers' sent-candidate sets.
+    /// Called when a job is removed from the pending queue (assigned, revoked,
+    /// or cancelled) so the same ID can be reused without being silently dropped.
+    pub fn remove_sent_candidate(&mut self, job_id: &str) {
+        for w in self.workers.values_mut() {
+            w.sent_candidates.remove(job_id);
+        }
+    }
+
+    /// Returns the set of job IDs already sent to `worker_id` as candidates.
+    pub fn sent_candidates_for(&self, worker_id: &str) -> Option<&HashSet<String>> {
+        self.workers.get(worker_id).map(|w| &w.sent_candidates)
     }
 
     pub fn assign_job(&mut self, worker_id: &str, job_id: &str) {

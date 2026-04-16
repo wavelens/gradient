@@ -282,19 +282,25 @@ pub(crate) async fn handle_socket(
                 continue;
             }
             _ = job_notify.notified() => {
-                // New jobs enqueued — push candidates to this worker.
-                let candidates = scheduler.get_job_candidates(&peer_id).await;
+                // New jobs enqueued — push only candidates not yet sent (delta),
+                // paginated at JOB_OFFER_CHUNK_SIZE per message.
+                let candidates = scheduler.get_new_job_candidates(&peer_id).await;
                 if !candidates.is_empty() {
-                    debug!(%peer_id, count = candidates.len(), "pushing job offer");
-                    if send_server_msg(
-                        &mut socket,
-                        &ServerMessage::JobOffer { candidates },
-                    )
-                    .await
-                    .is_err()
-                    {
-                        break;
+                    debug!(%peer_id, count = candidates.len(), "pushing job offer (delta)");
+                    let mut failed = false;
+                    for chunk in candidates.chunks(JOB_OFFER_CHUNK_SIZE) {
+                        if send_server_msg(
+                            &mut socket,
+                            &ServerMessage::JobOffer { candidates: chunk.to_vec() },
+                        )
+                        .await
+                        .is_err()
+                        {
+                            failed = true;
+                            break;
+                        }
                     }
+                    if failed { break; }
                 }
                 continue;
             }
@@ -401,14 +407,97 @@ pub(crate) async fn handle_socket(
             ClientMessage::RequestJobList => {
                 debug!(%peer_id, "RequestJobList");
                 let candidates = scheduler.get_job_candidates(&peer_id).await;
-                let is_final = true;
-                let chunk = ServerMessage::JobListChunk {
-                    candidates,
-                    is_final,
-                };
-                if send_server_msg(&mut socket, &chunk).await.is_err() {
-                    break;
+                let chunks: Vec<_> = candidates.chunks(JOB_OFFER_CHUNK_SIZE).collect();
+                let total = chunks.len();
+                let mut failed = false;
+                for (i, chunk) in chunks.into_iter().enumerate() {
+                    let is_final = i + 1 == total || total == 0;
+                    if send_server_msg(
+                        &mut socket,
+                        &ServerMessage::JobListChunk {
+                            candidates: chunk.to_vec(),
+                            is_final,
+                        },
+                    )
+                    .await
+                    .is_err()
+                    {
+                        failed = true;
+                        break;
+                    }
                 }
+                // Send an empty final chunk when there are no candidates.
+                if total == 0 {
+                    if send_server_msg(
+                        &mut socket,
+                        &ServerMessage::JobListChunk { candidates: vec![], is_final: true },
+                    )
+                    .await
+                    .is_err()
+                    {
+                        failed = true;
+                    }
+                }
+                if failed { break; }
+            }
+
+            // ── Pull-based capacity signal ────────────────────────────────
+            ClientMessage::RequestJob { kind } => {
+                debug!(%peer_id, ?kind, "RequestJob");
+                if let Some(assignment) = scheduler.request_job(&peer_id, kind).await {
+                    send_credentials_for_job(
+                        &mut socket,
+                        &state,
+                        &assignment.job,
+                        assignment.peer_id,
+                    )
+                    .await;
+                    let msg = ServerMessage::AssignJob {
+                        job_id: assignment.job_id,
+                        job: assignment.job,
+                        timeout_secs: Some(3600),
+                    };
+                    if send_server_msg(&mut socket, &msg).await.is_err() {
+                        break;
+                    }
+                }
+                // No job available — worker will retry via 10s heartbeat.
+            }
+
+            ClientMessage::RequestAllCandidates => {
+                debug!(%peer_id, "RequestAllCandidates");
+                let candidates = scheduler.get_job_candidates(&peer_id).await;
+                let chunks: Vec<_> = candidates.chunks(JOB_OFFER_CHUNK_SIZE).collect();
+                let total = chunks.len();
+                let mut failed = false;
+                for (i, chunk) in chunks.into_iter().enumerate() {
+                    let is_final = i + 1 == total || total == 0;
+                    if send_server_msg(
+                        &mut socket,
+                        &ServerMessage::JobListChunk {
+                            candidates: chunk.to_vec(),
+                            is_final,
+                        },
+                    )
+                    .await
+                    .is_err()
+                    {
+                        failed = true;
+                        break;
+                    }
+                }
+                if total == 0 {
+                    if send_server_msg(
+                        &mut socket,
+                        &ServerMessage::JobListChunk { candidates: vec![], is_final: true },
+                    )
+                    .await
+                    .is_err()
+                    {
+                        failed = true;
+                    }
+                }
+                if failed { break; }
             }
 
             // ── Incremental scoring ───────────────────────────────────────
@@ -781,15 +870,26 @@ async fn send_signing_key_credential(
 /// waiting on `notified()`, so notifications fired during processing are
 /// lost. This direct push ensures the worker learns about new candidates
 /// immediately.
+const JOB_OFFER_CHUNK_SIZE: usize = 1_000;
+
 async fn push_pending_candidates(
     socket: &mut ProtoSocket,
     scheduler: &Scheduler,
     peer_id: &str,
 ) {
-    let candidates = scheduler.get_job_candidates(peer_id).await;
-    if !candidates.is_empty() {
-        debug!(%peer_id, count = candidates.len(), "pushing job offer after message processing");
-        let _ = send_server_msg(socket, &ServerMessage::JobOffer { candidates }).await;
+    let candidates = scheduler.get_new_job_candidates(peer_id).await;
+    if candidates.is_empty() {
+        return;
+    }
+    debug!(%peer_id, count = candidates.len(), "pushing job offer (delta) after message processing");
+    for chunk in candidates.chunks(JOB_OFFER_CHUNK_SIZE) {
+        let _ = send_server_msg(
+            socket,
+            &ServerMessage::JobOffer {
+                candidates: chunk.to_vec(),
+            },
+        )
+        .await;
     }
 }
 

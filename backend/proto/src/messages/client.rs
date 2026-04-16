@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::types::proto::{CandidateScore, GradientCapabilities, JobUpdateKind, QueryMode};
+use gradient_core::types::proto::{CandidateScore, GradientCapabilities, JobKind, JobUpdateKind, QueryMode};
 use rkyv::{Archive, Deserialize, Serialize};
 
 /// Messages sent from the client (worker / federated peer) to the server.
@@ -130,6 +130,26 @@ pub enum ClientMessage {
         /// Hash of the uncompressed NAR (`sha256:<nix32>` or SRI format).
         nar_hash: String,
     },
+
+    /// Pull-based capacity signal: worker is ready to accept one job of the
+    /// given kind.
+    ///
+    /// Sent after the handshake for each available slot (once per free eval
+    /// slot and once per free build slot).  Re-sent immediately after an
+    /// [`super::server::ServerMessage::AssignJob`] is received if the worker
+    /// still has spare capacity.  Re-sent every 10 s as a heartbeat in case
+    /// the server restarted and lost the pending request.
+    ///
+    /// The server assigns the first matching pending job directly — no scoring
+    /// round-trip needed.
+    RequestJob { kind: JobKind },
+
+    /// Request the full current job candidate list from the server.
+    /// Sent once at startup (alongside [`ClientMessage::RequestJobList`]) so
+    /// the server can send the worker its initial candidate set.  All
+    /// subsequent candidate updates arrive as delta [`super::server::ServerMessage::JobOffer`]
+    /// messages and do not require another `RequestAllCandidates`.
+    RequestAllCandidates,
 
     /// Bulk query against the server cache.
     ///

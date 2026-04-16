@@ -317,19 +317,19 @@ sequenceDiagram
 
 ### How It Works
 
- 1. **`JobOffer`** (server → workers, delta-only) — the server pushes only **new** candidates that the worker hasn't seen yet. Workers accumulate candidates in a persistent local cache. Each candidate includes `required_paths` (with optional `CacheInfo` for paths in the server's cache) so workers can score locally. The server dispatches builds immediately after three events: evaluation result (new builds queued), build completion (dependent builds unlocked), and build failure (cascade frees blocked builds). A background dispatch loop (5-second interval) acts as a safety net.
+ 1. **`JobOffer`** (server → workers, delta-only) — the server pushes only **new** candidates that the worker hasn't seen yet. Workers accumulate candidates in a persistent local cache. Each candidate includes `required_paths` (with optional `CacheInfo` for paths in the server's cache) so workers can score locally. Candidates are paginated at **1 000 entries per message**; `is_final: true` on `JobListChunk` marks the end of the initial list. The server dispatches builds immediately after three events: evaluation result (new builds queued), build completion (dependent builds unlocked), and build failure (cascade frees blocked builds). A background dispatch loop (5-second interval) acts as a safety net.
  2. **Workers score in the background** — on receiving `JobOffer`, the worker adds candidates to its local cache and scores them against the local Nix store. Scores are kept in memory. After a build completes (populating store paths), the worker re-scores affected candidates whose `required_paths` overlap with the new outputs.
- 3. **`RequestJobChunk`** (worker → server, delta-only) — the worker sends only **new or changed** scores. A score changes when a path becomes available in the local store (e.g. after a build). The server accumulates scores per worker in memory. There is no `is_final` flag — scores stream continuously as they change.
+ 3. **`RequestJobChunk`** (worker → server, delta-only) — the worker sends only **new or changed** scores. A score changes when a path becomes available in the local store (e.g. after a build). The server accumulates scores per worker in memory. Scores are paginated at **1 000 entries per message**; `is_final: true` marks the last chunk in each scoring pass. An empty chunk with `is_final: true` signals the end of a pass when no scores changed.
  4. **`RequestJob`** (worker → server, pull-based) — the worker signals it has capacity for **one** job. `kind` specifies whether it wants a `FlakeJob` or `BuildJob`. The server either responds with `AssignJob` immediately (if a matching job with good scores exists) or marks internally that this worker needs a job and assigns one when available. On receiving `AssignJob`, the worker immediately sends another `RequestJob` if it still has capacity — this naturally fills all available slots. Workers also re-send `RequestJob` every **10 seconds** as a heartbeat if no `AssignJob` arrived, ensuring the server recovers the "worker needs work" state after a restart without persistent storage.
  5. **`AssignJob`** (server → winning worker) — the server compares scores across all workers that have requested a job. Lowest `missing_nar_size` wins (fewest bytes to download). Ties are broken by `missing_count`, then by fewest assigned jobs. The server may assign as soon as it sees an optimal score (e.g. `missing_nar_size: 0`).
  6. **`RevokeJob`** (server → losing workers) — all other workers that had this candidate in their cache are told to remove it. Workers delete the candidate and its score from their local cache.
 
-### State Recovery
+### Initial Sync
 
-Both sides persist candidate/score state in memory across the connection. After a server restart, the server has lost its in-memory score state. Two recovery messages enable resync without re-sending all candidates:
+Both sides persist candidate/score state in memory across the connection. On every new connection (including reconnects after a server restart), two startup-only messages perform the initial state sync:
 
- - **`RequestAllCandidates`** (worker → server) — the worker asks the server to re-send all active candidates. Used on reconnect when the worker's local cache might be stale (e.g. the server revoked candidates while the worker was disconnected). The server responds with a `JobOffer` containing all current candidates for this worker.
- - **`RequestAllScores`** (server → worker) — the server asks the worker to re-send all its current scores. Used after server restart to rebuild the in-memory score table. The worker responds with a `RequestJobChunk` containing all scores from its local cache.
+ - **`RequestAllCandidates`** (worker → server) — sent **once** by the worker immediately after the handshake completes. The server responds with a paginated `JobListChunk` stream (1 000 entries per message, `is_final: true` on the last) containing all active candidates for this worker. All subsequent candidate updates arrive as delta `JobOffer` messages — `RequestAllCandidates` is not sent again on the same connection.
+ - **`RequestAllScores`** (server → worker) — sent **once** by the server during handshake completion to rebuild its in-memory score table. The worker responds with a paginated `RequestJobChunk` stream of all scores from its local cache (`is_final: true` on the last chunk; an empty chunk with `is_final: true` when no scores are cached). All subsequent score updates arrive as delta `RequestJobChunk` messages — `RequestAllScores` is not sent again on the same connection.
 
 ```mermaid
 sequenceDiagram
@@ -358,7 +358,7 @@ sequenceDiagram
 ```
 
 ```rust
-// Server → Worker (pushed eagerly, delta-only — only new candidates)
+// Server → Worker (pushed eagerly, delta-only — only new candidates; paginated at 1 000)
 JobOffer {
     candidates: Vec<JobCandidate>,
 }
@@ -384,12 +384,13 @@ RevokeJob {
     job_ids: Vec<Uuid>,
 }
 
-// Server → Worker (after server restart — ask worker to re-send all scores)
+// Server → Worker (startup-only — sent once at handshake completion; ask worker to re-send all scores)
 RequestAllScores,
 
-// Worker → Server (delta-only — only new or changed scores)
+// Worker → Server (delta-only — only new or changed scores; paginated at 1 000)
 RequestJobChunk {
     scores: Vec<CandidateScore>,        // batch of new/changed scores
+    is_final: bool,                     // true on the last chunk of each scoring pass
 }
 
 // Worker → Server (pull-based — "I have capacity for one job")
@@ -401,7 +402,7 @@ RequestJob {
 
 enum JobKind { Flake, Build }
 
-// Worker → Server (after reconnect — ask server to re-send all active candidates)
+// Worker → Server (startup-only — sent once at handshake completion; ask server to re-send all active candidates)
 RequestAllCandidates,
 
 CandidateScore {
@@ -420,7 +421,7 @@ CandidateScore {
  - **Optimal assignment** — server sees all workers' scores before deciding. A worker that already has 90% of the closure cached (lower `missing_nar_size`) gets the job over one that needs everything.
  - **Large build trees handled incrementally** — as evaluation discovers derivations in batches (`EvalResult`), the server pushes new `JobOffer`s immediately. Workers start scoring while evaluation is still in progress.
  - **Re-scoring after builds** — when a build completes and populates the worker's store, affected candidate scores automatically improve. The worker sends updated scores, potentially claiming jobs it previously scored poorly on.
- - **Seamless server restart** — `RequestAllScores` + `RequestAllCandidates` rebuild state without re-evaluating everything from scratch.
+ - **Seamless server restart** — `RequestAllScores` + `RequestAllCandidates` at connection startup rebuild state without re-evaluating everything from scratch. Both are startup-only; all subsequent updates are delta-only.
 
 ### Edge Cases
 
@@ -724,11 +725,11 @@ enum ServerMessage {
     Error { code: u16, message: String },
 
     // Job dispatch
-    JobOffer { candidates: Vec<JobCandidate> },  // delta-only: only new candidates
+    JobOffer { candidates: Vec<JobCandidate> },  // delta-only: only new candidates; paginated at 1 000
     RevokeJob { job_ids: Vec<Uuid> },            // remove candidates assigned to another worker
     AssignJob { job_id: Uuid, job: Job, timeout_secs: Option<u64> },
     AbortJob { job_id: Uuid, reason: String },
-    RequestAllScores,                           // after server restart: ask worker to re-send all scores
+    RequestAllScores,                           // startup-only: ask worker to re-send all scores once
     Draining,                                   // server shutting down; finish work, buffer results, delay reconnect
 
     // Credentials (sent before or alongside AssignJob)
@@ -762,11 +763,12 @@ enum ClientMessage {
     AssignJobResponse { job_id: Uuid, accepted: bool, reason: Option<String> },
 
     // Job dispatch
-    RequestJobChunk {                           // delta-only: new or changed scores
+    RequestJobChunk {                           // delta-only: new or changed scores; paginated at 1 000
         scores: Vec<CandidateScore>,
+        is_final: bool,                         // true on last chunk of each scoring pass
     },
-    RequestJob { kind: JobKind },                  // "I have capacity for one job" — re-sent every 10s as heartbeat
-    RequestAllCandidates,                       // after reconnect: ask server to re-send all active candidates
+    RequestJob { kind: JobKind },               // "I have capacity for one job" — re-sent every 10s as heartbeat
+    RequestAllCandidates,                       // startup-only: ask server to re-send all active candidates once
     JobUpdate { job_id: Uuid, update: JobUpdateKind },
     JobCompleted { job_id: Uuid },              // all tasks done; results already sent via JobUpdate
     JobFailed { job_id: Uuid, error: String },
@@ -1146,8 +1148,8 @@ Workers should finish the current atomic operation (e.g. a single NarPush) befor
 graph TD
     A[connect] --> B[InitConnection]
     B --> C[InitAck]
-    C --> D[WorkerCapabilities]
-    D --> E[RequestJobChunk]
+    C --> D[WorkerCapabilities + RequestAllCandidates]
+    D --> E[RequestJob]
     E --> F[AssignJob]
     F --> G[execute job]
     G --> E
@@ -1172,15 +1174,15 @@ When the server restarts (deploy, crash, maintenance), workers experience a WebS
  4. Reconnect with exponential backoff: 1s → 2s → 4s → ... → 60s max, with jitter.
  5. On reconnect, send `InitConnection` + `WorkerCapabilities` (full re-handshake).
  6. Send `JobUpdate`/`JobCompleted`/`JobFailed` for any jobs that progressed or finished during the outage. The server matches these by `job_id`.
- 7. Send `RequestAllCandidates` to resync the candidate cache (server may have revoked or added candidates during the outage).
- 8. Respond to `RequestAllScores` with all cached scores so the server can rebuild its in-memory score table.
+ 7. Send `RequestAllCandidates` (startup-only) to resync the candidate cache (server may have revoked or added candidates during the outage).
+ 8. Respond to `RequestAllScores` (startup-only, sent by server at handshake) with all cached scores so the server can rebuild its in-memory score table.
 
 **Server behavior on startup:**
 
  1. Scan for orphaned jobs: any `build` with status `Building` (2) or `evaluation` with status `Fetching`/`EvaluatingFlake`/`EvaluatingDerivation` that has no connected worker.
  2. Wait a **grace period** (default: 120s) for workers to reconnect and report results.
  3. After the grace period, mark remaining orphaned jobs as `Failed` and re-queue them.
- 4. Send `RequestAllScores` to each reconnected worker to rebuild the in-memory score table.
+ 4. Send `RequestAllScores` to each reconnected worker (once, at handshake completion) to rebuild the in-memory score table.
 
 ```mermaid
 sequenceDiagram
@@ -1208,7 +1210,7 @@ sequenceDiagram
     W->>S: RequestJob { kind: Build }
 ```
 
-This means short server restarts (< grace period) cause **zero job loss** — workers buffer results and replay them on reconnect. Score state is rebuilt in a single round-trip via `RequestAllScores` + `RequestAllCandidates`. The 10-second `RequestJob` heartbeat ensures the server recovers the "worker needs work" state even if it restarts and loses that information.
+This means short server restarts (< grace period) cause **zero job loss** — workers buffer results and replay them on reconnect. Score state is rebuilt in a single startup round-trip via `RequestAllScores` + `RequestAllCandidates` (both sent exactly once per connection). The 10-second `RequestJob` heartbeat ensures the server recovers the "worker needs work" state even if it restarts and loses that information.
 
 ### Graceful Server Shutdown
 

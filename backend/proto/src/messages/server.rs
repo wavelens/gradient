@@ -63,6 +63,7 @@ pub enum ServerMessage {
 
     /// Incremental push of new job candidates as they become available
     /// (e.g. evaluation discovers new derivations).
+    /// Paginated at 1 000 entries per message.
     JobOffer { candidates: Vec<JobCandidate> },
 
     /// Remove candidates from the worker's local cache — they have been
@@ -113,6 +114,13 @@ pub enum ServerMessage {
         store_path: String,
         url: String,
     },
+
+    /// Ask a newly connected worker to send its full candidate score set.
+    /// Sent once by the server during the initial handshake completion so it
+    /// can populate its in-memory score table.  After startup all score
+    /// updates arrive as delta [`super::client::ClientMessage::RequestJobChunk`]
+    /// messages — `RequestAllScores` is not sent again.
+    RequestAllScores,
 
     /// Response to [`super::client::ClientMessage::CacheQuery`].
     /// Paths in the local Gradient cache have `url: None`; paths found in upstream

@@ -103,6 +103,7 @@ fn make_drv_output(id: Uuid, drv_id: Uuid, name: &str, path: &str) -> MDerivatio
         nar_size: None,
         is_cached: false,
         has_artefacts: false,
+        cached_path: None,
         created_at: test_date(),
     }
 }
