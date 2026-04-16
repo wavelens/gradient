@@ -49,6 +49,7 @@ export class CacheSubscriptionsComponent implements OnInit {
   canManageSubscriptions = signal<boolean | null>(null);
 
   orgName = '';
+  orgDisplayName = signal('');
   caches = signal<{ id: string; name: string }[]>([]);
   newCacheName = '';
   cacheSuggestions = signal<string[]>([]);
@@ -56,6 +57,10 @@ export class CacheSubscriptionsComponent implements OnInit {
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.orgsService.getOrganization(this.orgName).subscribe({
+      next: (org) => this.orgDisplayName.set(org.display_name),
+      error: () => {},
+    });
     this.loadCaches();
     this.loadOrgPermission();
   }

@@ -44,10 +44,14 @@ pub struct Worker {
     /// Local cache of job candidates received from the server.
     /// Updated on `JobListChunk` and `JobOffer`; entries removed on `RevokeJob`.
     /// Used to re-score and respond to `RequestAllScores` after a server restart.
-    candidates: HashMap<String, proto::messages::JobCandidate>,
+    ///
+    /// `Arc<Mutex<…>>` so scoring can run in a spawned task without blocking
+    /// the dispatch loop. Critical sections are short (HashMap insert/remove)
+    /// — std::sync::Mutex is sufficient and keeps the locking sync.
+    candidates: Arc<std::sync::Mutex<HashMap<String, proto::messages::JobCandidate>>>,
     /// Last known score per candidate (keyed by job_id).
     /// Used to filter `RequestJobChunk` to only changed scores.
-    last_scores: HashMap<String, proto::messages::CandidateScore>,
+    last_scores: Arc<std::sync::Mutex<HashMap<String, proto::messages::CandidateScore>>>,
 }
 
 impl Worker {
@@ -111,8 +115,8 @@ impl Worker {
             scorer: JobScorer::new(),
             credentials: CredentialStore::new(),
             draining: false,
-            candidates: HashMap::new(),
-            last_scores: HashMap::new(),
+            candidates: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            last_scores: Arc::new(std::sync::Mutex::new(HashMap::new())),
         })
     }
 
@@ -177,8 +181,8 @@ impl Worker {
             scorer: JobScorer::new(),
             credentials: CredentialStore::new(),
             draining: false,
-            candidates: HashMap::new(),
-            last_scores: HashMap::new(),
+            candidates: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            last_scores: Arc::new(std::sync::Mutex::new(HashMap::new())),
         })
     }
 
@@ -433,32 +437,28 @@ impl Worker {
                 if self.draining {
                     return Ok(());
                 }
-                // Cache the candidates for future re-scoring (e.g. RequestAllScores).
-                for c in &candidates {
-                    self.candidates.insert(c.job_id.clone(), c.clone());
-                }
-                let scores = self
-                    .scorer
-                    .score_candidates(&self.executor.store, &candidates)
-                    .await?;
-                // Record scores as baseline for future delta filtering.
-                for s in &scores {
-                    self.last_scores.insert(s.job_id.clone(), s.clone());
-                }
-                // Paginate at 1 000 scores per message; honour the upstream is_final.
-                if is_final {
-                    send_score_chunks(writer, scores)?;
-                } else {
-                    // Non-final chunk from a multi-chunk JobListChunk — accumulate.
-                    // We'll send after is_final arrives; for now send each page
-                    // as non-final.
-                    for chunk in scores.chunks(1_000) {
-                        writer.send(ClientMessage::RequestJobChunk {
-                            scores: chunk.to_vec(),
-                            is_final: false,
-                        })?;
+                // Cache candidates synchronously (fast — HashMap insert) so
+                // future RequestAllScores / RevokeJob handlers see them
+                // immediately. The actual `score_candidates` (which reads
+                // many `.drv` files) runs in a spawned task so this handler
+                // returns to the dispatch loop's `select!` right away —
+                // critical for keeping `heartbeat` / `done_rx` /
+                // `CacheStatus` polling responsive on big initial snapshots.
+                {
+                    let mut g = self.candidates.lock().unwrap();
+                    for c in &candidates {
+                        g.insert(c.job_id.clone(), c.clone());
                     }
                 }
+                spawn_scoring_task(
+                    self.scorer,
+                    Arc::clone(&self.executor.store),
+                    Arc::clone(&self.last_scores),
+                    writer.clone(),
+                    candidates,
+                    /* delta_filter = */ false, // first time: send all
+                    /* is_final = */ is_final,
+                );
             }
 
             ServerMessage::JobOffer { candidates } => {
@@ -466,41 +466,44 @@ impl Worker {
                 if self.draining {
                     return Ok(());
                 }
-                // Only score candidates that are new or updated (not already cached
-                // with the same content). The server sends delta-only JobOffers so
-                // this is typically all of them, but guard against duplicates.
-                let new_candidates: Vec<JobCandidate> = candidates
-                    .into_iter()
-                    .filter(|c| {
-                        let already = self.candidates.get(&c.job_id);
-                        already != Some(c)
-                    })
-                    .collect();
-                for c in &new_candidates {
-                    self.candidates.insert(c.job_id.clone(), c.clone());
-                }
-                if !new_candidates.is_empty() {
-                    let scores = self
-                        .scorer
-                        .score_candidates(&self.executor.store, &new_candidates)
-                        .await?;
-                    // Only send scores that are new or changed vs. baseline.
-                    let changed: Vec<_> = scores
-                        .into_iter()
-                        .filter(|s| self.last_scores.get(&s.job_id) != Some(s))
-                        .collect();
-                    for s in &changed {
-                        self.last_scores.insert(s.job_id.clone(), s.clone());
+                // Filter to genuinely new/changed candidates (the server sends
+                // delta-only offers but guard against duplicate frames),
+                // record them in the local cache, then spawn scoring off the
+                // dispatch loop. The dispatch loop returns immediately —
+                // even if scoring takes minutes, heartbeat ticks keep firing
+                // and `CacheStatus` replies for an in-flight eval still get
+                // routed without delay.
+                let new_candidates: Vec<JobCandidate> = {
+                    let mut g = self.candidates.lock().unwrap();
+                    let mut out = Vec::with_capacity(candidates.len());
+                    for c in candidates {
+                        if g.get(&c.job_id) != Some(&c) {
+                            g.insert(c.job_id.clone(), c.clone());
+                            out.push(c);
+                        }
                     }
-                    send_score_chunks(writer, changed)?;
+                    out
+                };
+                if !new_candidates.is_empty() {
+                    spawn_scoring_task(
+                        self.scorer,
+                        Arc::clone(&self.executor.store),
+                        Arc::clone(&self.last_scores),
+                        writer.clone(),
+                        new_candidates,
+                        /* delta_filter = */ true,
+                        /* is_final = */ true,
+                    );
                 }
             }
 
             ServerMessage::RevokeJob { job_ids } => {
                 debug!(?job_ids, "jobs revoked");
+                let mut cands = self.candidates.lock().unwrap();
+                let mut scores = self.last_scores.lock().unwrap();
                 for id in &job_ids {
-                    self.candidates.remove(id);
-                    self.last_scores.remove(id);
+                    cands.remove(id);
+                    scores.remove(id);
                 }
             }
 
@@ -551,8 +554,8 @@ impl Worker {
                 // Track the kind so done_rx can re-send the right RequestJob.
                 job_kinds.insert(job_id.clone(), kind.clone());
                 // Remove from candidate cache and score baseline — job is no longer pending.
-                self.candidates.remove(&job_id);
-                self.last_scores.remove(&job_id);
+                self.candidates.lock().unwrap().remove(&job_id);
+                self.last_scores.lock().unwrap().remove(&job_id);
 
                 // Set up abort signal for this job.
                 let (abort_tx, abort_rx) = watch::channel(false);
@@ -646,26 +649,27 @@ impl Worker {
             }
 
             ServerMessage::RequestAllScores => {
-                debug!(count = self.candidates.len(), "RequestAllScores — re-scoring all cached candidates");
-                let all: Vec<JobCandidate> = self.candidates.values().cloned().collect();
-                let fresh_scores = if all.is_empty() {
-                    vec![]
-                } else {
-                    self.scorer
-                        .score_candidates(&self.executor.store, &all)
-                        .await?
+                let all: Vec<JobCandidate> = {
+                    let g = self.candidates.lock().unwrap();
+                    g.values().cloned().collect()
                 };
-                // Send only scores that differ from the server's last known values.
-                let changed: Vec<_> = fresh_scores
-                    .into_iter()
-                    .filter(|s| self.last_scores.get(&s.job_id) != Some(s))
-                    .collect();
-                for s in &changed {
-                    self.last_scores.insert(s.job_id.clone(), s.clone());
+                debug!(count = all.len(), "RequestAllScores — re-scoring all cached candidates");
+                if all.is_empty() {
+                    // Server still expects exactly one final empty chunk so
+                    // it knows the re-score pass completed. Send it inline —
+                    // there's nothing to score, so no spawn needed.
+                    send_score_chunks(writer, vec![])?;
+                } else {
+                    spawn_scoring_task(
+                        self.scorer,
+                        Arc::clone(&self.executor.store),
+                        Arc::clone(&self.last_scores),
+                        writer.clone(),
+                        all,
+                        /* delta_filter = */ true,
+                        /* is_final = */ true,
+                    );
                 }
-                // Always send at least one final chunk so the server knows
-                // the worker completed the re-score pass.
-                send_score_chunks(writer, changed)?;
             }
 
             ServerMessage::Draining => {
@@ -707,13 +711,108 @@ impl Worker {
                 if let Some(tx) = cache_waiters.lock().unwrap().remove(&job_id) {
                     let _ = tx.send(cached);
                 } else {
-                    warn!(%job_id, count = cached.len(), "unexpected CacheStatus — no waiter");
+                    // Benign race: a CacheQuery reply arrives after the
+                    // job has already completed and the dispatch loop's
+                    // done_rx handler removed the waiter (or after the
+                    // 120s `query_cache` timeout dropped it). The log info
+                    // is no longer needed since the requesting code path
+                    // is gone — drop the response and move on. Stays at
+                    // debug because it's noisy and not actionable.
+                    debug!(%job_id, count = cached.len(), "CacheStatus arrived after waiter cleared (race with job completion or timeout)");
                 }
             }
         }
 
         Ok(())
     }
+}
+
+/// Drive a `score_candidates` pass off the dispatch loop.
+///
+/// Spawns a tokio task that:
+///   1. scores `candidates` against the local store,
+///   2. (optionally) filters down to scores that differ from the cached
+///      `last_scores` baseline,
+///   3. updates `last_scores` with the surviving entries (under the shared
+///      mutex), and
+///   4. emits one or more `RequestJobChunk` frames via `writer`.
+///
+/// This is the load-bearing fix for "no heartbeats during eval": before this,
+/// each `JobOffer` / `JobListChunk` / `RequestAllScores` ran the full
+/// `.drv`-reading scoring pass inside `handle_message.await`, holding the
+/// dispatch loop out of `select!` for as long as scoring took. With the
+/// scoring spawned, the dispatch loop returns immediately, so heartbeat
+/// ticks fire on schedule and `CacheStatus` replies for an in-flight eval
+/// are routed without delay.
+///
+/// `delta_filter = true` matches `JobOffer` / `RequestAllScores` semantics
+/// (only resend changed scores). `delta_filter = false` matches the initial
+/// `JobListChunk` snapshot (record every score as the baseline).
+/// `is_final` controls the `RequestJobChunk { is_final: … }` flag on the
+/// last chunk emitted in this pass.
+fn spawn_scoring_task(
+    scorer: JobScorer,
+    store: Arc<crate::nix::store::LocalNixStore>,
+    last_scores: Arc<std::sync::Mutex<HashMap<String, proto::messages::CandidateScore>>>,
+    writer: crate::connection::ProtoWriter,
+    candidates: Vec<JobCandidate>,
+    delta_filter: bool,
+    is_final: bool,
+) {
+    tokio::spawn(async move {
+        let started = std::time::Instant::now();
+        let count = candidates.len();
+        let scores = match scorer.score_candidates(&store, &candidates).await {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(error = %e, count, "score_candidates failed in spawned task");
+                return;
+            }
+        };
+
+        // Filter to changed (vs baseline) when requested, then update the
+        // baseline with whatever we actually emit. The mutex section is
+        // short — HashMap lookup + insert per surviving score.
+        let to_send: Vec<proto::messages::CandidateScore> = {
+            let mut g = last_scores.lock().unwrap();
+            let mut out = Vec::with_capacity(scores.len());
+            for s in scores {
+                if !delta_filter || g.get(&s.job_id) != Some(&s) {
+                    g.insert(s.job_id.clone(), s.clone());
+                    out.push(s);
+                }
+            }
+            out
+        };
+
+        debug!(
+            scored = count,
+            sending = to_send.len(),
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            is_final,
+            "scoring task complete"
+        );
+
+        // Send the resulting RequestJobChunk frames. Mirrors the original
+        // inline logic: paginate at 1 000 per frame, with `is_final` on the
+        // last chunk; non-final passes (mid-stream JobListChunk) flag every
+        // chunk as is_final=false.
+        if is_final {
+            if let Err(e) = send_score_chunks(&writer, to_send) {
+                warn!(error = %e, "send_score_chunks (final) failed");
+            }
+        } else {
+            for chunk in to_send.chunks(1_000) {
+                if let Err(e) = writer.send(ClientMessage::RequestJobChunk {
+                    scores: chunk.to_vec(),
+                    is_final: false,
+                }) {
+                    warn!(error = %e, "send RequestJobChunk (non-final) failed");
+                    break;
+                }
+            }
+        }
+    });
 }
 
 /// Send `scores` as one or more `RequestJobChunk` messages, paginated at

@@ -21,6 +21,7 @@ import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { interval, Subscription } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
 import { EvaluationsService, BuildItem, PaginatedBuilds } from '@core/services/evaluations.service';
+import { OrganizationsService } from '@core/services/organizations.service';
 import { Evaluation, EvaluationMessage } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
@@ -38,6 +39,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private evalService = inject(EvaluationsService);
+  private orgsService = inject(OrganizationsService);
   protected authService = inject(AuthService);
   private sanitizer = inject(DomSanitizer);
   private cdr = inject(ChangeDetectorRef);
@@ -61,6 +63,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private tick = signal(0);
 
   orgName = '';
+  orgDisplayName = signal('');
   evaluationId = '';
   private initialBuildId: string | null = null;
 
@@ -110,6 +113,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       this.loading.set(false);
       return;
     }
+    this.orgsService.getOrganization(this.orgName).subscribe({
+      next: (org) => this.orgDisplayName.set(org.display_name),
+      error: () => {},
+    });
     this.loadEvaluation();
   }
 

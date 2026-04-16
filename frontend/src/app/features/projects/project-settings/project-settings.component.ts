@@ -60,6 +60,7 @@ export class ProjectSettingsComponent implements OnInit {
   transferOrgSuggestions = signal<string[]>([]);
 
   orgName = '';
+  orgDisplayName = signal('');
   projectName = '';
 
   formData = {
@@ -90,6 +91,10 @@ export class ProjectSettingsComponent implements OnInit {
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
+    this.orgsService.getOrganization(this.orgName).subscribe({
+      next: (org) => this.orgDisplayName.set(org.display_name),
+      error: () => {},
+    });
     this.loadProject();
   }
 

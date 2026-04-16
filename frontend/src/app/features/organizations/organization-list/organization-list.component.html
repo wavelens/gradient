@@ -105,6 +105,19 @@
   }
   <div class="dialog-content">
     <div class="form-group">
+      <label for="display_name">Display Name *</label>
+      <input
+        pInputText
+        id="display_name"
+        [(ngModel)]="newOrg.display_name"
+        placeholder="My Organization"
+        class="w-full"
+        (ngModelChange)="onOrgDisplayNameChange($event)"
+        (keyup.enter)="createOrganization()"
+      />
+    </div>
+
+    <div class="form-group">
       <label for="name">Name *</label>
       <div class="name-input-wrapper">
         <input
@@ -114,6 +127,7 @@
           placeholder="organization-name"
           class="w-full"
           (ngModelChange)="onOrgNameChange($event)"
+          (input)="onOrgNameUserInput()"
           (keyup.enter)="createOrganization()"
         />
         @if (nameCheckState() === 'checking') {
@@ -131,18 +145,6 @@
       } @else {
         <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
       }
-    </div>
-
-    <div class="form-group">
-      <label for="display_name">Display Name *</label>
-      <input
-        pInputText
-        id="display_name"
-        [(ngModel)]="newOrg.display_name"
-        placeholder="My Organization"
-        class="w-full"
-        (keyup.enter)="createOrganization()"
-      />
     </div>
 
     <div class="form-group">

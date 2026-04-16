@@ -603,9 +603,13 @@ impl Scheduler {
     // ── Log streaming ─────────────────────────────────────────────────────────
 
     pub async fn append_log(&self, job_id: &str, task_index: u32, data: Vec<u8>) -> Result<()> {
+        let bytes_len = data.len();
         let text = match std::str::from_utf8(&data) {
             Ok(s) => s,
-            Err(_) => return Ok(()), // drop non-UTF-8 chunks silently
+            Err(_) => {
+                debug!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: non-UTF-8");
+                return Ok(());
+            }
         };
 
         let build_id_str = {
@@ -616,13 +620,27 @@ impl Scheduler {
                     .builds
                     .get(task_index as usize)
                     .map(|t| t.build_id.clone()),
-                _ => None,
+                Some(PendingJob::Eval(_)) => {
+                    debug!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: job is an eval, not a build");
+                    return Ok(());
+                }
+                None => {
+                    // Common shortly after a build finishes: a few in-flight
+                    // log lines from the worker arrive after the job has
+                    // already been removed from the active tracker. Not an
+                    // error — just lost output, log at debug.
+                    debug!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: no active job (likely race with completion)");
+                    return Ok(());
+                }
             }
         };
 
         let build_id = match build_id_str.and_then(|s| s.parse::<Uuid>().ok()) {
             Some(id) => id,
-            None => return Ok(()), // eval job or missing task — drop
+            None => {
+                warn!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: build_task index out of range or build_id unparseable");
+                return Ok(());
+            }
         };
 
         let log_id = match EBuild::find_by_id(build_id).one(&self.state.db).await? {
@@ -630,6 +648,7 @@ impl Scheduler {
             None => build_id,
         };
 
+        debug!(%build_id, %log_id, bytes = bytes_len, "appending build log");
         self.state.log_storage.append(log_id, text).await
     }
 

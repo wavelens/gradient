@@ -55,6 +55,7 @@ export class WorkersComponent implements OnInit {
   errorMessage = signal<string | null>(null);
 
   orgName = '';
+  orgDisplayName = signal('');
   /** The org UUID — shown as peer_id in the register dialog. */
   orgId = signal<string>('');
   workers = signal<Worker[]>([]);
@@ -73,7 +74,10 @@ export class WorkersComponent implements OnInit {
 
   private loadOrgId(): void {
     this.orgsService.getOrganization(this.orgName).subscribe({
-      next: (org) => this.orgId.set(org.id),
+      next: (org) => {
+        this.orgId.set(org.id);
+        this.orgDisplayName.set(org.display_name);
+      },
       error: () => {},
     });
   }

@@ -146,6 +146,18 @@
   }
   <div class="dialog-content">
     <div class="form-group">
+      <label for="cache-display">Display Name *</label>
+      <input
+        pInputText
+        id="cache-display"
+        [(ngModel)]="newCache.display_name"
+        placeholder="My Cache"
+        class="w-full"
+        (ngModelChange)="onCacheDisplayNameChange($event)"
+      />
+    </div>
+
+    <div class="form-group">
       <label for="cache-name">Name *</label>
       <div class="name-input-wrapper">
         <input
@@ -155,6 +167,7 @@
           placeholder="cache-name"
           class="w-full"
           (ngModelChange)="onCacheNameChange($event)"
+          (input)="onCacheNameUserInput()"
         />
         @if (nameCheckState() === 'checking') {
           <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
@@ -171,17 +184,6 @@
       } @else {
         <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
       }
-    </div>
-
-    <div class="form-group">
-      <label for="cache-display">Display Name *</label>
-      <input
-        pInputText
-        id="cache-display"
-        [(ngModel)]="newCache.display_name"
-        placeholder="My Cache"
-        class="w-full"
-      />
     </div>
 
     <div class="form-group">

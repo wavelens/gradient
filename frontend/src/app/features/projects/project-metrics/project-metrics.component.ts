@@ -20,6 +20,7 @@ import {
   ApexMarkers,
 } from 'ng-apexcharts';
 import { ProjectsService, ProjectMetricPoint, ProjectMetricsResponse } from '@core/services/projects.service';
+import { OrganizationsService } from '@core/services/organizations.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 
 const CHART_COLORS = {
@@ -59,16 +60,27 @@ type ChartOptions = {
 export class ProjectMetricsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private projectsService = inject(ProjectsService);
+  private orgsService = inject(OrganizationsService);
 
   loading = signal(true);
   metrics = signal<ProjectMetricPoint[]>([]);
   keepEvaluations = signal(30);
   orgName = '';
+  orgDisplayName = signal('');
   projectName = '';
+  projectDisplayName = signal('');
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
+    this.orgsService.getOrganization(this.orgName).subscribe({
+      next: (org) => this.orgDisplayName.set(org.display_name),
+      error: () => {},
+    });
+    this.projectsService.getProjectInfo(this.orgName, this.projectName).subscribe({
+      next: (proj) => this.projectDisplayName.set(proj.display_name),
+      error: () => {},
+    });
     this.projectsService.getProjectMetrics(this.orgName, this.projectName).subscribe({
       next: (data: ProjectMetricsResponse) => {
         this.metrics.set(data.points);

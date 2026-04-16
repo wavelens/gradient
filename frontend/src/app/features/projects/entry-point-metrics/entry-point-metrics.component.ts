@@ -20,6 +20,7 @@ import {
   ApexMarkers,
 } from 'ng-apexcharts';
 import { ProjectsService, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/services/projects.service';
+import { OrganizationsService } from '@core/services/organizations.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 
 const CHART_COLORS = {
@@ -58,19 +59,30 @@ type ChartOptions = {
 export class EntryPointMetricsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private projectsService = inject(ProjectsService);
+  private orgsService = inject(OrganizationsService);
 
   loading = signal(true);
   points = signal<EntryPointMetricPoint[]>([]);
   evalAttr = signal('');
   keepEvaluations = signal(30);
   orgName = '';
+  orgDisplayName = signal('');
   projectName = '';
+  projectDisplayName = signal('');
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
     const evalParam = this.route.snapshot.queryParamMap.get('eval') || '';
     this.evalAttr.set(evalParam);
+    this.orgsService.getOrganization(this.orgName).subscribe({
+      next: (org) => this.orgDisplayName.set(org.display_name),
+      error: () => {},
+    });
+    this.projectsService.getProjectInfo(this.orgName, this.projectName).subscribe({
+      next: (proj) => this.projectDisplayName.set(proj.display_name),
+      error: () => {},
+    });
 
     this.projectsService.getEntryPointMetrics(this.orgName, this.projectName, evalParam).subscribe({
       next: (data: EntryPointMetricsResponse) => {

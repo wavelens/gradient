@@ -10,6 +10,7 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
 import { ButtonModule } from 'primeng/button';
 import { AuthService } from '@core/services/auth.service';
+import { OrganizationsService } from '@core/services/organizations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
@@ -31,6 +32,7 @@ import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, 
 export class ProjectDetailComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   protected authService = inject(AuthService);
+  private orgsService = inject(OrganizationsService);
   private projectsService = inject(ProjectsService);
 
   loading = signal(true);
@@ -40,6 +42,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   tick = signal(Date.now());
 
   orgName = '';
+  orgDisplayName = signal('');
   projectName = '';
 
   private pollSubscription?: Subscription;
@@ -48,6 +51,10 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.projectName = this.route.snapshot.paramMap.get('project') || '';
+    this.orgsService.getOrganization(this.orgName).subscribe({
+      next: (org) => this.orgDisplayName.set(org.display_name),
+      error: () => {},
+    });
     this.loadProjectData();
     this.startPolling();
     this.tickSubscription = interval(1000).subscribe(() => this.tick.set(Date.now()));

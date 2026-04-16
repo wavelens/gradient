@@ -57,6 +57,8 @@ export class CacheListComponent implements OnInit, OnDestroy {
     public: false,
   };
 
+  protected cacheNameEditedByUser = false;
+
   publicCaches = signal<Cache[]>([]);
   publicLoading = signal(false);
 
@@ -111,9 +113,29 @@ export class CacheListComponent implements OnInit, OnDestroy {
 
   openCreateDialog(): void {
     this.newCache = { name: '', display_name: '', description: '', priority: 50, public: false };
+    this.cacheNameEditedByUser = false;
     this.nameCheckState.set('idle');
     this.createError.set(null);
     this.showCreateDialog.set(true);
+  }
+
+  onCacheDisplayNameChange(value: string): void {
+    if (!this.cacheNameEditedByUser) {
+      const slug = this.toSlug(value);
+      this.newCache.name = slug;
+      this.onCacheNameChange(slug);
+    }
+  }
+
+  onCacheNameUserInput(): void {
+    this.cacheNameEditedByUser = true;
+  }
+
+  private toSlug(text: string): string {
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
   }
 
   onCacheNameChange(name: string): void {

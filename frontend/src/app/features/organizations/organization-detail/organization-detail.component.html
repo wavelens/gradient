@@ -84,6 +84,19 @@
   }
   <div class="dialog-content">
     <div class="form-group">
+      <label for="proj-display">Display Name *</label>
+      <input
+        pInputText
+        id="proj-display"
+        [(ngModel)]="newProject.display_name"
+        placeholder="My Project"
+        class="w-full"
+        (ngModelChange)="onProjectDisplayNameChange($event)"
+        (keyup.enter)="createProject()"
+      />
+    </div>
+
+    <div class="form-group">
       <label for="proj-name">Name *</label>
       <div class="name-input-wrapper">
         <input
@@ -93,6 +106,7 @@
           placeholder="project-name"
           class="w-full"
           (ngModelChange)="onProjectNameChange($event)"
+          (input)="onProjectNameUserInput()"
           (keyup.enter)="createProject()"
         />
         @if (nameCheckState() === 'checking') {
@@ -110,18 +124,6 @@
       } @else {
         <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
       }
-    </div>
-
-    <div class="form-group">
-      <label for="proj-display">Display Name *</label>
-      <input
-        pInputText
-        id="proj-display"
-        [(ngModel)]="newProject.display_name"
-        placeholder="My Project"
-        class="w-full"
-        (keyup.enter)="createProject()"
-      />
     </div>
 
     <div class="form-group">
@@ -150,7 +152,12 @@
     </div>
 
     <div class="form-group">
-      <label for="proj-wildcard">Evaluation Wildcard</label>
+      <label for="proj-wildcard">
+        Evaluation Wildcard
+        <a href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" target="_blank" rel="noopener noreferrer" class="label-help" title="Learn about evaluation wildcards">
+          <span class="material-symbols-outlined">help</span>
+        </a>
+      </label>
       <input
         pInputText
         id="proj-wildcard"

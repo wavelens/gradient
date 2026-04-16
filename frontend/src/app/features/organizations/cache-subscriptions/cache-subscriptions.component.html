@@ -8,7 +8,7 @@
   <div class="page-header">
     <div>
       <div class="breadcrumb">
-        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgName }}</a>
+        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
         <span class="breadcrumb-separator">/</span>
         <a [routerLink]="['/organization', orgName, 'settings']" class="breadcrumb-link">Settings</a>
         <span class="breadcrumb-separator">/</span>

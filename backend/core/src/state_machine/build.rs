@@ -64,17 +64,30 @@ impl BuildStateMachine {
         }
 
         match (from.clone(), to.clone()) {
-            // Normal progression
+            // Normal progression (still enforced for non-terminal states so
+            // we don't accidentally skip Queued / Building in the UI).
             (BuildStatus::Created, BuildStatus::Queued) => Ok(to),
             (BuildStatus::Queued, BuildStatus::Building) => Ok(to),
-            (BuildStatus::Building, BuildStatus::Completed) => Ok(to),
-            (BuildStatus::Building, BuildStatus::Failed) => Ok(to),
 
-            // Abort is allowed from any non-terminal state
+            // Terminal transitions are allowed from ANY non-terminal source.
+            // The `from_is_terminal` guard above already prevents moves out
+            // of terminal states; here we deliberately accept shortcuts like
+            //   Queued → Completed   (worker built so fast the `Building`
+            //                          update was lost or never sent)
+            //   Queued → Failed      (worker errored before reporting
+            //                          `Building`)
+            //   Created → Failed     (eval-side rejection before queueing)
+            // Without these, a lost / out-of-order `Building` update would
+            // strand the build in `Queued`/`Building` forever — the same
+            // bug class as the silent Queued→Failed reject we hit earlier.
+            (_, BuildStatus::Completed) => Ok(to),
+            (_, BuildStatus::Failed) => Ok(to),
             (_, BuildStatus::Aborted) => Ok(to),
-            // DependencyFailed is allowed from any non-terminal state
             (_, BuildStatus::DependencyFailed) => Ok(to),
 
+            // Substituted is set inline by the eval handler when discovery
+            // sees the output is already in the cache; no transition needed.
+            // Anything else is a real bug.
             _ => Err(InvalidBuildTransition { from, to }),
         }
     }
@@ -183,6 +196,35 @@ mod tests {
     #[test]
     fn build_sm_skip_queued_rejected() {
         assert!(BuildStateMachine::validate(BuildStatus::Created, BuildStatus::Building).is_err());
+    }
+
+    /// Terminal transitions (`Failed`, `Completed`, `Aborted`,
+    /// `DependencyFailed`) are accepted from every non-terminal source.
+    /// This is the regression guard for "JobFailed / JobCompleted arriving
+    /// while the build is still `Queued` because the worker's `Building`
+    /// update was lost or never sent" — without this, the build would be
+    /// silently stranded in the wrong state.
+    #[test]
+    fn build_sm_any_nonterminal_to_any_terminal() {
+        let from_states = [
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+        ];
+        let terminal_states = [
+            BuildStatus::Completed,
+            BuildStatus::Failed,
+            BuildStatus::Aborted,
+            BuildStatus::DependencyFailed,
+        ];
+        for from in &from_states {
+            for to in &terminal_states {
+                assert!(
+                    BuildStateMachine::validate(from.clone(), to.clone()).is_ok(),
+                    "{from:?} → {to:?} should be valid (terminal shortcut)"
+                );
+            }
+        }
     }
 
     #[test]

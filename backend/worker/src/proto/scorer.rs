@@ -20,6 +20,7 @@ use tracing::{debug, warn};
 use crate::nix::store::LocalNixStore;
 
 /// Computes scores for job candidates against the local Nix store.
+#[derive(Clone, Copy, Default, Debug)]
 pub struct JobScorer;
 
 impl JobScorer {
@@ -142,11 +143,6 @@ impl JobScorer {
     }
 }
 
-impl Default for JobScorer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[cfg(test)]
 mod tests {

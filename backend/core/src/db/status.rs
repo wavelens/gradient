@@ -17,7 +17,7 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use std::sync::Arc;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::state_machine::{BuildStateMachine, EvalStateMachine};
@@ -31,12 +31,24 @@ pub async fn update_build_status(
     match BuildStateMachine::validate(build.status.clone(), status.clone()) {
         Ok(_) => {}
         Err(e) => {
-            warn!(build_id = %build.id, error = %e, "Skipping invalid build status transition");
+            // Loud: a rejected transition usually means the build is stuck
+            // in a state the next event can't legally move it from — e.g.
+            // a JobFailed arriving while the build is still `Queued`
+            // because the worker's `Building` JobUpdate was lost / never
+            // sent. Without this we'd silently drop the failure and the UI
+            // would show the build hanging in `Queued` / `Building` forever.
+            error!(
+                build_id = %build.id,
+                from = ?build.status,
+                to = ?status,
+                error = %e,
+                "Skipping invalid build status transition — investigate: status update lost or out of order"
+            );
             return build;
         }
     }
 
-    debug!(build_id = %build.id, status = ?status, "Updating build status");
+    info!(build_id = %build.id, from = ?build.status, to = ?status, "build status transition");
 
     let mut active_build: ABuild = build.clone().into_active_model();
 

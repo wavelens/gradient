@@ -81,6 +81,7 @@ export interface Evaluation {
   id: string;
   project?: string;
   project_name?: string;
+  project_display_name?: string;
   repository: string;
   commit: string;
   wildcard: string;

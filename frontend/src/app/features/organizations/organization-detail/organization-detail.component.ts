@@ -65,6 +65,8 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
     evaluation_wildcard: 'packages.x86_64-linux.*',
   };
 
+  protected projectNameEditedByUser = false;
+
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.loadOrganizationData();
@@ -103,9 +105,29 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
 
   openCreateDialog(): void {
     this.newProject = { name: '', display_name: '', description: '', repository: '', evaluation_wildcard: 'packages.x86_64-linux.*' };
+    this.projectNameEditedByUser = false;
     this.nameCheckState.set('idle');
     this.createError.set(null);
     this.showCreateDialog.set(true);
+  }
+
+  onProjectDisplayNameChange(value: string): void {
+    if (!this.projectNameEditedByUser) {
+      const slug = this.toSlug(value);
+      this.newProject.name = slug;
+      this.onProjectNameChange(slug);
+    }
+  }
+
+  onProjectNameUserInput(): void {
+    this.projectNameEditedByUser = true;
+  }
+
+  private toSlug(text: string): string {
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
   }
 
   onProjectNameChange(name: string): void {
@@ -138,7 +160,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
       case 'Completed': return 'check_circle';
       case 'Failed': return 'error';
       case 'Aborted': return 'cancel';
-      case 'Queued': return 'schedule';
+      case 'Queued': return 'hourglass_empty';
       case 'Waiting': return 'pause_circle';
       default: return 'sync';
     }

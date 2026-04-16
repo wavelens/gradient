@@ -69,6 +69,11 @@
   .header-actions {
     display: flex;
     gap: $spacing-md;
+    flex-shrink: 0;
+
+    button {
+      white-space: nowrap;
+    }
   }
 }
 

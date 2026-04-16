@@ -20,7 +20,8 @@ use harmonia_protocol::build_result::BuildResultInner;
 use harmonia_protocol::daemon_wire::types2::BuildMode;
 use harmonia_protocol::log::{Field, LogMessage, ResultType};
 use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT};
-use harmonia_store_core::store_path::StorePath;
+use harmonia_store_core::store_path::{ContentAddress, ContentAddressMethod, StorePath};
+use harmonia_utils_hash::{Algorithm, Hash};
 use harmonia_store_remote::DaemonStore as _;
 use proto::messages::{BuildOutput, BuildTask};
 use std::collections::BTreeMap;
@@ -42,7 +43,11 @@ pub async fn build_derivation(
     task_index: u32,
     updater: &mut JobUpdater,
 ) -> Result<()> {
-    updater.report_building(task.build_id.clone())?;
+    // NOTE: `report_building` is now sent by the caller
+    // (`execute_build_job`) *before* the prefetch step, so that a `JobFailed`
+    // arriving after a prefetch error finds the build already in `Building`
+    // state on the server. Re-sending it here would only generate a
+    // redundant `Building → Building` no-op transition + extra webhook.
 
     let full_drv_path = nix_store_path(&task.drv_path);
     debug!(drv = %full_drv_path, "building derivation locally");
@@ -90,14 +95,51 @@ pub async fn build_derivation(
         .client()
         .build_derivation(&harmonia_path, &basic_drv, BuildMode::Normal);
     let mut logs = pin!(logs);
+    let mut total_msgs: u64 = 0;
+    let mut forwarded_lines: u64 = 0;
+    let mut forwarded_bytes: u64 = 0;
+    let mut send_failures: u64 = 0;
     while let Some(msg) = logs.next().await {
-        if let Some(line) = log_message_to_text(&msg)
-            && let Err(e) = updater.send_log_chunk(task_index, line.into_bytes())
-        {
-            // Log streaming is best-effort — never fail the build because the
-            // server connection hiccupped.
-            warn!(error = %e, "failed to forward build log chunk; continuing");
+        total_msgs += 1;
+        if let Some(line) = log_message_to_text(&msg) {
+            let len = line.len();
+            match updater.send_log_chunk(task_index, line.into_bytes()) {
+                Ok(()) => {
+                    forwarded_lines += 1;
+                    forwarded_bytes += len as u64;
+                }
+                Err(e) => {
+                    // Log streaming is best-effort — never fail the build
+                    // because the server connection hiccupped.
+                    send_failures += 1;
+                    warn!(error = %e, "failed to forward build log chunk; continuing");
+                }
+            }
         }
+    }
+    info!(
+        drv = %task.drv_path,
+        daemon_messages = total_msgs,
+        forwarded_lines,
+        forwarded_bytes,
+        send_failures,
+        "build log stream drained"
+    );
+    if total_msgs == 0 {
+        warn!(
+            drv = %task.drv_path,
+            "daemon emitted zero LogMessages during build — daemon verbosity may be too low \
+             (set `verbose-builds = true` and `log-lines = 0` in nix.conf, or check \
+             the worker user's permissions to read daemon output)"
+        );
+    } else if forwarded_lines == 0 {
+        warn!(
+            drv = %task.drv_path,
+            daemon_messages = total_msgs,
+            "daemon emitted LogMessages but none had forwardable text content \
+             (only structured progress / activity events) — set `verbose-builds = true` \
+             on the worker's nix-daemon to enable BuildLogLine results"
+        );
     }
     let result = logs.await.map_err(|e| {
         anyhow::anyhow!("build_derivation failed for {}: {}", task.drv_path, e)
@@ -193,13 +235,33 @@ fn get_basic_derivation(
     drv: &gradient_core::db::Derivation,
 ) -> Result<BasicDerivation> {
     // ── Build outputs from .drv data ──────────────────────────────────────────
+    //
+    // Three shapes of `.drv` output to disambiguate:
+    //
+    // 1. Fixed-output derivation (FOD): both `hash_algo` and `hash` are
+    //    populated (e.g. a `fetchurl`). The daemon **must** see this as
+    //    `CAFixed(ContentAddress)` because that's what unlocks network
+    //    access in the build sandbox — passing it as `InputAddressed`
+    //    sandboxes it without DNS, so curl fails with
+    //    `Could not resolve host: …` and the build dies.
+    // 2. Floating CA derivation: `path` is empty AND `hash_algo` is empty.
+    //    Daemon will compute the path from the build output → `Deferred`.
+    // 3. Plain input-addressed derivation: `path` is set, no `hash_algo`.
+    //    → `InputAddressed(StorePath)`.
     let mut outputs: BTreeMap<_, _> = BTreeMap::new();
     for o in &drv.outputs {
         let output_name = o
             .name
             .parse()
             .with_context(|| format!("invalid output name '{}' in {}", o.name, full_drv_path))?;
-        let drv_output = if o.path.is_empty() {
+        let drv_output = if !o.hash_algo.is_empty() && !o.hash.is_empty() {
+            ca_fixed_output(&o.hash_algo, &o.hash).with_context(|| {
+                format!(
+                    "invalid FOD spec for output '{}' in {} (hash_algo={:?} hash={:?})",
+                    o.name, full_drv_path, o.hash_algo, o.hash
+                )
+            })?
+        } else if o.path.is_empty() {
             DerivationOutput::Deferred
         } else {
             let base = strip_nix_store_prefix(o.path.as_str());
@@ -290,3 +352,97 @@ fn get_basic_derivation(
         structured_attrs: None,
     })
 }
+
+/// Build a `DerivationOutput::CAFixed(...)` from a `.drv`'s `outputHashAlgo`
+/// and `outputHash` fields. Without this the daemon would treat the FOD as
+/// an input-addressed derivation, sandbox it without network access, and
+/// every fetch (curl, git clone, …) would fail with DNS errors.
+///
+/// The `.drv` `hash_algo` field follows Nix's wire format:
+///   `"sha256"`        → flat sha256
+///   `"r:sha256"`      → recursive (NAR-hashed) sha256
+///   `"text:sha256"`   → text-hashed (rare, used by `builtins.toFile`)
+///
+/// The `hash` field is hex-encoded (base16) raw digest bytes.
+fn ca_fixed_output(hash_algo: &str, hash_hex: &str) -> Result<DerivationOutput> {
+    let (method, algo_str) = if let Some(rest) = hash_algo.strip_prefix("r:") {
+        (ContentAddressMethod::Recursive, rest)
+    } else if let Some(rest) = hash_algo.strip_prefix("text:") {
+        (ContentAddressMethod::Text, rest)
+    } else {
+        (ContentAddressMethod::Flat, hash_algo)
+    };
+
+    let algorithm: Algorithm = algo_str
+        .parse()
+        .map_err(|e| anyhow::anyhow!("unknown hash algorithm {:?}: {}", algo_str, e))?;
+
+    let hash_bytes = hex::decode(hash_hex)
+        .with_context(|| format!("hash field {:?} is not valid hex", hash_hex))?;
+    let hash = Hash::from_slice(algorithm, &hash_bytes).with_context(|| {
+        format!(
+            "hash length {} doesn't match {:?} digest size",
+            hash_bytes.len(),
+            algorithm
+        )
+    })?;
+
+    let ca = ContentAddress::from_hash(method, hash)
+        .map_err(|e| anyhow::anyhow!("ContentAddress::from_hash failed: {}", e))?;
+    Ok(DerivationOutput::CAFixed(ca))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ca_fixed_flat_sha256() {
+        // sha256("hello") in hex
+        let h = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        let out = ca_fixed_output("sha256", h).unwrap();
+        match out {
+            DerivationOutput::CAFixed(ca) => {
+                assert_eq!(ca.method(), ContentAddressMethod::Flat);
+                assert_eq!(ca.algorithm(), Algorithm::SHA256);
+            }
+            other => panic!("expected CAFixed(Flat), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ca_fixed_recursive_sha256() {
+        let h = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        let out = ca_fixed_output("r:sha256", h).unwrap();
+        match out {
+            DerivationOutput::CAFixed(ca) => {
+                assert_eq!(ca.method(), ContentAddressMethod::Recursive);
+            }
+            other => panic!("expected CAFixed(Recursive), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ca_fixed_text_sha256() {
+        let h = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+        let out = ca_fixed_output("text:sha256", h).unwrap();
+        assert!(matches!(out, DerivationOutput::CAFixed(_)));
+    }
+
+    #[test]
+    fn ca_fixed_rejects_garbage_algo() {
+        assert!(ca_fixed_output("blake7", "deadbeef").is_err());
+    }
+
+    #[test]
+    fn ca_fixed_rejects_bad_hex() {
+        assert!(ca_fixed_output("sha256", "not-hex").is_err());
+    }
+
+    #[test]
+    fn ca_fixed_rejects_wrong_length_hash() {
+        // sha256 needs 32 bytes (64 hex chars); pass 8 bytes (16 hex chars).
+        assert!(ca_fixed_output("sha256", "deadbeefdeadbeef").is_err());
+    }
+}
+

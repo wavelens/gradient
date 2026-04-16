@@ -165,6 +165,8 @@ pub async fn post_build_log(
         .len();
 
     let stream = stream! {
+        use entity::build::BuildStatus;
+
         let mut last_offset: usize = initial_offset;
         let mut sent_any: bool = false;
 
@@ -176,27 +178,48 @@ pub async fn post_build_log(
                 Ok(None) => break,
                 Err(_) => break,
             };
+            let log_key = build.log_id.unwrap_or(build_id);
 
-            let log = state.log_storage.read(build.log_id.unwrap_or(build_id)).await.unwrap_or_default();
-            let log_new = log[last_offset..].to_string();
-
-            if !log_new.is_empty() {
-                sent_any = true;
-                last_offset = log.len();
-                yield log_new;
+            // While the build hasn't started executing yet (`Created` /
+            // `Queued`), there's nothing to stream — but we must not close
+            // the connection either, otherwise a UI that opened the stream
+            // before the worker picked the build up would see an empty
+            // response and never get the live output. Keep polling.
+            if matches!(build.status, BuildStatus::Created | BuildStatus::Queued) {
+                continue;
             }
 
-            if build.status != entity::build::BuildStatus::Building {
-                // One extra read: catches log lines flushed between our read
-                // above and the status transition being committed.
-                let final_log = state.log_storage.read(build.log_id.unwrap_or(build_id)).await.unwrap_or_default();
-                let final_chunk = final_log[last_offset..].to_string();
-                if !final_chunk.is_empty() {
+            // Building / terminal: read whatever's in the log buffer so far
+            // and emit only the new tail.
+            let log = state.log_storage.read(log_key).await.unwrap_or_default();
+            if log.len() > last_offset {
+                let log_new = log[last_offset..].to_string();
+                last_offset = log.len();
+                if !log_new.is_empty() {
                     sent_any = true;
-                    yield final_chunk;
+                    yield log_new;
+                }
+            }
+
+            // Anything other than `Building` is terminal — flush a final
+            // read (catches the race where lines were appended between our
+            // read above and the daemon-side status transition committing)
+            // and close the stream.
+            if build.status != BuildStatus::Building {
+                let final_log = state.log_storage.read(log_key).await.unwrap_or_default();
+                if final_log.len() > last_offset {
+                    let final_chunk = final_log[last_offset..].to_string();
+                    if !final_chunk.is_empty() {
+                        sent_any = true;
+                        yield final_chunk;
+                    }
                 }
                 if !sent_any {
-                    yield "".to_string();
+                    // Build completed (or was Substituted / DependencyFailed
+                    // and never produced output) — emit one empty frame so
+                    // the client sees a clean end-of-stream rather than a
+                    // hanging connection.
+                    yield String::new();
                 }
                 break;
             }

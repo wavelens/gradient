@@ -58,6 +58,8 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
     public: false,
   };
 
+  protected orgNameEditedByUser = false;
+
   publicOrgs = signal<Organization[]>([]);
   publicTotal = signal(0);
   publicPage = signal(1);
@@ -113,9 +115,29 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
 
   openCreateDialog(): void {
     this.newOrg = { name: '', display_name: '', description: '', public: false };
+    this.orgNameEditedByUser = false;
     this.nameCheckState.set('idle');
     this.createError.set(null);
     this.showCreateDialog.set(true);
+  }
+
+  onOrgDisplayNameChange(value: string): void {
+    if (!this.orgNameEditedByUser) {
+      const slug = this.toSlug(value);
+      this.newOrg.name = slug;
+      this.onOrgNameChange(slug);
+    }
+  }
+
+  onOrgNameUserInput(): void {
+    this.orgNameEditedByUser = true;
+  }
+
+  private toSlug(text: string): string {
+    return text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
   }
 
   onOrgNameChange(name: string): void {

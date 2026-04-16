@@ -31,7 +31,7 @@ pub async fn get_evaluation(
         .await?
         .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
-    let (organization_id, project_name) = if let Some(project_id) = evaluation.project {
+    let (organization_id, project_name, project_display_name) = if let Some(project_id) = evaluation.project {
         let project = EProject::find_by_id(project_id)
             .one(&state.db)
             .await?
@@ -44,7 +44,8 @@ pub async fn get_evaluation(
                 WebError::InternalServerError("Evaluation data inconsistency".to_string())
             })?;
         let name = project.name.clone();
-        (project.organization, Some(name))
+        let display_name = project.display_name.clone();
+        (project.organization, Some(name), Some(display_name))
     } else {
         let org_id = EDirectBuild::find()
             .filter(CDirectBuild::Evaluation.eq(evaluation.id))
@@ -55,7 +56,7 @@ pub async fn get_evaluation(
                 WebError::InternalServerError("Direct build data inconsistency".to_string())
             })?
             .organization;
-        (org_id, None)
+        (org_id, None, None)
     };
     let organization = EOrganization::find_by_id(organization_id)
         .one(&state.db)
@@ -135,6 +136,7 @@ pub async fn get_evaluation(
             id: evaluation.id,
             project: evaluation.project,
             project_name,
+            project_display_name,
             repository: evaluation.repository,
             commit: commit_hash,
             wildcard: evaluation.wildcard,

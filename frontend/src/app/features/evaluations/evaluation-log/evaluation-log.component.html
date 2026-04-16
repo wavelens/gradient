@@ -20,10 +20,10 @@
     <aside class="builds-sidebar">
 
       <div class="sidebar-breadcrumb">
-        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgName }}</a>
+        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
         @if (ev.project_name) {
           <span class="breadcrumb-sep">/</span>
-          <a [routerLink]="['/organization', orgName, 'project', ev.project_name]" class="breadcrumb-link">{{ ev.project_name }}</a>
+          <a [routerLink]="['/organization', orgName, 'project', ev.project_name]" class="breadcrumb-link">{{ ev.project_display_name || ev.project_name }}</a>
         }
         <span class="breadcrumb-sep">/</span>
         <span class="breadcrumb-cur">Evaluation</span>

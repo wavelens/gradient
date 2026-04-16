@@ -43,6 +43,7 @@ pub struct EvaluationResponse {
     pub id: Uuid,
     pub project: Option<Uuid>,
     pub project_name: Option<String>,
+    pub project_display_name: Option<String>,
     pub repository: String,
     pub commit: String,
     pub wildcard: String,

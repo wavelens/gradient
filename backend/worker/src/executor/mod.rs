@@ -123,6 +123,10 @@ impl JobExecutor {
                         }
                         if let Some(url) = &cp.url {
                             // S3 presigned upload.
+                            tracing::debug!(
+                                store_path = %cp.path,
+                                "uploading NAR via presigned PUT URL"
+                            );
                             if let Err(e) = nar::upload_presigned(
                                 &updater.job_id,
                                 &cp.path,
@@ -139,14 +143,30 @@ impl JobExecutor {
                                     "presigned NAR upload failed; continuing"
                                 );
                             }
-                        } else if let Err(e) =
-                            nar::push_direct(&updater.job_id, &cp.path, &updater.writer).await
-                        {
-                            tracing::warn!(
+                        } else {
+                            // Server returned `url: None` — either the cache
+                            // is local (no presigning) or S3 presigning
+                            // failed server-side (look for the matching
+                            // server-side ERROR log). Fall back to the
+                            // chunked WS transfer so the upload still
+                            // happens, but flag it: in S3-configured
+                            // deployments this routes every NAR through the
+                            // gradient-server process and defeats S3.
+                            tracing::info!(
                                 store_path = %cp.path,
-                                error = %e,
-                                "failed to push NAR for fetched input; continuing"
+                                "server returned no presigned URL — falling back to direct NarPush \
+                                 (expected for local-mode caches; check server logs for \
+                                 'presigned PUT URL generation failed' if you have S3 configured)"
                             );
+                            if let Err(e) =
+                                nar::push_direct(&updater.job_id, &cp.path, &updater.writer).await
+                            {
+                                tracing::warn!(
+                                    store_path = %cp.path,
+                                    error = %e,
+                                    "failed to push NAR for fetched input; continuing"
+                                );
+                            }
                         }
                     }
                     updater.report_fetch_result(fetched_inputs)?;
@@ -183,6 +203,15 @@ impl JobExecutor {
         credentials: &CredentialStore,
     ) -> Result<()> {
         for (index, build_task) in job.builds.iter().enumerate() {
+            // Move the build to `Building` on the server *before* anything
+            // that can fail. The state machine only allows
+            // `Building → Failed`; if we let prefetch (or anything before
+            // `report_building`) bubble up an error first, the eventual
+            // `JobFailed` would arrive at the server while the build is
+            // still `Queued`, the transition would be rejected, and the UI
+            // would show the build hanging in `Queued` forever.
+            updater.report_building(build_task.build_id.clone())?;
+
             // Best-effort prefetch: import any cache-resident inputs the
             // daemon will need. A failure here doesn't abort the build —
             // the daemon will error out cleanly if a critical input is

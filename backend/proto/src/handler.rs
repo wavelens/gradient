@@ -1429,10 +1429,23 @@ async fn handle_cache_query(
         } else if matches!(mode, QueryMode::Push) {
             // Path is NOT locally cached — for Push mode return it so the
             // worker knows to upload, with an optional presigned PUT URL.
+            // For S3 stores, `presigned_put_url` returns `Ok(Some(url))`; for
+            // local stores, `Ok(None)` (worker falls back to chunked NarPush).
+            // An `Err` means the S3 backend rejected the signing request —
+            // operator intervention is needed (credentials, endpoint, region).
+            // Log at error level since the fallback (NarPush through the WS)
+            // routes every NAR through the gradient-server process and
+            // defeats the whole point of having S3 configured.
             let url = match state.nar_storage.presigned_put_url(hash, expire).await {
                 Ok(u) => u,
                 Err(e) => {
-                    warn!(%hash, error = %e, "failed to generate presigned PUT URL");
+                    error!(
+                        %hash,
+                        error = %e,
+                        "S3 presigned PUT URL generation failed; worker will fall back to \
+                         direct NarPush (this defeats S3 — check S3 credentials / endpoint / \
+                         region config)"
+                    );
                     None
                 }
             };
@@ -1517,48 +1530,109 @@ async fn handle_cache_query(
         return result;
     }
 
-    let http = reqwest::Client::new();
+    // Per-request timeout: a single hung upstream (DNS-resolves but never
+    // responds) used to block the whole CacheQuery indefinitely, blowing
+    // through the worker's 120s `query_cache` timeout. 5s per request is
+    // generous for narinfo (a few-hundred-byte file) and bounds total
+    // worst-case wait to `5s × upstream_urls.len()` per path.
+    let http = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .connect_timeout(std::time::Duration::from_secs(3))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(error = %e, "failed to build upstream HTTP client; skipping upstream lookup");
+            return result;
+        }
+    };
 
-    'paths: for (hash, store_path) in uncached_pairs {
-        for base_url in &upstream_urls {
-            let narinfo_url =
-                format!("{}/{}.narinfo", base_url.trim_end_matches('/'), hash);
-            let body = match http.get(&narinfo_url).send().await {
-                Ok(r) if r.status().is_success() => match r.text().await {
-                    Ok(b) => b,
-                    Err(_) => continue,
-                },
-                _ => continue,
-            };
-            if let Some(nar_path) = body
-                .lines()
-                .find_map(|l| l.strip_prefix("URL: ").map(str::trim))
-            {
-                let url = format!("{}/{}", base_url.trim_end_matches('/'), nar_path);
-                // Upstream-served paths: we don't have the import metadata
-                // locally. For Pull-mode workers this means they can't import
-                // via add_to_store_nar without first parsing the upstream
-                // narinfo themselves; the URL points at the upstream NAR
-                // directly so they can fall back to `nix copy`/substituter
-                // semantics if needed.
-                result.push(CachedPath {
-                    path: store_path.to_string(),
-                    cached: true,
-                    file_size: None,
-                    nar_size: None,
-                    url: Some(url),
-                    nar_hash: None,
-                    references: None,
-                    signatures: None,
-                    deriver: None,
-                    ca: None,
-                });
-                continue 'paths;
-            }
+    // Parallelise upstream lookups across all uncached paths. Without this
+    // the loop was strictly serial: a 59-path eval batch with 2 upstream
+    // URLs averaging 1 s per probe = ~120 s end-to-end, which is exactly
+    // when the worker's `query_cache` timeout fires. With a concurrency cap
+    // we stay well under it even on slow links.
+    use futures::stream::{FuturesUnordered, StreamExt as _};
+    const UPSTREAM_LOOKUP_CONCURRENCY: usize = 16;
+
+    let upstream_urls = Arc::new(upstream_urls);
+    let mut futs = FuturesUnordered::new();
+    let mut iter = uncached_pairs.into_iter();
+    // Seed up to the concurrency cap, then refill as each completes so we
+    // never have more than N requests in flight at once.
+    for _ in 0..UPSTREAM_LOOKUP_CONCURRENCY {
+        if let Some((hash, store_path)) = iter.next() {
+            futs.push(lookup_upstream_narinfo(
+                http.clone(),
+                Arc::clone(&upstream_urls),
+                hash.to_owned(),
+                store_path.to_owned(),
+            ));
+        }
+    }
+    while let Some(found) = futs.next().await {
+        if let Some(cp) = found {
+            result.push(cp);
+        }
+        if let Some((hash, store_path)) = iter.next() {
+            futs.push(lookup_upstream_narinfo(
+                http.clone(),
+                Arc::clone(&upstream_urls),
+                hash.to_owned(),
+                store_path.to_owned(),
+            ));
         }
     }
 
     result
+}
+
+/// Probe each `upstream_url` for `<hash>.narinfo` until one responds 2xx.
+/// Returns `Some(CachedPath)` pointing at the upstream NAR URL on first hit,
+/// `None` if no upstream has the path.  Each HTTP request is bounded by the
+/// caller's `Client::timeout`, so a stuck upstream can't block the whole
+/// CacheQuery handler.
+async fn lookup_upstream_narinfo(
+    http: reqwest::Client,
+    upstream_urls: Arc<Vec<String>>,
+    hash: String,
+    store_path: String,
+) -> Option<crate::messages::CachedPath> {
+    for base_url in upstream_urls.iter() {
+        let narinfo_url = format!("{}/{}.narinfo", base_url.trim_end_matches('/'), &hash);
+        let body = match http.get(&narinfo_url).send().await {
+            Ok(r) if r.status().is_success() => match r.text().await {
+                Ok(b) => b,
+                Err(_) => continue,
+            },
+            _ => continue,
+        };
+        if let Some(nar_path) = body
+            .lines()
+            .find_map(|l| l.strip_prefix("URL: ").map(str::trim))
+        {
+            let url = format!("{}/{}", base_url.trim_end_matches('/'), nar_path);
+            // Upstream-served paths: we don't have the import metadata
+            // locally. For Pull-mode workers this means they can't import
+            // via add_to_store_nar without first parsing the upstream
+            // narinfo themselves; the URL points at the upstream NAR
+            // directly so they can fall back to `nix copy`/substituter
+            // semantics if needed.
+            return Some(crate::messages::CachedPath {
+                path: store_path,
+                cached: true,
+                file_size: None,
+                nar_size: None,
+                url: Some(url),
+                nar_hash: None,
+                references: None,
+                signatures: None,
+                deriver: None,
+                ca: None,
+            });
+        }
+    }
+    None
 }
 
 /// Chunk size for direct NAR streaming over the WebSocket (64 KiB).
