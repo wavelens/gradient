@@ -11,6 +11,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -20,6 +21,13 @@ use tracing::debug;
 
 use crate::connection::ProtoWriter;
 use proto::traits::JobReporter;
+
+/// Upper bound for how long a single `CacheQuery` may wait for its `CacheStatus`
+/// response. The worker dispatch loop processes server messages serially, so a
+/// slow `JobOffer` scoring pass can delay routing a `CacheStatus` to the waiter.
+/// Without a timeout the eval task would hang forever in pathological cases —
+/// surface the stall instead so the eval fails loudly and the operator can act.
+const CACHE_QUERY_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Typed sender for reporting job progress back to the server.
 ///
@@ -45,14 +53,7 @@ impl JobUpdater {
     }
 
     pub async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode) -> Result<Vec<CachedPath>> {
-        let (tx, rx) = oneshot::channel();
-        self.cache_waiters.lock().unwrap().insert(self.job_id.clone(), tx);
-        self.writer.send(ClientMessage::CacheQuery {
-            job_id: self.job_id.clone(),
-            paths,
-            mode,
-        })?;
-        rx.await.map_err(|_| anyhow::anyhow!("cache waiter dropped — connection closed?"))
+        cache_query_with_timeout(&self.job_id, &self.writer, &self.cache_waiters, paths, mode).await
     }
 
     pub fn report_fetch_result(&self, fetched_paths: Vec<FetchedInput>) -> Result<()> {
@@ -98,17 +99,51 @@ impl JobUpdater {
     }
 }
 
+/// Send a `CacheQuery` and wait for the matching `CacheStatus`, with a hard
+/// timeout so a stalled dispatch loop can't hang the eval task forever.
+async fn cache_query_with_timeout(
+    job_id: &str,
+    writer: &ProtoWriter,
+    cache_waiters: &Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>>,
+    paths: Vec<String>,
+    mode: QueryMode,
+) -> Result<Vec<CachedPath>> {
+    let path_count = paths.len();
+    let (tx, rx) = oneshot::channel();
+    // Re-using the same key drops any stale sender; the previous waiter then
+    // sees `RecvError` and bails out instead of blocking forever.
+    cache_waiters
+        .lock()
+        .unwrap()
+        .insert(job_id.to_owned(), tx);
+    writer.send(ClientMessage::CacheQuery {
+        job_id: job_id.to_owned(),
+        paths,
+        mode,
+    })?;
+    match tokio::time::timeout(CACHE_QUERY_TIMEOUT, rx).await {
+        Ok(Ok(cached)) => Ok(cached),
+        Ok(Err(_)) => Err(anyhow::anyhow!(
+            "cache waiter dropped — connection closed or superseded?"
+        )),
+        Err(_) => {
+            // Drop the waiter so a late CacheStatus doesn't deliver to a
+            // closed channel and log a spurious warning later.
+            cache_waiters.lock().unwrap().remove(job_id);
+            Err(anyhow::anyhow!(
+                "CacheQuery for {} paths timed out after {}s waiting for CacheStatus (job_id={})",
+                path_count,
+                CACHE_QUERY_TIMEOUT.as_secs(),
+                job_id,
+            ))
+        }
+    }
+}
+
 #[async_trait]
 impl JobReporter for JobUpdater {
     async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode) -> Result<Vec<CachedPath>> {
-        let (tx, rx) = oneshot::channel();
-        self.cache_waiters.lock().unwrap().insert(self.job_id.clone(), tx);
-        self.writer.send(ClientMessage::CacheQuery {
-            job_id: self.job_id.clone(),
-            paths,
-            mode,
-        })?;
-        rx.await.map_err(|_| anyhow::anyhow!("cache waiter dropped — connection closed?"))
+        cache_query_with_timeout(&self.job_id, &self.writer, &self.cache_waiters, paths, mode).await
     }
 
     async fn report_fetching(&mut self) -> Result<()> {

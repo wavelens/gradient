@@ -7,8 +7,10 @@
 
  - Final CI reporting (L2, L3, Q1, Q2) — needs injectable CI reporter to assert CiStatus::Success/Failure is sent when evaluation reaches terminal state. Currently the CI path is hard-coded to reporter_for_project() which creates reporters from DB config, not injectable.
  - Transitive cascade (M1) — needs proper graph walk test, but the current cascade_dependency_failed logic uses DB queries that are hard to stage for transitive walks with MockDB.
+ -  make score_candidates non-blocking for the dispatch loop. The proper fix is to spawn each JobListChunk / JobOffer /
+  RequestAllScores scoring pass into its own task that holds Arc<Mutex<HashMap>> clones of candidates and last_scores, computes scores, and sends RequestJobChunk via the writer. The dispatch loop would then return to select! immediately and stay responsive to CacheStatus (and everything else) regardless of how long scoring takes. I left this as task #8 since it touches the worker-loop state model and warrants its own focused change.
 
- - RequestJobChunk needs to only send the part thats updated, worker needs to keep track of which it needs to resend.
+ - build log completed builds value is increasing, but shoudn't, because the updates adds all builds to the completed value (not only the new ones)
  - save which worker was used for each build in the database
  - old docs for state configuration options
  - argon2 for user password hashing

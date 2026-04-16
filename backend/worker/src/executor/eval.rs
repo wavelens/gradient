@@ -15,13 +15,14 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::worker_pool::WorkerPoolResolver;
 use anyhow::{Context, Result};
 use gradient_core::db::parse_drv;
 use gradient_core::nix::DerivationResolver;
 use proto::messages::{DerivationOutput, DiscoveredDerivation, FlakeJob};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use proto::messages::QueryMode;
 
@@ -219,6 +220,13 @@ pub async fn evaluate_derivations_with(
         }
     }
 
+    info!(
+        roots = root_drvs.len(),
+        "starting closure walk"
+    );
+    let walk_start = Instant::now();
+    let mut walked: usize = 0;
+
     while let Some((attr, drv_path)) = queue.pop_front() {
         // CRITICAL: A silent `continue` here would drop the derivation **and its
         // entire dependency subtree** from the closure walk. The server would
@@ -272,6 +280,18 @@ pub async fn evaluate_derivations_with(
             substituted: false,
         });
 
+        walked += 1;
+        // Heartbeat log every 500 derivations so the operator can tell
+        // "slow eval" apart from "stuck eval".
+        if walked.is_multiple_of(500) {
+            info!(
+                walked,
+                queued = queue.len(),
+                elapsed_secs = walk_start.elapsed().as_secs(),
+                "closure walk progress"
+            );
+        }
+
         // Flush a mid-walk batch once it reaches EVAL_BATCH_SIZE.
         if batch.len() >= EVAL_BATCH_SIZE {
             mark_substituted(&mut batch, updater).await;
@@ -279,6 +299,12 @@ pub async fn evaluate_derivations_with(
             updater.report_eval_result(std::mem::take(&mut batch), vec![], vec![]).await?;
         }
     }
+
+    info!(
+        walked,
+        elapsed_secs = walk_start.elapsed().as_secs(),
+        "closure walk complete"
+    );
 
     // ── Final flush: remaining derivations + accumulated warnings/errors ──────
     warnings.sort_unstable();
