@@ -9,4 +9,6 @@
 pub mod credentials;
 pub mod job;
 pub mod nar;
+pub mod nar_import;
+pub mod nar_recv;
 pub mod scorer;

@@ -145,6 +145,32 @@ pub struct WorkerConfig {
     /// Sign store paths and upload signatures.
     #[arg(long, env = "GRADIENT_WORKER_CAPABILITY_SIGN", default_value = "false")]
     pub capability_sign: bool,
+
+    // ── Build environment ─────────────────────────────────────────────────────
+    /// Comma-separated Nix system strings this worker can build for.
+    /// Defaults to the host system (e.g. `x86_64-linux`). Override to add
+    /// emulated targets — e.g. `x86_64-linux,aarch64-linux` on a binfmt host.
+    /// Used by the server's dispatcher to gate build assignment.
+    #[arg(long, env = "GRADIENT_WORKER_ARCHITECTURES", value_delimiter = ',')]
+    pub architectures: Option<Vec<String>>,
+
+    /// Comma-separated Nix system features this worker advertises
+    /// (e.g. `kvm,big-parallel,nixos-test`). Builds requiring features not
+    /// in this list won't be assigned to this worker. Empty by default;
+    /// list your daemon's `system-features` here.
+    #[arg(long, env = "GRADIENT_WORKER_SYSTEM_FEATURES", value_delimiter = ',')]
+    pub system_features: Option<Vec<String>>,
+}
+
+/// Detect the host's Nix system string from `std::env::consts`.
+/// Maps `std::env::consts::OS` (`macos`) to Nix's convention (`darwin`).
+pub fn host_system() -> String {
+    let arch = std::env::consts::ARCH;
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        other => other,
+    };
+    format!("{arch}-{os}")
 }
 
 impl WorkerConfig {
@@ -277,6 +303,8 @@ mod tests {
             capability_eval: false,
             capability_build: false,
             capability_sign: false,
+            architectures: None,
+            system_features: None,
         }
     }
 
@@ -352,6 +380,8 @@ mod tests {
             capability_eval: false,
             capability_build: false,
             capability_sign: false,
+            architectures: None,
+            system_features: None,
         };
         assert!(cfg.peer_tokens().is_empty());
     }
@@ -411,6 +441,8 @@ mod tests {
             capability_eval: false,
             capability_build: false,
             capability_sign: false,
+            architectures: None,
+            system_features: None,
         };
         let tokens = cfg.peer_tokens();
         let _ = std::fs::remove_file(&path);

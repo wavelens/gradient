@@ -179,8 +179,22 @@ pub async fn add_features(
                 feature: Set(feature.id),
             };
 
-            aderivation_feature
-                .insert(&state.db)
+            // `derivation_feature` has a UNIQUE (derivation, feature) index;
+            // re-discovering an already-known edge during a fresh evaluation
+            // would otherwise blow up with a constraint violation and abort
+            // the whole eval-result handler. `ON CONFLICT DO NOTHING` makes
+            // the insert idempotent.
+            EDerivationFeature::insert(aderivation_feature)
+                .on_conflict(
+                    sea_orm::sea_query::OnConflict::columns([
+                        CDerivationFeature::Derivation,
+                        CDerivationFeature::Feature,
+                    ])
+                    .do_nothing()
+                    .to_owned(),
+                )
+                .do_nothing()
+                .exec(&state.db)
                 .await
                 .context("Failed to insert derivation feature")?;
         }

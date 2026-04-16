@@ -71,9 +71,20 @@ impl Worker {
         );
 
         if handshake.negotiated.build {
+            let architectures = config
+                .architectures
+                .clone()
+                .unwrap_or_else(|| vec![crate::config::host_system()]);
+            let system_features = config.system_features.clone().unwrap_or_default();
+            info!(
+                ?architectures,
+                ?system_features,
+                max_concurrent_builds = config.max_concurrent_builds,
+                "advertising build capabilities"
+            );
             conn.send(ClientMessage::WorkerCapabilities {
-                architectures: vec![],
-                system_features: vec![],
+                architectures,
+                system_features,
                 max_concurrent_builds: config.max_concurrent_builds,
             })
             .await?;
@@ -126,9 +137,20 @@ impl Worker {
         );
 
         if handshake.negotiated.build {
+            let architectures = config
+                .architectures
+                .clone()
+                .unwrap_or_else(|| vec![crate::config::host_system()]);
+            let system_features = config.system_features.clone().unwrap_or_default();
+            info!(
+                ?architectures,
+                ?system_features,
+                max_concurrent_builds = config.max_concurrent_builds,
+                "advertising build capabilities"
+            );
             conn.send(ClientMessage::WorkerCapabilities {
-                architectures: vec![],
-                system_features: vec![],
+                architectures,
+                system_features,
                 max_concurrent_builds: config.max_concurrent_builds,
             })
             .await?;
@@ -224,6 +246,9 @@ impl Worker {
         let cache_waiters: Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
+        // Shared: job tasks register here when awaiting NarPush chunks.
+        let nar_recv = crate::proto::nar_recv::NarReceiver::new();
+
         // Abort senders: keyed by job_id; job tasks hold the receiver.
         let mut abort_senders: HashMap<String, watch::Sender<bool>> = HashMap::new();
 
@@ -254,6 +279,7 @@ impl Worker {
                 Some((job_id, result)) = done_rx.recv() => {
                     abort_senders.remove(&job_id);
                     cache_waiters.lock().unwrap().remove(&job_id);
+                    nar_recv.forget_job(&job_id);
                     self.credentials.clear();
 
                     let completed_kind = job_kinds.remove(&job_id);
@@ -327,6 +353,7 @@ impl Worker {
                         msg,
                         &writer,
                         &cache_waiters,
+                        &nar_recv,
                         &mut abort_senders,
                         &mut job_kinds,
                         max_eval,
@@ -347,6 +374,50 @@ impl Worker {
         msg: ServerMessage,
         writer: &crate::connection::ProtoWriter,
         cache_waiters: &Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>>,
+        nar_recv: &crate::proto::nar_recv::NarReceiver,
+        abort_senders: &mut HashMap<String, watch::Sender<bool>>,
+        job_kinds: &mut HashMap<String, JobKind>,
+        max_eval: u32,
+        max_build: u32,
+        done_tx: &mpsc::UnboundedSender<(String, Result<()>)>,
+    ) -> Result<()> {
+        // Timing instrumentation: any single handler that takes more than a
+        // second is starving the dispatch loop's `select!` (no heartbeat,
+        // delayed `done_rx` / reader polling). Log it loudly so we can spot
+        // the offender without having to rebuild with debug tracing.
+        let started = std::time::Instant::now();
+        let kind = msg_kind(&msg);
+        let result = self
+            .handle_message_inner(
+                msg,
+                writer,
+                cache_waiters,
+                nar_recv,
+                abort_senders,
+                job_kinds,
+                max_eval,
+                max_build,
+                done_tx,
+            )
+            .await;
+        let elapsed_ms = started.elapsed().as_millis();
+        if elapsed_ms > 1_000 {
+            warn!(
+                kind,
+                elapsed_ms,
+                "slow handle_message — dispatch loop was blocked from polling heartbeat / done_rx for this duration"
+            );
+        }
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_message_inner(
+        &mut self,
+        msg: ServerMessage,
+        writer: &crate::connection::ProtoWriter,
+        cache_waiters: &Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>>,
+        nar_recv: &crate::proto::nar_recv::NarReceiver,
         abort_senders: &mut HashMap<String, watch::Sender<bool>>,
         job_kinds: &mut HashMap<String, JobKind>,
         max_eval: u32,
@@ -492,11 +563,17 @@ impl Worker {
                 let credentials = self.credentials.clone();
                 let job_writer = writer.clone();
                 let job_cache_waiters = cache_waiters.clone();
+                let job_nar_recv = nar_recv.clone();
                 let job_done_tx = done_tx.clone();
                 let jid = job_id.clone();
 
                 tokio::spawn(async move {
-                    let mut updater = JobUpdater::new(jid.clone(), job_writer, job_cache_waiters);
+                    let mut updater = JobUpdater::new(
+                        jid.clone(),
+                        job_writer,
+                        job_cache_waiters,
+                        job_nar_recv,
+                    );
                     let result = run_job(executor, job, &mut updater, &credentials, abort_rx).await;
                     let _ = job_done_tx.send((jid, result));
                 });
@@ -522,12 +599,19 @@ impl Worker {
             ServerMessage::NarPush {
                 job_id,
                 store_path,
-                data: _,
+                data,
                 offset,
                 is_final,
             } => {
-                debug!(%job_id, %store_path, offset, is_final, "received NAR chunk from server");
-                // TODO(1.4): reassemble and import into local nix store.
+                debug!(
+                    %job_id,
+                    %store_path,
+                    offset,
+                    is_final,
+                    bytes = data.len(),
+                    "received NAR chunk from server"
+                );
+                nar_recv.accept_chunk(&job_id, &store_path, data, is_final);
             }
 
             ServerMessage::PresignedDownload {
@@ -656,6 +740,31 @@ fn send_score_chunks(
         })?;
     }
     Ok(())
+}
+
+/// Short tag for a [`ServerMessage`] used in dispatch-loop timing logs so we
+/// can identify which handler is starving the loop without dumping the full
+/// message payload (some are large).
+fn msg_kind(msg: &ServerMessage) -> &'static str {
+    match msg {
+        ServerMessage::JobListChunk { .. } => "JobListChunk",
+        ServerMessage::JobOffer { .. } => "JobOffer",
+        ServerMessage::RevokeJob { .. } => "RevokeJob",
+        ServerMessage::AssignJob { .. } => "AssignJob",
+        ServerMessage::AbortJob { .. } => "AbortJob",
+        ServerMessage::Credential { .. } => "Credential",
+        ServerMessage::NarPush { .. } => "NarPush",
+        ServerMessage::PresignedDownload { .. } => "PresignedDownload",
+        ServerMessage::PresignedUpload { .. } => "PresignedUpload",
+        ServerMessage::RequestAllScores => "RequestAllScores",
+        ServerMessage::Draining => "Draining",
+        ServerMessage::Error { .. } => "Error",
+        ServerMessage::InitAck { .. } => "InitAck",
+        ServerMessage::Reject { .. } => "Reject",
+        ServerMessage::AuthChallenge { .. } => "AuthChallenge",
+        ServerMessage::AuthUpdate { .. } => "AuthUpdate",
+        ServerMessage::CacheStatus { .. } => "CacheStatus",
+    }
 }
 
 /// Execute a single job inside a spawned task.

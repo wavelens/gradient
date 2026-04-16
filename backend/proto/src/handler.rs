@@ -656,7 +656,13 @@ pub(crate) async fn handle_socket(
             // ── NAR transfer ──────────────────────────────────────────────
             ClientMessage::NarRequest { job_id, paths } => {
                 debug!(%peer_id, %job_id, count = paths.len(), "NarRequest");
-                // TODO: look up each path in NarStore; respond NarPush or PresignedDownload.
+                for store_path in paths {
+                    if let Err(e) =
+                        serve_nar_request(&state, &mut socket, &job_id, &store_path).await
+                    {
+                        warn!(%peer_id, %job_id, %store_path, error = %e, "NarRequest serve failed");
+                    }
+                }
             }
 
             ClientMessage::NarPush {
@@ -1553,6 +1559,84 @@ async fn handle_cache_query(
     }
 
     result
+}
+
+/// Chunk size for direct NAR streaming over the WebSocket (64 KiB).
+const NAR_PUSH_CHUNK_SIZE: usize = 64 * 1024;
+
+/// Look up `store_path` in `state.nar_storage` and stream it to the worker as
+/// a sequence of [`ServerMessage::NarPush`] frames. The last frame carries
+/// `is_final: true`. Returns an error (logged by the caller) if the NAR is
+/// not present or transmission fails midway — the worker's `NarRequest`
+/// waiter will time out so a stuck transfer doesn't block the build.
+async fn serve_nar_request(
+    state: &Arc<ServerState>,
+    socket: &mut ProtoSocket,
+    job_id: &str,
+    store_path: &str,
+) -> anyhow::Result<()> {
+    // Extract the 32-char hash that keys the NAR storage from the store path.
+    let hash = store_path
+        .strip_prefix("/nix/store/")
+        .and_then(|s| s.split('-').next())
+        .ok_or_else(|| anyhow::anyhow!("invalid store path: {store_path}"))?;
+
+    let bytes = state
+        .nar_storage
+        .get(hash)
+        .await
+        .map_err(|e| anyhow::anyhow!("nar_storage.get({hash}) failed: {e}"))?
+        .ok_or_else(|| anyhow::anyhow!("NAR not found in cache for {store_path}"))?;
+
+    let total = bytes.len();
+    let mut offset: u64 = 0;
+    if total == 0 {
+        // Empty NAR — still send one is_final frame so the worker's waiter
+        // can complete instead of timing out.
+        let _ = send_server_msg(
+            socket,
+            &ServerMessage::NarPush {
+                job_id: job_id.to_owned(),
+                store_path: store_path.to_owned(),
+                data: Vec::new(),
+                offset: 0,
+                is_final: true,
+            },
+        )
+        .await;
+        return Ok(());
+    }
+
+    let mut chunks = bytes.chunks(NAR_PUSH_CHUNK_SIZE).peekable();
+    while let Some(chunk) = chunks.next() {
+        let is_final = chunks.peek().is_none();
+        let chunk_len = chunk.len() as u64;
+        if send_server_msg(
+            socket,
+            &ServerMessage::NarPush {
+                job_id: job_id.to_owned(),
+                store_path: store_path.to_owned(),
+                data: chunk.to_vec(),
+                offset,
+                is_final,
+            },
+        )
+        .await
+        .is_err()
+        {
+            return Err(anyhow::anyhow!(
+                "WebSocket send failed mid-NarPush at offset {offset}"
+            ));
+        }
+        offset += chunk_len;
+    }
+    debug!(
+        %store_path,
+        bytes = total,
+        chunks = total.div_ceil(NAR_PUSH_CHUNK_SIZE),
+        "NarRequest served"
+    );
+    Ok(())
 }
 
 /// Resolve the import metadata (`nar_hash`, `references`, `signatures`,

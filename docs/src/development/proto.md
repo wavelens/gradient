@@ -60,7 +60,7 @@ sequenceDiagram
 
 ### Peer Identity
 
-Each peer (worker or server) has a persistent `id: Uuid` generated on first start and stored locally (e.g. `/var/lib/gradient-worker/id`). The peer sends it in `InitConnection`:
+Each peer (worker or server) has a persistent `id: Uuid` generated on first start and stored locally (e.g. `/var/lib/gradient-worker/worker-id`). The peer sends it in `InitConnection`:
 
 ```rust
 InitConnection {
@@ -70,27 +70,27 @@ InitConnection {
 }
 ```
 
-The `id` enables:
+The `worker-id` enables:
  - **Reconnect matching** — on reconnect after server restart, the server matches the peer to its previous session and reassigns orphaned jobs immediately instead of waiting for the grace period.
- - **Duplicate detection** — the server rejects a second connection with the same `id`. One WebSocket connection per worker per server instance.
+ - **Duplicate detection** — the server rejects a second connection with the same `worker-id`. One WebSocket connection per worker per server instance.
  - **Admin visibility** — the server tracks connected peers by ID for the frontend UI (list workers, their capabilities, assigned jobs, status).
  - **Logging** — all log lines and job assignments reference the peer ID for debugging.
 
 ### Negotiation
 
-**Version:** the server accepts any `client_version <= PROTO_VERSION`. If the client sends a higher version, the server responds with `Reject { code: 400 }`.
+**Version:** the server accepts any `client_version == PROTO_VERSION`. If the client sends a other version, the server responds with `Reject { code: 400 }`.
 
 **Capabilities:** each `GradientCapabilities` field is AND-ed — a capability is active only if both sides support it. Two fields are server-authoritative:
 
-| Capability | Who controls | Description |
-|------------|--------------|-------------|
-| `core`     | Server only  | Always `true` on the server, always `false` on workers |
-| `federate` | AND          | Relay work and NAR traffic between peers |
-| `fetch`    | AND          | Prefetch flake inputs and clone repositories |
-| `eval`     | AND          | Run Nix flake evaluations |
-| `build`    | AND          | Execute Nix store builds |
-| `sign`     | AND          | Sign store paths and upload signatures |
-| `cache`    | Server only  | Server serves as a binary cache (`GRADIENT_SERVE_CACHE`) |
+| Capability | Who controls |                        Description                           |
+|------------|--------------|--------------------------------------------------------------|
+| `core`     | Server only  | Always `true` on the server, always `false` on workers       |
+| `federate` | AND          | Relay work and NAR traffic between peers                     |
+| `fetch`    | AND          | Prefetch flake inputs and clone repositories                 |
+| `eval`     | AND          | Run Nix flake evaluations                                    |
+| `build`    | AND          | Execute Nix store builds                                     |
+| `sign`     | AND          | Sign store paths and upload signatures                       |
+| `cache`    | Server only  | Server serves as a binary cache (`GRADIENT_SERVE_CACHE`)     |
 
 ---
 
@@ -204,7 +204,16 @@ WorkerCapabilities {
 
 Architectures are free-form strings (e.g. `"x86_64-linux"`, `"aarch64-linux"`) — not an enum. Custom or unusual platforms (e.g. `"riscv64-linux"`) can be advertised without any code changes.
 
-When the server dispatches a build, it checks that the build's target architecture is present in the worker's `architectures` and all `required_features` are present in the worker's `system_features`. For example, a build targeting `aarch64-linux` with `required_features: ["kvm"]` requires a worker with `"aarch64-linux"` in `architectures` and `"kvm"` in `system_features`.
+The reference worker (`gradient-worker`) auto-detects its host system at startup and uses that as the default `architectures` value (`std::env::consts::ARCH` + OS, with `macos` mapped to `darwin`). Both fields are overridable via env vars / CLI flags so a host with binfmt-emulated architectures or a custom-configured daemon can advertise extras:
+
+```text
+GRADIENT_WORKER_ARCHITECTURES=x86_64-linux,aarch64-linux,builtin
+GRADIENT_WORKER_SYSTEM_FEATURES=kvm,big-parallel,nixos-test
+```
+
+When `GRADIENT_WORKER_ARCHITECTURES` is **set**, it replaces the auto-detected default entirely (so e.g. setting it on an aarch64 host without including `aarch64-linux` will refuse all native builds — list every system you want to accept). `GRADIENT_WORKER_SYSTEM_FEATURES` is empty by default; it should mirror the daemon's `system-features` line in `nix.conf` so the dispatcher doesn't route a `kvm`-requiring build to a worker whose daemon can't run it.
+
+When the server dispatches a build, it checks that the build's target architecture is present in the worker's `architectures` and all `required_features` are present in the worker's `system_features`. For example, a build targeting `aarch64-linux` with `required_features: ["kvm"]` requires a worker with `"aarch64-linux"` in `architectures` and `"kvm"` in `system_features`. Builds whose `architecture` is the special string `"builtin"` (e.g. `builtin:fetchurl`) are always assignable, regardless of the worker's `architectures` list.
 
 **Federation proxy behavior:** a proxy with `federate` enabled connects upstream as a single worker. It **aggregates** the capabilities of all its downstream workers:
 

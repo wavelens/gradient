@@ -287,8 +287,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
     this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, offset).subscribe({
       next: (result) => {
+        // Do NOT update totalBuildsCount / activeBuildsCount here — those metric signals
+        // are owned exclusively by loadBuilds() to avoid jumps from concurrent responses.
         this.totalBuilds = result.total;
-        this.activeBuildsCount.set(result.active_count);
         if (result.builds.length > 0) {
           const existingIds = new Set(this.builds().map(b => b.id));
           const newBuilds = result.builds.filter(b => !existingIds.has(b.id));

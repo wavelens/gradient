@@ -20,6 +20,7 @@ use tokio::sync::oneshot;
 use tracing::debug;
 
 use crate::connection::ProtoWriter;
+use crate::proto::nar_recv::NarReceiver;
 use proto::traits::JobReporter;
 
 /// Upper bound for how long a single `CacheQuery` may wait for its `CacheStatus`
@@ -41,6 +42,9 @@ pub struct JobUpdater {
     /// sender is registered here; the dispatch loop routes the `CacheStatus`
     /// reply to the waiting job task.
     pub(crate) cache_waiters: Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>>,
+    /// Routes incoming `NarPush` chunks back to the job task that requested
+    /// them via `NarRequest`. Cloneable; cheap.
+    pub(crate) nar_recv: NarReceiver,
 }
 
 impl JobUpdater {
@@ -48,12 +52,35 @@ impl JobUpdater {
         job_id: String,
         writer: ProtoWriter,
         cache_waiters: Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>>,
+        nar_recv: NarReceiver,
     ) -> Self {
-        Self { job_id, writer, cache_waiters }
+        Self { job_id, writer, cache_waiters, nar_recv }
     }
 
     pub async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode) -> Result<Vec<CachedPath>> {
         cache_query_with_timeout(&self.job_id, &self.writer, &self.cache_waiters, paths, mode).await
+    }
+
+    /// Send `NarRequest { paths }` and wait for every requested path to arrive
+    /// via chunked `NarPush` frames. Returns the assembled (still
+    /// zstd-compressed) NAR bytes per path in the order requested. Each path
+    /// has its own [`NAR_RECV_TIMEOUT`].
+    pub async fn request_nars(&self, paths: Vec<String>) -> Result<Vec<(String, Vec<u8>)>> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Send the bulk request, then await each path concurrently so a slow
+        // one doesn't serialize the rest.
+        self.writer.send(ClientMessage::NarRequest {
+            job_id: self.job_id.clone(),
+            paths: paths.clone(),
+        })?;
+        let mut out = Vec::with_capacity(paths.len());
+        for p in paths {
+            let bytes = self.nar_recv.wait_for(&self.job_id, &p).await?;
+            out.push((p, bytes));
+        }
+        Ok(out)
     }
 
     pub fn report_fetch_result(&self, fetched_paths: Vec<FetchedInput>) -> Result<()> {
@@ -224,7 +251,8 @@ mod tests {
     fn make_updater(job_id: String, conn: crate::connection::ProtoConnection) -> (JobUpdater, crate::connection::ProtoReader) {
         let (writer, reader) = conn.split();
         let cache_waiters = Arc::new(Mutex::new(HashMap::new()));
-        let updater = JobUpdater::new(job_id, writer, cache_waiters);
+        let nar_recv = NarReceiver::new();
+        let updater = JobUpdater::new(job_id, writer, cache_waiters, nar_recv);
         (updater, reader)
     }
 

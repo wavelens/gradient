@@ -168,6 +168,13 @@ impl JobExecutor {
     }
 
     /// Execute a `BuildJob` (builds → compress → sign).
+    ///
+    /// Before each derivation is built, we prefetch any of its input store
+    /// paths that aren't in the local store from the server's cache (via
+    /// `CacheQuery {Pull}` + presigned URL download or `NarRequest`). Without
+    /// this, the daemon would fail with "1 dependency failed" the moment it
+    /// tries to build a derivation whose inputs were produced on a different
+    /// worker.
     #[instrument(skip_all)]
     pub async fn execute_build_job(
         &self,
@@ -176,6 +183,24 @@ impl JobExecutor {
         credentials: &CredentialStore,
     ) -> Result<()> {
         for (index, build_task) in job.builds.iter().enumerate() {
+            // Best-effort prefetch: import any cache-resident inputs the
+            // daemon will need. A failure here doesn't abort the build —
+            // the daemon will error out cleanly if a critical input is
+            // truly missing, and that error is more diagnosable than the
+            // generic "prefetch failed" we'd raise here.
+            if let Err(e) = crate::proto::nar_import::prefetch_inputs(
+                &self.store,
+                build_task,
+                updater,
+            )
+            .await
+            {
+                tracing::warn!(
+                    build_id = %build_task.build_id,
+                    error = %e,
+                    "input prefetch failed; build will proceed and fail fast if any input is unavailable"
+                );
+            }
             build::build_derivation(&self.store, build_task, index as u32, updater).await?;
         }
 
