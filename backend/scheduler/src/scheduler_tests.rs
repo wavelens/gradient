@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use gradient_core::types::proto::{CandidateScore, FlakeJob, FlakeTask, GradientCapabilities};
+use gradient_core::types::proto::{CandidateScore, FlakeJob, FlakeTask, GradientCapabilities, JobKind};
 
 use super::Scheduler;
 use super::jobs::PendingEvalJob;
@@ -106,9 +106,9 @@ async fn test_score_assignment_flow() {
         .enqueue_eval_job("j1".into(), eval_job(peer))
         .await;
 
-    // Worker scores the job with missing=0 → assigned.
-    let assignment = scheduler
-        .consider_scores(
+    // Worker scores the job, then explicitly requests one.
+    scheduler
+        .record_scores(
             "w1",
             vec![CandidateScore {
                 job_id: "j1".into(),
@@ -117,6 +117,7 @@ async fn test_score_assignment_flow() {
             }],
         )
         .await;
+    let assignment = scheduler.request_job("w1", JobKind::Flake).await;
 
     assert!(assignment.is_some());
     assert_eq!(assignment.unwrap().job_id, "j1");
@@ -136,17 +137,8 @@ async fn test_job_rejected_requeues() {
         .enqueue_eval_job("j1".into(), eval_job(peer))
         .await;
 
-    // Assign via scoring.
-    scheduler
-        .consider_scores(
-            "w1",
-            vec![CandidateScore {
-                job_id: "j1".into(),
-                missing_count: 0,
-                missing_nar_size: 0,
-            }],
-        )
-        .await;
+    // Assign via RequestJob.
+    scheduler.request_job("w1", JobKind::Flake).await;
     assert_eq!(scheduler.pending_job_count().await, 0);
 
     // Worker rejects the job → back to pending.
@@ -170,27 +162,9 @@ async fn test_worker_disconnect_requeues_jobs() {
         .enqueue_eval_job("j2".into(), eval_job(peer))
         .await;
 
-    // Assign both via fallback (no required paths).
-    scheduler
-        .consider_scores(
-            "w1",
-            vec![CandidateScore {
-                job_id: "j1".into(),
-                missing_count: 0,
-                missing_nar_size: 0,
-            }],
-        )
-        .await;
-    scheduler
-        .consider_scores(
-            "w1",
-            vec![CandidateScore {
-                job_id: "j2".into(),
-                missing_count: 0,
-                missing_nar_size: 0,
-            }],
-        )
-        .await;
+    // Assign both via RequestJob.
+    scheduler.request_job("w1", JobKind::Flake).await;
+    scheduler.request_job("w1", JobKind::Flake).await;
 
     assert_eq!(scheduler.pending_job_count().await, 0);
 
@@ -252,17 +226,7 @@ async fn test_draining_worker_still_has_assigned_jobs() {
         .enqueue_eval_job("j1".into(), eval_job(peer))
         .await;
 
-    scheduler
-        .consider_scores(
-            "w1",
-            vec![CandidateScore {
-                job_id: "j1".into(),
-                missing_count: 0,
-                missing_nar_size: 0,
-            }],
-        )
-        .await;
-
+    scheduler.request_job("w1", JobKind::Flake).await;
     scheduler.mark_worker_draining("w1").await;
 
     // Worker is draining but still has the assigned job.

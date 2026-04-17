@@ -167,6 +167,25 @@ impl WorkerPool {
         self.workers.get(worker_id).map(|w| &w.sent_candidates)
     }
 
+    /// Returns `true` when the worker has room for at least one more job of
+    /// the given kind. Eval jobs are always accepted (no capacity tracking on
+    /// the server side — the worker enforces its own `max_concurrent_evaluations`).
+    /// Build jobs are gated by `max_concurrent_builds` vs the current
+    /// `assigned_jobs` count so the server never blasts more `AssignJob`s than
+    /// the worker can accept, even when heartbeat bursts stack up.
+    pub fn has_capacity(&self, worker_id: &str, kind: &gradient_core::types::proto::JobKind) -> bool {
+        let w = match self.workers.get(worker_id) {
+            Some(w) => w,
+            None => return false,
+        };
+        match kind {
+            gradient_core::types::proto::JobKind::Flake => true,
+            gradient_core::types::proto::JobKind::Build => {
+                (w.assigned_jobs.len() as u32) < w.max_concurrent_builds
+            }
+        }
+    }
+
     pub fn assign_job(&mut self, worker_id: &str, job_id: &str) {
         if let Some(w) = self.workers.get_mut(worker_id) {
             w.assigned_jobs.insert(job_id.to_owned());
@@ -178,6 +197,7 @@ impl WorkerPool {
             w.assigned_jobs.remove(job_id);
         }
     }
+
 
     pub fn worker_count(&self) -> usize {
         self.workers.len()

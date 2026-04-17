@@ -202,19 +202,33 @@ pub async fn build_derivation(
 
 /// Extract a forwardable log line from a harmonia daemon log message.
 ///
-/// Returns:
-/// - `Message`: the high-level message text (errors, warnings, status notes).
-/// - `BuildLogLine`/`PostBuildLogLine` results: the raw stdout/stderr line
+/// Captures:
+/// - `Message`: high-level messages (errors, warnings, status notes).
+/// - `StartActivity`: activity descriptions ("building '/nix/store/…'",
+///   "copying '/nix/store/…'" etc.). Useful for builtins (fetchurl, path)
+///   that run inside the daemon rather than in a sandbox and therefore never
+///   produce `BuildLogLine` results.
+/// - `BuildLogLine`/`PostBuildLogLine` results: the raw stdout/stderr lines
 ///   from the build sandbox or post-build hook (the actual build log).
 ///
-/// All other variants (StartActivity / StopActivity / progress results) are
-/// noisy structured events that don't belong in the user-facing build log.
+/// `StopActivity`, `Progress`, `SetExpected`, `SetPhase`, and other
+/// structured result types are skipped — they're progress-bar bookkeeping,
+/// not user-facing log content.
 fn log_message_to_text(msg: &LogMessage) -> Option<String> {
     match msg {
         LogMessage::Message(m) => {
-            let mut s = String::from_utf8_lossy(&m.text).into_owned();
-            s.push('\n');
-            Some(s)
+            let s = String::from_utf8_lossy(&m.text);
+            if s.is_empty() {
+                return None;
+            }
+            Some(format!("{s}\n"))
+        }
+        LogMessage::StartActivity(a) => {
+            let s = String::from_utf8_lossy(&a.text);
+            if s.is_empty() {
+                return None;
+            }
+            Some(format!("{s}\n"))
         }
         LogMessage::Result(r)
             if matches!(
@@ -225,9 +239,11 @@ fn log_message_to_text(msg: &LogMessage) -> Option<String> {
             // BuildLogLine/PostBuildLogLine results carry the line as the first String field.
             r.fields.iter().find_map(|f| match f {
                 Field::String(b) => {
-                    let mut s = String::from_utf8_lossy(b).into_owned();
-                    s.push('\n');
-                    Some(s)
+                    let s = String::from_utf8_lossy(b);
+                    if s.is_empty() {
+                        return None;
+                    }
+                    Some(format!("{s}\n"))
                 }
                 _ => None,
             })

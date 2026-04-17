@@ -315,6 +315,21 @@ impl Scheduler {
     /// free slot.  Returns `Some(Assignment)` if a matching pending job was
     /// found and claimed; `None` if no such job exists yet.
     pub async fn request_job(&self, peer_id: &str, kind: JobKind) -> Option<Assignment> {
+        // ── Server-side capacity guard ──────────────────────────────────────
+        // Check BEFORE touching the job tracker so a heartbeat burst
+        // (many `RequestJob`s in flight at once) doesn't assign more jobs
+        // than the worker's `max_concurrent_builds`. Without this the
+        // server would blast N assignments, the worker would reject N-max,
+        // but `assigned_jobs` would spike to N until all rejections
+        // round-trip back.
+        {
+            let pool = self.worker_pool.read().await;
+            if !pool.has_capacity(peer_id, &kind) {
+                debug!(%peer_id, ?kind, "RequestJob ignored — worker at capacity");
+                return None;
+            }
+        }
+
         let (authorized, caps) = {
             let pool = self.worker_pool.read().await;
             let authorized: Option<HashSet<Uuid>> = pool
@@ -333,7 +348,7 @@ impl Scheduler {
             .job_tracker
             .write()
             .await
-            .take_first_of_kind(peer_id, authorized.as_ref(), caps.as_ref(), &kind);
+            .take_best_of_kind(peer_id, authorized.as_ref(), caps.as_ref(), &kind);
 
         if let Some(ref a) = assignment {
             self.worker_pool
@@ -345,55 +360,14 @@ impl Scheduler {
         assignment
     }
 
-    pub async fn consider_scores(
-        &self,
-        peer_id: &str,
-        scores: Vec<CandidateScore>,
-    ) -> Option<Assignment> {
-        // Snapshot authorized peers + build caps (read lock, short-lived).
-        let (authorized, caps) = {
-            let pool = self.worker_pool.read().await;
-            let authorized: Option<HashSet<Uuid>> = pool
-                .authorized_peers_for(peer_id)
-                .and_then(|p| if p.is_empty() { None } else { Some(p.clone()) });
-            let caps = pool.build_caps_for(peer_id).map(|(a, f)| {
-                jobs::WorkerBuildCaps {
-                    architectures: a,
-                    system_features: f,
-                }
-            });
-            (authorized, caps)
-        };
-
-        // Try score-based assignment (missing: 0).
-        let assignment = self.job_tracker.write().await.receive_scores(
-            peer_id,
-            authorized.as_ref(),
-            caps.as_ref(),
-            scores,
-        );
-        if let Some(ref a) = assignment {
-            self.worker_pool
-                .write()
-                .await
-                .assign_job(peer_id, &a.job_id);
-            info!(%peer_id, job_id = %a.job_id, "job assigned via scoring");
-            return assignment;
-        }
-        // Fallback: assign any job with no required paths.
-        let fallback = self.job_tracker.write().await.take_empty_required(
-            peer_id,
-            authorized.as_ref(),
-            caps.as_ref(),
-        );
-        if let Some(ref a) = fallback {
-            self.worker_pool
-                .write()
-                .await
-                .assign_job(peer_id, &a.job_id);
-            info!(%peer_id, job_id = %a.job_id, "job assigned (no required paths)");
-        }
-        fallback
+    /// Record candidate scores from a worker. Does NOT assign — the worker
+    /// explicitly signals capacity via `RequestJob`. Scores are used later
+    /// by `request_job` to pick the best candidate.
+    pub async fn record_scores(&self, peer_id: &str, scores: Vec<CandidateScore>) {
+        self.job_tracker
+            .write()
+            .await
+            .record_scores(peer_id, scores);
     }
 
     pub async fn job_rejected(&self, peer_id: &str, job_id: &str) {

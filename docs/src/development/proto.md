@@ -275,7 +275,7 @@ sequenceDiagram
     W2->>S: InitConnection { new id }
 ```
 
-The server treats `Draining` as "do not assign new jobs to this worker". The worker is free to disconnect once all in-flight jobs complete. This is distinct from an unexpected disconnect — no grace period or orphan scan needed.
+The server treats `Draining` as "do not assign new jobs to this worker". The worker is free to disconnect once all in-flight jobs complete.
 
 ---
 
@@ -1237,8 +1237,6 @@ On receiving `ServerMessage::Draining`, workers:
  1. Stop sending `RequestJob` — no new work.
  2. Finish in-flight jobs and send results.
  3. After the connection closes, wait before reconnecting (e.g. 30s) to give the server time to restart.
-
-This is distinct from a crash (unexpected disconnect) where workers reconnect immediately with exponential backoff. `Draining` tells workers the disconnect is planned.
 
 ---
 

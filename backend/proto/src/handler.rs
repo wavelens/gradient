@@ -501,27 +501,14 @@ pub(crate) async fn handle_socket(
             }
 
             // ── Incremental scoring ───────────────────────────────────────
+            // Scores are recorded for this worker but do NOT trigger
+            // assignment — the server only assigns in response to an
+            // explicit `RequestJob`. This avoids the burst-assign problem
+            // where heartbeat-accumulated `RequestJob`s would cause the
+            // server to blast more `AssignJob`s than the worker can accept.
             ClientMessage::RequestJobChunk { scores, is_final } => {
                 debug!(%peer_id, count = scores.len(), is_final, "RequestJobChunk");
-                if let Some(assignment) = scheduler.consider_scores(&peer_id, scores).await {
-                    // Deliver credentials before the job assignment.
-                    send_credentials_for_job(
-                        &mut socket,
-                        &state,
-                        &assignment.job,
-                        assignment.peer_id,
-                    )
-                    .await;
-
-                    let msg = ServerMessage::AssignJob {
-                        job_id: assignment.job_id,
-                        job: assignment.job,
-                        timeout_secs: Some(3600),
-                    };
-                    if send_server_msg(&mut socket, &msg).await.is_err() {
-                        break;
-                    }
-                }
+                scheduler.record_scores(&peer_id, scores).await;
             }
 
             // ── Job accept / reject ───────────────────────────────────────
