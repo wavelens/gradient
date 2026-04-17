@@ -150,68 +150,13 @@ pub async fn handle_eval_result(
         }
     }
 
-    // Dependency edges.
-    // Dependencies may reference derivations from previous EvalResult batches
-    // that are already in the DB but not in the current drv_path_to_id map.
-    // Look them up now so no edges are silently dropped.
-    let missing_dep_paths: Vec<String> = derivations
-        .iter()
-        .flat_map(|d| d.dependencies.iter())
-        .filter(|p| !drv_path_to_id.contains_key(*p))
-        .cloned()
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    if !missing_dep_paths.is_empty() {
-        let extra: Vec<MDerivation> = EDerivation::find()
-            .filter(CDerivation::Organization.eq(organization_id))
-            .filter(CDerivation::DerivationPath.is_in(missing_dep_paths))
-            .all(&state.db)
-            .await
-            .context("query dependency derivations")?;
-        for d in extra {
-            drv_path_to_id.entry(d.derivation_path).or_insert(d.id);
-        }
-    }
-
-    let mut dep_edges: Vec<ADerivationDependency> = Vec::new();
-    for d in &derivations {
-        let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
-            continue;
-        };
-        for dep_path in &d.dependencies {
-            if let Some(&dep_id) = drv_path_to_id.get(dep_path) {
-                dep_edges.push(ADerivationDependency {
-                    id: Set(Uuid::new_v4()),
-                    derivation: Set(drv_id),
-                    dependency: Set(dep_id),
-                });
-            }
-        }
-    }
-    if !dep_edges.is_empty() {
-        // Edges have a UNIQUE (derivation, dependency) index, so re-evaluating
-        // a derivation we've seen before would otherwise blow up the entire
-        // chunk and lose any genuinely new edges in it. ON CONFLICT DO NOTHING
-        // makes the insert idempotent.
-        for chunk in dep_edges.chunks(BATCH_SIZE) {
-            if let Err(e) = EDerivationDependency::insert_many(chunk.to_vec())
-                .on_conflict(
-                    sea_orm::sea_query::OnConflict::columns([
-                        CDerivationDependency::Derivation,
-                        CDerivationDependency::Dependency,
-                    ])
-                    .do_nothing()
-                    .to_owned(),
-                )
-                .do_nothing()
-                .exec(&state.db)
-                .await
-            {
-                error!(error = %e, "failed to insert dependency edges");
-            }
-        }
-    }
+    // Dependency edges are NOT created here. The BFS walks roots→leaves, so
+    // batch N may contain derivation A whose dep B lands in batch N+1. If we
+    // tried to insert the A→B edge now, B's derivation row wouldn't exist yet
+    // → FK violation drops the edge (or the whole chunk) silently. Instead,
+    // deps are accumulated in `Scheduler::deferred_deps` and flushed in one
+    // shot by `flush_deferred_deps` inside `handle_eval_job_completed`, when
+    // every derivation row is guaranteed to be in the DB.
 
     // Build rows.
     let mut builds: Vec<ABuild> = Vec::new();
@@ -446,6 +391,93 @@ pub async fn handle_eval_job_completed(
     // If every build was already terminal (e.g. all Substituted), close the
     // evaluation out via the shared decision function.
     check_evaluation_done(state, evaluation_id).await
+}
+
+/// Flush all deferred dependency edges for `evaluation_id`.
+///
+/// Called once from `handle_eval_job_completed` after every derivation row is
+/// guaranteed to be in the DB. Resolves `(drv_path, Vec<dep_drv_path>)` pairs
+/// to `(derivation_uuid, dep_uuid)` edges and inserts them in bulk.
+pub async fn flush_deferred_deps(
+    state: &Arc<ServerState>,
+    evaluation_id: Uuid,
+    organization_id: Uuid,
+    deferred: Vec<(String, Vec<String>)>,
+) -> Result<()> {
+    if deferred.is_empty() {
+        return Ok(());
+    }
+
+    // Collect every unique drv_path mentioned (both as source and as dep).
+    let all_paths: Vec<String> = {
+        let mut set = std::collections::HashSet::new();
+        for (src, deps) in &deferred {
+            set.insert(src.clone());
+            for d in deps {
+                set.insert(d.clone());
+            }
+        }
+        set.into_iter().collect()
+    };
+
+    // Single query to map drv_path → UUID.
+    let drv_path_to_id: std::collections::HashMap<String, Uuid> = EDerivation::find()
+        .filter(CDerivation::Organization.eq(organization_id))
+        .filter(CDerivation::DerivationPath.is_in(all_paths))
+        .all(&state.db)
+        .await
+        .context("flush_deferred_deps: query derivations")?
+        .into_iter()
+        .map(|d| (d.derivation_path, d.id))
+        .collect();
+
+    let mut edges: Vec<ADerivationDependency> = Vec::new();
+    let mut unresolved = 0usize;
+    for (src, deps) in &deferred {
+        let Some(&src_id) = drv_path_to_id.get(src) else {
+            unresolved += 1;
+            continue;
+        };
+        for dep in deps {
+            if let Some(&dep_id) = drv_path_to_id.get(dep) {
+                edges.push(ADerivationDependency {
+                    id: Set(Uuid::new_v4()),
+                    derivation: Set(src_id),
+                    dependency: Set(dep_id),
+                });
+            } else {
+                unresolved += 1;
+            }
+        }
+    }
+
+    if !edges.is_empty() {
+        for chunk in edges.chunks(BATCH_SIZE) {
+            if let Err(e) = EDerivationDependency::insert_many(chunk.to_vec())
+                .on_conflict(
+                    sea_orm::sea_query::OnConflict::columns([
+                        CDerivationDependency::Derivation,
+                        CDerivationDependency::Dependency,
+                    ])
+                    .do_nothing()
+                    .to_owned(),
+                )
+                .do_nothing()
+                .exec(&state.db)
+                .await
+            {
+                error!(error = %e, "flush_deferred_deps: failed to insert edges");
+            }
+        }
+    }
+
+    info!(
+        %evaluation_id,
+        inserted = edges.len(),
+        unresolved,
+        "flushed deferred dependency edges"
+    );
+    Ok(())
 }
 
 pub async fn handle_eval_job_failed(

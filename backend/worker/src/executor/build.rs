@@ -95,8 +95,10 @@ pub async fn build_derivation(
     // user sees an empty build log. Talkative (4) is the level `nix-build`
     // uses by default for showing build output.
     let mut opts = ClientOptions::default();
+
     opts.verbose_build = Verbosity::Talkative;
     opts.verbosity = Verbosity::Notice;
+
     if let Err(e) = guard.client().set_options(&opts).await {
         warn!(
             error = %e,
@@ -112,6 +114,7 @@ pub async fn build_derivation(
     let logs = guard
         .client()
         .build_derivation(&harmonia_path, &basic_drv, BuildMode::Normal);
+
     let mut logs = pin!(logs);
     let mut total_msgs: u64 = 0;
     let mut forwarded_lines: u64 = 0;
@@ -135,6 +138,7 @@ pub async fn build_derivation(
             }
         }
     }
+
     info!(
         drv = %task.drv_path,
         daemon_messages = total_msgs,
@@ -143,6 +147,7 @@ pub async fn build_derivation(
         send_failures,
         "build log stream drained"
     );
+
     if total_msgs == 0 {
         warn!(
             drv = %task.drv_path,
@@ -288,6 +293,7 @@ fn get_basic_derivation(
             .name
             .parse()
             .with_context(|| format!("invalid output name '{}' in {}", o.name, full_drv_path))?;
+
         let drv_output = if !o.hash_algo.is_empty() && !o.hash.is_empty() {
             ca_fixed_output(&o.hash_algo, &o.hash).with_context(|| {
                 format!(
@@ -304,6 +310,7 @@ fn get_basic_derivation(
             })?;
             DerivationOutput::InputAddressed(sp)
         };
+
         outputs.insert(output_name, drv_output);
     }
 

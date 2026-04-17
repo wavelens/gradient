@@ -39,13 +39,18 @@ use super::jobs::{PendingBuildJob, PendingEvalJob};
 use gradient_core::types::proto::{BuildJob, BuildTask, FlakeJob, FlakeTask};
 
 /// Spawns all dispatch loops as detached tokio tasks.
+///
+/// Note: there is deliberately NO `build_dispatch_loop`. Build dispatch is
+/// demand-driven: `dispatch_ready_builds` runs inside `request_job` when a
+/// worker asks for work and the in-memory tracker has nothing to offer.
+/// This keeps the server responsive (no 5-second polling delay, no expensive
+/// SQL query blocking the message handler) and means builds are dispatched
+/// exactly when a worker is ready to accept them.
 pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
     let s1 = Arc::clone(&scheduler);
-    let s2 = Arc::clone(&scheduler);
     let s3 = Arc::clone(&scheduler);
     tokio::spawn(async move { project_poll_loop(s3).await });
     tokio::spawn(async move { eval_dispatch_loop(s1).await });
-    tokio::spawn(async move { build_dispatch_loop(s2).await });
 }
 
 // ── Project polling ──────────────────────────────────────────────────────────
@@ -246,24 +251,6 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
 }
 
 // ── Build dispatch ────────────────────────────────────────────────────────────
-
-async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
-    let mut interval = tokio::time::interval(Duration::from_secs(5));
-    info!("build dispatch loop started");
-    loop {
-        interval.tick().await;
-        if let Err(e) = dispatch_ready_builds(&scheduler).await {
-            error!(error = %e, "build dispatch error");
-        }
-        // After dispatching, reconcile each in-flight evaluation's
-        // Building/Waiting state so the UI reflects "no worker can pick this
-        // up" (or recovers when a worker comes back online). Cheap when
-        // there are no in-flight evals.
-        if let Err(e) = scheduler.reconcile_waiting_state().await {
-            error!(error = %e, "reconcile_waiting_state in dispatch loop failed");
-        }
-    }
-}
 
 pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Result<()> {
     let state = &scheduler.state;

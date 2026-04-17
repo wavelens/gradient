@@ -15,12 +15,12 @@ pub mod eval;
 pub mod jobs;
 pub mod worker_pool;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Result;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use gradient_core::types::*;
@@ -52,6 +52,16 @@ pub struct Scheduler {
     /// Signalled when new jobs are enqueued so handler dispatch loops can push
     /// `JobOffer` messages to connected workers.
     job_notify: Arc<tokio::sync::Notify>,
+    /// Per-evaluation deferred dependency edges.
+    ///
+    /// The worker's BFS walks roots→leaves, so batch N may contain a
+    /// derivation whose dependency lands in batch N+1. Trying to insert the
+    /// edge immediately would FK-fail (dep row doesn't exist yet) or silently
+    /// skip (dep not in `drv_path_to_id`). We accumulate `(drv_path,
+    /// Vec<dep_drv_path>)` per eval here and flush them all at once in
+    /// `handle_eval_job_completed` when every derivation row is guaranteed
+    /// to be in the DB.
+    deferred_deps: Arc<RwLock<HashMap<Uuid, Vec<(String, Vec<String>)>>>>,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -67,6 +77,7 @@ impl Scheduler {
             worker_pool: Arc::new(RwLock::new(WorkerPool::new())),
             job_tracker: Arc::new(RwLock::new(JobTracker::new())),
             job_notify: Arc::new(tokio::sync::Notify::new()),
+            deferred_deps: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -316,12 +327,6 @@ impl Scheduler {
     /// found and claimed; `None` if no such job exists yet.
     pub async fn request_job(&self, peer_id: &str, kind: JobKind) -> Option<Assignment> {
         // ── Server-side capacity guard ──────────────────────────────────────
-        // Check BEFORE touching the job tracker so a heartbeat burst
-        // (many `RequestJob`s in flight at once) doesn't assign more jobs
-        // than the worker's `max_concurrent_builds`. Without this the
-        // server would blast N assignments, the worker would reject N-max,
-        // but `assigned_jobs` would spike to N until all rejections
-        // round-trip back.
         {
             let pool = self.worker_pool.read().await;
             if !pool.has_capacity(peer_id, &kind) {
@@ -344,18 +349,48 @@ impl Scheduler {
             (authorized, caps)
         };
 
+        // ── First try: pick from what's already in the tracker ──────────────
         let assignment = self
             .job_tracker
             .write()
             .await
             .take_best_of_kind(peer_id, authorized.as_ref(), caps.as_ref(), &kind);
-
         if let Some(ref a) = assignment {
             self.worker_pool
                 .write()
                 .await
                 .assign_job(peer_id, &a.job_id);
             info!(%peer_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob");
+            return assignment;
+        }
+
+        // ── Tracker empty: on-demand DB refresh ─────────────────────────────
+        // Build dispatch is demand-driven: instead of a 5-second polling
+        // loop that blocks the handler, we only query the DB when a worker
+        // actually asks for work and the tracker has nothing. This is the
+        // ONLY place dispatch_ready_builds runs for build jobs.
+        if matches!(kind, JobKind::Build) {
+            if let Err(e) = dispatch::dispatch_ready_builds(self).await {
+                warn!(error = %e, "on-demand dispatch_ready_builds failed");
+            }
+            // Also reconcile Waiting/Building state while we're at it.
+            if let Err(e) = self.reconcile_waiting_state().await {
+                warn!(error = %e, "reconcile_waiting_state after on-demand dispatch failed");
+            }
+        }
+
+        // ── Second try after refresh ────────────────────────────────────────
+        let assignment = self
+            .job_tracker
+            .write()
+            .await
+            .take_best_of_kind(peer_id, authorized.as_ref(), caps.as_ref(), &kind);
+        if let Some(ref a) = assignment {
+            self.worker_pool
+                .write()
+                .await
+                .assign_job(peer_id, &a.job_id);
+            info!(%peer_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob (after DB refresh)");
         }
         assignment
     }
@@ -476,13 +511,28 @@ impl Scheduler {
                 }
             }
         };
-        eval::handle_eval_result(&self.state, &job, derivations, warnings, errors).await?;
-        // Immediately dispatch newly-queued builds so workers don't have to
-        // wait for the next build_dispatch_loop iteration (5 seconds).
-        if let Err(e) = dispatch::dispatch_ready_builds(self).await {
-            warn!(error = %e, "immediate build dispatch after eval result failed");
+
+        // Accumulate dep edges to flush later (at eval-job-completed) when
+        // every derivation row is guaranteed to be in the DB. The BFS walks
+        // roots→leaves, so batch N may contain a derivation whose dep lands
+        // in batch N+1 — inserting the edge now would FK-fail or silently
+        // skip the dep because the row doesn't exist yet.
+        let eval_id = job.evaluation_id;
+        let dep_pairs: Vec<(String, Vec<String>)> = derivations
+            .iter()
+            .filter(|d| !d.dependencies.is_empty())
+            .map(|d| (d.drv_path.clone(), d.dependencies.clone()))
+            .collect();
+        if !dep_pairs.is_empty() {
+            self.deferred_deps
+                .write()
+                .await
+                .entry(eval_id)
+                .or_default()
+                .extend(dep_pairs);
         }
-        Ok(())
+
+        eval::handle_eval_result(&self.state, &job, derivations, warnings, errors).await
     }
 
     pub async fn handle_build_output(
@@ -516,32 +566,26 @@ impl Scheduler {
         let job = self.job_tracker.write().await.remove_active(job_id);
         match job {
             Some(PendingJob::Eval(j)) => {
-                let result = eval::handle_eval_job_completed(&self.state, j.evaluation_id).await;
-                // The eval just promoted any newly-discovered builds from
-                // Created → Queued; kick off dispatch immediately so workers
-                // don't have to wait for the next build_dispatch_loop tick.
-                if let Err(e) = dispatch::dispatch_ready_builds(self).await {
-                    warn!(error = %e, "immediate build dispatch after eval completion failed");
+                // Flush deferred dependency edges BEFORE promoting builds,
+                // so the dispatch SQL's dep-gating sees the full graph.
+                let deferred = self
+                    .deferred_deps
+                    .write()
+                    .await
+                    .remove(&j.evaluation_id)
+                    .unwrap_or_default();
+                if let Err(e) =
+                    eval::flush_deferred_deps(&self.state, j.evaluation_id, j.peer_id, deferred)
+                        .await
+                {
+                    error!(error = %e, evaluation_id = %j.evaluation_id, "flush_deferred_deps failed");
                 }
-                // The new builds may target architectures / features that
-                // none of the currently-connected workers can satisfy; flag
-                // the eval as `Waiting` so the UI surfaces "no worker is
-                // configured for these builds" instead of a stalled
-                // `Building` spinner.
-                if let Err(e) = self.reconcile_waiting_state().await {
-                    warn!(error = %e, "reconcile_waiting_state after eval completion failed");
-                }
-                result
+                eval::handle_eval_job_completed(&self.state, j.evaluation_id).await
             }
             Some(PendingJob::Build(j)) => {
-                let result =
-                    build::handle_build_job_completed(&self.state, j.build_id).await;
-                // A completed build may unlock dependent builds — dispatch them
-                // immediately instead of waiting for the build_dispatch_loop.
-                if let Err(e) = dispatch::dispatch_ready_builds(self).await {
-                    warn!(error = %e, "immediate build dispatch after completion failed");
-                }
-                result
+                build::handle_build_job_completed(&self.state, j.build_id).await
+                // Same: the worker chains a RequestJob after JobCompleted,
+                // which triggers on-demand dispatch if needed.
             }
             None => {
                 warn!(%job_id, "job_completed for unknown job");
@@ -558,14 +602,7 @@ impl Scheduler {
                 eval::handle_eval_job_failed(&self.state, j.evaluation_id, error).await
             }
             Some(PendingJob::Build(j)) => {
-                let result =
-                    build::handle_build_job_failed(&self.state, j.build_id, error).await;
-                // A failed build may cascade DependencyFailed, unlocking other
-                // builds to dispatch or completing the evaluation.
-                if let Err(e) = dispatch::dispatch_ready_builds(self).await {
-                    warn!(error = %e, "immediate build dispatch after failure failed");
-                }
-                result
+                build::handle_build_job_failed(&self.state, j.build_id, error).await
             }
             None => {
                 warn!(%job_id, "job_failed for unknown job");
