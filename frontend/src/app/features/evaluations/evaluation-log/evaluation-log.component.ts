@@ -605,13 +605,16 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
     let openSpans = 0;
-    const result = escaped.replace(/\u001b\[([0-9;]*)m/g, (_, code: string) => {
-      if (EvaluationLogComponent.ANSI_RESETS.has(code)) {
+    // Match any CSI sequence: ESC [ <param bytes> <final byte>
+    // Only SGR sequences (final byte 'm') are converted to spans; all others are stripped.
+    const result = escaped.replace(/\u001b\[([?0-9;]*)([A-Za-z~])/g, (_, params: string, cmd: string) => {
+      if (cmd !== 'm') return '';
+      if (EvaluationLogComponent.ANSI_RESETS.has(params)) {
         const closing = '</span>'.repeat(openSpans);
         openSpans = 0;
         return closing;
       }
-      const tag = this.ansiColorMap[code];
+      const tag = this.ansiColorMap[params];
       if (tag) { openSpans++; return tag; }
       return '';
     });

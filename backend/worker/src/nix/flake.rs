@@ -274,6 +274,39 @@ mod tests {
         assert!(!exclude_empty, "exclude should not be empty");
     }
 
+    // ── build_wildcard_nix_expr multiple includes ─────────────────────────────
+
+    /// Regression: comma-separated wildcards must be pre-split into individual
+    /// patterns before being passed to `build_wildcard_nix_expr` / `discover_derivations`.
+    /// Passing them as a single string like `"packages.x86_64-linux.*,checks.x86_64-linux.*"`
+    /// would embed the literal comma into a Nix segment and find no derivations.
+    #[test]
+    fn build_wildcard_nix_expr_multiple_patterns_each_separate() {
+        let patterns = vec![
+            "packages.x86_64-linux.*".to_string(),
+            "checks.x86_64-linux.*".to_string(),
+        ];
+        let result = build_wildcard_nix_expr(&patterns);
+        // Both patterns must appear as separate Nix list entries
+        assert_eq!(
+            result,
+            r#"{ "include" = [ [ "packages" "x86_64-linux" "*" ] [ "checks" "x86_64-linux" "*" ] ]; "exclude" = [  ]; }"#,
+        );
+    }
+
+    #[test]
+    fn build_wildcard_nix_expr_comma_in_single_string_is_wrong() {
+        // This is the broken behaviour we fixed: the comma ends up inside a segment.
+        let patterns = vec!["packages.x86_64-linux.*,checks.x86_64-linux.*".to_string()];
+        let result = build_wildcard_nix_expr(&patterns);
+        // The comma-containing segment makes the include list malformed —
+        // it will NOT match the expected two-entry form.
+        assert_ne!(
+            result,
+            r#"{ "include" = [ [ "packages" "x86_64-linux" "*" ] [ "checks" "x86_64-linux" "*" ] ]; "exclude" = [  ]; }"#,
+        );
+    }
+
     // ── is_literal_pattern / discover_derivations literal bypass ─────────────
 
     #[test]

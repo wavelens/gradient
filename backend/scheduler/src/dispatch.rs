@@ -23,6 +23,7 @@ use entity::evaluation::EvaluationStatus;
 use gradient_core::ci::TriggerError;
 use gradient_core::sources::{check_project_updates, get_commit_info};
 use gradient_core::types::input::vec_to_hex;
+use gradient_core::types::wildcard::Wildcard;
 use gradient_core::types::*;
 use sea_orm::{ActiveModelTrait as _, ColumnTrait, EntityTrait, QueryFilter};
 
@@ -210,7 +211,10 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             ],
             repository: eval.repository.clone(),
             commit: commit_sha,
-            wildcards: vec![eval.wildcard.clone()],
+            wildcards: eval.wildcard
+                .parse::<Wildcard>()
+                .map(|w| w.patterns().to_vec())
+                .unwrap_or_else(|_| vec![eval.wildcard.clone()]),
             timeout_secs: None,
             sign: None,
         };

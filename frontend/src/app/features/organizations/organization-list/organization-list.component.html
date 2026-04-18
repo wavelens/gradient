@@ -30,7 +30,7 @@
               <p class="text-secondary">{{ org.description || 'No description' }}</p>
               <div class="org-badges">
                 @if (org.role) {
-                  <span class="role-badge" [class.owner]="org.role === 'owner'">
+                  <span class="role-badge" [class.owner]="org.role === 'Admin'">
                     {{ org.role }}
                   </span>
                 }

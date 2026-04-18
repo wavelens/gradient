@@ -53,6 +53,7 @@ pub struct OrganizationSummary {
     pub created_by: Uuid,
     pub created_at: chrono::NaiveDateTime,
     pub running_evaluations: i64,
+    pub role: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -69,6 +70,7 @@ pub struct OrgResponse {
     pub created_at: chrono::NaiveDateTime,
     pub github_installation_id: Option<i64>,
     pub forge_webhook_secret_set: bool,
+    pub role: Option<String>,
 }
 
 pub async fn get_org_name_available(
@@ -171,10 +173,29 @@ pub async fn get(
     let org_ids: Vec<Uuid> = orgs.iter().map(|o| o.id).collect();
     let running_per_org = count_running_evaluations(&state, &org_ids).await?;
 
+    // Fetch the current user's membership row for each org to get the role.
+    let org_users = EOrganizationUser::find()
+        .filter(COrganizationUser::User.eq(user.id))
+        .filter(COrganizationUser::Organization.is_in(org_ids.clone()))
+        .all(&state.db)
+        .await?;
+
+    let role_ids: Vec<Uuid> = org_users.iter().map(|ou| ou.role).collect();
+    let roles = ERole::find()
+        .filter(CRole::Id.is_in(role_ids))
+        .all(&state.db)
+        .await?;
+    let role_name_map: HashMap<Uuid, String> = roles.into_iter().map(|r| (r.id, r.name)).collect();
+    let org_role_map: HashMap<Uuid, String> = org_users
+        .into_iter()
+        .filter_map(|ou| role_name_map.get(&ou.role).map(|n| (ou.organization, n.clone())))
+        .collect();
+
     let items: Vec<OrganizationSummary> = orgs
         .into_iter()
         .map(|o| OrganizationSummary {
             running_evaluations: *running_per_org.get(&o.id).unwrap_or(&0),
+            role: org_role_map.get(&o.id).cloned(),
             id: o.id,
             name: o.name,
             display_name: o.display_name,
@@ -295,6 +316,24 @@ pub async fn get_organization(
 ) -> WebResult<Json<BaseResponse<OrgResponse>>> {
     let org = get_org_readable(&state.0, organization, &maybe_user, "Organization").await?;
 
+    let role = if let Some(ref user) = maybe_user {
+        let org_user = EOrganizationUser::find()
+            .filter(COrganizationUser::User.eq(user.id))
+            .filter(COrganizationUser::Organization.eq(org.id))
+            .one(&state.db)
+            .await?;
+        if let Some(ou) = org_user {
+            ERole::find_by_id(ou.role)
+                .one(&state.db)
+                .await?
+                .map(|r| r.name)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     Ok(Json(BaseResponse {
         error: false,
         message: OrgResponse {
@@ -310,6 +349,7 @@ pub async fn get_organization(
             created_by: org.created_by,
             created_at: org.created_at,
             github_installation_id: org.github_installation_id,
+            role,
         },
     }))
 }

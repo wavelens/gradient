@@ -15,7 +15,7 @@ export interface Organization {
   managed: boolean;
   created_by?: string;
   created_at?: string;
-  role?: 'owner' | 'member';
+  role?: 'Admin' | 'Write' | 'View';
   running_evaluations?: number;
   forge_webhook_secret_set?: boolean;
 }
@@ -24,7 +24,7 @@ export interface OrganizationMember {
   id: string;
   username: string;
   name: string;
-  role: 'owner' | 'member';
+  role: string;
 }
 
 export interface OrganizationSSH {
