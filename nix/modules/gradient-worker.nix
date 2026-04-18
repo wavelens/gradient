@@ -10,7 +10,6 @@
 in {
   options.services.gradient.worker = {
     enable = lib.mkEnableOption "Gradient worker";
-
     packages = {
       gradient = lib.mkPackageOption pkgs "gradient" { };
       nix = lib.mkOption {
@@ -124,7 +123,7 @@ in {
       architectures = lib.mkOption {
         description = "Nix system strings this worker can build for";
         type = lib.types.listOf lib.types.str;
-        default = [ pkgs.system ];
+        default = [ pkgs.stdenv.hostPlatform.system ];
         defaultText = lib.literalExpression "[ pkgs.system ]";
         example = [ "x86_64-linux" "aarch64-linux" ];
       };
