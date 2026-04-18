@@ -10,9 +10,8 @@
  - missing Child::kill() plumbing through WorkerPoolResolver.
  - save "env"."preferLocalBuild" in database parsed from .drv
  - save which worker was used for each build in the database
- - old docs for state configuration options
+ - docs old for state configuration options
  - argon2 for user password hashing
- - system types need to be strings
  - docs: fix cache secret "main-cache:" before private key not needed (needs reformatting is not described in the docs)
  - update updater script
 

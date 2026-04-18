@@ -45,7 +45,7 @@ in {
       reportErrors = lib.mkEnableOption "error reporting to Sentry";
       useTls = lib.mkEnableOption "TLS" // { default = true; };
       enableQuic = lib.mkEnableOption "Quic support";
-      discoverable = lib.mkEnableOption "discoverable — accept incoming connections on /proto" // { default = true; };
+      discoverable = lib.mkEnableOption "accept incoming connections on /proto" // { default = true; };
       packages = {
         server = lib.mkPackageOption pkgs "gradient" { };
         frontend = lib.mkPackageOption pkgs "gradient-frontend" { };

@@ -36,7 +36,7 @@ in {
 
     configureNginx = lib.mkEnableOption "Nginx reverse proxy for the worker listener";
     useTls = lib.mkEnableOption "TLS" // { default = true; };
-    discoverable = lib.mkEnableOption "listen for incoming connections from servers";
+    discoverable = lib.mkEnableOption "accept incoming connections on /proto";
     domain = lib.mkOption {
       description = "Domain under which the worker's nginx vhost is served. Only used when configureNginx is enabled";
       type = lib.types.str;
@@ -112,11 +112,11 @@ in {
     };
 
     capabilities = {
-      federate = lib.mkEnableOption "federate capability — relay work and NAR traffic between workers and servers (requires discoverable)";
-      fetch = lib.mkEnableOption "fetch capability — prefetch flake inputs and sources";
-      eval  = lib.mkEnableOption "eval capability — run Nix flake evaluations";
-      build = lib.mkEnableOption "build capability — execute Nix store builds";
-      sign  = lib.mkEnableOption "sign capability — sign and upload store paths";
+      federate = lib.mkEnableOption "federate capability - relay work and NAR traffic between workers and servers (requires discoverable)";
+      fetch = lib.mkEnableOption "fetch capability - prefetch flake inputs and sources";
+      eval  = lib.mkEnableOption "eval capability - run Nix flake evaluations";
+      build = lib.mkEnableOption "build capability - execute Nix store builds";
+      sign  = lib.mkEnableOption "sign capability - sign and upload store paths";
     };
 
     settings = {

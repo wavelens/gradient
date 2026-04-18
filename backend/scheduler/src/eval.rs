@@ -256,6 +256,7 @@ impl<'a> EvalResultProcessor<'a> {
             if let Err(e) = gradient_core::db::add_features(
                 Arc::clone(self.state),
                 d.required_features.clone(),
+                entity::feature::FeatureKind::Feature,
                 Some(drv_id),
             )
             .await

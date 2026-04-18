@@ -365,6 +365,7 @@ impl BuildDispatchMaps {
             let feature_ids: Vec<Uuid> = feature_edges.iter().map(|e| e.feature).collect();
             EFeature::find()
                 .filter(CFeature::Id.is_in(feature_ids))
+                .filter(CFeature::Kind.eq(entity::feature::FeatureKind::Feature))
                 .all(&state.db)
                 .await
                 .unwrap_or_default()

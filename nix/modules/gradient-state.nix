@@ -296,17 +296,17 @@
 
   workerType = types.submodule ({ name, ... }: {
     options = {
+      name = mkOption {
+        type = types.str;
+        description = "Human-readable display name for this worker. Shown in the UI.";
+        example = "build-server-1";
+      };
+
       worker_id = mkOption {
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
         description = "Worker identity string. Must match GRADIENT_WORKER_ID on the worker machine.";
-      };
-
-      name = mkOption {
-        type = types.str;
-        description = "Human-readable display name for this worker. Shown in the UI.";
-        example = "build-server-1";
       };
 
       url = mkOption {

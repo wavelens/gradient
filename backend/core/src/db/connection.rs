@@ -149,11 +149,13 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
 pub async fn add_features(
     state: Arc<ServerState>,
     features: Vec<String>,
+    kind: entity::feature::FeatureKind,
     derivation_id: Option<Uuid>,
 ) -> Result<()> {
     for f in features {
         let feature = EFeature::find()
             .filter(CFeature::Name.eq(f.clone()))
+            .filter(CFeature::Kind.eq(kind.clone()))
             .one(&state.db)
             .await
             .context("Failed to query feature")?;
@@ -164,6 +166,7 @@ pub async fn add_features(
             let afeature = AFeature {
                 id: Set(Uuid::new_v4()),
                 name: Set(f),
+                kind: Set(kind.clone()),
             };
 
             afeature
