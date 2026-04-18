@@ -31,8 +31,8 @@ pub struct Model {
     /// When false, the server will refuse to authenticate this registration and
     /// will not dispatch jobs to this worker.
     pub active: bool,
-    /// Optional human-readable display name for this worker (set server-side).
-    pub name: Option<String>,
+    /// Human-readable display name for this worker (empty string if not set).
+    pub name: String,
     pub created_at: NaiveDateTime,
 }
 

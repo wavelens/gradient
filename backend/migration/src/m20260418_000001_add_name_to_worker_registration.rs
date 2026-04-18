@@ -16,7 +16,7 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Alias::new("worker_registration"))
-                    .add_column(ColumnDef::new(Alias::new("name")).text().null())
+                    .add_column(ColumnDef::new(Alias::new("name")).text().not_null().default("worker"))
                     .to_owned(),
             )
             .await

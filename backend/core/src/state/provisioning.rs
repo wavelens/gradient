@@ -660,18 +660,12 @@ impl<'a> StateApplicator<'a> {
                 Some(state_worker.url.clone())
             };
 
-            let name = if state_worker.name.is_empty() {
-                None
-            } else {
-                Some(state_worker.name.clone())
-            };
-
             if let Some(existing) = existing {
                 let mut reg: worker_registration::ActiveModel = existing.into();
                 reg.token_hash = Set(token_hash);
                 reg.managed = Set(true);
                 reg.url = Set(url);
-                reg.name = Set(name);
+                reg.name = Set(state_worker.name.clone());
                 reg.update(self.db).await?;
                 tracing::info!("Updated worker registration: {}", state_worker.worker_id);
             } else {
@@ -682,7 +676,7 @@ impl<'a> StateApplicator<'a> {
                     token_hash: Set(token_hash),
                     managed: Set(true),
                     url: Set(url),
-                    name: Set(name),
+                    name: Set(state_worker.name.clone()),
                     active: Set(true),
                     created_at: Set(now),
                 };

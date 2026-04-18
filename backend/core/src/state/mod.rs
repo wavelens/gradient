@@ -118,7 +118,6 @@ pub struct StateWorker {
     pub url: String,
     pub organization: String,
     pub token_file: String,
-    #[serde(default)]
     pub name: String,
 }
 

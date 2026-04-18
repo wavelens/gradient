@@ -2101,7 +2101,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [worker_id]
+              required: [worker_id, name]
               properties:
                 worker_id:
                   type: string
@@ -2119,8 +2119,7 @@ paths:
                     Omit to have the server generate a token — it will be returned once and cannot be retrieved again.
                 name:
                   type: string
-                  nullable: true
-                  description: Optional human-readable display name for this worker.
+                  description: Human-readable display name for this worker.
       responses:
         '200':
           description: Worker registered
@@ -2178,8 +2177,7 @@ paths:
                   description: Set to false to deactivate the worker, true to reactivate it. Omit to leave unchanged.
                 name:
                   type: string
-                  nullable: true
-                  description: Update the display name. Empty string clears the name. Omit to leave unchanged.
+                  description: Update the display name. Omit to leave unchanged.
       responses:
         '200':
           description: Worker updated
@@ -3289,8 +3287,7 @@ components:
           description: Persistent worker identity string
         name:
           type: string
-          nullable: true
-          description: Human-readable display name for this worker, if set
+          description: 'Human-readable display name for this worker. Defaults to "worker".'
         registered_at:
           type: string
           format: date-time

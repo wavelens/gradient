@@ -31,8 +31,8 @@ pub struct RegisterWorkerRequest {
     /// WebSocket URL where the worker listens for incoming server connections.
     /// When set, the server connects outbound to this URL.
     pub url: Option<String>,
-    /// Optional human-readable display name for this worker.
-    pub name: Option<String>,
+    /// Human-readable display name for this worker.
+    pub name: String,
     /// Pre-generated token (output of `openssl rand -base64 48`, exactly 64 base64 chars).
     /// When provided the server stores its hash and does NOT return the token in the response.
     pub token: Option<String>,
@@ -49,9 +49,8 @@ pub struct RegisterWorkerResponse {
 #[derive(Serialize)]
 pub struct OrgWorkerEntry {
     pub worker_id: String,
-    /// Human-readable display name for this worker, if set.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    /// Human-readable display name for this worker (empty string if not set).
+    pub name: String,
     pub registered_at: NaiveDateTime,
     pub active: bool,
     /// WebSocket URL where the worker accepts incoming server connections.
@@ -128,7 +127,7 @@ pub async fn post_org_worker(
         token_hash: Set(token_hash),
         managed: Set(false),
         url: Set(body.url),
-        name: Set(body.name.filter(|n| !n.trim().is_empty())),
+        name: Set(body.name.trim().to_string()),
         active: Set(true),
         created_at: Set(Utc::now().naive_utc()),
     };
@@ -220,8 +219,7 @@ pub async fn patch_org_worker(
         active_model.active = Set(active);
     }
     if let Some(ref name) = body.name {
-        let trimmed = name.trim();
-        active_model.name = Set(if trimmed.is_empty() { None } else { Some(trimmed.to_string()) });
+        active_model.name = Set(name.trim().to_string());
     }
     active_model.update(&state.db).await?;
 

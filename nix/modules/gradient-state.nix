@@ -305,8 +305,7 @@
 
       name = mkOption {
         type = types.str;
-        default = "";
-        description = "Human-readable display name for this worker. Shown in the UI. Leave empty to use the worker ID.";
+        description = "Human-readable display name for this worker. Shown in the UI.";
         example = "build-server-1";
       };
 
