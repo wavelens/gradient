@@ -133,21 +133,6 @@ impl EvalWorker {
         }
     }
 
-    pub(super) async fn attr_names(
-        &mut self,
-        repository: String,
-        path: String,
-    ) -> Result<Vec<String>> {
-        self.evaluations_served += 1;
-        match self
-            .request(&EvalRequest::AttrNames { repository, path })
-            .await?
-        {
-            EvalResponse::AttrNamesOk { keys, .. } => Ok(keys),
-            EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
-            _ => anyhow::bail!("eval worker: unexpected response to AttrNames"),
-        }
-    }
 }
 
 impl std::fmt::Debug for EvalWorker {

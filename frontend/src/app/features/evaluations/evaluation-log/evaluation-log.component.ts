@@ -618,6 +618,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     return result + '</span>'.repeat(openSpans);
   }
 
+  renderMessageHtml(text: string): SafeHtml {
+    return this.sanitizer.bypassSecurityTrustHtml(this.convertAnsiToHtml(text));
+  }
+
   private renderLog(): void {
     const html = this.logLines.map(l => this.convertAnsiToHtml(l)).join('\n');
     this.logHtml.set(this.sanitizer.bypassSecurityTrustHtml(html));

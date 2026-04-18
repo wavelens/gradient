@@ -20,6 +20,7 @@
 //! blocking context (e.g. `tokio::task::spawn_blocking`).
 
 use anyhow::{Context as _, Result};
+use tracing::error;
 use nix_bindings::sys::{
     self, EvalState, Store, ValueType_NIX_TYPE_ATTRS, ValueType_NIX_TYPE_STRING, nix_alloc_value,
     nix_c_context, nix_c_context_create, nix_c_context_free, nix_err_NIX_OK, nix_err_msg,
@@ -195,10 +196,16 @@ impl NixEvaluator {
                     value,
                 ),
             )
-            .with_context(|| format!("nix eval failed: {}", expr))?;
+            .map_err(|e| {
+                error!(expr = %expr, error = %e, "nix eval failed");
+                e
+            })?;
 
             check(self.ctx, nix_value_force(self.ctx, self.state, value))
-                .with_context(|| format!("nix force failed: {}", expr))?;
+                .map_err(|e| {
+                    error!(expr = %expr, error = %e, "nix force failed");
+                    e
+                })?;
 
             Ok(value)
         }
