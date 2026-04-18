@@ -55,7 +55,8 @@
             <div class="worker-info">
               <span class="material-symbols-outlined">construction</span>
               <div>
-                <div class="worker-id">{{ worker.worker_id }}</div>
+                <div class="worker-name">{{ worker.name }}</div>
+                <div class="worker-id text-secondary">{{ worker.worker_id }}</div>
                 @if (worker.url) {
                   <div class="worker-url text-secondary">{{ worker.url }}</div>
                 }
@@ -92,6 +93,15 @@
               <span class="badge" [class.badge-connected]="worker.live" [class.badge-offline]="!worker.live">
                 {{ worker.live ? 'Connected' : 'Offline' }}
               </span>
+              <button
+                pButton
+                label="Rename"
+                icon="pi pi-pencil"
+                severity="secondary"
+                size="small"
+                [disabled]="worker.managed || deletingId() !== null || togglingId() !== null || renaming()"
+                (click)="openRenameDialog(worker)"
+              ></button>
               <button
                 pButton
                 [label]="worker.active ? 'Deactivate' : 'Activate'"
@@ -145,6 +155,18 @@
     </div>
   }
   <div class="form-group">
+    <label for="worker-name">Name</label>
+    <input
+      pInputText
+      id="worker-name"
+      [(ngModel)]="newWorkerName"
+      placeholder="e.g. Primary Build Server"
+      class="w-full"
+      (keyup.enter)="registerWorker()"
+    />
+    <small class="text-secondary">Human-readable label shown in the workers list.</small>
+  </div>
+  <div class="form-group">
     <label for="worker-id">Worker ID</label>
     <input
       pInputText
@@ -186,7 +208,7 @@
       icon="pi pi-plus"
       (click)="registerWorker()"
       [loading]="registering()"
-      [disabled]="registering() || !newWorkerId.trim()"
+      [disabled]="registering() || !newWorkerId.trim() || !newWorkerName.trim()"
     ></button>
   </ng-template>
 </p-dialog>
@@ -265,5 +287,43 @@
   }
   <ng-template pTemplate="footer">
     <button pButton label="I've saved the token" icon="pi pi-check" (click)="closeTokenDialog()"></button>
+  </ng-template>
+</p-dialog>
+
+<!-- Rename Worker Dialog -->
+<p-dialog
+  header="Rename Worker"
+  [(visible)]="showRenameDialog"
+  [modal]="true"
+  [style]="{ width: '440px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  @if (renamingWorker(); as worker) {
+    <div class="form-group">
+      <div class="text-secondary" style="font-size: 0.875rem; margin-bottom: 0.5rem;">{{ worker.worker_id }}</div>
+    </div>
+    <div class="form-group">
+      <label for="rename-name">Name</label>
+      <input
+        pInputText
+        id="rename-name"
+        [(ngModel)]="newName"
+        placeholder="e.g. Primary Build Server"
+        class="w-full"
+        (keyup.enter)="confirmRename()"
+      />
+    </div>
+  }
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="cancelRename()" [disabled]="renaming()"></button>
+    <button
+      pButton
+      label="Save"
+      icon="pi pi-check"
+      (click)="confirmRename()"
+      [loading]="renaming()"
+      [disabled]="renaming() || !newName.trim()"
+    ></button>
   </ng-template>
 </p-dialog>

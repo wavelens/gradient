@@ -17,12 +17,21 @@ export class WorkersService {
     return this.api.get<Worker[]>(`orgs/${org}/workers`);
   }
 
-  registerWorker(org: string, workerId: string, url?: string, token?: string): Observable<WorkerRegistration> {
-    return this.api.post<WorkerRegistration>(`orgs/${org}/workers`, { worker_id: workerId, url: url || undefined, token: token || undefined });
+  registerWorker(org: string, workerId: string, name: string, url?: string, token?: string): Observable<WorkerRegistration> {
+    return this.api.post<WorkerRegistration>(`orgs/${org}/workers`, {
+      worker_id: workerId,
+      name,
+      url: url || undefined,
+      token: token || undefined,
+    });
   }
 
   setWorkerActive(org: string, workerId: string, active: boolean): Observable<string> {
     return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, { active });
+  }
+
+  renameWorker(org: string, workerId: string, name: string): Observable<string> {
+    return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, { name });
   }
 
   deleteWorker(org: string, workerId: string): Observable<string> {

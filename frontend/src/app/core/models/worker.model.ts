@@ -25,6 +25,8 @@ export interface WorkerLiveInfo {
 
 export interface Worker {
   worker_id: string;
+  /** Human-readable display name. */
+  name: string;
   managed: boolean;
   active: boolean;
   registered_at?: string;

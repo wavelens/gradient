@@ -46,12 +46,15 @@ export class WorkersComponent implements OnInit {
 
   loading = signal(true);
   registering = signal(false);
+  renaming = signal(false);
   deletingId = signal<string | null>(null);
   togglingId = signal<string | null>(null);
   showRegisterDialog = signal(false);
   showTokenDialog = signal(false);
   showToggleWarningDialog = signal(false);
+  showRenameDialog = signal(false);
   pendingToggleWorker = signal<Worker | null>(null);
+  renamingWorker = signal<Worker | null>(null);
   errorMessage = signal<string | null>(null);
 
   orgName = '';
@@ -60,8 +63,10 @@ export class WorkersComponent implements OnInit {
   orgId = signal<string>('');
   workers = signal<Worker[]>([]);
   newWorkerId = '';
+  newWorkerName = '';
   newWorkerUrl = '';
   newWorkerToken = '';
+  newName = '';
   lastRegistration = signal<WorkerRegistration | null>(null);
   tokenCopied = signal(false);
   peerIdCopied = signal(false);
@@ -98,6 +103,7 @@ export class WorkersComponent implements OnInit {
 
   openRegisterDialog(): void {
     this.newWorkerId = '';
+    this.newWorkerName = '';
     this.newWorkerUrl = '';
     this.newWorkerToken = '';
     this.errorMessage.set(null);
@@ -105,12 +111,12 @@ export class WorkersComponent implements OnInit {
   }
 
   registerWorker(): void {
-    if (!this.newWorkerId.trim()) return;
+    if (!this.newWorkerId.trim() || !this.newWorkerName.trim()) return;
     this.registering.set(true);
     this.errorMessage.set(null);
     const url = this.newWorkerUrl.trim() || undefined;
     const token = this.newWorkerToken.trim() || undefined;
-    this.workersService.registerWorker(this.orgName, this.newWorkerId.trim(), url, token).subscribe({
+    this.workersService.registerWorker(this.orgName, this.newWorkerId.trim(), this.newWorkerName.trim(), url, token).subscribe({
       next: (reg) => {
         this.registering.set(false);
         this.showRegisterDialog.set(false);
@@ -175,6 +181,35 @@ export class WorkersComponent implements OnInit {
   cancelToggleWorker(): void {
     this.showToggleWarningDialog.set(false);
     this.pendingToggleWorker.set(null);
+  }
+
+  openRenameDialog(worker: Worker): void {
+    this.renamingWorker.set(worker);
+    this.newName = worker.name;
+    this.showRenameDialog.set(true);
+  }
+
+  confirmRename(): void {
+    const worker = this.renamingWorker();
+    if (!worker || !this.newName.trim()) return;
+    this.renaming.set(true);
+    this.workersService.renameWorker(this.orgName, worker.worker_id, this.newName.trim()).subscribe({
+      next: () => {
+        this.renaming.set(false);
+        this.showRenameDialog.set(false);
+        this.renamingWorker.set(null);
+        this.loadWorkers();
+      },
+      error: (err) => {
+        console.error('Failed to rename worker:', err);
+        this.renaming.set(false);
+      },
+    });
+  }
+
+  cancelRename(): void {
+    this.showRenameDialog.set(false);
+    this.renamingWorker.set(null);
   }
 
   copyToken(): void {
