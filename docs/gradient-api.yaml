@@ -2117,6 +2117,10 @@ paths:
                     Pre-generated token (output of `openssl rand -base64 48`, exactly 64 standard-base64 characters).
                     When provided the server stores its hash and does NOT return the token in the response.
                     Omit to have the server generate a token — it will be returned once and cannot be retrieved again.
+                name:
+                  type: string
+                  nullable: true
+                  description: Optional human-readable display name for this worker.
       responses:
         '200':
           description: Worker registered
@@ -2167,14 +2171,18 @@ paths:
           application/json:
             schema:
               type: object
-              required: [active]
               properties:
                 active:
                   type: boolean
-                  description: Set to false to deactivate the worker, true to reactivate it
+                  nullable: true
+                  description: Set to false to deactivate the worker, true to reactivate it. Omit to leave unchanged.
+                name:
+                  type: string
+                  nullable: true
+                  description: Update the display name. Empty string clears the name. Omit to leave unchanged.
       responses:
         '200':
-          description: Worker activation state updated
+          description: Worker updated
           content:
             application/json:
               schema:
@@ -3279,6 +3287,10 @@ components:
         worker_id:
           type: string
           description: Persistent worker identity string
+        name:
+          type: string
+          nullable: true
+          description: Human-readable display name for this worker, if set
         registered_at:
           type: string
           format: date-time
