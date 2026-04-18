@@ -303,6 +303,13 @@
         description = "Worker identity string. Must match GRADIENT_WORKER_ID on the worker machine.";
       };
 
+      name = mkOption {
+        type = types.str;
+        default = "";
+        description = "Human-readable display name for this worker. Shown in the UI. Leave empty to use the worker ID.";
+        example = "build-server-1";
+      };
+
       url = mkOption {
         type = types.str;
         default = "";
@@ -387,6 +394,7 @@
         example = literalExpression ''
           {
             builder-1 = {
+              name = "Primary Build Server";
               organization = "acme-corp";
               token_file = "/etc/gradient/secrets/builder-1-token";
             };
