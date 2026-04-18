@@ -121,6 +121,22 @@ in {
     };
 
     settings = {
+      architectures = lib.mkOption {
+        description = "Nix system strings this worker can build for";
+        type = lib.types.listOf lib.types.str;
+        default = [ pkgs.system ];
+        defaultText = lib.literalExpression "[ pkgs.system ]";
+        example = [ "x86_64-linux" "aarch64-linux" ];
+      };
+
+      systemFeatures = lib.mkOption {
+        description = "Nix system features this worker advertises";
+        type = lib.types.listOf lib.types.str;
+        default = lib.lists.uniqueStrings config.nix.settings.system-features;
+        defaultText = lib.literalExpression "lib.lists.uniqueStrings config.nix.settings.system-features";
+        example = [ "nixos-test" "benchmark" "big-parallel" ];
+      };
+
       maxConcurrentEvaluations = lib.mkOption {
         description = "Maximum number of concurrent evaluations";
         type = lib.types.ints.positive;
@@ -270,6 +286,11 @@ in {
           GRADIENT_WORKER_EVAL_WORKERS                = toString cfg.settings.evalWorkers;
           GRADIENT_MAX_EVALUATIONS_PER_WORKER         = toString cfg.settings.maxEvaluationsPerWorker;
           GRADIENT_MAX_PROTO_CONNECTIONS              = toString cfg.settings.maxProtoConnections;
+        } // lib.optionalAttrs (cfg.settings.architectures != []) {
+          GRADIENT_WORKER_ARCHITECTURES = lib.concatStringsSep "," cfg.settings.architectures;
+        } // lib.optionalAttrs (cfg.settings.systemFeatures != []) {
+          GRADIENT_WORKER_SYSTEM_FEATURES = lib.concatStringsSep "," cfg.settings.systemFeatures;
+        } // {
           GRADIENT_WORKER_CAPABILITY_FEDERATE         = lib.boolToString cfg.capabilities.federate;
           GRADIENT_WORKER_CAPABILITY_FETCH            = lib.boolToString cfg.capabilities.fetch;
           GRADIENT_WORKER_CAPABILITY_EVAL             = lib.boolToString cfg.capabilities.eval;

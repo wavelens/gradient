@@ -113,8 +113,10 @@ impl ParsedDerivation {
         let mut opts = ClientOptions::default();
         opts.verbose_build = Verbosity::Talkative;
         opts.verbosity = Verbosity::Notice;
+        opts.use_substitutes = false;
+
         if let Err(e) = guard.client().set_options(&opts).await {
-            warn!(error = %e, "set_options(verbose_build=Talkative) failed; build logs may be empty");
+            warn!(error = %e, "set_options failed; build logs may be empty or substitution may be active");
         }
 
         // `build_derivation` returns `impl ResultLog = Stream<Item=LogMessage> + Future`.
