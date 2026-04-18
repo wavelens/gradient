@@ -70,7 +70,9 @@ impl WorkerEvaluator {
 
 impl Clone for WorkerEvaluator {
     fn clone(&self) -> Self {
-        Self { resolver: self.resolver.clone() }
+        Self {
+            resolver: self.resolver.clone(),
+        }
     }
 }
 
@@ -120,7 +122,7 @@ pub async fn evaluate_derivations(
 
 /// Query the server cache for `batch`'s output paths and set `substituted`
 /// on any derivation whose outputs are all present in the cache.
-async fn mark_substituted(batch: &mut Vec<DiscoveredDerivation>, updater: &mut dyn JobReporter) {
+async fn mark_substituted(batch: &mut [DiscoveredDerivation], updater: &mut dyn JobReporter) {
     let output_paths: Vec<String> = batch
         .iter()
         .flat_map(|d| d.outputs.iter().map(|o| o.path.clone()))
@@ -138,12 +140,232 @@ async fn mark_substituted(batch: &mut Vec<DiscoveredDerivation>, updater: &mut d
     let cached_set: HashSet<&str> = cached.iter().map(|c| c.path.as_str()).collect();
     for drv in batch.iter_mut() {
         if !drv.outputs.is_empty()
-            && drv.outputs.iter().all(|o| cached_set.contains(o.path.as_str()))
+            && drv
+                .outputs
+                .iter()
+                .all(|o| cached_set.contains(o.path.as_str()))
         {
             drv.substituted = true;
         }
     }
 }
+
+// ── Pipeline helpers ─────────────────────────────────────────────────────────
+
+/// Build the flake reference string from a job and an optional local checkout.
+///
+/// When `FetchFlake` archived the repo into the Nix store the returned path
+/// starts with `/nix/store/` — content-addressed and immutable, valid in pure
+/// eval mode.  For a temporary `/tmp/` checkout we use `git+file://?rev=` to
+/// stay pure (bare `path:/tmp/...` would allow impure `builtins.fetchGit`
+/// calls that bypass `builtins.tryEval`).
+fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
+    if let Some(path) = local_flake_path {
+        if path.starts_with("/nix/store/") {
+            format!("path:{}", path)
+        } else {
+            format!("git+file://{}?rev={}", path, job.commit)
+        }
+    } else {
+        gradient_core::nix::NixFlakeUrl::new(&job.repository, &job.commit)
+            .map(|u| u.to_string())
+            .unwrap_or_else(|_| job.repository.clone())
+    }
+}
+
+/// Read and parse every `.drv` in `wave` concurrently, preserving BFS order.
+///
+/// A read or parse failure is a hard error — silently dropping a derivation
+/// drops its entire dep subtree, causing the dispatcher to release the parent
+/// prematurely and the nix-daemon to die with "1 dependency failed".
+async fn parse_drv_wave(
+    drv_reader: &dyn DrvReader,
+    wave: &[(Option<String>, String)],
+) -> Result<Vec<gradient_core::db::Derivation>> {
+    // Index-tagged futures so results can be sorted back into BFS order.
+    let mut futs: FuturesUnordered<_> = wave
+        .iter()
+        .enumerate()
+        .map(|(i, (_, drv_path))| {
+            let drv_path = drv_path.clone();
+            async move {
+                let bytes = drv_reader.read_drv(&drv_path).await.with_context(|| {
+                    format!(
+                        "cannot read .drv {drv_path} during closure walk; aborting eval \
+                         to avoid silently dropping dependencies"
+                    )
+                })?;
+                let parsed = parse_drv(&bytes).with_context(|| {
+                    format!(
+                        "cannot parse .drv {drv_path} during closure walk; aborting eval \
+                         to avoid silently dropping dependencies"
+                    )
+                })?;
+                Ok::<_, anyhow::Error>((i, parsed))
+            }
+        })
+        .collect();
+
+    let mut slots: Vec<Option<gradient_core::db::Derivation>> =
+        (0..wave.len()).map(|_| None).collect();
+    while let Some(result) = futs.next().await {
+        let (i, drv) = result?;
+        slots[i] = Some(drv);
+    }
+
+    Ok(slots
+        .into_iter()
+        .map(|s| s.expect("every wave slot was filled"))
+        .collect())
+}
+
+/// Build a [`DiscoveredDerivation`] from a parsed `.drv` file.
+fn build_discovered_derivation(
+    attr: Option<String>,
+    drv_path: String,
+    drv: &gradient_core::db::Derivation,
+) -> DiscoveredDerivation {
+    let outputs: Vec<DerivationOutput> = drv
+        .outputs
+        .iter()
+        .filter(|o| !o.path.is_empty())
+        .map(|o| DerivationOutput {
+            name: o.name.clone(),
+            path: o.path.clone(),
+        })
+        .collect();
+
+    let dependencies: Vec<String> = drv
+        .input_derivations
+        .iter()
+        .map(|(p, _)| p.clone())
+        .collect();
+
+    DiscoveredDerivation {
+        attr: attr.unwrap_or_default(),
+        drv_path,
+        outputs,
+        dependencies,
+        architecture: drv.system.clone(),
+        required_features: drv.required_system_features(),
+        substituted: false,
+    }
+}
+
+/// BFS closure walker.
+///
+/// Holds the walk state (frontier queue, visited set, accumulation batch)
+/// and drives the traversal in concurrent waves of up to
+/// [`DRV_READ_CONCURRENCY`] `.drv` paths.
+///
+/// Every [`EVAL_BATCH_SIZE`] derivations the batch is flushed to the server
+/// so builds can start queuing while the walk continues.
+struct ClosureWalker<'a> {
+    drv_reader: &'a dyn DrvReader,
+    batch: Vec<DiscoveredDerivation>,
+    visited: HashSet<String>,
+    queue: VecDeque<(Option<String>, String)>,
+    walked: usize,
+    start: Instant,
+}
+
+impl<'a> ClosureWalker<'a> {
+    /// Initialise the walker with `root_drvs` as the BFS frontier.
+    fn new(drv_reader: &'a dyn DrvReader, root_drvs: &[(String, String)]) -> Self {
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::new();
+        for (attr, drv) in root_drvs {
+            if visited.insert(drv.clone()) {
+                queue.push_back((Some(attr.clone()), drv.clone()));
+            }
+        }
+        info!(roots = root_drvs.len(), "starting closure walk");
+        Self {
+            drv_reader,
+            batch: Vec::new(),
+            visited,
+            queue,
+            walked: 0,
+            start: Instant::now(),
+        }
+    }
+
+    /// Drive the full BFS, flushing intermediate batches to `updater`.
+    ///
+    /// Returns the final unflushed batch; the caller is responsible for the
+    /// final `report_eval_result` call.
+    async fn walk(
+        &mut self,
+        updater: &mut dyn JobReporter,
+        abort: &mut watch::Receiver<bool>,
+    ) -> Result<Vec<DiscoveredDerivation>> {
+        while !self.queue.is_empty() {
+            // Honour AbortJob at every wave boundary.
+            if is_aborted(abort) {
+                anyhow::bail!(ABORT_ERR);
+            }
+            self.process_wave(updater).await?;
+        }
+
+        info!(
+            walked = self.walked,
+            elapsed_secs = self.start.elapsed().as_secs(),
+            "closure walk complete"
+        );
+
+        Ok(std::mem::take(&mut self.batch))
+    }
+
+    /// Drain one concurrent wave from the front of the queue and process it.
+    async fn process_wave(&mut self, updater: &mut dyn JobReporter) -> Result<()> {
+        let wave_size = self.queue.len().min(DRV_READ_CONCURRENCY);
+        let wave: Vec<_> = (0..wave_size)
+            .map(|_| self.queue.pop_front().expect("wave_size <= queue.len()"))
+            .collect();
+
+        let parsed_drvs = parse_drv_wave(self.drv_reader, &wave).await?;
+
+        for ((attr, drv_path), drv) in wave.into_iter().zip(parsed_drvs) {
+            // Expand BFS frontier.
+            for (input_drv, _) in &drv.input_derivations {
+                if self.visited.insert(input_drv.clone()) {
+                    self.queue.push_back((None, input_drv.clone()));
+                }
+            }
+
+            self.batch
+                .push(build_discovered_derivation(attr, drv_path, &drv));
+            self.walked += 1;
+
+            // Heartbeat log so operators can distinguish "slow eval" from "stuck".
+            if self.walked.is_multiple_of(500) {
+                info!(
+                    walked = self.walked,
+                    queued = self.queue.len(),
+                    elapsed_secs = self.start.elapsed().as_secs(),
+                    "closure walk progress"
+                );
+            }
+
+            // Mid-walk flush: let the server start queuing builds early.
+            if self.batch.len() >= EVAL_BATCH_SIZE {
+                mark_substituted(&mut self.batch, updater).await;
+                debug!(
+                    count = self.batch.len(),
+                    remaining = self.queue.len(),
+                    "flushing eval batch"
+                );
+                updater
+                    .report_eval_result(std::mem::take(&mut self.batch), vec![], vec![])
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// ── Orchestrator ──────────────────────────────────────────────────────────────
 
 /// Testable version of [`evaluate_derivations`] that accepts trait objects.
 ///
@@ -168,46 +390,18 @@ pub async fn evaluate_derivations_with(
     }
     updater.report_evaluating_derivations().await?;
 
-    // Use the local clone from FetchFlake if available, otherwise build a
-    // commit-pinned remote URL.
-    //
-    // When FetchFlake archived the repo into the Nix store (via `nix flake
-    // archive`), the returned path starts with `/nix/store/`.  Nix store paths
-    // are content-addressed and immutable, so `path:/nix/store/xxx` is valid in
-    // pure evaluation mode — we use it directly.
-    //
-    // When FetchFlake fell back to a temporary git checkout in /tmp, use
-    // `git+file://?rev=` to keep Nix in pure mode: `path:/tmp/...` would switch
-    // Nix to impure mode, allowing `builtins.fetchGit` calls without a `rev` to
-    // attempt live network fetches that are not catchable by `builtins.tryEval`.
-    let repo = if let Some(path) = local_flake_path {
-        if path.starts_with("/nix/store/") {
-            format!("path:{}", path)
-        } else {
-            format!("git+file://{}?rev={}", path, job.commit)
-        }
-    } else {
-        gradient_core::nix::NixFlakeUrl::new(&job.repository, &job.commit)
-            .map(|u| u.to_string())
-            .unwrap_or_else(|_| job.repository.clone())
-    };
-    let wildcards = job.wildcards.clone();
+    let repo = build_flake_url(job, local_flake_path);
 
     // ── Step 1: discover attr paths ──────────────────────────────────────────
     debug!(repo = %repo, "listing flake derivations");
     let (attrs, mut warnings) = match resolver
-        .list_flake_derivations(repo.clone(), wildcards)
+        .list_flake_derivations(repo.clone(), job.wildcards.clone())
         .await
     {
         Ok(v) => v,
         Err(e) => {
-            // Surface the underlying Nix evaluation error as an
-            // `EvalResult { errors: [...] }` so the server records it as an
-            // `evaluation_message` row visible in the UI. The chained error
-            // string from anyhow includes the eval-worker subprocess stderr
-            // (the actual `error: …` lines from nix). Without this report,
-            // only the `JobFailed.error` summary makes it to the server,
-            // which the UI shows as a single opaque line.
+            // Surface the Nix error as an EvalResult so it appears in the UI,
+            // not just as an opaque JobFailed summary.
             let err_msg = format!("list_flake_derivations failed: {:#}", e);
             warn!(error = %err_msg, "reporting eval error to server");
             let _ = updater
@@ -219,8 +413,7 @@ pub async fn evaluate_derivations_with(
 
     if attrs.is_empty() {
         warn!("no derivations found for evaluation");
-        updater.report_eval_result(vec![], warnings, vec![]).await?;
-        return Ok(());
+        return updater.report_eval_result(vec![], warnings, vec![]).await;
     }
 
     if is_aborted(abort) {
@@ -228,29 +421,21 @@ pub async fn evaluate_derivations_with(
     }
 
     // ── Step 2: resolve attr paths → drv paths ───────────────────────────────
-    let (resolved, resolve_warnings) = match resolver
-        .resolve_derivation_paths(repo.clone(), attrs.clone())
-        .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            // Same as above for resolve: surface the error to the server
-            // before bubbling up so it doesn't only show as a JobFailed
-            // summary. Forward any warnings collected so far so they don't
-            // get lost just because the next step blew up.
-            let err_msg = format!("resolve_derivation_paths failed: {:#}", e);
-            warn!(error = %err_msg, "reporting eval error to server");
-            let _ = updater
-                .report_eval_result(vec![], warnings, vec![err_msg])
-                .await;
-            return Err(e).context("resolve_derivation_paths failed");
-        }
-    };
+    let (resolved, resolve_warnings) =
+        match resolver.resolve_derivation_paths(repo.clone(), attrs).await {
+            Ok(v) => v,
+            Err(e) => {
+                // Forward warnings accumulated so far so they aren't lost.
+                let err_msg = format!("resolve_derivation_paths failed: {:#}", e);
+                warn!(error = %err_msg, "reporting eval error to server");
+                let _ = updater
+                    .report_eval_result(vec![], warnings, vec![err_msg])
+                    .await;
+                return Err(e).context("resolve_derivation_paths failed");
+            }
+        };
     warnings.extend(resolve_warnings);
 
-    // Build (attr, drv_path) pairs from successful resolutions.
-    // Per-attr failures are hard errors (not Nix warnings) — they prevent the
-    // derivation from being built at all, so they go into `errors`.
     let mut root_drvs: Vec<(String, String)> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     for (attr, result) in resolved {
@@ -265,166 +450,30 @@ pub async fn evaluate_derivations_with(
 
     if root_drvs.is_empty() {
         warn!("all attr resolutions failed");
-        updater.report_eval_result(vec![], warnings, errors).await?;
-        return Ok(());
+        return updater.report_eval_result(vec![], warnings, errors).await;
     }
 
-    // ── Step 3+4+5: BFS closure walk with incremental EvalResult flushing ───────
-    // Start from all root drv paths.  Every EVAL_BATCH_SIZE derivations the
-    // worker queries the server cache and sends an EvalResult so the server can
-    // start queuing builds while the walk continues.
-    let mut batch: Vec<DiscoveredDerivation> = Vec::new();
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<(Option<String>, String)> = VecDeque::new(); // (attr, drv_path)
+    // ── Step 3+4+5: BFS closure walk with incremental flushes ────────────────
+    let mut remaining = ClosureWalker::new(drv_reader, &root_drvs)
+        .walk(updater, abort)
+        .await?;
 
-    for (attr, drv) in &root_drvs {
-        if visited.insert(drv.clone()) {
-            queue.push_back((Some(attr.clone()), drv.clone()));
-        }
-    }
-
-    info!(
-        roots = root_drvs.len(),
-        "starting closure walk"
-    );
-    let walk_start = Instant::now();
-    let mut walked: usize = 0;
-
-    // Drive the BFS in waves: drain up to DRV_READ_CONCURRENCY items from the
-    // queue, read+parse them concurrently, then fold the results back into
-    // `batch` / `visited` / `queue` sequentially (so those structures need no
-    // locking). Reading a single `.drv` is async filesystem IO and almost all
-    // of the per-derivation cost — running waves concurrently scales the walk
-    // from "one inflight read at a time" to many.
-    while !queue.is_empty() {
-        // Honour AbortJob promptly — checked at every wave boundary so a
-        // long-running closure walk on a multi-thousand-derivation flake
-        // can still be aborted cleanly from the API. The check is cheap
-        // (single mutex-free atomic load on the watch channel).
-        if is_aborted(abort) {
-            anyhow::bail!(ABORT_ERR);
-        }
-
-        // Drain a wave from the queue, preserving BFS order within the wave.
-        let wave_size = queue.len().min(DRV_READ_CONCURRENCY);
-        let mut wave: Vec<(Option<String>, String)> = Vec::with_capacity(wave_size);
-        for _ in 0..wave_size {
-            wave.push(queue.pop_front().expect("wave_size <= queue.len()"));
-        }
-
-        // Read + parse every .drv in the wave concurrently. Indices keep the
-        // results aligned with `wave` so later sequential processing is
-        // deterministic and BFS order is preserved across waves.
-        // CRITICAL: A read or parse failure must abort the eval — silently
-        // dropping a derivation drops its entire dep subtree from the closure
-        // walk, so the server never sees those dependencies, the dispatch
-        // SQL releases the parent prematurely, and the nix-daemon then dies
-        // with "1 dependency failed".
-        let mut futs = wave
-            .iter()
-            .enumerate()
-            .map(|(i, (_, drv_path))| {
-                let drv_path = drv_path.clone();
-                async move {
-                    let bytes = drv_reader.read_drv(&drv_path).await.with_context(|| {
-                        format!(
-                            "cannot read .drv {drv_path} during closure walk; aborting eval \
-                             to avoid silently dropping dependencies"
-                        )
-                    })?;
-                    let parsed = parse_drv(&bytes).with_context(|| {
-                        format!(
-                            "cannot parse .drv {drv_path} during closure walk; aborting eval \
-                             to avoid silently dropping dependencies"
-                        )
-                    })?;
-                    Ok::<_, anyhow::Error>((i, parsed))
-                }
-            })
-            .collect::<FuturesUnordered<_>>();
-
-        let mut parsed: Vec<Option<gradient_core::db::Derivation>> =
-            (0..wave.len()).map(|_| None).collect();
-        while let Some(result) = futs.next().await {
-            let (i, drv) = result?;
-            parsed[i] = Some(drv);
-        }
-        drop(futs); // release any borrows of drv_reader before re-using it
-
-        for ((attr, drv_path), drv_opt) in wave.into_iter().zip(parsed) {
-            let drv = drv_opt.expect("every wave slot was filled");
-
-            // Enqueue input derivations (BFS frontier expansion).
-            for (input_drv, _outputs) in &drv.input_derivations {
-                if visited.insert(input_drv.clone()) {
-                    queue.push_back((None, input_drv.clone()));
-                }
-            }
-
-            let outputs: Vec<DerivationOutput> = drv
-                .outputs
-                .iter()
-                .filter(|o| !o.path.is_empty())
-                .map(|o| DerivationOutput { name: o.name.clone(), path: o.path.clone() })
-                .collect();
-
-            let dependencies: Vec<String> = drv
-                .input_derivations
-                .iter()
-                .map(|(p, _)| p.clone())
-                .collect();
-
-            batch.push(DiscoveredDerivation {
-                attr: attr.unwrap_or_default(),
-                drv_path: drv_path.clone(),
-                outputs,
-                dependencies,
-                architecture: drv.system.clone(),
-                required_features: drv.required_system_features(),
-                substituted: false,
-            });
-
-            walked += 1;
-            // Heartbeat log every 500 derivations so the operator can tell
-            // "slow eval" apart from "stuck eval".
-            if walked.is_multiple_of(500) {
-                info!(
-                    walked,
-                    queued = queue.len(),
-                    elapsed_secs = walk_start.elapsed().as_secs(),
-                    "closure walk progress"
-                );
-            }
-
-            // Flush a mid-walk batch once it reaches EVAL_BATCH_SIZE.
-            if batch.len() >= EVAL_BATCH_SIZE {
-                mark_substituted(&mut batch, updater).await;
-                debug!(count = batch.len(), remaining = queue.len(), "flushing eval batch");
-                updater.report_eval_result(std::mem::take(&mut batch), vec![], vec![]).await?;
-            }
-        }
-    }
-
-    info!(
-        walked,
-        elapsed_secs = walk_start.elapsed().as_secs(),
-        "closure walk complete"
-    );
-
-    // ── Final flush: remaining derivations + accumulated warnings/errors ──────
+    // ── Final flush: remaining derivations + deduplicated warnings/errors ─────
     warnings.sort_unstable();
     warnings.dedup();
     errors.sort_unstable();
     errors.dedup();
 
-    mark_substituted(&mut batch, updater).await;
+    mark_substituted(&mut remaining, updater).await;
     debug!(
-        count = batch.len(),
+        count = remaining.len(),
         warnings = warnings.len(),
         errors = errors.len(),
-        "closure walk complete — flushing final batch"
+        "flushing final eval batch"
     );
-    updater.report_eval_result(batch, warnings, errors).await
+    updater
+        .report_eval_result(remaining, warnings, errors)
+        .await
 }
 
 #[cfg(test)]
@@ -484,9 +533,16 @@ mod tests {
         let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
-            .await
-            .unwrap();
+        evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
 
         // Should have at least EvaluatingDerivations + one EvalResult.
         assert!(reporter.len() >= 2);
@@ -497,7 +553,10 @@ mod tests {
         // Nothing is built → nothing substituted.
         assert!(all.iter().all(|d| !d.substituted));
         // Entry point should have the attr set.
-        let entry = all.iter().find(|d| d.drv_path == fixture.entry_point).unwrap();
+        let entry = all
+            .iter()
+            .find(|d| d.drv_path == fixture.entry_point)
+            .unwrap();
         assert_eq!(entry.attr, "hello");
         // Warnings should be empty for a valid fixture (check final batch).
         if let ReportedEvent::EvalResult { warnings, .. } = reporter.last_eval_result().unwrap() {
@@ -519,9 +578,16 @@ mod tests {
         let cached: Vec<String> = fixture.store.present_paths().into_iter().collect();
         let mut reporter = RecordingJobReporter::new().with_cached_paths(cached);
 
-        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
-            .await
-            .unwrap();
+        evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
 
         let all = reporter.all_eval_derivations();
         let substituted_count = all.iter().filter(|d| d.substituted).count();
@@ -552,9 +618,16 @@ mod tests {
         let cached: Vec<String> = fixture.store.present_paths().into_iter().collect();
         let mut reporter = RecordingJobReporter::new().with_cached_paths(cached);
 
-        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
-            .await
-            .unwrap();
+        evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
 
         let all = reporter.all_eval_derivations();
         assert!(
@@ -570,9 +643,16 @@ mod tests {
         let job = make_flake_job("https://example.com/empty");
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
-            .await
-            .unwrap();
+        evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
 
         if let ReportedEvent::EvalResult { derivations, .. } = reporter.last_eval_result().unwrap()
         {
@@ -595,9 +675,16 @@ mod tests {
         let job = make_flake_job("repo");
         let mut reporter = RecordingJobReporter::new();
 
-        let err = evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
-            .await
-            .expect_err("missing .drv must abort the eval");
+        let err = evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .expect_err("missing .drv must abort the eval");
         let msg = format!("{err:#}");
         assert!(
             msg.contains("nonexistent.drv"),
@@ -626,9 +713,16 @@ mod tests {
         let mut abort = rx;
         tx.send(true).unwrap();
 
-        let err = evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut abort)
-            .await
-            .expect_err("aborted eval must return Err");
+        let err = evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut abort,
+        )
+        .await
+        .expect_err("aborted eval must return Err");
         assert!(
             format!("{err:#}").contains("aborted by server"),
             "error should mention abort: {err:#}"
@@ -646,9 +740,16 @@ mod tests {
         let job = make_flake_job(repo);
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
-            .await
-            .unwrap();
+        evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
 
         let all = reporter.all_eval_derivations();
         {

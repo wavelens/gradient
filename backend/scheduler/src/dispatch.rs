@@ -24,9 +24,7 @@ use gradient_core::ci::TriggerError;
 use gradient_core::sources::{check_project_updates, get_commit_info};
 use gradient_core::types::input::vec_to_hex;
 use gradient_core::types::*;
-use sea_orm::{
-    ActiveModelTrait as _, ColumnTrait, EntityTrait, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait as _, ColumnTrait, EntityTrait, QueryFilter};
 
 /// Fallback poll interval for projects whose org has a forge webhook configured.
 /// Webhooks are the primary trigger; this catches any that fail to arrive.
@@ -39,18 +37,13 @@ use super::jobs::{PendingBuildJob, PendingEvalJob};
 use gradient_core::types::proto::{BuildJob, BuildTask, FlakeJob, FlakeTask};
 
 /// Spawns all dispatch loops as detached tokio tasks.
-///
-/// Note: there is deliberately NO `build_dispatch_loop`. Build dispatch is
-/// demand-driven: `dispatch_ready_builds` runs inside `request_job` when a
-/// worker asks for work and the in-memory tracker has nothing to offer.
-/// This keeps the server responsive (no 5-second polling delay, no expensive
-/// SQL query blocking the message handler) and means builds are dispatched
-/// exactly when a worker is ready to accept them.
 pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
     let s1 = Arc::clone(&scheduler);
+    let s2 = Arc::clone(&scheduler);
     let s3 = Arc::clone(&scheduler);
     tokio::spawn(async move { project_poll_loop(s3).await });
     tokio::spawn(async move { eval_dispatch_loop(s1).await });
+    tokio::spawn(async move { build_dispatch_loop(s2).await });
 }
 
 // ── Project polling ──────────────────────────────────────────────────────────
@@ -71,9 +64,7 @@ async fn project_poll_loop(scheduler: Arc<Scheduler>) {
 /// Projects whose organization has a forge webhook configured are polled every
 /// [`WEBHOOK_BACKUP_POLL_SECS`] (30 min) as a fallback in case a webhook delivery
 /// fails. Projects without a webhook use the CLI `evaluation_timeout`.
-pub(crate) async fn poll_projects_for_evaluations(
-    scheduler: &Scheduler,
-) -> anyhow::Result<()> {
+pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyhow::Result<()> {
     let state = &scheduler.state;
     let now = Utc::now().naive_utc();
     let threshold = now - chrono::Duration::seconds(state.cli.evaluation_timeout);
@@ -252,6 +243,202 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
 
 // ── Build dispatch ────────────────────────────────────────────────────────────
 
+async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
+    let mut interval = tokio::time::interval(Duration::from_secs(5));
+    info!("build dispatch loop started");
+    loop {
+        interval.tick().await;
+        if let Err(e) = dispatch_ready_builds(&scheduler).await {
+            error!(error = %e, "build dispatch error");
+        }
+        // After dispatching, reconcile each in-flight evaluation's
+        // Building/Waiting state so the UI reflects "no worker can pick this
+        // up" (or recovers when a worker comes back online). Cheap when
+        // there are no in-flight evals.
+        if let Err(e) = scheduler.reconcile_waiting_state().await {
+            error!(error = %e, "reconcile_waiting_state in dispatch loop failed");
+        }
+    }
+}
+
+/// All DB data needed to assemble [`PendingBuildJob`]s for a dispatch pass.
+///
+/// Loaded in bulk (one IN-list query per table) by [`BuildDispatchMaps::load`],
+/// then queried in-memory by [`BuildDispatchMaps::make_pending_job`].
+/// This avoids O(n) serial round-trips when hundreds of builds become ready
+/// at once.
+struct BuildDispatchMaps {
+    derivations: HashMap<Uuid, MDerivation>,
+    evaluations: HashMap<Uuid, MEvaluation>,
+    /// project_id → organization_id
+    projects: HashMap<Uuid, Uuid>,
+    /// eval_id → organization_id (used when the eval has no project)
+    direct_builds: HashMap<Uuid, Uuid>,
+    features_by_drv: HashMap<Uuid, Vec<Uuid>>,
+    feature_names: HashMap<Uuid, String>,
+}
+
+impl BuildDispatchMaps {
+    /// Issue one IN-list query per table and build all lookup maps.
+    async fn load(state: &Arc<ServerState>, builds: &[MBuild]) -> anyhow::Result<Self> {
+        let drv_ids: Vec<Uuid> = builds.iter().map(|b| b.derivation).collect();
+        let eval_ids: Vec<Uuid> = builds
+            .iter()
+            .map(|b| b.evaluation)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        let derivations: HashMap<Uuid, MDerivation> = EDerivation::find()
+            .filter(CDerivation::Id.is_in(drv_ids.clone()))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|d| (d.id, d))
+            .collect();
+
+        let evaluations: HashMap<Uuid, MEvaluation> = EEvaluation::find()
+            .filter(CEvaluation::Id.is_in(eval_ids))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|e| (e.id, e))
+            .collect();
+
+        // peer_id resolution: project (preferred) or direct_build (fallback).
+        let project_ids: Vec<Uuid> = evaluations
+            .values()
+            .filter_map(|e| e.project)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        let projects: HashMap<Uuid, Uuid> = if project_ids.is_empty() {
+            HashMap::new()
+        } else {
+            EProject::find()
+                .filter(CProject::Id.is_in(project_ids))
+                .all(&state.db)
+                .await?
+                .into_iter()
+                .map(|p| (p.id, p.organization))
+                .collect()
+        };
+        let direct_builds: HashMap<Uuid, Uuid> = {
+            let evals_without_project: Vec<Uuid> = evaluations
+                .values()
+                .filter(|e| e.project.is_none())
+                .map(|e| e.id)
+                .collect();
+            if evals_without_project.is_empty() {
+                HashMap::new()
+            } else {
+                EDirectBuild::find()
+                    .filter(CDirectBuild::Evaluation.is_in(evals_without_project))
+                    .all(&state.db)
+                    .await?
+                    .into_iter()
+                    .map(|db| (db.evaluation, db.organization))
+                    .collect()
+            }
+        };
+
+        // Required features: per-derivation list of feature names.
+        let feature_edges = EDerivationFeature::find()
+            .filter(CDerivationFeature::Derivation.is_in(drv_ids))
+            .all(&state.db)
+            .await
+            .unwrap_or_default();
+        let mut features_by_drv: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+        for e in &feature_edges {
+            features_by_drv
+                .entry(e.derivation)
+                .or_default()
+                .push(e.feature);
+        }
+        let feature_names: HashMap<Uuid, String> = if feature_edges.is_empty() {
+            HashMap::new()
+        } else {
+            let feature_ids: Vec<Uuid> = feature_edges.iter().map(|e| e.feature).collect();
+            EFeature::find()
+                .filter(CFeature::Id.is_in(feature_ids))
+                .all(&state.db)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|f| (f.id, f.name))
+                .collect()
+        };
+
+        Ok(Self {
+            derivations,
+            evaluations,
+            projects,
+            direct_builds,
+            features_by_drv,
+            feature_names,
+        })
+    }
+
+    /// Resolve the organization that owns this evaluation (used as `peer_id`
+    /// to route the job only to workers registered by that org).
+    fn resolve_peer_id(&self, eval: &MEvaluation) -> Option<Uuid> {
+        match eval.project {
+            Some(pid) => self.projects.get(&pid).copied(),
+            None => self.direct_builds.get(&eval.id).copied(),
+        }
+    }
+
+    /// Return the required Nix system features for `derivation_id`.
+    fn required_features(&self, derivation_id: Uuid) -> Vec<String> {
+        self.features_by_drv
+            .get(&derivation_id)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|i| self.feature_names.get(i).cloned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Assemble a `(job_id, PendingBuildJob)` pair for `build`, or `None` if
+    /// any required map lookup fails (logged as errors at call site).
+    fn make_pending_job(&self, build: &MBuild) -> Option<(String, PendingBuildJob)> {
+        let derivation = self.derivations.get(&build.derivation).or_else(|| {
+            error!(build_id = %build.id, "derivation not found for build");
+            None
+        })?;
+        let eval = self.evaluations.get(&build.evaluation).or_else(|| {
+            error!(build_id = %build.id, "evaluation not found for build");
+            None
+        })?;
+        let peer_id = self.resolve_peer_id(eval).or_else(|| {
+            error!(build_id = %build.id, "could not resolve peer_id for build");
+            None
+        })?;
+
+        let job_id = format!("build:{}", build.id);
+        let build_job = BuildJob {
+            builds: vec![BuildTask {
+                build_id: build.id.to_string(),
+                drv_path: derivation.derivation_path.clone(),
+            }],
+            compress: None,
+            sign: None,
+        };
+        let pending = PendingBuildJob {
+            build_id: build.id,
+            evaluation_id: build.evaluation,
+            peer_id,
+            job: build_job,
+            required_paths: vec![],
+            architecture: derivation.architecture.clone(),
+            required_features: self.required_features(build.derivation),
+        };
+
+        Some((job_id, pending))
+    }
+}
+
 pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Result<()> {
     let state = &scheduler.state;
 
@@ -289,8 +476,8 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
         return Ok(());
     }
 
-    // ── Filter out builds already in the in-memory tracker ──────────────────
-    // One read-lock acquisition for the whole pass instead of per-build.
+    // Filter out builds already in the in-memory tracker — one lock acquisition
+    // for the whole pass instead of per-build.
     let new_builds: Vec<MBuild> = {
         let tracker = scheduler.job_tracker.read().await;
         builds
@@ -302,157 +489,14 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
         return Ok(());
     }
 
-    // ── Bulk-load every piece of metadata the dispatcher needs ──────────────
-    // Previously this loop did six DB round-trips PER build (derivation,
-    // evaluation, project, derivation_feature edges, feature names, plus
-    // the contains_job read lock). For a large eval that just promoted
-    // hundreds of builds Created→Queued, that's hundreds of serial queries
-    // — blocking the message handler that called us so the worker can't
-    // even send `RequestJob` until we're done. Doing one IN-list query per
-    // table instead drops the total to a constant 5–6 queries.
-    let drv_ids: Vec<Uuid> = new_builds.iter().map(|b| b.derivation).collect();
-    let eval_ids: Vec<Uuid> = new_builds
-        .iter()
-        .map(|b| b.evaluation)
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
+    let maps = BuildDispatchMaps::load(state, &new_builds).await?;
 
-    let derivations: HashMap<Uuid, MDerivation> = EDerivation::find()
-        .filter(CDerivation::Id.is_in(drv_ids.clone()))
-        .all(&state.db)
-        .await?
-        .into_iter()
-        .map(|d| (d.id, d))
-        .collect();
-
-    let evaluations: HashMap<Uuid, MEvaluation> = EEvaluation::find()
-        .filter(CEvaluation::Id.is_in(eval_ids.clone()))
-        .all(&state.db)
-        .await?
-        .into_iter()
-        .map(|e| (e.id, e))
-        .collect();
-
-    // peer_id resolution: project (preferred) or direct_build (fallback).
-    let project_ids: Vec<Uuid> = evaluations
-        .values()
-        .filter_map(|e| e.project)
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    let projects: HashMap<Uuid, Uuid> = if project_ids.is_empty() {
-        HashMap::new()
-    } else {
-        EProject::find()
-            .filter(CProject::Id.is_in(project_ids))
-            .all(&state.db)
-            .await?
-            .into_iter()
-            .map(|p| (p.id, p.organization))
-            .collect()
-    };
-    let direct_builds: HashMap<Uuid, Uuid> = {
-        let evals_without_project: Vec<Uuid> = evaluations
-            .values()
-            .filter(|e| e.project.is_none())
-            .map(|e| e.id)
-            .collect();
-        if evals_without_project.is_empty() {
-            HashMap::new()
-        } else {
-            EDirectBuild::find()
-                .filter(CDirectBuild::Evaluation.is_in(evals_without_project))
-                .all(&state.db)
-                .await?
-                .into_iter()
-                .map(|db| (db.evaluation, db.organization))
-                .collect()
-        }
-    };
-
-    // Required features: per-derivation list of feature names.
-    let feature_edges = EDerivationFeature::find()
-        .filter(CDerivationFeature::Derivation.is_in(drv_ids))
-        .all(&state.db)
-        .await
-        .unwrap_or_default();
-    let mut features_by_drv: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
-    for e in &feature_edges {
-        features_by_drv.entry(e.derivation).or_default().push(e.feature);
-    }
-    let feature_names: HashMap<Uuid, String> = if feature_edges.is_empty() {
-        HashMap::new()
-    } else {
-        let feature_ids: Vec<Uuid> = feature_edges.iter().map(|e| e.feature).collect();
-        EFeature::find()
-            .filter(CFeature::Id.is_in(feature_ids))
-            .all(&state.db)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|f| (f.id, f.name))
-            .collect()
-    };
-
-    // ── Assemble PendingBuildJob entries from in-memory maps ─────────────────
     let mut enqueued = 0usize;
     for build in new_builds {
-        let job_id = format!("build:{}", build.id);
-        let Some(derivation) = derivations.get(&build.derivation) else {
-            error!(build_id = %build.id, "derivation not found for build");
+        let Some((job_id, pending)) = maps.make_pending_job(&build) else {
             continue;
         };
-        let Some(eval) = evaluations.get(&build.evaluation) else {
-            error!(build_id = %build.id, "evaluation not found for build");
-            continue;
-        };
-        let peer_id = match eval.project {
-            Some(pid) => match projects.get(&pid) {
-                Some(&org) => org,
-                None => {
-                    error!(build_id = %build.id, "project not found for build");
-                    continue;
-                }
-            },
-            None => match direct_builds.get(&eval.id) {
-                Some(&org) => org,
-                None => {
-                    error!(build_id = %build.id, "direct_build not found for build");
-                    continue;
-                }
-            },
-        };
-
-        let build_job = BuildJob {
-            builds: vec![BuildTask {
-                build_id: build.id.to_string(),
-                drv_path: derivation.derivation_path.clone(),
-            }],
-            compress: None,
-            sign: None,
-        };
-
-        let required_features: Vec<String> = features_by_drv
-            .get(&build.derivation)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|i| feature_names.get(i).cloned())
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        let pending = PendingBuildJob {
-            build_id: build.id,
-            evaluation_id: build.evaluation,
-            peer_id,
-            job: build_job,
-            required_paths: vec![],
-            architecture: derivation.architecture.clone(),
-            required_features,
-        };
-
-        scheduler.enqueue_build_job(job_id.clone(), pending).await;
+        scheduler.enqueue_build_job(job_id, pending).await;
         enqueued += 1;
     }
     info!(

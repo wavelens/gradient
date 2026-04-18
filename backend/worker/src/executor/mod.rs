@@ -22,12 +22,86 @@ use proto::messages::{BuildJob, FlakeJob, FlakeTask};
 use tokio::sync::watch;
 use tracing::instrument;
 
+use gradient_core::types::CachedPathInfo;
 use proto::messages::QueryMode;
 
 use crate::nix::store::LocalNixStore;
 use crate::proto::{credentials::CredentialStore, job::JobUpdater, nar};
+use proto::messages::CachedPath;
 
 pub use eval::WorkerEvaluator;
+
+// ── Fetch helpers ─────────────────────────────────────────────────────────────
+
+/// Query the server for which fetched input paths are already cached, falling
+/// back to "treat everything as uncached" when the query fails.
+async fn query_fetched_paths(updater: &mut JobUpdater, all_paths: Vec<String>) -> Vec<CachedPath> {
+    if all_paths.is_empty() {
+        return vec![];
+    }
+    match updater
+        .query_cache(all_paths.clone(), QueryMode::Push)
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "CacheQuery failed; will attempt direct push for all paths");
+            all_paths
+                .iter()
+                .map(|p| CachedPath {
+                    path: p.clone(),
+                    cached: false,
+                    file_size: None,
+                    nar_size: None,
+                    url: None,
+                    nar_hash: None,
+                    references: None,
+                    signatures: None,
+                    deriver: None,
+                    ca: None,
+                })
+                .collect()
+        }
+    }
+}
+
+/// Upload one fetched input path's NAR to the cache — either via a presigned
+/// PUT URL (S3) or via the chunked WS `NarPush` fallback (local storage).
+///
+/// Errors are logged and swallowed; a failed push for a source path is not
+/// fatal — the build proceeds and fails cleanly if the daemon truly needs it.
+async fn push_one_fetched_nar(updater: &mut JobUpdater, cp: &CachedPath) {
+    match cp.as_info() {
+        CachedPathInfo::Cached { .. } => {
+            tracing::debug!(store_path = %cp.path, "skipping NAR push — already cached");
+        }
+        CachedPathInfo::Uncached {
+            path,
+            upload_url: Some(url),
+        } => {
+            tracing::debug!(store_path = %path, "uploading NAR via presigned PUT URL");
+            if let Err(e) =
+                nar::upload_presigned(&updater.job_id, path, url, "PUT", &[], &updater.writer).await
+            {
+                tracing::warn!(store_path = %path, error = %e, "presigned NAR upload failed; continuing");
+            }
+        }
+        CachedPathInfo::Uncached {
+            path,
+            upload_url: None,
+        } => {
+            tracing::info!(
+                store_path = %path,
+                "server returned no presigned URL — falling back to direct NarPush \
+                 (expected for local-mode caches; check server logs for \
+                 'presigned PUT URL generation failed' if you have S3 configured)"
+            );
+            if let Err(e) = nar::push_direct(&updater.job_id, path, &updater.writer).await {
+                tracing::warn!(store_path = %path, error = %e, "failed to push NAR for fetched input; continuing");
+            }
+        }
+    }
+}
 
 /// Executes jobs dispatched by the server.
 ///
@@ -89,86 +163,15 @@ impl JobExecutor {
                     )
                     .await?;
 
-                    let all_paths: Vec<String> =
-                        fetched_inputs.iter().map(|fi| fi.store_path.clone()).collect();
-
-                    let cache_entries = if all_paths.is_empty() {
-                        vec![]
-                    } else {
-                        match updater.query_cache(all_paths.clone(), QueryMode::Push).await {
-                            Ok(c) => c,
-                            Err(e) => {
-                                tracing::warn!(error = %e, "CacheQuery failed; will attempt direct push for all paths");
-                                // Treat all paths as uncached with no URL.
-                                all_paths.iter().map(|p| proto::messages::CachedPath {
-                                    path: p.clone(),
-                                    cached: false,
-                                    file_size: None,
-                                    nar_size: None,
-                                    url: None,
-                                    nar_hash: None,
-                                    references: None,
-                                    signatures: None,
-                                    deriver: None,
-                                    ca: None,
-                                }).collect()
-                            }
-                        }
-                    };
-
+                    let all_paths: Vec<String> = fetched_inputs
+                        .iter()
+                        .map(|fi| fi.store_path.clone())
+                        .collect();
+                    let cache_entries = query_fetched_paths(updater, all_paths).await;
                     for cp in &cache_entries {
-                        if cp.cached {
-                            tracing::debug!(store_path = %cp.path, "skipping NAR push — already cached");
-                            continue;
-                        }
-                        if let Some(url) = &cp.url {
-                            // S3 presigned upload.
-                            tracing::debug!(
-                                store_path = %cp.path,
-                                "uploading NAR via presigned PUT URL"
-                            );
-                            if let Err(e) = nar::upload_presigned(
-                                &updater.job_id,
-                                &cp.path,
-                                url,
-                                "PUT",
-                                &[],
-                                &updater.writer,
-                            )
-                            .await
-                            {
-                                tracing::warn!(
-                                    store_path = %cp.path,
-                                    error = %e,
-                                    "presigned NAR upload failed; continuing"
-                                );
-                            }
-                        } else {
-                            // Server returned `url: None` — either the cache
-                            // is local (no presigning) or S3 presigning
-                            // failed server-side (look for the matching
-                            // server-side ERROR log). Fall back to the
-                            // chunked WS transfer so the upload still
-                            // happens, but flag it: in S3-configured
-                            // deployments this routes every NAR through the
-                            // gradient-server process and defeats S3.
-                            tracing::info!(
-                                store_path = %cp.path,
-                                "server returned no presigned URL — falling back to direct NarPush \
-                                 (expected for local-mode caches; check server logs for \
-                                 'presigned PUT URL generation failed' if you have S3 configured)"
-                            );
-                            if let Err(e) =
-                                nar::push_direct(&updater.job_id, &cp.path, &updater.writer).await
-                            {
-                                tracing::warn!(
-                                    store_path = %cp.path,
-                                    error = %e,
-                                    "failed to push NAR for fetched input; continuing"
-                                );
-                            }
-                        }
+                        push_one_fetched_nar(updater, cp).await;
                     }
+
                     updater.report_fetch_result(fetched_inputs)?;
                     local_flake_path = Some(path);
                 }
@@ -218,12 +221,8 @@ impl JobExecutor {
             // the daemon will error out cleanly if a critical input is
             // truly missing, and that error is more diagnosable than the
             // generic "prefetch failed" we'd raise here.
-            if let Err(e) = crate::proto::nar_import::prefetch_inputs(
-                &self.store,
-                build_task,
-                updater,
-            )
-            .await
+            if let Err(e) =
+                crate::proto::nar_import::prefetch_inputs(&self.store, build_task, updater).await
             {
                 tracing::warn!(
                     build_id = %build_task.build_id,

@@ -5,8 +5,7 @@
  */
 
 use crate::authorization::MaybeUser;
-use crate::endpoints::user_is_org_member;
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use core::types::input::vec_to_hex;
@@ -16,6 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use super::EvalAccessContext;
 use super::types::{
     BuildItem, BuildsQuery, EntryPointBrief, EvaluationMessageResponse, EvaluationResponse,
     PaginatedBuilds,
@@ -26,57 +26,8 @@ pub async fn get_evaluation(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(evaluation_id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<EvaluationResponse>>> {
-    let evaluation = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Evaluation"))?;
-
-    let (organization_id, project_name, project_display_name) = if let Some(project_id) = evaluation.project {
-        let project = EProject::find_by_id(project_id)
-            .one(&state.db)
-            .await?
-            .ok_or_else(|| {
-                tracing::error!(
-                    "Project {} not found for evaluation {}",
-                    project_id,
-                    evaluation_id
-                );
-                WebError::InternalServerError("Evaluation data inconsistency".to_string())
-            })?;
-        let name = project.name.clone();
-        let display_name = project.display_name.clone();
-        (project.organization, Some(name), Some(display_name))
-    } else {
-        let org_id = EDirectBuild::find()
-            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
-            .one(&state.db)
-            .await?
-            .ok_or_else(|| {
-                tracing::error!("DirectBuild not found for evaluation {}", evaluation_id);
-                WebError::InternalServerError("Direct build data inconsistency".to_string())
-            })?
-            .organization;
-        (org_id, None, None)
-    };
-    let organization = EOrganization::find_by_id(organization_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| {
-            tracing::error!("Organization {} not found", organization_id);
-            WebError::InternalServerError("Organization data inconsistency".to_string())
-        })?;
-
-    let can_access = if organization.public {
-        true
-    } else {
-        match &maybe_user {
-            Some(user) => user_is_org_member(&state, user.id, organization.id).await?,
-            None => false,
-        }
-    };
-    if !can_access {
-        return Err(WebError::not_found("Evaluation"));
-    }
+    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user).await?;
+    let evaluation = ctx.evaluation;
 
     let commit_hash = ECommit::find_by_id(evaluation.commit)
         .one(&state.db)
@@ -106,14 +57,13 @@ pub async fn get_evaluation(
         vec![]
     } else {
         let build_ids: Vec<Uuid> = ep_rows.iter().map(|ep| ep.build).collect();
-        let builds: std::collections::HashMap<Uuid, entity::build::BuildStatus> =
-            EBuild::find()
-                .filter(CBuild::Id.is_in(build_ids))
-                .all(&state.db)
-                .await?
-                .into_iter()
-                .map(|b| (b.id, b.status))
-                .collect();
+        let builds: std::collections::HashMap<Uuid, entity::build::BuildStatus> = EBuild::find()
+            .filter(CBuild::Id.is_in(build_ids))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|b| (b.id, b.status))
+            .collect();
         ep_rows
             .into_iter()
             .map(|ep| {
@@ -135,8 +85,8 @@ pub async fn get_evaluation(
         message: EvaluationResponse {
             id: evaluation.id,
             project: evaluation.project,
-            project_name,
-            project_display_name,
+            project_name: ctx.project_name,
+            project_display_name: ctx.project_display_name,
             repository: evaluation.repository,
             commit: commit_hash,
             wildcard: evaluation.wildcard,
@@ -159,55 +109,8 @@ pub async fn get_evaluation_builds(
     Path(evaluation_id): Path<Uuid>,
     Query(query): Query<BuildsQuery>,
 ) -> WebResult<Json<BaseResponse<PaginatedBuilds>>> {
-    let evaluation = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Evaluation"))?;
-
-    let organization_id = if let Some(project_id) = evaluation.project {
-        let project = EProject::find_by_id(project_id)
-            .one(&state.db)
-            .await?
-            .ok_or_else(|| {
-                tracing::error!(
-                    "Project {} not found for evaluation {}",
-                    project_id,
-                    evaluation_id
-                );
-                WebError::InternalServerError("Evaluation data inconsistency".to_string())
-            })?;
-        project.organization
-    } else {
-        EDirectBuild::find()
-            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
-            .one(&state.db)
-            .await?
-            .ok_or_else(|| {
-                tracing::error!("DirectBuild not found for evaluation {}", evaluation_id);
-                WebError::InternalServerError("Direct build data inconsistency".to_string())
-            })?
-            .organization
-    };
-
-    let organization = EOrganization::find_by_id(organization_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| {
-            tracing::error!("Organization {} not found", organization_id);
-            WebError::InternalServerError("Organization data inconsistency".to_string())
-        })?;
-
-    let can_access = if organization.public {
-        true
-    } else {
-        match &maybe_user {
-            Some(user) => user_is_org_member(&state, user.id, organization.id).await?,
-            None => false,
-        }
-    };
-    if !can_access {
-        return Err(WebError::not_found("Evaluation"));
-    }
+    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user).await?;
+    let evaluation = ctx.evaluation;
 
     let builds = EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation.id))
@@ -316,50 +219,11 @@ pub async fn get_evaluation_messages(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(evaluation_id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationMessageResponse>>>> {
-    let evaluation = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Evaluation"))?;
-
-    let organization_id = if let Some(project_id) = evaluation.project {
-        EProject::find_by_id(project_id)
-            .one(&state.db)
-            .await?
-            .ok_or_else(|| {
-                WebError::InternalServerError("Evaluation data inconsistency".to_string())
-            })?
-            .organization
-    } else {
-        EDirectBuild::find()
-            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
-            .one(&state.db)
-            .await?
-            .ok_or_else(|| {
-                WebError::InternalServerError("Direct build data inconsistency".to_string())
-            })?
-            .organization
-    };
-    let organization = EOrganization::find_by_id(organization_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| {
-            WebError::InternalServerError("Organization data inconsistency".to_string())
-        })?;
-
-    let can_access = if organization.public {
-        true
-    } else {
-        match &maybe_user {
-            Some(user) => user_is_org_member(&state, user.id, organization.id).await?,
-            None => false,
-        }
-    };
-    if !can_access {
-        return Err(WebError::not_found("Evaluation"));
-    }
+    let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user).await?;
+    let evaluation = ctx.evaluation;
 
     let messages = EEvaluationMessage::find()
-        .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
+        .filter(CEvaluationMessage::Evaluation.eq(evaluation.id))
         .order_by(CEvaluationMessage::CreatedAt, Order::Asc)
         .all(&state.db)
         .await?;

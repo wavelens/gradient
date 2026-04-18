@@ -356,7 +356,8 @@ async fn eval_result_single_derivation_creates_build() {
     let state = make_state(db);
     let job = make_eval_job(eval_id, org_id);
 
-    let result = eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![], vec![]).await;
+    let result =
+        eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![], vec![]).await;
     assert!(result.is_ok());
 }
 
@@ -402,7 +403,8 @@ async fn eval_result_existing_derivation_reuses_id() {
     let state = make_state(db);
     let job = make_eval_job(eval_id, org_id);
 
-    let result = eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![], vec![]).await;
+    let result =
+        eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![], vec![]).await;
     assert!(result.is_ok());
 }
 
@@ -455,7 +457,8 @@ async fn eval_result_substituted_derivation_completes_eval() {
     let state = make_state(db);
     let job = make_eval_job(eval_id, org_id);
 
-    let result = eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![], vec![]).await;
+    let result =
+        eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![], vec![]).await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
 }
 
@@ -524,7 +527,8 @@ async fn eval_result_with_dependencies() {
     let state = make_state(db);
     let job = make_eval_job(eval_id, org_id);
 
-    let result = eval_handler::handle_eval_result(&state, &job, vec![drv_a, drv_b], vec![], vec![]).await;
+    let result =
+        eval_handler::handle_eval_result(&state, &job, vec![drv_a, drv_b], vec![], vec![]).await;
     assert!(result.is_ok());
 }
 
@@ -1091,7 +1095,10 @@ async fn eval_job_completed_no_active_builds_completes_eval() {
         // 1. find Created builds → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 2. find_by_id(eval) → EvaluatingDerivation
-        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::EvaluatingDerivation)]])
+        .append_query_results([vec![make_eval(
+            eval_id,
+            EvaluationStatus::EvaluatingDerivation,
+        )]])
         // 3. update_many eval → Building
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -1134,7 +1141,10 @@ async fn eval_job_completed_with_failed_build_marks_eval_failed() {
         // 1. find Created builds → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 2. find_by_id(eval) → EvaluatingDerivation
-        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::EvaluatingDerivation)]])
+        .append_query_results([vec![make_eval(
+            eval_id,
+            EvaluationStatus::EvaluatingDerivation,
+        )]])
         // 3. update_many eval → Building
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -1178,7 +1188,10 @@ async fn eval_job_completed_active_builds_remain_noop() {
         // 1. find Created builds (to promote to Queued) → none
         .append_query_results([Vec::<MBuild>::new()])
         // 2. find_by_id(eval) → still in EvaluatingDerivation
-        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::EvaluatingDerivation)]])
+        .append_query_results([vec![make_eval(
+            eval_id,
+            EvaluationStatus::EvaluatingDerivation,
+        )]])
         // 3. update_many eval → Building
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -1377,7 +1390,8 @@ async fn eval_result_error_on_derivation_insert_transitions_eval_failed() {
     let state = make_state(db);
     let job = make_eval_job(eval_id, org_id);
 
-    let result = eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![], vec![]).await;
+    let result =
+        eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![], vec![]).await;
     assert!(
         result.is_err(),
         "expected Err when derivation insert fails, got: {:?}",
@@ -1440,7 +1454,8 @@ async fn eval_result_build_insert_fails_transitions_eval_failed() {
     let state = make_state(db);
     let job = make_eval_job(eval_id, org_id);
 
-    let result = eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![], vec![]).await;
+    let result =
+        eval_handler::handle_eval_result(&state, &job, vec![discovered], vec![], vec![]).await;
     assert!(
         result.is_err(),
         "expected Err when build insert fails, got: {:?}",
@@ -1532,9 +1547,14 @@ async fn eval_result_existing_drv_still_creates_dep_edge() {
     let state = make_state(db);
     let job = make_eval_job(eval_id, org_id);
 
-    let result =
-        eval_handler::handle_eval_result(&state, &job, vec![drv_a_existing, drv_b_new], vec![], vec![])
-            .await;
+    let result = eval_handler::handle_eval_result(
+        &state,
+        &job,
+        vec![drv_a_existing, drv_b_new],
+        vec![],
+        vec![],
+    )
+    .await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
 }
 
@@ -1911,7 +1931,8 @@ async fn eval_result_creates_entry_points_for_project() {
         .into_connection();
 
     let state = test_support::prelude::test_state(db);
-    let result = eval_handler::handle_eval_result(&state, &eval_job, derivations, vec![], vec![]).await;
+    let result =
+        eval_handler::handle_eval_result(&state, &eval_job, derivations, vec![], vec![]).await;
     assert!(
         result.is_ok(),
         "eval_result with project should succeed: {:?}",
@@ -1996,7 +2017,8 @@ async fn eval_result_no_entry_points_without_project() {
         .into_connection();
 
     let state = test_support::prelude::test_state(db);
-    let result = eval_handler::handle_eval_result(&state, &eval_job, derivations, vec![], vec![]).await;
+    let result =
+        eval_handler::handle_eval_result(&state, &eval_job, derivations, vec![], vec![]).await;
     assert!(
         result.is_ok(),
         "eval_result without project should succeed: {:?}",
@@ -2147,7 +2169,8 @@ async fn eval_result_all_substituted_with_project_completes() {
         .into_connection();
 
     let state = test_support::prelude::test_state(db);
-    let result = eval_handler::handle_eval_result(&state, &eval_job, derivations, vec![], vec![]).await;
+    let result =
+        eval_handler::handle_eval_result(&state, &eval_job, derivations, vec![], vec![]).await;
     assert!(
         result.is_ok(),
         "substituted eval with project should complete: {:?}",

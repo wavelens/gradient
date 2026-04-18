@@ -5,7 +5,7 @@
  */
 
 use gradient_core::ci::{
-    CiReport, CiStatus, decrypt_webhook_secret, parse_owner_repo, reporter_for_project,
+    CiReport, CiStatus, ProjectCiConfig, decrypt_webhook_secret, parse_owner_repo,
 };
 use gradient_core::types::*;
 use sea_orm::EntityTrait;
@@ -52,11 +52,12 @@ pub async fn report_ci_for_entry_points(
         }
     });
 
-    let reporter = reporter_for_project(
+    let reporter = ProjectCiConfig::from_db(
         project.ci_reporter_type.as_deref(),
         project.ci_reporter_url.as_deref(),
         decrypted_token.as_ref().map(|t| t.expose()),
-    );
+    )
+    .into_reporter();
 
     let commit = match ECommit::find_by_id(commit_id).one(&state.db).await {
         Ok(Some(c)) => c,
@@ -152,11 +153,12 @@ pub async fn report_ci_for_evaluation(
         }
     });
 
-    let reporter = reporter_for_project(
+    let reporter = ProjectCiConfig::from_db(
         project.ci_reporter_type.as_deref(),
         project.ci_reporter_url.as_deref(),
         decrypted_token.as_ref().map(|t| t.expose()),
-    );
+    )
+    .into_reporter();
 
     let commit = match ECommit::find_by_id(commit_id).one(&state.db).await {
         Ok(Some(c)) => c,

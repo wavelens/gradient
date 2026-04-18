@@ -53,6 +53,7 @@ async fn handle_incoming(stream: tokio::net::TcpStream, config: WorkerConfig) ->
         .await
         .context("WebSocket upgrade failed")?;
 
-    let mut worker = Worker::from_accepted(ws, config).await?;
-    worker.run().await
+    let worker = Worker::from_accepted(ws, config).await?;
+    let (_disconnected, outcome) = worker.run().await;
+    outcome.map(|_| ())
 }

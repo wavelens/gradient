@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::types::Cli;
+use crate::types::EmailConfig;
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use lettre::message::header::ContentType;
@@ -45,61 +45,41 @@ pub struct EmailService {
 }
 
 impl EmailService {
-    pub async fn new(cli: &Cli) -> Result<Self> {
-        if !cli.email_enabled {
+    pub async fn new(config: Option<EmailConfig>) -> Result<Self> {
+        let Some(config) = config else {
             return Ok(Self {
                 transport: None,
                 from_address: String::new(),
-                from_name: cli.email_from_name.clone(),
+                from_name: String::new(),
                 enabled: false,
             });
-        }
+        };
 
-        let smtp_host = cli
-            .email_smtp_host
-            .as_ref()
-            .context("SMTP host is required when email is enabled")?;
-
-        let smtp_username = cli
-            .email_smtp_username
-            .as_ref()
-            .context("SMTP username is required when email is enabled")?;
-
-        let smtp_password_file = cli
-            .email_smtp_password_file
-            .as_ref()
-            .context("SMTP password file is required when email is enabled")?;
-
-        let from_address = cli
-            .email_from_address
-            .as_ref()
-            .context("From address is required when email is enabled")?;
-
-        let smtp_password = fs::read_to_string(smtp_password_file)
+        let smtp_password = fs::read_to_string(&config.smtp_password_file)
             .await
             .context("Failed to read SMTP password file")?
             .trim()
             .to_string();
 
-        let credentials = Credentials::new(smtp_username.clone(), smtp_password);
+        let credentials = Credentials::new(config.smtp_username.clone(), smtp_password);
 
-        let transport = if !cli.email_enable_tls {
-            SmtpTransport::builder_dangerous(smtp_host)
+        let transport = if !config.enable_tls {
+            SmtpTransport::builder_dangerous(&config.smtp_host)
                 .credentials(credentials)
-                .port(cli.email_smtp_port)
+                .port(config.smtp_port)
                 .build()
         } else {
-            SmtpTransport::relay(smtp_host)
+            SmtpTransport::relay(&config.smtp_host)
                 .context("Failed to create SMTP transport")?
                 .credentials(credentials)
-                .port(cli.email_smtp_port)
+                .port(config.smtp_port)
                 .build()
         };
 
         Ok(Self {
             transport: Some(transport),
-            from_address: from_address.clone(),
-            from_name: cli.email_from_name.clone(),
+            from_address: config.from_address.clone(),
+            from_name: config.from_name.clone(),
             enabled: true,
         })
     }

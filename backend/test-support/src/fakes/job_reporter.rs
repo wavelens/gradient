@@ -95,7 +95,11 @@ impl RecordingJobReporter {
 
 #[async_trait]
 impl JobReporter for RecordingJobReporter {
-    async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode) -> Result<Vec<CachedPath>> {
+    async fn query_cache(
+        &mut self,
+        paths: Vec<String>,
+        mode: QueryMode,
+    ) -> Result<Vec<CachedPath>> {
         let cached_set: std::collections::HashSet<&str> =
             self.cached_paths.iter().map(|s| s.as_str()).collect();
         Ok(paths

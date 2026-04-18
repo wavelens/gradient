@@ -5,11 +5,13 @@
  */
 
 pub mod github_app;
+pub mod project_ci_config;
 pub mod reporter;
 pub mod trigger;
 pub mod webhook;
 
 pub use self::github_app::*;
+pub use self::project_ci_config::*;
 pub use self::reporter::*;
 pub use self::trigger::*;
 pub use self::webhook::*;

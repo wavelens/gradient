@@ -17,6 +17,7 @@ use std::sync::Arc;
 use tracing::error;
 use uuid::Uuid;
 
+use super::EvalAccessContext;
 use super::types::drv_display_name;
 
 pub async fn post_evaluation_builds(
@@ -24,47 +25,14 @@ pub async fn post_evaluation_builds(
     Extension(user): Extension<MUser>,
     Path(evaluation_id): Path<Uuid>,
 ) -> Result<StreamBodyAs<'static>, WebError> {
-    let evaluation = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Evaluation"))?;
+    let ctx = EvalAccessContext::load(&state, evaluation_id, &Some(user.clone())).await?;
 
-    let organization_id = if let Some(project_id) = evaluation.project {
-        let project = EProject::find_by_id(project_id)
-            .one(&state.db)
-            .await?
-            .ok_or_else(|| {
-                tracing::error!(
-                    "Project {} not found for evaluation {}",
-                    project_id,
-                    evaluation_id
-                );
-                WebError::InternalServerError("Evaluation data inconsistency".to_string())
-            })?;
-        project.organization
-    } else {
-        EDirectBuild::find()
-            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
-            .one(&state.db)
-            .await?
-            .ok_or_else(|| {
-                tracing::error!("DirectBuild not found for evaluation {}", evaluation_id);
-                WebError::InternalServerError("Direct build data inconsistency".to_string())
-            })?
-            .organization
-    };
-    let organization = EOrganization::find_by_id(organization_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| {
-            tracing::error!("Organization {} not found", organization_id);
-            WebError::InternalServerError("Organization data inconsistency".to_string())
-        })?;
-
-    // TODO: Check if user is in organization
-    if !user_is_org_member(&state, user.id, organization.id).await? {
+    // Streaming log access requires org membership (not just public read access).
+    if !user_is_org_member(&state, user.id, ctx.organization_id).await? {
         return Err(WebError::not_found("Evaluation"));
     }
+
+    let evaluation = ctx.evaluation;
 
     let condition = Condition::all()
         .add(CBuild::Evaluation.eq(evaluation.id))

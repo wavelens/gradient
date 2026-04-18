@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::{load_editable_org, load_org_member};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use core::db::{get_any_cache_by_name, get_organization_by_name};
+use core::db::get_any_cache_by_name;
 use core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_WRITE_ID};
 use core::types::*;
 use entity::organization_cache::CacheSubscriptionMode;
@@ -29,25 +30,68 @@ pub struct CacheSubscriptionItem {
     pub mode: CacheSubscriptionMode,
 }
 
+// ── Access helpers ────────────────────────────────────────────────────────────
+
+/// Verify that `user_id` has Write or Admin role in `org_id`.
+async fn require_write_permission(
+    state: &Arc<ServerState>,
+    org_id: Uuid,
+    user_id: Uuid,
+) -> WebResult<()> {
+    let org_user = EOrganizationUser::find()
+        .filter(
+            Condition::all()
+                .add(COrganizationUser::Organization.eq(org_id))
+                .add(COrganizationUser::User.eq(user_id)),
+        )
+        .one(&state.db)
+        .await?;
+
+    let has_write = matches!(
+        org_user,
+        Some(ref ou) if ou.role == BASE_ROLE_ADMIN_ID || ou.role == BASE_ROLE_WRITE_ID
+    );
+
+    if !has_write {
+        return Err(WebError::Forbidden(
+            "You need Write or Admin permissions in this organization to manage cache subscriptions"
+                .to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Load a public or owned cache by name; verify the requesting user may subscribe to it.
+async fn load_subscribable_cache(
+    state: &Arc<ServerState>,
+    cache_name: String,
+    user_id: Uuid,
+) -> WebResult<MCache> {
+    let cache = get_any_cache_by_name(Arc::clone(state), cache_name)
+        .await?
+        .ok_or_else(|| WebError::not_found("Cache"))?;
+
+    if !cache.public && cache.created_by != user_id {
+        return Err(WebError::Forbidden(
+            "You don't have permission to subscribe to this cache. The cache is private and you are not the owner.".to_string(),
+        ));
+    }
+
+    Ok(cache)
+}
+
+// ── Handlers ──────────────────────────────────────────────────────────────────
+
 pub async fn post_organization_public(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if organization.managed {
-        return Err(WebError::Forbidden(
-            "Cannot modify state-managed organization.".to_string(),
-        ));
-    }
-
-    let mut aorganization: AOrganization = organization.into();
-    aorganization.public = Set(true);
-    aorganization.update(&state.db).await?;
+    let org = load_editable_org(&state, user.id, organization).await?;
+    let mut active: AOrganization = org.into();
+    active.public = Set(true);
+    active.update(&state.db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -60,20 +104,10 @@ pub async fn delete_organization_public(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if organization.managed {
-        return Err(WebError::Forbidden(
-            "Cannot modify state-managed organization.".to_string(),
-        ));
-    }
-
-    let mut aorganization: AOrganization = organization.into();
-    aorganization.public = Set(false);
-    aorganization.update(&state.db).await?;
+    let org = load_editable_org(&state, user.id, organization).await?;
+    let mut active: AOrganization = org.into();
+    active.public = Set(false);
+    active.update(&state.db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -86,18 +120,15 @@ pub async fn get_organization_subscribe(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<CacheSubscriptionItem>>>> {
-    let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization)
-            .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
+    let org = load_org_member(&state, user.id, organization).await?;
 
-    let organization_caches = EOrganizationCache::find()
-        .filter(COrganizationCache::Organization.eq(organization.id))
+    let org_caches = EOrganizationCache::find()
+        .filter(COrganizationCache::Organization.eq(org.id))
         .all(&state.db)
         .await?;
 
     let mut subscribed = Vec::new();
-    for oc in organization_caches {
+    for oc in org_caches {
         if let Ok(Some(cache)) = ECache::find_by_id(oc.cache).one(&state.db).await {
             subscribed.push(CacheSubscriptionItem {
                 id: oc.cache,
@@ -119,45 +150,15 @@ pub async fn post_organization_subscribe_cache(
     Path((organization, cache)): Path<(String, String)>,
     body: Option<Json<SubscribeCacheRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
+    let org = load_org_member(&state, user.id, organization).await?;
+    require_write_permission(&state, org.id, user.id).await?;
 
-    let org_user = EOrganizationUser::find()
-        .filter(
-            Condition::all()
-                .add(COrganizationUser::Organization.eq(organization.id))
-                .add(COrganizationUser::User.eq(user.id)),
-        )
-        .one(&state.db)
-        .await?;
-
-    let has_write_permission = matches!(
-        org_user,
-        Some(ref ou) if ou.role == BASE_ROLE_ADMIN_ID || ou.role == BASE_ROLE_WRITE_ID
-    );
-
-    if !has_write_permission {
-        return Err(WebError::Forbidden(
-            "You need Write or Admin permissions in this organization to manage cache subscriptions".to_string(),
-        ));
-    }
-
-    let cache: MCache = get_any_cache_by_name(state.0.clone(), cache.clone())
-        .await?
-        .ok_or_else(|| WebError::not_found("Cache"))?;
-
-    if !cache.public && cache.created_by != user.id {
-        return Err(WebError::Forbidden(
-            "You don't have permission to subscribe to this cache. The cache is private and you are not the owner.".to_string(),
-        ));
-    }
+    let cache = load_subscribable_cache(&state, cache, user.id).await?;
 
     let already = EOrganizationCache::find()
         .filter(
             Condition::all()
-                .add(COrganizationCache::Organization.eq(organization.id))
+                .add(COrganizationCache::Organization.eq(org.id))
                 .add(COrganizationCache::Cache.eq(cache.id)),
         )
         .one(&state.db)
@@ -175,7 +176,7 @@ pub async fn post_organization_subscribe_cache(
 
     AOrganizationCache {
         id: Set(Uuid::new_v4()),
-        organization: Set(organization.id),
+        organization: Set(org.id),
         cache: Set(cache.id),
         mode: Set(mode),
     }
@@ -193,39 +194,15 @@ pub async fn delete_organization_subscribe_cache(
     Extension(user): Extension<MUser>,
     Path((organization, cache)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
+    let org = load_org_member(&state, user.id, organization).await?;
+    require_write_permission(&state, org.id, user.id).await?;
 
-    let org_user = EOrganizationUser::find()
-        .filter(
-            Condition::all()
-                .add(COrganizationUser::Organization.eq(organization.id))
-                .add(COrganizationUser::User.eq(user.id)),
-        )
-        .one(&state.db)
-        .await?;
-
-    let has_write_permission = matches!(
-        org_user,
-        Some(ref ou) if ou.role == BASE_ROLE_ADMIN_ID || ou.role == BASE_ROLE_WRITE_ID
-    );
-
-    if !has_write_permission {
-        return Err(WebError::Forbidden(
-            "You need Write or Admin permissions in this organization to manage cache subscriptions".to_string(),
-        ));
-    }
-
-    let cache: MCache = get_any_cache_by_name(state.0.clone(), cache.clone())
-        .await?
-        .ok_or_else(|| WebError::not_found("Cache"))?;
+    let cache = load_subscribable_cache(&state, cache, user.id).await?;
 
     let record = EOrganizationCache::find()
         .filter(
             Condition::all()
-                .add(COrganizationCache::Organization.eq(organization.id))
+                .add(COrganizationCache::Organization.eq(org.id))
                 .add(COrganizationCache::Cache.eq(cache.id)),
         )
         .one(&state.db)

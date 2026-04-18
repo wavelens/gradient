@@ -6,7 +6,7 @@
 
 use crate::messages::{
     CachedPath, ClientMessage, FlakeJob, FlakeTask, GradientCapabilities, Job, JobCandidate,
-    QueryMode, RequiredPath, ServerMessage, PROTO_VERSION,
+    PROTO_VERSION, QueryMode, RequiredPath, ServerMessage,
 };
 use rkyv::rancor::Error as RkyvError;
 
@@ -152,10 +152,7 @@ fn cache_query_normal_roundtrip() {
 fn cache_query_push_roundtrip() {
     let original = ClientMessage::CacheQuery {
         job_id: "job-2".into(),
-        paths: vec![
-            "/nix/store/aaaa-foo".into(),
-            "/nix/store/bbbb-bar".into(),
-        ],
+        paths: vec!["/nix/store/aaaa-foo".into(), "/nix/store/bbbb-bar".into()],
         mode: QueryMode::Push,
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
@@ -186,7 +183,9 @@ fn cache_status_roundtrip() {
                 file_size: Some(1024),
                 nar_size: Some(4096),
                 url: None,
-                nar_hash: Some("sha256:0000000000000000000000000000000000000000000000000000".into()),
+                nar_hash: Some(
+                    "sha256:0000000000000000000000000000000000000000000000000000".into(),
+                ),
                 references: Some(vec!["/nix/store/cccc-dep".into()]),
                 signatures: Some(vec!["cache.example.com-1:abcd".into()]),
                 deriver: Some("/nix/store/aaaa-foo.drv".into()),

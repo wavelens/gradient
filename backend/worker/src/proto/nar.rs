@@ -148,7 +148,10 @@ pub async fn upload_presigned(
     let file_hash = format!("sha256:{}", hex::encode(Sha256::digest(&compressed)));
     let nar_hash = format!("sha256:{}", hex::encode(nar_hasher.finalize()));
 
-    info!(store_path, file_size, nar_size, "uploading NAR to presigned URL");
+    info!(
+        store_path,
+        file_size, nar_size, "uploading NAR to presigned URL"
+    );
 
     // --- 2. HTTP request to the presigned URL ---
     let client = reqwest::Client::new();
@@ -192,7 +195,10 @@ pub async fn upload_presigned(
         nar_hash,
     })?;
 
-    info!(store_path, file_size, nar_size, "presigned NAR upload complete");
+    info!(
+        store_path,
+        file_size, nar_size, "presigned NAR upload complete"
+    );
     Ok(())
 }
 

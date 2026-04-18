@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::types::proto::{CachedPath, CredentialKind, GradientCapabilities, Job, JobCandidate};
+use gradient_core::types::proto::{
+    CachedPath, CredentialKind, GradientCapabilities, Job, JobCandidate,
+};
 use rkyv::{Archive, Deserialize, Serialize};
 
 /// A peer that failed authentication during the challenge-response flow.

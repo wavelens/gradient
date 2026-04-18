@@ -102,7 +102,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     };
     let webhooks: Arc<dyn ci::WebhookClient> = Arc::new(webhook_client);
 
-    let email_service = match EmailService::new(&cli).await {
+    let email_service = match EmailService::new(cli.email_config()).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Failed to initialize email service: {}", e);
@@ -111,8 +111,8 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     };
     let email: Arc<dyn storage::EmailSender> = Arc::new(email_service);
 
-    let nar_storage = if let Some(ref bucket) = cli.s3_bucket {
-        let secret = match cli.s3_secret_access_key_file.as_deref() {
+    let nar_storage = if let Some(s3) = cli.s3_config() {
+        let secret = match s3.secret_access_key_file.as_deref() {
             Some(path) => match std::fs::read_to_string(path) {
                 Ok(s) => Some(s.trim().to_string()),
                 Err(e) => {
@@ -124,12 +124,12 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         };
 
         let store = match NarStore::s3(
-            bucket,
-            &cli.s3_region,
-            cli.s3_endpoint.as_deref(),
-            cli.s3_access_key_id.as_deref(),
+            &s3.bucket,
+            &s3.region,
+            s3.endpoint.as_deref(),
+            s3.access_key_id.as_deref(),
             secret.as_deref(),
-            &cli.s3_prefix,
+            &s3.prefix,
         ) {
             Ok(s) => s,
             Err(e) => {
@@ -138,13 +138,16 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
             }
         };
         if let Err(e) = store.ping().await {
-            eprintln!("S3 NAR storage unreachable (bucket '{}'): {:#}", bucket, e);
+            eprintln!(
+                "S3 NAR storage unreachable (bucket '{}'): {:#}",
+                s3.bucket, e
+            );
             std::process::exit(1);
         }
-        println!("NAR storage: S3 bucket '{}'", bucket);
+        println!("NAR storage: S3 bucket '{}'", s3.bucket);
         tracing::debug!(
-            bucket = %bucket,
-            access_key_id = ?cli.s3_access_key_id.as_deref(),
+            bucket = %s3.bucket,
+            access_key_id = ?s3.access_key_id.as_deref(),
             secret_loaded = secret.is_some(),
             "S3 NAR storage initialized",
         );
@@ -162,7 +165,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         }
     };
 
-    let log_storage: Arc<dyn storage::LogStorage> = if cli.s3_bucket.is_some() {
+    let log_storage: Arc<dyn storage::LogStorage> = if cli.s3_config().is_some() {
         println!("Log storage: S3 (with local cache)");
         Arc::new(S3LogStorage::new(
             local_log_storage,

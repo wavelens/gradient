@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{ProjectResponse, user_can_edit};
+use super::{ProjectResponse, load_editable_project, load_project, user_can_edit};
 use crate::authorization::MaybeUser;
-use crate::endpoints::user_is_org_member;
+use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use chrono::Utc;
 use core::ci::encrypt_webhook_secret;
-use core::db::{get_any_organization_by_name, get_organization_by_name, get_project_by_name};
+use core::db::{get_any_organization_by_name, get_organization_by_name};
 use core::nix::RepositoryUrl;
 use core::sources::check_project_updates;
 use core::types::consts::*;
@@ -88,21 +88,8 @@ pub async fn get(
     Path(organization): Path<String>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<ProjectResponse>>>>> {
-    let organization: MOrganization =
-        get_any_organization_by_name(state.0.clone(), organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if !organization.public {
-        match &maybe_user {
-            Some(user) => {
-                if !user_is_org_member(&state.0, user.id, organization.id).await? {
-                    return Err(WebError::not_found("Organization"));
-                }
-            }
-            None => return Err(WebError::not_found("Organization")),
-        }
-    }
+    let organization =
+        get_org_readable(&state.0, organization, &maybe_user, "Organization").await?;
 
     let page = params.page();
     let per_page = params.per_page();
@@ -253,21 +240,7 @@ pub async fn get_project(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectResponse>>> {
-    let organization: MOrganization =
-        get_any_organization_by_name(state.0.clone(), organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Project"))?;
-
-    if !organization.public {
-        match &maybe_user {
-            Some(user) => {
-                if !user_is_org_member(&state.0, user.id, organization.id).await? {
-                    return Err(WebError::not_found("Project"));
-                }
-            }
-            None => return Err(WebError::not_found("Project")),
-        }
-    }
+    let organization = get_org_readable(&state.0, organization, &maybe_user, "Project").await?;
 
     let project: MProject = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
@@ -321,127 +294,145 @@ pub async fn patch_project(
     Path((organization, project)): Path<(String, String)>,
     Json(body): Json<PatchProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (organization, project): (MOrganization, MProject) = get_project_by_name(
-        state.0.clone(),
-        user.id,
-        organization.clone(),
-        project.clone(),
-    )
-    .await?
-    .ok_or_else(|| WebError::not_found("Project"))?;
-
-    if !user_can_edit(&state, user.id, organization.id).await? {
-        return Err(WebError::Forbidden(
-            "You do not have permission to modify this project.".to_string(),
-        ));
-    }
-
-    // Prevent modification of state-managed projects
-    if project.managed {
-        return Err(WebError::Forbidden("Cannot modify state-managed project. This project is managed by configuration and cannot be edited through the API.".to_string()));
-    }
-
+    let (organization, project) =
+        load_editable_project(&state, user.id, organization, project).await?;
     let mut aproject: AProject = project.into();
+    let mut patcher = ProjectPatcher::new(&state, &mut aproject);
 
     if let Some(name) = body.name {
+        patcher.apply_name(&organization, name).await?;
+    }
+    if let Some(display_name) = body.display_name {
+        patcher.apply_display_name(display_name)?;
+    }
+    if let Some(description) = body.description {
+        patcher.aproject.description = Set(description.trim().to_string());
+    }
+    if let Some(repository) = body.repository {
+        patcher.apply_repository(repository)?;
+    }
+    if let Some(evaluation_wildcard) = body.evaluation_wildcard {
+        patcher.apply_evaluation_wildcard(evaluation_wildcard)?;
+    }
+    if let Some(keep) = body.keep_evaluations {
+        patcher.apply_keep_evaluations(keep)?;
+    }
+    patcher.apply_ci_reporter_fields(
+        body.ci_reporter_type,
+        body.ci_reporter_url,
+        body.ci_reporter_token,
+    )?;
+
+    aproject.force_evaluation = Set(true);
+    aproject.update(&state.db).await?;
+
+    Ok(Json(BaseResponse {
+        error: false,
+        message: "Project updated".to_string(),
+    }))
+}
+
+/// Holds shared context for the project-patch field validators so that
+/// `state` and `aproject` are not threaded through every helper as parameters.
+struct ProjectPatcher<'a> {
+    state: &'a State<Arc<ServerState>>,
+    aproject: &'a mut AProject,
+}
+
+impl<'a> ProjectPatcher<'a> {
+    fn new(state: &'a State<Arc<ServerState>>, aproject: &'a mut AProject) -> Self {
+        Self { state, aproject }
+    }
+
+    async fn apply_name(&mut self, organization: &MOrganization, name: String) -> WebResult<()> {
         if check_index_name(name.as_str()).is_err() {
             return Err(WebError::invalid_name("Project Name"));
         }
-
-        let existing_project = EProject::find()
+        let existing = EProject::find()
             .filter(
                 Condition::all()
                     .add(CProject::Organization.eq(organization.id))
                     .add(CProject::Name.eq(name.clone())),
             )
-            .one(&state.db)
+            .one(&self.state.db)
             .await?;
-
-        if existing_project.is_some() {
+        if existing.is_some() {
             return Err(WebError::already_exists("Project Name"));
         }
-
-        aproject.name = Set(name);
+        self.aproject.name = Set(name);
+        Ok(())
     }
 
-    if let Some(display_name) = body.display_name {
+    fn apply_display_name(&mut self, display_name: String) -> WebResult<()> {
         let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
             return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
         }
-        aproject.display_name = Set(display_name);
+        self.aproject.display_name = Set(display_name);
+        Ok(())
     }
 
-    if let Some(description) = body.description {
-        aproject.description = Set(description.trim().to_string());
-    }
-
-    if let Some(repository) = body.repository {
+    fn apply_repository(&mut self, repository: String) -> WebResult<()> {
         repository
             .parse::<RepositoryUrl>()
             .map_err(|e| WebError::BadRequest(e.to_string()))?;
-        aproject.repository = Set(repository);
+        self.aproject.repository = Set(repository);
+        Ok(())
     }
 
-    if let Some(evaluation_wildcard) = body.evaluation_wildcard {
+    fn apply_evaluation_wildcard(&mut self, evaluation_wildcard: String) -> WebResult<()> {
         let evaluation_wildcard = evaluation_wildcard
             .trim()
             .parse::<Wildcard>()
             .map_err(|e| WebError::BadRequest(e.to_string()))?
             .to_string();
-        aproject.evaluation_wildcard = Set(evaluation_wildcard);
+        self.aproject.evaluation_wildcard = Set(evaluation_wildcard);
+        Ok(())
     }
 
-    if let Some(keep) = body.keep_evaluations {
+    fn apply_keep_evaluations(&mut self, keep: i32) -> WebResult<()> {
         if keep < 1 {
             return Err(WebError::BadRequest(
                 "keep_evaluations must be at least 1".to_string(),
             ));
         }
-        let global_max = state.cli.keep_evaluations as i32;
+        let global_max = self.state.cli.keep_evaluations as i32;
         if global_max > 0 && keep > global_max {
             return Err(WebError::BadRequest(format!(
                 "keep_evaluations cannot exceed the server maximum of {}",
                 global_max
             )));
         }
-        aproject.keep_evaluations = Set(keep);
+        self.aproject.keep_evaluations = Set(keep);
+        Ok(())
     }
 
-    // CI reporter — treat empty string as "remove" (set to None)
-    if let Some(ci_type) = body.ci_reporter_type {
-        aproject.ci_reporter_type = Set(if ci_type.is_empty() {
-            None
-        } else {
-            Some(ci_type)
-        });
-    }
-    if let Some(ci_url) = body.ci_reporter_url {
-        aproject.ci_reporter_url = Set(if ci_url.is_empty() {
-            None
-        } else {
-            Some(ci_url)
-        });
-    }
-    if let Some(ci_token) = body.ci_reporter_token {
-        if ci_token.is_empty() {
-            aproject.ci_reporter_token = Set(None);
-        } else {
-            let encrypted = encrypt_webhook_secret(&state.cli.crypt_secret_file, &ci_token)
-                .map_err(|e| WebError::BadRequest(format!("Failed to encrypt CI token: {}", e)))?;
-            aproject.ci_reporter_token = Set(Some(encrypted));
+    /// Apply CI reporter fields — treat empty string as "remove" (set to None).
+    fn apply_ci_reporter_fields(
+        &mut self,
+        ci_type: Option<String>,
+        ci_url: Option<String>,
+        ci_token: Option<String>,
+    ) -> WebResult<()> {
+        if let Some(t) = ci_type {
+            self.aproject.ci_reporter_type = Set(if t.is_empty() { None } else { Some(t) });
         }
+        if let Some(u) = ci_url {
+            self.aproject.ci_reporter_url = Set(if u.is_empty() { None } else { Some(u) });
+        }
+        if let Some(token) = ci_token {
+            if token.is_empty() {
+                self.aproject.ci_reporter_token = Set(None);
+            } else {
+                let encrypted = encrypt_webhook_secret(&self.state.cli.crypt_secret_file, &token)
+                    .map_err(|e| {
+                    WebError::BadRequest(format!("Failed to encrypt CI token: {}", e))
+                })?;
+                self.aproject.ci_reporter_token = Set(Some(encrypted));
+            }
+        }
+        Ok(())
     }
-
-    aproject.force_evaluation = Set(true);
-    aproject.update(&state.db).await?;
-
-    let res = BaseResponse {
-        error: false,
-        message: "Project updated".to_string(),
-    };
-
-    Ok(Json(res))
 }
 
 pub async fn delete_project(
@@ -449,26 +440,8 @@ pub async fn delete_project(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (organization, project): (MOrganization, MProject) = get_project_by_name(
-        state.0.clone(),
-        user.id,
-        organization.clone(),
-        project.clone(),
-    )
-    .await?
-    .ok_or_else(|| WebError::not_found("Project"))?;
-
-    if !user_can_edit(&state, user.id, organization.id).await? {
-        return Err(WebError::Forbidden(
-            "You do not have permission to delete this project.".to_string(),
-        ));
-    }
-
-    // Prevent deletion of state-managed projects
-    if project.managed {
-        return Err(WebError::Forbidden("Cannot delete state-managed project. This project is managed by configuration and cannot be deleted through the API.".to_string()));
-    }
-
+    let (_organization, project) =
+        load_editable_project(&state, user.id, organization, project).await?;
     let aproject: AProject = project.into();
     aproject.delete(&state.db).await?;
 
@@ -485,27 +458,8 @@ pub async fn delete_project_integration(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (organization, project): (MOrganization, MProject) = get_project_by_name(
-        state.0.clone(),
-        user.id,
-        organization.clone(),
-        project.clone(),
-    )
-    .await?
-    .ok_or_else(|| WebError::not_found("Project"))?;
-
-    if !user_can_edit(&state, user.id, organization.id).await? {
-        return Err(WebError::Forbidden(
-            "You do not have permission to modify this project.".to_string(),
-        ));
-    }
-
-    if project.managed {
-        return Err(WebError::Forbidden(
-            "Cannot modify state-managed project.".to_string(),
-        ));
-    }
-
+    let (_organization, project) =
+        load_editable_project(&state, user.id, organization, project).await?;
     let mut aproject: AProject = project.into();
     aproject.ci_reporter_type = Set(None);
     aproject.ci_reporter_url = Set(None);
@@ -523,15 +477,7 @@ pub async fn post_project_active(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
-        state.0.clone(),
-        user.id,
-        organization.clone(),
-        project.clone(),
-    )
-    .await?
-    .ok_or_else(|| WebError::not_found("Project"))?;
-
+    let (_organization, project) = load_project(&state, user.id, organization, project).await?;
     let mut aproject: AProject = project.into();
     aproject.active = Set(true);
     aproject.update(&state.db).await?;
@@ -549,15 +495,7 @@ pub async fn delete_project_active(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
-        state.0.clone(),
-        user.id,
-        organization.clone(),
-        project.clone(),
-    )
-    .await?
-    .ok_or_else(|| WebError::not_found("Project"))?;
-
+    let (_organization, project) = load_project(&state, user.id, organization, project).await?;
     let mut aproject: AProject = project.into();
     aproject.active = Set(false);
     aproject.update(&state.db).await?;
@@ -575,14 +513,7 @@ pub async fn post_project_check_repository(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
-        state.0.clone(),
-        user.id,
-        organization.clone(),
-        project.clone(),
-    )
-    .await?
-    .ok_or_else(|| WebError::not_found("Project"))?;
+    let (_organization, project) = load_project(&state, user.id, organization, project).await?;
 
     let (_has_updates, remote_hash) = check_project_updates(Arc::clone(&state), &project)
         .await
@@ -608,14 +539,7 @@ pub async fn post_project_transfer(
     Path((organization, project)): Path<(String, String)>,
     Json(body): Json<TransferOwnershipRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (organization, project): (MOrganization, MProject) = get_project_by_name(
-        state.0.clone(),
-        user.id,
-        organization.clone(),
-        project.clone(),
-    )
-    .await?
-    .ok_or_else(|| WebError::not_found("Project"))?;
+    let (organization, project) = load_project(&state, user.id, organization, project).await?;
 
     // Only admins of the org or the current owner may transfer ownership
     let is_admin = user_can_edit(&state, user.id, organization.id).await?;

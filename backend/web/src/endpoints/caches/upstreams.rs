@@ -54,14 +54,38 @@ pub struct PatchUpstreamRequest {
     pub public_key: Option<String>,
 }
 
+// ── Access helpers ────────────────────────────────────────────────────────────
+
+async fn load_cache_for_user(
+    state: &Arc<ServerState>,
+    user_id: Uuid,
+    cache_name: String,
+) -> WebResult<MCache> {
+    get_cache_by_name(Arc::clone(state), user_id, cache_name)
+        .await?
+        .ok_or_else(|| WebError::not_found("Cache"))
+}
+
+async fn load_upstream(
+    state: &Arc<ServerState>,
+    cache_id: Uuid,
+    upstream_id: Uuid,
+) -> WebResult<MCacheUpstream> {
+    ECacheUpstream::find_by_id(upstream_id)
+        .filter(CCacheUpstream::Cache.eq(cache_id))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Upstream cache"))
+}
+
+// ── Handlers ──────────────────────────────────────────────────────────────────
+
 pub async fn get_cache_upstreams(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<UpstreamCacheItem>>>> {
-    let cache = get_cache_by_name(state.0.clone(), user.id, cache)
-        .await?
-        .ok_or_else(|| WebError::not_found("Cache"))?;
+    let cache = load_cache_for_user(&state, user.id, cache).await?;
 
     let upstreams = ECacheUpstream::find()
         .filter(CCacheUpstream::Cache.eq(cache.id))
@@ -90,9 +114,7 @@ pub async fn put_cache_upstream(
     Path(cache): Path<String>,
     Json(body): Json<AddUpstreamRequest>,
 ) -> WebResult<Json<BaseResponse<Uuid>>> {
-    let cache = get_cache_by_name(state.0.clone(), user.id, cache)
-        .await?
-        .ok_or_else(|| WebError::not_found("Cache"))?;
+    let cache = load_cache_for_user(&state, user.id, cache).await?;
 
     let record = match body {
         AddUpstreamRequest::Internal {
@@ -100,9 +122,7 @@ pub async fn put_cache_upstream(
             display_name,
             mode,
         } => {
-            let upstream = get_cache_by_name(state.0.clone(), user.id, cache_name.clone())
-                .await?
-                .ok_or_else(|| WebError::not_found("Upstream cache"))?;
+            let upstream = load_cache_for_user(&state, user.id, cache_name).await?;
             if upstream.id == cache.id {
                 return Err(WebError::BadRequest(
                     "A cache cannot be its own upstream".to_string(),
@@ -147,17 +167,13 @@ pub async fn patch_cache_upstream(
     Path((cache, upstream_id)): Path<(String, Uuid)>,
     Json(body): Json<PatchUpstreamRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = get_cache_by_name(state.0.clone(), user.id, cache)
-        .await?
-        .ok_or_else(|| WebError::not_found("Cache"))?;
+    let cache = load_cache_for_user(&state, user.id, cache).await?;
+    let record = load_upstream(&state, cache.id, upstream_id).await?;
 
-    let record = ECacheUpstream::find_by_id(upstream_id)
-        .filter(CCacheUpstream::Cache.eq(cache.id))
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Upstream cache"))?;
-
-    let is_external = record.upstream_cache.is_none();
+    let is_external = matches!(
+        record.as_source(),
+        Some(entity::cache_upstream::CacheUpstreamSource::External { .. })
+    );
     let mut active = record.into_active_model();
 
     if let Some(name) = body.display_name {
@@ -189,15 +205,8 @@ pub async fn delete_cache_upstream(
     Extension(user): Extension<MUser>,
     Path((cache, upstream_id)): Path<(String, Uuid)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = get_cache_by_name(state.0.clone(), user.id, cache)
-        .await?
-        .ok_or_else(|| WebError::not_found("Cache"))?;
-
-    let record = ECacheUpstream::find_by_id(upstream_id)
-        .filter(CCacheUpstream::Cache.eq(cache.id))
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Upstream cache"))?;
+    let cache = load_cache_for_user(&state, user.id, cache).await?;
+    let record = load_upstream(&state, cache.id, upstream_id).await?;
 
     let active: ACacheUpstream = record.into();
     active.delete(&state.db).await?;

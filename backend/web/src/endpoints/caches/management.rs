@@ -10,7 +10,6 @@ use crate::error::{WebError, WebResult};
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
 use chrono::{NaiveDateTime, Utc};
 use core::db::{get_any_cache_by_name, get_cache_by_name};
 use core::sources::{format_cache_public_key, generate_signing_key};
@@ -56,6 +55,32 @@ pub struct PatchCacheRequest {
     pub description: Option<String>,
     pub priority: Option<i32>,
 }
+
+// ── Access context ────────────────────────────────────────────────────────────
+
+/// Load an owned (editable) cache for mutation handlers.
+///
+/// Returns `not_found("Cache")` if the cache doesn't exist or isn't owned by
+/// `user_id`, and `Forbidden` if it is state-managed.
+async fn load_editable_cache(
+    state: &Arc<ServerState>,
+    user_id: Uuid,
+    cache_name: String,
+) -> WebResult<MCache> {
+    let cache = get_cache_by_name(Arc::clone(state), user_id, cache_name)
+        .await?
+        .ok_or_else(|| WebError::not_found("Cache"))?;
+
+    if cache.managed {
+        return Err(WebError::Forbidden(
+            "Cannot modify state-managed cache. This cache is managed by configuration and cannot be edited through the API.".to_string(),
+        ));
+    }
+
+    Ok(cache)
+}
+
+// ── Handlers ──────────────────────────────────────────────────────────────────
 
 pub async fn get_cache_name_available(
     state: State<Arc<ServerState>>,
@@ -117,12 +142,10 @@ pub async fn get(
         .all(&state.db)
         .await?;
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: caches,
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn put(
@@ -184,12 +207,10 @@ pub async fn put(
     .insert(&state.db)
     .await?;
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: cache.id.to_string(),
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn get_public_caches(
@@ -234,7 +255,7 @@ pub async fn get_cache(
 
     let can_edit = matches!(&maybe_user, Some(u) if u.id == cache.created_by);
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: CacheResponse {
             id: cache.id,
@@ -250,9 +271,7 @@ pub async fn get_cache(
             managed: cache.managed,
             can_edit,
         },
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn patch_cache(
@@ -260,90 +279,29 @@ pub async fn patch_cache(
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
     Json(body): Json<PatchCacheRequest>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
-        Ok(Some(c)) => c,
-        Ok(None) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Cache not found".to_string(),
-                }),
-            ));
-        }
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: format!("Database error: {}", e),
-                }),
-            ));
-        }
-    };
-
-    // Prevent modification of state-managed caches
-    if cache.managed {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(BaseResponse {
-                error: true,
-                message: "Cannot modify state-managed cache. This cache is managed by configuration and cannot be edited through the API.".to_string(),
-            }),
-        ));
-    }
-
+) -> WebResult<Json<BaseResponse<String>>> {
+    let cache = load_editable_cache(&state, user.id, cache).await?;
     let mut acache: ACache = cache.into();
 
     if let Some(name) = body.name {
         if check_index_name(name.as_str()).is_err() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Invalid Cache Name".to_string(),
-                }),
-            ));
+            return Err(WebError::invalid_name("Cache Name"));
         }
-
-        let cache = ECache::find()
+        if ECache::find()
             .filter(CCache::Name.eq(name.clone()))
             .one(&state.db)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(BaseResponse {
-                        error: true,
-                        message: format!("Database error: {}", e),
-                    }),
-                )
-            })?;
-
-        if cache.is_some() {
-            return Err((
-                StatusCode::CONFLICT,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Cache Name already exists".to_string(),
-                }),
-            ));
+            .await?
+            .is_some()
+        {
+            return Err(WebError::already_exists("Cache Name"));
         }
-
         acache.name = Set(name);
     }
 
     if let Some(display_name) = body.display_name {
         let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(BaseResponse {
-                    error: true,
-                    message: format!("Invalid display name: {}", e),
-                }),
-            ));
+            return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
         }
         acache.display_name = Set(display_name);
     }
@@ -356,61 +314,20 @@ pub async fn patch_cache(
         acache.priority = Set(priority);
     }
 
-    if let Err(e) = acache.update(&state.db).await {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(BaseResponse {
-                error: true,
-                message: format!("Failed to update cache: {}", e),
-            }),
-        ));
-    }
+    acache.update(&state.db).await?;
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: "Cache updated".to_string(),
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn delete_cache(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
-        Ok(Some(c)) => c,
-        Ok(None) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Cache not found".to_string(),
-                }),
-            ));
-        }
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: format!("Database error: {}", e),
-                }),
-            ));
-        }
-    };
-
-    // Prevent deletion of state-managed caches
-    if cache.managed {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(BaseResponse {
-                error: true,
-                message: "Cannot delete state-managed cache. This cache is managed by configuration and cannot be deleted through the API.".to_string(),
-            }),
-        ));
-    }
+) -> WebResult<Json<BaseResponse<String>>> {
+    let cache = load_editable_cache(&state, user.id, cache).await?;
 
     // Collect orgs that subscribe to this cache before deleting it, so we can
     // clean up orphaned NAR files in the background afterwards.
@@ -424,15 +341,7 @@ pub async fn delete_cache(
         .collect();
 
     let acache: ACache = cache.into();
-    if let Err(e) = acache.delete(&state.db).await {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(BaseResponse {
-                error: true,
-                message: format!("Failed to delete cache: {}", e),
-            }),
-        ));
-    }
+    acache.delete(&state.db).await?;
 
     // Spawn background task to delete now-orphaned NAR files.
     let state_bg = Arc::clone(&state);
@@ -440,106 +349,42 @@ pub async fn delete_cache(
         cleanup_nars_for_orgs(state_bg, subscribing_orgs).await;
     });
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: "Cache deleted".to_string(),
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn post_cache_active(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
-        Ok(Some(c)) => c,
-        Ok(None) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Cache not found".to_string(),
-                }),
-            ));
-        }
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: format!("Database error: {}", e),
-                }),
-            ));
-        }
-    };
-
+) -> WebResult<Json<BaseResponse<String>>> {
+    let cache = load_editable_cache(&state, user.id, cache).await?;
     let mut acache: ACache = cache.into();
     acache.active = Set(true);
-    if let Err(e) = acache.update(&state.db).await {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(BaseResponse {
-                error: true,
-                message: format!("Failed to activate cache: {}", e),
-            }),
-        ));
-    }
+    acache.update(&state.db).await?;
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: "Cache enabled".to_string(),
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn delete_cache_active(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
-) -> Result<Json<BaseResponse<String>>, (StatusCode, Json<BaseResponse<String>>)> {
-    let cache: MCache = match get_cache_by_name(state.0.clone(), user.id, cache.clone()).await {
-        Ok(Some(c)) => c,
-        Ok(None) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(BaseResponse {
-                    error: true,
-                    message: "Cache not found".to_string(),
-                }),
-            ));
-        }
-        Err(e) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(BaseResponse {
-                    error: true,
-                    message: format!("Database error: {}", e),
-                }),
-            ));
-        }
-    };
-
+) -> WebResult<Json<BaseResponse<String>>> {
+    let cache = load_editable_cache(&state, user.id, cache).await?;
     let mut acache: ACache = cache.into();
     acache.active = Set(false);
-    if let Err(e) = acache.update(&state.db).await {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(BaseResponse {
-                error: true,
-                message: format!("Failed to deactivate cache: {}", e),
-            }),
-        ));
-    }
+    acache.update(&state.db).await?;
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: "Cache disabled".to_string(),
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn post_cache_public(
@@ -547,16 +392,7 @@ pub async fn post_cache_public(
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone())
-        .await?
-        .ok_or_else(|| WebError::not_found("Cache"))?;
-
-    if cache.managed {
-        return Err(WebError::Forbidden(
-            "Cannot modify state-managed cache.".to_string(),
-        ));
-    }
-
+    let cache = load_editable_cache(&state, user.id, cache).await?;
     let mut acache: ACache = cache.into();
     acache.public = Set(true);
     acache.update(&state.db).await?;
@@ -572,16 +408,7 @@ pub async fn delete_cache_public(
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache: MCache = get_cache_by_name(state.0.clone(), user.id, cache.clone())
-        .await?
-        .ok_or_else(|| WebError::not_found("Cache"))?;
-
-    if cache.managed {
-        return Err(WebError::Forbidden(
-            "Cannot modify state-managed cache.".to_string(),
-        ));
-    }
-
+    let cache = load_editable_cache(&state, user.id, cache).await?;
     let mut acache: ACache = cache.into();
     acache.public = Set(false);
     acache.update(&state.db).await?;

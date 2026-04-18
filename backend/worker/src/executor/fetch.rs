@@ -15,10 +15,10 @@
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
-use tempfile::NamedTempFile;
 use git2::RemoteCallbacks;
 use proto::messages::{FetchedInput, FlakeJob};
 use proto::traits::JobReporter;
+use tempfile::NamedTempFile;
 use tokio::sync::watch;
 use tracing::{debug, info};
 
@@ -99,7 +99,15 @@ pub async fn fetch_repository(
     let flake_ref = format!("git+file://{}?rev={}", tmp_path, job.commit);
     let binpath_nix = binpath_nix.to_owned();
     let binpath_ssh = binpath_ssh.to_owned();
-    match archive_flake(&flake_ref, &binpath_nix, &binpath_ssh, ssh_key.as_deref(), abort).await {
+    match archive_flake(
+        &flake_ref,
+        &binpath_nix,
+        &binpath_ssh,
+        ssh_key.as_deref(),
+        abort,
+    )
+    .await
+    {
         Ok((source_path, fetched_inputs)) => {
             info!(%source_path, inputs = fetched_inputs.len(), "flake archived to nix store");
             Ok((source_path, fetched_inputs))
@@ -138,8 +146,8 @@ async fn archive_flake(
     // that nix's libfetchers picks it up when cloning git+ssh inputs.  The
     // _key_file guard ensures the file is deleted when this scope exits.
     let _key_file: Option<NamedTempFile> = if let Some(key) = ssh_key {
-        let kf = NamedTempFile::with_suffix(".key")
-            .context("failed to create SSH key temp file")?;
+        let kf =
+            NamedTempFile::with_suffix(".key").context("failed to create SSH key temp file")?;
         std::fs::set_permissions(kf.path(), std::fs::Permissions::from_mode(0o600))
             .context("failed to chmod SSH key file")?;
         std::fs::write(kf.path(), key.as_bytes()).context("failed to write SSH key file")?;
@@ -361,7 +369,8 @@ mod tests {
         let mut reporter = RecordingJobReporter::new();
 
         // This will fail with a git error (fake URL), but it should report Fetching first.
-        let result = fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
+        let result =
+            fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
 
         assert_eq!(reporter.len(), 1);
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
@@ -379,7 +388,8 @@ mod tests {
         );
 
         let mut reporter = RecordingJobReporter::new();
-        let result = fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
+        let result =
+            fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
 
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
         assert!(result.is_err()); // fake URL
@@ -397,19 +407,47 @@ mod tests {
         let repo_dir = tmp.path().join("repo");
 
         let rd = repo_dir.to_str().unwrap();
-        Command::new("git").args(["init", rd, "-b", "main"]).output().unwrap();
-        std::fs::write(repo_dir.join("flake.nix"), "{}").unwrap();
-        Command::new("git").args(["-C", rd, "add", "."]).output().unwrap();
-        let commit_out = Command::new("git")
-            .args(["-C", rd, "-c", "user.name=test", "-c", "user.email=t@t",
-                   "-c", "commit.gpgsign=false", "commit", "-m", "init"])
+        Command::new("git")
+            .args(["init", rd, "-b", "main"])
             .output()
             .unwrap();
-        assert!(commit_out.status.success(), "git commit failed: {}", String::from_utf8_lossy(&commit_out.stderr));
+        std::fs::write(repo_dir.join("flake.nix"), "{}").unwrap();
+        Command::new("git")
+            .args(["-C", rd, "add", "."])
+            .output()
+            .unwrap();
+        let commit_out = Command::new("git")
+            .args([
+                "-C",
+                rd,
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "init",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            commit_out.status.success(),
+            "git commit failed: {}",
+            String::from_utf8_lossy(&commit_out.stderr)
+        );
 
         let sha = String::from_utf8(
-            Command::new("git").args(["-C", rd, "rev-parse", "HEAD"]).output().unwrap().stdout
-        ).unwrap().trim().to_string();
+            Command::new("git")
+                .args(["-C", rd, "rev-parse", "HEAD"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_string();
         assert!(sha.len() == 40, "expected 40-char SHA, got: {sha}");
 
         let job = FlakeJob {
@@ -426,7 +464,8 @@ mod tests {
 
         // Clone succeeds; nix flake archive fails (nix not available in test context).
         // Without the fallback, the error propagates.
-        let result = fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
+        let result =
+            fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
         assert!(result.is_err(), "expected error when nix is unavailable");
         // The Fetching event was still emitted before the failure.
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));

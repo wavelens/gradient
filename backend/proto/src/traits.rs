@@ -54,7 +54,8 @@ pub trait JobReporter: Send {
     /// - [`QueryMode::Normal`] — only paths already in the cache (`cached: true`, no URLs).
     /// - [`QueryMode::Pull`]   — cached paths with presigned S3 GET URLs where available.
     /// - [`QueryMode::Push`]   — all paths; uncached ones include presigned S3 PUT URLs.
-    async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode) -> Result<Vec<CachedPath>>;
+    async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode)
+    -> Result<Vec<CachedPath>>;
     async fn report_fetching(&mut self) -> Result<()>;
     async fn report_fetch_result(&mut self, fetched_paths: Vec<FetchedInput>) -> Result<()>;
     async fn report_evaluating_flake(&mut self) -> Result<()>;

@@ -12,7 +12,9 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use gradient_core::types::proto::{CandidateScore, FlakeJob, FlakeTask, GradientCapabilities, JobKind};
+use gradient_core::types::proto::{
+    CandidateScore, FlakeJob, FlakeTask, GradientCapabilities, JobKind,
+};
 
 use super::Scheduler;
 use super::jobs::PendingEvalJob;

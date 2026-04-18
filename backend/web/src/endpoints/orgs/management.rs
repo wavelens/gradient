@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::load_editable_org;
 use crate::authorization::MaybeUser;
-use crate::endpoints::user_is_org_member;
+use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use chrono::Utc;
-use core::db::{get_any_organization_by_name, get_organization_by_name};
 use core::sources::generate_ssh_key;
 use core::types::consts::BASE_ROLE_ADMIN_ID;
 use core::types::input::{check_index_name, validate_display_name};
@@ -93,6 +93,58 @@ pub async fn get_org_name_available(
     }))
 }
 
+/// Count in-progress evaluations per organization for `org_ids`.
+///
+/// Returns a map of org_id → count of evaluations in any active status
+/// (Queued, Fetching, EvaluatingFlake, EvaluatingDerivation, Building, Waiting).
+async fn count_running_evaluations(
+    state: &Arc<ServerState>,
+    org_ids: &[Uuid],
+) -> WebResult<HashMap<Uuid, i64>> {
+    use entity::evaluation::EvaluationStatus;
+
+    if org_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let projects = EProject::find()
+        .filter(CProject::Organization.is_in(org_ids.to_vec()))
+        .all(&state.db)
+        .await?;
+
+    let project_ids: Vec<Uuid> = projects.iter().map(|p| p.id).collect();
+    let project_to_org: HashMap<Uuid, Uuid> = projects
+        .into_iter()
+        .map(|p| (p.id, p.organization))
+        .collect();
+
+    let mut running_per_org: HashMap<Uuid, i64> = HashMap::new();
+    if !project_ids.is_empty() {
+        let running = EEvaluation::find()
+            .filter(CEvaluation::Project.is_in(project_ids))
+            .filter(
+                Condition::any()
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Fetching))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingFlake))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingDerivation))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Building))
+                    .add(CEvaluation::Status.eq(EvaluationStatus::Waiting)),
+            )
+            .all(&state.db)
+            .await?;
+        for eval in running {
+            if let Some(project_id) = eval.project
+                && let Some(&org_id) = project_to_org.get(&project_id)
+            {
+                *running_per_org.entry(org_id).or_insert(0) += 1;
+            }
+        }
+    }
+
+    Ok(running_per_org)
+}
+
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
@@ -116,42 +168,8 @@ pub async fn get(
     let total = paginator.num_items().await?;
     let orgs = paginator.fetch_page(page - 1).await?;
 
-    // Batch-count running evaluations per organization.
     let org_ids: Vec<Uuid> = orgs.iter().map(|o| o.id).collect();
-    let projects = EProject::find()
-        .filter(CProject::Organization.is_in(org_ids))
-        .all(&state.db)
-        .await?;
-    let project_ids: Vec<Uuid> = projects.iter().map(|p| p.id).collect();
-    let project_to_org: HashMap<Uuid, Uuid> = projects
-        .into_iter()
-        .map(|p| (p.id, p.organization))
-        .collect();
-
-    let mut running_per_org: HashMap<Uuid, i64> = HashMap::new();
-    if !project_ids.is_empty() {
-        use entity::evaluation::EvaluationStatus;
-        let running = EEvaluation::find()
-            .filter(CEvaluation::Project.is_in(project_ids))
-            .filter(
-                Condition::any()
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Fetching))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingFlake))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingDerivation))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Building))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Waiting)),
-            )
-            .all(&state.db)
-            .await?;
-        for eval in running {
-            if let Some(project_id) = eval.project
-                && let Some(&org_id) = project_to_org.get(&project_id)
-            {
-                *running_per_org.entry(org_id).or_insert(0) += 1;
-            }
-        }
-    }
+    let running_per_org = count_running_evaluations(&state, &org_ids).await?;
 
     let items: Vec<OrganizationSummary> = orgs
         .into_iter()
@@ -275,21 +293,7 @@ pub async fn get_organization(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<OrgResponse>>> {
-    let org: MOrganization =
-        get_any_organization_by_name(state.0.clone(), organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if !org.public {
-        match &maybe_user {
-            Some(user) => {
-                if !user_is_org_member(&state.0, user.id, org.id).await? {
-                    return Err(WebError::not_found("Organization"));
-                }
-            }
-            None => return Err(WebError::not_found("Organization")),
-        }
-    }
+    let org = get_org_readable(&state.0, organization, &maybe_user, "Organization").await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -316,16 +320,7 @@ pub async fn patch_organization(
     Path(organization): Path<String>,
     Json(body): Json<PatchOrganizationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    // Prevent modification of state-managed organizations
-    if organization.managed {
-        return Err(WebError::Forbidden("Cannot modify state-managed organization. This organization is managed by configuration and cannot be edited through the API.".to_string()));
-    }
-
+    let organization = load_editable_org(&state, user.id, organization).await?;
     let mut aorganization: AOrganization = organization.into();
 
     if let Some(name) = body.name {
@@ -372,16 +367,7 @@ pub async fn delete_organization(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    // Prevent deletion of state-managed organizations
-    if organization.managed {
-        return Err(WebError::Forbidden("Cannot delete state-managed organization. This organization is managed by configuration and cannot be deleted through the API.".to_string()));
-    }
-
+    let organization = load_editable_org(&state, user.id, organization).await?;
     let aorganization: AOrganization = organization.into();
     aorganization.delete(&state.db).await?;
 

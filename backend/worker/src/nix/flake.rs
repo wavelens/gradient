@@ -278,7 +278,9 @@ mod tests {
 
     #[test]
     fn is_literal_pattern_plain() {
-        assert!(is_literal_pattern("nixosConfigurations.server1.config.system.build.toplevel"));
+        assert!(is_literal_pattern(
+            "nixosConfigurations.server1.config.system.build.toplevel"
+        ));
         assert!(is_literal_pattern("packages.x86_64-linux.hello"));
     }
 

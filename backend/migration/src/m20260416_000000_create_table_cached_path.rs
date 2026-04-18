@@ -39,11 +39,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(CachedPath::NarHash).text())
                     .col(ColumnDef::new(CachedPath::References).text())
                     .col(ColumnDef::new(CachedPath::Ca).text())
-                    .col(
-                        ColumnDef::new(CachedPath::CreatedAt)
-                            .date_time()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(CachedPath::CreatedAt).date_time().not_null())
                     .to_owned(),
             )
             .await?;
@@ -67,11 +63,7 @@ impl MigrationTrait for Migration {
                             .uuid()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(CachedPathSignature::Cache)
-                            .uuid()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(CachedPathSignature::Cache).uuid().not_null())
                     .col(ColumnDef::new(CachedPathSignature::Signature).text())
                     .col(
                         ColumnDef::new(CachedPathSignature::CreatedAt)
@@ -184,11 +176,7 @@ impl MigrationTrait for Migration {
             .await?;
 
         manager
-            .drop_table(
-                Table::drop()
-                    .table(CachedPathSignature::Table)
-                    .to_owned(),
-            )
+            .drop_table(Table::drop().table(CachedPathSignature::Table).to_owned())
             .await?;
 
         manager

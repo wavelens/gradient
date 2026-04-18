@@ -59,41 +59,30 @@ async fn get_oidc_metadata(discovery_url: &str) -> Result<serde_json::Value> {
 }
 
 pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<Url> {
-    if !state.cli.oidc_enabled {
-        bail!("OIDC is not enabled");
-    }
-
-    let discovery_url = state
+    let oidc = state
         .cli
-        .oidc_discovery_url
-        .as_ref()
-        .context("OIDC discovery URL not configured")?;
+        .oidc_config()
+        .context("OIDC is not enabled or not fully configured")?;
 
-    let metadata = get_oidc_metadata(discovery_url).await?;
+    let metadata = get_oidc_metadata(&oidc.discovery_url).await?;
 
     let auth_endpoint = metadata["authorization_endpoint"]
         .as_str()
         .context("No authorization_endpoint in OIDC metadata")?;
 
-    let client_id = state
-        .cli
-        .oidc_client_id
-        .as_ref()
-        .context("OIDC client ID not configured")?;
-
     let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.cli.serve_url);
+    let scope = oidc
+        .scopes
+        .as_deref()
+        .unwrap_or("openid email profile")
+        .to_string();
 
-    let mut params = vec![
+    let params = vec![
         ("response_type", "code"),
-        ("client_id", client_id),
-        ("redirect_uri", &redirect_uri),
+        ("client_id", oidc.client_id.as_str()),
+        ("redirect_uri", redirect_uri.as_str()),
+        ("scope", scope.as_str()),
     ];
-
-    if let Some(scopes) = &state.cli.oidc_scopes {
-        params.push(("scope", scopes));
-    } else {
-        params.push(("scope", "openid email profile"));
-    }
 
     let auth_url = Url::parse_with_params(auth_endpoint, &params)
         .context("Failed to build authorization URL")?;
@@ -105,17 +94,12 @@ pub async fn oidc_login_verify(
     state: State<Arc<ServerState>>,
     authorization_code: String,
 ) -> Result<MUser> {
-    if !state.cli.oidc_enabled {
-        bail!("OIDC is not enabled");
-    }
-
-    let discovery_url = state
+    let oidc = state
         .cli
-        .oidc_discovery_url
-        .as_ref()
-        .context("OIDC discovery URL not configured")?;
+        .oidc_config()
+        .context("OIDC is not enabled or not fully configured")?;
 
-    let metadata = get_oidc_metadata(discovery_url).await?;
+    let metadata = get_oidc_metadata(&oidc.discovery_url).await?;
 
     let token_endpoint = metadata["token_endpoint"]
         .as_str()
@@ -125,24 +109,13 @@ pub async fn oidc_login_verify(
         .as_str()
         .context("No userinfo_endpoint in OIDC metadata")?;
 
-    let client_id = state
-        .cli
-        .oidc_client_id
-        .as_ref()
-        .context("OIDC client ID not configured")?;
-    let client_secret_file = state
-        .cli
-        .oidc_client_secret_file
-        .as_ref()
-        .context("OIDC client secret file not configured")?;
-
     let http_client = reqwest::ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::limited(5))
         .build()
         .context("Failed to create HTTP client")?;
 
     let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.cli.serve_url);
-    let client_secret = load_secret(client_secret_file);
+    let client_secret = load_secret(&oidc.client_secret_file);
 
     // Exchange authorization code for tokens
     let token_response = http_client
@@ -151,7 +124,7 @@ pub async fn oidc_login_verify(
             ("grant_type", "authorization_code"),
             ("code", authorization_code.as_str()),
             ("redirect_uri", redirect_uri.as_str()),
-            ("client_id", client_id.as_str()),
+            ("client_id", oidc.client_id.as_str()),
             ("client_secret", client_secret.expose()),
         ])
         .send()

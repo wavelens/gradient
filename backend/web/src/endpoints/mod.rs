@@ -20,12 +20,44 @@ pub mod workers;
 
 use crate::error::{WebError, WebResult};
 use axum::extract::{Json, State};
-use core::types::{BaseResponse, ServerState};
+use core::db::get_any_organization_by_name;
+use core::types::{BaseResponse, MOrganization, MUser, ServerState};
 use core::types::{COrganizationUser, EOrganizationUser};
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
+
+/// Load an organization by name and verify the caller may read it.
+///
+/// Returns `not_found(label)` when the org doesn't exist *or* when it is
+/// private and `maybe_user` is not a member — the caller cannot distinguish
+/// the two cases, which prevents org-existence enumeration.
+///
+/// `label` is the resource name in the error message; project endpoints pass
+/// `"Project"` so the response doesn't leak org existence.
+pub async fn get_org_readable(
+    state: &Arc<ServerState>,
+    org_name: String,
+    maybe_user: &Option<MUser>,
+    label: &str,
+) -> WebResult<MOrganization> {
+    let org = get_any_organization_by_name(Arc::clone(state), org_name)
+        .await?
+        .ok_or_else(|| WebError::not_found(label))?;
+
+    if !org.public {
+        let is_member = match maybe_user {
+            Some(user) => user_is_org_member(state, user.id, org.id).await?,
+            None => false,
+        };
+        if !is_member {
+            return Err(WebError::not_found(label));
+        }
+    }
+
+    Ok(org)
+}
 
 pub async fn user_is_org_member(
     state: &Arc<ServerState>,
@@ -41,6 +73,36 @@ pub async fn user_is_org_member(
         .one(&state.db)
         .await?
         .is_some())
+}
+
+// ── Hydra build product helpers ───────────────────────────────────────────────
+
+/// Parse a single `hydra-build-products` line.
+///
+/// Returns `(file_type, file_path)` for lines of the form `file <type> <path>`,
+/// `None` for blank lines or lines with a different prefix.
+pub fn parse_hydra_product_line(line: &str) -> Option<(String, String)> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() >= 3 && parts[0] == "file" {
+        Some((parts[1].to_string(), parts[2..].join(" ")))
+    } else {
+        None
+    }
+}
+
+pub fn content_type_for_filename(filename: &str) -> &'static str {
+    match std::path::Path::new(filename)
+        .extension()
+        .and_then(|ext| ext.to_str())
+    {
+        Some("tar") => "application/x-tar",
+        Some("gz") => "application/gzip",
+        Some("zst") => "application/zstd",
+        Some("txt") => "text/plain",
+        Some("json") => "application/json",
+        Some("zip") => "application/zip",
+        _ => "application/octet-stream",
+    }
 }
 
 pub async fn handle_404() -> WebError {

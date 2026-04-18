@@ -71,19 +71,11 @@ pub struct WorkerConfig {
 
     /// Maximum number of simultaneous evaluations.
     /// Defaults to `eval_workers` (one eval job per evaluator subprocess).
-    #[arg(
-        long,
-        env = "GRADIENT_MAX_CONCURRENT_EVALUATIONS",
-        default_value_t = 1
-    )]
+    #[arg(long, env = "GRADIENT_MAX_CONCURRENT_EVALUATIONS", default_value_t = 1)]
     pub max_concurrent_evaluations: u32,
 
     /// Maximum number of simultaneous builds.
-    #[arg(
-        long,
-        env = "GRADIENT_MAX_CONCURRENT_BUILDS",
-        default_value_t = 1
-    )]
+    #[arg(long, env = "GRADIENT_MAX_CONCURRENT_BUILDS", default_value_t = 1)]
     pub max_concurrent_builds: u32,
 
     // ── Logging ───────────────────────────────────────────────────────────────

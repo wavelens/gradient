@@ -81,7 +81,11 @@ impl JobScorer {
         // Build a lookup map from store path → nar_size for fast access.
         let path_nar_size: std::collections::HashMap<&str, u64> = required_paths
             .iter()
-            .filter_map(|rp| rp.cache_info.as_ref().map(|ci| (rp.path.as_str(), ci.nar_size)))
+            .filter_map(|rp| {
+                rp.cache_info
+                    .as_ref()
+                    .map(|ci| (rp.path.as_str(), ci.nar_size))
+            })
             .collect();
 
         for drv_path in drv_paths {
@@ -108,8 +112,8 @@ impl JobScorer {
             for (input_drv, _outputs) in &drv.input_derivations {
                 let input_full = nix_store_path(input_drv);
                 // Read the input .drv to get its output paths.
-                if let Ok(input_bytes) = tokio::fs::read(&input_full).await {
-                    if let Ok(input_parsed) = parse_drv(&input_bytes) {
+                if let Ok(input_bytes) = tokio::fs::read(&input_full).await
+                    && let Ok(input_parsed) = parse_drv(&input_bytes) {
                         for o in &input_parsed.outputs {
                             if o.path.is_empty() {
                                 continue;
@@ -124,7 +128,6 @@ impl JobScorer {
                             }
                         }
                     }
-                }
             }
 
             // Check inputSrcs.
@@ -142,7 +145,6 @@ impl JobScorer {
         (missing_count, missing_nar_size)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -212,20 +214,14 @@ mod tests {
                         Ok(true) => {}
                         _ => {
                             missing_count += 1;
-                            missing_nar_size += rp
-                                .cache_info
-                                .as_ref()
-                                .map(|ci| ci.nar_size)
-                                .unwrap_or(0);
+                            missing_nar_size +=
+                                rp.cache_info.as_ref().map(|ci| ci.nar_size).unwrap_or(0);
                         }
                     }
                 }
                 // Count each unreadable drv as missing.
                 for drv_path in &c.drv_paths {
-                    if tokio::fs::metadata(nix_store_path(drv_path))
-                        .await
-                        .is_err()
-                    {
+                    if tokio::fs::metadata(nix_store_path(drv_path)).await.is_err() {
                         missing_count += 1;
                     }
                 }

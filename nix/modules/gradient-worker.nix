@@ -19,12 +19,14 @@ in {
         type = lib.types.package;
         description = "Nix package to use for evaluation and fetching. The `nix` binary from this package is passed to the worker as `GRADIENT_BINPATH_NIX`.";
       };
+
       git = lib.mkOption {
         default = config.programs.git.package;
         defaultText = lib.literalExpression "config.programs.git.package";
         type = lib.types.package;
         description = "Git package. Required by the worker's repository cloning code (libgit2 may spawn git subprocesses).";
       };
+
       ssh = lib.mkOption {
         default = config.programs.ssh.package;
         defaultText = lib.literalExpression "config.programs.ssh.package";

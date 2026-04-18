@@ -19,6 +19,41 @@ use uuid::Uuid;
 
 use super::projects::user_can_edit;
 
+// ── Access helpers ────────────────────────────────────────────────────────────
+
+/// Load an organization by name and verify the user has Admin/Write permission.
+async fn load_webhook_org(
+    state: &Arc<ServerState>,
+    user_id: Uuid,
+    org_name: String,
+) -> WebResult<MOrganization> {
+    let organization = get_any_organization_by_name(Arc::clone(state), org_name)
+        .await?
+        .ok_or_else(|| WebError::not_found("Organization"))?;
+
+    if !user_can_edit(state, user_id, organization.id).await? {
+        return Err(WebError::Forbidden(
+            "You do not have permission to manage webhooks for this organization.".to_string(),
+        ));
+    }
+
+    Ok(organization)
+}
+
+/// Load a webhook by UUID, scoped to the given organization.
+async fn load_webhook(
+    state: &Arc<ServerState>,
+    org_id: Uuid,
+    webhook_id: Uuid,
+) -> WebResult<MWebhook> {
+    EWebhook::find()
+        .filter(CWebhook::Id.eq(webhook_id))
+        .filter(CWebhook::Organization.eq(org_id))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("Webhook"))
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CreateWebhookRequest {
     pub name: String,
@@ -70,16 +105,7 @@ pub async fn get(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<WebhookResponse>>>> {
-    let organization = get_any_organization_by_name(state.0.clone(), organization)
-        .await
-        .map_err(|e| WebError::InternalServerError(e.to_string()))?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if !user_can_edit(&state, user.id, organization.id).await? {
-        return Err(WebError::Forbidden(
-            "You do not have permission to view webhooks for this organization.".to_string(),
-        ));
-    }
+    let organization = load_webhook_org(&state, user.id, organization).await?;
 
     let webhooks = EWebhook::find()
         .filter(CWebhook::Organization.eq(organization.id))
@@ -99,16 +125,7 @@ pub async fn put(
     Path(organization): Path<String>,
     Json(body): Json<CreateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
-    let organization = get_any_organization_by_name(state.0.clone(), organization)
-        .await
-        .map_err(|e| WebError::InternalServerError(e.to_string()))?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if !user_can_edit(&state, user.id, organization.id).await? {
-        return Err(WebError::Forbidden(
-            "You do not have permission to create webhooks for this organization.".to_string(),
-        ));
-    }
+    let organization = load_webhook_org(&state, user.id, organization).await?;
 
     if body.name.is_empty() {
         return Err(WebError::BadRequest(
@@ -160,23 +177,8 @@ pub async fn get_webhook(
     Extension(user): Extension<MUser>,
     Path((organization, webhook_id)): Path<(String, Uuid)>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
-    let organization = get_any_organization_by_name(state.0.clone(), organization)
-        .await
-        .map_err(|e| WebError::InternalServerError(e.to_string()))?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if !user_can_edit(&state, user.id, organization.id).await? {
-        return Err(WebError::Forbidden(
-            "You do not have permission to view this webhook.".to_string(),
-        ));
-    }
-
-    let webhook = EWebhook::find()
-        .filter(CWebhook::Id.eq(webhook_id))
-        .filter(CWebhook::Organization.eq(organization.id))
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Webhook"))?;
+    let organization = load_webhook_org(&state, user.id, organization).await?;
+    let webhook = load_webhook(&state, organization.id, webhook_id).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -191,23 +193,8 @@ pub async fn patch_webhook(
     Path((organization, webhook_id)): Path<(String, Uuid)>,
     Json(body): Json<UpdateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
-    let organization = get_any_organization_by_name(state.0.clone(), organization)
-        .await
-        .map_err(|e| WebError::InternalServerError(e.to_string()))?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if !user_can_edit(&state, user.id, organization.id).await? {
-        return Err(WebError::Forbidden(
-            "You do not have permission to modify this webhook.".to_string(),
-        ));
-    }
-
-    let webhook = EWebhook::find()
-        .filter(CWebhook::Id.eq(webhook_id))
-        .filter(CWebhook::Organization.eq(organization.id))
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Webhook"))?;
+    let organization = load_webhook_org(&state, user.id, organization).await?;
+    let webhook = load_webhook(&state, organization.id, webhook_id).await?;
 
     let mut active_webhook: AWebhook = webhook.into_active_model();
 
@@ -247,23 +234,8 @@ pub async fn delete_webhook(
     Extension(user): Extension<MUser>,
     Path((organization, webhook_id)): Path<(String, Uuid)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
-    let organization = get_any_organization_by_name(state.0.clone(), organization)
-        .await
-        .map_err(|e| WebError::InternalServerError(e.to_string()))?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if !user_can_edit(&state, user.id, organization.id).await? {
-        return Err(WebError::Forbidden(
-            "You do not have permission to delete this webhook.".to_string(),
-        ));
-    }
-
-    let webhook = EWebhook::find()
-        .filter(CWebhook::Id.eq(webhook_id))
-        .filter(CWebhook::Organization.eq(organization.id))
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Webhook"))?;
+    let organization = load_webhook_org(&state, user.id, organization).await?;
+    let webhook = load_webhook(&state, organization.id, webhook_id).await?;
 
     webhook.into_active_model().delete(&state.db).await?;
 
@@ -279,23 +251,8 @@ pub async fn post_webhook_test(
     Extension(user): Extension<MUser>,
     Path((organization, webhook_id)): Path<(String, Uuid)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
-    let organization = get_any_organization_by_name(state.0.clone(), organization)
-        .await
-        .map_err(|e| WebError::InternalServerError(e.to_string()))?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if !user_can_edit(&state, user.id, organization.id).await? {
-        return Err(WebError::Forbidden(
-            "You do not have permission to test this webhook.".to_string(),
-        ));
-    }
-
-    let webhook = EWebhook::find()
-        .filter(CWebhook::Id.eq(webhook_id))
-        .filter(CWebhook::Organization.eq(organization.id))
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Webhook"))?;
+    let organization = load_webhook_org(&state, user.id, organization).await?;
+    let webhook = load_webhook(&state, organization.id, webhook_id).await?;
 
     let payload = serde_json::json!({
         "event": "ping",

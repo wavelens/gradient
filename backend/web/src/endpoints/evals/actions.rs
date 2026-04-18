@@ -9,10 +9,10 @@ use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use core::types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use super::EvalAccessContext;
 use super::types::MakeEvaluationRequest;
 
 pub async fn post_evaluation(
@@ -22,55 +22,19 @@ pub async fn post_evaluation(
     Path(evaluation_id): Path<Uuid>,
     Json(body): Json<MakeEvaluationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let evaluation = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Evaluation"))?;
+    let ctx = EvalAccessContext::load(&state, evaluation_id, &Some(user.clone())).await?;
 
-    let organization_id = if let Some(project_id) = evaluation.project {
-        let project = EProject::find_by_id(project_id)
-            .one(&state.db)
-            .await?
-            .ok_or_else(|| {
-                tracing::error!(
-                    "Project {} not found for evaluation {}",
-                    project_id,
-                    evaluation_id
-                );
-                WebError::InternalServerError("Evaluation data inconsistency".to_string())
-            })?;
-        project.organization
-    } else {
-        EDirectBuild::find()
-            .filter(CDirectBuild::Evaluation.eq(evaluation.id))
-            .one(&state.db)
-            .await?
-            .ok_or_else(|| {
-                tracing::error!("DirectBuild not found for evaluation {}", evaluation_id);
-                WebError::InternalServerError("Direct build data inconsistency".to_string())
-            })?
-            .organization
-    };
-    let organization = EOrganization::find_by_id(organization_id)
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| {
-            tracing::error!("Organization {} not found", organization_id);
-            WebError::InternalServerError("Organization data inconsistency".to_string())
-        })?;
-
-    if !user_is_org_member(&state, user.id, organization.id).await? {
+    // Mutations require explicit org membership even when the org is public.
+    if !user_is_org_member(&state, user.id, ctx.organization_id).await? {
         return Err(WebError::not_found("Evaluation"));
     }
 
     if body.method == "abort" {
-        scheduler.abort_evaluation(evaluation).await;
+        scheduler.abort_evaluation(ctx.evaluation).await;
     }
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: "Success".to_string(),
-    };
-
-    Ok(Json(res))
+    }))
 }

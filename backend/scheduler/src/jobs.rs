@@ -205,7 +205,8 @@ impl JobTracker {
                 authorized.is_none_or(|peers| peers.contains(&j.peer_id()))
                     && matches!(
                         (kind, j),
-                        (JobKind::Flake, PendingJob::Eval(_)) | (JobKind::Build, PendingJob::Build(_))
+                        (JobKind::Flake, PendingJob::Eval(_))
+                            | (JobKind::Build, PendingJob::Build(_))
                     )
                     && job_eligible_for_caps(j, caps)
             })
@@ -331,7 +332,7 @@ mod tests {
                 commit: "abc123".into(),
                 wildcards: vec!["*".into()],
                 timeout_secs: None,
-            sign: None,
+                sign: None,
             },
             required_paths: vec![],
         })
@@ -399,11 +400,20 @@ mod tests {
         let mut tracker = JobTracker::new();
         let peer = Uuid::new_v4();
         // x86_64 build
-        tracker.add_pending("x86".into(), build_job_arch(peer, vec![], "x86_64-linux", vec![]));
+        tracker.add_pending(
+            "x86".into(),
+            build_job_arch(peer, vec![], "x86_64-linux", vec![]),
+        );
         // aarch64 build
-        tracker.add_pending("arm".into(), build_job_arch(peer, vec![], "aarch64-linux", vec![]));
+        tracker.add_pending(
+            "arm".into(),
+            build_job_arch(peer, vec![], "aarch64-linux", vec![]),
+        );
         // builtin builds run anywhere
-        tracker.add_pending("any".into(), build_job_arch(peer, vec![], "builtin", vec![]));
+        tracker.add_pending(
+            "any".into(),
+            build_job_arch(peer, vec![], "builtin", vec![]),
+        );
 
         let x86_caps = WorkerBuildCaps {
             architectures: vec!["x86_64-linux".into()],
@@ -428,8 +438,7 @@ mod tests {
             system_features: vec![],
         };
         // Worker requesting Build → arm-only build is filtered out → no assignment.
-        let assignment =
-            tracker.take_best_of_kind("w1", None, Some(&x86_caps), &JobKind::Build);
+        let assignment = tracker.take_best_of_kind("w1", None, Some(&x86_caps), &JobKind::Build);
         assert!(assignment.is_none());
         assert_eq!(tracker.pending_count(), 1);
     }

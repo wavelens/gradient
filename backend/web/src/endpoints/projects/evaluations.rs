@@ -4,15 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{EntryPointSummary, EvaluationSummary, ProjectDetailsResponse, user_can_edit};
+use super::{
+    EntryPointSummary, EvaluationSummary, ProjectDetailsResponse, load_project,
+    load_readable_project, user_can_edit,
+};
 use crate::authorization::MaybeUser;
-use crate::endpoints::user_is_org_member;
+use crate::endpoints::{content_type_for_filename, parse_hydra_product_line, user_is_org_member};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
-use core::db::{get_any_organization_by_name, get_project_by_name};
+use core::db::get_any_organization_by_name;
 use core::sources::check_project_updates;
 use core::types::input::vec_to_hex;
 use core::types::*;
@@ -119,14 +122,7 @@ pub async fn post_project_evaluate(
     Path((organization, project)): Path<(String, String)>,
     body: Option<Json<EvaluateRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project): (MOrganization, MProject) = get_project_by_name(
-        state.0.clone(),
-        user.id,
-        organization.clone(),
-        project.clone(),
-    )
-    .await?
-    .ok_or_else(|| WebError::not_found("Project"))?;
+    let (_organization, project) = load_project(&state, user.id, organization, project).await?;
 
     let mode = body.as_ref().and_then(|b| b.mode.as_deref());
 
@@ -188,27 +184,8 @@ pub async fn get_project_evaluations(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationSummary>>>> {
-    let organization = get_any_organization_by_name(state.0.clone(), organization)
-        .await?
-        .ok_or_else(|| WebError::not_found("Project"))?;
-
-    if !organization.public {
-        match &maybe_user {
-            Some(user) => {
-                if !user_is_org_member(&state.0, user.id, organization.id).await? {
-                    return Err(WebError::not_found("Project"));
-                }
-            }
-            None => return Err(WebError::not_found("Project")),
-        }
-    }
-
-    let project = EProject::find()
-        .filter(CProject::Organization.eq(organization.id))
-        .filter(CProject::Name.eq(project))
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Project"))?;
+    let (_organization, project) =
+        load_readable_project(&state, &maybe_user, organization, project).await?;
 
     let evaluations = EEvaluation::find()
         .filter(CEvaluation::Project.eq(project.id))
@@ -233,28 +210,8 @@ pub async fn get_project_details(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectDetailsResponse>>> {
-    let organization: MOrganization =
-        get_any_organization_by_name(state.0.clone(), organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Project"))?;
-
-    if !organization.public {
-        match &maybe_user {
-            Some(user) => {
-                if !user_is_org_member(&state.0, user.id, organization.id).await? {
-                    return Err(WebError::not_found("Project"));
-                }
-            }
-            None => return Err(WebError::not_found("Project")),
-        }
-    }
-
-    let project: MProject = EProject::find()
-        .filter(CProject::Organization.eq(organization.id))
-        .filter(CProject::Name.eq(project))
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Project"))?;
+    let (organization, project) =
+        load_readable_project(&state, &maybe_user, organization, project).await?;
 
     // Get last 5 evaluations for this project
     let evaluations = EEvaluation::find()
@@ -307,28 +264,8 @@ pub async fn get_project_entry_points(
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<EntryPointsQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<EntryPointSummary>>>> {
-    let organization: MOrganization =
-        get_any_organization_by_name(state.0.clone(), organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Project"))?;
-
-    if !organization.public {
-        match &maybe_user {
-            Some(user) => {
-                if !user_is_org_member(&state.0, user.id, organization.id).await? {
-                    return Err(WebError::not_found("Project"));
-                }
-            }
-            None => return Err(WebError::not_found("Project")),
-        }
-    }
-
-    let project: MProject = EProject::find()
-        .filter(CProject::Organization.eq(organization.id))
-        .filter(CProject::Name.eq(project))
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Project"))?;
+    let (_organization, project) =
+        load_readable_project(&state, &maybe_user, organization, project).await?;
 
     // Use the requested evaluation ID, or fall back to the project's last evaluation.
     let eval_id = match params.evaluation_id.or(project.last_evaluation) {
@@ -362,76 +299,108 @@ pub async fn get_project_entry_points(
         }));
     }
 
-    let build_ids: Vec<Uuid> = entry_points.iter().map(|ep| ep.build).collect();
-    let builds = EBuild::find()
-        .filter(CBuild::Id.is_in(build_ids))
-        .all(&state.db)
-        .await?;
-    let build_map: HashMap<Uuid, MBuild> = builds.into_iter().map(|b| (b.id, b)).collect();
-
-    let drv_ids: Vec<Uuid> = build_map.values().map(|b| b.derivation).collect();
-    let derivations: HashMap<Uuid, MDerivation> = if drv_ids.is_empty() {
-        HashMap::new()
-    } else {
-        EDerivation::find()
-            .filter(CDerivation::Id.is_in(drv_ids.clone()))
-            .all(&state.db)
-            .await?
-            .into_iter()
-            .map(|d| (d.id, d))
-            .collect()
-    };
-
-    let completed_drv_ids: Vec<Uuid> = entry_points
-        .iter()
-        .filter_map(|ep| build_map.get(&ep.build))
-        .filter(|b| b.status == BuildStatus::Completed || b.status == BuildStatus::Substituted)
-        .map(|b| b.derivation)
-        .collect();
-
-    let has_artefacts_map: HashMap<Uuid, bool> = if completed_drv_ids.is_empty() {
-        HashMap::new()
-    } else {
-        let mut m: HashMap<Uuid, bool> = HashMap::new();
-        let outputs = EDerivationOutput::find()
-            .filter(CDerivationOutput::Derivation.is_in(completed_drv_ids))
-            .filter(CDerivationOutput::HasArtefacts.eq(true))
-            .all(&state.db)
-            .await?;
-        for o in outputs {
-            m.insert(o.derivation, true);
-        }
-        m
-    };
-
-    let mut summaries = Vec::new();
-    for ep in entry_points {
-        let build = match build_map.get(&ep.build) {
-            Some(b) => b,
-            None => continue,
-        };
-        let drv = match derivations.get(&build.derivation) {
-            Some(d) => d,
-            None => continue,
-        };
-        summaries.push(EntryPointSummary {
-            id: ep.id,
-            build_id: build.id,
-            derivation_path: drv.derivation_path.clone(),
-            eval: ep.eval.clone(),
-            build_status: build.status.clone(),
-            has_artefacts: *has_artefacts_map.get(&build.derivation).unwrap_or(&false),
-            architecture: drv.architecture.clone(),
-            evaluation_id: evaluation.id,
-            evaluation_status: evaluation.status.clone(),
-            created_at: ep.created_at,
-        });
-    }
+    let data = EntryPointRelatedData::load(&state, &entry_points).await?;
+    let summaries = data.build_summaries(&entry_points, &evaluation);
 
     Ok(Json(BaseResponse {
         error: false,
         message: summaries,
     }))
+}
+
+// ── Entry-point bulk data loader ─────────────────────────────────────────────
+
+/// All DB data needed to render a list of [`EntryPointSummary`] records.
+///
+/// Loaded in one pass via `load` to avoid per-entry-point round-trips.
+struct EntryPointRelatedData {
+    builds: HashMap<Uuid, MBuild>,
+    derivations: HashMap<Uuid, MDerivation>,
+    /// Derivation IDs whose outputs have `has_artefacts = true`.
+    has_artefacts: HashMap<Uuid, bool>,
+}
+
+impl EntryPointRelatedData {
+    async fn load(state: &Arc<ServerState>, entry_points: &[MEntryPoint]) -> WebResult<Self> {
+        let build_ids: Vec<Uuid> = entry_points.iter().map(|ep| ep.build).collect();
+        let builds: HashMap<Uuid, MBuild> = EBuild::find()
+            .filter(CBuild::Id.is_in(build_ids))
+            .all(&state.db)
+            .await?
+            .into_iter()
+            .map(|b| (b.id, b))
+            .collect();
+
+        let drv_ids: Vec<Uuid> = builds.values().map(|b| b.derivation).collect();
+        let derivations: HashMap<Uuid, MDerivation> = if drv_ids.is_empty() {
+            HashMap::new()
+        } else {
+            EDerivation::find()
+                .filter(CDerivation::Id.is_in(drv_ids.clone()))
+                .all(&state.db)
+                .await?
+                .into_iter()
+                .map(|d| (d.id, d))
+                .collect()
+        };
+
+        let completed_drv_ids: Vec<Uuid> = builds
+            .values()
+            .filter(|b| b.status == BuildStatus::Completed || b.status == BuildStatus::Substituted)
+            .map(|b| b.derivation)
+            .collect();
+
+        let has_artefacts: HashMap<Uuid, bool> = if completed_drv_ids.is_empty() {
+            HashMap::new()
+        } else {
+            let mut m: HashMap<Uuid, bool> = HashMap::new();
+            for o in EDerivationOutput::find()
+                .filter(CDerivationOutput::Derivation.is_in(completed_drv_ids))
+                .filter(CDerivationOutput::HasArtefacts.eq(true))
+                .all(&state.db)
+                .await?
+            {
+                m.insert(o.derivation, true);
+            }
+            m
+        };
+
+        Ok(Self {
+            builds,
+            derivations,
+            has_artefacts,
+        })
+    }
+
+    /// Assemble summary records for `entry_points` using pre-loaded data.
+    fn build_summaries(
+        &self,
+        entry_points: &[MEntryPoint],
+        evaluation: &MEvaluation,
+    ) -> Vec<EntryPointSummary> {
+        let mut summaries = Vec::new();
+        for ep in entry_points {
+            let Some(build) = self.builds.get(&ep.build) else {
+                continue;
+            };
+            let Some(drv) = self.derivations.get(&build.derivation) else {
+                continue;
+            };
+            summaries.push(EntryPointSummary {
+                id: ep.id,
+                build_id: build.id,
+                derivation_path: drv.derivation_path.clone(),
+                eval: ep.eval.clone(),
+                build_status: build.status.clone(),
+                has_artefacts: *self.has_artefacts.get(&build.derivation).unwrap_or(&false),
+                architecture: drv.architecture.clone(),
+                evaluation_id: evaluation.id,
+                evaluation_status: evaluation.status.clone(),
+                created_at: ep.created_at,
+            });
+        }
+        summaries
+    }
 }
 
 // ── Entry-point download (stable permalink) ──────────────────────────────────
@@ -447,6 +416,66 @@ pub struct EntryPointDownloadQuery {
     /// Pass via this parameter for static/permalink URLs; omit if you already have a
     /// session cookie or `Authorization: Bearer` header.
     pub token: Option<String>,
+}
+
+/// Ensure every derivation output path is realised in the local store, then
+/// scan `nix-support/hydra-build-products` across all outputs and stream the
+/// first output whose filename matches `filename`.
+///
+/// Returns `None` when no matching file is found.
+async fn serve_hydra_artifact(
+    state: &Arc<ServerState>,
+    build_outputs: Vec<MDerivationOutput>,
+    filename: &str,
+) -> WebResult<Option<Response>> {
+    // Best-effort realisation — log and continue on failure.
+    for output in &build_outputs {
+        if let Err(e) = state.web_nix_store.ensure_path(output.output.clone()).await {
+            tracing::warn!(
+                error = format!("{:#}", e),
+                path = %output.output,
+                "Failed to ensure output path is realised"
+            );
+        }
+    }
+
+    for output in build_outputs {
+        let products_path = format!("{}/nix-support/hydra-build-products", output.output);
+        let Ok(content) = fs::read_to_string(&products_path).await else {
+            continue;
+        };
+        for line in content.lines() {
+            let Some((_, file_path)) = parse_hydra_product_line(line) else {
+                continue;
+            };
+            let file_name = std::path::Path::new(&file_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            if file_name != filename {
+                continue;
+            }
+            let contents = fs::read(&file_path)
+                .await
+                .map_err(|_| WebError::InternalServerError("Failed to read file".to_string()))?;
+            return Ok(Some(
+                (
+                    StatusCode::OK,
+                    [
+                        (header::CONTENT_TYPE, content_type_for_filename(filename)),
+                        (
+                            header::CONTENT_DISPOSITION,
+                            &format!("attachment; filename=\"{}\"", filename),
+                        ),
+                    ],
+                    contents,
+                )
+                    .into_response(),
+            ));
+        }
+    }
+
+    Ok(None)
 }
 
 /// Downloads the newest build output for a specific entry point.
@@ -531,75 +560,8 @@ pub async fn get_entry_point_download(
         .all(&state.db)
         .await?;
 
-    for output in &build_outputs {
-        // Substituted builds may not have their output paths realised on the
-        // gradient-server's local store yet. Ensure the path exists before
-        // reading hydra-build-products.
-        if let Err(e) = state.web_nix_store.ensure_path(output.output.clone()).await {
-            tracing::warn!(
-                error = format!("{:#}", e),
-                path = %output.output,
-                "Failed to ensure output path is realised"
-            );
-        }
+    match serve_hydra_artifact(&state, build_outputs, &params.filename).await? {
+        Some(response) => Ok(response),
+        None => Err(WebError::not_found("File")),
     }
-
-    for output in build_outputs {
-        let hydra_products_path = format!("{}/nix-support/hydra-build-products", output.output);
-        if let Ok(content) = fs::read_to_string(&hydra_products_path).await {
-            for line in content.lines() {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 3 && parts[0] == "file" {
-                    let file_path = parts[2..].join(" ");
-                    let file_name = std::path::Path::new(&file_path)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("");
-                    if file_name == params.filename {
-                        match fs::read(&file_path).await {
-                            Ok(contents) => {
-                                let content_type = match std::path::Path::new(&params.filename)
-                                    .extension()
-                                    .and_then(|ext| ext.to_str())
-                                {
-                                    Some("tar") => "application/x-tar",
-                                    Some("gz") => "application/gzip",
-                                    Some("zst") => "application/zstd",
-                                    Some("txt") => "text/plain",
-                                    Some("json") => "application/json",
-                                    Some("zip") => "application/zip",
-                                    _ => "application/octet-stream",
-                                };
-                                return Ok((
-                                    StatusCode::OK,
-                                    [
-                                        (header::CONTENT_TYPE, content_type),
-                                        (
-                                            header::CONTENT_DISPOSITION,
-                                            &format!(
-                                                "attachment; filename=\"{}\"",
-                                                params.filename
-                                            ),
-                                        ),
-                                    ],
-                                    contents,
-                                )
-                                    .into_response());
-                            }
-                            Err(_) => {
-                                return Err(WebError::InternalServerError(
-                                    "Failed to read file".to_string(),
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Err(WebError::not_found("File"))
 }

@@ -31,6 +31,356 @@ use gradient_core::types::proto::DiscoveredDerivation;
 
 const BATCH_SIZE: usize = 1000;
 
+// ── Derivation batch preparation ──────────────────────────────────────────────
+
+/// New derivation rows and their outputs, ready for bulk DB insert.
+struct DerivationInsertBatch {
+    /// Mapping from drv_path → assigned UUID for all derivations (new + pre-existing).
+    drv_path_to_id: HashMap<String, Uuid>,
+    new_derivations: Vec<ADerivation>,
+    new_outputs: Vec<ADerivationOutput>,
+}
+
+impl DerivationInsertBatch {
+    /// Build insert rows for derivations not yet in `existing`.
+    fn prepare(
+        organization_id: Uuid,
+        derivations: &[DiscoveredDerivation],
+        existing: &[MDerivation],
+    ) -> Self {
+        let mut drv_path_to_id: HashMap<String, Uuid> = existing
+            .iter()
+            .map(|d| (d.derivation_path.clone(), d.id))
+            .collect();
+
+        let now = chrono::Utc::now().naive_utc();
+        let mut new_derivations: Vec<ADerivation> = Vec::new();
+        let mut new_outputs: Vec<ADerivationOutput> = Vec::new();
+
+        for d in derivations {
+            if drv_path_to_id.contains_key(&d.drv_path) {
+                continue;
+            }
+            let id = Uuid::new_v4();
+            drv_path_to_id.insert(d.drv_path.clone(), id);
+            new_derivations.push(ADerivation {
+                id: Set(id),
+                organization: Set(organization_id),
+                derivation_path: Set(d.drv_path.clone()),
+                architecture: Set(d.architecture.clone()),
+                created_at: Set(now),
+            });
+            for output in &d.outputs {
+                let (hash, package) = get_hash_from_path(output.path.clone())
+                    .unwrap_or_else(|_| ("unknown".to_owned(), output.name.clone()));
+                new_outputs.push(ADerivationOutput {
+                    id: Set(Uuid::new_v4()),
+                    derivation: Set(id),
+                    name: Set(output.name.clone()),
+                    output: Set(output.path.clone()),
+                    hash: Set(hash),
+                    package: Set(package),
+                    ca: Set(None),
+                    file_hash: Set(None),
+                    file_size: Set(None),
+                    nar_size: Set(None),
+                    is_cached: Set(false),
+                    has_artefacts: Set(false),
+                    cached_path: Set(None),
+                    created_at: Set(now),
+                });
+            }
+        }
+
+        Self {
+            drv_path_to_id,
+            new_derivations,
+            new_outputs,
+        }
+    }
+
+    /// Insert new derivations and outputs into the DB.
+    ///
+    /// Returns the `drv_path_to_id` map for downstream use.
+    async fn insert(
+        self,
+        state: &Arc<ServerState>,
+        evaluation: &MEvaluation,
+    ) -> Result<HashMap<String, Uuid>> {
+        if !self.new_derivations.is_empty() {
+            for chunk in self.new_derivations.chunks(BATCH_SIZE) {
+                if let Err(e) = EDerivation::insert_many(chunk.to_vec())
+                    .exec(&state.db)
+                    .await
+                {
+                    error!(error = %e, "failed to insert derivations");
+                    update_evaluation_status_with_error(
+                        Arc::clone(state),
+                        evaluation.clone(),
+                        EvaluationStatus::Failed,
+                        format!("failed to insert derivations: {}", e),
+                        Some("db-insert".to_string()),
+                    )
+                    .await;
+                    return Err(e.into());
+                }
+            }
+        }
+        if !self.new_outputs.is_empty() {
+            for chunk in self.new_outputs.chunks(BATCH_SIZE) {
+                if let Err(e) = EDerivationOutput::insert_many(chunk.to_vec())
+                    .exec(&state.db)
+                    .await
+                {
+                    error!(error = %e, "failed to insert derivation outputs");
+                }
+            }
+        }
+        Ok(self.drv_path_to_id)
+    }
+}
+
+// ── EvalResultProcessor ───────────────────────────────────────────────────────
+
+/// Processes a single batch of derivations discovered during evaluation.
+///
+/// Holds the context shared by every step: server state, evaluation identity,
+/// and the owning organisation. Created once in [`handle_eval_result`] and
+/// passed through each pipeline stage.
+struct EvalResultProcessor<'a> {
+    state: &'a Arc<ServerState>,
+    evaluation_id: Uuid,
+    organization_id: Uuid,
+    evaluation: MEvaluation,
+}
+
+impl<'a> EvalResultProcessor<'a> {
+    fn new(
+        state: &'a Arc<ServerState>,
+        evaluation_id: Uuid,
+        organization_id: Uuid,
+        evaluation: MEvaluation,
+    ) -> Self {
+        Self {
+            state,
+            evaluation_id,
+            organization_id,
+            evaluation,
+        }
+    }
+
+    /// Load derivations that already exist in the DB so we don't re-insert them.
+    async fn load_existing_derivations(
+        &self,
+        derivations: &[DiscoveredDerivation],
+    ) -> Result<Vec<MDerivation>> {
+        let paths: Vec<String> = derivations.iter().map(|d| d.drv_path.clone()).collect();
+        if paths.is_empty() {
+            return Ok(vec![]);
+        }
+        EDerivation::find()
+            .filter(CDerivation::Organization.eq(self.organization_id))
+            .filter(CDerivation::DerivationPath.is_in(paths))
+            .all(&self.state.db)
+            .await
+            .context("query existing derivations")
+    }
+
+    /// Insert `ABuild` rows for each newly-discovered derivation.
+    async fn insert_build_rows(
+        &self,
+        derivations: &[DiscoveredDerivation],
+        drv_path_to_id: &HashMap<String, Uuid>,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().naive_utc();
+        let mut builds: Vec<ABuild> = Vec::new();
+
+        for d in derivations {
+            let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
+                continue;
+            };
+            let status = if d.substituted {
+                BuildStatus::Substituted
+            } else {
+                BuildStatus::Created
+            };
+            builds.push(ABuild {
+                id: Set(Uuid::new_v4()),
+                evaluation: Set(self.evaluation_id),
+                derivation: Set(drv_id),
+                status: Set(status),
+                server: Set(None),
+                log_id: Set(None),
+                build_time_ms: Set(None),
+                created_at: Set(now),
+                updated_at: Set(now),
+            });
+        }
+
+        if !builds.is_empty() {
+            for chunk in builds.chunks(BATCH_SIZE) {
+                if let Err(e) = EBuild::insert_many(chunk.to_vec())
+                    .exec(&self.state.db)
+                    .await
+                {
+                    error!(error = %e, "failed to insert builds");
+                    update_evaluation_status_with_error(
+                        Arc::clone(self.state),
+                        self.evaluation.clone(),
+                        EvaluationStatus::Failed,
+                        format!("failed to insert builds: {}", e),
+                        Some("db-insert".to_string()),
+                    )
+                    .await;
+                    return Err(e.into());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Record per-derivation system-feature requirements in the DB.
+    async fn add_system_features(
+        &self,
+        derivations: &[DiscoveredDerivation],
+        drv_path_to_id: &HashMap<String, Uuid>,
+    ) {
+        for d in derivations {
+            if d.required_features.is_empty() {
+                continue;
+            }
+            let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
+                continue;
+            };
+            if let Err(e) = gradient_core::db::add_features(
+                Arc::clone(self.state),
+                d.required_features.clone(),
+                Some(drv_id),
+            )
+            .await
+            {
+                error!(error = %e, %drv_id, "failed to add system features");
+            }
+        }
+    }
+
+    /// Persist Nix evaluation warnings and errors as evaluation messages.
+    async fn record_eval_messages(&self, warnings: &[String], errors: &[String]) {
+        for warning in warnings {
+            record_evaluation_message(
+                self.state,
+                self.evaluation_id,
+                MessageLevel::Warning,
+                warning.clone(),
+                Some("nix-eval".to_string()),
+            )
+            .await;
+        }
+        for error in errors {
+            record_evaluation_message(
+                self.state,
+                self.evaluation_id,
+                MessageLevel::Error,
+                error.clone(),
+                Some("nix-eval".to_string()),
+            )
+            .await;
+        }
+    }
+
+    /// Insert project entry points, report CI status, and schedule GC.
+    ///
+    /// Only called when the evaluation belongs to a project (not a standalone
+    /// one-shot eval).
+    async fn process_entry_points(
+        &self,
+        project_id: Uuid,
+        derivations: &[DiscoveredDerivation],
+        drv_path_to_id: &HashMap<String, Uuid>,
+    ) {
+        let now = chrono::Utc::now().naive_utc();
+
+        // Build a lookup: derivation_uuid → build_uuid for this evaluation.
+        let eval_builds = EBuild::find()
+            .filter(CBuild::Evaluation.eq(self.evaluation_id))
+            .all(&self.state.db)
+            .await
+            .unwrap_or_default();
+        let drv_id_to_build: HashMap<Uuid, Uuid> =
+            eval_builds.iter().map(|b| (b.derivation, b.id)).collect();
+
+        let mut entry_points: Vec<(Uuid, String)> = Vec::new();
+        let mut active_entry_points: Vec<AEntryPoint> = Vec::new();
+
+        for d in derivations {
+            // Only root derivations (with a non-empty attr) are entry points.
+            if d.attr.is_empty() {
+                continue;
+            }
+            if let Some(&drv_id) = drv_path_to_id.get(&d.drv_path)
+                && let Some(&build_id) = drv_id_to_build.get(&drv_id)
+            {
+                entry_points.push((build_id, d.attr.clone()));
+                active_entry_points.push(AEntryPoint {
+                    id: Set(Uuid::new_v4()),
+                    project: Set(project_id),
+                    evaluation: Set(self.evaluation_id),
+                    build: Set(build_id),
+                    eval: Set(d.attr.clone()),
+                    created_at: Set(now),
+                });
+            }
+        }
+
+        if !active_entry_points.is_empty() {
+            for chunk in active_entry_points.chunks(BATCH_SIZE) {
+                if let Err(e) = EEntryPoint::insert_many(chunk.to_vec())
+                    .exec(&self.state.db)
+                    .await
+                {
+                    error!(error = %e, "failed to insert entry points");
+                }
+            }
+        }
+
+        // CI reporting — report per-entry-point status as Pending.
+        if !entry_points.is_empty() {
+            let state_clone = Arc::clone(self.state);
+            let repo = self.evaluation.repository.clone();
+            let commit_id = self.evaluation.commit;
+            let evaluation_id = self.evaluation_id;
+            tokio::spawn(async move {
+                report_ci_for_entry_points(
+                    state_clone,
+                    project_id,
+                    commit_id,
+                    &repo,
+                    evaluation_id,
+                    &entry_points,
+                    CiStatus::Pending,
+                )
+                .await;
+            });
+        }
+
+        // GC: remove old evaluations beyond keep_evaluations for this project.
+        if let Ok(Some(project)) = EProject::find_by_id(project_id).one(&self.state.db).await {
+            let gc_state = Arc::clone(self.state);
+            let gc_keep = project.keep_evaluations as usize;
+            tokio::spawn(async move {
+                if let Err(e) =
+                    gradient_core::db::gc_project_evaluations(gc_state, project_id, gc_keep).await
+                {
+                    error!(error = %e, %project_id, "GC: per-project evaluation GC failed");
+                }
+            });
+        }
+    }
+}
+
+// ── Public handlers ───────────────────────────────────────────────────────────
+
 pub async fn handle_eval_result(
     state: &Arc<ServerState>,
     job: &PendingEvalJob,
@@ -62,190 +412,29 @@ pub async fn handle_eval_result(
         "processing eval result from worker",
     );
 
-    // Load existing derivations to avoid re-inserting.
-    let existing_paths: Vec<String> = derivations.iter().map(|d| d.drv_path.clone()).collect();
-    let existing: Vec<MDerivation> = if !existing_paths.is_empty() {
-        EDerivation::find()
-            .filter(CDerivation::Organization.eq(organization_id))
-            .filter(CDerivation::DerivationPath.is_in(existing_paths))
-            .all(&state.db)
-            .await
-            .context("query existing derivations")?
-    } else {
-        vec![]
-    };
+    let proc = EvalResultProcessor::new(state, evaluation_id, organization_id, evaluation);
 
-    let mut drv_path_to_id: HashMap<String, Uuid> = existing
-        .iter()
-        .map(|d| (d.derivation_path.clone(), d.id))
-        .collect();
-
-    // Insert new derivation rows.
-    let now = chrono::Utc::now().naive_utc();
-    let mut new_derivations: Vec<ADerivation> = Vec::new();
-    let mut new_outputs: Vec<ADerivationOutput> = Vec::new();
-
-    for d in &derivations {
-        if drv_path_to_id.contains_key(&d.drv_path) {
-            continue;
-        }
-        let id = Uuid::new_v4();
-        drv_path_to_id.insert(d.drv_path.clone(), id);
-        new_derivations.push(ADerivation {
-            id: Set(id),
-            organization: Set(organization_id),
-            derivation_path: Set(d.drv_path.clone()),
-            architecture: Set(d.architecture.clone()),
-            created_at: Set(now),
-        });
-        for output in &d.outputs {
-            let (hash, package) = get_hash_from_path(output.path.clone())
-                .unwrap_or_else(|_| ("unknown".to_owned(), output.name.clone()));
-            new_outputs.push(ADerivationOutput {
-                id: Set(Uuid::new_v4()),
-                derivation: Set(id),
-                name: Set(output.name.clone()),
-                output: Set(output.path.clone()),
-                hash: Set(hash),
-                package: Set(package),
-                ca: Set(None),
-                file_hash: Set(None),
-                file_size: Set(None),
-                nar_size: Set(None),
-                is_cached: Set(false),
-                has_artefacts: Set(false),
-                cached_path: Set(None),
-                created_at: Set(now),
-            });
-        }
-    }
-
-    if !new_derivations.is_empty() {
-        for chunk in new_derivations.chunks(BATCH_SIZE) {
-            if let Err(e) = EDerivation::insert_many(chunk.to_vec())
-                .exec(&state.db)
-                .await
-            {
-                error!(error = %e, "failed to insert derivations");
-                update_evaluation_status_with_error(
-                    Arc::clone(state),
-                    evaluation.clone(),
-                    EvaluationStatus::Failed,
-                    format!("failed to insert derivations: {}", e),
-                    Some("db-insert".to_string()),
-                )
-                .await;
-                return Err(e.into());
-            }
-        }
-    }
-    if !new_outputs.is_empty() {
-        for chunk in new_outputs.chunks(BATCH_SIZE) {
-            if let Err(e) = EDerivationOutput::insert_many(chunk.to_vec())
-                .exec(&state.db)
-                .await
-            {
-                error!(error = %e, "failed to insert derivation outputs");
-            }
-        }
-    }
+    let existing = proc.load_existing_derivations(&derivations).await?;
+    let batch = DerivationInsertBatch::prepare(organization_id, &derivations, &existing);
+    let drv_path_to_id = batch.insert(state, &proc.evaluation).await?;
 
     // Dependency edges are NOT created here. The BFS walks roots→leaves, so
-    // batch N may contain derivation A whose dep B lands in batch N+1. If we
-    // tried to insert the A→B edge now, B's derivation row wouldn't exist yet
-    // → FK violation drops the edge (or the whole chunk) silently. Instead,
+    // batch N may contain derivation A whose dep B lands in batch N+1. Instead,
     // deps are accumulated in `Scheduler::deferred_deps` and flushed in one
     // shot by `flush_deferred_deps` inside `handle_eval_job_completed`, when
     // every derivation row is guaranteed to be in the DB.
 
-    // Build rows.
-    let mut builds: Vec<ABuild> = Vec::new();
-    for d in &derivations {
-        let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
-            continue;
-        };
-        let status = if d.substituted {
-            BuildStatus::Substituted
-        } else {
-            BuildStatus::Created
-        };
-        builds.push(ABuild {
-            id: Set(Uuid::new_v4()),
-            evaluation: Set(evaluation_id),
-            derivation: Set(drv_id),
-            status: Set(status),
-            server: Set(None),
-            log_id: Set(None),
-            build_time_ms: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-        });
-    }
-    if !builds.is_empty() {
-        for chunk in builds.chunks(BATCH_SIZE) {
-            if let Err(e) = EBuild::insert_many(chunk.to_vec()).exec(&state.db).await {
-                error!(error = %e, "failed to insert builds");
-                update_evaluation_status_with_error(
-                    Arc::clone(state),
-                    evaluation.clone(),
-                    EvaluationStatus::Failed,
-                    format!("failed to insert builds: {}", e),
-                    Some("db-insert".to_string()),
-                )
-                .await;
-                return Err(e.into());
-            }
-        }
-    }
-
-    // System features.
-    for d in &derivations {
-        if d.required_features.is_empty() {
-            continue;
-        }
-        let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
-            continue;
-        };
-        if let Err(e) = gradient_core::db::add_features(
-            Arc::clone(state),
-            d.required_features.clone(),
-            Some(drv_id),
-        )
-        .await
-        {
-            error!(error = %e, %drv_id, "failed to add system features");
-        }
-    }
-
-    // Warnings.
-    for warning in &warnings {
-        record_evaluation_message(
-            state,
-            evaluation_id,
-            MessageLevel::Warning,
-            warning.clone(),
-            Some("nix-eval".to_string()),
-        )
+    proc.insert_build_rows(&derivations, &drv_path_to_id)
+        .await?;
+    proc.add_system_features(&derivations, &drv_path_to_id)
         .await;
-    }
-
-    // Hard errors (per-attr resolution failures).
-    for error in &errors {
-        record_evaluation_message(
-            state,
-            evaluation_id,
-            MessageLevel::Error,
-            error.clone(),
-            Some("nix-eval".to_string()),
-        )
-        .await;
-    }
+    proc.record_eval_messages(&warnings, &errors).await;
 
     // If all attrs failed and nothing was resolved, mark evaluation as Failed.
     if derivations.is_empty() && !errors.is_empty() {
         update_evaluation_status_with_error(
             Arc::clone(state),
-            evaluation,
+            proc.evaluation,
             EvaluationStatus::Failed,
             format!("{} attr(s) failed to resolve", errors.len()),
             Some("nix-eval".to_string()),
@@ -254,103 +443,16 @@ pub async fn handle_eval_result(
         return Ok(());
     }
 
-    // Entry points — map each discovered derivation to its wildcard/attr.
     if let Some(project_id) = job.project_id {
-        let now_ep = chrono::Utc::now().naive_utc();
-
-        // Build a lookup: drv_path → build_id for this evaluation.
-        let eval_builds = EBuild::find()
-            .filter(CBuild::Evaluation.eq(evaluation_id))
-            .all(&state.db)
-            .await
-            .unwrap_or_default();
-
-        let drv_id_to_build: HashMap<Uuid, Uuid> =
-            eval_builds.iter().map(|b| (b.derivation, b.id)).collect();
-
-        let mut entry_points: Vec<(Uuid, String)> = Vec::new();
-        let mut active_entry_points: Vec<AEntryPoint> = Vec::new();
-
-        for d in &derivations {
-            // Only root derivations (with a non-empty attr) are entry points.
-            // Transitive dependencies have attr = "" and should not be tracked
-            // as entry points.
-            if d.attr.is_empty() {
-                continue;
-            }
-            if let Some(&drv_id) = drv_path_to_id.get(&d.drv_path)
-                && let Some(&build_id) = drv_id_to_build.get(&drv_id)
-            {
-                entry_points.push((build_id, d.attr.clone()));
-                active_entry_points.push(AEntryPoint {
-                    id: Set(Uuid::new_v4()),
-                    project: Set(project_id),
-                    evaluation: Set(evaluation_id),
-                    build: Set(build_id),
-                    eval: Set(d.attr.clone()),
-                    created_at: Set(now_ep),
-                });
-            }
-        }
-
-        if !active_entry_points.is_empty() {
-            for chunk in active_entry_points.chunks(BATCH_SIZE) {
-                if let Err(e) = EEntryPoint::insert_many(chunk.to_vec())
-                    .exec(&state.db)
-                    .await
-                {
-                    error!(error = %e, "failed to insert entry points");
-                }
-            }
-        }
-
-        // CI reporting — report per-entry-point status as Pending.
-        if !entry_points.is_empty() {
-            let state_clone = Arc::clone(state);
-            let repo = evaluation.repository.clone();
-            let commit_id = evaluation.commit;
-            tokio::spawn(async move {
-                report_ci_for_entry_points(
-                    state_clone,
-                    project_id,
-                    commit_id,
-                    &repo,
-                    evaluation_id,
-                    &entry_points,
-                    CiStatus::Pending,
-                )
-                .await;
-            });
-        }
-
-        // GC: remove old evaluations beyond keep_evaluations for this project.
-        if let Ok(Some(project)) = EProject::find_by_id(project_id).one(&state.db).await {
-            let gc_state = Arc::clone(state);
-            let gc_keep = project.keep_evaluations as usize;
-            tokio::spawn(async move {
-                if let Err(e) =
-                    gradient_core::db::gc_project_evaluations(gc_state, project_id, gc_keep).await
-                {
-                    error!(error = %e, %project_id, "GC: per-project evaluation GC failed");
-                }
-            });
-        }
+        proc.process_entry_points(project_id, &derivations, &drv_path_to_id)
+            .await;
     }
 
-    // No status transitions while batches are still streaming in: the
-    // evaluation stays in `EvaluatingDerivation` and builds stay in `Created`
-    // (or `Substituted`). Transitioning here would prematurely flip the
-    // evaluation to `Building` and mark builds `Queued` while the worker is
-    // still walking the closure — making the dispatcher race against
-    // half-discovered dependency edges. The Created → Queued and
-    // EvaluatingDerivation → Building transitions happen exactly once, in
-    // `handle_eval_job_completed`, after the worker has sent every batch.
     debug!(
         %evaluation_id,
         new_derivations = derivations.len(),
         "eval batch persisted; awaiting more batches"
     );
-    let _ = evaluation; // keep `evaluation` available for the early-fail path above
     Ok(())
 }
 

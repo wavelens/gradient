@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::load_org_member;
 use crate::authorization::MaybeUser;
-use crate::endpoints::user_is_org_member;
+use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use core::db::{get_any_organization_by_name, get_organization_by_name};
 use core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -37,26 +37,40 @@ pub struct RemoveUserRequest {
     pub user: String,
 }
 
+// ── Access helpers ────────────────────────────────────────────────────────────
+
+async fn find_user_by_username(state: &Arc<ServerState>, username: &str) -> WebResult<MUser> {
+    EUser::find()
+        .filter(CUser::Username.eq(username))
+        .one(&state.db)
+        .await?
+        .ok_or_else(|| WebError::not_found("User"))
+}
+
+async fn find_org_membership(
+    state: &Arc<ServerState>,
+    org_id: Uuid,
+    user_id: Uuid,
+) -> WebResult<Option<MOrganizationUser>> {
+    Ok(EOrganizationUser::find()
+        .filter(
+            Condition::all()
+                .add(COrganizationUser::Organization.eq(org_id))
+                .add(COrganizationUser::User.eq(user_id)),
+        )
+        .one(&state.db)
+        .await?)
+}
+
+// ── Handlers ──────────────────────────────────────────────────────────────────
+
 pub async fn get_organization_users(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<StringListItem>>>> {
-    let organization: MOrganization =
-        get_any_organization_by_name(state.0.clone(), organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if !organization.public {
-        match &maybe_user {
-            Some(user) => {
-                if !user_is_org_member(&state.0, user.id, organization.id).await? {
-                    return Err(WebError::not_found("Organization"));
-                }
-            }
-            None => return Err(WebError::not_found("Organization")),
-        }
-    }
+    let organization =
+        get_org_readable(&state.0, organization, &maybe_user, "Organization").await?;
 
     let organization_users = EOrganizationUser::find()
         .join(JoinType::InnerJoin, ROrganizationUser::User.def())
@@ -74,7 +88,7 @@ pub async fn get_organization_users(
         .map(|r| (r.id, r.name))
         .collect();
 
-    let organization_users: Vec<StringListItem> = organization_users
+    let items: Vec<StringListItem> = organization_users
         .iter()
         .map(|(ou, user)| StringListItem {
             id: user
@@ -88,12 +102,10 @@ pub async fn get_organization_users(
         })
         .collect();
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
-        message: organization_users,
-    };
-
-    Ok(Json(res))
+        message: items,
+    }))
 }
 
 pub async fn post_organization_users(
@@ -102,27 +114,13 @@ pub async fn post_organization_users(
     Path(organization): Path<String>,
     Json(body): Json<AddUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
+    let organization = load_org_member(&state, user.id, organization).await?;
+    let target_user = find_user_by_username(&state, &body.user).await?;
 
-    let target_user = EUser::find()
-        .filter(CUser::Username.eq(body.user.clone()))
-        .one(&state.db)
+    if find_org_membership(&state, organization.id, target_user.id)
         .await?
-        .ok_or_else(|| WebError::not_found("User"))?;
-
-    let organization_user = EOrganizationUser::find()
-        .filter(
-            Condition::all()
-                .add(COrganizationUser::Organization.eq(organization.id))
-                .add(COrganizationUser::User.eq(target_user.id)),
-        )
-        .one(&state.db)
-        .await?;
-
-    if organization_user.is_some() {
+        .is_some()
+    {
         return Err(WebError::already_exists("User already in Organization"));
     }
 
@@ -138,21 +136,19 @@ pub async fn post_organization_users(
         .await?
         .ok_or_else(|| WebError::not_found("Role"))?;
 
-    let organization_user = AOrganizationUser {
+    AOrganizationUser {
         id: Set(Uuid::new_v4()),
         organization: Set(organization.id),
         user: Set(target_user.id),
         role: Set(role.id),
-    };
+    }
+    .insert(&state.db)
+    .await?;
 
-    organization_user.insert(&state.db).await?;
-
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: "User invited".to_string(),
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn patch_organization_users(
@@ -161,24 +157,10 @@ pub async fn patch_organization_users(
     Path(organization): Path<String>,
     Json(body): Json<AddUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
+    let organization = load_org_member(&state, user.id, organization).await?;
+    let target_user = find_user_by_username(&state, &body.user).await?;
 
-    let target_user = EUser::find()
-        .filter(CUser::Username.eq(body.user.clone()))
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("User"))?;
-
-    let organization_user = EOrganizationUser::find()
-        .filter(
-            Condition::all()
-                .add(COrganizationUser::Organization.eq(organization.id))
-                .add(COrganizationUser::User.eq(target_user.id)),
-        )
-        .one(&state.db)
+    let membership = find_org_membership(&state, organization.id, target_user.id)
         .await?
         .ok_or_else(|| WebError::BadRequest("User not in Organization".to_string()))?;
 
@@ -188,16 +170,14 @@ pub async fn patch_organization_users(
         .await?
         .ok_or_else(|| WebError::not_found("Role"))?;
 
-    let mut aorganization_user: AOrganizationUser = organization_user.into();
-    aorganization_user.role = Set(role.id);
-    aorganization_user.update(&state.db).await?;
+    let mut active: AOrganizationUser = membership.into();
+    active.role = Set(role.id);
+    active.update(&state.db).await?;
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: "User role updated".to_string(),
-    };
-
-    Ok(Json(res))
+    }))
 }
 
 pub async fn delete_organization_users(
@@ -206,34 +186,18 @@ pub async fn delete_organization_users(
     Path(organization): Path<String>,
     Json(body): Json<RemoveUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
+    let organization = load_org_member(&state, user.id, organization).await?;
+    let target_user = find_user_by_username(&state, &body.user).await?;
 
-    let target_user = EUser::find()
-        .filter(CUser::Username.eq(body.user.clone()))
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("User"))?;
-
-    let organization_user = EOrganizationUser::find()
-        .filter(
-            Condition::all()
-                .add(COrganizationUser::Organization.eq(organization.id))
-                .add(COrganizationUser::User.eq(target_user.id)),
-        )
-        .one(&state.db)
+    let membership = find_org_membership(&state, organization.id, target_user.id)
         .await?
         .ok_or_else(|| WebError::BadRequest("User not in Organization".to_string()))?;
 
-    let aorganization_user: AOrganizationUser = organization_user.into();
-    aorganization_user.delete(&state.db).await?;
+    let active: AOrganizationUser = membership.into();
+    active.delete(&state.db).await?;
 
-    let res = BaseResponse {
+    Ok(Json(BaseResponse {
         error: false,
         message: "User kicked".to_string(),
-    };
-
-    Ok(Json(res))
+    }))
 }

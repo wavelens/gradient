@@ -5,11 +5,10 @@
  */
 
 use crate::authorization::MaybeUser;
-use crate::endpoints::user_is_org_member;
+use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
-use core::db::get_any_organization_by_name;
 use core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
@@ -34,25 +33,60 @@ pub struct ProjectMetricsResponse {
     pub points: Vec<ProjectMetricPoint>,
 }
 
+// ── Shared metric helpers ─────────────────────────────────────────────────────
+
+/// BFS over `derivation_dependency` starting from `seed_drv_ids`.
+///
+/// Returns all reachable derivation UUIDs (including the seeds themselves).
+async fn derivation_closure_reachable(
+    db: &sea_orm::DatabaseConnection,
+    seed_drv_ids: Vec<Uuid>,
+) -> WebResult<HashSet<Uuid>> {
+    let mut visited: HashSet<Uuid> = seed_drv_ids.iter().cloned().collect();
+    let mut frontier = seed_drv_ids;
+
+    while !frontier.is_empty() {
+        let edges = EDerivationDependency::find()
+            .filter(CDerivationDependency::Derivation.is_in(frontier.clone()))
+            .all(db)
+            .await?;
+        frontier.clear();
+        for edge in edges {
+            if visited.insert(edge.dependency) {
+                frontier.push(edge.dependency);
+            }
+        }
+    }
+
+    Ok(visited)
+}
+
+/// Sum `file_size` of derivation outputs for `drv_ids`.
+///
+/// Returns `Some(total)` when the total is > 0, `None` otherwise.
+async fn sum_output_sizes(
+    db: &sea_orm::DatabaseConnection,
+    drv_ids: Vec<Uuid>,
+) -> WebResult<Option<i64>> {
+    if drv_ids.is_empty() {
+        return Ok(None);
+    }
+    let outputs = EDerivationOutput::find()
+        .filter(CDerivationOutput::Derivation.is_in(drv_ids))
+        .all(db)
+        .await?;
+    let total: i64 = outputs.iter().filter_map(|o| o.file_size).sum();
+    Ok(if total > 0 { Some(total) } else { None })
+}
+
+// ── Endpoints ─────────────────────────────────────────────────────────────────
+
 pub async fn get_project_metrics(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectMetricsResponse>>> {
-    let organization = get_any_organization_by_name(state.0.clone(), organization)
-        .await?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if !organization.public {
-        match &maybe_user {
-            Some(user) => {
-                if !user_is_org_member(&state.0, user.id, organization.id).await? {
-                    return Err(WebError::not_found("Project"));
-                }
-            }
-            None => return Err(WebError::not_found("Project")),
-        }
-    }
+    let organization = get_org_readable(&state.0, organization, &maybe_user, "Project").await?;
 
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
@@ -74,17 +108,14 @@ pub async fn get_project_metrics(
     for evaluation in evaluations {
         let eval_time_ms = (evaluation.updated_at - evaluation.created_at).num_milliseconds();
 
-        // Sum build durations for all completed builds
         let builds = EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation.id))
             .all(&state.db)
             .await?;
-
-        // Only sum actual build times; substituted builds have build_time_ms = None
-        // and should not contribute (they had no build cost).
+        // Only sum actual build times; substituted builds contribute nothing.
         let build_time_total_ms: i64 = builds.iter().filter_map(|b| b.build_time_ms).sum();
 
-        // Entry points for this evaluation
+        // Resolve entry-point builds for this evaluation.
         let ep_build_ids: Vec<Uuid> = EEntryPoint::find()
             .filter(CEntryPoint::Evaluation.eq(evaluation.id))
             .all(&state.db)
@@ -93,12 +124,11 @@ pub async fn get_project_metrics(
             .map(|ep| ep.build)
             .collect();
 
-        // Resolve entry-point builds to their derivations.
         let ep_drv_ids: Vec<Uuid> = if ep_build_ids.is_empty() {
             vec![]
         } else {
             EBuild::find()
-                .filter(CBuild::Id.is_in(ep_build_ids.clone()))
+                .filter(CBuild::Id.is_in(ep_build_ids))
                 .all(&state.db)
                 .await?
                 .into_iter()
@@ -107,50 +137,11 @@ pub async fn get_project_metrics(
         };
 
         let entry_point_count = ep_drv_ids.len() as i64;
+        let closure = derivation_closure_reachable(&state.db, ep_drv_ids.clone()).await?;
+        let dependencies_count = (closure.len() as i64) - entry_point_count;
 
-        // BFS over derivation_dependency — graph is authoritative across evals.
-        let mut all_reachable: HashSet<Uuid> = ep_drv_ids.iter().cloned().collect();
-        let mut frontier: Vec<Uuid> = ep_drv_ids.clone();
-        while !frontier.is_empty() {
-            let edges = EDerivationDependency::find()
-                .filter(CDerivationDependency::Derivation.is_in(frontier.clone()))
-                .all(&state.db)
-                .await?;
-            frontier.clear();
-            for edge in edges {
-                if all_reachable.insert(edge.dependency) {
-                    frontier.push(edge.dependency);
-                }
-            }
-        }
-        let dependencies_count = (all_reachable.len() as i64) - entry_point_count;
-
-        // Output size: file_size of entry-point derivation outputs only
-        let output_size_bytes = if ep_drv_ids.is_empty() {
-            None
-        } else {
-            let outputs = EDerivationOutput::find()
-                .filter(CDerivationOutput::Derivation.is_in(ep_drv_ids))
-                .all(&state.db)
-                .await?;
-            let total: i64 = outputs.iter().filter_map(|o| o.file_size).sum();
-            if total > 0 { Some(total) } else { None }
-        };
-
-        // Closure size: file_size of outputs of all reachable derivations
-        let closure_size_bytes = if all_reachable.is_empty() {
-            None
-        } else {
-            let outputs = EDerivationOutput::find()
-                .filter(
-                    CDerivationOutput::Derivation
-                        .is_in(all_reachable.into_iter().collect::<Vec<_>>()),
-                )
-                .all(&state.db)
-                .await?;
-            let total: i64 = outputs.iter().filter_map(|o| o.file_size).sum();
-            if total > 0 { Some(total) } else { None }
-        };
+        let output_size_bytes = sum_output_sizes(&state.db, ep_drv_ids).await?;
+        let closure_size_bytes = sum_output_sizes(&state.db, closure.into_iter().collect()).await?;
 
         points.push(ProjectMetricPoint {
             evaluation_id: evaluation.id,
@@ -208,20 +199,7 @@ pub async fn get_entry_point_metrics(
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<EntryPointMetricsQuery>,
 ) -> WebResult<Json<BaseResponse<EntryPointMetricsResponse>>> {
-    let organization = get_any_organization_by_name(state.0.clone(), organization)
-        .await?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if !organization.public {
-        match &maybe_user {
-            Some(user) => {
-                if !user_is_org_member(&state.0, user.id, organization.id).await? {
-                    return Err(WebError::not_found("Project"));
-                }
-            }
-            None => return Err(WebError::not_found("Project")),
-        }
-    }
+    let organization = get_org_readable(&state.0, organization, &maybe_user, "Project").await?;
 
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
@@ -252,51 +230,15 @@ pub async fn get_entry_point_metrics(
             continue;
         };
 
-        // Output size: only this derivation's outputs
-        let outputs = EDerivationOutput::find()
-            .filter(CDerivationOutput::Derivation.eq(build.derivation))
-            .all(&state.db)
-            .await?;
-        let output_total: i64 = outputs.iter().filter_map(|o| o.file_size).sum();
-        let output_size_bytes = if output_total > 0 {
-            Some(output_total)
-        } else {
-            None
-        };
-
         // Substituted builds have build_time_ms = None; leave as null rather than
         // falling back to (updated_at - created_at) which gives ~0 ms.
         let build_time_ms = build.build_time_ms;
 
-        // BFS over derivation_dependency.
-        let mut visited: HashSet<Uuid> = HashSet::new();
-        let mut frontier = vec![build.derivation];
-        visited.insert(build.derivation);
-        while !frontier.is_empty() {
-            let edges = EDerivationDependency::find()
-                .filter(CDerivationDependency::Derivation.is_in(frontier.clone()))
-                .all(&state.db)
-                .await?;
-            frontier.clear();
-            for edge in edges {
-                if visited.insert(edge.dependency) {
-                    frontier.push(edge.dependency);
-                }
-            }
-        }
+        let closure = derivation_closure_reachable(&state.db, vec![build.derivation]).await?;
+        let dependencies_count = (closure.len() as i64).saturating_sub(1);
 
-        let dependencies_count = (visited.len() as i64).saturating_sub(1);
-
-        let closure_outputs = EDerivationOutput::find()
-            .filter(CDerivationOutput::Derivation.is_in(visited.into_iter().collect::<Vec<_>>()))
-            .all(&state.db)
-            .await?;
-        let closure_total: i64 = closure_outputs.iter().filter_map(|o| o.file_size).sum();
-        let closure_size_bytes = if closure_total > 0 {
-            Some(closure_total)
-        } else {
-            None
-        };
+        let output_size_bytes = sum_output_sizes(&state.db, vec![build.derivation]).await?;
+        let closure_size_bytes = sum_output_sizes(&state.db, closure.into_iter().collect()).await?;
 
         points.push(EntryPointMetricPoint {
             evaluation_id: evaluation.id,

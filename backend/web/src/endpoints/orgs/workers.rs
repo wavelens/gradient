@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use super::load_org_member;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use base64::Engine as _;
 use chrono::{NaiveDateTime, Utc};
-use core::db::get_organization_by_name;
-use core::types::{BaseResponse, MUser, ServerState};
 use core::types::proto::GradientCapabilities;
+use core::types::{BaseResponse, MUser, ServerState};
 use entity::worker_registration::{
     self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
 };
@@ -82,10 +82,7 @@ pub async fn post_org_worker(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<RegisterWorkerResponse>>> {
-    let org = get_organization_by_name(Arc::clone(&state), user.id, organization)
-        .await
-        .map_err(|e| WebError::InternalServerError(e.to_string()))?
-        .ok_or_else(|| WebError::not_found("organization"))?;
+    let org = load_org_member(&state, user.id, organization).await?;
 
     let worker_uuid = Uuid::parse_str(&body.worker_id)
         .ok()
@@ -147,10 +144,7 @@ pub async fn get_org_workers(
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<Vec<OrgWorkerEntry>>>> {
-    let org = get_organization_by_name(Arc::clone(&state), user.id, organization)
-        .await
-        .map_err(|e| WebError::InternalServerError(e.to_string()))?
-        .ok_or_else(|| WebError::not_found("organization"))?;
+    let org = load_org_member(&state, user.id, organization).await?;
 
     let registrations = EWorkerRegistration::find()
         .filter(worker_registration::Column::PeerId.eq(org.id))
@@ -201,10 +195,7 @@ pub async fn patch_org_worker(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<PatchWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let org = get_organization_by_name(Arc::clone(&state), user.id, organization)
-        .await
-        .map_err(|e| WebError::InternalServerError(e.to_string()))?
-        .ok_or_else(|| WebError::not_found("organization"))?;
+    let org = load_org_member(&state, user.id, organization).await?;
 
     let reg = EWorkerRegistration::find()
         .filter(worker_registration::Column::PeerId.eq(org.id))
@@ -221,14 +212,20 @@ pub async fn patch_org_worker(
     // before triggering reauth, so the worker stops them immediately.
     if !body.active {
         let org_set = std::collections::HashSet::from([org.id]);
-        scheduler.abort_org_jobs_on_worker(&worker_id, &org_set).await;
+        scheduler
+            .abort_org_jobs_on_worker(&worker_id, &org_set)
+            .await;
     }
 
     // Trigger re-auth so the worker's authorized peer set is updated
     // (or the worker is kicked if all registrations are now inactive).
     scheduler.request_reauth(&worker_id).await;
 
-    let status = if body.active { "activated" } else { "deactivated" };
+    let status = if body.active {
+        "activated"
+    } else {
+        "deactivated"
+    };
     Ok(Json(BaseResponse {
         error: false,
         message: format!("worker '{}' {}", worker_id, status),
@@ -241,10 +238,7 @@ pub async fn delete_org_worker(
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let org = get_organization_by_name(Arc::clone(&state), user.id, organization)
-        .await
-        .map_err(|e| WebError::InternalServerError(e.to_string()))?
-        .ok_or_else(|| WebError::not_found("organization"))?;
+    let org = load_org_member(&state, user.id, organization).await?;
 
     let result = EWorkerRegistration::delete_many()
         .filter(worker_registration::Column::PeerId.eq(org.id))
@@ -258,7 +252,9 @@ pub async fn delete_org_worker(
 
     // Abort in-flight jobs from this org on the worker before triggering reauth.
     let org_set = std::collections::HashSet::from([org.id]);
-    scheduler.abort_org_jobs_on_worker(&worker_id, &org_set).await;
+    scheduler
+        .abort_org_jobs_on_worker(&worker_id, &org_set)
+        .await;
 
     // Trigger re-auth so the worker loses authorization for the removed peer.
     scheduler.request_reauth(&worker_id).await;

@@ -5,6 +5,11 @@
  */
 
 //! In-memory registry of connected proto workers.
+//!
+//! Workers are stored as [`WorkerSlot`] values — either
+//! [`WorkerSlot::Active`] or [`WorkerSlot::Draining`].  Capacity checks are
+//! only ever performed on `Active` workers, so the compiler prevents the class
+//! of bug where a draining worker accidentally receives a new job assignment.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -12,36 +17,62 @@ use std::sync::Arc;
 use tokio::sync::{Notify, mpsc};
 use uuid::Uuid;
 
-use gradient_core::types::proto::GradientCapabilities;
+use gradient_core::types::proto::{GradientCapabilities, JobKind};
 
-/// Metadata for a single connected worker.
-#[derive(Debug)]
-pub struct ConnectedWorker {
-    pub capabilities: GradientCapabilities,
-    pub architectures: Vec<String>,
-    pub system_features: Vec<String>,
-    pub max_concurrent_builds: u32,
-    pub assigned_jobs: HashSet<String>,
-    pub draining: bool,
-    /// Peer IDs (org/cache/proxy UUIDs) this worker is authorized for.
-    /// Empty means no peers registered this worker (open/discoverable mode).
-    pub authorized_peers: HashSet<Uuid>,
-    /// Job IDs that have already been sent to this worker as candidates.
-    /// Used to implement delta-only `JobOffer` — only IDs not in this set
-    /// are included in the next push.
-    pub sent_candidates: HashSet<String>,
-    /// Signalled by the API when registrations change and the worker should
-    /// re-authenticate without disconnecting.
-    pub reauth_notify: Arc<Notify>,
-    /// Channel for sending abort messages to the handler for this worker.
-    /// Each message is `(job_id, reason)`.
-    pub abort_tx: mpsc::UnboundedSender<(String, String)>,
+use crate::peer_auth::PeerAuth;
+use crate::worker_state::{Active, Draining, TypedWorker};
+
+// ── WorkerSlot ────────────────────────────────────────────────────────────────
+
+/// Lifecycle state of a connected worker as seen by the pool.
+///
+/// Only [`WorkerSlot::Active`] workers can receive new job offers.
+pub enum WorkerSlot {
+    /// Worker is active — eligible for new job assignments.
+    Active(TypedWorker<Active>),
+    /// Worker is draining — finishes in-flight jobs but accepts no new ones.
+    Draining(TypedWorker<Draining>),
 }
+
+impl WorkerSlot {
+    /// Read-only access to the shared worker data, regardless of state.
+    fn shared(&self) -> &crate::worker_state::WorkerShared {
+        match self {
+            Self::Active(w) => w,
+            Self::Draining(w) => w,
+        }
+    }
+
+    /// Mutable access to the shared worker data, regardless of state.
+    fn shared_mut(&mut self) -> &mut crate::worker_state::WorkerShared {
+        match self {
+            Self::Active(w) => w,
+            Self::Draining(w) => w,
+        }
+    }
+
+    /// Returns `true` when the worker is draining.
+    pub fn is_draining(&self) -> bool {
+        matches!(self, Self::Draining(_))
+    }
+}
+
+// Manual Debug impl because TypedWorker<S> impls Debug
+impl std::fmt::Debug for WorkerSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Active(w) => f.debug_tuple("Active").field(&w.shared).finish(),
+            Self::Draining(w) => f.debug_tuple("Draining").field(&w.shared).finish(),
+        }
+    }
+}
+
+// ── WorkerPool ────────────────────────────────────────────────────────────────
 
 /// In-memory registry of all currently connected workers.
 #[derive(Debug, Default)]
 pub struct WorkerPool {
-    workers: HashMap<String, ConnectedWorker>,
+    workers: HashMap<String, WorkerSlot>,
 }
 
 impl WorkerPool {
@@ -61,61 +92,52 @@ impl WorkerPool {
     ) -> (Arc<Notify>, mpsc::UnboundedReceiver<(String, String)>) {
         let notify = Arc::new(Notify::new());
         let (abort_tx, abort_rx) = mpsc::unbounded_channel();
-        self.workers.insert(
-            id,
-            ConnectedWorker {
-                capabilities,
-                architectures: vec![],
-                system_features: vec![],
-                max_concurrent_builds: 1,
-                assigned_jobs: HashSet::new(),
-                draining: false,
-                authorized_peers,
-                sent_candidates: HashSet::new(),
-                reauth_notify: Arc::clone(&notify),
-                abort_tx,
-            },
+        let worker = TypedWorker::<Active>::new(
+            capabilities,
+            authorized_peers,
+            Arc::clone(&notify),
+            abort_tx,
         );
+        self.workers.insert(id, WorkerSlot::Active(worker));
         (notify, abort_rx)
     }
 
     /// Signal a connected worker that its registrations have changed and it
     /// should re-authenticate.  No-op if the worker is not connected.
     pub fn request_reauth(&self, worker_id: &str) {
-        if let Some(w) = self.workers.get(worker_id) {
-            w.reauth_notify.notify_one();
+        if let Some(slot) = self.workers.get(worker_id) {
+            slot.shared().reauth_notify.notify_one();
         }
     }
 
     /// Send an abort message to a connected worker's handler.
     /// Returns `true` if the message was sent (worker connected), `false` otherwise.
     pub fn send_abort(&self, worker_id: &str, job_id: String, reason: String) -> bool {
-        if let Some(w) = self.workers.get(worker_id) {
-            w.abort_tx.send((job_id, reason)).is_ok()
+        if let Some(slot) = self.workers.get(worker_id) {
+            slot.shared().abort_tx.send((job_id, reason)).is_ok()
         } else {
             false
         }
     }
 
     pub fn update_authorized_peers(&mut self, id: &str, authorized_peers: HashSet<Uuid>) {
-        if let Some(w) = self.workers.get_mut(id) {
-            w.authorized_peers = authorized_peers;
+        if let Some(slot) = self.workers.get_mut(id) {
+            slot.shared_mut().peer_auth = PeerAuth::from_peers(authorized_peers);
         }
     }
 
-    /// Returns the authorized peer set for a worker, or `None` if the worker
-    /// is not connected. An empty set means no peers registered this worker
-    /// (open/discoverable mode — all jobs visible).
-    pub fn authorized_peers_for(&self, id: &str) -> Option<&HashSet<Uuid>> {
-        self.workers.get(id).map(|w| &w.authorized_peers)
+    /// Returns the peer-auth mode for a worker, or `None` if not connected.
+    pub fn peer_auth_for(&self, id: &str) -> Option<&PeerAuth> {
+        self.workers.get(id).map(|slot| &slot.shared().peer_auth)
     }
 
     /// Returns `(architectures, system_features)` for a connected worker.
     /// Returns `None` if the worker is not connected.
     pub fn build_caps_for(&self, id: &str) -> Option<(Vec<String>, Vec<String>)> {
-        self.workers
-            .get(id)
-            .map(|w| (w.architectures.clone(), w.system_features.clone()))
+        self.workers.get(id).map(|slot| {
+            let s = slot.shared();
+            (s.architectures.clone(), s.system_features.clone())
+        })
     }
 
     pub fn update_capabilities(
@@ -125,79 +147,89 @@ impl WorkerPool {
         system_features: Vec<String>,
         max_concurrent_builds: u32,
     ) {
-        if let Some(w) = self.workers.get_mut(id) {
-            w.architectures = architectures;
-            w.system_features = system_features;
-            w.max_concurrent_builds = max_concurrent_builds;
+        if let Some(slot) = self.workers.get_mut(id) {
+            let s = slot.shared_mut();
+            s.architectures = architectures;
+            s.system_features = system_features;
+            s.max_concurrent_builds = max_concurrent_builds;
         }
     }
 
     pub fn unregister(&mut self, id: &str) -> Vec<String> {
         self.workers
             .remove(id)
-            .map(|w| w.assigned_jobs.into_iter().collect())
+            .map(|slot| slot.shared().assigned_jobs.iter().cloned().collect())
             .unwrap_or_default()
     }
 
+    /// Transition a worker to the draining state.
+    ///
+    /// Draining workers finish their in-flight jobs but are never offered new
+    /// ones — [`has_capacity`] returns `false` for draining workers at the type
+    /// level.
     pub fn mark_draining(&mut self, id: &str) {
-        if let Some(w) = self.workers.get_mut(id) {
-            w.draining = true;
+        if let Some(slot) = self.workers.remove(id) {
+            let new_slot = match slot {
+                WorkerSlot::Active(w) => WorkerSlot::Draining(w.into_draining()),
+                already_draining => already_draining,
+            };
+            self.workers.insert(id.to_owned(), new_slot);
         }
     }
 
     /// Mark a batch of job IDs as sent to `worker_id` so they are not
     /// re-included in the next delta `JobOffer`.
     pub fn mark_candidates_sent(&mut self, worker_id: &str, job_ids: &[String]) {
-        if let Some(w) = self.workers.get_mut(worker_id) {
-            w.sent_candidates.extend(job_ids.iter().cloned());
+        if let Some(slot) = self.workers.get_mut(worker_id) {
+            slot.shared_mut()
+                .sent_candidates
+                .extend(job_ids.iter().cloned());
         }
     }
 
     /// Remove a single job ID from all workers' sent-candidate sets.
-    /// Called when a job is removed from the pending queue (assigned, revoked,
-    /// or cancelled) so the same ID can be reused without being silently dropped.
     pub fn remove_sent_candidate(&mut self, job_id: &str) {
-        for w in self.workers.values_mut() {
-            w.sent_candidates.remove(job_id);
+        for slot in self.workers.values_mut() {
+            slot.shared_mut().sent_candidates.remove(job_id);
         }
     }
 
     /// Returns the set of job IDs already sent to `worker_id` as candidates.
     pub fn sent_candidates_for(&self, worker_id: &str) -> Option<&HashSet<String>> {
-        self.workers.get(worker_id).map(|w| &w.sent_candidates)
+        self.workers
+            .get(worker_id)
+            .map(|slot| &slot.shared().sent_candidates)
     }
 
-    /// Returns `true` when the worker has room for at least one more job of
-    /// the given kind. Eval jobs are always accepted (no capacity tracking on
-    /// the server side — the worker enforces its own `max_concurrent_evaluations`).
-    /// Build jobs are gated by `max_concurrent_builds` vs the current
-    /// `assigned_jobs` count so the server never blasts more `AssignJob`s than
-    /// the worker can accept, even when heartbeat bursts stack up.
-    pub fn has_capacity(&self, worker_id: &str, kind: &gradient_core::types::proto::JobKind) -> bool {
-        let w = match self.workers.get(worker_id) {
-            Some(w) => w,
-            None => return false,
-        };
-        match kind {
-            gradient_core::types::proto::JobKind::Flake => true,
-            gradient_core::types::proto::JobKind::Build => {
-                (w.assigned_jobs.len() as u32) < w.max_concurrent_builds
-            }
+    /// Returns `true` when the worker can accept a new job of the given kind.
+    ///
+    /// - **Draining workers always return `false`** — this is enforced at the
+    ///   type level by only calling `has_build_capacity` on `TypedWorker<Active>`.
+    /// - Eval jobs are always accepted by active workers (capacity is enforced
+    ///   worker-side).
+    /// - Build jobs are gated by `max_concurrent_builds`.
+    pub fn has_capacity(&self, worker_id: &str, kind: &JobKind) -> bool {
+        match self.workers.get(worker_id) {
+            Some(WorkerSlot::Active(w)) => match kind {
+                JobKind::Flake => true,
+                JobKind::Build => w.has_build_capacity(),
+            },
+            Some(WorkerSlot::Draining(_)) => false,
+            None => false,
         }
     }
 
     pub fn assign_job(&mut self, worker_id: &str, job_id: &str) {
-        if let Some(w) = self.workers.get_mut(worker_id) {
-            w.assigned_jobs.insert(job_id.to_owned());
+        if let Some(slot) = self.workers.get_mut(worker_id) {
+            slot.shared_mut().assigned_jobs.insert(job_id.to_owned());
         }
     }
 
     pub fn release_job(&mut self, worker_id: &str, job_id: &str) {
-        if let Some(w) = self.workers.get_mut(worker_id) {
-            w.assigned_jobs.remove(job_id);
+        if let Some(slot) = self.workers.get_mut(worker_id) {
+            slot.shared_mut().assigned_jobs.remove(job_id);
         }
     }
-
 
     pub fn worker_count(&self) -> usize {
         self.workers.len()
@@ -206,19 +238,25 @@ impl WorkerPool {
     pub fn all_workers(&self) -> Vec<WorkerInfo> {
         self.workers
             .iter()
-            .map(|(id, w)| WorkerInfo {
-                id: id.clone(),
-                capabilities: w.capabilities.clone(),
-                architectures: w.architectures.clone(),
-                system_features: w.system_features.clone(),
-                max_concurrent_builds: w.max_concurrent_builds,
-                assigned_job_count: w.assigned_jobs.len(),
-                draining: w.draining,
+            .map(|(id, slot)| {
+                let s = slot.shared();
+                WorkerInfo {
+                    id: id.clone(),
+                    capabilities: s.capabilities.clone(),
+                    architectures: s.architectures.clone(),
+                    system_features: s.system_features.clone(),
+                    max_concurrent_builds: s.max_concurrent_builds,
+                    assigned_job_count: s.assigned_jobs.len(),
+                    draining: slot.is_draining(),
+                }
             })
             .collect()
     }
 }
 
+// ── WorkerInfo ────────────────────────────────────────────────────────────────
+
+/// Serialisable snapshot of a connected worker for API responses.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct WorkerInfo {
     pub id: String,
@@ -227,12 +265,16 @@ pub struct WorkerInfo {
     pub system_features: Vec<String>,
     pub max_concurrent_builds: u32,
     pub assigned_job_count: usize,
+    /// `true` when the worker is draining (corresponds to [`WorkerSlot::Draining`]).
     pub draining: bool,
 }
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::peer_auth::PeerAuth;
 
     fn caps() -> GradientCapabilities {
         GradientCapabilities::default()
@@ -294,19 +336,34 @@ mod tests {
     }
 
     #[test]
+    fn test_draining_worker_has_no_capacity() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new());
+        pool.update_capabilities("w1", vec![], vec![], 10);
+
+        // Active worker has capacity.
+        assert!(pool.has_capacity("w1", &JobKind::Build));
+        assert!(pool.has_capacity("w1", &JobKind::Flake));
+
+        // After draining, capacity is always false.
+        pool.mark_draining("w1");
+        assert!(!pool.has_capacity("w1", &JobKind::Build));
+        assert!(!pool.has_capacity("w1", &JobKind::Flake));
+    }
+
+    #[test]
     fn test_authorized_peers_for() {
         let mut pool = WorkerPool::new();
         let peer_a = Uuid::new_v4();
         let peer_b = Uuid::new_v4();
 
         pool.register("w1".into(), caps(), HashSet::from([peer_a, peer_b]));
-        let peers = pool.authorized_peers_for("w1").unwrap();
-        assert!(peers.contains(&peer_a));
-        assert!(peers.contains(&peer_b));
-        assert_eq!(peers.len(), 2);
+        let auth = pool.peer_auth_for("w1").unwrap();
+        assert!(auth.contains(&peer_a));
+        assert!(auth.contains(&peer_b));
+        assert!(matches!(auth, PeerAuth::Restricted(_)));
 
-        // Unknown worker returns None.
-        assert!(pool.authorized_peers_for("w2").is_none());
+        assert!(pool.peer_auth_for("w2").is_none());
     }
 
     #[test]
@@ -316,10 +373,24 @@ mod tests {
         let peer_b = Uuid::new_v4();
 
         pool.register("w1".into(), caps(), HashSet::from([peer_a]));
-        assert_eq!(pool.authorized_peers_for("w1").unwrap().len(), 1);
+        assert!(matches!(
+            pool.peer_auth_for("w1").unwrap(),
+            PeerAuth::Restricted(_)
+        ));
 
         pool.update_authorized_peers("w1", HashSet::from([peer_a, peer_b]));
-        assert_eq!(pool.authorized_peers_for("w1").unwrap().len(), 2);
+        let auth = pool.peer_auth_for("w1").unwrap();
+        let PeerAuth::Restricted(set) = auth else {
+            panic!("expected Restricted");
+        };
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn test_open_mode_on_empty_peers() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new());
+        assert!(matches!(pool.peer_auth_for("w1").unwrap(), PeerAuth::Open));
     }
 
     #[test]
@@ -368,7 +439,6 @@ mod tests {
 
         pool.request_reauth("w1");
 
-        // After request_reauth, the notify should fire immediately.
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -383,7 +453,6 @@ mod tests {
     #[test]
     fn test_request_reauth_noop_for_unknown_worker() {
         let pool = WorkerPool::new();
-        // Should not panic for unknown worker.
         pool.request_reauth("nonexistent");
     }
 }

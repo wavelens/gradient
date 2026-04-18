@@ -116,12 +116,15 @@ impl ProtoConnection {
     /// messages to the underlying WebSocket sink.  The `ProtoConnection` is
     /// consumed — only the reader half is returned (for `recv` calls).
     pub fn split(self) -> (ProtoWriter, ProtoReader) {
-        type BoxSink = std::pin::Pin<Box<dyn futures::Sink<
-            Message, Error = tokio_tungstenite::tungstenite::Error
-        > + Send>>;
-        type BoxStream = std::pin::Pin<Box<dyn futures::Stream<
-            Item = Result<Message, tokio_tungstenite::tungstenite::Error>
-        > + Send>>;
+        type BoxSink = std::pin::Pin<
+            Box<dyn futures::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Send>,
+        >;
+        type BoxStream = std::pin::Pin<
+            Box<
+                dyn futures::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+                    + Send,
+            >,
+        >;
 
         let (sink, stream): (BoxSink, BoxStream) = match self.socket {
             ProtoStream::Client(ws) => {
@@ -141,9 +144,14 @@ impl ProtoConnection {
             while let Some(msg) = rx.recv().await {
                 let bytes = match rkyv::to_bytes::<RkyvError>(&msg) {
                     Ok(b) => b,
-                    Err(e) => { tracing::warn!("serialisation error: {}", e); continue; }
+                    Err(e) => {
+                        tracing::warn!("serialisation error: {}", e);
+                        continue;
+                    }
                 };
-                if let Err(e) = SinkExt::send(&mut sink, Message::Binary(bytes.to_vec().into())).await {
+                if let Err(e) =
+                    SinkExt::send(&mut sink, Message::Binary(bytes.to_vec().into())).await
+                {
                     tracing::warn!("WebSocket write error: {}", e);
                     break;
                 }
@@ -153,7 +161,9 @@ impl ProtoConnection {
 
         (
             ProtoWriter { tx },
-            ProtoReader { stream: Box::pin(stream) },
+            ProtoReader {
+                stream: Box::pin(stream),
+            },
         )
     }
 }
@@ -169,16 +179,24 @@ impl ProtoWriter {
     /// Enqueue a message for sending. Returns Err only if the writer
     /// task has exited (connection closed).
     pub fn send(&self, msg: ClientMessage) -> anyhow::Result<()> {
-        self.tx.send(msg).map_err(|_| anyhow::anyhow!("writer channel closed"))
+        self.tx
+            .send(msg)
+            .map_err(|_| anyhow::anyhow!("writer channel closed"))
     }
 }
 
 /// Read-only half produced by [`ProtoConnection::split`].
 pub struct ProtoReader {
-    stream: std::pin::Pin<Box<dyn futures::Stream<
-        Item = Result<tokio_tungstenite::tungstenite::Message,
-                      tokio_tungstenite::tungstenite::Error>
-    > + Send>>,
+    stream: std::pin::Pin<
+        Box<
+            dyn futures::Stream<
+                    Item = Result<
+                        tokio_tungstenite::tungstenite::Message,
+                        tokio_tungstenite::tungstenite::Error,
+                    >,
+                > + Send,
+        >,
+    >,
 }
 
 impl ProtoReader {

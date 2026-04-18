@@ -9,11 +9,21 @@
 //! Unlike the server's `SshBuildExecutor`, the worker builds directly against
 //! its own local nix-daemon (no SSH tunneling). Dependencies are already
 //! present in the local store (placed there by the server via NarPush or S3).
+//!
+//! The build pipeline is encoded as a type-state chain:
+//!
+//! ```text
+//! ParsedDerivation::load(drv_path)   →  ParsedDerivation
+//!                     .realize(…)    →  Vec<BuildOutput>
+//! ```
+//!
+//! `build_derivation` is a thin orchestrator that threads these stages
+//! together and reports the result to the server.
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::StreamExt as _;
-use gradient_core::db::parse_drv;
+use gradient_core::db::{DrvOutputSpec, parse_drv};
 use gradient_core::executer::path_utils::{nix_store_path, strip_nix_store_prefix};
 use gradient_core::sources::get_hash_from_path;
 use harmonia_protocol::build_result::BuildResultInner;
@@ -22,15 +32,142 @@ use harmonia_protocol::log::{Field, LogMessage, ResultType, Verbosity};
 use harmonia_protocol::types::ClientOptions;
 use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, DerivationT};
 use harmonia_store_core::store_path::{ContentAddress, ContentAddressMethod, StorePath};
-use harmonia_utils_hash::{Algorithm, Hash};
 use harmonia_store_remote::DaemonStore as _;
+use harmonia_utils_hash::{Algorithm, Hash};
 use proto::messages::{BuildOutput, BuildTask};
 use std::collections::BTreeMap;
-use std::pin::pin;
+use std::pin::{Pin, pin};
 use tracing::{debug, info, warn};
 
 use crate::nix::store::{LocalNixStore, strip_store_prefix};
 use crate::proto::job::JobUpdater;
+
+// ── Type-state pipeline ───────────────────────────────────────────────────────
+
+/// A `.drv` file read from disk and parsed into all data needed to call
+/// `DaemonStore::build_derivation`.
+///
+/// Obtain via [`ParsedDerivation::load`]; advance to built outputs via
+/// [`ParsedDerivation::realize`].
+pub(super) struct ParsedDerivation {
+    drv: gradient_core::db::Derivation,
+    harmonia_path: StorePath,
+    basic_drv: BasicDerivation,
+}
+
+impl ParsedDerivation {
+    /// Read and parse a `.drv` file from the local Nix store.
+    pub(super) async fn load(drv_path: &str) -> Result<Self> {
+        let path = nix_store_path(drv_path);
+        debug!(drv = %path, "building derivation locally");
+
+        let drv_bytes = tokio::fs::read(&path)
+            .await
+            .with_context(|| format!("read .drv file: {}", path))?;
+
+        let drv = parse_drv(&drv_bytes).with_context(|| format!("parse .drv file: {}", path))?;
+
+        let harmonia_path = StorePath::from_base_path(strip_store_prefix(&path))
+            .map_err(|e| anyhow::anyhow!("invalid store path {}: {}", path, e))?;
+
+        let basic_drv = get_basic_derivation(&path, &drv)?;
+
+        Ok(Self {
+            drv,
+            harmonia_path,
+            basic_drv,
+        })
+    }
+
+    /// Submit this derivation to the local nix-daemon and collect the realised
+    /// outputs.
+    ///
+    /// Streams build log lines to the server via `updater` while the daemon is
+    /// running.  Returns one [`BuildOutput`] per output name; `nar_size` and
+    /// `nar_hash` are `None` at this stage and are filled in by the compress
+    /// step.
+    pub(super) async fn realize(
+        self,
+        store: &LocalNixStore,
+        task_index: u32,
+        updater: &mut JobUpdater,
+        drv_path: &str,
+    ) -> Result<Vec<BuildOutput>> {
+        let mut guard = store
+            .pool()
+            .acquire()
+            .await
+            .map_err(|e| anyhow::anyhow!("acquire local store for build: {}", e))?;
+
+        debug!(
+            drv = %drv_path,
+            platform = %self.drv.system,
+            builder = %self.drv.builder,
+            outputs = ?self.drv.outputs.iter().map(|o| &o.name).collect::<Vec<_>>(),
+            input_drvs = self.drv.input_derivations.len(),
+            input_srcs = self.drv.input_sources.len(),
+            env_keys = ?self.drv.environment.keys().collect::<Vec<_>>(),
+            "sending BasicDerivation to nix-daemon"
+        );
+
+        let mut opts = ClientOptions::default();
+        opts.verbose_build = Verbosity::Talkative;
+        opts.verbosity = Verbosity::Notice;
+        if let Err(e) = guard.client().set_options(&opts).await {
+            warn!(error = %e, "set_options(verbose_build=Talkative) failed; build logs may be empty");
+        }
+
+        // `build_derivation` returns `impl ResultLog = Stream<Item=LogMessage> + Future`.
+        // Drain the stream first, then await the future for the BuildResult.
+        let logs = guard.client().build_derivation(
+            &self.harmonia_path,
+            &self.basic_drv,
+            BuildMode::Normal,
+        );
+        let mut logs = pin!(logs);
+        let stats = drain_build_logs(logs.as_mut(), updater, task_index).await;
+        log_stream_summary(&stats, drv_path);
+
+        let result = logs
+            .await
+            .map_err(|e| anyhow::anyhow!("build_derivation failed for {}: {}", drv_path, e))?;
+
+        match result.inner {
+            BuildResultInner::Success(s) => {
+                info!(drv = %drv_path, "build succeeded");
+                let mut outputs = Vec::with_capacity(s.built_outputs.len());
+                for (output_name, realisation) in &s.built_outputs {
+                    let store_path_str = format!("/nix/store/{}", realisation.out_path);
+                    let (hash, _package) = get_hash_from_path(store_path_str.clone())
+                        .with_context(|| format!("parse output path: {}", store_path_str))?;
+                    let has_artefacts = tokio::fs::metadata(format!(
+                        "{}/nix-support/hydra-build-products",
+                        store_path_str
+                    ))
+                    .await
+                    .is_ok();
+                    outputs.push(BuildOutput {
+                        name: output_name.to_string(),
+                        store_path: store_path_str,
+                        hash,
+                        nar_size: None, // filled in by compress step
+                        nar_hash: None,
+                        has_artefacts,
+                    });
+                }
+                Ok(outputs)
+            }
+
+            BuildResultInner::Failure(f) => {
+                let msg = String::from_utf8_lossy(&f.error_msg);
+                warn!(drv = %drv_path, error = %msg, "build failed");
+                Err(anyhow::anyhow!("build failed: {}", msg))
+            }
+        }
+    }
+}
+
+// ── Orchestrator ──────────────────────────────────────────────────────────────
 
 /// Build a single derivation on the local nix-daemon.
 ///
@@ -44,165 +181,95 @@ pub async fn build_derivation(
     task_index: u32,
     updater: &mut JobUpdater,
 ) -> Result<()> {
-    // NOTE: `report_building` is now sent by the caller
-    // (`execute_build_job`) *before* the prefetch step, so that a `JobFailed`
-    // arriving after a prefetch error finds the build already in `Building`
-    // state on the server. Re-sending it here would only generate a
-    // redundant `Building → Building` no-op transition + extra webhook.
+    // NOTE: `report_building` is sent by the caller (`execute_build_job`)
+    // *before* the prefetch step, so that a `JobFailed` arriving after a
+    // prefetch error finds the build already in `Building` state on the
+    // server.
 
-    let full_drv_path = nix_store_path(&task.drv_path);
-    debug!(drv = %full_drv_path, "building derivation locally");
+    let outputs = ParsedDerivation::load(&task.drv_path)
+        .await?
+        .realize(store, task_index, updater, &task.drv_path)
+        .await?;
 
-    // ── Parse .drv file ───────────────────────────────────────────────────────
-    let drv_bytes = tokio::fs::read(&full_drv_path)
-        .await
-        .with_context(|| format!("read .drv file: {}", full_drv_path))?;
+    updater.report_build_output(task.build_id.clone(), outputs)
+}
 
-    let drv =
-        parse_drv(&drv_bytes).with_context(|| format!("parse .drv file: {}", full_drv_path))?;
+// ── Log helpers ───────────────────────────────────────────────────────────────
 
-    // ── Build BasicDerivation for harmonia ────────────────────────────────────
-    // Output paths are taken directly from the .drv file.
-    // Sending Deferred outputs causes the daemon to return CA paths like
-    // `sha256:hash-name` in its response, which harmonia cannot parse.
-    let harmonia_path = StorePath::from_base_path(strip_store_prefix(&full_drv_path))
-        .map_err(|e| anyhow::anyhow!("invalid store path {}: {}", full_drv_path, e))?;
+/// Counters collected while draining the harmonia build log stream.
+#[derive(Default)]
+struct LogStreamStats {
+    total_msgs: u64,
+    forwarded_lines: u64,
+    forwarded_bytes: u64,
+    send_failures: u64,
+}
 
-    let basic_drv = get_basic_derivation(&full_drv_path, &drv)?;
-
-    let mut guard = store
-        .pool()
-        .acquire()
-        .await
-        .map_err(|e| anyhow::anyhow!("acquire local store for build: {}", e))?;
-
-    debug!(
-        drv = %task.drv_path,
-        platform = %drv.system,
-        builder = %drv.builder,
-        outputs = ?drv.outputs.iter().map(|o| &o.name).collect::<Vec<_>>(),
-        input_drvs = drv.input_derivations.len(),
-        input_srcs = drv.input_sources.len(),
-        env_keys = ?drv.environment.keys().collect::<Vec<_>>(),
-        "sending BasicDerivation to nix-daemon"
-    );
-
-    // ── Crank up daemon verbosity so it actually emits BuildLogLine ──────────
-    // Default `ClientOptions::verbose_build` is `Verbosity::Error`, which
-    // makes the daemon suppress per-line build stdout/stderr (BuildLogLine
-    // results, type 101). Without this every build log stream comes back
-    // with only structured Progress / SetPhase / activity events and the
-    // user sees an empty build log. Talkative (4) is the level `nix-build`
-    // uses by default for showing build output.
-    let mut opts = ClientOptions::default();
-
-    opts.verbose_build = Verbosity::Talkative;
-    opts.verbosity = Verbosity::Notice;
-
-    if let Err(e) = guard.client().set_options(&opts).await {
-        warn!(
-            error = %e,
-            "set_options(verbose_build=Talkative) failed; build logs may be empty"
-        );
-    }
-
-    // ── Drive the daemon and stream logs back to the server ──────────────────
-    // `build_derivation` returns `impl ResultLog = Stream<Item = LogMessage> + Future`.
-    // We must consume the stream first; only then is the future ready with the
-    // BuildResult. Forward stdout/stderr-bearing log messages to the server as
-    // `LogChunk` frames so they end up in the build's log_storage.
-    let logs = guard
-        .client()
-        .build_derivation(&harmonia_path, &basic_drv, BuildMode::Normal);
-
-    let mut logs = pin!(logs);
-    let mut total_msgs: u64 = 0;
-    let mut forwarded_lines: u64 = 0;
-    let mut forwarded_bytes: u64 = 0;
-    let mut send_failures: u64 = 0;
+/// Drain every [`LogMessage`] from `logs`, forwarding text lines to `updater`.
+///
+/// Returns aggregate counters; callers should pass them to
+/// [`log_stream_summary`] for tracing.
+async fn drain_build_logs<S>(
+    mut logs: Pin<&mut S>,
+    updater: &mut JobUpdater,
+    task_index: u32,
+) -> LogStreamStats
+where
+    S: futures::Stream<Item = LogMessage>,
+{
+    let mut stats = LogStreamStats::default();
     while let Some(msg) = logs.next().await {
-        total_msgs += 1;
+        stats.total_msgs += 1;
         if let Some(line) = log_message_to_text(&msg) {
             let len = line.len();
+            // Log streaming is best-effort — never fail the build because the
+            // server connection hiccupped.
             match updater.send_log_chunk(task_index, line.into_bytes()) {
                 Ok(()) => {
-                    forwarded_lines += 1;
-                    forwarded_bytes += len as u64;
+                    stats.forwarded_lines += 1;
+                    stats.forwarded_bytes += len as u64;
                 }
+
                 Err(e) => {
-                    // Log streaming is best-effort — never fail the build
-                    // because the server connection hiccupped.
-                    send_failures += 1;
+                    stats.send_failures += 1;
                     warn!(error = %e, "failed to forward build log chunk; continuing");
                 }
             }
         }
     }
+    stats
+}
 
+/// Emit a tracing summary after [`drain_build_logs`] completes.
+///
+/// Warns if the daemon emitted no messages at all, or if it emitted messages
+/// but none were forwardable text (suggesting daemon verbosity is too low).
+fn log_stream_summary(stats: &LogStreamStats, drv_path: &str) {
     info!(
-        drv = %task.drv_path,
-        daemon_messages = total_msgs,
-        forwarded_lines,
-        forwarded_bytes,
-        send_failures,
+        drv = %drv_path,
+        daemon_messages = stats.total_msgs,
+        forwarded_lines = stats.forwarded_lines,
+        forwarded_bytes = stats.forwarded_bytes,
+        send_failures = stats.send_failures,
         "build log stream drained"
     );
 
-    if total_msgs == 0 {
+    if stats.total_msgs == 0 {
         warn!(
-            drv = %task.drv_path,
+            drv = %drv_path,
             "daemon emitted zero LogMessages during build — daemon verbosity may be too low \
              (set `verbose-builds = true` and `log-lines = 0` in nix.conf, or check \
              the worker user's permissions to read daemon output)"
         );
-    } else if forwarded_lines == 0 {
+    } else if stats.forwarded_lines == 0 {
         warn!(
-            drv = %task.drv_path,
-            daemon_messages = total_msgs,
+            drv = %drv_path,
+            daemon_messages = stats.total_msgs,
             "daemon emitted LogMessages but none had forwardable text content \
              (only structured progress / activity events) — set `verbose-builds = true` \
              on the worker's nix-daemon to enable BuildLogLine results"
         );
     }
-    let result = logs.await.map_err(|e| {
-        anyhow::anyhow!("build_derivation failed for {}: {}", task.drv_path, e)
-    })?;
-
-    // ── Process build result ──────────────────────────────────────────────────
-    let outputs = match &result.inner {
-        BuildResultInner::Success(s) => {
-            info!(drv = %task.drv_path, "build succeeded");
-            let mut out = Vec::with_capacity(s.built_outputs.len());
-            for (output_name, realisation) in &s.built_outputs {
-                let store_path_str = format!("/nix/store/{}", realisation.out_path);
-                let (hash, _package) = get_hash_from_path(store_path_str.clone())
-                    .with_context(|| format!("parse output path: {}", store_path_str))?;
-                let has_artefacts = tokio::fs::metadata(format!(
-                    "{}/nix-support/hydra-build-products",
-                    store_path_str
-                ))
-                .await
-                .is_ok();
-                out.push(BuildOutput {
-                    name: output_name.to_string(),
-                    store_path: store_path_str,
-                    hash,
-                    nar_size: None, // filled in by compress step
-                    nar_hash: None,
-                    has_artefacts,
-                });
-            }
-            out
-        }
-
-        BuildResultInner::Failure(f) => {
-            let msg = String::from_utf8_lossy(&f.error_msg);
-            warn!(drv = %task.drv_path, error = %msg, "build failed");
-            return Err(anyhow::anyhow!("build failed: {}", msg));
-        }
-    };
-
-    updater.report_build_output(task.build_id.clone(), outputs)
 }
 
 /// Extract a forwardable log line from a harmonia daemon log message.
@@ -228,6 +295,7 @@ fn log_message_to_text(msg: &LogMessage) -> Option<String> {
             }
             Some(format!("{s}\n"))
         }
+
         LogMessage::StartActivity(a) => {
             let s = String::from_utf8_lossy(&a.text);
             if s.is_empty() {
@@ -235,6 +303,7 @@ fn log_message_to_text(msg: &LogMessage) -> Option<String> {
             }
             Some(format!("{s}\n"))
         }
+
         LogMessage::Result(r)
             if matches!(
                 r.result_type,
@@ -256,6 +325,8 @@ fn log_message_to_text(msg: &LogMessage) -> Option<String> {
         _ => None,
     }
 }
+
+// ── Derivation construction ───────────────────────────────────────────────────
 
 /// Construct a harmonia [`BasicDerivation`] from a parsed drv file.
 ///
@@ -294,21 +365,22 @@ fn get_basic_derivation(
             .parse()
             .with_context(|| format!("invalid output name '{}' in {}", o.name, full_drv_path))?;
 
-        let drv_output = if !o.hash_algo.is_empty() && !o.hash.is_empty() {
-            ca_fixed_output(&o.hash_algo, &o.hash).with_context(|| {
-                format!(
-                    "invalid FOD spec for output '{}' in {} (hash_algo={:?} hash={:?})",
-                    o.name, full_drv_path, o.hash_algo, o.hash
-                )
-            })?
-        } else if o.path.is_empty() {
-            DerivationOutput::Deferred
-        } else {
-            let base = strip_nix_store_prefix(o.path.as_str());
-            let sp = StorePath::from_base_path(&base).with_context(|| {
-                format!("invalid output path '{}' in {}", o.path, full_drv_path)
-            })?;
-            DerivationOutput::InputAddressed(sp)
+        let drv_output = match o.as_spec() {
+            DrvOutputSpec::FixedOutput { hash_algo, hash } => ca_fixed_output(hash_algo, hash)
+                .with_context(|| {
+                    format!(
+                        "invalid FOD spec for output '{}' in {} (hash_algo={:?} hash={:?})",
+                        o.name, full_drv_path, hash_algo, hash
+                    )
+                })?,
+            DrvOutputSpec::Deferred => DerivationOutput::Deferred,
+            DrvOutputSpec::InputAddressed { path } => {
+                let base = strip_nix_store_prefix(path);
+                let sp = StorePath::from_base_path(&base).with_context(|| {
+                    format!("invalid output path '{}' in {}", path, full_drv_path)
+                })?;
+                DerivationOutput::InputAddressed(sp)
+            }
         };
 
         outputs.insert(output_name, drv_output);
@@ -343,6 +415,7 @@ fn get_basic_derivation(
                 continue;
             }
         };
+
         let input_drv = match parse_drv(&input_bytes) {
             Ok(d) => d,
             Err(e) => {
@@ -350,13 +423,18 @@ fn get_basic_derivation(
                 continue;
             }
         };
+
         for o in &input_drv.outputs {
             if o.path.is_empty() {
                 continue;
             }
+
             let base = strip_nix_store_prefix(&o.path);
             match StorePath::from_base_path(&base) {
-                Ok(sp) => { inputs.insert(sp); }
+                Ok(sp) => {
+                    inputs.insert(sp);
+                }
+
                 Err(e) => {
                     warn!(path = %o.path, error = %e, "skipping input drv output: not a valid store path");
                 }
@@ -486,4 +564,3 @@ mod tests {
         assert!(ca_fixed_output("sha256", "deadbeefdeadbeef").is_err());
     }
 }
-

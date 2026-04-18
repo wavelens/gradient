@@ -46,3 +46,14 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl Model {
+    /// Returns `true` when the NAR has been fully uploaded and recorded.
+    ///
+    /// A `cached_path` row is created eagerly when the path is first seen, but
+    /// `file_hash` is only set after the compressed NAR is actually stored. An
+    /// absent `file_hash` means the upload is pending or failed.
+    pub fn is_fully_cached(&self) -> bool {
+        self.file_hash.is_some()
+    }
+}

@@ -224,6 +224,130 @@ fn badge_for_status(status: Option<EvaluationStatus>, has_failed_builds: bool) -
     }
 }
 
+// ── Badge access helpers ──────────────────────────────────────────────────────
+
+/// Resolve the caller identity: JWT/API-key `token` overrides the session user.
+async fn resolve_badge_user(
+    state: &Arc<ServerState>,
+    maybe_user: Option<MUser>,
+    token: Option<String>,
+) -> Result<Option<MUser>, WebError> {
+    match token {
+        Some(tok) => {
+            let token_data = crate::authorization::decode_jwt(State(Arc::clone(state)), tok)
+                .await
+                .map_err(|_| WebError::Unauthorized("Invalid token".to_string()))?;
+            Ok(EUser::find_by_id(token_data.claims.id)
+                .one(&state.db)
+                .await?)
+        }
+        None => Ok(maybe_user),
+    }
+}
+
+/// For private orgs, verify the resolved user is a member.
+async fn check_badge_org_access(
+    state: &Arc<ServerState>,
+    org: &MOrganization,
+    resolved_user: &Option<MUser>,
+) -> Result<(), WebError> {
+    if org.public {
+        return Ok(());
+    }
+    match resolved_user {
+        Some(user) => {
+            if !user_is_org_member(state, user.id, org.id).await? {
+                return Err(WebError::not_found("Organization"));
+            }
+        }
+        None => return Err(WebError::Unauthorized("Authorization required".to_string())),
+    }
+    Ok(())
+}
+
+/// Badge status when `?eval=<attr>` is specified: look up the entry point's
+/// build status in the latest completed evaluation.
+async fn badge_status_for_entry_point(
+    state: &Arc<ServerState>,
+    project_id: uuid::Uuid,
+    eval_attr: &str,
+) -> Result<(Option<EvaluationStatus>, bool), WebError> {
+    let evaluation = EEvaluation::find()
+        .filter(CEvaluation::Project.eq(project_id))
+        .filter(CEvaluation::Status.eq(EvaluationStatus::Completed))
+        .order_by_desc(CEvaluation::CreatedAt)
+        .one(&state.db)
+        .await?;
+
+    let Some(ev) = evaluation else {
+        return Ok((None, false));
+    };
+
+    let Some(ep) = EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.eq(ev.id))
+        .filter(CEntryPoint::Eval.eq(eval_attr))
+        .one(&state.db)
+        .await?
+    else {
+        return Ok((None, false));
+    };
+
+    let build_status = EBuild::find_by_id(ep.build)
+        .one(&state.db)
+        .await?
+        .map(|b| b.status);
+
+    let (eval_status, has_failed) = match build_status {
+        Some(BuildStatus::Completed) | Some(BuildStatus::Substituted) => {
+            (EvaluationStatus::Completed, false)
+        }
+        Some(BuildStatus::Failed) => (EvaluationStatus::Failed, true),
+        Some(BuildStatus::Aborted) | Some(BuildStatus::DependencyFailed) => {
+            (EvaluationStatus::Aborted, false)
+        }
+        Some(BuildStatus::Building) => (EvaluationStatus::Building, false),
+        _ => (EvaluationStatus::Queued, false),
+    };
+
+    Ok((Some(eval_status), has_failed))
+}
+
+/// Badge status for the overall project: use the last evaluation's status and
+/// check whether any entry-point builds failed.
+async fn badge_status_for_latest_eval(
+    state: &Arc<ServerState>,
+    project: &MProject,
+) -> Result<(Option<EvaluationStatus>, bool), WebError> {
+    let Some(eval_id) = project.last_evaluation else {
+        return Ok((None, false));
+    };
+
+    let eval = EEvaluation::find_by_id(eval_id).one(&state.db).await?;
+
+    let has_failed = match &eval {
+        Some(e) if e.status == EvaluationStatus::Completed => {
+            let ep_build_ids: Vec<uuid::Uuid> = EEntryPoint::find()
+                .filter(CEntryPoint::Evaluation.eq(e.id))
+                .all(&state.db)
+                .await?
+                .into_iter()
+                .map(|ep| ep.build)
+                .collect();
+
+            !ep_build_ids.is_empty()
+                && EBuild::find()
+                    .filter(CBuild::Id.is_in(ep_build_ids))
+                    .filter(CBuild::Status.eq(BuildStatus::Failed))
+                    .one(&state.db)
+                    .await?
+                    .is_some()
+        }
+        _ => false,
+    };
+
+    Ok((eval.map(|e| e.status), has_failed))
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 /// Returns a shields.io-compatible SVG status badge for the named project.
@@ -242,30 +366,9 @@ pub async fn get_project_badge(
         .await?
         .ok_or_else(|| WebError::not_found("Organization"))?;
 
-    // Resolve caller identity from ?token= or existing session.
-    let resolved_user: Option<MUser> = if let Some(tok) = params.token {
-        let token_data = crate::authorization::decode_jwt(State(Arc::clone(&state)), tok)
-            .await
-            .map_err(|_| WebError::Unauthorized("Invalid token".to_string()))?;
-        EUser::find_by_id(token_data.claims.id)
-            .one(&state.db)
-            .await?
-    } else {
-        maybe_user
-    };
+    let resolved_user = resolve_badge_user(&state, maybe_user, params.token).await?;
+    check_badge_org_access(&state, &organization, &resolved_user).await?;
 
-    if !organization.public {
-        match resolved_user {
-            Some(ref user) => {
-                if !user_is_org_member(&state, user.id, organization.id).await? {
-                    return Err(WebError::not_found("Organization"));
-                }
-            }
-            None => return Err(WebError::Unauthorized("Authorization required".to_string())),
-        }
-    }
-
-    // Look up the project.
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
         .filter(CProject::Name.eq(&project))
@@ -273,79 +376,10 @@ pub async fn get_project_badge(
         .await?
         .ok_or_else(|| WebError::not_found("Project"))?;
 
-    // Determine badge content.
     let (status, has_failed_builds) = if let Some(ref eval_attr) = params.eval {
-        // ?eval specified: find the most recent completed evaluation and look up
-        // the matching entry point's build status.
-        let evaluation = EEvaluation::find()
-            .filter(CEvaluation::Project.eq(project.id))
-            .filter(CEvaluation::Status.eq(EvaluationStatus::Completed))
-            .order_by_desc(CEvaluation::CreatedAt)
-            .one(&state.db)
-            .await?;
-
-        match evaluation {
-            None => (None, false),
-            Some(ev) => {
-                let ep = EEntryPoint::find()
-                    .filter(CEntryPoint::Evaluation.eq(ev.id))
-                    .filter(CEntryPoint::Eval.eq(eval_attr.as_str()))
-                    .one(&state.db)
-                    .await?;
-
-                match ep {
-                    None => (None, false),
-                    Some(ep) => {
-                        let build = EBuild::find_by_id(ep.build).one(&state.db).await?;
-                        let build_status = build.map(|b| b.status);
-                        let (eval_status, has_failed) = match build_status {
-                            Some(BuildStatus::Completed) | Some(BuildStatus::Substituted) => {
-                                (EvaluationStatus::Completed, false)
-                            }
-                            Some(BuildStatus::Failed) => (EvaluationStatus::Failed, true),
-                            Some(BuildStatus::Aborted) | Some(BuildStatus::DependencyFailed) => {
-                                (EvaluationStatus::Aborted, false)
-                            }
-                            Some(BuildStatus::Building) => (EvaluationStatus::Building, false),
-                            Some(BuildStatus::Queued) => (EvaluationStatus::Queued, false),
-                            _ => (EvaluationStatus::Queued, false),
-                        };
-                        (Some(eval_status), has_failed)
-                    }
-                }
-            }
-        }
-    } else if let Some(eval_id) = project.last_evaluation {
-        // No ?eval: use the overall project last evaluation status.
-        let eval = EEvaluation::find_by_id(eval_id).one(&state.db).await?;
-
-        let has_failed = match &eval {
-            Some(e) if e.status == EvaluationStatus::Completed => {
-                let ep_build_ids: Vec<uuid::Uuid> = EEntryPoint::find()
-                    .filter(CEntryPoint::Evaluation.eq(e.id))
-                    .all(&state.db)
-                    .await?
-                    .into_iter()
-                    .map(|ep| ep.build)
-                    .collect();
-
-                if ep_build_ids.is_empty() {
-                    false
-                } else {
-                    EBuild::find()
-                        .filter(CBuild::Id.is_in(ep_build_ids))
-                        .filter(CBuild::Status.eq(BuildStatus::Failed))
-                        .one(&state.db)
-                        .await?
-                        .is_some()
-                }
-            }
-            _ => false,
-        };
-
-        (eval.map(|e| e.status), has_failed)
+        badge_status_for_entry_point(&state, project.id, eval_attr).await?
     } else {
-        (None, false)
+        badge_status_for_latest_eval(&state, &project).await?
     };
 
     let content = badge_for_status(status, has_failed_builds);

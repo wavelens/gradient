@@ -91,17 +91,14 @@ impl NarReceiver {
 
     /// Append a `NarPush` chunk. When `is_final` is true the assembled buffer
     /// is delivered to any registered waiter (or dropped + warned if none).
-    pub fn accept_chunk(
-        &self,
-        job_id: &str,
-        store_path: &str,
-        data: Vec<u8>,
-        is_final: bool,
-    ) {
+    pub fn accept_chunk(&self, job_id: &str, store_path: &str, data: Vec<u8>, is_final: bool) {
         let key = (job_id.to_owned(), store_path.to_owned());
         let mut g = self.inner.lock().unwrap();
         if !data.is_empty() {
-            g.buffers.entry(key.clone()).or_default().extend_from_slice(&data);
+            g.buffers
+                .entry(key.clone())
+                .or_default()
+                .extend_from_slice(&data);
         }
         if is_final {
             let buf = g.buffers.remove(&key).unwrap_or_default();

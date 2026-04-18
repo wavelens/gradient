@@ -15,13 +15,20 @@ use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use proto::messages::{BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, FetchedInput, JobUpdateKind, QueryMode};
+use proto::messages::{
+    BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, FetchedInput, JobUpdateKind,
+    QueryMode,
+};
 use tokio::sync::oneshot;
 use tracing::debug;
 
 use crate::connection::ProtoWriter;
 use crate::proto::nar_recv::NarReceiver;
 use proto::traits::JobReporter;
+
+/// Shared map from job-id to a oneshot sender that delivers `CacheStatus` responses
+/// back to the waiting job task.
+pub(crate) type CacheWaiters = Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>>;
 
 /// Upper bound for how long a single `CacheQuery` may wait for its `CacheStatus`
 /// response. The worker dispatch loop processes server messages serially, so a
@@ -41,7 +48,7 @@ pub struct JobUpdater {
     /// Shared with the dispatch loop: when a `CacheQuery` is sent, a oneshot
     /// sender is registered here; the dispatch loop routes the `CacheStatus`
     /// reply to the waiting job task.
-    pub(crate) cache_waiters: Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>>,
+    pub(crate) cache_waiters: CacheWaiters,
     /// Routes incoming `NarPush` chunks back to the job task that requested
     /// them via `NarRequest`. Cloneable; cheap.
     pub(crate) nar_recv: NarReceiver,
@@ -51,13 +58,22 @@ impl JobUpdater {
     pub fn new(
         job_id: String,
         writer: ProtoWriter,
-        cache_waiters: Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>>,
+        cache_waiters: CacheWaiters,
         nar_recv: NarReceiver,
     ) -> Self {
-        Self { job_id, writer, cache_waiters, nar_recv }
+        Self {
+            job_id,
+            writer,
+            cache_waiters,
+            nar_recv,
+        }
     }
 
-    pub async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode) -> Result<Vec<CachedPath>> {
+    pub async fn query_cache(
+        &mut self,
+        paths: Vec<String>,
+        mode: QueryMode,
+    ) -> Result<Vec<CachedPath>> {
         cache_query_with_timeout(&self.job_id, &self.writer, &self.cache_waiters, paths, mode).await
     }
 
@@ -131,7 +147,7 @@ impl JobUpdater {
 async fn cache_query_with_timeout(
     job_id: &str,
     writer: &ProtoWriter,
-    cache_waiters: &Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>>,
+    cache_waiters: &CacheWaiters,
     paths: Vec<String>,
     mode: QueryMode,
 ) -> Result<Vec<CachedPath>> {
@@ -139,10 +155,7 @@ async fn cache_query_with_timeout(
     let (tx, rx) = oneshot::channel();
     // Re-using the same key drops any stale sender; the previous waiter then
     // sees `RecvError` and bails out instead of blocking forever.
-    cache_waiters
-        .lock()
-        .unwrap()
-        .insert(job_id.to_owned(), tx);
+    cache_waiters.lock().unwrap().insert(job_id.to_owned(), tx);
     writer.send(ClientMessage::CacheQuery {
         job_id: job_id.to_owned(),
         paths,
@@ -169,7 +182,11 @@ async fn cache_query_with_timeout(
 
 #[async_trait]
 impl JobReporter for JobUpdater {
-    async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode) -> Result<Vec<CachedPath>> {
+    async fn query_cache(
+        &mut self,
+        paths: Vec<String>,
+        mode: QueryMode,
+    ) -> Result<Vec<CachedPath>> {
         cache_query_with_timeout(&self.job_id, &self.writer, &self.cache_waiters, paths, mode).await
     }
 
@@ -195,14 +212,22 @@ impl JobReporter for JobUpdater {
         warnings: Vec<String>,
         errors: Vec<String>,
     ) -> Result<()> {
-        self.send_update(JobUpdateKind::EvalResult { derivations, warnings, errors })
+        self.send_update(JobUpdateKind::EvalResult {
+            derivations,
+            warnings,
+            errors,
+        })
     }
 
     async fn report_building(&mut self, build_id: String) -> Result<()> {
         self.send_update(JobUpdateKind::Building { build_id })
     }
 
-    async fn report_build_output(&mut self, build_id: String, outputs: Vec<BuildOutput>) -> Result<()> {
+    async fn report_build_output(
+        &mut self,
+        build_id: String,
+        outputs: Vec<BuildOutput>,
+    ) -> Result<()> {
         self.send_update(JobUpdateKind::BuildOutput { build_id, outputs })
     }
 
@@ -248,7 +273,10 @@ mod tests {
         }};
     }
 
-    fn make_updater(job_id: String, conn: crate::connection::ProtoConnection) -> (JobUpdater, crate::connection::ProtoReader) {
+    fn make_updater(
+        job_id: String,
+        conn: crate::connection::ProtoConnection,
+    ) -> (JobUpdater, crate::connection::ProtoReader) {
         let (writer, reader) = conn.split();
         let cache_waiters = Arc::new(Mutex::new(HashMap::new()));
         let nar_recv = NarReceiver::new();
@@ -269,10 +297,13 @@ mod tests {
         });
 
         let (updater, _reader) = make_updater(job_id, conn);
-        updater.writer.send(ClientMessage::JobUpdate {
-            job_id: updater.job_id.clone(),
-            update: JobUpdateKind::Fetching,
-        }).unwrap();
+        updater
+            .writer
+            .send(ClientMessage::JobUpdate {
+                job_id: updater.job_id.clone(),
+                update: JobUpdateKind::Fetching,
+            })
+            .unwrap();
         server_task.await.unwrap();
     }
 
@@ -299,14 +330,17 @@ mod tests {
         });
 
         let (updater, _reader) = make_updater(job_id, conn);
-        updater.writer.send(ClientMessage::JobUpdate {
-            job_id: updater.job_id.clone(),
-            update: JobUpdateKind::EvalResult {
-                derivations: vec![],
-                warnings: vec!["warn1".to_owned()],
-                errors: vec![],
-            },
-        }).unwrap();
+        updater
+            .writer
+            .send(ClientMessage::JobUpdate {
+                job_id: updater.job_id.clone(),
+                update: JobUpdateKind::EvalResult {
+                    derivations: vec![],
+                    warnings: vec!["warn1".to_owned()],
+                    errors: vec![],
+                },
+            })
+            .unwrap();
         server_task.await.unwrap();
     }
 
@@ -329,11 +363,14 @@ mod tests {
         });
 
         let (updater, _reader) = make_updater(job_id, conn);
-        updater.writer.send(ClientMessage::LogChunk {
-            job_id: updater.job_id.clone(),
-            task_index: 3,
-            data: b"hello log".to_vec(),
-        }).unwrap();
+        updater
+            .writer
+            .send(ClientMessage::LogChunk {
+                job_id: updater.job_id.clone(),
+                task_index: 3,
+                data: b"hello log".to_vec(),
+            })
+            .unwrap();
         server_task.await.unwrap();
     }
 
@@ -349,7 +386,12 @@ mod tests {
         });
 
         let (updater, _reader) = make_updater(job_id, conn);
-        updater.writer.send(ClientMessage::JobCompleted { job_id: updater.job_id.clone() }).unwrap();
+        updater
+            .writer
+            .send(ClientMessage::JobCompleted {
+                job_id: updater.job_id.clone(),
+            })
+            .unwrap();
         server_task.await.unwrap();
     }
 
@@ -366,10 +408,13 @@ mod tests {
         });
 
         let (updater, _reader) = make_updater(job_id, conn);
-        updater.writer.send(ClientMessage::JobFailed {
-            job_id: updater.job_id.clone(),
-            error: "something went wrong".to_owned(),
-        }).unwrap();
+        updater
+            .writer
+            .send(ClientMessage::JobFailed {
+                job_id: updater.job_id.clone(),
+                error: "something went wrong".to_owned(),
+            })
+            .unwrap();
         server_task.await.unwrap();
     }
 }

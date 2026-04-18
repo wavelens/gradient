@@ -13,7 +13,7 @@
         <h1>{{ org.display_name }}</h1>
         <p class="text-secondary">{{ org.description || 'No description' }}</p>
       </div>
-      @if (authService.isAuthenticated()) {
+      @if (org.role) {
         <div class="header-actions">
           <button pButton label="Create Project" icon="pi pi-plus" (click)="openCreateDialog()"></button>
           <button pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/organization', orgName, 'settings']"></button>
@@ -59,9 +59,9 @@
       <app-empty-state
         icon="folder"
         title="No projects yet"
-        [message]="authService.isAuthenticated() ? 'Create your first project to start evaluating Nix builds' : 'No projects have been created yet'"
-        [actionLabel]="authService.isAuthenticated() ? 'Create Project' : ''"
-        (actionClick)="authService.isAuthenticated() && openCreateDialog()"
+        [message]="org.role ? 'Create your first project to start evaluating Nix builds' : 'No projects have been created yet'"
+        [actionLabel]="org.role ? 'Create Project' : ''"
+        (actionClick)="org.role && openCreateDialog()"
       />
     }
   }

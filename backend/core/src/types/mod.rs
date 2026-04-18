@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod build_output_metadata;
+pub mod cached_path_info;
+pub mod config;
 pub mod consts;
 pub mod input;
 pub mod proto;
@@ -14,6 +17,9 @@ mod entity_aliases;
 mod io;
 mod nix_cache;
 
+pub use self::build_output_metadata::BuildOutputMetadata;
+pub use self::cached_path_info::CachedPathInfo;
+pub use self::config::{EmailConfig, GitHubAppConfig, OidcConfig, S3Config};
 pub use self::consts::*;
 pub use self::entity_aliases::*;
 pub use self::input::*;
@@ -138,13 +144,9 @@ pub struct Cli {
     /// `list` / `resolve` calls. Nix's Boehm GC never releases memory
     /// back to the OS, so long-lived workers grow monotonically; this
     /// cap bounds RSS growth by forcing a respawn. Set to 0 to disable.
-    #[arg(
-        long,
-        env = "GRADIENT_MAX_EVALUATIONS_PER_WORKER",
-        default_value = "1"
-    )]
+    #[arg(long, env = "GRADIENT_MAX_EVALUATIONS_PER_WORKER", default_value = "1")]
     pub max_evaluations_per_worker: usize,
-/// TTL in hours for cached NAR files that have not been fetched recently.
+    /// TTL in hours for cached NAR files that have not been fetched recently.
     /// When expired the NAR is removed from storage and its GC root is deleted.
     /// Set to 0 to disable (default).
     #[arg(long, env = "GRADIENT_NAR_TTL_HOURS", default_value_t = 0)]

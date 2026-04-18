@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_core::types::proto::{CandidateScore, GradientCapabilities, JobKind, JobUpdateKind, QueryMode};
+use gradient_core::types::proto::{
+    CandidateScore, GradientCapabilities, JobKind, JobUpdateKind, QueryMode,
+};
 use rkyv::{Archive, Deserialize, Serialize};
 
 /// Messages sent from the client (worker / federated peer) to the server.
