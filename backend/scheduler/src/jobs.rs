@@ -27,6 +27,9 @@ pub struct PendingEvalJob {
     pub repository: String,
     pub job: FlakeJob,
     pub required_paths: Vec<RequiredPath>,
+    /// `evaluation.updated_at` at the time this job was dispatched.
+    /// Used by the scoring policy to prefer evaluations that have waited longer.
+    pub queued_at: chrono::NaiveDateTime,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +45,12 @@ pub struct PendingBuildJob {
     pub architecture: String,
     /// Nix system features the build needs (e.g. `["kvm", "big-parallel"]`).
     pub required_features: Vec<String>,
+    /// Number of direct derivation dependencies (inputs) this build has.
+    /// Used by the scoring policy to prefer builds that unblock more work.
+    pub dependency_count: u32,
+    /// `build.updated_at` at the time this job was dispatched to the tracker.
+    /// Used by the scoring policy to prefer builds that have waited longer.
+    pub queued_at: chrono::NaiveDateTime,
 }
 
 /// A connected worker's build-relevant capabilities, used to gate which
@@ -110,6 +119,20 @@ impl PendingJob {
         match self {
             PendingJob::Eval(j) => j.evaluation_id,
             PendingJob::Build(j) => j.evaluation_id,
+        }
+    }
+
+    pub fn dependency_count(&self) -> u32 {
+        match self {
+            PendingJob::Build(j) => j.dependency_count,
+            PendingJob::Eval(_) => 0,
+        }
+    }
+
+    pub fn queued_at(&self) -> chrono::NaiveDateTime {
+        match self {
+            PendingJob::Build(j) => j.queued_at,
+            PendingJob::Eval(j) => j.queued_at,
         }
     }
 }
@@ -248,6 +271,8 @@ impl JobTracker {
                         job: job_a,
                         missing_count: s.map(|s| s.missing_count),
                         missing_nar_size: s.map(|s| s.missing_nar_size),
+                        dependency_count: job_a.dependency_count(),
+                        queued_at: job_a.queued_at(),
                     };
                     policy.score(&ctx, worker_ctx)
                 };
@@ -257,6 +282,8 @@ impl JobTracker {
                         job: job_b,
                         missing_count: s.map(|s| s.missing_count),
                         missing_nar_size: s.map(|s| s.missing_nar_size),
+                        dependency_count: job_b.dependency_count(),
+                        queued_at: job_b.queued_at(),
                     };
                     policy.score(&ctx, worker_ctx)
                 };
@@ -385,6 +412,7 @@ mod tests {
                 sign: None,
             },
             required_paths: vec![],
+            queued_at: chrono::Utc::now().naive_utc(),
         })
     }
 
@@ -413,6 +441,8 @@ mod tests {
             required_paths: required,
             architecture: architecture.into(),
             required_features,
+            dependency_count: 0,
+            queued_at: chrono::Utc::now().naive_utc(),
         })
     }
 

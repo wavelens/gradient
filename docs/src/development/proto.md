@@ -634,6 +634,27 @@ sequenceDiagram
     W->>S: JobCompleted
 ```
 
+#### BFS Subtree Pruning
+
+Before enqueuing each wave of input-derivation paths, the worker sends `QueryKnownDerivations` with all newly-discovered `.drv` paths in that wave. The server returns the subset it already has in its `derivation` table for the owning org. The worker:
+
+ 1. Pre-marks all new dep paths as visited (prevents double-enqueuing).
+ 2. Enqueues **unknown** paths for further BFS traversal.
+ 3. For **known** paths, adds a minimal `DiscoveredDerivation` entry (empty outputs/deps) directly to the batch — no further traversal needed. The server-side `DerivationInsertBatch` handles these via its `load_existing_derivations` path and creates build rows normally.
+
+This avoids redundantly re-walking the entire closure of large packages (e.g. stdenv) that were already fully recorded in a previous evaluation of the same org.
+
+```mermaid
+sequenceDiagram
+    participant W as Worker
+    participant S as Server
+
+    Note over W: BFS wave — discovers deps [A, B, C, D]
+    W->>S: QueryKnownDerivations { drv_paths: [A, B, C, D] }
+    S->>W: KnownDerivations { known: [A, C] }
+    Note over W: A, C → add as minimal DiscoveredDerivation<br/>B, D → enqueue for full BFS traversal
+```
+
 The server processes each batch immediately:
 
  1. Insert `derivation`, `derivation_output`, `derivation_dependency` rows.
@@ -748,6 +769,12 @@ enum ServerMessage {
 
     // Cache queries
     CacheStatus { job_id: String, cached: Vec<CachedPath> },   // response to CacheQuery
+
+    // BFS pruning (EvaluateDerivations)
+    /// Response to `QueryKnownDerivations`.  `known` is the subset of the
+    /// requested `.drv` paths that are already in the server's derivation table
+    /// for the owning org.
+    KnownDerivations { job_id: String, known: Vec<String> },
 }
 
 struct FailedPeer { peer_id: Uuid, reason: String }
@@ -789,6 +816,13 @@ enum ClientMessage {
 
     // Cache queries
     CacheQuery { job_id: String, paths: Vec<String>, mode: QueryMode },  // see QueryMode
+
+    // BFS pruning (EvaluateDerivations)
+    /// Ask the server which of the given `.drv` paths are already recorded in
+    /// its derivation table for the org that owns `job_id`.  The server responds
+    /// with `KnownDerivations`.  The worker uses this to skip re-traversing
+    /// subtrees that were fully recorded during a previous evaluation.
+    QueryKnownDerivations { job_id: String, drv_paths: Vec<String> },
 }
 
 enum QueryMode { Normal, Pull, Push }  // default: Normal

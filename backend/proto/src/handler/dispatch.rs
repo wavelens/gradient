@@ -145,6 +145,9 @@ impl<'a> DispatchContext<'a> {
                 paths,
                 mode,
             } => self.on_cache_query(job_id, paths, mode).await,
+            ClientMessage::QueryKnownDerivations { job_id, drv_paths } => {
+                self.on_query_known_derivations(job_id, drv_paths).await
+            }
         }
     }
 
@@ -515,6 +518,36 @@ impl<'a> DispatchContext<'a> {
         let cached = handle_cache_query(self.state, org_id, &paths, mode).await;
         debug!(peer_id = %self.peer_id, %job_id, entries = cached.len(), "CacheStatus");
         send_server_msg(self.socket, &ServerMessage::CacheStatus { job_id, cached })
+            .await
+            .is_ok()
+    }
+
+    async fn on_query_known_derivations(
+        &mut self,
+        job_id: String,
+        drv_paths: Vec<String>,
+    ) -> bool {
+        debug!(peer_id = %self.peer_id, %job_id, count = drv_paths.len(), "QueryKnownDerivations");
+        let known = match self.scheduler.peer_id_for_job(&job_id).await {
+            Some(org_id) => {
+                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+                EDerivation::find()
+                    .filter(CDerivation::Organization.eq(org_id))
+                    .filter(CDerivation::DerivationPath.is_in(drv_paths))
+                    .all(&self.state.db)
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|d| d.derivation_path)
+                    .collect()
+            }
+            None => {
+                warn!(peer_id = %self.peer_id, %job_id, "QueryKnownDerivations: no org for job");
+                vec![]
+            }
+        };
+        debug!(peer_id = %self.peer_id, %job_id, known = known.len(), "KnownDerivations");
+        send_server_msg(self.socket, &ServerMessage::KnownDerivations { job_id, known })
             .await
             .is_ok()
     }

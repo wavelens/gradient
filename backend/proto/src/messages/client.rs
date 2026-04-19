@@ -166,4 +166,16 @@ pub enum ClientMessage {
         /// Defaults to [`QueryMode::Normal`] when deserialized from an older client.
         mode: QueryMode,
     },
+
+    /// Query which of the given `.drv` paths the server already has recorded in
+    /// its derivation table for the org that owns `job_id`.
+    ///
+    /// Server responds with [`super::server::ServerMessage::KnownDerivations`].
+    /// The worker uses the response to prune BFS subtrees: if a derivation is
+    /// already fully recorded on the server, there is no need to traverse its
+    /// `inputDrvs` again.
+    QueryKnownDerivations {
+        job_id: String,
+        drv_paths: Vec<String>,
+    },
 }

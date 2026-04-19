@@ -325,14 +325,65 @@ impl<'a> ClosureWalker<'a> {
 
         let parsed_drvs = parse_drv_wave(self.drv_reader, &wave).await?;
 
-        for ((attr, drv_path), drv) in wave.into_iter().zip(parsed_drvs) {
-            // Expand BFS frontier.
+        // Collect all new input-derivation paths from this wave so we can
+        // batch-query the server once rather than once per derivation.
+        let mut new_deps: Vec<String> = Vec::new();
+        for drv in &parsed_drvs {
             for (input_drv, _) in &drv.input_derivations {
-                if self.visited.insert(input_drv.clone()) {
-                    self.queue.push_back((None, input_drv.clone()));
+                if !self.visited.contains(input_drv.as_str()) {
+                    new_deps.push(input_drv.clone());
                 }
             }
+        }
+        new_deps.sort_unstable();
+        new_deps.dedup();
 
+        // Pre-mark ALL new deps as visited so nothing adds them twice.
+        for dep in &new_deps {
+            self.visited.insert(dep.clone());
+        }
+
+        // Ask the server which deps it already has.  Known deps don't need
+        // subtree traversal; we add them as minimal DiscoveredDerivation
+        // entries so the server can still create build rows for them.
+        let known_set: HashSet<String> = if new_deps.is_empty() {
+            HashSet::new()
+        } else {
+            updater
+                .query_known_derivations(new_deps.clone())
+                .await
+                .unwrap_or_else(|e| {
+                    warn!(error = %e, "query_known_derivations failed; treating all as unknown");
+                    vec![]
+                })
+                .into_iter()
+                .collect()
+        };
+
+        if !known_set.is_empty() {
+            debug!(pruned = known_set.len(), "BFS: pruning known subtrees");
+        }
+
+        // Enqueue unknown deps; add known deps to the batch directly.
+        for dep in new_deps {
+            if known_set.contains(&dep) {
+                // Server already has the full subtree — report the derivation
+                // (so a build row is created) but skip further traversal.
+                self.batch.push(DiscoveredDerivation {
+                    attr: String::new(),
+                    drv_path: dep,
+                    outputs: vec![],
+                    dependencies: vec![],
+                    architecture: String::new(),
+                    required_features: vec![],
+                    substituted: false,
+                });
+            } else {
+                self.queue.push_back((None, dep));
+            }
+        }
+
+        for ((attr, drv_path), drv) in wave.into_iter().zip(parsed_drvs) {
             self.batch
                 .push(build_discovered_derivation(attr, drv_path, &drv));
             self.walked += 1;

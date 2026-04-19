@@ -279,6 +279,8 @@ async fn dispatch_ready_build_enqueues_job() {
         .append_query_results([vec![make_project(project_id, org_id)]])
         // 5. derivation_feature edges for required_features lookup → empty
         .append_query_results([Vec::<entity::derivation_feature::Model>::new()])
+        // 6. derivation_dependency edges for dep_counts → empty
+        .append_query_results([Vec::<entity::derivation_dependency::Model>::new()])
         .into_connection();
 
     let scheduler = make_scheduler(db);
@@ -312,6 +314,8 @@ async fn dispatch_ready_build_skips_already_enqueued() {
         .append_query_results([vec![make_project(project_id, org_id)]])
         // derivation_feature edges (none) → no follow-up feature name lookup
         .append_query_results([Vec::<entity::derivation_feature::Model>::new()])
+        // derivation_dependency edges for dep_counts → empty
+        .append_query_results([Vec::<entity::derivation_dependency::Model>::new()])
         // Second dispatch:
         // raw SQL query returns the same build; contains_job → true → skips lookups
         .append_query_results([vec![make_build_queued(build_id, eval_id, drv_id)]])

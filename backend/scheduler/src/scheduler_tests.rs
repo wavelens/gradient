@@ -45,6 +45,7 @@ fn eval_job(peer: Uuid) -> PendingEvalJob {
             sign: None,
         },
         required_paths: vec![],
+        queued_at: chrono::Utc::now().naive_utc(),
     }
 }
 

@@ -56,6 +56,14 @@ pub trait JobReporter: Send {
     /// - [`QueryMode::Push`]   — all paths; uncached ones include presigned S3 PUT URLs.
     async fn query_cache(&mut self, paths: Vec<String>, mode: QueryMode)
     -> Result<Vec<CachedPath>>;
+
+    /// Query the server for which of the given `.drv` paths are already in its
+    /// derivation table for the owning org.
+    ///
+    /// Returns the subset of `drv_paths` that the server already knows about.
+    /// The BFS closure walker uses this to skip re-traversing subtrees of
+    /// derivations that were fully recorded in a previous evaluation.
+    async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>>;
     async fn report_fetching(&mut self) -> Result<()>;
     async fn report_fetch_result(&mut self, fetched_paths: Vec<FetchedInput>) -> Result<()>;
     async fn report_evaluating_flake(&mut self) -> Result<()>;

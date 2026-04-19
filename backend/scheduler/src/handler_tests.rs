@@ -132,6 +132,7 @@ fn make_eval_job(eval_id: Uuid, org_id: Uuid) -> PendingEvalJob {
             sign: None,
         },
         required_paths: vec![],
+        queued_at: chrono::Utc::now().naive_utc(),
     }
 }
 
@@ -152,6 +153,8 @@ fn make_build_job(build_id: Uuid, eval_id: Uuid, org_id: Uuid) -> PendingBuildJo
         required_paths: vec![],
         architecture: "x86_64-linux".into(),
         required_features: vec![],
+        dependency_count: 0,
+        queued_at: chrono::Utc::now().naive_utc(),
     }
 }
 
@@ -1858,6 +1861,7 @@ async fn eval_result_creates_entry_points_for_project() {
             sign: None,
         },
         required_paths: vec![],
+        queued_at: chrono::Utc::now().naive_utc(),
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -2108,6 +2112,7 @@ async fn eval_result_all_substituted_with_project_completes() {
             sign: None,
         },
         required_paths: vec![],
+        queued_at: chrono::Utc::now().naive_utc(),
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)

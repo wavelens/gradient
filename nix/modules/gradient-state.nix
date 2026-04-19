@@ -298,15 +298,15 @@
     options = {
       name = mkOption {
         type = types.str;
-        description = "Human-readable display name for this worker. Shown in the UI.";
-        example = "build-server-1";
+        default = name;
+        defaultText = "<attrset key>";
+        description = "Display name for the worker";
       };
 
       worker_id = mkOption {
         type = types.str;
-        default = name;
-        defaultText = "<attrset key>";
         description = "Worker identity string. Must match GRADIENT_WORKER_ID on the worker machine.";
+        example = "123e4567-e89b-12d3-a456-426614174000";
       };
 
       url = mkOption {
@@ -390,6 +390,7 @@
           can authenticate via challenge-response. The token is read from
           token_file, hashed, and stored — the plaintext is never persisted.
         '';
+
         example = literalExpression ''
           {
             builder-1 = {

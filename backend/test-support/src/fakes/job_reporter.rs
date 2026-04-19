@@ -47,6 +47,10 @@ pub struct RecordingJobReporter {
     /// Paths to return from `query_cache`. Tests set this to simulate
     /// paths already present in the server's cache.
     pub cached_paths: Vec<String>,
+    /// Derivation paths to return from `query_known_derivations`. Tests set
+    /// this to simulate derivations already recorded on the server, causing
+    /// the BFS to prune those subtrees.
+    pub known_drv_paths: Vec<String>,
 }
 
 impl RecordingJobReporter {
@@ -57,6 +61,13 @@ impl RecordingJobReporter {
     /// Configure paths that `query_cache` will report as cached.
     pub fn with_cached_paths(mut self, paths: Vec<String>) -> Self {
         self.cached_paths = paths;
+        self
+    }
+
+    /// Configure `.drv` paths that `query_known_derivations` will report as
+    /// already known, causing the BFS to prune those subtrees.
+    pub fn with_known_drv_paths(mut self, paths: Vec<String>) -> Self {
+        self.known_drv_paths = paths;
         self
     }
 
@@ -95,6 +106,15 @@ impl RecordingJobReporter {
 
 #[async_trait]
 impl JobReporter for RecordingJobReporter {
+    async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>> {
+        let known_set: std::collections::HashSet<&str> =
+            self.known_drv_paths.iter().map(|s| s.as_str()).collect();
+        Ok(drv_paths
+            .into_iter()
+            .filter(|p| known_set.contains(p.as_str()))
+            .collect())
+    }
+
     async fn query_cache(
         &mut self,
         paths: Vec<String>,

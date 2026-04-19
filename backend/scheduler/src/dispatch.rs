@@ -236,6 +236,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             repository: eval.repository.clone(),
             job: flake_job,
             required_paths: vec![],
+            queued_at: eval.updated_at,
         };
 
         scheduler.enqueue_eval_job(job_id.clone(), pending).await;
@@ -280,6 +281,8 @@ struct BuildDispatchMaps {
     direct_builds: HashMap<Uuid, Uuid>,
     features_by_drv: HashMap<Uuid, Vec<Uuid>>,
     feature_names: HashMap<Uuid, String>,
+    /// derivation_id → number of direct dependencies
+    dep_counts: HashMap<Uuid, u32>,
 }
 
 impl BuildDispatchMaps {
@@ -348,7 +351,7 @@ impl BuildDispatchMaps {
 
         // Required features: per-derivation list of feature names.
         let feature_edges = EDerivationFeature::find()
-            .filter(CDerivationFeature::Derivation.is_in(drv_ids))
+            .filter(CDerivationFeature::Derivation.is_in(drv_ids.clone()))
             .all(&state.db)
             .await
             .unwrap_or_default();
@@ -374,6 +377,20 @@ impl BuildDispatchMaps {
                 .collect()
         };
 
+        // Count direct dependencies per derivation for the scoring policy.
+        let dep_counts: HashMap<Uuid, u32> = {
+            let edges = EDerivationDependency::find()
+                .filter(CDerivationDependency::Derivation.is_in(drv_ids))
+                .all(&state.db)
+                .await
+                .unwrap_or_default();
+            let mut counts: HashMap<Uuid, u32> = HashMap::new();
+            for e in edges {
+                *counts.entry(e.derivation).or_insert(0) += 1;
+            }
+            counts
+        };
+
         Ok(Self {
             derivations,
             evaluations,
@@ -381,6 +398,7 @@ impl BuildDispatchMaps {
             direct_builds,
             features_by_drv,
             feature_names,
+            dep_counts,
         })
     }
 
@@ -438,6 +456,8 @@ impl BuildDispatchMaps {
             required_paths: vec![],
             architecture: derivation.architecture.clone(),
             required_features: self.required_features(build.derivation),
+            dependency_count: self.dep_counts.get(&build.derivation).copied().unwrap_or(0),
+            queued_at: build.updated_at,
         };
 
         Some((job_id, pending))

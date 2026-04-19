@@ -23,7 +23,7 @@ use crate::config::WorkerConfig;
 use crate::connection::{ProtoConnection, ProtoWriter};
 use crate::executor::JobExecutor;
 use crate::proto::credentials::CredentialStore;
-use crate::proto::job::{CacheWaiters, JobUpdater};
+use crate::proto::job::{CacheWaiters, JobUpdater, KnownDerivationWaiters};
 use crate::proto::scorer::JobScorer;
 
 use super::scoring::{send_score_chunks, spawn_scoring_task};
@@ -44,6 +44,7 @@ pub(super) async fn run_dispatch_loop(
     let (writer, mut reader) = conn.split();
 
     let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
+    let known_derivation_waiters: KnownDerivationWaiters = Arc::new(Mutex::new(HashMap::new()));
     let mut draining = false;
     let nar_recv = crate::proto::nar_recv::NarReceiver::new();
     let mut abort_senders: HashMap<String, watch::Sender<bool>> = HashMap::new();
@@ -65,7 +66,7 @@ pub(super) async fn run_dispatch_loop(
             Some((job_id, result)) = done_rx.recv() => {
                 on_job_done(
                     job_id, result,
-                    &writer, &cache_waiters, &nar_recv,
+                    &writer, &cache_waiters, &known_derivation_waiters, &nar_recv,
                     credentials, &mut job_kinds, &mut abort_senders,
                     &draining, max_eval, max_build,
                 )?;
@@ -88,6 +89,7 @@ pub(super) async fn run_dispatch_loop(
                 let result = MessageHandler {
                     writer: &writer,
                     cache_waiters: &cache_waiters,
+                    known_derivation_waiters: &known_derivation_waiters,
                     nar_recv: &nar_recv,
                     abort_senders: &mut abort_senders,
                     job_kinds: &mut job_kinds,
@@ -128,6 +130,7 @@ fn on_job_done(
     result: Result<()>,
     writer: &ProtoWriter,
     cache_waiters: &CacheWaiters,
+    known_derivation_waiters: &KnownDerivationWaiters,
     nar_recv: &crate::proto::nar_recv::NarReceiver,
     credentials: &mut CredentialStore,
     job_kinds: &mut HashMap<String, JobKind>,
@@ -138,6 +141,7 @@ fn on_job_done(
 ) -> Result<()> {
     abort_senders.remove(&job_id);
     cache_waiters.lock().unwrap().remove(&job_id);
+    known_derivation_waiters.lock().unwrap().remove(&job_id);
     nar_recv.forget_job(&job_id);
     credentials.clear();
 
@@ -219,6 +223,7 @@ fn on_heartbeat(
 pub(super) struct MessageHandler<'a> {
     pub writer: &'a ProtoWriter,
     pub cache_waiters: &'a CacheWaiters,
+    pub known_derivation_waiters: &'a KnownDerivationWaiters,
     pub nar_recv: &'a crate::proto::nar_recv::NarReceiver,
     pub abort_senders: &'a mut HashMap<String, watch::Sender<bool>>,
     pub job_kinds: &'a mut HashMap<String, JobKind>,
@@ -313,6 +318,9 @@ impl<'a> MessageHandler<'a> {
             }
             ServerMessage::CacheStatus { job_id, cached } => {
                 self.on_cache_status(job_id, cached);
+            }
+            ServerMessage::KnownDerivations { job_id, known } => {
+                self.on_known_derivations(job_id, known);
             }
         }
         Ok(())
@@ -457,13 +465,19 @@ impl<'a> MessageHandler<'a> {
         let credentials = self.credentials.clone();
         let job_writer = self.writer.clone();
         let job_cache_waiters = Arc::clone(self.cache_waiters);
+        let job_known_derivation_waiters = Arc::clone(self.known_derivation_waiters);
         let job_nar_recv = self.nar_recv.clone();
         let job_done_tx = self.done_tx.clone();
         let jid = job_id.clone();
 
         tokio::spawn(async move {
-            let mut updater =
-                JobUpdater::new(jid.clone(), job_writer, job_cache_waiters, job_nar_recv);
+            let mut updater = JobUpdater::new(
+                jid.clone(),
+                job_writer,
+                job_cache_waiters,
+                job_known_derivation_waiters,
+                job_nar_recv,
+            );
             let result = run_job(executor, job, &mut updater, &credentials, abort_rx).await;
             let _ = job_done_tx.send((jid, result));
         });
@@ -535,6 +549,14 @@ impl<'a> MessageHandler<'a> {
         }
     }
 
+    fn on_known_derivations(self, job_id: String, known: Vec<String>) {
+        if let Some(tx) = self.known_derivation_waiters.lock().unwrap().remove(&job_id) {
+            let _ = tx.send(known);
+        } else {
+            debug!(%job_id, count = known.len(), "KnownDerivations arrived after waiter cleared");
+        }
+    }
+
     // ── Auth ──────────────────────────────────────────────────────────────────
 
     fn on_auth_challenge(self, peers: Vec<String>) -> Result<()> {
@@ -585,6 +607,7 @@ pub(super) fn msg_kind(msg: &ServerMessage) -> &'static str {
         ServerMessage::AuthChallenge { .. } => "AuthChallenge",
         ServerMessage::AuthUpdate { .. } => "AuthUpdate",
         ServerMessage::CacheStatus { .. } => "CacheStatus",
+        ServerMessage::KnownDerivations { .. } => "KnownDerivations",
     }
 }
 

@@ -30,6 +30,11 @@ use proto::traits::JobReporter;
 /// back to the waiting job task.
 pub(crate) type CacheWaiters = Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>>;
 
+/// Shared map from job-id to a oneshot sender that delivers `KnownDerivations`
+/// responses back to the waiting job task.
+pub(crate) type KnownDerivationWaiters =
+    Arc<Mutex<HashMap<String, oneshot::Sender<Vec<String>>>>>;
+
 /// Upper bound for how long a single `CacheQuery` may wait for its `CacheStatus`
 /// response. The worker dispatch loop processes server messages serially, so a
 /// slow `JobOffer` scoring pass can delay routing a `CacheStatus` to the waiter.
@@ -49,6 +54,10 @@ pub struct JobUpdater {
     /// sender is registered here; the dispatch loop routes the `CacheStatus`
     /// reply to the waiting job task.
     pub(crate) cache_waiters: CacheWaiters,
+    /// Shared with the dispatch loop: when a `QueryKnownDerivations` is sent,
+    /// a oneshot sender is registered here; the dispatch loop routes the
+    /// `KnownDerivations` reply to the waiting job task.
+    pub(crate) known_derivation_waiters: KnownDerivationWaiters,
     /// Routes incoming `NarPush` chunks back to the job task that requested
     /// them via `NarRequest`. Cloneable; cheap.
     pub(crate) nar_recv: NarReceiver,
@@ -59,12 +68,14 @@ impl JobUpdater {
         job_id: String,
         writer: ProtoWriter,
         cache_waiters: CacheWaiters,
+        known_derivation_waiters: KnownDerivationWaiters,
         nar_recv: NarReceiver,
     ) -> Self {
         Self {
             job_id,
             writer,
             cache_waiters,
+            known_derivation_waiters,
             nar_recv,
         }
     }
@@ -75,6 +86,16 @@ impl JobUpdater {
         mode: QueryMode,
     ) -> Result<Vec<CachedPath>> {
         cache_query_with_timeout(&self.job_id, &self.writer, &self.cache_waiters, paths, mode).await
+    }
+
+    pub async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>> {
+        known_derivations_with_timeout(
+            &self.job_id,
+            &self.writer,
+            &self.known_derivation_waiters,
+            drv_paths,
+        )
+        .await
     }
 
     /// Send `NarRequest { paths }` and wait for every requested path to arrive
@@ -142,6 +163,38 @@ impl JobUpdater {
     }
 }
 
+/// Send a `QueryKnownDerivations` and wait for the matching `KnownDerivations`,
+/// with a hard timeout so a stalled dispatch loop can't hang the eval task.
+async fn known_derivations_with_timeout(
+    job_id: &str,
+    writer: &ProtoWriter,
+    waiters: &KnownDerivationWaiters,
+    drv_paths: Vec<String>,
+) -> Result<Vec<String>> {
+    let path_count = drv_paths.len();
+    let (tx, rx) = oneshot::channel();
+    waiters.lock().unwrap().insert(job_id.to_owned(), tx);
+    writer.send(ClientMessage::QueryKnownDerivations {
+        job_id: job_id.to_owned(),
+        drv_paths,
+    })?;
+    match tokio::time::timeout(CACHE_QUERY_TIMEOUT, rx).await {
+        Ok(Ok(known)) => Ok(known),
+        Ok(Err(_)) => Err(anyhow::anyhow!(
+            "known-derivation waiter dropped — connection closed or superseded?"
+        )),
+        Err(_) => {
+            waiters.lock().unwrap().remove(job_id);
+            Err(anyhow::anyhow!(
+                "QueryKnownDerivations for {} paths timed out after {}s (job_id={})",
+                path_count,
+                CACHE_QUERY_TIMEOUT.as_secs(),
+                job_id,
+            ))
+        }
+    }
+}
+
 /// Send a `CacheQuery` and wait for the matching `CacheStatus`, with a hard
 /// timeout so a stalled dispatch loop can't hang the eval task forever.
 async fn cache_query_with_timeout(
@@ -188,6 +241,16 @@ impl JobReporter for JobUpdater {
         mode: QueryMode,
     ) -> Result<Vec<CachedPath>> {
         cache_query_with_timeout(&self.job_id, &self.writer, &self.cache_waiters, paths, mode).await
+    }
+
+    async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>> {
+        known_derivations_with_timeout(
+            &self.job_id,
+            &self.writer,
+            &self.known_derivation_waiters,
+            drv_paths,
+        )
+        .await
     }
 
     async fn report_fetching(&mut self) -> Result<()> {
@@ -279,8 +342,9 @@ mod tests {
     ) -> (JobUpdater, crate::connection::ProtoReader) {
         let (writer, reader) = conn.split();
         let cache_waiters = Arc::new(Mutex::new(HashMap::new()));
+        let known_derivation_waiters = Arc::new(Mutex::new(HashMap::new()));
         let nar_recv = NarReceiver::new();
-        let updater = JobUpdater::new(job_id, writer, cache_waiters, nar_recv);
+        let updater = JobUpdater::new(job_id, writer, cache_waiters, known_derivation_waiters, nar_recv);
         (updater, reader)
     }
 

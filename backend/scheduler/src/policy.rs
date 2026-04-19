@@ -34,6 +34,11 @@ pub struct JobContext<'a> {
     /// Total uncompressed NAR size (bytes) of the missing paths.
     /// `None` when no score has been submitted.
     pub missing_nar_size: Option<u64>,
+    /// Number of direct derivation dependencies this build has.
+    pub dependency_count: u32,
+    /// When the build entered the queue (`build.updated_at`).
+    /// Used to prefer builds that have waited longer.
+    pub queued_at: chrono::NaiveDateTime,
 }
 
 /// Build-relevant capabilities of the requesting worker.
@@ -157,6 +162,68 @@ impl Rule for BuiltinDeprioritizeRule {
     }
 }
 
+/// Prefer builds that have more derivation dependencies.
+///
+/// A build with many inputs is likely a "root" that unblocks a large portion
+/// of the dependency graph once it finishes, so scheduling it early reduces
+/// overall wall-clock time for the evaluation.
+///
+/// Score contribution: `dependency_count as f64 * dep_bonus_per_dep`.
+#[derive(Debug)]
+pub struct DependencyCountRule {
+    /// Score bonus per direct dependency (should be positive).
+    pub dep_bonus_per_dep: f64,
+}
+
+impl Default for DependencyCountRule {
+    fn default() -> Self {
+        Self {
+            dep_bonus_per_dep: 0.5,
+        }
+    }
+}
+
+impl Rule for DependencyCountRule {
+    fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
+        match job.job {
+            PendingJob::Build(j) => j.dependency_count as f64 * self.dep_bonus_per_dep,
+            PendingJob::Eval(_) => 0.0,
+        }
+    }
+}
+
+/// Prefer builds that have been waiting in the queue the longest.
+///
+/// Score contribution: seconds since `queued_at`, capped at `max_wait_secs`,
+/// scaled by `bonus_per_second`.
+#[derive(Debug)]
+pub struct WaitTimeRule {
+    /// Score bonus per second the build has been waiting (should be positive).
+    pub bonus_per_second: f64,
+    /// Cap on wait time used for scoring, in seconds.
+    /// Prevents very old jobs from dominating all other rules.
+    pub max_wait_secs: f64,
+}
+
+impl Default for WaitTimeRule {
+    fn default() -> Self {
+        Self {
+            bonus_per_second: 0.1,
+            max_wait_secs: 600.0, // 10 minutes
+        }
+    }
+}
+
+impl Rule for WaitTimeRule {
+    fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
+        let now = chrono::Utc::now().naive_utc();
+        let waited = (now - job.queued_at)
+            .num_seconds()
+            .max(0) as f64;
+        waited.min(self.max_wait_secs) * self.bonus_per_second
+    }
+}
+
 // ── Policy ────────────────────────────────────────────────────────────────────
 
 /// Ordered collection of [`Rule`]s.
@@ -189,11 +256,15 @@ impl Policy {
     /// Rules (in evaluation order):
     /// 1. [`MissingPathsRule`] — prefer jobs the worker can start without fetching
     /// 2. [`MissingNarSizeRule`] — prefer jobs that require less data to fetch
-    /// 3. [`BuiltinDeprioritizeRule`] — keep real builds ahead of synthetic helpers
+    /// 3. [`DependencyCountRule`] — prefer builds that unblock more downstream work
+    /// 4. [`WaitTimeRule`] — prevent starvation by boosting long-waiting builds
+    /// 5. [`BuiltinDeprioritizeRule`] — keep real builds ahead of synthetic helpers
     pub fn default_build_policy() -> Self {
         let mut p = Self::new();
         p.add_rule(MissingPathsRule::default());
         p.add_rule(MissingNarSizeRule::default());
+        p.add_rule(DependencyCountRule::default());
+        p.add_rule(WaitTimeRule::default());
         p.add_rule(BuiltinDeprioritizeRule::default());
         p
     }
@@ -231,6 +302,8 @@ mod tests {
             required_paths: vec![],
             architecture: arch.into(),
             required_features: vec![],
+            dependency_count: 0,
+            queued_at: chrono::Utc::now().naive_utc(),
         });
         (job, missing_count.unwrap_or(0), missing_nar_size.unwrap_or(0))
     }
@@ -242,10 +315,11 @@ mod tests {
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
 
+        let now = chrono::Utc::now().naive_utc();
         let (job, ..) = build_job_ctx("x86_64-linux", Some(0), None);
-        let ctx_scored = JobContext { job: &job, missing_count: Some(0), missing_nar_size: None };
+        let ctx_scored = JobContext { job: &job, missing_count: Some(0), missing_nar_size: None, dependency_count: 0, queued_at: now };
         let (job2, ..) = build_job_ctx("x86_64-linux", None, None);
-        let ctx_unscored = JobContext { job: &job2, missing_count: None, missing_nar_size: None };
+        let ctx_unscored = JobContext { job: &job2, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now };
 
         // Scored with 0 missing beats unscored.
         assert!(rule.score(&ctx_scored, &w) > rule.score(&ctx_unscored, &w));
@@ -258,10 +332,11 @@ mod tests {
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
 
+        let now = chrono::Utc::now().naive_utc();
         let (j1, ..) = build_job_ctx("x86_64-linux", Some(2), None);
         let (j2, ..) = build_job_ctx("x86_64-linux", Some(10), None);
-        let c1 = JobContext { job: &j1, missing_count: Some(2), missing_nar_size: None };
-        let c2 = JobContext { job: &j2, missing_count: Some(10), missing_nar_size: None };
+        let c1 = JobContext { job: &j1, missing_count: Some(2), missing_nar_size: None, dependency_count: 0, queued_at: now };
+        let c2 = JobContext { job: &j2, missing_count: Some(10), missing_nar_size: None, dependency_count: 0, queued_at: now };
 
         assert!(rule.score(&c1, &w) > rule.score(&c2, &w));
     }
@@ -273,10 +348,11 @@ mod tests {
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
 
+        let now = chrono::Utc::now().naive_utc();
         let (j1, ..) = build_job_ctx("x86_64-linux", None, None);
         let (j2, ..) = build_job_ctx("x86_64-linux", None, None);
-        let c1 = JobContext { job: &j1, missing_count: None, missing_nar_size: Some(1_048_576) }; // 1 MB
-        let c2 = JobContext { job: &j2, missing_count: None, missing_nar_size: Some(100_000_000) }; // ~95 MB
+        let c1 = JobContext { job: &j1, missing_count: None, missing_nar_size: Some(1_048_576), dependency_count: 0, queued_at: now }; // 1 MB
+        let c2 = JobContext { job: &j2, missing_count: None, missing_nar_size: Some(100_000_000), dependency_count: 0, queued_at: now }; // ~95 MB
 
         assert!(rule.score(&c1, &w) > rule.score(&c2, &w));
     }
@@ -288,10 +364,11 @@ mod tests {
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
 
+        let now = chrono::Utc::now().naive_utc();
         let (j_real, ..) = build_job_ctx("x86_64-linux", None, None);
         let (j_builtin, ..) = build_job_ctx("builtin", None, None);
-        let c_real = JobContext { job: &j_real, missing_count: None, missing_nar_size: None };
-        let c_builtin = JobContext { job: &j_builtin, missing_count: None, missing_nar_size: None };
+        let c_real = JobContext { job: &j_real, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now };
+        let c_builtin = JobContext { job: &j_builtin, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now };
 
         assert!(rule.score(&c_real, &w) > rule.score(&c_builtin, &w));
     }
@@ -303,13 +380,14 @@ mod tests {
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
 
+        let now = chrono::Utc::now().naive_utc();
         // Job A: worker has everything, real arch
         let (ja, ..) = build_job_ctx("x86_64-linux", Some(0), Some(0));
-        let ca = JobContext { job: &ja, missing_count: Some(0), missing_nar_size: Some(0) };
+        let ca = JobContext { job: &ja, missing_count: Some(0), missing_nar_size: Some(0), dependency_count: 0, queued_at: now };
 
         // Job B: worker missing 5 paths, large NAR, builtin
         let (jb, ..) = build_job_ctx("builtin", Some(5), Some(50_000_000));
-        let cb = JobContext { job: &jb, missing_count: Some(5), missing_nar_size: Some(50_000_000) };
+        let cb = JobContext { job: &jb, missing_count: Some(5), missing_nar_size: Some(50_000_000), dependency_count: 0, queued_at: now };
 
         assert!(policy.score(&ca, &w) > policy.score(&cb, &w));
     }
