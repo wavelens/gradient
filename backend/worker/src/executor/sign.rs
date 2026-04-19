@@ -20,7 +20,7 @@ use harmonia_store_core::signature::{SecretKey, fingerprint_path};
 use harmonia_store_core::store_path::{StoreDir, StorePath};
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::fmt::CommonHash as _;
-use proto::messages::SignTask;
+use proto::messages::{PathSignature, SignTask};
 use tracing::{info, warn};
 
 use crate::nix::store::{LocalNixStore, strip_store_prefix};
@@ -30,6 +30,7 @@ use crate::proto::job::JobUpdater;
 /// Sign all store paths in `task` with the cache signing key from `credentials`.
 ///
 /// Fails with an error if no signing key credential has been received.
+/// On success, reports all computed signatures to the server via `JobUpdateKind::Signed`.
 pub async fn sign_outputs(
     store: &LocalNixStore,
     credentials: &CredentialStore,
@@ -48,24 +49,36 @@ pub async fn sign_outputs(
         .map_err(|e| anyhow::anyhow!("failed to parse signing key: {}", e))?;
 
     let store_dir = StoreDir::default();
+    let mut signatures: Vec<PathSignature> = Vec::new();
 
     for store_path_str in &task.store_paths {
         match sign_one_path(store, &secret_key, &store_dir, store_path_str).await {
-            Ok(()) => info!(path = %store_path_str, "signed store path"),
+            Ok(sig_str) => {
+                info!(path = %store_path_str, "signed store path");
+                signatures.push(PathSignature {
+                    store_path: store_path_str.clone(),
+                    signature: sig_str,
+                });
+            }
             Err(e) => warn!(path = %store_path_str, error = %e, "failed to sign path (non-fatal)"),
         }
+    }
+
+    if !signatures.is_empty() {
+        updater.report_signed(signatures)?;
     }
 
     Ok(())
 }
 
-/// Sign a single store path and add the signature to the local nix-daemon.
+/// Sign a single store path, add the signature to the local nix-daemon, and
+/// return the full signature string in `"key-name:base64"` format.
 async fn sign_one_path(
     store: &LocalNixStore,
     secret_key: &SecretKey,
     store_dir: &StoreDir,
     store_path_str: &str,
-) -> Result<()> {
+) -> Result<String> {
     let base = strip_store_prefix(store_path_str);
     let store_path = StorePath::from_base_path(base)
         .with_context(|| format!("invalid store path: {}", store_path_str))?;
@@ -104,13 +117,15 @@ async fn sign_one_path(
     .context("compute fingerprint")?;
 
     let sig = secret_key.sign(&fingerprint);
+    let sig_str = sig.to_string();
+
     guard
         .client()
         .add_signatures(&store_path, &[sig])
         .await
         .map_err(|e| anyhow::anyhow!("add_signatures failed: {}", e))?;
 
-    Ok(())
+    Ok(sig_str)
 }
 
 /// Converts an SRI-format NAR hash (`sha256-<base64>`) to the Nix format

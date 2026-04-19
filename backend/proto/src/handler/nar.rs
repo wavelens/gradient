@@ -5,7 +5,9 @@
  */
 
 use chrono::Timelike;
+use gradient_core::sources::sign_narinfo_fingerprint;
 use gradient_core::types::*;
+use gradient_core::types::proto::PathSignature;
 use scheduler::Scheduler;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use tracing::{info, warn};
@@ -19,8 +21,6 @@ pub(super) struct NarUploadRecord<'a> {
     pub nar_hash: &'a str,
     /// Store-path references in hash-name format (no `/nix/store/` prefix).
     pub references: &'a [String],
-    /// Base64 part of the cache signature (without the `name:` prefix).
-    pub signature: Option<&'a str>,
 }
 
 /// Create `cached_path` rows for source paths pushed during evaluation.
@@ -309,11 +309,7 @@ pub(super) async fn mark_nar_stored(
         }
     };
 
-    // If the worker provided a signature, record it for every cache the org subscribes to.
-    let Some(signature) = record.signature else {
-        return Ok(());
-    };
-
+    // Sign the path server-side for every cache the org subscribes to.
     let Some(org_id) = scheduler.peer_id_for_job(job_id).await else {
         return Ok(());
     };
@@ -322,6 +318,9 @@ pub(super) async fn mark_nar_stored(
         .filter(COrganizationCache::Organization.eq(org_id))
         .all(&state.db)
         .await?;
+
+    // Convert nar_hash to sha256:<nix32> format for the narinfo fingerprint.
+    let nar_hash_nix32 = hex_hash_to_nix32(record.nar_hash);
 
     for oc in &org_caches {
         let existing = ECachedPathSignature::find()
@@ -335,11 +334,42 @@ pub(super) async fn mark_nar_stored(
             continue;
         }
 
+        let cache = match ECache::find_by_id(oc.cache).one(&state.db).await {
+            Ok(Some(c)) => c,
+            Ok(None) => continue,
+            Err(e) => {
+                warn!(cache = %oc.cache, error = %e, "failed to fetch cache for signing");
+                continue;
+            }
+        };
+
+        let full_sig = match sign_narinfo_fingerprint(
+            state.cli.crypt_secret_file.clone(),
+            cache,
+            state.cli.serve_url.clone(),
+            store_path,
+            &nar_hash_nix32,
+            record.nar_size as u64,
+            record.references,
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(store_path, cache = %oc.cache, error = %e, "failed to sign cached_path");
+                continue;
+            }
+        };
+
+        // Store only the base64 part (after "key-name:").
+        let signature_b64 = full_sig
+            .find(':')
+            .map(|i| full_sig[i + 1..].to_string())
+            .unwrap_or(full_sig);
+
         let sig_row = ACachedPathSignature {
             id: Set(Uuid::new_v4()),
             cached_path: Set(cached_path_row.id),
             cache: Set(oc.cache),
-            signature: Set(Some(signature.to_owned())),
+            signature: Set(Some(signature_b64)),
             created_at: Set(now),
         };
         if let Err(e) = sig_row.insert(&state.db).await {
@@ -359,4 +389,144 @@ pub(super) async fn mark_nar_stored(
     );
 
     Ok(())
+}
+
+/// Store per-path signatures reported by the worker's Sign task.
+///
+/// For each signature, finds the `cached_path` row and upserts a
+/// `cached_path_signature` row for every cache the org subscribes to.
+/// The signature string is expected in `"key-name:base64"` format; only the
+/// base64 portion is stored (the key name is reconstructed from the cache and
+/// serve URL at narinfo read time).
+pub(super) async fn record_worker_signatures(
+    state: &ServerState,
+    scheduler: &Scheduler,
+    job_id: &str,
+    signatures: &[PathSignature],
+) -> anyhow::Result<()> {
+    if signatures.is_empty() {
+        return Ok(());
+    }
+
+    let Some(org_id) = scheduler.peer_id_for_job(job_id).await else {
+        return Ok(());
+    };
+
+    let org_caches = EOrganizationCache::find()
+        .filter(COrganizationCache::Organization.eq(org_id))
+        .all(&state.db)
+        .await?;
+
+    if org_caches.is_empty() {
+        return Ok(());
+    }
+
+    let now = chrono::Utc::now().naive_utc();
+
+    for ps in signatures {
+        let hash = ps
+            .store_path
+            .strip_prefix("/nix/store/")
+            .unwrap_or(&ps.store_path)
+            .split('-')
+            .next()
+            .unwrap_or("");
+
+        if hash.is_empty() {
+            warn!(store_path = %ps.store_path, "Signed: could not parse hash from store path");
+            continue;
+        }
+
+        let cached_path_row = match ECachedPath::find()
+            .filter(CCachedPath::Hash.eq(hash))
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                warn!(store_path = %ps.store_path, "Signed: no cached_path row found");
+                continue;
+            }
+            Err(e) => {
+                warn!(store_path = %ps.store_path, error = %e, "Signed: cached_path lookup failed");
+                continue;
+            }
+        };
+
+        let sig_b64 = ps
+            .signature
+            .find(':')
+            .map(|i| ps.signature[i + 1..].to_string())
+            .unwrap_or_else(|| ps.signature.clone());
+
+        for oc in &org_caches {
+            let existing = ECachedPathSignature::find()
+                .filter(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
+                .filter(CCachedPathSignature::Cache.eq(oc.cache))
+                .one(&state.db)
+                .await
+                .unwrap_or(None);
+
+            if existing.is_some() {
+                continue;
+            }
+
+            let sig_row = ACachedPathSignature {
+                id: Set(Uuid::new_v4()),
+                cached_path: Set(cached_path_row.id),
+                cache: Set(oc.cache),
+                signature: Set(Some(sig_b64.clone())),
+                created_at: Set(now),
+            };
+            if let Err(e) = sig_row.insert(&state.db).await {
+                warn!(
+                    store_path = %ps.store_path,
+                    cache = %oc.cache,
+                    error = %e,
+                    "failed to insert cached_path_signature from worker Signed update"
+                );
+            }
+        }
+    }
+
+    info!(count = signatures.len(), %org_id, "recorded worker signatures");
+    Ok(())
+}
+
+/// Converts a nar_hash from any common format to `sha256:<nix32>`.
+///
+/// Handles `sha256:<hex>` (from streaming workers), `sha256-<base64>` (SRI),
+/// and `sha256:<nix32>` (already correct).
+fn hex_hash_to_nix32(hash: &str) -> String {
+    const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
+    let encode = |bytes: &[u8]| -> String {
+        let len = (bytes.len() * 8 - 1) / 5 + 1;
+        let mut out = String::with_capacity(len);
+        for n in (0..len).rev() {
+            let b = n * 5;
+            let i = b / 8;
+            let j = b % 8;
+            let b0 = bytes.get(i).copied().unwrap_or(0) as u32;
+            let b1 = bytes.get(i + 1).copied().unwrap_or(0) as u32;
+            let c = ((b0 >> j) | (b1 << (8 - j))) & 0x1f;
+            out.push(CHARS[c as usize] as char);
+        }
+        out
+    };
+
+    // sha256:<hex> (64 hex chars)
+    if let Some(rest) = hash.strip_prefix("sha256:") {
+        if rest.len() == 64 && rest.chars().all(|c| c.is_ascii_hexdigit()) {
+            if let Ok(bytes) = (0..32)
+                .map(|i| u8::from_str_radix(&rest[i * 2..i * 2 + 2], 16))
+                .collect::<Result<Vec<u8>, _>>()
+            {
+                return format!("sha256:{}", encode(&bytes));
+            }
+        }
+        // Already nix32 (or unknown) — return as-is.
+        return hash.to_string();
+    }
+
+    hash.to_string()
 }

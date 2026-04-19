@@ -528,8 +528,6 @@ impl<'a> MessageHandler<'a> {
     ) {
         debug!(%job_id, %store_path, %method, "received presigned upload URL");
         let store = std::sync::Arc::clone(&self.executor.store);
-        let signing_key = self.credentials.signing_key();
-        let signing_key_str = signing_key.as_ref().map(|k| k.expose().to_owned());
         if let Err(e) = crate::proto::nar::upload_presigned(
             &job_id,
             &store_path,
@@ -538,7 +536,6 @@ impl<'a> MessageHandler<'a> {
             &headers,
             self.writer,
             Some(&store),
-            signing_key_str.as_deref(),
         )
         .await
         {

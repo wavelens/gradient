@@ -275,6 +275,7 @@ async fn send_ssh_key_credential(socket: &mut ProtoSocket, state: &ServerState, 
 }
 
 async fn send_signing_key_credential(socket: &mut ProtoSocket, state: &ServerState, org_id: Uuid) {
+    use gradient_core::sources::format_cache_key;
     use gradient_core::types::proto::CredentialKind;
 
     match EOrganizationCache::find()
@@ -286,16 +287,27 @@ async fn send_signing_key_credential(socket: &mut ProtoSocket, state: &ServerSta
             for oc in org_caches {
                 match ECache::find_by_id(oc.cache).one(&state.db).await {
                     Ok(Some(cache)) if !cache.private_key.is_empty() => {
-                        let _ = send_server_msg(
-                            socket,
-                            &ServerMessage::Credential {
-                                kind: CredentialKind::SigningKey,
-                                data: cache.private_key.into_bytes(),
-                            },
-                        )
-                        .await;
-                        debug!(cache_name = %cache.name, %org_id, "signing key credential sent");
-                        return;
+                        match format_cache_key(
+                            state.cli.crypt_secret_file.clone(),
+                            cache.clone(),
+                            state.cli.serve_url.clone(),
+                        ) {
+                            Ok(key_str) => {
+                                let _ = send_server_msg(
+                                    socket,
+                                    &ServerMessage::Credential {
+                                        kind: CredentialKind::SigningKey,
+                                        data: key_str.into_bytes(),
+                                    },
+                                )
+                                .await;
+                                debug!(cache_name = %cache.name, %org_id, "signing key credential sent");
+                                return;
+                            }
+                            Err(e) => {
+                                warn!(cache_name = %cache.name, %org_id, error = %e, "failed to decrypt signing key");
+                            }
+                        }
                     }
                     Ok(_) => {}
                     Err(e) => warn!(error = %e, "failed to fetch cache for signing key"),

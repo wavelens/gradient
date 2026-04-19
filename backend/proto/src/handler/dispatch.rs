@@ -18,7 +18,7 @@ use scheduler::Scheduler;
 
 use super::auth::{lookup_registered_peers, validate_tokens};
 use super::cache::handle_cache_query;
-use super::nar::{NarUploadRecord, mark_nar_stored, record_fetched_paths, record_nar_push_metric};
+use super::nar::{NarUploadRecord, mark_nar_stored, record_fetched_paths, record_nar_push_metric, record_worker_signatures};
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoSocket, push_pending_candidates, send_credentials_for_job,
     send_error, send_server_msg, serve_nar_request,
@@ -136,11 +136,9 @@ impl<'a> DispatchContext<'a> {
                 nar_size,
                 nar_hash,
                 references,
-                signature,
             } => {
                 self.on_nar_uploaded(
                     job_id, store_path, file_hash, file_size, nar_size, nar_hash, references,
-                    signature,
                 )
                 .await;
                 true
@@ -371,6 +369,18 @@ impl<'a> DispatchContext<'a> {
                 }
             }
             JobUpdateKind::Compressing | JobUpdateKind::Signing => {}
+            JobUpdateKind::Signed { signatures } => {
+                if let Err(e) = record_worker_signatures(
+                    self.state,
+                    self.scheduler,
+                    &job_id,
+                    &signatures,
+                )
+                .await
+                {
+                    warn!(%job_id, error = %e, "failed to record worker signatures");
+                }
+            }
         }
     }
 
@@ -492,7 +502,6 @@ impl<'a> DispatchContext<'a> {
         nar_size: u64,
         nar_hash: String,
         references: Vec<String>,
-        signature: Option<String>,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, "NarUploaded");
         let file_size_i64 = file_size as i64;
@@ -502,7 +511,6 @@ impl<'a> DispatchContext<'a> {
             nar_size: nar_size as i64,
             nar_hash: &nar_hash,
             references: &references,
-            signature: signature.as_deref(),
         };
         if let Err(e) =
             mark_nar_stored(self.state, self.scheduler, &job_id, &store_path, &nar_record).await

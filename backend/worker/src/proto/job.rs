@@ -17,7 +17,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use proto::messages::{
     BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, FetchedInput, JobUpdateKind,
-    QueryMode,
+    PathSignature, QueryMode,
 };
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -142,6 +142,10 @@ impl JobUpdater {
 
     pub fn report_signing(&self) -> Result<()> {
         self.send_update(JobUpdateKind::Signing)
+    }
+
+    pub fn report_signed(&self, signatures: Vec<PathSignature>) -> Result<()> {
+        self.send_update(JobUpdateKind::Signed { signatures })
     }
 
     /// Forward a chunk of build log output to the server. Sync — returns

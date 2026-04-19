@@ -99,6 +99,17 @@ pub struct SignTask {
     pub store_paths: Vec<String>,
 }
 
+/// A store path and its Ed25519 narinfo signature.
+///
+/// `signature` is in the standard Nix format `key-name:base64` as returned by
+/// `harmonia_store_core::signature::Signature::to_string()`.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct PathSignature {
+    pub store_path: String,
+    pub signature: String,
+}
+
 /// Progress events for job updates.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
@@ -127,6 +138,11 @@ pub enum JobUpdateKind {
     },
     Compressing,
     Signing,
+    /// Worker has finished signing store paths and reports each signature so
+    /// the server can record them in `cached_path_signature`.
+    Signed {
+        signatures: Vec<PathSignature>,
+    },
 }
 
 /// A flake input fetched during the `FetchFlake` task.

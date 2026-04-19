@@ -81,7 +81,7 @@ async fn push_one_fetched_nar(updater: &mut JobUpdater, cp: &CachedPath) {
         } => {
             tracing::debug!(store_path = %path, "uploading NAR via presigned PUT URL");
             if let Err(e) =
-                nar::upload_presigned(&updater.job_id, path, url, "PUT", &[], &updater.writer, None, None).await
+                nar::upload_presigned(&updater.job_id, path, url, "PUT", &[], &updater.writer, None).await
             {
                 tracing::warn!(store_path = %path, error = %e, "presigned NAR upload failed; continuing");
             }
@@ -96,7 +96,7 @@ async fn push_one_fetched_nar(updater: &mut JobUpdater, cp: &CachedPath) {
                  (expected for local-mode caches; check server logs for \
                  'presigned PUT URL generation failed' if you have S3 configured)"
             );
-            if let Err(e) = nar::push_direct(&updater.job_id, path, &updater.writer, None, None).await {
+            if let Err(e) = nar::push_direct(&updater.job_id, path, &updater.writer, None).await {
                 tracing::warn!(store_path = %path, error = %e, "failed to push NAR for fetched input; continuing");
             }
         }
