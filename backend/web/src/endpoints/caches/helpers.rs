@@ -160,24 +160,57 @@ impl<'a> CacheOpsHandler<'a> {
 
         let path = get_path_from_derivation_output(build_output.clone());
 
-        let pathinfo = self
+        // Try to get path info from the local store. For paths built on remote
+        // workers the store won't have the path, so we fall back to cached_path.
+        let pathinfo_opt = self
             .state
             .web_nix_store
             .query_pathinfo(path.to_string())
             .await
-            .map_err(|e| {
-                tracing::error!("Failed to get pathinfo: {}", e);
-                WebError::InternalServerError("Failed to get path information".to_string())
-            })?
-            .ok_or_else(|| WebError::not_found("Path"))?;
+            .ok()
+            .flatten();
 
-        let nar_hash = normalize_nar_hash(&pathinfo.nar_hash);
+        let nar_hash;
+        let nar_size;
+        let references;
+        let deriver;
+        let ca;
 
-        let references = pathinfo
-            .references
-            .into_iter()
-            .map(|s| s.strip_prefix("/nix/store/").unwrap_or(&s).to_string())
-            .collect();
+        if let Some(pathinfo) = pathinfo_opt {
+            nar_hash = normalize_nar_hash(&pathinfo.nar_hash);
+            nar_size = pathinfo.nar_size;
+            references = pathinfo
+                .references
+                .into_iter()
+                .map(|s| s.strip_prefix("/nix/store/").unwrap_or(&s).to_string())
+                .collect();
+            deriver = pathinfo
+                .deriver
+                .map(|d| strip_nix_store_prefix(d.as_str()));
+            ca = pathinfo.ca;
+        } else {
+            // Path is not in the local store (built on a remote worker).
+            // Use metadata stored in cached_path when the worker uploaded the NAR.
+            nar_hash = cached_path_row
+                .nar_hash
+                .as_deref()
+                .map(normalize_nar_hash)
+                .ok_or_else(|| WebError::not_found("NarHash not recorded"))?;
+            nar_size = cached_path_row
+                .nar_size
+                .ok_or_else(|| WebError::not_found("NarSize not recorded"))?
+                as u64;
+            references = cached_path_row
+                .references
+                .as_deref()
+                .unwrap_or("")
+                .split_whitespace()
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect();
+            deriver = None;
+            ca = cached_path_row.ca.clone();
+        }
 
         let sig_url = self
             .state
@@ -192,7 +225,9 @@ impl<'a> CacheOpsHandler<'a> {
         let file_hash = build_output
             .file_hash
             .ok_or_else(|| WebError::BadRequest("Missing file hash".to_string()))?;
-        let file_hash_nix32 = file_hash.trim_start_matches("sha256:").to_string();
+        let file_hash_nix32 = normalize_nar_hash(&file_hash)
+            .trim_start_matches("sha256:")
+            .to_string();
 
         Ok(NixPathInfo {
             store_path: path,
@@ -204,13 +239,11 @@ impl<'a> CacheOpsHandler<'a> {
                 .ok_or_else(|| WebError::BadRequest("Missing file size".to_string()))?
                 as u32,
             nar_hash,
-            nar_size: pathinfo.nar_size,
+            nar_size,
             references,
-            deriver: pathinfo
-                .deriver
-                .map(|deriver| strip_nix_store_prefix(deriver.as_str())),
+            deriver,
             sig,
-            ca: pathinfo.ca,
+            ca,
         })
     }
 
@@ -348,8 +381,9 @@ pub(super) fn nix32_encode(bytes: &[u8]) -> String {
     out
 }
 
-/// Converts any NarHash string (SRI `sha256-{base64}`, nix32 `sha256:{nix32}`, or bare hex)
-/// to the narinfo wire format `sha256:{nix32}`.
+/// Converts any NarHash string (SRI `sha256-{base64}`, nix32 `sha256:{nix32}`,
+/// prefixed hex `sha256:{hex}`, or bare hex) to the narinfo wire format
+/// `sha256:{nix32}`.
 pub(super) fn normalize_nar_hash(hash: &str) -> String {
     // SRI format: sha256-<base64>
     if let Some(b64) = hash.strip_prefix("sha256-")
@@ -357,8 +391,17 @@ pub(super) fn normalize_nar_hash(hash: &str) -> String {
     {
         return format!("sha256:{}", nix32_encode(&bytes));
     }
-    // Already in nix32 format: sha256:<nix32>
-    if hash.starts_with("sha256:") {
+    if let Some(rest) = hash.strip_prefix("sha256:") {
+        // sha256:<hex> (64 lowercase hex chars) — convert to nix32.
+        if rest.len() == 64
+            && rest.chars().all(|c| c.is_ascii_hexdigit())
+            && let Ok(bytes) = (0..32)
+                .map(|i| u8::from_str_radix(&rest[i * 2..i * 2 + 2], 16))
+                .collect::<Result<Vec<u8>, _>>()
+        {
+            return format!("sha256:{}", nix32_encode(&bytes));
+        }
+        // Already in nix32 format: sha256:<nix32>
         return hash.to_string();
     }
     // Raw hex (64 chars = 32 bytes SHA-256)

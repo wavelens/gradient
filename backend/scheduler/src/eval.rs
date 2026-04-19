@@ -431,18 +431,11 @@ pub async fn handle_eval_result(
         .await;
     proc.record_eval_messages(&warnings, &errors).await;
 
-    // If all attrs failed and nothing was resolved, mark evaluation as Failed.
-    if derivations.is_empty() && !errors.is_empty() {
-        update_evaluation_status_with_error(
-            Arc::clone(state),
-            proc.evaluation,
-            EvaluationStatus::Failed,
-            format!("{} attr(s) failed to resolve", errors.len()),
-            Some("nix-eval".to_string()),
-        )
-        .await;
-        return Ok(());
-    }
+    // Errors are stored as evaluation_message rows and will cause
+    // check_evaluation_done to mark the evaluation as Failed once all
+    // queued builds finish (or immediately if there are no builds at all).
+    // Do NOT mark Failed here: a later batch or a previous batch may have
+    // queued builds that should still run.
 
     if let Some(project_id) = job.project_id {
         proc.process_entry_points(project_id, &derivations, &drv_path_to_id)

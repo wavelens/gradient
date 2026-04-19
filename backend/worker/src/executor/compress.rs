@@ -28,7 +28,7 @@ pub async fn compress_outputs(
     updater.report_compressing()?;
 
     for store_path in &task.store_paths {
-        nar::push_direct(&updater.job_id.clone(), store_path, &updater.writer).await?;
+        nar::push_direct(&updater.job_id.clone(), store_path, &updater.writer, None, None).await?;
         info!(store_path, "compressed and pushed NAR");
     }
 

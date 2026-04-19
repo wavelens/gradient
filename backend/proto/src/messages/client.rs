@@ -131,6 +131,12 @@ pub enum ClientMessage {
         nar_size: u64,
         /// Hash of the uncompressed NAR (`sha256:<nix32>` or SRI format).
         nar_hash: String,
+        /// Store-path references in hash-name format (without `/nix/store/` prefix).
+        /// Empty when the worker could not query local path info.
+        references: Vec<String>,
+        /// Base64 part of the cache signature (after the `name:` prefix).
+        /// `None` when no signing key was available.
+        signature: Option<String>,
     },
 
     /// Pull-based capacity signal: worker is ready to accept one job of the

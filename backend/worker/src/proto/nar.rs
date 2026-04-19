@@ -15,24 +15,181 @@
 //!   worker compresses the NAR, HTTP-PUTs it to S3, then confirms with
 //!   [`ClientMessage::NarReady`].
 
+use std::collections::BTreeSet;
 use std::io::Write as _;
 
 use anyhow::{Context, Result};
+use base64::Engine as _;
 use futures::StreamExt;
+use harmonia_store_core::signature::{SecretKey, fingerprint_path};
+use harmonia_store_core::store_path::{StoreDir, StorePath};
+use harmonia_store_remote::DaemonStore as _;
+use harmonia_utils_hash::fmt::CommonHash as _;
 use proto::messages::ClientMessage;
 use sha2::{Digest, Sha256};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::connection::ProtoWriter;
+use crate::nix::store::{LocalNixStore, strip_store_prefix};
 
 /// Chunk size for direct NAR streaming (64 KiB).
 const NAR_CHUNK_SIZE: usize = 64 * 1024;
+
+/// Path metadata gathered from the local nix-daemon for a built store path.
+struct PathMeta {
+    /// References in hash-name format (without `/nix/store/` prefix).
+    references: Vec<String>,
+    /// Optional base64 cache signature (after the `name:` prefix).
+    signature: Option<String>,
+}
+
+/// Query the local nix-daemon for `store_path`'s references and optionally
+/// compute a cache signature.
+///
+/// Returns `None` (and logs a warning) if the path is not found in the store
+/// or if any step fails — NAR upload continues without metadata in that case.
+async fn gather_path_meta(
+    store: &LocalNixStore,
+    store_path: &str,
+    signing_key_str: Option<&str>,
+) -> Option<PathMeta> {
+    let base = strip_store_prefix(store_path);
+    let sp = match StorePath::from_base_path(base) {
+        Ok(sp) => sp,
+        Err(e) => {
+            warn!(store_path, error = %e, "gather_path_meta: invalid store path");
+            return None;
+        }
+    };
+
+    let mut guard = match store.pool().acquire().await {
+        Ok(g) => g,
+        Err(e) => {
+            warn!(store_path, error = %e, "gather_path_meta: could not acquire store connection");
+            return None;
+        }
+    };
+
+    let path_info = match guard.client().query_path_info(&sp).await {
+        Ok(Some(pi)) => pi,
+        Ok(None) => {
+            warn!(store_path, "gather_path_meta: path not found in local store");
+            return None;
+        }
+        Err(e) => {
+            warn!(store_path, error = %e, "gather_path_meta: query_path_info failed");
+            return None;
+        }
+    };
+
+    let references_raw: Vec<StorePath> = path_info.references.iter()
+        .filter_map(|r: &StorePath| {
+            StorePath::from_base_path(strip_store_prefix(&r.to_string())).ok()
+        })
+        .collect();
+
+    let references: Vec<String> = path_info
+        .references
+        .iter()
+        .map(|r: &StorePath| {
+            let s = r.to_string();
+            s.strip_prefix("/nix/store/").unwrap_or(&s).to_owned()
+        })
+        .collect();
+
+    let nar_hash_sri = path_info.nar_hash.sri().to_string();
+    let nar_size = path_info.nar_size;
+
+    let signature = signing_key_str.and_then(|key_str| {
+        compute_signature(&sp, &nar_hash_sri, nar_size, &references_raw, key_str)
+            .map_err(|e| warn!(store_path, error = %e, "failed to compute cache signature"))
+            .ok()
+    });
+
+    Some(PathMeta {
+        references,
+        signature,
+    })
+}
+
+fn compute_signature(
+    sp: &StorePath,
+    nar_hash_sri: &str,
+    nar_size: u64,
+    references_raw: &[StorePath],
+    signing_key_str: &str,
+) -> Result<String> {
+    let secret_key: SecretKey = signing_key_str
+        .parse()
+        .map_err(|e| anyhow::anyhow!("failed to parse signing key: {}", e))?;
+
+    let nar_hash_nix = sri_to_nix_hash(nar_hash_sri).context("convert NAR hash")?;
+
+    let store_dir = StoreDir::default();
+    let refs_set: BTreeSet<StorePath> = references_raw.iter().cloned().collect();
+
+    let fingerprint = fingerprint_path(
+        &store_dir,
+        sp,
+        nar_hash_nix.as_bytes(),
+        nar_size,
+        &refs_set,
+    )
+    .context("compute fingerprint")?;
+
+    let sig = secret_key.sign(&fingerprint);
+    let sig_str = sig.to_string();
+    // Strip the `name:` prefix — caller reconstructs it with the cache name.
+    let b64 = sig_str
+        .find(':')
+        .map(|i| sig_str[i + 1..].to_string())
+        .unwrap_or(sig_str);
+
+    Ok(b64)
+}
+
+fn sri_to_nix_hash(sri: &str) -> Result<String> {
+    let b64 = sri
+        .strip_prefix("sha256-")
+        .ok_or_else(|| anyhow::anyhow!("not a sha256 SRI hash: {}", sri))?;
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .context("invalid base64 in SRI hash")?;
+    Ok(format!("sha256:{}", nix_base32_encode(&raw)))
+}
+
+fn nix_base32_encode(hash: &[u8]) -> String {
+    const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
+    let len = (hash.len() * 8 - 1) / 5 + 1;
+    let mut out = String::with_capacity(len);
+    for n in (0..len).rev() {
+        let b = n * 5;
+        let i = b / 8;
+        let j = b % 8;
+        let byte0 = hash.get(i).copied().unwrap_or(0) as u32;
+        let byte1 = hash.get(i + 1).copied().unwrap_or(0) as u32;
+        let c = ((byte0 >> j) | (byte1 << (8 - j))) & 0x1f;
+        out.push(CHARS[c as usize] as char);
+    }
+    out
+}
 
 /// Compress `store_path` into a zstd-compressed NAR and push it to the server
 /// in [`NAR_CHUNK_SIZE`]-byte chunks via [`ClientMessage::NarPush`].
 ///
 /// This is the "direct" transfer mode — no S3 involved.
-pub async fn push_direct(job_id: &str, store_path: &str, writer: &ProtoWriter) -> Result<()> {
+///
+/// When `store` and `signing_key_str` are provided the function also queries
+/// the local store for references and computes a cache signature; both are
+/// included in the final [`ClientMessage::NarUploaded`] so the server can
+/// populate `cached_path` / `cached_path_signature` rows.
+pub async fn push_direct(
+    job_id: &str,
+    store_path: &str,
+    writer: &ProtoWriter,
+    store: Option<&LocalNixStore>,
+    signing_key_str: Option<&str>,
+) -> Result<()> {
     debug!(store_path, "NAR direct push");
 
     let mut nar_stream = harmonia_nar::NarByteStream::new(store_path.to_owned().into());
@@ -93,6 +250,16 @@ pub async fn push_direct(job_id: &str, store_path: &str, writer: &ProtoWriter) -
     let file_hash = format!("sha256:{}", hex::encode(file_hasher.finalize()));
     let nar_hash = format!("sha256:{}", hex::encode(nar_hasher.finalize()));
 
+    let (references, signature) = if let Some(s) = store {
+        let meta = gather_path_meta(s, store_path, signing_key_str).await;
+        (
+            meta.as_ref().map(|m| m.references.clone()).unwrap_or_default(),
+            meta.and_then(|m| m.signature),
+        )
+    } else {
+        (vec![], None)
+    };
+
     // Report metadata so the server can update cache records.
     writer.send(ClientMessage::NarUploaded {
         job_id: job_id.to_owned(),
@@ -101,6 +268,8 @@ pub async fn push_direct(job_id: &str, store_path: &str, writer: &ProtoWriter) -
         file_size: offset,
         nar_size,
         nar_hash,
+        references,
+        signature,
     })?;
 
     info!(
@@ -117,6 +286,10 @@ pub async fn push_direct(job_id: &str, store_path: &str, writer: &ProtoWriter) -
 ///
 /// `method` is the HTTP method the server expects (usually `"PUT"`).
 /// `headers` are additional HTTP headers to include (e.g. `x-amz-*` for S3).
+///
+/// When `store` and `signing_key_str` are provided the function also queries
+/// the local store for references and computes a cache signature; both are
+/// included in the final [`ClientMessage::NarUploaded`].
 pub async fn upload_presigned(
     job_id: &str,
     store_path: &str,
@@ -124,6 +297,8 @@ pub async fn upload_presigned(
     method: &str,
     headers: &[(String, String)],
     writer: &ProtoWriter,
+    store: Option<&LocalNixStore>,
+    signing_key_str: Option<&str>,
 ) -> Result<()> {
     debug!(store_path, method, "presigned NAR upload");
 
@@ -178,7 +353,18 @@ pub async fn upload_presigned(
         anyhow::bail!("presigned upload returned {}: {}", status, body);
     }
 
-    // --- 3. Confirm to the server ---
+    // --- 3. Gather path metadata (references + signature) ---
+    let (references, signature) = if let Some(s) = store {
+        let meta = gather_path_meta(s, store_path, signing_key_str).await;
+        (
+            meta.as_ref().map(|m| m.references.clone()).unwrap_or_default(),
+            meta.and_then(|m| m.signature),
+        )
+    } else {
+        (vec![], None)
+    };
+
+    // --- 4. Confirm to the server ---
     writer.send(ClientMessage::NarReady {
         job_id: job_id.to_owned(),
         store_path: store_path.to_owned(),
@@ -193,6 +379,8 @@ pub async fn upload_presigned(
         file_size,
         nar_size,
         nar_hash,
+        references,
+        signature,
     })?;
 
     info!(
@@ -275,7 +463,7 @@ mod tests {
             .await
             .unwrap();
         let (writer, _reader) = conn.split();
-        push_direct("job-123", &store_path_str, &writer)
+        push_direct("job-123", &store_path_str, &writer, None, None)
             .await
             .unwrap();
 
@@ -315,7 +503,7 @@ mod tests {
             .await
             .unwrap();
         let (writer, _reader) = conn.split();
-        push_direct("job-123", &store_path_str, &writer)
+        push_direct("job-123", &store_path_str, &writer, None, None)
             .await
             .unwrap();
 
@@ -396,7 +584,7 @@ mod tests {
             .await
             .unwrap();
         let (writer, _reader) = conn.split();
-        upload_presigned("job-xyz", &store_path_str, &http_url, "PUT", &[], &writer)
+        upload_presigned("job-xyz", &store_path_str, &http_url, "PUT", &[], &writer, None, None)
             .await
             .unwrap();
 

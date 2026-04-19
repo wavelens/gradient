@@ -17,6 +17,10 @@ pub(super) struct NarUploadRecord<'a> {
     pub file_size: i64,
     pub nar_size: i64,
     pub nar_hash: &'a str,
+    /// Store-path references in hash-name format (no `/nix/store/` prefix).
+    pub references: &'a [String],
+    /// Base64 part of the cache signature (without the `name:` prefix).
+    pub signature: Option<&'a str>,
 }
 
 /// Create `cached_path` rows for source paths pushed during evaluation.
@@ -208,10 +212,14 @@ async fn upsert_cache_metric(
     Ok(())
 }
 
-/// Update the `derivation_output` or `cached_path` record for `store_path`
-/// after a direct NAR push.
+/// Update the `derivation_output` and `cached_path` records for `store_path`
+/// after a NAR push.  Creates `cached_path` and `cached_path_signature` rows
+/// when the worker supplies path metadata (build-output uploads from remote
+/// workers).
 pub(super) async fn mark_nar_stored(
     state: &ServerState,
+    scheduler: &Scheduler,
+    job_id: &str,
     store_path: &str,
     record: &NarUploadRecord<'_>,
 ) -> anyhow::Result<()> {
@@ -231,28 +239,124 @@ pub(super) async fn mark_nar_stored(
         );
     }
 
-    let hash = store_path
+    let hash_name = store_path
         .strip_prefix("/nix/store/")
-        .unwrap_or(store_path)
-        .split('-')
-        .next()
+        .unwrap_or(store_path);
+    let hash = hash_name.split('-').next().unwrap_or("");
+    let package = hash_name
+        .find('-')
+        .map(|i| &hash_name[i + 1..])
         .unwrap_or("");
 
-    if !hash.is_empty() {
-        let cached_rows = ECachedPath::find()
-            .filter(CCachedPath::Hash.eq(hash))
-            .all(&state.db)
-            .await?;
+    if hash.is_empty() {
+        return Ok(());
+    }
 
-        for row in cached_rows {
+    let now = chrono::Utc::now().naive_utc();
+
+    // Find or create the cached_path row.
+    let references_str = if record.references.is_empty() {
+        None
+    } else {
+        Some(record.references.join(" "))
+    };
+
+    let cached_path_row = match ECachedPath::find()
+        .filter(CCachedPath::Hash.eq(hash))
+        .one(&state.db)
+        .await?
+    {
+        Some(row) => {
             let mut active = row.into_active_model();
             active.file_size = Set(Some(record.file_size));
             active.file_hash = Set(Some(record.file_hash.to_owned()));
             active.nar_size = Set(Some(record.nar_size));
             active.nar_hash = Set(Some(record.nar_hash.to_owned()));
-            active.update(&state.db).await?;
+            if references_str.is_some() {
+                active.references = Set(references_str);
+            }
+            active.update(&state.db).await?
+        }
+        None => {
+            let am = ACachedPath {
+                id: Set(Uuid::new_v4()),
+                store_path: Set(store_path.to_owned()),
+                hash: Set(hash.to_owned()),
+                package: Set(package.to_owned()),
+                file_hash: Set(Some(record.file_hash.to_owned())),
+                file_size: Set(Some(record.file_size)),
+                nar_size: Set(Some(record.nar_size)),
+                nar_hash: Set(Some(record.nar_hash.to_owned())),
+                references: Set(references_str),
+                ca: Set(None),
+                created_at: Set(now),
+            };
+            match am.insert(&state.db).await {
+                Ok(row) => row,
+                Err(e) => {
+                    warn!(store_path, error = %e, "failed to insert cached_path (may be a race)");
+                    // Try to find the row that was inserted concurrently.
+                    match ECachedPath::find()
+                        .filter(CCachedPath::Hash.eq(hash))
+                        .one(&state.db)
+                        .await?
+                    {
+                        Some(row) => row,
+                        None => return Err(e.into()),
+                    }
+                }
+            }
+        }
+    };
+
+    // If the worker provided a signature, record it for every cache the org subscribes to.
+    let Some(signature) = record.signature else {
+        return Ok(());
+    };
+
+    let Some(org_id) = scheduler.peer_id_for_job(job_id).await else {
+        return Ok(());
+    };
+
+    let org_caches = EOrganizationCache::find()
+        .filter(COrganizationCache::Organization.eq(org_id))
+        .all(&state.db)
+        .await?;
+
+    for oc in &org_caches {
+        let existing = ECachedPathSignature::find()
+            .filter(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
+            .filter(CCachedPathSignature::Cache.eq(oc.cache))
+            .one(&state.db)
+            .await
+            .unwrap_or(None);
+
+        if existing.is_some() {
+            continue;
+        }
+
+        let sig_row = ACachedPathSignature {
+            id: Set(Uuid::new_v4()),
+            cached_path: Set(cached_path_row.id),
+            cache: Set(oc.cache),
+            signature: Set(Some(signature.to_owned())),
+            created_at: Set(now),
+        };
+        if let Err(e) = sig_row.insert(&state.db).await {
+            warn!(
+                store_path,
+                cache = %oc.cache,
+                error = %e,
+                "failed to insert cached_path_signature"
+            );
         }
     }
+
+    info!(
+        store_path,
+        caches = org_caches.len(),
+        "cached_path and signatures recorded after NarUploaded"
+    );
 
     Ok(())
 }

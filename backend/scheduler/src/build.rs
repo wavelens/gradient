@@ -209,19 +209,35 @@ impl<'a> BuildStateHandler<'a> {
             return Ok(());
         }
 
-        let failed = EBuild::find()
+        let failed_builds = EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation_id))
             .filter(CBuild::Status.is_in(vec![BuildStatus::Failed, BuildStatus::DependencyFailed]))
             .all(&self.state.db)
             .await
             .context("fetch failed builds")?;
 
-        let target = if failed.is_empty() {
+        // Also treat error-level evaluation messages (nix eval errors, attr
+        // resolution failures) as a failure signal — the evaluation was only
+        // partially successful even if every discovered build passed.
+        let eval_error_messages = EEvaluationMessage::find()
+            .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
+            .filter(CEvaluationMessage::Level.eq(entity::evaluation_message::MessageLevel::Error))
+            .all(&self.state.db)
+            .await
+            .context("fetch eval error messages")?;
+
+        let target = if failed_builds.is_empty() && eval_error_messages.is_empty() {
             EvaluationStatus::Completed
         } else {
             EvaluationStatus::Failed
         };
-        info!(%evaluation_id, ?target, "evaluation finished");
+        info!(
+            %evaluation_id,
+            ?target,
+            failed_builds = failed_builds.len(),
+            eval_errors = eval_error_messages.len(),
+            "evaluation finished"
+        );
         update_evaluation_status(Arc::clone(self.state), eval, target).await;
         Ok(())
     }

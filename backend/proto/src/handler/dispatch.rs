@@ -135,9 +135,14 @@ impl<'a> DispatchContext<'a> {
                 file_size,
                 nar_size,
                 nar_hash,
+                references,
+                signature,
             } => {
-                self.on_nar_uploaded(job_id, store_path, file_hash, file_size, nar_size, nar_hash)
-                    .await;
+                self.on_nar_uploaded(
+                    job_id, store_path, file_hash, file_size, nar_size, nar_hash, references,
+                    signature,
+                )
+                .await;
                 true
             }
             ClientMessage::CacheQuery {
@@ -486,6 +491,8 @@ impl<'a> DispatchContext<'a> {
         file_size: u64,
         nar_size: u64,
         nar_hash: String,
+        references: Vec<String>,
+        signature: Option<String>,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, "NarUploaded");
         let file_size_i64 = file_size as i64;
@@ -494,8 +501,12 @@ impl<'a> DispatchContext<'a> {
             file_size: file_size_i64,
             nar_size: nar_size as i64,
             nar_hash: &nar_hash,
+            references: &references,
+            signature: signature.as_deref(),
         };
-        if let Err(e) = mark_nar_stored(self.state, &store_path, &nar_record).await {
+        if let Err(e) =
+            mark_nar_stored(self.state, self.scheduler, &job_id, &store_path, &nar_record).await
+        {
             warn!(%store_path, error = %e, "failed to mark NAR as stored");
         }
         if let Err(e) =

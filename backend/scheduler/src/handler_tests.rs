@@ -624,12 +624,14 @@ async fn build_completed_last_build_completes_eval() {
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         // 5. find failed builds → empty
         .append_query_results([Vec::<MBuild>::new()])
-        // 6. update_many eval → Completed
+        // 6. find eval error messages → empty
+        .append_query_results([Vec::<MEvaluationMessage>::new()])
+        // 7. update_many eval → Completed
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // 7. find_by_id(eval) → Completed
+        // 8. find_by_id(eval) → Completed
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Completed)]])
         .into_connection();
 
@@ -692,7 +694,9 @@ async fn build_completed_with_failed_sibling() {
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         // 5. find failed builds → has one Failed build
         .append_query_results([vec![failed_build]])
-        // 6. update eval → Failed
+        // 6. find eval error messages → empty
+        .append_query_results([Vec::<MEvaluationMessage>::new()])
+        // 7. update eval → Failed
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -772,6 +776,7 @@ async fn build_completed_dep_failed_siblings_cause_eval_failed() {
         .append_query_results([Vec::<MBuild>::new()]) // no active
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         .append_query_results([vec![dep_failed]]) // DependencyFailed counts
+        .append_query_results([Vec::<MEvaluationMessage>::new()]) // no eval errors
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -830,7 +835,9 @@ async fn build_failed_cascades_to_direct_dependent() {
             make_build(build_a_id, eval_id, drv_a_id, BuildStatus::Failed),
             make_build(build_b_id, eval_id, drv_b_id, BuildStatus::DependencyFailed),
         ]])
-        // 10. update eval → Failed
+        // 10. find eval error messages → empty
+        .append_query_results([Vec::<MEvaluationMessage>::new()])
+        // 11. update eval → Failed
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -868,7 +875,9 @@ async fn build_failed_no_dependents() {
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         // 6. find failed → [build]
         .append_query_results([vec![build_failed]])
-        // 7. update eval → Failed
+        // 7. find eval error messages → empty
+        .append_query_results([Vec::<MEvaluationMessage>::new()])
+        // 8. update eval → Failed
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -1116,7 +1125,9 @@ async fn eval_job_completed_no_active_builds_completes_eval() {
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         // 7. find failed builds → empty
         .append_query_results([Vec::<MBuild>::new()])
-        // 8. update_many eval → Completed
+        // 8. find eval error messages → empty
+        .append_query_results([Vec::<MEvaluationMessage>::new()])
+        // 9. update_many eval → Completed
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -1162,7 +1173,62 @@ async fn eval_job_completed_with_failed_build_marks_eval_failed() {
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         // 7. find failed builds → [failed_build]
         .append_query_results([vec![failed_build]])
-        // 8. update_many eval → Failed
+        // 8. find eval error messages → empty
+        .append_query_results([Vec::<MEvaluationMessage>::new()])
+        // 9. update_many eval → Failed
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
+        .into_connection();
+
+    let state = make_state(db);
+    let result = eval_handler::handle_eval_job_completed(&state, eval_id).await;
+    assert!(result.is_ok());
+}
+
+/// Eval job completes with no build failures but has eval-error messages
+/// (e.g. some wildcard attrs failed to resolve).  `check_evaluation_done`
+/// must mark the evaluation as `Failed`, not `Completed`.
+#[tokio::test]
+async fn eval_job_completed_with_eval_errors_marks_eval_failed() {
+    let eval_id = Uuid::new_v4();
+
+    let eval_msg = entity::evaluation_message::Model {
+        id: Uuid::new_v4(),
+        evaluation: eval_id,
+        level: entity::evaluation_message::MessageLevel::Error,
+        message: "packages.x86_64-linux.broken: attribute missing".into(),
+        source: Some("nix-eval".into()),
+        created_at: test_date(),
+    };
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find Created builds (to promote to Queued) → none
+        .append_query_results([Vec::<MBuild>::new()])
+        // 2. find_by_id(eval) → EvaluatingDerivation
+        .append_query_results([vec![make_eval(
+            eval_id,
+            EvaluationStatus::EvaluatingDerivation,
+        )]])
+        // 3. update_many eval → Building
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // 4. find_by_id(eval) → Building
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        // ── check_evaluation_done ──
+        // 5. find active builds → empty (all done or substituted)
+        .append_query_results([Vec::<MBuild>::new()])
+        // 6. find_by_id(eval) → Building
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
+        // 7. find failed builds → empty (builds themselves passed)
+        .append_query_results([Vec::<MBuild>::new()])
+        // 8. find eval error messages → one error
+        .append_query_results([vec![eval_msg]])
+        // 9. update_many eval → Failed (because of eval errors)
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -1640,12 +1706,14 @@ async fn webhook_fired_on_build_completed() {
         .append_query_results([vec![eval_building]])
         // 5. find failed builds → empty
         .append_query_results([Vec::<MBuild>::new()])
-        // 6. update_many eval → Completed
+        // 6. find eval error messages → empty
+        .append_query_results([Vec::<MEvaluationMessage>::new()])
+        // 7. update_many eval → Completed
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // 7. find_by_id(eval) → Completed
+        // 8. find_by_id(eval) → Completed
         .append_query_results([vec![eval_completed.clone()]])
         // TASK_A (fire_build_webhook Completed):
         // 8. get_build_org_id: find_by_id(eval)
@@ -1771,14 +1839,16 @@ async fn webhook_not_fired_for_dep_failed() {
         .append_query_results([Vec::<MBuild>::new()])
         // 8. find_by_id(eval) → Building
         .append_query_results([vec![eval_building]])
-        // 8. find failed → [buildA, buildB]
+        // 9. find failed → [buildA, buildB]
         .append_query_results([vec![build_a_failed, build_b_dep_failed]])
-        // 9. update_many eval → Failed
+        // 10. find eval error messages → empty
+        .append_query_results([Vec::<MEvaluationMessage>::new()])
+        // 11. update_many eval → Failed
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // 10. find_by_id(eval) → Failed
+        // 12. find_by_id(eval) → Failed
         .append_query_results([vec![eval_failed.clone()]])
         // TASK_A (fire_build_webhook Failed):
         // 11. get_build_org_id: find_by_id(eval)
@@ -2262,12 +2332,14 @@ async fn build_failed_cascades_transitively_through_graph() {
             make_build(build_b, eval_id, drv_b, BuildStatus::DependencyFailed),
             make_build(build_a, eval_id, drv_a, BuildStatus::DependencyFailed),
         ]])
-        // 14. update eval → Failed
+        // 14. find eval error messages → empty
+        .append_query_results([Vec::<MEvaluationMessage>::new()])
+        // 15. update eval → Failed
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // 15. find eval → Failed
+        // 16. find eval → Failed
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
         .into_connection();
 
