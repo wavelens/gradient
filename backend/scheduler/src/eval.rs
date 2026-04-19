@@ -380,6 +380,83 @@ impl<'a> EvalResultProcessor<'a> {
     }
 }
 
+// ── Substituted-closure expansion ────────────────────────────────────────────
+
+/// Walk the transitive dependency closure of every `Substituted` build in
+/// `evaluation_id` and insert `Substituted` build rows for any reachable
+/// derivation that does not yet have a build row in this evaluation.
+///
+/// Called in [`handle_eval_job_completed`] after `flush_deferred_deps` has
+/// written all dependency edges, so the full graph is available.  This
+/// ensures:
+/// * The dependency-gating SQL in `dispatch_ready_builds` sees build rows for
+///   every dep of every queued build, even when large subtrees were pruned by
+///   the BFS known-derivation optimisation.
+/// * The evaluation's build list in the UI reflects the complete dep tree.
+async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uuid) -> Result<()> {
+    use sea_orm::ConnectionTrait;
+
+    // Recursive CTE: seed = direct deps of substituted builds in this eval;
+    // recurse through derivation_dependency until the closure is exhausted.
+    // The outer SELECT filters to derivations without a build row yet.
+    let find_sql = sea_orm::Statement::from_sql_and_values(
+        sea_orm::DbBackend::Postgres,
+        r#"
+        WITH RECURSIVE sub_closure(drv_id) AS (
+            SELECT DISTINCT dd.dependency
+            FROM build b
+            JOIN derivation_dependency dd ON dd.derivation = b.derivation
+            WHERE b.evaluation = $1 AND b.status = 7
+            UNION
+            SELECT dd2.dependency
+            FROM derivation_dependency dd2
+            JOIN sub_closure sc ON sc.drv_id = dd2.derivation
+        )
+        SELECT DISTINCT sc.drv_id
+        FROM sub_closure sc
+        WHERE NOT EXISTS (
+            SELECT 1 FROM build WHERE derivation = sc.drv_id AND evaluation = $1
+        )
+        "#,
+        [evaluation_id.into()],
+    );
+
+    let rows = state.db.query_all(find_sql).await.context("expand_substituted_closure: query")?;
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    let now = chrono::Utc::now().naive_utc();
+    let builds: Vec<ABuild> = rows
+        .iter()
+        .filter_map(|row| {
+            row.try_get::<Uuid>("", "drv_id").ok().map(|drv_id| ABuild {
+                id: Set(Uuid::new_v4()),
+                evaluation: Set(evaluation_id),
+                derivation: Set(drv_id),
+                status: Set(BuildStatus::Substituted),
+                server: Set(None),
+                log_id: Set(None),
+                build_time_ms: Set(None),
+                created_at: Set(now),
+                updated_at: Set(now),
+            })
+        })
+        .collect();
+
+    let count = builds.len();
+    for chunk in builds.chunks(BATCH_SIZE) {
+        if let Err(e) = EBuild::insert_many(chunk.to_vec())
+            .exec(&state.db)
+            .await
+        {
+            error!(error = %e, %evaluation_id, "expand_substituted_closure: failed to insert builds");
+        }
+    }
+    info!(%evaluation_id, count, "substituted closure expanded");
+    Ok(())
+}
+
 // ── Public handlers ───────────────────────────────────────────────────────────
 
 pub async fn handle_eval_result(
@@ -454,6 +531,13 @@ pub async fn handle_eval_job_completed(
     state: &Arc<ServerState>,
     evaluation_id: Uuid,
 ) -> Result<()> {
+    // Expand the transitive dependency closure of all Substituted builds so
+    // the full dep tree has build rows. This runs before Created→Queued
+    // promotion so the dispatch SQL's dep-gating sees a complete picture.
+    if let Err(e) = expand_substituted_closure(state, evaluation_id).await {
+        error!(error = %e, %evaluation_id, "expand_substituted_closure failed (non-fatal)");
+    }
+
     // The worker is done sending batches, so the evaluation's build set is
     // now final. Promote every `Created` build to `Queued` so the dispatcher
     // can pick them up, then move the evaluation into `Building`.

@@ -541,16 +541,43 @@ impl<'a> DispatchContext<'a> {
         debug!(peer_id = %self.peer_id, %job_id, count = drv_paths.len(), "QueryKnownDerivations");
         let known = match self.scheduler.peer_id_for_job(&job_id).await {
             Some(org_id) => {
+                use entity::build::BuildStatus;
                 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-                EDerivation::find()
+
+                // First: find derivations that exist for this org.
+                let candidates = EDerivation::find()
                     .filter(CDerivation::Organization.eq(org_id))
                     .filter(CDerivation::DerivationPath.is_in(drv_paths))
                     .all(&self.state.db)
                     .await
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|d| d.derivation_path)
-                    .collect()
+                    .unwrap_or_default();
+
+                if candidates.is_empty() {
+                    vec![]
+                } else {
+                    // Second: keep only those that have a Completed or Substituted build.
+                    // A derivation exists in the DB but has only Failed builds should
+                    // NOT be pruned — the worker must retry it.
+                    let drv_ids: Vec<Uuid> = candidates.iter().map(|d| d.id).collect();
+                    let built: std::collections::HashSet<Uuid> = EBuild::find()
+                        .filter(CBuild::Derivation.is_in(drv_ids))
+                        .filter(CBuild::Status.is_in(vec![
+                            BuildStatus::Completed,
+                            BuildStatus::Substituted,
+                        ]))
+                        .all(&self.state.db)
+                        .await
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|b| b.derivation)
+                        .collect();
+
+                    candidates
+                        .into_iter()
+                        .filter(|d| built.contains(&d.id))
+                        .map(|d| d.derivation_path)
+                        .collect()
+                }
             }
             None => {
                 warn!(peer_id = %self.peer_id, %job_id, "QueryKnownDerivations: no org for job");

@@ -376,7 +376,7 @@ impl<'a> ClosureWalker<'a> {
                     dependencies: vec![],
                     architecture: String::new(),
                     required_features: vec![],
-                    substituted: false,
+                    substituted: true, // already built — skip dispatch
                 });
             } else {
                 self.queue.push_back((None, dep));
