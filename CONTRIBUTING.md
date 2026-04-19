@@ -5,7 +5,7 @@ When contributing to this repository, please first discuss the change you wish t
 
 ## Licensing
 
-This project is licensed under the Affero General Public License (AGPL) version 3.0. By contributing to this project, you agree that your contributions will be licensed under the AGPL-3.0.
+This project is licensed under the Affero General Public License (AGPL) version 3.0. By contributing to this project, you agree to the terms of our [Contributor License Agreement](https://gist.github.com/DerDennisOP/0c7ca37dd1f1ee41239125a986b87d47).
 
 ## Code of Conduct
 
