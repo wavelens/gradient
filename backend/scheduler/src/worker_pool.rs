@@ -265,7 +265,6 @@ pub struct WorkerInfo {
     pub system_features: Vec<String>,
     pub max_concurrent_builds: u32,
     pub assigned_job_count: usize,
-    /// `true` when the worker is draining (corresponds to [`WorkerSlot::Draining`]).
     pub draining: bool,
 }
 

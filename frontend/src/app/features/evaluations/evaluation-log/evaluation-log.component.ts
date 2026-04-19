@@ -49,7 +49,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   loading = signal(true);
   evaluation = signal<Evaluation | null>(null);
   builds = signal<BuildItem[]>([]);
-  messages = signal<EvaluationMessage[]>([]);
+  messages = signal<(EvaluationMessage & { renderedHtml: SafeHtml })[]>([]);
   selectedBuildId = signal<string | null>(null);
   selectedSection = signal<'messages' | null>(null);
   logHtml = signal<SafeHtml>('');
@@ -146,7 +146,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   loadMessages(): void {
     this.evalService.getEvaluationMessages(this.evaluationId).subscribe({
-      next: (msgs) => this.messages.set(msgs),
+      next: (msgs) => this.messages.set(
+        msgs.map(m => ({
+          ...m,
+          renderedHtml: this.sanitizer.bypassSecurityTrustHtml(this.convertAnsiToHtml(m.message)),
+        }))
+      ),
     });
   }
 

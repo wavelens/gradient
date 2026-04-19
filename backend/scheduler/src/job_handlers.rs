@@ -514,11 +514,12 @@ impl Scheduler {
         caps: Option<&WorkerBuildCaps>,
         kind: &JobKind,
     ) -> Option<Assignment> {
+        let policy = Arc::clone(&self.policy);
         let assignment = self
             .job_tracker
             .write()
             .await
-            .take_best_of_kind(peer_id, authorized, caps, kind);
+            .take_best_of_kind(peer_id, authorized, caps, kind, &policy);
         if let Some(ref a) = assignment {
             self.worker_pool
                 .write()

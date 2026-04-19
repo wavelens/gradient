@@ -18,6 +18,7 @@ pub mod dispatch;
 pub mod eval;
 pub mod jobs;
 pub mod peer_auth;
+pub mod policy;
 pub mod worker_pool;
 pub mod worker_state;
 
@@ -33,6 +34,7 @@ use uuid::Uuid;
 use gradient_core::types::*;
 
 use jobs::JobTracker;
+use policy::Policy;
 use worker_pool::WorkerPool;
 
 /// Per-evaluation deferred dependency edges accumulated during eval result
@@ -68,6 +70,9 @@ pub struct Scheduler {
     /// `handle_eval_job_completed` when every derivation row is guaranteed
     /// to be in the DB.
     pub(crate) deferred_deps: DeferredDeps,
+    /// Scoring policy used when selecting which pending job to assign to a
+    /// requesting worker.  Shared via `Arc` so it can be read lock-free.
+    pub(crate) policy: Arc<Policy>,
 }
 
 impl std::fmt::Debug for Scheduler {
@@ -84,6 +89,7 @@ impl Scheduler {
             job_tracker: Arc::new(RwLock::new(JobTracker::new())),
             job_notify: Arc::new(tokio::sync::Notify::new()),
             deferred_deps: Arc::new(RwLock::new(HashMap::new())),
+            policy: Arc::new(Policy::default_build_policy()),
         }
     }
 

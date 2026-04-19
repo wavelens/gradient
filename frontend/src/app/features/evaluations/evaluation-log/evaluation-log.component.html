@@ -184,7 +184,7 @@
                       @if (msg.source) {
                         <span class="message-source">{{ msg.source }}</span>
                       }
-                      <pre class="message-text">{{ msg.message }}</pre>
+                      <pre class="message-text" [innerHTML]="msg.renderedHtml"></pre>
                     </div>
                   </div>
                 }
