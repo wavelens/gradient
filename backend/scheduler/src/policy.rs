@@ -373,6 +373,91 @@ mod tests {
         assert!(rule.score(&c_real, &w) > rule.score(&c_builtin, &w));
     }
 
+    fn build_job_with_deps(dep_count: u32) -> PendingJob {
+        PendingJob::Build(PendingBuildJob {
+            build_id: Uuid::new_v4(),
+            evaluation_id: Uuid::new_v4(),
+            peer_id: Uuid::new_v4(),
+            job: BuildJob {
+                builds: vec![BuildTask {
+                    build_id: Uuid::new_v4().to_string(),
+                    drv_path: "/nix/store/abc.drv".into(),
+                }],
+                compress: None,
+                sign: None,
+            },
+            required_paths: vec![],
+            architecture: "x86_64-linux".into(),
+            required_features: vec![],
+            dependency_count: dep_count,
+            queued_at: chrono::Utc::now().naive_utc(),
+        })
+    }
+
+    #[test]
+    fn dependency_count_rule_more_deps_wins() {
+        // More dependencies → higher score (unblocks more work). Guards
+        // against sign flip of the `dependency_count * bonus` contribution.
+        let rule = DependencyCountRule::default();
+        let archs = vec!["x86_64-linux".into()];
+        let feats: Vec<String> = vec![];
+        let w = worker_ctx(&archs, &feats);
+        let now = chrono::Utc::now().naive_utc();
+
+        let j_few = build_job_with_deps(1);
+        let j_many = build_job_with_deps(20);
+        let c_few = JobContext { job: &j_few, missing_count: None, missing_nar_size: None, dependency_count: 1, queued_at: now };
+        let c_many = JobContext { job: &j_many, missing_count: None, missing_nar_size: None, dependency_count: 20, queued_at: now };
+
+        assert!(rule.score(&c_many, &w) > rule.score(&c_few, &w));
+        assert!(rule.score(&c_few, &w) > 0.0, "positive bonus expected");
+    }
+
+    #[test]
+    fn dependency_count_rule_zero_deps_zero_score() {
+        let rule = DependencyCountRule::default();
+        let archs = vec!["x86_64-linux".into()];
+        let feats: Vec<String> = vec![];
+        let w = worker_ctx(&archs, &feats);
+        let now = chrono::Utc::now().naive_utc();
+
+        let j = build_job_with_deps(0);
+        let ctx = JobContext { job: &j, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now };
+        assert_eq!(rule.score(&ctx, &w), 0.0);
+    }
+
+    #[test]
+    fn wait_time_rule_longer_wait_scores_higher_but_capped() {
+        // - Zero wait → 0 contribution.
+        // - Short wait → positive, proportional.
+        // - Very long wait → capped at `max_wait_secs * bonus_per_second`.
+        //   Guards against `.min(max)` being mutated to `.max(max)` (which
+        //   would remove the cap and let ancient jobs dominate).
+        let rule = WaitTimeRule::default();
+        let archs = vec!["x86_64-linux".into()];
+        let feats: Vec<String> = vec![];
+        let w = worker_ctx(&archs, &feats);
+        let now = chrono::Utc::now().naive_utc();
+
+        let (j, ..) = build_job_ctx("x86_64-linux", None, None);
+
+        let ctx_fresh = JobContext { job: &j, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now };
+        let ctx_mid = JobContext { job: &j, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now - chrono::Duration::seconds(60) };
+        let ctx_ancient = JobContext { job: &j, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now - chrono::Duration::seconds(10_000) };
+
+        let fresh = rule.score(&ctx_fresh, &w);
+        let mid = rule.score(&ctx_mid, &w);
+        let ancient = rule.score(&ctx_ancient, &w);
+
+        assert!(fresh < mid, "older should score higher: {fresh} vs {mid}");
+        let cap = rule.max_wait_secs * rule.bonus_per_second;
+        assert!(
+            ancient <= cap + 0.01,
+            "ancient wait must be capped at {cap}, got {ancient}"
+        );
+        assert!(ancient >= cap - 0.01, "ancient wait should reach the cap, got {ancient}");
+    }
+
     #[test]
     fn default_policy_prefers_ready_over_costly() {
         let policy = Policy::default_build_policy();

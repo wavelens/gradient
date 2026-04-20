@@ -167,6 +167,17 @@ mod tests {
     }
 
     #[test]
+    fn github_empty_url_treated_as_default() {
+        // An empty `ci_url` must be coerced to `None`, not preserved as
+        // `Some("")` — otherwise the reporter would build an invalid base URL.
+        let config = ProjectCiConfig::from_db(Some("github"), Some(""), Some("tok"));
+        assert!(matches!(
+            config,
+            ProjectCiConfig::GitHub { base_url: None, .. }
+        ));
+    }
+
+    #[test]
     fn github_with_enterprise_url() {
         let config = ProjectCiConfig::from_db(
             Some("github"),

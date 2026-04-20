@@ -98,6 +98,17 @@ pub async fn trigger_evaluation(
     Ok(evaluation)
 }
 
+/// Status mapping applied to each previous build when restarting.
+///
+/// Outputs already present in the cache are marked `Substituted` so the worker
+/// skips them; everything else is re-queued for a fresh build.
+pub(crate) fn restart_build_status(prev: BuildStatus) -> BuildStatus {
+    match prev {
+        BuildStatus::Completed | BuildStatus::Substituted => BuildStatus::Substituted,
+        _ => BuildStatus::Queued,
+    }
+}
+
 /// Creates a new `Building` evaluation that skips the fetch+eval phase and
 /// re-runs only the failed builds from the most recent evaluation.
 ///
@@ -167,10 +178,7 @@ pub async fn trigger_restart_builds(
         std::collections::HashMap::with_capacity(prev_builds.len());
 
     for prev_build in &prev_builds {
-        let new_status = match prev_build.status {
-            BuildStatus::Completed | BuildStatus::Substituted => BuildStatus::Substituted,
-            _ => BuildStatus::Queued,
-        };
+        let new_status = restart_build_status(prev_build.status.clone());
         let new_build_id = Uuid::new_v4();
         let abuild = ABuild {
             id: Set(new_build_id),
@@ -326,6 +334,38 @@ mod tests {
             assert!(
                 matches!(result, Err(TriggerError::AlreadyInProgress)),
                 "{status:?} should block trigger"
+            );
+        }
+    }
+
+    // ── restart_build_status ─────────────────────────────────────────────────
+
+    #[test]
+    fn restart_status_cached_stays_substituted() {
+        assert_eq!(
+            restart_build_status(BuildStatus::Completed),
+            BuildStatus::Substituted,
+        );
+        assert_eq!(
+            restart_build_status(BuildStatus::Substituted),
+            BuildStatus::Substituted,
+        );
+    }
+
+    #[test]
+    fn restart_status_others_become_queued() {
+        for s in [
+            BuildStatus::Queued,
+            BuildStatus::Building,
+            BuildStatus::Failed,
+            BuildStatus::Aborted,
+            BuildStatus::Created,
+            BuildStatus::DependencyFailed,
+        ] {
+            assert_eq!(
+                restart_build_status(s.clone()),
+                BuildStatus::Queued,
+                "{s:?} should be re-queued"
             );
         }
     }

@@ -174,6 +174,44 @@ fn verify_forge_signature(forge: &str, secret: &str, headers: &HeaderMap, body: 
 
 // ── Org forge webhook secret management ───────────────────────────────────
 
+#[cfg(test)]
+mod verify_tests {
+    use super::*;
+    use axum::http::{HeaderMap, HeaderValue};
+
+    #[test]
+    fn gitlab_matches_token_exactly() {
+        let mut h = HeaderMap::new();
+        h.insert("X-Gitlab-Token", HeaderValue::from_static("s3cret"));
+        assert!(verify_forge_signature("gitlab", "s3cret", &h, b""));
+    }
+
+    #[test]
+    fn gitlab_rejects_mismatched_token() {
+        let mut h = HeaderMap::new();
+        h.insert("X-Gitlab-Token", HeaderValue::from_static("wrong"));
+        assert!(!verify_forge_signature("gitlab", "s3cret", &h, b""));
+    }
+
+    #[test]
+    fn gitlab_rejects_missing_token() {
+        let h = HeaderMap::new();
+        assert!(!verify_forge_signature("gitlab", "s3cret", &h, b""));
+    }
+
+    #[test]
+    fn unknown_forge_is_rejected() {
+        let h = HeaderMap::new();
+        assert!(!verify_forge_signature("bitbucket", "s3cret", &h, b""));
+    }
+
+    #[test]
+    fn gitea_rejects_missing_signature() {
+        let h = HeaderMap::new();
+        assert!(!verify_forge_signature("gitea", "s3cret", &h, b"body"));
+    }
+}
+
 /// Response for the forge webhook secret endpoint.
 #[derive(serde::Serialize)]
 pub struct ForgeWebhookSecretResponse {

@@ -589,6 +589,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cache_query_rejects_overlong_hash() {
+        // Hash component of 33 chars must be rejected — nix-base32 hashes are
+        // exactly 32 chars. Guards against an `== 32` → `>= 32` length-check
+        // relaxation.
+        let state = make_state();
+        let paths = vec![
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
+        ];
+        for mode in [QueryMode::Normal, QueryMode::Pull, QueryMode::Push] {
+            let result = CacheQueryHandler::new(&state)
+                .query(None, &paths, mode)
+                .await;
+            assert!(result.is_empty(), "33-char hash must be filtered out");
+        }
+    }
+
+    #[tokio::test]
     async fn cache_query_push_deduplicates_by_hash() {
         let state = make_state();
         let paths = vec![
@@ -601,5 +618,54 @@ mod tests {
         for cp in &result {
             assert!(!cp.cached);
         }
+    }
+
+    // ── expand_references ────────────────────────────────────────────────────
+
+    #[test]
+    fn expand_references_none_passthrough() {
+        assert_eq!(expand_references(None), None);
+    }
+
+    #[test]
+    fn expand_references_empty_string_empty_vec() {
+        assert_eq!(expand_references(Some("")), Some(vec![]));
+    }
+
+    #[test]
+    fn expand_references_splits_whitespace() {
+        let out = expand_references(Some("aaaa-a bbbb-b cccc-c")).unwrap();
+        assert_eq!(out.len(), 3);
+    }
+
+    #[test]
+    fn expand_references_prefixes_bare_names() {
+        let out = expand_references(Some("aaaa-a")).unwrap();
+        assert_eq!(out, vec!["/nix/store/aaaa-a".to_string()]);
+    }
+
+    #[test]
+    fn expand_references_preserves_absolute() {
+        let out = expand_references(Some("/nix/store/aaaa-a")).unwrap();
+        assert_eq!(out, vec!["/nix/store/aaaa-a".to_string()]);
+    }
+
+    #[test]
+    fn expand_references_mixed_forms() {
+        let out = expand_references(Some("aaaa-a /nix/store/bbbb-b")).unwrap();
+        assert_eq!(
+            out,
+            vec![
+                "/nix/store/aaaa-a".to_string(),
+                "/nix/store/bbbb-b".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn expand_references_collapses_multiple_whitespace() {
+        // split_whitespace collapses runs of spaces/tabs.
+        let out = expand_references(Some("aaaa-a   \t bbbb-b")).unwrap();
+        assert_eq!(out.len(), 2);
     }
 }

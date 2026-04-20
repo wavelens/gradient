@@ -13,6 +13,7 @@
 - **Streaming Logs** — real-time log streaming for running builds
 - **OAuth2 / OIDC** — integrated single-sign-on support
 - **Binary Cache** — built-in Nix store cache with S3 storage backend support
+- **Remote Evals** — support for evaluating and building nix derviations without having nix installed locally
 - **Proto Workers** — build Nix derivations on distributed `gradient-worker` instances over a persistent WebSocket protocol
 - **Pull Deployment** — deploy NixOS configurations by pulling from the Gradient server
 - **Dependency Graph** — interactive visualization of Nix build dependency trees

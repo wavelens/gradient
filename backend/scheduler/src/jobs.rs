@@ -447,6 +447,36 @@ mod tests {
     }
 
     #[test]
+    fn can_build_multi_arch_worker_accepts_one_of_many() {
+        // Worker with multiple architectures must accept a build whose target
+        // matches ANY (not ALL) of its listed architectures. Guards against
+        // `.any()` → `.all()` in the capability check.
+        let caps = WorkerBuildCaps {
+            architectures: vec!["x86_64-linux".into(), "aarch64-linux".into()],
+            system_features: vec![],
+        };
+        assert!(caps.can_build("x86_64-linux", &[]));
+        assert!(caps.can_build("aarch64-linux", &[]));
+        assert!(!caps.can_build("riscv64-linux", &[]));
+    }
+
+    #[test]
+    fn can_build_requires_all_features() {
+        // Worker must provide EVERY required feature (not just one). Guards
+        // against `.all()` → `.any()` in the feature check.
+        let caps = WorkerBuildCaps {
+            architectures: vec!["x86_64-linux".into()],
+            system_features: vec!["kvm".into()],
+        };
+        assert!(caps.can_build("x86_64-linux", &["kvm".into()]));
+        // kvm is provided but big-parallel is not → must reject.
+        assert!(!caps.can_build(
+            "x86_64-linux",
+            &["kvm".into(), "big-parallel".into()],
+        ));
+    }
+
+    #[test]
     fn test_add_pending_and_candidates() {
         let mut tracker = JobTracker::new();
         let peer = Uuid::new_v4();

@@ -196,44 +196,6 @@ pub fn check_repository_url_is_ssh(url: &str) -> bool {
     false
 }
 
-pub fn parse_evaluation_wildcard(s: &str) -> Result<Vec<&str>, InputError> {
-    if s.trim() != s {
-        return Err(InputError::EvaluationWildcardWhitespace);
-    } else if s.contains(",,") {
-        return Err(InputError::EvaluationWildcardConsecutiveCommas);
-    }
-
-    let seperate_evaluations = s.split(",").map(|sub| sub.trim()).collect::<Vec<&str>>();
-
-    let mut evaluations = Vec::new();
-
-    for evaluation in seperate_evaluations {
-        if evaluation.is_empty() {
-            return Err(InputError::EvaluationWildcardEmpty);
-        }
-
-        if evaluation.split_whitespace().count() > 1 {
-            return Err(InputError::EvaluationWildcardInternalWhitespace);
-        }
-
-        if evaluation.starts_with(".") {
-            return Err(InputError::EvaluationWildcardStartsWithPeriod);
-        }
-
-        evaluations.push(evaluation);
-    }
-
-    if evaluations.is_empty() {
-        return Err(InputError::EvaluationWildcardEmpty);
-    }
-
-    Ok(evaluations)
-}
-
-pub fn valid_evaluation_wildcard(s: &str) -> bool {
-    parse_evaluation_wildcard(s).is_ok()
-}
-
 pub fn check_index_name(s: &str) -> Result<(), InputError> {
     if s.is_empty() {
         return Err(InputError::NameEmpty);

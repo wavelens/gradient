@@ -162,3 +162,37 @@ impl ParsedPushEvent {
         .await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const VALID_SHA: &str = "abcdef0123456789abcdef0123456789abcdef01";
+    const ZERO_SHA: &str = "0000000000000000000000000000000000000000";
+
+    #[test]
+    fn decode_push_commit_accepts_branch_ref() {
+        let out = decode_push_commit("refs/heads/main", VALID_SHA, "github").unwrap();
+        assert_eq!(out, hex::decode(VALID_SHA).unwrap());
+    }
+
+    #[test]
+    fn decode_push_commit_rejects_tag_ref() {
+        assert!(decode_push_commit("refs/tags/v1", VALID_SHA, "github").is_none());
+    }
+
+    #[test]
+    fn decode_push_commit_rejects_zero_sha_branch_deletion() {
+        assert!(decode_push_commit("refs/heads/main", ZERO_SHA, "github").is_none());
+    }
+
+    #[test]
+    fn decode_push_commit_rejects_invalid_hex() {
+        assert!(decode_push_commit("refs/heads/main", "not-hex-at-all", "github").is_none());
+    }
+
+    #[test]
+    fn decode_push_commit_rejects_empty_ref() {
+        assert!(decode_push_commit("", VALID_SHA, "github").is_none());
+    }
+}

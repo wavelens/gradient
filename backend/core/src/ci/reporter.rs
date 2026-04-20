@@ -372,3 +372,222 @@ pub fn parse_owner_repo(repository_url: &str) -> Option<(String, String)> {
     let repo = parts.next()?.to_string();
     Some((owner, repo))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── State conversions ─────────────────────────────────────────────────────
+
+    #[test]
+    fn gitea_state_from_ci_status_all_variants() {
+        assert!(matches!(
+            GiteaState::from(&CiStatus::Pending),
+            GiteaState::Pending
+        ));
+        assert!(matches!(
+            GiteaState::from(&CiStatus::Running),
+            GiteaState::Pending
+        ));
+        assert!(matches!(
+            GiteaState::from(&CiStatus::Success),
+            GiteaState::Success
+        ));
+        assert!(matches!(
+            GiteaState::from(&CiStatus::Failure),
+            GiteaState::Failure
+        ));
+        assert!(matches!(
+            GiteaState::from(&CiStatus::Error),
+            GiteaState::Error
+        ));
+    }
+
+    #[test]
+    fn github_state_from_ci_status_all_variants() {
+        assert!(matches!(
+            GithubState::from(&CiStatus::Pending),
+            GithubState::Pending
+        ));
+        assert!(matches!(
+            GithubState::from(&CiStatus::Running),
+            GithubState::Pending
+        ));
+        assert!(matches!(
+            GithubState::from(&CiStatus::Success),
+            GithubState::Success
+        ));
+        assert!(matches!(
+            GithubState::from(&CiStatus::Failure),
+            GithubState::Failure
+        ));
+        assert!(matches!(
+            GithubState::from(&CiStatus::Error),
+            GithubState::Error
+        ));
+    }
+
+    #[test]
+    fn gitea_state_serializes_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&GiteaState::Pending).unwrap(),
+            "\"pending\""
+        );
+        assert_eq!(
+            serde_json::to_string(&GiteaState::Success).unwrap(),
+            "\"success\""
+        );
+        assert_eq!(
+            serde_json::to_string(&GiteaState::Failure).unwrap(),
+            "\"failure\""
+        );
+        assert_eq!(
+            serde_json::to_string(&GiteaState::Error).unwrap(),
+            "\"error\""
+        );
+    }
+
+    #[test]
+    fn github_state_serializes_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&GithubState::Pending).unwrap(),
+            "\"pending\""
+        );
+        assert_eq!(
+            serde_json::to_string(&GithubState::Success).unwrap(),
+            "\"success\""
+        );
+    }
+
+    // ── Reporter constructors ────────────────────────────────────────────────
+
+    #[test]
+    fn gitea_reporter_trims_trailing_slash() {
+        let r = GiteaReporter::new("https://gitea.example.com/", "tok").unwrap();
+        assert_eq!(r.base_url, "https://gitea.example.com");
+    }
+
+    #[test]
+    fn gitea_reporter_preserves_no_trailing_slash() {
+        let r = GiteaReporter::new("https://gitea.example.com", "tok").unwrap();
+        assert_eq!(r.base_url, "https://gitea.example.com");
+    }
+
+    #[test]
+    fn github_reporter_empty_url_uses_default() {
+        let r = GithubReporter::new("", "tok").unwrap();
+        assert_eq!(r.base_url, GithubReporter::DEFAULT_API_URL);
+    }
+
+    #[test]
+    fn github_reporter_custom_url_kept() {
+        let r = GithubReporter::new("https://github.example.com/api/v3", "tok").unwrap();
+        assert_eq!(r.base_url, "https://github.example.com/api/v3");
+    }
+
+    #[test]
+    fn github_reporter_trims_trailing_slash() {
+        let r = GithubReporter::new("https://github.example.com/api/v3/", "tok").unwrap();
+        assert_eq!(r.base_url, "https://github.example.com/api/v3");
+    }
+
+    // ── reporter_for_project factory ─────────────────────────────────────────
+
+    fn is_noop(r: &Arc<dyn CiReporter>) -> bool {
+        format!("{:?}", r).contains("NoopCiReporter")
+    }
+
+    #[test]
+    fn reporter_for_project_no_token_is_noop() {
+        let r = reporter_for_project(Some("github"), Some("https://x"), None);
+        assert!(is_noop(&r));
+    }
+
+    #[test]
+    fn reporter_for_project_no_type_is_noop() {
+        let r = reporter_for_project(None, None, Some("tok"));
+        assert!(is_noop(&r));
+    }
+
+    #[test]
+    fn reporter_for_project_unknown_type_is_noop() {
+        let r = reporter_for_project(Some("bitbucket"), None, Some("tok"));
+        assert!(is_noop(&r));
+    }
+
+    #[test]
+    fn reporter_for_project_gitea_builds_gitea() {
+        let r = reporter_for_project(
+            Some("gitea"),
+            Some("https://gitea.example.com"),
+            Some("tok"),
+        );
+        assert!(format!("{:?}", r).contains("GiteaReporter"));
+    }
+
+    #[test]
+    fn reporter_for_project_github_builds_github() {
+        let r = reporter_for_project(Some("github"), None, Some("tok"));
+        assert!(format!("{:?}", r).contains("GithubReporter"));
+    }
+
+    // ── parse_owner_repo ─────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_owner_repo_https_with_git_suffix() {
+        let got = parse_owner_repo("https://github.com/acme/widgets.git");
+        assert_eq!(got, Some(("acme".into(), "widgets".into())));
+    }
+
+    #[test]
+    fn parse_owner_repo_https_without_git_suffix() {
+        let got = parse_owner_repo("https://github.com/acme/widgets");
+        assert_eq!(got, Some(("acme".into(), "widgets".into())));
+    }
+
+    #[test]
+    fn parse_owner_repo_http() {
+        let got = parse_owner_repo("http://github.com/acme/widgets.git");
+        assert_eq!(got, Some(("acme".into(), "widgets".into())));
+    }
+
+    #[test]
+    fn parse_owner_repo_git_protocol() {
+        let got = parse_owner_repo("git://github.com/acme/widgets.git");
+        assert_eq!(got, Some(("acme".into(), "widgets".into())));
+    }
+
+    #[test]
+    fn parse_owner_repo_ssh_scp_style() {
+        let got = parse_owner_repo("git@github.com:acme/widgets.git");
+        assert_eq!(got, Some(("acme".into(), "widgets".into())));
+    }
+
+    #[test]
+    fn parse_owner_repo_strips_git_plus_prefix() {
+        let got = parse_owner_repo("git+https://github.com/acme/widgets.git");
+        assert_eq!(got, Some(("acme".into(), "widgets".into())));
+    }
+
+    #[test]
+    fn parse_owner_repo_no_path_rejected() {
+        assert_eq!(parse_owner_repo("https://github.com"), None);
+    }
+
+    #[test]
+    fn parse_owner_repo_only_owner_rejected() {
+        assert_eq!(parse_owner_repo("https://github.com/acme"), None);
+    }
+
+    #[test]
+    fn parse_owner_repo_unknown_scheme_rejected() {
+        assert_eq!(parse_owner_repo("ftp-no-colon-owner-repo"), None);
+    }
+
+    #[test]
+    fn parse_owner_repo_ssh_with_subpath() {
+        // With deeper path, splitn(2) keeps everything after owner/ as the repo name.
+        let got = parse_owner_repo("git@gitea.example.com:group/sub/repo.git");
+        assert_eq!(got, Some(("group".into(), "sub/repo".into())));
+    }
+}

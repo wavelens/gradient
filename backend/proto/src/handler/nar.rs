@@ -530,3 +530,91 @@ fn hex_hash_to_nix32(hash: &str) -> String {
 
     hash.to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_hash_to_nix32_converts_valid_hex() {
+        // SHA-256 of empty string: e3b0c442 98fc1c14 ...
+        let hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        let out = hex_hash_to_nix32(&format!("sha256:{hex}"));
+        assert!(out.starts_with("sha256:"));
+        let suffix = out.strip_prefix("sha256:").unwrap();
+        assert_eq!(suffix.len(), 52, "nix32-encoded sha256 is 52 chars");
+        assert!(
+            suffix.chars().all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c)),
+            "nix32 alphabet only: {suffix}"
+        );
+    }
+
+    #[test]
+    fn hex_hash_to_nix32_passthrough_non_hex() {
+        // Already nix32 (52 chars) passes through unchanged.
+        let already = "sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73";
+        assert_eq!(hex_hash_to_nix32(already), already);
+    }
+
+    #[test]
+    fn hex_hash_to_nix32_passthrough_without_sha256_prefix() {
+        // No sha256: prefix → return unchanged (e.g. SRI sha256-<b64>).
+        assert_eq!(hex_hash_to_nix32("sha256-AAAA"), "sha256-AAAA");
+        assert_eq!(hex_hash_to_nix32("garbage"), "garbage");
+    }
+
+    #[test]
+    fn hex_hash_to_nix32_wrong_hex_length_returned_as_is() {
+        // 63 hex chars — invalid, must be returned unchanged.
+        let short = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85";
+        assert_eq!(hex_hash_to_nix32(short), short);
+    }
+
+    #[test]
+    fn hex_hash_to_nix32_non_hex_chars_returned_as_is() {
+        // Contains 'z' — not a hex char.
+        let bad = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85z";
+        assert_eq!(hex_hash_to_nix32(bad), bad);
+    }
+
+    #[test]
+    fn hex_hash_to_nix32_accepts_uppercase_hex() {
+        let lower = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        let upper = lower.to_ascii_uppercase();
+        // is_ascii_hexdigit accepts both cases; output must match.
+        let out_lower = hex_hash_to_nix32(&format!("sha256:{lower}"));
+        let out_upper = hex_hash_to_nix32(&format!("sha256:{upper}"));
+        assert_eq!(out_lower, out_upper);
+    }
+
+    #[test]
+    fn hex_hash_to_nix32_zero_digest() {
+        // 32 zero bytes → 52 zero chars (all 5-bit groups are 0 → '0').
+        let zero_hex = "0".repeat(64);
+        let out = hex_hash_to_nix32(&format!("sha256:{zero_hex}"));
+        assert_eq!(out, format!("sha256:{}", "0".repeat(52)));
+    }
+
+    #[test]
+    fn hex_hash_to_nix32_ff_digest_last_char_is_z() {
+        // The final output char (reverse-emitted, so emitted last in the
+        // loop; n=0) reads bits 0..5 of byte 0. For 0xff this is 0b11111 = 31
+        // → 'z' (last char of the nix-base32 alphabet).
+        let ff_hex = "ff".repeat(32);
+        let out = hex_hash_to_nix32(&format!("sha256:{ff_hex}"));
+        let suffix = out.strip_prefix("sha256:").unwrap();
+        assert!(suffix.ends_with('z'), "expected trailing 'z', got: {suffix}");
+        assert_eq!(suffix.len(), 52);
+    }
+
+    #[test]
+    fn hex_hash_to_nix32_deterministic_different_inputs_differ() {
+        let a = hex_hash_to_nix32(
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        );
+        let b = hex_hash_to_nix32(
+            "sha256:f3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        );
+        assert_ne!(a, b);
+    }
+}

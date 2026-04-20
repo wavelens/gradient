@@ -446,4 +446,26 @@ mod tests {
         let b = badge_for_status(Some(EvaluationStatus::Completed), false);
         assert_eq!(b.message, "passing");
     }
+
+    #[test]
+    fn waiting_status_renders_as_waiting() {
+        let b = badge_for_status(Some(EvaluationStatus::Waiting), false);
+        assert_eq!(b.message, "waiting");
+    }
+
+    #[test]
+    fn char_width_includes_space() {
+        // Space is the first entry in the table (idx 32) — the boundary must be
+        // inclusive (>=), not exclusive (>), or spaces would silently fall back.
+        assert_eq!(char_width(' '), 33);
+    }
+
+    #[test]
+    fn char_width_unknown_char_uses_fallback() {
+        // Non-ASCII characters must fall back to a non-zero width so the SVG
+        // renderer still reserves space for them.
+        assert_eq!(char_width('é'), 70);
+        assert_eq!(char_width('日'), 70);
+    }
+
 }

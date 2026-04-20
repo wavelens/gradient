@@ -329,4 +329,76 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
         let pem = "-----BEGIN TEST-----\nnot!valid!base64!!!\n-----END TEST-----\n";
         assert!(pem_to_der(pem).is_err());
     }
+
+    #[test]
+    fn pem_to_der_concatenates_multiple_lines() {
+        // PEMs wrap their base64 body at 64 columns; the decoder must glue
+        // every body line together before base64-decoding.
+        let original = vec![0xAB; 96];
+        let b64 = general_purpose::STANDARD.encode(&original);
+        let (chunk1, rest) = b64.split_at(16);
+        let (chunk2, chunk3) = rest.split_at(16);
+        let pem = format!("-----BEGIN K-----\n{chunk1}\n{chunk2}\n{chunk3}\n-----END K-----\n");
+        let der = pem_to_der(&pem).unwrap();
+        assert_eq!(der, original);
+    }
+
+    #[test]
+    fn generate_jwt_payload_iat_and_exp_diff_600() {
+        // exp must be 10 minutes after iat (back-dated 60 s). Guards against
+        // the constant drift mutations on iat/exp arithmetic.
+        let jwt = generate_jwt(1, TEST_RSA_PEM).expect("generate_jwt failed");
+        let payload_b64 = jwt.split('.').nth(1).unwrap();
+        let payload_json = general_purpose::URL_SAFE_NO_PAD
+            .decode(payload_b64)
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&payload_json).unwrap();
+        let iat = payload["iat"].as_u64().expect("iat must be a u64");
+        let exp = payload["exp"].as_u64().expect("exp must be a u64");
+        assert_eq!(exp - iat, 660, "exp should be iat + 660 (60 back-date + 600 window)");
+    }
+
+    #[test]
+    fn generate_jwt_signature_verifies_with_public_key() {
+        // Round-trip: RS256-sign then verify with the corresponding public key
+        // derived from the same PEM. Catches mutations that corrupt the
+        // signing input (e.g. swapping header/payload or changing the
+        // separator).
+        use ring::signature::{RSA_PKCS1_2048_8192_SHA256, UnparsedPublicKey};
+
+        let jwt = generate_jwt(42, TEST_RSA_PEM).expect("generate_jwt failed");
+        let parts: Vec<&str> = jwt.split('.').collect();
+        let signing_input = format!("{}.{}", parts[0], parts[1]);
+        let sig = general_purpose::URL_SAFE_NO_PAD.decode(parts[2]).unwrap();
+
+        let der = pem_to_der(TEST_RSA_PEM).unwrap();
+        let key_pair = RsaKeyPair::from_pkcs8(&der).unwrap();
+        // Extract public key components from the RsaKeyPair to build a verifier.
+        let pub_key = key_pair.public().as_ref();
+        let verifier = UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, pub_key);
+        verifier
+            .verify(signing_input.as_bytes(), &sig)
+            .expect("signature must verify");
+    }
+
+    #[test]
+    fn verify_github_signature_empty_header_rejected() {
+        assert!(!verify_github_signature("secret", "", b"body"));
+    }
+
+    #[test]
+    fn verify_gitea_signature_empty_header_rejected() {
+        // Empty hex decodes to empty bytes — mac.verify_slice with empty
+        // expected bytes must not accept any real signature.
+        let body = b"body";
+        assert!(!verify_gitea_signature("secret", "", body));
+    }
+
+    #[test]
+    fn verify_github_signature_wrong_prefix_rejected() {
+        // sha1= instead of sha256=
+        let bare = compute_gitea_sig("secret", b"body");
+        let sig = format!("sha1={bare}");
+        assert!(!verify_github_signature("secret", &sig, b"body"));
+    }
 }

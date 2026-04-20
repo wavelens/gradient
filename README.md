@@ -18,15 +18,15 @@ Gradient is a web-based Nix-based Continuous Integration (CI) system.
 
 ![Gradient](./docs/gradient.png)
 
-- **Modern UI**: has a clean and intuitive user interface.
-- **Organizations**: multiple organizations, which work independently from each other (e.g. different servers, user access).
+- **Modern UI**: has a clean and intuitive user interface
+- **Organizations**: multiple organizations, which work independently from each other (e.g. different servers, user access)
 - **API**: provides a RESTful API with API-Key management for authentication
-- **Streaming Logs**: real-time log streaming for builds.
+- **Streaming Logs**: real-time log streaming for builds
 - **Rich Project Configuration**: check all branches, pull requests, and tags (planned)
 - **OAuth2 / OIDC**: integrated single-sign-on support
 - **Binary Cache**: built-in Nix store cache with S3 storage backend support
-- **Remote Builds**: support for building nix derviations without having nix installed locally.
-- **Deployment Module**: Support for easy Pull-Deployment.
+- **Remote Evals**: support for evaluating and building nix derviations without having nix installed locally
+- **Deployment Module**: Support for easy Pull-Deployment
 - **Dependency Graph**: interactive visualization of Nix build dependency trees
 - **Actions Integration**: GitHub App, Gitea and Gitlab Integration
 
@@ -101,11 +101,7 @@ OpenAPI documentation is available at `/docs/gradient-api.yaml` or via [Swagger 
 
 ### Web Interface
 
-> [!NOTE]
-> The web interface is currently under heavy development.
-
-The web interface is the primary way to interact with Gradient. It also just uses the API.
-Registration is at `/account/register`.
+The web interface is the primary way to interact with Gradient. It also just uses the main API.
 
 ### CLI
 

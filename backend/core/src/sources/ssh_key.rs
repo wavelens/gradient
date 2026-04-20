@@ -204,4 +204,98 @@ mod tests {
         let result = format_public_key(org, "https://gradient.wavelens.io");
         assert_eq!(result, "ssh-ed25519 BBBB gradient.wavelens.io-wavelens");
     }
+
+    #[test]
+    fn format_public_key_strips_http() {
+        let org = make_org("myorg", "ssh-ed25519 AAAA");
+        let result = format_public_key(org, "http://example.com");
+        assert_eq!(result, "ssh-ed25519 AAAA example.com-myorg");
+    }
+
+    #[test]
+    fn format_public_key_fallback_without_scheme() {
+        // When no scheme is present, the raw URL is used as the hostname
+        // (no path stripping either, since there's nothing to strip).
+        let org = make_org("myorg", "ssh-ed25519 AAAA");
+        let result = format_public_key(org, "example.com");
+        assert_eq!(result, "ssh-ed25519 AAAA example.com-myorg");
+    }
+
+    #[test]
+    fn write_and_clear_key_roundtrip() {
+        let path = write_key("hello-key".to_string()).expect("write_key failed");
+        let contents = std::fs::read_to_string(&path).expect("read failed");
+        assert_eq!(contents, "hello-key");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "key file must be mode 0600");
+        clear_key(path.clone()).expect("clear_key failed");
+        assert!(!std::path::Path::new(&path).exists());
+    }
+
+    #[test]
+    fn clear_key_nonexistent_fails() {
+        let result = clear_key("/tmp/definitely-does-not-exist-gradient-test".to_string());
+        assert!(matches!(result, Err(SourceError::KeyFileRemoval { .. })));
+    }
+
+    #[test]
+    fn decrypt_ssh_key_corrupt_base64_fails() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(&mut f, b"test-secret-key-32-bytes-padding!").unwrap();
+        let path = f.path().to_string_lossy().to_string();
+        let mut org = make_org("o", "ssh-ed25519 AAAA");
+        org.private_key = "!!!not-base64!!!".to_string();
+        let result = decrypt_ssh_private_key(path, org, "https://example.com");
+        assert!(matches!(
+            result,
+            Err(SourceError::OrganizationKeyDecoding { .. })
+        ));
+    }
+
+    #[test]
+    fn decrypt_ssh_key_plaintext_fallback_accepts_pem() {
+        // Legacy rows may store the OpenSSH PEM as plaintext base64.
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(&mut f, b"test-secret-key-32-bytes-padding!").unwrap();
+        let path = f.path().to_string_lossy().to_string();
+        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----";
+        let mut org = make_org("o", "ssh-ed25519 AAAA");
+        org.private_key = general_purpose::STANDARD.encode(pem);
+        let (priv_out, pub_out) =
+            decrypt_ssh_private_key(path, org, "https://example.com").expect("should succeed");
+        assert!(priv_out.starts_with("-----BEGIN"));
+        assert!(priv_out.ends_with('\n'), "trailing newline must be appended");
+        assert_eq!(pub_out, "ssh-ed25519 AAAA example.com-o");
+    }
+
+    #[test]
+    fn decrypt_ssh_key_plaintext_non_pem_rejected() {
+        // Valid base64 that decrypts to garbage AND is not a PEM must fail.
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(&mut f, b"test-secret-key-32-bytes-padding!").unwrap();
+        let path = f.path().to_string_lossy().to_string();
+        let mut org = make_org("o", "ssh-ed25519 AAAA");
+        org.private_key = general_purpose::STANDARD.encode(b"random garbage not a key");
+        let result = decrypt_ssh_private_key(path, org, "https://example.com");
+        assert!(matches!(result, Err(SourceError::KeyDecryption { .. })));
+    }
+
+    #[test]
+    fn generate_ssh_key_decrypts_to_openssh_pem() {
+        // Round-trip: generated keys must decrypt to a PEM the loader accepts,
+        // and the returned tuple must pair correctly.
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        std::io::Write::write_all(&mut f, b"test-secret-key-32-bytes-padding!").unwrap();
+        let path = f.path().to_string_lossy().to_string();
+        let (enc_priv, pub_openssh) = generate_ssh_key(path.clone()).expect("generate failed");
+        assert!(pub_openssh.starts_with("ssh-ed25519 "));
+
+        let mut org = make_org("myorg", &pub_openssh);
+        org.private_key = enc_priv;
+        let (priv_pem, pub_formatted) =
+            decrypt_ssh_private_key(path, org, "https://example.com").expect("decrypt failed");
+        assert!(priv_pem.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----"));
+        assert!(pub_formatted.starts_with(&pub_openssh));
+        assert!(pub_formatted.ends_with(" example.com-myorg"));
+    }
 }

@@ -415,3 +415,81 @@ pub(super) fn normalize_nar_hash(hash: &str) -> String {
     }
     hash.to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // SHA-256 of empty string, used as a stable test vector for nix32 encoding.
+    const EMPTY_SHA256: [u8; 32] = [
+        0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9,
+        0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52,
+        0xb8, 0x55,
+    ];
+    const EMPTY_SHA256_NIX32: &str = "0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73";
+    const EMPTY_SHA256_HEX: &str =
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    #[test]
+    fn nix32_encode_zeros_all_zero_chars() {
+        let result = nix32_encode(&[0u8; 32]);
+        assert_eq!(result.len(), 52);
+        assert!(result.chars().all(|c| c == '0'), "got {result}");
+    }
+
+    #[test]
+    fn nix32_encode_known_vector() {
+        assert_eq!(nix32_encode(&EMPTY_SHA256), EMPTY_SHA256_NIX32);
+    }
+
+    #[test]
+    fn normalize_nar_hash_from_sri() {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(EMPTY_SHA256);
+        let sri = format!("sha256-{b64}");
+        assert_eq!(
+            normalize_nar_hash(&sri),
+            format!("sha256:{EMPTY_SHA256_NIX32}")
+        );
+    }
+
+    #[test]
+    fn normalize_nar_hash_from_prefixed_hex() {
+        let input = format!("sha256:{EMPTY_SHA256_HEX}");
+        assert_eq!(
+            normalize_nar_hash(&input),
+            format!("sha256:{EMPTY_SHA256_NIX32}")
+        );
+    }
+
+    #[test]
+    fn normalize_nar_hash_already_nix32_is_passthrough() {
+        let input = format!("sha256:{EMPTY_SHA256_NIX32}");
+        assert_eq!(normalize_nar_hash(&input), input);
+    }
+
+    #[test]
+    fn normalize_nar_hash_from_bare_hex() {
+        assert_eq!(
+            normalize_nar_hash(EMPTY_SHA256_HEX),
+            format!("sha256:{EMPTY_SHA256_NIX32}")
+        );
+    }
+
+    #[test]
+    fn normalize_nar_hash_rejects_wrong_length_hex() {
+        // 63-char hex and 65-char hex must not be treated as a valid SHA-256.
+        let short = &EMPTY_SHA256_HEX[..63];
+        assert_eq!(normalize_nar_hash(short), short);
+        let long = format!("{EMPTY_SHA256_HEX}a");
+        assert_eq!(normalize_nar_hash(&long), long);
+    }
+
+    #[test]
+    fn normalize_nar_hash_rejects_prefixed_non_64_hex() {
+        // "sha256:<59 nix32 chars>" is the canonical form — must stay as-is,
+        // not be treated as hex (would be if the length check was wrong).
+        let input = format!("sha256:{EMPTY_SHA256_NIX32}");
+        assert_eq!(normalize_nar_hash(&input), input);
+    }
+}

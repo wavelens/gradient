@@ -170,6 +170,37 @@ fn repository_url_git_protocol_passthrough() {
     assert_eq!(url, format!("git://server.example.com/repo.git?rev={REV}"));
 }
 
+#[test]
+fn repository_url_short_hash_rejected() {
+    assert_eq!(
+        repository_url_to_nix("https://github.com/foo/bar.git", "abc123")
+            .unwrap_err()
+            .to_string(),
+        "Commit hash must be 40 characters long"
+    );
+}
+
+#[test]
+fn repository_url_file_scheme_rejected() {
+    assert_eq!(
+        repository_url_to_nix("file:///local/repo", REV)
+            .unwrap_err()
+            .to_string(),
+        "URLs pointing to local files are not allowed"
+    );
+}
+
+#[test]
+fn repository_url_bare_file_prefix_rejected() {
+    // `file:/local/repo` doesn't contain `file://` but still starts with `file`.
+    assert_eq!(
+        repository_url_to_nix("file:/local/repo", REV)
+            .unwrap_err()
+            .to_string(),
+        "URLs pointing to local files are not allowed"
+    );
+}
+
 // ── check_repository_url_is_ssh ──────────────────────────────────────────────
 
 #[test]
@@ -198,6 +229,17 @@ fn https_is_not_ssh() {
         "https://user@github.com/repo.git"
     ));
     assert!(!check_repository_url_is_ssh("/local/path/to/repo.git"));
+}
+
+#[test]
+fn https_with_userinfo_and_port_is_not_ssh() {
+    // `user@host:port` inside an `https://` URL must not be mistaken for SCP.
+    assert!(!check_repository_url_is_ssh(
+        "https://user@github.com:8080/repo.git"
+    ));
+    assert!(!check_repository_url_is_ssh(
+        "http://alice@example.com:443/path"
+    ));
 }
 
 // ── check_index_name ─────────────────────────────────────────────────────────
@@ -248,44 +290,6 @@ fn index_name_space_rejected() {
         check_index_name("test name").unwrap_err().to_string(),
         "Name can only contain letters, numbers, and dashes"
     );
-}
-
-// ── parse_evaluation_wildcard ────────────────────────────────────────────────
-
-#[test]
-fn wildcard_star_is_valid() {
-    assert_eq!(parse_evaluation_wildcard("*").unwrap(), vec!["*"]);
-}
-
-#[test]
-fn wildcard_multiple_patterns() {
-    assert_eq!(
-        parse_evaluation_wildcard("*.nix,*.toml").unwrap(),
-        vec!["*.nix", "*.toml"]
-    );
-}
-
-#[test]
-fn wildcard_trims_spaces_between_patterns() {
-    assert_eq!(
-        parse_evaluation_wildcard("*.nix, *.toml").unwrap(),
-        vec!["*.nix", "*.toml"]
-    );
-}
-
-#[test]
-fn wildcard_empty_rejected() {
-    assert!(parse_evaluation_wildcard("").is_err());
-}
-
-#[test]
-fn wildcard_double_comma_rejected() {
-    assert!(parse_evaluation_wildcard("test,,test").is_err());
-}
-
-#[test]
-fn wildcard_leading_space_rejected() {
-    assert!(parse_evaluation_wildcard(" *.nix").is_err());
 }
 
 // ── validate_password ────────────────────────────────────────────────────────
@@ -383,4 +387,145 @@ fn password_repeated_chars_rejected() {
 fn password_non_sequential_alternating_is_valid() {
     assert!(validate_password("TestAaAa1!").is_ok());
     assert!(validate_password("Test1a1a!").is_ok());
+}
+
+// ── validate_username ────────────────────────────────────────────────────────
+
+#[test]
+fn username_valid() {
+    assert!(validate_username("alice").is_ok());
+    assert!(validate_username("alice_bob").is_ok());
+    assert!(validate_username("alice-bob").is_ok());
+    assert!(validate_username("a1b").is_ok()); // exactly 3 chars
+    assert!(validate_username("Bob42").is_ok());
+}
+
+#[test]
+fn username_empty_rejected() {
+    assert_eq!(
+        validate_username("").unwrap_err(),
+        core::types::input::InputError::UsernameEmpty
+    );
+}
+
+#[test]
+fn username_too_short_rejected() {
+    assert_eq!(
+        validate_username("ab").unwrap_err().to_string(),
+        "Username must be at least 3 characters long"
+    );
+}
+
+#[test]
+fn username_too_long_rejected() {
+    let long = "a".repeat(51);
+    assert_eq!(
+        validate_username(&long).unwrap_err().to_string(),
+        "Username cannot exceed 50 characters"
+    );
+}
+
+#[test]
+fn username_exactly_50_chars_is_valid() {
+    assert!(validate_username(&"a".repeat(50)).is_ok());
+}
+
+#[test]
+fn username_invalid_chars_rejected() {
+    assert_eq!(
+        validate_username("alice!bob").unwrap_err().to_string(),
+        "Username can only contain letters, numbers, underscores, and hyphens"
+    );
+    assert_eq!(
+        validate_username("alice.bob").unwrap_err().to_string(),
+        "Username can only contain letters, numbers, underscores, and hyphens"
+    );
+    assert_eq!(
+        validate_username("alice bob").unwrap_err().to_string(),
+        "Username can only contain letters, numbers, underscores, and hyphens"
+    );
+}
+
+#[test]
+fn username_bad_start_end_rejected() {
+    let msg = "Username cannot start or end with underscore or hyphen";
+    assert_eq!(validate_username("_alice").unwrap_err().to_string(), msg);
+    assert_eq!(validate_username("-alice").unwrap_err().to_string(), msg);
+    assert_eq!(validate_username("alice_").unwrap_err().to_string(), msg);
+    assert_eq!(validate_username("alice-").unwrap_err().to_string(), msg);
+}
+
+#[test]
+fn username_consecutive_specials_rejected() {
+    let msg = "Username cannot contain consecutive special characters";
+    assert_eq!(validate_username("a__b").unwrap_err().to_string(), msg);
+    assert_eq!(validate_username("a--b").unwrap_err().to_string(), msg);
+    assert_eq!(validate_username("a_-b").unwrap_err().to_string(), msg);
+    assert_eq!(validate_username("a-_b").unwrap_err().to_string(), msg);
+}
+
+#[test]
+fn username_reserved_rejected() {
+    let msg = "This username is reserved and cannot be used";
+    assert_eq!(validate_username("admin").unwrap_err().to_string(), msg);
+    assert_eq!(validate_username("ROOT").unwrap_err().to_string(), msg);
+    assert_eq!(validate_username("System").unwrap_err().to_string(), msg);
+    assert_eq!(validate_username("undefined").unwrap_err().to_string(), msg);
+}
+
+// ── validate_display_name ────────────────────────────────────────────────────
+
+#[test]
+fn display_name_valid() {
+    assert!(validate_display_name("Alice").is_ok());
+    assert!(validate_display_name("Alice Bob").is_ok());
+    assert!(validate_display_name("O'Neil").is_ok());
+    assert!(validate_display_name("J.R.R. Tolkien").is_ok());
+    assert!(validate_display_name("name-with_under").is_ok());
+}
+
+#[test]
+fn display_name_empty_rejected() {
+    assert_eq!(
+        validate_display_name("").unwrap_err().to_string(),
+        "Display name cannot be empty"
+    );
+}
+
+#[test]
+fn display_name_too_long_rejected() {
+    assert_eq!(
+        validate_display_name(&"a".repeat(101))
+            .unwrap_err()
+            .to_string(),
+        "Display name cannot exceed 100 characters"
+    );
+}
+
+#[test]
+fn display_name_exactly_100_is_valid() {
+    assert!(validate_display_name(&"a".repeat(100)).is_ok());
+}
+
+#[test]
+fn display_name_invalid_chars_rejected() {
+    assert_eq!(
+        validate_display_name("Alice!").unwrap_err().to_string(),
+        "Display name can only contain letters, numbers, spaces, apostrophes, dots, dashes, and underscores"
+    );
+}
+
+#[test]
+fn display_name_leading_or_trailing_space_rejected() {
+    let msg = "Display name cannot start or end with spaces";
+    assert_eq!(validate_display_name(" Alice").unwrap_err().to_string(), msg);
+    assert_eq!(validate_display_name("Alice ").unwrap_err().to_string(), msg);
+}
+
+#[test]
+fn display_name_consecutive_spaces_rejected() {
+    assert_eq!(
+        validate_display_name("Alice  Bob").unwrap_err().to_string(),
+        "Display name cannot contain consecutive spaces"
+    );
 }

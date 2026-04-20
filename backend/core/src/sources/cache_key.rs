@@ -308,4 +308,152 @@ mod tests {
         let result = decrypt_signing_key(path, cache);
         assert!(result.is_err(), "expected error for corrupted base64");
     }
+
+    #[test]
+    fn format_cache_public_key_legacy_matches_stored() {
+        // Deriving the pubkey from the encrypted private key must yield exactly
+        // the same result as reading cache.public_key — guards against the
+        // "last 32 bytes" slice drifting.
+        let (_f, path) = temp_secret_file();
+        let (encrypted_priv, pub_b64) =
+            generate_signing_key(path.clone()).expect("generate failed");
+        let stored = make_cache("c", &pub_b64, &encrypted_priv);
+        let legacy = make_cache("c", "", &encrypted_priv);
+        let url = "https://cache.example.com".to_string();
+        let r_stored = format_cache_public_key(path.clone(), stored, url.clone()).unwrap();
+        let r_legacy = format_cache_public_key(path, legacy, url).unwrap();
+        assert_eq!(r_stored, r_legacy);
+    }
+
+    #[test]
+    fn format_cache_public_key_strips_http_and_port() {
+        let (_f, path) = temp_secret_file();
+        let (encrypted_priv, pub_b64) =
+            generate_signing_key(path.clone()).expect("generate failed");
+        let cache = make_cache("c", &pub_b64, &encrypted_priv);
+        let r = format_cache_public_key(path, cache, "http://cache.example.com:8080".to_string())
+            .expect("format failed");
+        assert!(
+            r.starts_with("cache.example.com-8080-c:"),
+            "unexpected format: {r}"
+        );
+    }
+
+    #[test]
+    fn sign_narinfo_prefixes_bare_refs() {
+        // Signing with bare store-path names should produce the same signature
+        // as signing with fully-qualified `/nix/store/...` refs.
+        let (_f, path) = temp_secret_file();
+        let (encrypted_priv, pub_b64) =
+            generate_signing_key(path.clone()).expect("generate failed");
+        let cache = make_cache("c", &pub_b64, &encrypted_priv);
+        let url = "https://cache.example.com".to_string();
+        let bare = vec!["aaaa-a".to_string(), "bbbb-b".to_string()];
+        let full = vec![
+            "/nix/store/aaaa-a".to_string(),
+            "/nix/store/bbbb-b".to_string(),
+        ];
+        let s1 = sign_narinfo_fingerprint(
+            path.clone(),
+            cache.clone(),
+            url.clone(),
+            "/nix/store/x-y",
+            "sha256:AAAA",
+            42,
+            &bare,
+        )
+        .unwrap();
+        let s2 = sign_narinfo_fingerprint(
+            path,
+            cache,
+            url,
+            "/nix/store/x-y",
+            "sha256:AAAA",
+            42,
+            &full,
+        )
+        .unwrap();
+        assert_eq!(s1, s2);
+    }
+
+    #[test]
+    fn sign_narinfo_nar_size_affects_signature() {
+        let (_f, path) = temp_secret_file();
+        let (encrypted_priv, pub_b64) =
+            generate_signing_key(path.clone()).expect("generate failed");
+        let cache = make_cache("c", &pub_b64, &encrypted_priv);
+        let url = "https://cache.example.com".to_string();
+        let s1 = sign_narinfo_fingerprint(
+            path.clone(),
+            cache.clone(),
+            url.clone(),
+            "/nix/store/x-y",
+            "sha256:AAAA",
+            100,
+            &[],
+        )
+        .unwrap();
+        let s2 = sign_narinfo_fingerprint(
+            path,
+            cache,
+            url,
+            "/nix/store/x-y",
+            "sha256:AAAA",
+            101,
+            &[],
+        )
+        .unwrap();
+        assert_ne!(s1, s2, "nar_size must participate in the fingerprint");
+    }
+
+    #[test]
+    fn sign_narinfo_store_path_affects_signature() {
+        let (_f, path) = temp_secret_file();
+        let (encrypted_priv, pub_b64) =
+            generate_signing_key(path.clone()).expect("generate failed");
+        let cache = make_cache("c", &pub_b64, &encrypted_priv);
+        let url = "https://cache.example.com".to_string();
+        let s1 = sign_narinfo_fingerprint(
+            path.clone(),
+            cache.clone(),
+            url.clone(),
+            "/nix/store/aaaa-a",
+            "sha256:AAAA",
+            1,
+            &[],
+        )
+        .unwrap();
+        let s2 = sign_narinfo_fingerprint(
+            path,
+            cache,
+            url,
+            "/nix/store/bbbb-b",
+            "sha256:AAAA",
+            1,
+            &[],
+        )
+        .unwrap();
+        assert_ne!(s1, s2);
+    }
+
+    #[test]
+    fn sign_narinfo_short_key_fails() {
+        // A decoded key shorter than ed25519 secret size must return KeyPairConversion.
+        let (_f, path) = temp_secret_file();
+        let secret = crate::types::input::load_secret_bytes(&path);
+        let short_b64 = general_purpose::STANDARD.encode(b"too short");
+        let enc = crypter::encrypt_with_password(secret.expose(), short_b64.as_bytes()).unwrap();
+        let enc_b64 = general_purpose::STANDARD.encode(enc);
+        let cache = make_cache("c", "ignored", &enc_b64);
+        let result = sign_narinfo_fingerprint(
+            path,
+            cache,
+            "https://cache.example.com".to_string(),
+            "/nix/store/x-y",
+            "sha256:AAAA",
+            1,
+            &[],
+        );
+        assert!(matches!(result, Err(SourceError::KeyPairConversion)));
+    }
 }

@@ -186,6 +186,16 @@ mod tests {
     }
 
     #[test]
+    fn repo_url_file_single_slash_rejected() {
+        // `file:/local/repo` doesn't match `file://` but is still a local file
+        // reference and must be rejected.
+        assert_eq!(
+            "file:/local/repo".parse::<RepositoryUrl>().unwrap_err(),
+            InputError::LocalFileUrlNotAllowed,
+        );
+    }
+
+    #[test]
     fn repo_url_plain_string_rejected() {
         assert!("notaurl".parse::<RepositoryUrl>().is_err());
     }

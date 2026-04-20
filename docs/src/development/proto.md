@@ -703,7 +703,7 @@ SignTask {
 |------|----------|---------------------|----------------------|
 | **Build** | `build` | `builds` + `required_paths` — full chain with pre-computed closure | Per-build `BuildOutput` via `JobUpdate` |
 | **Compress** | `build` | `store_paths` — outputs to pack | zstd-compressed NARs ready for upload |
-| **Sign** | `sign` | `store_paths`, signing key credential | `signatures: Vec<Signature>` — per-output Ed25519 signatures |
+| **Sign** | `sign` | `store_paths`, signing key credential (`"key-name:base64"`) | `Signed { signatures: Vec<PathSignature> }` via `JobUpdate` — per-output Ed25519 signatures reported to server |
 
 **NAR transfer flow:**
 
@@ -724,7 +724,10 @@ sequenceDiagram
     W->>S: JobUpdate::BuildOutput { target }
     W->>S: JobUpdate::Compressing
     Note over W: packs outputs into zstd NARs
+    W->>S: NarUploaded { store_path, file_hash, file_size, nar_size, nar_hash, references }
     W->>S: JobUpdate::Signing
+    Note over W: signs outputs with cache Ed25519 key
+    W->>S: JobUpdate::Signed { signatures }
     W->>S: JobCompleted
 ```
 
@@ -812,7 +815,15 @@ enum ClientMessage {
     NarRequest { job_id: Uuid, paths: Vec<String> },    // "send me these paths"
     NarPush { job_id: Uuid, store_path: String, data: Vec<u8>, offset: u64, is_final: bool },
     NarReady { job_id: Uuid, store_path: String, nar_size: u64, nar_hash: String },
-    NarUploaded { job_id: Uuid, store_path: String, file_hash: String, file_size: u64 },
+    NarUploaded {
+        job_id: Uuid,
+        store_path: String,
+        file_hash: String,     // sha256:<hex> — hash of the compressed NAR file
+        file_size: u64,        // size in bytes of the compressed NAR file
+        nar_size: u64,         // uncompressed NAR size in bytes
+        nar_hash: String,      // sha256:<nix32> or SRI — hash of the uncompressed NAR
+        references: Vec<String>, // store-path references in hash-name format (no /nix/store/ prefix)
+    },
 
     // Cache queries
     CacheQuery { job_id: String, paths: Vec<String>, mode: QueryMode },  // see QueryMode
@@ -853,7 +864,15 @@ enum JobUpdateKind {
     Building { build_id: Uuid },                        // → Building (per derivation in chain)
     BuildOutput { build_id: Uuid, outputs: Vec<BuildOutput> }, // per-derivation result
     Compressing,                                        // packing outputs into zstd NARs (no DB status change)
-    Signing,                                            // (no DB status change)
+    Signing,                                            // (no DB status change; signing in progress)
+    Signed {                                            // Sign task complete — report computed signatures to server
+        signatures: Vec<PathSignature>,
+    },
+}
+
+struct PathSignature {
+    store_path: String,   // /nix/store/xxx-name
+    signature: String,    // "key-name:base64" — standard Nix narinfo Ed25519 signature
 }
 
 struct FetchedInput {
@@ -886,7 +905,8 @@ struct BuildOutput {
 | `Building` | `build` | `Building` (2) — per derivation in chain |
 | `BuildOutput` | `build` + `derivation_output` | `Completed` (3); updates output hash/size/path |
 | `Compressing` | — | No status change; informational — packing outputs into zstd NARs |
-| `Signing` | — | No status change; informational |
+| `Signing` | — | No status change; informational — signing in progress |
+| `Signed` | `cached_path_signature` | No status change; server records each signature in `cached_path_signature` for the org's caches so narinfo can serve them |
 
 `JobCompleted` sets the final terminal status. `JobFailed` sets `Failed` and cascades `DependencyFailed` to downstream builds.
 
@@ -1110,10 +1130,11 @@ When a worker receives a `SignTask`, it performs pure-Rust Ed25519 signing local
  1. For each store path, query local store for `PathInfo` (NAR hash, NAR size, references).
  2. Convert NAR hash from SRI format (`sha256-<base64>`) to Nix format (`sha256:<nix-base32>`).
  3. Compute fingerprint: `fingerprint_path(store_path, nar_hash, nar_size, references)`.
- 4. Sign fingerprint with the cache's Ed25519 secret key (received via `Credential::SigningKey`).
- 5. Return signatures in `JobCompleted`.
+ 4. Sign fingerprint with the cache's Ed25519 secret key (received via `Credential::SigningKey` in `"key-name:base64"` format).
+ 5. Register the signature in the local nix-daemon via `add_signatures`.
+ 6. Report all computed signatures to the server via `JobUpdate { update: Signed { signatures } }`.
 
-The server inserts signatures into `cached_path` rows and calls `add_signatures` on its local store.
+The server records each signature in `cached_path_signature` for all caches the org subscribes to, enabling narinfo to serve valid signatures for paths built on remote workers.
 
 ---
 

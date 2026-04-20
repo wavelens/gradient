@@ -262,10 +262,6 @@ impl FromStr for Wildcard {
             patterns.push(part.to_string());
         }
 
-        if patterns.is_empty() {
-            return Err(InputError::EvaluationWildcardEmpty);
-        }
-
         Ok(Self { patterns })
     }
 }
@@ -461,31 +457,57 @@ mod tests {
 
     #[test]
     fn double_comma_rejected() {
-        assert!("packages.*.*,,checks.*.*".parse::<Wildcard>().is_err());
+        assert_eq!(
+            "packages.*.*,,checks.*.*".parse::<Wildcard>().unwrap_err(),
+            InputError::EvaluationWildcardConsecutiveCommas,
+        );
     }
 
     #[test]
     fn leading_space_rejected() {
-        assert!(" packages.*.*".parse::<Wildcard>().is_err());
+        assert_eq!(
+            " packages.*.*".parse::<Wildcard>().unwrap_err(),
+            InputError::EvaluationWildcardWhitespace,
+        );
+    }
+
+    #[test]
+    fn trailing_space_rejected() {
+        assert_eq!(
+            "packages.*.* ".parse::<Wildcard>().unwrap_err(),
+            InputError::EvaluationWildcardWhitespace,
+        );
     }
 
     #[test]
     fn internal_whitespace_rejected() {
-        assert!("packages .*.* ".parse::<Wildcard>().is_err());
+        assert_eq!(
+            "packages .*.*".parse::<Wildcard>().unwrap_err(),
+            InputError::EvaluationWildcardInternalWhitespace,
+        );
     }
 
     #[test]
     fn starts_with_period_rejected() {
-        assert!(".packages.*.*".parse::<Wildcard>().is_err());
+        assert_eq!(
+            ".packages.*.*".parse::<Wildcard>().unwrap_err(),
+            InputError::EvaluationWildcardStartsWithPeriod,
+        );
     }
 
     #[test]
     fn exclusion_bare_body_rejected() {
-        assert!("packages.*.*,!".parse::<Wildcard>().is_err());
+        assert_eq!(
+            "packages.*.*,!".parse::<Wildcard>().unwrap_err(),
+            InputError::EvaluationWildcardBareSpecialChar,
+        );
     }
 
     #[test]
     fn exclusion_starts_with_period_rejected() {
-        assert!("packages.*.*,!.packages".parse::<Wildcard>().is_err());
+        assert_eq!(
+            "packages.*.*,!.packages".parse::<Wildcard>().unwrap_err(),
+            InputError::EvaluationWildcardStartsWithPeriod,
+        );
     }
 }

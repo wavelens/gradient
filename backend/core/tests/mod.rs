@@ -5,4 +5,5 @@
  */
 
 pub mod input;
+pub mod path_utils;
 pub mod sources;

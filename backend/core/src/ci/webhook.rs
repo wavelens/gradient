@@ -314,6 +314,18 @@ mod tests {
         assert!(result.is_err(), "expected Err for invalid base64");
     }
 
+    #[test]
+    fn decrypt_valid_base64_but_corrupt_ciphertext_fails() {
+        // Base64-decodes fine but does not represent a valid `crypter` ciphertext.
+        let (_f, path) = temp_secret_file();
+        let garbage = general_purpose::STANDARD.encode(b"not-an-actual-ciphertext");
+        let result = decrypt_webhook_secret(&path, &garbage);
+        assert!(
+            result.is_err(),
+            "expected Err for well-formed base64 that is not a valid ciphertext"
+        );
+    }
+
     // ── sign_webhook_payload ─────────────────────────────────────────────────
 
     #[test]
@@ -336,6 +348,14 @@ mod tests {
     fn sign_payload_different_secret_different_sig() {
         let a = sign_webhook_payload("secret-a", "body");
         let b = sign_webhook_payload("secret-b", "body");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn sign_payload_different_body_different_sig() {
+        // Guards against regressions that forget to hash the body.
+        let a = sign_webhook_payload("secret", "body-one");
+        let b = sign_webhook_payload("secret", "body-two");
         assert_ne!(a, b);
     }
 

@@ -164,3 +164,58 @@ pub async fn decode_download_token(
 pub fn generate_api_key() -> String {
     Alphanumeric.sample_string(&mut rand::rng(), 64)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{HeaderMap, HeaderValue, header};
+
+    fn headers_with(name: header::HeaderName, value: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(name, HeaderValue::from_str(value).unwrap());
+        h
+    }
+
+    #[test]
+    fn extract_bearer_from_authorization_header() {
+        let h = headers_with(header::AUTHORIZATION, "Bearer abc.def.ghi");
+        assert_eq!(extract_bearer_or_cookie(&h).as_deref(), Some("abc.def.ghi"));
+    }
+
+    #[test]
+    fn extract_bearer_scheme_is_case_sensitive() {
+        // Lowercase "bearer" is not the canonical scheme used by our clients;
+        // matching it would mask mis-configured callers.
+        let h = headers_with(header::AUTHORIZATION, "bearer abc");
+        assert_eq!(extract_bearer_or_cookie(&h), None);
+    }
+
+    #[test]
+    fn extract_basic_auth_is_ignored() {
+        let h = headers_with(header::AUTHORIZATION, "Basic dXNlcjpwYXNz");
+        assert_eq!(extract_bearer_or_cookie(&h), None);
+    }
+
+    #[test]
+    fn extract_falls_back_to_cookie_when_no_auth_header() {
+        let h = headers_with(header::COOKIE, "other=1; jwt_token=xyz; last=2");
+        assert_eq!(extract_bearer_or_cookie(&h).as_deref(), Some("xyz"));
+    }
+
+    #[test]
+    fn extract_cookie_without_jwt_token_returns_none() {
+        let h = headers_with(header::COOKIE, "other=1; session=2");
+        assert_eq!(extract_bearer_or_cookie(&h), None);
+    }
+
+    #[test]
+    fn extract_empty_headers_returns_none() {
+        assert_eq!(extract_bearer_or_cookie(&HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn extract_bearer_with_no_token_part_returns_none() {
+        let h = headers_with(header::AUTHORIZATION, "Bearer");
+        assert_eq!(extract_bearer_or_cookie(&h), None);
+    }
+}

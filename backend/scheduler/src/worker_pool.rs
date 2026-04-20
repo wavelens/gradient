@@ -393,6 +393,26 @@ mod tests {
     }
 
     #[test]
+    fn build_capacity_strict_at_limit() {
+        // Worker at exactly max_concurrent_builds must reject new builds.
+        // Guards against `<` → `<=` off-by-one in `has_build_capacity`.
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new());
+        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec![], 2);
+
+        assert!(pool.has_capacity("w1", &JobKind::Build), "0/2 has capacity");
+        pool.assign_job("w1", "j1");
+        assert!(pool.has_capacity("w1", &JobKind::Build), "1/2 has capacity");
+        pool.assign_job("w1", "j2");
+        assert!(
+            !pool.has_capacity("w1", &JobKind::Build),
+            "2/2 is at limit — must reject"
+        );
+        pool.release_job("w1", "j2");
+        assert!(pool.has_capacity("w1", &JobKind::Build), "1/2 again");
+    }
+
+    #[test]
     fn test_assign_and_release_job() {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new());

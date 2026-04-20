@@ -209,4 +209,47 @@ mod tests {
         let b = SecretBytes::new(vec![10, 20, 30]);
         assert_eq!(b.expose(), &[10u8, 20, 30]);
     }
+
+    #[test]
+    fn secret_bytes_display_redacted() {
+        let b = SecretBytes::new(vec![1, 2, 3]);
+        assert_eq!(format!("{}", b), "[REDACTED]");
+    }
+
+    #[test]
+    fn secret_string_from_string() {
+        let s: SecretString = "token".to_string().into();
+        assert_eq!(s.expose(), "token");
+    }
+
+    #[test]
+    fn secret_bytes_from_vec() {
+        let b: SecretBytes = vec![1u8, 2, 3].into();
+        assert_eq!(b.expose(), &[1, 2, 3]);
+    }
+
+    #[test]
+    fn zeroize_slice_clears_bytes() {
+        let mut buf = [1u8, 2, 3, 4];
+        zeroize_slice(&mut buf);
+        assert_eq!(buf, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn zeroize_slice_empty_ok() {
+        let mut buf: [u8; 0] = [];
+        zeroize_slice(&mut buf);
+    }
+
+    #[test]
+    fn secret_string_empty_allowed() {
+        let s = SecretString::new(String::new());
+        assert_eq!(s.expose(), "");
+    }
+
+    #[test]
+    fn secret_bytes_empty_allowed() {
+        let b = SecretBytes::new(vec![]);
+        assert!(b.expose().is_empty());
+    }
 }

@@ -301,3 +301,121 @@ pub async fn pack_derivation_output(
 
     Ok((format!("sha256:{}", file_hash), file_size, nar_size))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine as _;
+
+    // ── nix_base32_encode ────────────────────────────────────────────────────
+
+    #[test]
+    fn nix_base32_encode_single_zero() {
+        // 1 byte × 8 bits → (8-1)/5 + 1 = 2 chars, all zero bits.
+        assert_eq!(nix_base32_encode(&[0x00]), "00");
+    }
+
+    #[test]
+    fn nix_base32_encode_single_ff() {
+        // Byte 0xff: high group (bits 5..) = 0b111 = 7 → '7';
+        // low group (bits 0..5) = 0b11111 = 31 → 'z' (last alphabet char).
+        assert_eq!(nix_base32_encode(&[0xff]), "7z");
+    }
+
+    #[test]
+    fn nix_base32_encode_two_zero_bytes() {
+        // 2 bytes × 8 bits → (16-1)/5 + 1 = 4 chars.
+        assert_eq!(nix_base32_encode(&[0x00, 0x00]), "0000");
+    }
+
+    #[test]
+    fn nix_base32_encode_32_byte_digest_has_52_chars() {
+        let digest = [0u8; 32];
+        let out = nix_base32_encode(&digest);
+        assert_eq!(out.len(), 52, "sha256 digest → 52 nix-base32 chars");
+        assert!(out.chars().all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c)));
+    }
+
+    #[test]
+    fn nix_base32_encode_deterministic() {
+        let data = [0x12, 0x34, 0x56, 0x78, 0x9a];
+        let a = nix_base32_encode(&data);
+        let b = nix_base32_encode(&data);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn nix_base32_encode_uses_no_ambiguous_chars() {
+        // Nix excludes e, o, t, u from the alphabet; a 32-byte all-ones digest
+        // exercises every output slot.
+        let digest = [0xffu8; 32];
+        let out = nix_base32_encode(&digest);
+        for c in out.chars() {
+            assert!(
+                !['e', 'o', 't', 'u'].contains(&c),
+                "nix-base32 must not contain ambiguous char '{c}'"
+            );
+        }
+    }
+
+    // ── nix_base32_sha256 ────────────────────────────────────────────────────
+
+    #[test]
+    fn nix_base32_sha256_empty_input_well_known() {
+        // SHA-256 of empty string encoded in Nix base-32 is a well-known
+        // fixed value; guards against any regression in the pipeline.
+        let out = nix_base32_sha256(b"");
+        assert_eq!(out.len(), 52);
+        assert!(out.chars().all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c)));
+        // Additionally verify it matches direct encoding of the SHA-256 digest.
+        let direct = nix_base32_encode(
+            ring::digest::digest(&ring::digest::SHA256, b"").as_ref(),
+        );
+        assert_eq!(out, direct);
+    }
+
+    #[test]
+    fn nix_base32_sha256_different_inputs_differ() {
+        assert_ne!(nix_base32_sha256(b"foo"), nix_base32_sha256(b"bar"));
+    }
+
+    // ── sri_to_nix_hash ──────────────────────────────────────────────────────
+
+    #[test]
+    fn sri_to_nix_hash_roundtrip_via_base64() {
+        // Encode a fixed 32-byte digest as SRI, then convert, then check the
+        // Nix-base32 suffix matches direct encoding.
+        let digest = [0x42u8; 32];
+        let b64 = base64::engine::general_purpose::STANDARD.encode(digest);
+        let sri = format!("sha256-{b64}");
+        let nix = sri_to_nix_hash(&sri).expect("should convert");
+        let expected = format!("sha256:{}", nix_base32_encode(&digest));
+        assert_eq!(nix, expected);
+    }
+
+    #[test]
+    fn sri_to_nix_hash_rejects_non_sha256_prefix() {
+        let b64 = base64::engine::general_purpose::STANDARD.encode([0u8; 32]);
+        let sri = format!("sha512-{b64}");
+        assert!(sri_to_nix_hash(&sri).is_err());
+    }
+
+    #[test]
+    fn sri_to_nix_hash_rejects_missing_prefix() {
+        let b64 = base64::engine::general_purpose::STANDARD.encode([0u8; 32]);
+        assert!(sri_to_nix_hash(&b64).is_err());
+    }
+
+    #[test]
+    fn sri_to_nix_hash_rejects_invalid_base64() {
+        assert!(sri_to_nix_hash("sha256-!!!not-base64!!!").is_err());
+    }
+
+    #[test]
+    fn sri_to_nix_hash_has_sha256_prefix() {
+        let b64 = base64::engine::general_purpose::STANDARD.encode([0x01u8; 32]);
+        let sri = format!("sha256-{b64}");
+        let nix = sri_to_nix_hash(&sri).unwrap();
+        assert!(nix.starts_with("sha256:"));
+    }
+}

@@ -392,14 +392,7 @@ fn ls_remote_head_git_protocol(url: &str) -> Result<Vec<u8>, SourceError> {
     use std::net::TcpStream;
     use std::time::Duration;
 
-    // Parse git://[host[:port]]/path
-    let rest = url.strip_prefix("git://").ok_or(SourceError::InvalidUrl)?;
-    let (host_port, repo_path) = rest.split_once('/').ok_or(SourceError::InvalidUrl)?;
-    let (host, port) = if let Some((h, p)) = host_port.rsplit_once(':') {
-        (h, p.parse::<u16>().unwrap_or(9418))
-    } else {
-        (host_port, 9418u16)
-    };
+    let (host, port, repo_path) = parse_git_protocol_url(url)?;
 
     let mut stream =
         TcpStream::connect((host, port)).map_err(|e| SourceError::GitCommandFailed {
@@ -571,6 +564,19 @@ fn read_head_from_pktlines(reader: &mut dyn std::io::Read) -> Result<Vec<u8>, So
     first_ref.ok_or(SourceError::GitHashExtraction)
 }
 
+/// Parses a `git://[host[:port]]/repo/path` URL into its host, port, and repo
+/// path components. Defaults port to 9418 (git-daemon).
+fn parse_git_protocol_url(url: &str) -> Result<(&str, u16, &str), SourceError> {
+    let rest = url.strip_prefix("git://").ok_or(SourceError::InvalidUrl)?;
+    let (host_port, repo_path) = rest.split_once('/').ok_or(SourceError::InvalidUrl)?;
+    let (host, port) = if let Some((h, p)) = host_port.rsplit_once(':') {
+        (h, p.parse::<u16>().unwrap_or(9418))
+    } else {
+        (host_port, 9418u16)
+    };
+    Ok((host, port, repo_path))
+}
+
 /// Parses a nix flake URL of the form `git+<scheme>://host/repo?rev=<hash>` into
 /// `(git_url, rev)`.  The `git+` prefix is stripped so the returned URL is
 /// suitable for direct use with libgit2.
@@ -616,6 +622,101 @@ mod tests {
 
     const FLUSH: &[u8] = b"0000";
     const FAKE_SHA: &str = "aabbccddee00112233445566778899aabbccddee";
+
+    // ── parse_nix_git_url ────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_nix_git_url_strips_git_plus_prefix() {
+        let (url, rev) =
+            parse_nix_git_url("git+https://example.com/repo.git?rev=deadbeef").unwrap();
+        assert_eq!(url, "https://example.com/repo.git");
+        assert_eq!(rev, "deadbeef");
+    }
+
+    #[test]
+    fn parse_nix_git_url_without_git_plus_prefix() {
+        let (url, rev) = parse_nix_git_url("https://example.com/repo.git?rev=abc123").unwrap();
+        assert_eq!(url, "https://example.com/repo.git");
+        assert_eq!(rev, "abc123");
+    }
+
+    #[test]
+    fn parse_nix_git_url_rev_among_multiple_query_params() {
+        let (url, rev) = parse_nix_git_url(
+            "git+ssh://git@host/repo.git?ref=main&rev=cafef00d&shallow=1",
+        )
+        .unwrap();
+        assert_eq!(url, "ssh://git@host/repo.git");
+        assert_eq!(rev, "cafef00d");
+    }
+
+    #[test]
+    fn parse_nix_git_url_missing_query_rejected() {
+        assert!(matches!(
+            parse_nix_git_url("git+https://example.com/repo.git"),
+            Err(SourceError::UrlParsing)
+        ));
+    }
+
+    #[test]
+    fn parse_nix_git_url_missing_rev_rejected() {
+        assert!(matches!(
+            parse_nix_git_url("git+https://example.com/repo.git?ref=main"),
+            Err(SourceError::MissingHash)
+        ));
+    }
+
+    #[test]
+    fn parse_nix_git_url_empty_query_missing_rev() {
+        assert!(matches!(
+            parse_nix_git_url("git+https://example.com/repo.git?"),
+            Err(SourceError::MissingHash)
+        ));
+    }
+
+    // ── parse_git_protocol_url ───────────────────────────────────────────────
+
+    #[test]
+    fn parse_git_protocol_url_default_port() {
+        let (host, port, path) = parse_git_protocol_url("git://server.example.com/repo.git").unwrap();
+        assert_eq!(host, "server.example.com");
+        assert_eq!(port, 9418);
+        assert_eq!(path, "repo.git");
+    }
+
+    #[test]
+    fn parse_git_protocol_url_explicit_port() {
+        let (host, port, path) =
+            parse_git_protocol_url("git://server.example.com:9419/foo/bar.git").unwrap();
+        assert_eq!(host, "server.example.com");
+        assert_eq!(port, 9419);
+        assert_eq!(path, "foo/bar.git");
+    }
+
+    #[test]
+    fn parse_git_protocol_url_unparseable_port_falls_back_to_default() {
+        let (host, port, path) =
+            parse_git_protocol_url("git://server.example.com:not-a-port/repo").unwrap();
+        assert_eq!(host, "server.example.com");
+        assert_eq!(port, 9418);
+        assert_eq!(path, "repo");
+    }
+
+    #[test]
+    fn parse_git_protocol_url_wrong_scheme_rejected() {
+        assert!(matches!(
+            parse_git_protocol_url("https://server/repo"),
+            Err(SourceError::InvalidUrl)
+        ));
+    }
+
+    #[test]
+    fn parse_git_protocol_url_missing_path_rejected() {
+        assert!(matches!(
+            parse_git_protocol_url("git://server.example.com"),
+            Err(SourceError::InvalidUrl)
+        ));
+    }
 
     #[test]
     fn read_head_from_pktlines_basic() {
