@@ -5,7 +5,6 @@
  */
 
 use chrono::Timelike;
-use gradient_core::sources::sign_narinfo_fingerprint;
 use gradient_core::types::*;
 use gradient_core::types::proto::PathSignature;
 use scheduler::Scheduler;
@@ -23,130 +22,84 @@ pub(super) struct NarUploadRecord<'a> {
     pub references: &'a [String],
 }
 
-/// Create `cached_path` rows for source paths pushed during evaluation.
-///
-/// Resolves `job_id → org → caches` and creates one `cached_path` row per
-/// cache for each fetched input.
-pub(super) async fn record_fetched_paths(
+/// Write one `cached_path_signature` row per entry in `signatures`. Each
+/// entry is `"<cache-name>:<base64>"`; the cache name is resolved against
+/// the job's org caches. Foreign or unknown cache names are logged and
+/// dropped. Entries whose cache already has a signature for this path are
+/// skipped.
+async fn record_signatures_by_cache_name(
     state: &ServerState,
-    scheduler: &Scheduler,
-    job_id: &str,
-    fetched_paths: &[gradient_core::types::proto::FetchedInput],
-) -> anyhow::Result<()> {
-    use gradient_core::sources::get_hash_from_path;
-
-    if fetched_paths.is_empty() {
-        return Ok(());
+    cached_path_id: Uuid,
+    org_caches: &[entity::organization_cache::Model],
+    signatures: &[String],
+    store_path: &str,
+    now: chrono::NaiveDateTime,
+) {
+    if signatures.is_empty() {
+        return;
     }
 
-    let org_id = scheduler
-        .peer_id_for_job(job_id)
-        .await
-        .ok_or_else(|| anyhow::anyhow!("no peer for job {}", job_id))?;
-
-    let org_caches = EOrganizationCache::find()
-        .filter(COrganizationCache::Organization.eq(org_id))
+    // Pre-resolve the org's cache rows so we can match by name.
+    let cache_ids: Vec<Uuid> = org_caches.iter().map(|oc| oc.cache).collect();
+    let caches = match ECache::find()
+        .filter(CCache::Id.is_in(cache_ids))
         .all(&state.db)
-        .await?;
+        .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(error = %e, "failed to resolve org caches for signature recording");
+            return;
+        }
+    };
 
-    if org_caches.is_empty() {
-        return Ok(());
-    }
-
-    let now = chrono::Utc::now().naive_utc();
-
-    for fi in fetched_paths {
-        let (hash, package) = match get_hash_from_path(fi.store_path.clone()) {
-            Ok(v) => v,
-            Err(e) => {
-                warn!(store_path = %fi.store_path, error = %e, "cannot parse fetched path");
+    for sig in signatures {
+        let (cache_name, sig_b64) = match split_signature(sig) {
+            Some(v) => v,
+            None => {
+                warn!(%store_path, sig = %sig, "malformed signature entry, skipping");
                 continue;
             }
         };
 
-        let Some(row) = find_or_create_cached_path(state, fi, &hash, &package, now).await? else {
+        let Some(cache) = caches.iter().find(|c| c.name == cache_name) else {
+            warn!(%store_path, %cache_name, "signature for cache not owned by job's org, dropping");
             continue;
         };
-        record_cached_path_signatures(state, &row, &org_caches, fi, now).await;
-    }
 
-    info!(count = fetched_paths.len(), %org_id, "recorded fetched paths in cache");
-    Ok(())
-}
-
-async fn find_or_create_cached_path(
-    state: &ServerState,
-    fi: &gradient_core::types::proto::FetchedInput,
-    hash: &str,
-    package: &str,
-    now: chrono::NaiveDateTime,
-) -> anyhow::Result<Option<entity::cached_path::Model>> {
-    match ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(hash))
-        .one(&state.db)
-        .await?
-    {
-        Some(row) => Ok(Some(row)),
-        None => {
-            let am = ACachedPath {
-                id: Set(Uuid::new_v4()),
-                store_path: Set(fi.store_path.clone()),
-                hash: Set(hash.to_owned()),
-                package: Set(package.to_owned()),
-                file_hash: Set(None),
-                file_size: Set(None),
-                nar_size: Set(Some(fi.nar_size as i64)),
-                nar_hash: Set(Some(fi.nar_hash.clone())),
-                references: Set(None),
-                ca: Set(None),
-                created_at: Set(now),
-            };
-            match am.insert(&state.db).await {
-                Ok(row) => Ok(Some(row)),
-                Err(e) => {
-                    warn!(store_path = %fi.store_path, error = %e, "failed to insert cached_path");
-                    Ok(None)
-                }
-            }
-        }
-    }
-}
-
-async fn record_cached_path_signatures(
-    state: &ServerState,
-    cached_path_row: &entity::cached_path::Model,
-    org_caches: &[entity::organization_cache::Model],
-    fi: &gradient_core::types::proto::FetchedInput,
-    now: chrono::NaiveDateTime,
-) {
-    for oc in org_caches {
         let existing = ECachedPathSignature::find()
-            .filter(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
-            .filter(CCachedPathSignature::Cache.eq(oc.cache))
+            .filter(CCachedPathSignature::CachedPath.eq(cached_path_id))
+            .filter(CCachedPathSignature::Cache.eq(cache.id))
             .one(&state.db)
             .await
             .unwrap_or(None);
-
         if existing.is_some() {
             continue;
         }
 
         let sig_row = ACachedPathSignature {
             id: Set(Uuid::new_v4()),
-            cached_path: Set(cached_path_row.id),
-            cache: Set(oc.cache),
-            signature: Set(fi.signature.clone()),
+            cached_path: Set(cached_path_id),
+            cache: Set(cache.id),
+            signature: Set(Some(sig_b64.to_string())),
             created_at: Set(now),
         };
         if let Err(e) = sig_row.insert(&state.db).await {
             warn!(
-                store_path = %fi.store_path,
-                cache = %oc.cache,
+                %store_path,
+                cache = %cache.id,
                 error = %e,
                 "failed to insert cached_path_signature"
             );
         }
     }
+}
+
+/// Split a narinfo signature `"<name>:<base64>"` into `(name, base64)`.
+/// Returns `None` if there is no `:` separator.
+fn split_signature(sig: &str) -> Option<(&str, &str)> {
+    let (name, rest) = sig.split_once(':')?;
+    Some((name, rest))
 }
 
 /// Record a cache metric entry for a NAR push (direct or presigned).
@@ -309,85 +262,13 @@ pub(super) async fn mark_nar_stored(
         }
     };
 
-    // Sign the path server-side for every cache the org subscribes to.
-    let Some(org_id) = scheduler.peer_id_for_job(job_id).await else {
-        return Ok(());
-    };
+    // Signatures are reported separately via `JobUpdateKind::Signed` (see
+    // `record_worker_signatures`). Server no longer signs anything.
+    let _ = scheduler;
+    let _ = job_id;
+    let _ = cached_path_row;
 
-    let org_caches = EOrganizationCache::find()
-        .filter(COrganizationCache::Organization.eq(org_id))
-        .all(&state.db)
-        .await?;
-
-    // Convert nar_hash to sha256:<nix32> format for the narinfo fingerprint.
-    let nar_hash_nix32 = hex_hash_to_nix32(record.nar_hash);
-
-    for oc in &org_caches {
-        let existing = ECachedPathSignature::find()
-            .filter(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
-            .filter(CCachedPathSignature::Cache.eq(oc.cache))
-            .one(&state.db)
-            .await
-            .unwrap_or(None);
-
-        if existing.is_some() {
-            continue;
-        }
-
-        let cache = match ECache::find_by_id(oc.cache).one(&state.db).await {
-            Ok(Some(c)) => c,
-            Ok(None) => continue,
-            Err(e) => {
-                warn!(cache = %oc.cache, error = %e, "failed to fetch cache for signing");
-                continue;
-            }
-        };
-
-        let full_sig = match sign_narinfo_fingerprint(
-            state.cli.crypt_secret_file.clone(),
-            cache,
-            state.cli.serve_url.clone(),
-            store_path,
-            &nar_hash_nix32,
-            record.nar_size as u64,
-            record.references,
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!(store_path, cache = %oc.cache, error = %e, "failed to sign cached_path");
-                continue;
-            }
-        };
-
-        // Store only the base64 part (after "key-name:").
-        let signature_b64 = full_sig
-            .find(':')
-            .map(|i| full_sig[i + 1..].to_string())
-            .unwrap_or(full_sig);
-
-        let sig_row = ACachedPathSignature {
-            id: Set(Uuid::new_v4()),
-            cached_path: Set(cached_path_row.id),
-            cache: Set(oc.cache),
-            signature: Set(Some(signature_b64)),
-            created_at: Set(now),
-        };
-        if let Err(e) = sig_row.insert(&state.db).await {
-            warn!(
-                store_path,
-                cache = %oc.cache,
-                error = %e,
-                "failed to insert cached_path_signature"
-            );
-        }
-    }
-
-    info!(
-        store_path,
-        caches = org_caches.len(),
-        "cached_path and signatures recorded after NarUploaded"
-    );
-
+    info!(store_path, "cached_path metadata recorded after NarUploaded");
     Ok(())
 }
 
@@ -453,38 +334,30 @@ pub(super) async fn record_worker_signatures(
             }
         };
 
-        let sig_b64 = ps
-            .signature
-            .find(':')
-            .map(|i| ps.signature[i + 1..].to_string())
-            .unwrap_or_else(|| ps.signature.clone());
+        record_signatures_by_cache_name(
+            state,
+            cached_path_row.id,
+            &org_caches,
+            &ps.signatures,
+            &ps.store_path,
+            now,
+        )
+        .await;
 
-        for oc in &org_caches {
-            let existing = ECachedPathSignature::find()
-                .filter(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
-                .filter(CCachedPathSignature::Cache.eq(oc.cache))
-                .one(&state.db)
-                .await
-                .unwrap_or(None);
-
-            if existing.is_some() {
-                continue;
-            }
-
-            let sig_row = ACachedPathSignature {
-                id: Set(Uuid::new_v4()),
-                cached_path: Set(cached_path_row.id),
-                cache: Set(oc.cache),
-                signature: Set(Some(sig_b64.clone())),
-                created_at: Set(now),
-            };
-            if let Err(e) = sig_row.insert(&state.db).await {
-                warn!(
-                    store_path = %ps.store_path,
-                    cache = %oc.cache,
-                    error = %e,
-                    "failed to insert cached_path_signature from worker Signed update"
-                );
+        // If this path corresponds to a derivation_output, check whether
+        // its derivation's closure is now fully cached+signed in any cache
+        // and record `cache_derivation` accordingly.
+        if let Ok(Some(output)) = EDerivationOutput::find()
+            .filter(CDerivationOutput::Hash.eq(hash))
+            .one(&state.db)
+            .await
+        {
+            for oc in &org_caches {
+                if let Err(e) =
+                    try_record_cache_derivation(state, oc.cache, output.derivation, now).await
+                {
+                    warn!(cache = %oc.cache, drv = %output.derivation, error = %e, "try_record_cache_derivation failed");
+                }
             }
         }
     }
@@ -493,10 +366,67 @@ pub(super) async fn record_worker_signatures(
     Ok(())
 }
 
+/// If every output of `derivation_id` is cached AND every transitive
+/// dependency already has a `cache_derivation` row for `cache_id`, insert
+/// the row. Idempotent.
+async fn try_record_cache_derivation(
+    state: &ServerState,
+    cache_id: Uuid,
+    derivation_id: Uuid,
+    now: chrono::NaiveDateTime,
+) -> anyhow::Result<()> {
+    let any_uncached = EDerivationOutput::find()
+        .filter(CDerivationOutput::Derivation.eq(derivation_id))
+        .filter(CDerivationOutput::IsCached.eq(false))
+        .one(&state.db)
+        .await?
+        .is_some();
+    if any_uncached {
+        return Ok(());
+    }
+
+    let dep_edges = EDerivationDependency::find()
+        .filter(CDerivationDependency::Derivation.eq(derivation_id))
+        .all(&state.db)
+        .await?;
+    for edge in dep_edges {
+        let present = ECacheDerivation::find()
+            .filter(CCacheDerivation::Cache.eq(cache_id))
+            .filter(CCacheDerivation::Derivation.eq(edge.dependency))
+            .one(&state.db)
+            .await?
+            .is_some();
+        if !present {
+            return Ok(());
+        }
+    }
+
+    let already = ECacheDerivation::find()
+        .filter(CCacheDerivation::Cache.eq(cache_id))
+        .filter(CCacheDerivation::Derivation.eq(derivation_id))
+        .one(&state.db)
+        .await?
+        .is_some();
+    if already {
+        return Ok(());
+    }
+
+    let row = ACacheDerivation {
+        id: Set(Uuid::new_v4()),
+        cache: Set(cache_id),
+        derivation: Set(derivation_id),
+        cached_at: Set(now),
+        last_fetched_at: Set(None),
+    };
+    row.insert(&state.db).await?;
+    Ok(())
+}
+
 /// Converts a nar_hash from any common format to `sha256:<nix32>`.
 ///
 /// Handles `sha256:<hex>` (from streaming workers), `sha256-<base64>` (SRI),
 /// and `sha256:<nix32>` (already correct).
+#[cfg(test)]
 fn hex_hash_to_nix32(hash: &str) -> String {
     const CHARS: &[u8] = b"0123456789abcdfghijklmnpqrsvwxyz";
     let encode = |bytes: &[u8]| -> String {

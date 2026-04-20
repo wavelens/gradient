@@ -11,10 +11,10 @@ pub mod server;
 // backward compatibility so existing `proto::messages::FlakeJob` paths still work.
 pub use client::ClientMessage;
 pub use gradient_core::types::proto::{
-    BuildJob, BuildOutput, BuildTask, CacheInfo, CachedPath, CandidateScore, CompressTask,
-    CredentialKind, DerivationOutput, DiscoveredDerivation, FetchedInput, FlakeJob, FlakeTask,
+    BuildJob, BuildOutput, BuildTask, CacheInfo, CachedPath, CandidateScore, CredentialKind,
+    DerivationOutput, DiscoveredDerivation, FlakeJob, FlakeSource, FlakeTask,
     GradientCapabilities, Job, JobCandidate, JobKind, JobUpdateKind, PathSignature, QueryMode,
-    RequiredPath, SignTask,
+    RequiredPath, SignItem, SignJob,
 };
 pub use server::{FailedPeer, ServerMessage};
 

@@ -16,7 +16,7 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 use git2::RemoteCallbacks;
-use proto::messages::{FetchedInput, FlakeJob};
+use proto::messages::{FlakeJob, FlakeSource};
 use proto::traits::JobReporter;
 use tempfile::NamedTempFile;
 use tokio::sync::watch;
@@ -45,9 +45,26 @@ async fn abort_true(abort: &mut watch::Receiver<bool>) {
     }
 }
 
+/// Outcome of a successful `fetch_repository` call.
+///
+/// `local_flake_path` is the path eval tasks should point at (either the
+/// archived nix-store source, or the temporary git checkout on fallback).
+/// `flake_source` is `Some(store_path)` when `nix flake archive` succeeded
+/// and the source now lives in the cache — this is the value reported back
+/// to the server so subsequent eval-only jobs can use
+/// `FlakeSource::Cached { store_path }`. On archive fallback it is `None`
+/// (worker is on a tmp checkout; no eval-only follow-up possible).
+/// `archived_paths` lists every store path produced by the archive (source
+/// + transitive inputs) — the caller pushes and optionally signs these.
+///   Empty on fallback.
+pub struct FetchOutcome {
+    pub local_flake_path: String,
+    pub flake_source: Option<String>,
+    pub archived_paths: Vec<String>,
+}
+
 /// Clone the repository referenced by `job`, archive it and all flake inputs
-/// into the Nix store, and return the nix store source path together with
-/// metadata for every archived path.
+/// into the Nix store, and return metadata about the archive.
 ///
 /// The caller is responsible for pushing the NARs (via `nar::push_direct`) and
 /// reporting the result to the server (via `report_fetch_result`).
@@ -61,15 +78,22 @@ pub async fn fetch_repository(
     binpath_nix: &str,
     binpath_ssh: &str,
     mut abort: watch::Receiver<bool>,
-) -> Result<(String, Vec<FetchedInput>)> {
+) -> Result<FetchOutcome> {
     if *abort.borrow() {
         anyhow::bail!("job aborted");
     }
 
     updater.report_fetching().await?;
 
-    let url = job.repository.clone();
-    let commit = job.commit.clone();
+    // Only Repository sources are supported on this path — Cached sources
+    // skip FetchFlake entirely and go straight to eval. The scheduler
+    // guarantees this by construction, but guard in case.
+    let (url, commit) = match &job.source {
+        FlakeSource::Repository { url, commit } => (url.clone(), commit.clone()),
+        FlakeSource::Cached { .. } => {
+            anyhow::bail!("FetchFlake task requires FlakeSource::Repository");
+        }
+    };
     let ssh_key = credentials
         .ssh_key()
         .map(|k| String::from_utf8_lossy(k.expose()).to_string());
@@ -77,8 +101,9 @@ pub async fn fetch_repository(
     debug!(%url, %commit, has_ssh_key = ssh_key.is_some(), "fetching repository");
 
     let ssh_key_for_clone = ssh_key.clone();
+    let commit_for_clone = commit.clone();
     let clone_task = tokio::task::spawn_blocking(move || {
-        clone_and_checkout(&url, &commit, ssh_key_for_clone.as_deref())
+        clone_and_checkout(&url, &commit_for_clone, ssh_key_for_clone.as_deref())
     });
 
     let tmp_path = tokio::select! {
@@ -96,7 +121,7 @@ pub async fn fetch_repository(
     // and store-write access).  Returns the nix store source path so the
     // evaluator can use `path:/nix/store/xxx` — a pure, content-addressed
     // reference — instead of the git checkout in /tmp.
-    let flake_ref = format!("git+file://{}?rev={}", tmp_path, job.commit);
+    let flake_ref = format!("git+file://{}?rev={}", tmp_path, commit);
     let binpath_nix = binpath_nix.to_owned();
     let binpath_ssh = binpath_ssh.to_owned();
     match archive_flake(
@@ -108,9 +133,13 @@ pub async fn fetch_repository(
     )
     .await
     {
-        Ok((source_path, fetched_inputs)) => {
-            info!(%source_path, inputs = fetched_inputs.len(), "flake archived to nix store");
-            Ok((source_path, fetched_inputs))
+        Ok((source_path, archived_paths)) => {
+            info!(%source_path, inputs = archived_paths.len(), "flake archived to nix store");
+            Ok(FetchOutcome {
+                local_flake_path: source_path.clone(),
+                flake_source: Some(source_path),
+                archived_paths,
+            })
         }
         Err(e) => Err(e),
     }
@@ -133,7 +162,7 @@ async fn archive_flake(
     binpath_ssh: &str,
     ssh_key: Option<&str>,
     mut abort: watch::Receiver<bool>,
-) -> Result<(String, Vec<FetchedInput>)> {
+) -> Result<(String, Vec<String>)> {
     use std::os::unix::fs::PermissionsExt;
 
     let mut cmd = tokio::process::Command::new(binpath_nix);
@@ -200,9 +229,14 @@ async fn archive_flake(
     collect_input_paths(&json, &mut all_paths);
 
     let all_paths: Vec<String> = all_paths.into_iter().collect();
-    let fetched_inputs = query_path_info(&all_paths, binpath_nix, abort).await?;
+    // Path metadata is no longer surfaced via FetchResult — the server
+    // records cached_path rows from the NarUploaded stream instead. We
+    // still run `nix path-info` here to verify every archived path is
+    // actually present in the local store before the caller tries to push
+    // it, which surfaces a misbehaving archive step early.
+    let _ = query_path_info(&all_paths, binpath_nix, abort).await?;
 
-    Ok((source_path, fetched_inputs))
+    Ok((source_path, all_paths))
 }
 
 /// Recursively walk the `inputs` tree from `nix flake archive --json` output
@@ -227,7 +261,7 @@ async fn query_path_info(
     paths: &[String],
     binpath_nix: &str,
     mut abort: watch::Receiver<bool>,
-) -> Result<Vec<FetchedInput>> {
+) -> Result<Vec<()>> {
     if paths.is_empty() {
         return Ok(vec![]);
     }
@@ -264,35 +298,12 @@ async fn query_path_info(
         anyhow::bail!("nix path-info failed: {}", stderr.trim());
     }
 
-    let json: serde_json::Value = parse_nix_json(&output.stdout, "nix path-info")?;
+    // Just parse enough to confirm nix path-info ran successfully; we no
+    // longer surface narHash/narSize from here because the server receives
+    // that metadata via the NarUploaded stream.
+    let _json: serde_json::Value = parse_nix_json(&output.stdout, "nix path-info")?;
 
-    let mut inputs = Vec::new();
-
-    if let Some(arr) = json.as_array() {
-        // Modern Nix: array of objects with a "path" key.
-        for entry in arr {
-            if let Some(store_path) = entry["path"].as_str() {
-                inputs.push(FetchedInput {
-                    store_path: store_path.to_owned(),
-                    nar_hash: entry["narHash"].as_str().unwrap_or("").to_owned(),
-                    nar_size: entry["narSize"].as_u64().unwrap_or(0),
-                    signature: None,
-                });
-            }
-        }
-    } else if let Some(obj) = json.as_object() {
-        // Legacy Nix: object keyed by store path.
-        for (store_path, info) in obj {
-            inputs.push(FetchedInput {
-                store_path: store_path.clone(),
-                nar_hash: info["narHash"].as_str().unwrap_or("").to_owned(),
-                nar_size: info["narSize"].as_u64().unwrap_or(0),
-                signature: None,
-            });
-        }
-    }
-
-    Ok(inputs)
+    Ok(Vec::new())
 }
 
 fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<String> {
@@ -350,11 +361,12 @@ mod tests {
     fn make_flake_job() -> FlakeJob {
         FlakeJob {
             tasks: vec![FlakeTask::FetchFlake],
-            repository: "https://example.com/repo.git".into(),
-            commit: "abc123".into(),
+            source: FlakeSource::Repository {
+                url: "https://example.com/repo.git".into(),
+                commit: "abc123".into(),
+            },
             wildcards: vec![],
             timeout_secs: None,
-            sign: None,
         }
     }
 
@@ -452,11 +464,12 @@ mod tests {
 
         let job = FlakeJob {
             tasks: vec![FlakeTask::FetchFlake],
-            repository: format!("file://{}", repo_dir.display()),
-            commit: sha,
+            source: FlakeSource::Repository {
+                url: format!("file://{}", repo_dir.display()),
+                commit: sha,
+            },
             wildcards: vec![],
             timeout_secs: None,
-            sign: None,
         };
 
         let credentials = crate::proto::credentials::CredentialStore::new();

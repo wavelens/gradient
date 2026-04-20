@@ -6,7 +6,6 @@
 
 use anyhow::{Context, Result};
 use core::types::*;
-use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseBackend, EntityTrait,
     IntoActiveModel, QueryFilter, Statement,
@@ -14,118 +13,6 @@ use sea_orm::{
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-
-use super::signing::sign_derivation_output;
-
-/// Checks every `is_cached = true` output against the NAR store.
-/// Resets `is_cached = false` (and clears file metadata) for any output
-/// whose NAR file is no longer present so the cache loop will re-pack it.
-pub(super) async fn validate_cached_outputs(state: Arc<ServerState>) -> Result<()> {
-    let cached = EDerivationOutput::find()
-        .filter(CDerivationOutput::IsCached.eq(true))
-        .all(&state.db)
-        .await
-        .context("Failed to query cached outputs for validation")?;
-
-    let mut reset = 0usize;
-    for output in cached {
-        match state.nar_storage.get(&output.hash).await {
-            Ok(Some(_)) => {}
-            Ok(None) => {
-                warn!(hash = %output.hash, package = %output.package, "NAR file missing for cached output, resetting is_cached");
-                let mut active = output.into_active_model();
-                active.is_cached = Set(false);
-                active.file_hash = Set(None);
-                active.file_size = Set(None);
-                active.nar_size = Set(None);
-                if let Err(e) = active.update(&state.db).await {
-                    error!(error = %e, "Failed to reset is_cached for missing NAR");
-                } else {
-                    reset += 1;
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, hash = %output.hash, "Failed to check NAR file presence");
-            }
-        }
-    }
-
-    if reset > 0 {
-        info!(
-            count = reset,
-            "Reset is_cached for outputs with missing NARs"
-        );
-    }
-    Ok(())
-}
-
-/// Signs any `is_cached = true` outputs that are missing a signature for
-/// one or more of the organization's active caches. Handles the case where
-/// a cache is added after outputs were already packed.
-pub(super) async fn sign_missing_signatures(state: Arc<ServerState>) -> Result<()> {
-    let cached = EDerivationOutput::find()
-        .filter(CDerivationOutput::IsCached.eq(true))
-        .all(&state.db)
-        .await
-        .context("Failed to query cached outputs for signature check")?;
-
-    for output in cached {
-        let derivation = match EDerivation::find_by_id(output.derivation)
-            .one(&state.db)
-            .await?
-        {
-            Some(d) => d,
-            None => continue,
-        };
-
-        let cache_ids: Vec<Uuid> = match EOrganizationCache::find()
-            .filter(COrganizationCache::Organization.eq(derivation.organization))
-            .all(&state.db)
-            .await
-        {
-            Ok(ocs) => ocs.into_iter().map(|oc| oc.cache).collect(),
-            Err(_) => continue,
-        };
-
-        let active_caches = match ECache::find()
-            .filter(CCache::Id.is_in(cache_ids))
-            .filter(CCache::Active.eq(true))
-            .all(&state.db)
-            .await
-        {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        for cache in active_caches {
-            let (hash, _) = match core::sources::get_hash_from_path(output.output.clone()) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            let already_signed = match ECachedPath::find()
-                .filter(CCachedPath::Hash.eq(&hash))
-                .one(&state.db)
-                .await
-            {
-                Ok(Some(cp)) => ECachedPathSignature::find()
-                    .filter(CCachedPathSignature::CachedPath.eq(cp.id))
-                    .filter(CCachedPathSignature::Cache.eq(cache.id))
-                    .one(&state.db)
-                    .await
-                    .unwrap_or(None)
-                    .and_then(|s| s.signature)
-                    .is_some(),
-                _ => false,
-            };
-
-            if !already_signed {
-                sign_derivation_output(Arc::clone(&state), cache, output.clone()).await;
-            }
-        }
-    }
-
-    Ok(())
-}
 
 pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
     let projects = EProject::find()
@@ -227,7 +114,7 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
 
     let mut removed = 0usize;
     for hash in hashes {
-        let exists = EDerivationOutput::find()
+        let output_exists = EDerivationOutput::find()
             .filter(
                 Condition::all()
                     .add(CDerivationOutput::Hash.eq(hash.clone()))
@@ -237,6 +124,18 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
             .await
             .context("Failed to check derivation output")?
             .is_some();
+
+        // Also keep NARs referenced by a fully-uploaded cached_path row
+        // (e.g. `.drv` files that aren't tracked via derivation_output).
+        let cached_path_exists = ECachedPath::find()
+            .filter(CCachedPath::Hash.eq(hash.clone()))
+            .filter(CCachedPath::FileHash.is_not_null())
+            .one(&state.db)
+            .await
+            .context("Failed to check cached_path")?
+            .is_some();
+
+        let exists = output_exists || cached_path_exists;
 
         if !exists {
             if let Err(e) = state.nar_storage.delete(&hash).await {

@@ -167,6 +167,7 @@ fn on_job_done(
         let max = match &kind {
             JobKind::Flake => max_eval,
             JobKind::Build => max_build,
+            JobKind::Sign => max_eval,
         };
         if active < max {
             writer.send(ClientMessage::RequestJob { kind })?;
@@ -430,11 +431,14 @@ impl<'a> MessageHandler<'a> {
         let kind = match &job {
             Job::Flake(_) => JobKind::Flake,
             Job::Build(_) => JobKind::Build,
+            Job::Sign(_) => JobKind::Sign,
         };
         let active_count = self.job_kinds.values().filter(|k| **k == kind).count() as u32;
         let max = match &kind {
             JobKind::Flake => self.max_eval,
             JobKind::Build => self.max_build,
+            // Sign jobs are cheap (metadata-only) — share the eval budget.
+            JobKind::Sign => self.max_eval,
         };
 
         if active_count >= max {
@@ -629,6 +633,11 @@ async fn run_job(
         Job::Build(build_job) => {
             executor
                 .execute_build_job(build_job, updater, credentials)
+                .await
+        }
+        Job::Sign(sign_job) => {
+            executor
+                .execute_sign_job(sign_job, updater, credentials)
                 .await
         }
     }

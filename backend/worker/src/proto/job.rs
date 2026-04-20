@@ -16,8 +16,8 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use proto::messages::{
-    BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, FetchedInput, JobUpdateKind,
-    PathSignature, QueryMode,
+    BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, JobUpdateKind, PathSignature,
+    QueryMode,
 };
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -88,16 +88,6 @@ impl JobUpdater {
         cache_query_with_timeout(&self.job_id, &self.writer, &self.cache_waiters, paths, mode).await
     }
 
-    pub async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>> {
-        known_derivations_with_timeout(
-            &self.job_id,
-            &self.writer,
-            &self.known_derivation_waiters,
-            drv_paths,
-        )
-        .await
-    }
-
     /// Send `NarRequest { paths }` and wait for every requested path to arrive
     /// via chunked `NarPush` frames. Returns the assembled (still
     /// zstd-compressed) NAR bytes per path in the order requested. Each path
@@ -120,8 +110,8 @@ impl JobUpdater {
         Ok(out)
     }
 
-    pub fn report_fetch_result(&self, fetched_paths: Vec<FetchedInput>) -> Result<()> {
-        self.send_update(JobUpdateKind::FetchResult { fetched_paths })
+    pub fn report_fetch_result(&self, flake_source: Option<String>) -> Result<()> {
+        self.send_update(JobUpdateKind::FetchResult { flake_source })
     }
 
     pub fn report_evaluating_flake(&self) -> Result<()> {
@@ -261,8 +251,8 @@ impl JobReporter for JobUpdater {
         self.send_update(JobUpdateKind::Fetching)
     }
 
-    async fn report_fetch_result(&mut self, fetched_paths: Vec<FetchedInput>) -> Result<()> {
-        self.send_update(JobUpdateKind::FetchResult { fetched_paths })
+    async fn report_fetch_result(&mut self, flake_source: Option<String>) -> Result<()> {
+        self.send_update(JobUpdateKind::FetchResult { flake_source })
     }
 
     async fn report_evaluating_flake(&mut self) -> Result<()> {

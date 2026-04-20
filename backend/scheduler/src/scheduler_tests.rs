@@ -38,11 +38,12 @@ fn eval_job(peer: Uuid) -> PendingEvalJob {
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
             tasks: vec![FlakeTask::EvaluateDerivations],
-            repository: "https://example.com/repo".into(),
-            commit: "abc123".into(),
+            source: gradient_core::types::proto::FlakeSource::Repository {
+                url: "https://example.com/repo".into(),
+                commit: "abc123".into(),
+            },
             wildcards: vec!["*".into()],
             timeout_secs: None,
-            sign: None,
         },
         required_paths: vec![],
         queued_at: chrono::Utc::now().naive_utc(),

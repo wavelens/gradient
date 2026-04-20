@@ -1129,6 +1129,17 @@ Tests use `RecordingJobReporter` — no real git server or WebSocket needed.
 
 ---
 
+## `web::endpoints::caches::nar` — NAR URL Resolver
+
+Unit tests for `resolve_effective_hash_db`, which maps the file-hash embedded in a narinfo URL back to the store-hash key used by the NAR blob storage.
+
+| Test | What it checks |
+|------|---------------|
+| `resolve_falls_back_to_cached_path_for_drv` | No matching `derivation_output` → falls back to `cached_path.file_hash` lookup and returns that row's store hash. Covers `.drv` file narinfo requests. |
+| `resolve_falls_back_to_url_hash_when_no_match` | Neither table matches → URL hash returned unchanged (legacy/direct-hash URL behaviour preserved). |
+
+---
+
 ## `core::sources::cache_key` — Cache Signing Key Lifecycle
 
 | Test | What it checks |

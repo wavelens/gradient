@@ -105,7 +105,11 @@ Each cache has a dedicated Ed25519 signing key encrypted in the database (using 
 
 **Narinfo** (`GET /cache/{cache}/{hash}.narinfo`)
 
-Constructs a `NixPathInfo` response by querying `derivation_output` + `derivation_output_signature`, calling `QueryPathInfo` on the local store for NAR size/hash/references, and converting the NAR hash from hex to Nix's base-32 encoding via `nix hash convert`. Sizes/hashes are read directly from the `derivation_output` row — they were populated once when the derivation was first built and are reused on every subsequent narinfo request.
+Constructs a `NixPathInfo` response from `derivation_output` + `cached_path` + `cached_path_signature`. Sizes, hashes, and references are read directly from the DB row the worker populated when it uploaded the NAR — the server never re-packs or re-hashes a NAR.
+
+When the hash doesn't match any `derivation_output`, narinfo falls back to the `cached_path` table. This covers `.drv` files and any other standalone store path the worker pushed.
+
+**Worker-side signing.** All packing, zstd compression, and Ed25519 signing happen on the worker. Before dispatching a `FlakeJob` or `BuildJob`, the server sends one `Credential { kind: SigningKey }` per cache owned by the job's org that has a `private_key` configured. The worker accumulates the keys and signs every path it uploads (fetched flake input, evaluated `.drv`, built output) once per key. Signatures arrive via `FetchedInput.signatures` or `JobUpdate::Signed`; the server stores each entry in `cached_path_signature` keyed by the cache named in the signature. A cache added after a path was uploaded has no signature for that path until it is re-uploaded — there is no server-side backfill.
 
 **Closure presence** (`cache_derivation`)
 

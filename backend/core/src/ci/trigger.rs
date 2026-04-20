@@ -86,6 +86,7 @@ pub async fn trigger_evaluation(
         next: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
+        flake_source: Set(None),
     };
     let evaluation = aevaluation.insert(db).await?;
 
@@ -164,6 +165,7 @@ pub async fn trigger_restart_builds(
         next: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
+        flake_source: Set(prev_eval.flake_source.clone()),
     };
     let new_eval = aevaluation.insert(db).await?;
 
@@ -265,6 +267,7 @@ mod tests {
             next: None,
             created_at: NaiveDateTime::default(),
             updated_at: NaiveDateTime::default(),
+            flake_source: None,
         }
     }
 

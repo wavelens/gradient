@@ -218,15 +218,13 @@ The special peer ID `*` can be used instead of a specific UUID to respond with t
 
 The token must be the 48-byte random secret returned by the registration API (generated via `openssl rand -base64 48` server-side).
 
-When `peersFile` is `null` (the default), the worker connects in **open mode** — suitable for co-located workers. The server accepts the connection without token validation if no peers have been registered for that worker ID.
-
 ### Worker Options
 
 | Option | Default | Description |
 |---|---|---|
 | `serverUrl` | `null` | WebSocket URL of the server's `/proto` endpoint (required) |
 | `workerId` | `null` | Override the worker UUID (`GRADIENT_WORKER_ID`). When null, the ID is read from `$StateDirectory/worker-id` or auto-generated on first start |
-| `peersFile` | `null` | Path to peers file (`peer_id:token` per line, `*` = any peer); null = open mode |
+| `peersFile` | `null` | Path to peers file (`peer_id:token` per line, `*` = any peer) |
 | `useTls` | `true` | Enable TLS (ACME + forceSSL) on the nginx vhost |
 | `discoverable` | `false` | Accept incoming connections from the server (reverse-proxy mode) |
 | `listenAddr` | `127.0.0.1` | Bind address for the worker listener |
@@ -351,6 +349,8 @@ Worker registrations can be declared in state instead of using the API. This is 
 ```nix
 services.gradient.state.workers = {
   builder-1 = {
+    name         = "builder-1";            # display name (defaults to attrset key)
+    worker_id    = "<uuid>";  # required; must match GRADIENT_WORKER_ID on the worker machine
     url          = "wss://gradient.example.com/proto";
     organization = "acme";
     token_file   = "/run/secrets/builder-1-token";
@@ -364,12 +364,12 @@ The token file must contain a single plaintext token — the server hashes it an
 openssl rand -base64 48 > /run/secrets/builder-1-token
 ```
 
-The `worker_id` defaults to the attrset key. Unlike API registration, state-managed workers are not restricted to UUID v4 — any stable string is accepted, though using a UUID is conventional.
+`worker_id` is required and must match the `GRADIENT_WORKER_ID` environment variable (or `workerId` option) on the worker machine. Unlike API registration, state-managed workers are not restricted to UUID v4 — any stable string is accepted, though using a UUID is conventional.
 
-To ensure the worker uses the same UUID that was pre-registered, set `workerId` in the worker module so the worker does not auto-generate a different one on first start:
+To ensure the worker uses the same ID that was pre-registered, set `workerId` in the worker module:
 
 ```nix
-services.gradient.worker.workerId = "550e8400-e29b-41d4-a716-446655440001";
+services.gradient.worker.workerId = "<uuid>";
 ```
 
 State-managed worker registrations are deleted automatically when removed from `state.workers` (subject to `settings.deleteState`).

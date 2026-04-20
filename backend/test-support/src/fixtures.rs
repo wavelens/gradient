@@ -79,5 +79,6 @@ pub fn eval_at(id: Uuid, offset_secs: i64) -> evaluation::Model {
         next: None,
         created_at,
         updated_at: created_at,
+        flake_source: None,
     }
 }

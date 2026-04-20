@@ -5,8 +5,8 @@
  */
 
 use crate::messages::{
-    CachedPath, ClientMessage, FlakeJob, FlakeTask, GradientCapabilities, Job, JobCandidate,
-    PROTO_VERSION, QueryMode, RequiredPath, ServerMessage,
+    CachedPath, ClientMessage, FlakeJob, FlakeSource, FlakeTask, GradientCapabilities, Job,
+    JobCandidate, PROTO_VERSION, QueryMode, RequiredPath, ServerMessage,
 };
 use rkyv::rancor::Error as RkyvError;
 
@@ -123,11 +123,12 @@ fn assign_job_roundtrip() {
         job_id: "550e8400-e29b-41d4-a716-446655440000".into(),
         job: Job::Flake(FlakeJob {
             tasks: vec![FlakeTask::FetchFlake, FlakeTask::EvaluateFlake],
-            repository: "https://github.com/example/repo".into(),
-            commit: "abc123".into(),
+            source: FlakeSource::Repository {
+                url: "https://github.com/example/repo".into(),
+                commit: "abc123".into(),
+            },
             wildcards: vec!["packages.*".into()],
             timeout_secs: Some(300),
-            sign: None,
         }),
         timeout_secs: Some(600),
     };

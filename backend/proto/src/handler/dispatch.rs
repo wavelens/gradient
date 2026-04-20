@@ -18,7 +18,7 @@ use scheduler::Scheduler;
 
 use super::auth::{lookup_registered_peers, validate_tokens};
 use super::cache::handle_cache_query;
-use super::nar::{NarUploadRecord, mark_nar_stored, record_fetched_paths, record_nar_push_metric, record_worker_signatures};
+use super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric, record_worker_signatures};
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoSocket, push_pending_candidates, send_credentials_for_job,
     send_error, send_server_msg, serve_nar_request,
@@ -263,8 +263,15 @@ impl<'a> DispatchContext<'a> {
     async fn on_request_job(&mut self, kind: JobKind) -> bool {
         debug!(peer_id = %self.peer_id, ?kind, "RequestJob");
         if let Some(assignment) = self.scheduler.request_job(self.peer_id, kind).await {
-            send_credentials_for_job(self.socket, self.state, &assignment.job, assignment.peer_id)
-                .await;
+            send_credentials_for_job(
+                self.socket,
+                self.state,
+                self.scheduler,
+                self.peer_id,
+                &assignment.job,
+                assignment.peer_id,
+            )
+            .await;
             if send_server_msg(
                 self.socket,
                 &ServerMessage::AssignJob {
@@ -318,13 +325,11 @@ impl<'a> DispatchContext<'a> {
                     )
                     .await;
             }
-            JobUpdateKind::FetchResult { fetched_paths } => {
-                debug!(peer_id = %self.peer_id, %job_id, count = fetched_paths.len(), "FetchResult");
-                if let Err(e) =
-                    record_fetched_paths(self.state, self.scheduler, &job_id, &fetched_paths).await
-                {
-                    warn!(%job_id, error = %e, "failed to record fetched paths in cache");
-                }
+            JobUpdateKind::FetchResult { flake_source } => {
+                debug!(peer_id = %self.peer_id, %job_id, ?flake_source, "FetchResult");
+                self.scheduler
+                    .persist_flake_source(&job_id, flake_source)
+                    .await;
             }
             JobUpdateKind::EvaluatingFlake => {
                 self.scheduler

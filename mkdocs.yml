@@ -12,6 +12,7 @@ docs_dir: docs/src
 
 nav:
   - Home: index.md
+  - Quick Start: quick-start.md
   - Installation: installation.md
   - Configuration: configuration.md
   - Usage:

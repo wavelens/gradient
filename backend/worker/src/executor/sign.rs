@@ -20,65 +20,99 @@ use harmonia_store_core::signature::{SecretKey, fingerprint_path};
 use harmonia_store_core::store_path::{StoreDir, StorePath};
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::fmt::CommonHash as _;
-use proto::messages::{PathSignature, SignTask};
+use proto::messages::{PathSignature, SignItem};
 use tracing::{info, warn};
 
 use crate::nix::store::{LocalNixStore, strip_store_prefix};
 use crate::proto::credentials::CredentialStore;
 use crate::proto::job::JobUpdater;
 
-/// Sign all store paths in `task` with the cache signing key from `credentials`.
+/// Sign every path in `store_paths` once per cache signing key delivered
+/// for the job. Returns the per-path signature bundles without reporting
+/// them (callers may want to embed them in a `FetchResult` instead).
 ///
-/// Fails with an error if no signing key credential has been received.
-/// On success, reports all computed signatures to the server via `JobUpdateKind::Signed`.
-pub async fn sign_outputs(
+/// Returns an empty list when no signing keys were delivered or the input
+/// is empty.
+pub async fn sign_paths(
     store: &LocalNixStore,
     credentials: &CredentialStore,
-    task: &SignTask,
-    updater: &mut JobUpdater,
-) -> Result<()> {
-    updater.report_signing()?;
+    store_paths: &[String],
+) -> Result<Vec<PathSignature>> {
+    if store_paths.is_empty() {
+        return Ok(Vec::new());
+    }
 
-    let key_secret = credentials
-        .signing_key()
-        .ok_or_else(|| anyhow::anyhow!("no signing key credential received for this job"))?;
+    let key_secrets = credentials.signing_keys();
+    if key_secrets.is_empty() {
+        return Ok(Vec::new());
+    }
 
-    let secret_key: SecretKey = key_secret
-        .expose()
-        .parse()
-        .map_err(|e| anyhow::anyhow!("failed to parse signing key: {}", e))?;
+    let mut secret_keys: Vec<SecretKey> = Vec::with_capacity(key_secrets.len());
+    for ks in &key_secrets {
+        match ks.expose().parse::<SecretKey>() {
+            Ok(k) => secret_keys.push(k),
+            Err(e) => warn!(error = %e, "skipping malformed signing key credential"),
+        }
+    }
+    if secret_keys.is_empty() {
+        return Ok(Vec::new());
+    }
 
     let store_dir = StoreDir::default();
-    let mut signatures: Vec<PathSignature> = Vec::new();
+    let mut out: Vec<PathSignature> = Vec::with_capacity(store_paths.len());
 
-    for store_path_str in &task.store_paths {
-        match sign_one_path(store, &secret_key, &store_dir, store_path_str).await {
-            Ok(sig_str) => {
-                info!(path = %store_path_str, "signed store path");
-                signatures.push(PathSignature {
-                    store_path: store_path_str.clone(),
-                    signature: sig_str,
-                });
+    for store_path_str in store_paths {
+        let mut signatures: Vec<String> = Vec::with_capacity(secret_keys.len());
+        match sign_one_path_all_keys(store, &secret_keys, &store_dir, store_path_str).await {
+            Ok(sigs) => {
+                for s in sigs {
+                    signatures.push(s);
+                }
+                info!(path = %store_path_str, count = signatures.len(), "signed store path");
             }
             Err(e) => warn!(path = %store_path_str, error = %e, "failed to sign path (non-fatal)"),
         }
+        out.push(PathSignature {
+            store_path: store_path_str.clone(),
+            signatures,
+        });
     }
 
-    if !signatures.is_empty() {
+    Ok(out)
+}
+
+/// Sign every path and emit a `JobUpdateKind::Signed` with the results.
+/// Convenience wrapper around `sign_paths` for build-job flow.
+pub async fn sign_outputs(
+    store: &LocalNixStore,
+    credentials: &CredentialStore,
+    store_paths: &[String],
+    updater: &mut JobUpdater,
+) -> Result<()> {
+    if store_paths.is_empty() {
+        return Ok(());
+    }
+    if credentials.signing_keys().is_empty() {
+        return Ok(());
+    }
+
+    updater.report_signing()?;
+    let signatures = sign_paths(store, credentials, store_paths).await?;
+    if signatures.iter().any(|ps| !ps.signatures.is_empty()) {
         updater.report_signed(signatures)?;
     }
-
     Ok(())
 }
 
-/// Sign a single store path, add the signature to the local nix-daemon, and
-/// return the full signature string in `"key-name:base64"` format.
-async fn sign_one_path(
+/// Sign a single store path with every provided secret key, register all
+/// signatures in the local nix-daemon, and return them in
+/// `"cache-name:base64"` format (one per key).
+async fn sign_one_path_all_keys(
     store: &LocalNixStore,
-    secret_key: &SecretKey,
+    secret_keys: &[SecretKey],
     store_dir: &StoreDir,
     store_path_str: &str,
-) -> Result<String> {
+) -> Result<Vec<String>> {
     let base = strip_store_prefix(store_path_str);
     let store_path = StorePath::from_base_path(base)
         .with_context(|| format!("invalid store path: {}", store_path_str))?;
@@ -116,16 +150,121 @@ async fn sign_one_path(
     )
     .context("compute fingerprint")?;
 
-    let sig = secret_key.sign(&fingerprint);
-    let sig_str = sig.to_string();
+    let mut sig_strings: Vec<String> = Vec::with_capacity(secret_keys.len());
+    let mut sigs_for_daemon = Vec::with_capacity(secret_keys.len());
+    for key in secret_keys {
+        let sig = key.sign(&fingerprint);
+        sig_strings.push(sig.to_string());
+        sigs_for_daemon.push(sig);
+    }
 
     guard
         .client()
-        .add_signatures(&store_path, &[sig])
+        .add_signatures(&store_path, &sigs_for_daemon)
         .await
         .map_err(|e| anyhow::anyhow!("add_signatures failed: {}", e))?;
 
-    Ok(sig_str)
+    Ok(sig_strings)
+}
+
+/// Sign a batch of [`SignItem`]s purely from metadata (no NAR access).
+///
+/// Used by the `SignJob` handler: the server already has every path's
+/// `store_path`, `nar_hash`, `nar_size`, and `references` on
+/// `cached_path`, so the worker just rebuilds the narinfo fingerprint
+/// locally and signs once per delivered key. Reports via
+/// `JobUpdateKind::Signed`.
+pub async fn sign_items(
+    credentials: &CredentialStore,
+    items: &[SignItem],
+    updater: &mut JobUpdater,
+) -> Result<()> {
+    if items.is_empty() {
+        return Ok(());
+    }
+
+    let key_secrets = credentials.signing_keys();
+    if key_secrets.is_empty() {
+        warn!("SignJob delivered without any signing-key credentials; nothing to do");
+        return Ok(());
+    }
+
+    let mut secret_keys: Vec<SecretKey> = Vec::with_capacity(key_secrets.len());
+    for ks in &key_secrets {
+        match ks.expose().parse::<SecretKey>() {
+            Ok(k) => secret_keys.push(k),
+            Err(e) => warn!(error = %e, "skipping malformed signing key credential"),
+        }
+    }
+    if secret_keys.is_empty() {
+        return Ok(());
+    }
+
+    updater.report_signing()?;
+
+    let store_dir = StoreDir::default();
+    let mut out: Vec<PathSignature> = Vec::with_capacity(items.len());
+
+    for item in items {
+        match sign_one_item(&store_dir, &secret_keys, item) {
+            Ok(sigs) => out.push(PathSignature {
+                store_path: item.store_path.clone(),
+                signatures: sigs,
+            }),
+            Err(e) => {
+                warn!(path = %item.store_path, error = %e, "failed to sign sign-item (skipping)");
+                out.push(PathSignature {
+                    store_path: item.store_path.clone(),
+                    signatures: Vec::new(),
+                });
+            }
+        }
+    }
+
+    if out.iter().any(|ps| !ps.signatures.is_empty()) {
+        updater.report_signed(out)?;
+    }
+    Ok(())
+}
+
+/// Build the narinfo fingerprint from a [`SignItem`] and sign once per key.
+fn sign_one_item(
+    store_dir: &StoreDir,
+    secret_keys: &[SecretKey],
+    item: &SignItem,
+) -> Result<Vec<String>> {
+    let base = strip_store_prefix(&item.store_path);
+    let store_path = StorePath::from_base_path(base)
+        .with_context(|| format!("invalid store path: {}", item.store_path))?;
+
+    // References: bare hash-name → StorePath. Unparseable entries are
+    // skipped with a warning (the server should never send them).
+    let references: BTreeSet<StorePath> = item
+        .references
+        .iter()
+        .filter_map(|r| match StorePath::from_base_path(strip_store_prefix(r)) {
+            Ok(sp) => Some(sp),
+            Err(e) => {
+                warn!(store_path = %item.store_path, reference = %r, error = %e, "unparseable reference in SignItem");
+                None
+            }
+        })
+        .collect();
+
+    let fingerprint = fingerprint_path(
+        store_dir,
+        &store_path,
+        item.nar_hash.as_bytes(),
+        item.nar_size,
+        &references,
+    )
+    .context("compute fingerprint from SignItem")?;
+
+    let mut out = Vec::with_capacity(secret_keys.len());
+    for key in secret_keys {
+        out.push(key.sign(&fingerprint).to_string());
+    }
+    Ok(out)
 }
 
 /// Converts an SRI-format NAR hash (`sha256-<base64>`) to the Nix format
@@ -212,6 +351,24 @@ mod tests {
         assert!(
             err.to_string().contains("sha256"),
             "unexpected error: {err}"
+        );
+    }
+
+    /// `sign_one_item` rejects a SignItem with a malformed `store_path`.
+    /// Protects against bad server data silently producing empty signatures.
+    #[test]
+    fn sign_one_item_rejects_invalid_store_path() {
+        let store_dir = StoreDir::default();
+        let item = SignItem {
+            store_path: "not-a-store-path".into(),
+            nar_hash: "sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into(),
+            nar_size: 0,
+            references: vec![],
+        };
+        let err = sign_one_item(&store_dir, &[], &item).expect_err("invalid path must error");
+        assert!(
+            format!("{err:#}").contains("invalid store path"),
+            "unexpected error: {err:#}"
         );
     }
 }

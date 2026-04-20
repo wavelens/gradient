@@ -182,7 +182,7 @@ pub async fn build_derivation(
     task: &BuildTask,
     task_index: u32,
     updater: &mut JobUpdater,
-) -> Result<()> {
+) -> Result<Vec<BuildOutput>> {
     // NOTE: `report_building` is sent by the caller (`execute_build_job`)
     // *before* the prefetch step, so that a `JobFailed` arriving after a
     // prefetch error finds the build already in `Building` state on the
@@ -193,7 +193,8 @@ pub async fn build_derivation(
         .realize(store, task_index, updater, &task.drv_path)
         .await?;
 
-    updater.report_build_output(task.build_id.clone(), outputs)
+    updater.report_build_output(task.build_id.clone(), outputs.clone())?;
+    Ok(outputs)
 }
 
 // ── Log helpers ───────────────────────────────────────────────────────────────

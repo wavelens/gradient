@@ -140,6 +140,14 @@ impl WorkerPool {
         })
     }
 
+    /// Returns the negotiated `GradientCapabilities` for a connected worker,
+    /// or `None` if the worker is not connected.
+    pub fn gradient_caps_for(&self, id: &str) -> Option<GradientCapabilities> {
+        self.workers
+            .get(id)
+            .map(|slot| slot.shared().capabilities.clone())
+    }
+
     pub fn update_capabilities(
         &mut self,
         id: &str,
@@ -211,7 +219,7 @@ impl WorkerPool {
     pub fn has_capacity(&self, worker_id: &str, kind: &JobKind) -> bool {
         match self.workers.get(worker_id) {
             Some(WorkerSlot::Active(w)) => match kind {
-                JobKind::Flake => true,
+                JobKind::Flake | JobKind::Sign => true,
                 JobKind::Build => w.has_build_capacity(),
             },
             Some(WorkerSlot::Draining(_)) => false,

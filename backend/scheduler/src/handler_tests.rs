@@ -62,6 +62,7 @@ fn make_eval(id: Uuid, status: EvaluationStatus) -> MEvaluation {
         next: None,
         created_at: test_date(),
         updated_at: test_date(),
+        flake_source: None,
     }
 }
 
@@ -125,11 +126,12 @@ fn make_eval_job(eval_id: Uuid, org_id: Uuid) -> PendingEvalJob {
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
             tasks: vec![FlakeTask::EvaluateDerivations],
-            repository: "https://example.com/repo".into(),
-            commit: "abc123".into(),
+            source: gradient_core::types::proto::FlakeSource::Repository {
+                url: "https://example.com/repo".into(),
+                commit: "abc123".into(),
+            },
             wildcards: vec!["*".into()],
             timeout_secs: None,
-            sign: None,
         },
         required_paths: vec![],
         queued_at: chrono::Utc::now().naive_utc(),
@@ -147,8 +149,7 @@ fn make_build_job(build_id: Uuid, eval_id: Uuid, org_id: Uuid) -> PendingBuildJo
                 build_id: build_id.to_string(),
                 drv_path: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv".into(),
             }],
-            compress: None,
-            sign: None,
+            sign: false,
         },
         required_paths: vec![],
         architecture: "x86_64-linux".into(),
@@ -194,6 +195,7 @@ fn make_eval_with_project(id: Uuid, project_id: Uuid, status: EvaluationStatus) 
         next: None,
         created_at: test_date(),
         updated_at: test_date(),
+        flake_source: None,
     }
 }
 
@@ -1924,11 +1926,12 @@ async fn eval_result_creates_entry_points_for_project() {
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
             tasks: vec![FlakeTask::EvaluateDerivations],
-            repository: "https://example.com/repo".into(),
-            commit: "abc123".into(),
+            source: gradient_core::types::proto::FlakeSource::Repository {
+                url: "https://example.com/repo".into(),
+                commit: "abc123".into(),
+            },
             wildcards: vec!["*".into()],
             timeout_secs: None,
-            sign: None,
         },
         required_paths: vec![],
         queued_at: chrono::Utc::now().naive_utc(),
@@ -2175,11 +2178,12 @@ async fn eval_result_all_substituted_with_project_completes() {
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
             tasks: vec![FlakeTask::EvaluateDerivations],
-            repository: "https://example.com/repo".into(),
-            commit: "abc123".into(),
+            source: gradient_core::types::proto::FlakeSource::Repository {
+                url: "https://example.com/repo".into(),
+                commit: "abc123".into(),
+            },
             wildcards: vec!["*".into()],
             timeout_secs: None,
-            sign: None,
         },
         required_paths: vec![],
         queued_at: chrono::Utc::now().naive_utc(),

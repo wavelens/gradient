@@ -12,7 +12,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::messages::{BuildOutput, CachedPath, DiscoveredDerivation, FetchedInput, QueryMode};
+use crate::messages::{BuildOutput, CachedPath, DiscoveredDerivation, QueryMode};
 
 // ── Store access ─────────────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ pub trait JobReporter: Send {
     /// derivations that were fully recorded in a previous evaluation.
     async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>>;
     async fn report_fetching(&mut self) -> Result<()>;
-    async fn report_fetch_result(&mut self, fetched_paths: Vec<FetchedInput>) -> Result<()>;
+    async fn report_fetch_result(&mut self, flake_source: Option<String>) -> Result<()>;
     async fn report_evaluating_flake(&mut self) -> Result<()>;
     async fn report_evaluating_derivations(&mut self) -> Result<()>;
     async fn report_eval_result(

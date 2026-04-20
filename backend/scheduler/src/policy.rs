@@ -187,7 +187,7 @@ impl Rule for DependencyCountRule {
     fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
         match job.job {
             PendingJob::Build(j) => j.dependency_count as f64 * self.dep_bonus_per_dep,
-            PendingJob::Eval(_) => 0.0,
+            PendingJob::Eval(_) | PendingJob::Sign(_) => 0.0,
         }
     }
 }
@@ -275,8 +275,8 @@ impl Policy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::jobs::{PendingBuildJob, PendingEvalJob, PendingJob};
-    use gradient_core::types::proto::{BuildJob, BuildTask, FlakeJob, FlakeTask};
+    use crate::jobs::{PendingBuildJob, PendingJob};
+    use gradient_core::types::proto::{BuildJob, BuildTask};
     use uuid::Uuid;
 
     fn worker_ctx<'a>(archs: &'a [String], features: &'a [String]) -> WorkerContext<'a> {
@@ -296,8 +296,7 @@ mod tests {
                     build_id: Uuid::new_v4().to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                 }],
-                compress: None,
-                sign: None,
+                sign: false,
             },
             required_paths: vec![],
             architecture: arch.into(),
@@ -383,8 +382,7 @@ mod tests {
                     build_id: Uuid::new_v4().to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                 }],
-                compress: None,
-                sign: None,
+                sign: false,
             },
             required_paths: vec![],
             architecture: "x86_64-linux".into(),

@@ -209,14 +209,15 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
                 FlakeTask::EvaluateFlake,
                 FlakeTask::EvaluateDerivations,
             ],
-            repository: eval.repository.clone(),
-            commit: commit_sha,
+            source: gradient_core::types::proto::FlakeSource::Repository {
+                url: eval.repository.clone(),
+                commit: commit_sha,
+            },
             wildcards: eval.wildcard
                 .parse::<Wildcard>()
                 .map(|w| w.patterns().to_vec())
                 .unwrap_or_else(|_| vec![eval.wildcard.clone()]),
             timeout_secs: None,
-            sign: None,
         };
 
         let organization_id = organization_id_for_eval(state, &eval).await;
@@ -440,13 +441,15 @@ impl BuildDispatchMaps {
         })?;
 
         let job_id = format!("build:{}", build.id);
+        // Placeholder; the real value is set per-assignment in
+        // `job_handlers::apply_sign_flag` based on the receiving worker's
+        // `sign` capability.
         let build_job = BuildJob {
             builds: vec![BuildTask {
                 build_id: build.id.to_string(),
                 drv_path: derivation.derivation_path.clone(),
             }],
-            compress: None,
-            sign: None,
+            sign: false,
         };
         let pending = PendingBuildJob {
             build_id: build.id,

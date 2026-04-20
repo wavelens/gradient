@@ -101,4 +101,4 @@ To run a worker on the server host itself, import the `gradient-worker` NixOS mo
 
 3. The worker connects and is visible in **Organization → Workers** in the UI and via `GET /api/v1/orgs/{org}/workers`.
 
-Workers authenticate using per-organization tokens. A worker authorized for an org receives only that org's job offers. Workers with no peers file run in **open mode** and are trusted for all jobs — suitable for co-located workers on a trusted host.
+Workers authenticate using per-organization tokens. A worker authorized for an org receives only that org's job offers.

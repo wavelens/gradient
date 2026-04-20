@@ -47,6 +47,20 @@ pub struct GradientCapabilities {
 pub enum Job {
     Flake(FlakeJob),
     Build(BuildJob),
+    Sign(SignJob),
+}
+
+/// Where to obtain the flake source for a [`FlakeJob`].
+///
+/// `Repository` requires the worker to have the `fetch` capability and the
+/// `FetchFlake` task in `tasks`. `Cached` is used for eval-only follow-up
+/// jobs dispatched after a fetch-capable worker has already archived the
+/// source into the cache.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum FlakeSource {
+    Repository { url: String, commit: String },
+    Cached { store_path: String },
 }
 
 /// Evaluation job: fetch and/or evaluate a Nix flake.
@@ -54,13 +68,9 @@ pub enum Job {
 #[rkyv(derive(Debug, PartialEq))]
 pub struct FlakeJob {
     pub tasks: Vec<FlakeTask>,
-    pub repository: String,
-    pub commit: String,
+    pub source: FlakeSource,
     pub wildcards: Vec<String>,
     pub timeout_secs: Option<u64>,
-    /// When set, the worker signs all fetched store paths after pushing their
-    /// NARs.  Requires a `SigningKey` credential to be delivered before the job.
-    pub sign: Option<SignTask>,
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -71,13 +81,19 @@ pub enum FlakeTask {
     EvaluateDerivations,
 }
 
-/// Build job: build derivations, optionally compress and sign outputs.
+/// Build job: build derivations. The worker always zstd-compresses
+/// uploaded NARs, and always signs every realised output once per
+/// signing-key credential delivered by the server. Whether signing
+/// happens at all is therefore implicit in the org→cache relations on the
+/// server side — no proto-level flag is needed.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct BuildJob {
     pub builds: Vec<BuildTask>,
-    pub compress: Option<CompressTask>,
-    pub sign: Option<SignTask>,
+    /// When `true`, the worker signs every realised output inline using the
+    /// delivered signing keys. When `false`, signing is skipped and the
+    /// server's scanner will dispatch a [`SignJob`] later.
+    pub sign: bool,
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -87,27 +103,39 @@ pub struct BuildTask {
     pub drv_path: String,
 }
 
+/// Sign job: compute narinfo signatures for a batch of already-uploaded
+/// cache paths. The worker fingerprints each item from metadata alone
+/// (no NAR bytes needed) and signs once per delivered signing key.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
-pub struct CompressTask {
-    pub store_paths: Vec<String>,
+pub struct SignJob {
+    pub items: Vec<SignItem>,
 }
 
+/// One entry in a [`SignJob`]. Carries exactly the metadata needed to
+/// compute the narinfo fingerprint `"1;<store_path>;<nar_hash>;<nar_size>;<refs>"`.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
-pub struct SignTask {
-    pub store_paths: Vec<String>,
+pub struct SignItem {
+    pub store_path: String,
+    /// `"sha256:<nix32>"` — canonical narinfo form.
+    pub nar_hash: String,
+    pub nar_size: u64,
+    /// Bare hash-name references (no `/nix/store/` prefix).
+    pub references: Vec<String>,
 }
 
-/// A store path and its Ed25519 narinfo signature.
+/// A store path and the list of Ed25519 narinfo signatures computed for it.
 ///
-/// `signature` is in the standard Nix format `key-name:base64` as returned by
-/// `harmonia_store_core::signature::Signature::to_string()`.
+/// Each entry is in the standard Nix format `cache-name:base64`; there is
+/// one entry per signing-key credential the worker received for the job.
+/// An empty `signatures` vec means the worker did not sign (either `sign`
+/// was false or no keys were delivered).
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct PathSignature {
     pub store_path: String,
-    pub signature: String,
+    pub signatures: Vec<String>,
 }
 
 /// Progress events for job updates.
@@ -115,8 +143,13 @@ pub struct PathSignature {
 #[rkyv(derive(Debug, PartialEq))]
 pub enum JobUpdateKind {
     Fetching,
+    /// Reports the archived flake source path after `FetchFlake` completes.
+    /// `Some(path)` — `nix flake archive` succeeded and the source now lives
+    /// in the cache; the server can hand the path to a subsequent eval-only
+    /// job as `FlakeSource::Cached`. `None` — the worker fell back to a
+    /// temporary git checkout; no eval-only follow-up is possible.
     FetchResult {
-        fetched_paths: Vec<FetchedInput>,
+        flake_source: Option<String>,
     },
     EvaluatingFlake,
     EvaluatingDerivations,
@@ -143,18 +176,6 @@ pub enum JobUpdateKind {
     Signed {
         signatures: Vec<PathSignature>,
     },
-}
-
-/// A flake input fetched during the `FetchFlake` task.
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
-pub struct FetchedInput {
-    pub store_path: String,
-    pub nar_hash: String,
-    pub nar_size: u64,
-    /// Ed25519 signature produced by the `sign` step, if present.
-    /// Format: `<key-name>:<base64>` — the standard Nix narinfo signature format.
-    pub signature: Option<String>,
 }
 
 // ── Scheduling types ─────────────────────────────────────────────────────────
@@ -328,4 +349,6 @@ pub enum JobKind {
     Flake,
     /// Nix build job.
     Build,
+    /// Sign job (batch narinfo signing).
+    Sign,
 }

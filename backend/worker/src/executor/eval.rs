@@ -22,7 +22,7 @@ use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_core::db::parse_drv;
 use gradient_core::nix::DerivationResolver;
-use proto::messages::{DerivationOutput, DiscoveredDerivation, FlakeJob};
+use proto::messages::{DerivationOutput, DiscoveredDerivation, FlakeJob, FlakeSource};
 use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
@@ -108,7 +108,7 @@ pub async fn evaluate_derivations(
     local_flake_path: Option<&str>,
     updater: &mut JobUpdater,
     abort: &mut watch::Receiver<bool>,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     evaluate_derivations_with(
         &*evaluator.resolver,
         &FsDrvReader,
@@ -162,14 +162,24 @@ async fn mark_substituted(batch: &mut [DiscoveredDerivation], updater: &mut dyn 
 fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
     if let Some(path) = local_flake_path {
         if path.starts_with("/nix/store/") {
-            format!("path:{}", path)
-        } else {
-            format!("git+file://{}?rev={}", path, job.commit)
+            return format!("path:{}", path);
         }
-    } else {
-        gradient_core::nix::NixFlakeUrl::new(&job.repository, &job.commit)
-            .map(|u| u.to_string())
-            .unwrap_or_else(|_| job.repository.clone())
+        // A tmp git checkout — pair it with the commit from source when we
+        // know we're on a Repository source; else fall back to a bare
+        // `path:` reference.
+        if let FlakeSource::Repository { commit, .. } = &job.source {
+            return format!("git+file://{}?rev={}", path, commit);
+        }
+        return format!("path:{}", path);
+    }
+    match &job.source {
+        FlakeSource::Repository { url, commit } => {
+            gradient_core::nix::NixFlakeUrl::new(url, commit)
+                .map(|u| u.to_string())
+                .unwrap_or_else(|_| url.clone())
+        }
+        // Eval-only: Nix accepts `/nix/store/...` directly as a flake URI.
+        FlakeSource::Cached { store_path } => format!("path:{}", store_path),
     }
 }
 
@@ -267,6 +277,10 @@ struct ClosureWalker<'a> {
     queue: VecDeque<(Option<String>, String)>,
     walked: usize,
     start: Instant,
+    /// Every `.drv` path the walker actually parsed (i.e. present in the
+    /// local store, not pruned via `known_set`). The caller uses this to
+    /// push each drv NAR into the cache and sign it.
+    produced_drvs: Vec<String>,
 }
 
 impl<'a> ClosureWalker<'a> {
@@ -287,6 +301,7 @@ impl<'a> ClosureWalker<'a> {
             queue,
             walked: 0,
             start: Instant::now(),
+            produced_drvs: Vec::new(),
         }
     }
 
@@ -384,6 +399,7 @@ impl<'a> ClosureWalker<'a> {
         }
 
         for ((attr, drv_path), drv) in wave.into_iter().zip(parsed_drvs) {
+            self.produced_drvs.push(drv_path.clone());
             self.batch
                 .push(build_discovered_derivation(attr, drv_path, &drv));
             self.walked += 1;
@@ -435,7 +451,7 @@ pub async fn evaluate_derivations_with(
     local_flake_path: Option<&str>,
     updater: &mut dyn JobReporter,
     abort: &mut watch::Receiver<bool>,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     if is_aborted(abort) {
         anyhow::bail!(ABORT_ERR);
     }
@@ -464,7 +480,8 @@ pub async fn evaluate_derivations_with(
 
     if attrs.is_empty() {
         warn!("no derivations found for evaluation");
-        return updater.report_eval_result(vec![], warnings, vec![]).await;
+        updater.report_eval_result(vec![], warnings, vec![]).await?;
+        return Ok(Vec::new());
     }
 
     if is_aborted(abort) {
@@ -501,13 +518,14 @@ pub async fn evaluate_derivations_with(
 
     if root_drvs.is_empty() {
         warn!("all attr resolutions failed");
-        return updater.report_eval_result(vec![], warnings, errors).await;
+        updater.report_eval_result(vec![], warnings, errors).await?;
+        return Ok(Vec::new());
     }
 
     // ── Step 3+4+5: BFS closure walk with incremental flushes ────────────────
-    let mut remaining = ClosureWalker::new(drv_reader, &root_drvs)
-        .walk(updater, abort)
-        .await?;
+    let mut walker = ClosureWalker::new(drv_reader, &root_drvs);
+    let mut remaining = walker.walk(updater, abort).await?;
+    let produced_drvs = std::mem::take(&mut walker.produced_drvs);
 
     // ── Final flush: remaining derivations + deduplicated warnings/errors ─────
     warnings.sort_unstable();
@@ -524,7 +542,8 @@ pub async fn evaluate_derivations_with(
     );
     updater
         .report_eval_result(remaining, warnings, errors)
-        .await
+        .await?;
+    Ok(produced_drvs)
 }
 
 #[cfg(test)]
@@ -544,11 +563,12 @@ mod tests {
     fn make_flake_job(repo: &str) -> FlakeJob {
         FlakeJob {
             tasks: vec![],
-            repository: repo.into(),
-            commit: "abc123".into(),
+            source: FlakeSource::Repository {
+                url: repo.into(),
+                commit: "abc123".into(),
+            },
             wildcards: vec!["*".into()],
             timeout_secs: None,
-            sign: None,
         }
     }
 

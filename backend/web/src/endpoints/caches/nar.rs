@@ -12,7 +12,7 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use core::sources::get_hash_from_url;
 use core::types::*;
-use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -83,22 +83,43 @@ pub async fn upstream_nar(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Resolve the file hash from the URL to the store hash stored in `derivation_output`.
-/// Falls back to using the path hash directly for legacy/direct-hash URLs.
+/// Resolve the file hash from the URL to the store hash used as the NAR
+/// storage key. Checks `derivation_output` first (build outputs), then
+/// `cached_path` (for standalone store paths such as `.drv` files).
+/// Falls back to the URL hash for legacy/direct-hash URLs.
 async fn resolve_effective_hash(state: &Arc<ServerState>, path_hash: &str) -> WebResult<String> {
+    resolve_effective_hash_db(&state.db, path_hash).await
+}
+
+pub(crate) async fn resolve_effective_hash_db(
+    db: &DatabaseConnection,
+    path_hash: &str,
+) -> WebResult<String> {
+    let file_hash_prefixed = format!("sha256:{}", path_hash);
+
     let by_file = EDerivationOutput::find()
         .filter(
             Condition::all()
                 .add(CDerivationOutput::IsCached.eq(true))
-                .add(CDerivationOutput::FileHash.eq(format!("sha256:{}", path_hash))),
+                .add(CDerivationOutput::FileHash.eq(&file_hash_prefixed)),
         )
-        .one(&state.db)
+        .one(db)
         .await?;
 
-    Ok(match by_file {
-        Some(output) => output.hash,
-        None => path_hash.to_string(),
-    })
+    if let Some(output) = by_file {
+        return Ok(output.hash);
+    }
+
+    let by_cached_path = ECachedPath::find()
+        .filter(CCachedPath::FileHash.eq(&file_hash_prefixed))
+        .one(db)
+        .await?;
+
+    if let Some(row) = by_cached_path {
+        return Ok(row.hash);
+    }
+
+    Ok(path_hash.to_string())
 }
 
 fn spawn_nar_traffic_metric(state: Arc<ServerState>, cache_id: Uuid, bytes_len: i64) {
@@ -129,6 +150,75 @@ fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: Uuid, 
             ))
             .await;
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use sea_orm::{DatabaseBackend, MockDatabase};
+
+    // Placeholder file hash (nix32 52-char) as it appears in a narinfo URL.
+    const FILE_HASH_NIX32: &str = "0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73";
+    const STORE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    fn empty_output_page() -> Vec<entity::derivation_output::Model> {
+        Vec::new()
+    }
+
+    fn cached_path_row() -> entity::cached_path::Model {
+        entity::cached_path::Model {
+            id: uuid::Uuid::new_v4(),
+            store_path: format!("/nix/store/{STORE_HASH}-hello.drv"),
+            hash: STORE_HASH.to_string(),
+            package: "hello.drv".to_string(),
+            file_hash: Some(format!("sha256:{FILE_HASH_NIX32}")),
+            file_size: Some(1234),
+            nar_size: Some(2048),
+            nar_hash: Some(format!("sha256:{FILE_HASH_NIX32}")),
+            references: Some(String::new()),
+            ca: None,
+            created_at: Utc::now().naive_utc(),
+        }
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+    }
+
+    /// When no derivation_output matches but a cached_path does, the
+    /// resolver returns the cached_path's store hash — this is the key
+    /// the NAR blob was written under by `pack_store_path`.
+    #[test]
+    fn resolve_falls_back_to_cached_path_for_drv() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([empty_output_page()])
+            .append_query_results([vec![cached_path_row()]])
+            .into_connection();
+
+        let effective = runtime()
+            .block_on(resolve_effective_hash_db(&db, FILE_HASH_NIX32))
+            .expect("resolve should succeed");
+        assert_eq!(effective, STORE_HASH);
+    }
+
+    /// When neither table has a match, the URL hash is returned unchanged
+    /// (legacy/direct-hash URL behaviour preserved).
+    #[test]
+    fn resolve_falls_back_to_url_hash_when_no_match() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([empty_output_page()])
+            .append_query_results([Vec::<entity::cached_path::Model>::new()])
+            .into_connection();
+
+        let effective = runtime()
+            .block_on(resolve_effective_hash_db(&db, FILE_HASH_NIX32))
+            .expect("resolve should succeed");
+        assert_eq!(effective, FILE_HASH_NIX32);
+    }
 }
 
 async fn fetch_upstream_nar(base_url: &str, path: &str) -> WebResult<bytes::Bytes> {

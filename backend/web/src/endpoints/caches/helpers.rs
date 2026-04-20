@@ -108,8 +108,15 @@ impl<'a> CacheOpsHandler<'a> {
             )
             .one(&self.state.db)
             .await
-            .map_err(WebError::from)?
-            .ok_or_else(|| WebError::not_found("Path"))?;
+            .map_err(WebError::from)?;
+
+        // If there's no matching derivation_output, the requested hash may
+        // belong to a `.drv` file or other standalone store path cached via
+        // `cached_path`. Fall back to that lookup.
+        let build_output = match build_output {
+            Some(o) => o,
+            None => return self.get_nar_by_cached_path(cache, hash).await,
+        };
 
         // Verify the derivation belongs to an org that subscribes to this cache.
         let derivation = EDerivation::find_by_id(build_output.derivation)
@@ -244,6 +251,95 @@ impl<'a> CacheOpsHandler<'a> {
             deriver,
             sig,
             ca,
+        })
+    }
+
+    /// Narinfo lookup for store paths that aren't build outputs — notably
+    /// `.drv` files. Access is gated on the signature row for `cache.id`:
+    /// its existence proves the caller-authorised cache also holds the
+    /// path.  All metadata comes from `cached_path` because the server
+    /// local store may have GC'd the drv already.
+    async fn get_nar_by_cached_path(
+        &self,
+        cache: MCache,
+        hash: String,
+    ) -> Result<NixPathInfo, WebError> {
+        let cached_path_row = ECachedPath::find()
+            .filter(CCachedPath::Hash.eq(hash.clone()))
+            .one(&self.state.db)
+            .await
+            .map_err(WebError::from)?
+            .ok_or_else(|| WebError::not_found("Path"))?;
+
+        if !cached_path_row.is_fully_cached() {
+            return Err(WebError::not_found("Path"));
+        }
+
+        let cached_path_sig = ECachedPathSignature::find()
+            .filter(
+                Condition::all()
+                    .add(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
+                    .add(CCachedPathSignature::Cache.eq(cache.id)),
+            )
+            .one(&self.state.db)
+            .await
+            .map_err(WebError::from)?
+            .ok_or_else(|| WebError::not_found("Signature"))?;
+
+        let signature = cached_path_sig
+            .signature
+            .ok_or_else(|| WebError::not_found("Signature not yet computed"))?;
+
+        let sig_url = self
+            .state
+            .cli
+            .serve_url
+            .replace("https://", "")
+            .replace("http://", "")
+            .replace(":", "-");
+        let sig = format!("{}-{}:{}", sig_url, cache.name, signature);
+
+        let file_hash = cached_path_row
+            .file_hash
+            .clone()
+            .ok_or_else(|| WebError::BadRequest("Missing file hash".to_string()))?;
+        let file_size = cached_path_row
+            .file_size
+            .ok_or_else(|| WebError::BadRequest("Missing file size".to_string()))?
+            as u32;
+        let nar_hash = cached_path_row
+            .nar_hash
+            .as_deref()
+            .map(normalize_nar_hash)
+            .ok_or_else(|| WebError::not_found("NarHash not recorded"))?;
+        let nar_size = cached_path_row
+            .nar_size
+            .ok_or_else(|| WebError::not_found("NarSize not recorded"))?
+            as u64;
+        let references = cached_path_row
+            .references
+            .as_deref()
+            .unwrap_or("")
+            .split_whitespace()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+        let file_hash_nix32 = normalize_nar_hash(&file_hash)
+            .trim_start_matches("sha256:")
+            .to_string();
+
+        Ok(NixPathInfo {
+            store_path: cached_path_row.store_path.clone(),
+            url: format!("nar/{}.nar.zst", file_hash_nix32),
+            compression: "zstd".to_string(),
+            file_hash,
+            file_size,
+            nar_hash,
+            nar_size,
+            references,
+            deriver: None,
+            sig,
+            ca: cached_path_row.ca.clone(),
         })
     }
 
