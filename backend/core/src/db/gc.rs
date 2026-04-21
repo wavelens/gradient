@@ -18,13 +18,6 @@ use uuid::Uuid;
 
 use crate::types::*;
 
-pub async fn remove_gcroot(state: &Arc<ServerState>, hash: &str, package: &str) {
-    let name = format!("{}-{}", hash, package);
-    if let Err(e) = state.nix_store.remove_gcroot(name.clone()).await {
-        warn!(error = %e, name = %name, "Failed to remove GC root");
-    }
-}
-
 /// Deletes evaluations for `project_id` beyond the most recent `keep` entries.
 ///
 /// Handles DB deletion, build log removal, NAR cache files, and GC root symlinks.
@@ -156,8 +149,7 @@ pub async fn gc_project_evaluations(
 /// For each orphan it:
 ///   1. Removes any `cache_derivation` rows (FK cascade also removes them, but doing it
 ///      explicitly lets us delete the NAR files first).
-///   2. Removes the GC root for each `derivation_output`.
-///   3. Deletes the derivation row — FK cascade cleans up outputs / dep edges / features /
+///   2. Deletes the derivation row — FK cascade cleans up outputs / dep edges / features /
 ///      signatures.
 pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) -> Result<()> {
     let cutoff = Utc::now().naive_utc() - ChronoDuration::hours(grace_hours.max(0));
@@ -215,12 +207,7 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
             let _ = cache_row.into_active_model().delete(&state.db).await;
         }
 
-        // 2. Remove GC roots for each output.
-        for o in &outputs {
-            remove_gcroot(&state, &o.hash, &o.package).await;
-        }
-
-        // 3. Delete the derivation row. FK cascade removes outputs / dep edges /
+        // 2. Delete the derivation row. FK cascade removes outputs / dep edges /
         //    features / signatures.
         if let Some(d) = EDerivation::find_by_id(drv_id)
             .one(&state.db)

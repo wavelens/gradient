@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use chrono::Utc;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use gradient_core::db::{update_build_status, update_evaluation_status};
@@ -57,15 +58,41 @@ impl<'a> BuildStateHandler<'a> {
                 .context("fetch derivation_output")?;
 
             if let Some(row) = existing {
+                let row_id = row.id;
                 let mut active = row.into_active_model();
                 if let BuildOutputMetadata::Available { nar_size, nar_hash } = output.nar_metadata()
                 {
                     active.nar_size = Set(Some(nar_size));
                     active.file_hash = Set(Some(nar_hash.to_owned()));
                 }
-                active.has_artefacts = Set(output.has_artefacts);
                 if let Err(e) = active.update(&self.state.db).await {
                     error!(error = %e, %build_id, output_name = %output.name, "failed to update derivation_output");
+                }
+
+                // Delete any prior products for this output (idempotency on retry).
+                if let Err(e) = EBuildProduct::delete_many()
+                    .filter(CBuildProduct::DerivationOutput.eq(row_id))
+                    .exec(&self.state.db)
+                    .await
+                    .context("delete prior build_product rows")
+                {
+                    warn!(error = %e, %build_id, output_name = %output.name, "failed to delete prior build_product rows");
+                }
+
+                // Insert new product rows.
+                for product in &output.products {
+                    let am = ABuildProduct {
+                        id: Set(Uuid::new_v4()),
+                        derivation_output: Set(row_id),
+                        file_type: Set(product.file_type.clone()),
+                        name: Set(product.name.clone()),
+                        path: Set(product.path.clone()),
+                        size: Set(product.size.map(|s| s as i64)),
+                        created_at: Set(Utc::now().naive_utc()),
+                    };
+                    if let Err(e) = am.insert(&self.state.db).await {
+                        warn!(error = %e, %build_id, output_name = %output.name, "failed to insert build_product");
+                    }
                 }
             } else {
                 warn!(%build_id, output_name = %output.name, "derivation_output row not found");

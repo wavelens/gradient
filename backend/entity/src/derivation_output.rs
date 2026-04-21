@@ -24,7 +24,6 @@ pub struct Model {
     pub file_size: Option<i64>,
     pub nar_size: Option<i64>,
     pub is_cached: bool,
-    pub has_artefacts: bool,
     /// Link to the `cached_path` row when this output is cached.
     /// Replaces the old `derivation_output_signature` join — the signature
     /// lives on `cached_path` directly.
@@ -46,6 +45,8 @@ pub enum Relation {
         to = "super::cached_path::Column::Id"
     )]
     CachedPath,
+    #[sea_orm(has_many = "super::build_product::Entity")]
+    BuildProduct,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

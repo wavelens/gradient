@@ -33,6 +33,10 @@ The server binary starts three concurrent async tasks:
 
 `gradient-worker` is a standalone process that connects to the server over WebSocket at `/proto`. It handles fetch, eval, build, and sign tasks dispatched by the server's scheduler. Workers can run co-located on the server host or on separate machines.
 
+### Server has no Nix daemon
+
+The server does not require access to a Nix daemon. All store interaction (eval, build, fetch, sign) happens on worker nodes, which talk to a local `nix-daemon` via harmonia. The server reads `.narinfo` responses straight from DB rows (`cached_path`) and serves artefact downloads from `nar_storage` (local FS or S3), extracting individual files from the stored NARs on the fly. GC roots are created and removed only on the worker that builds the output.
+
 ## Crates
 
 ```

@@ -9,7 +9,7 @@ use super::{
     load_readable_project, user_can_edit,
 };
 use crate::authorization::MaybeUser;
-use crate::endpoints::{content_type_for_filename, parse_hydra_product_line, user_is_org_member};
+use crate::endpoints::{content_type_for_filename, user_is_org_member};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
@@ -17,6 +17,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use core::db::get_any_organization_by_name;
 use core::sources::check_project_updates;
+use core::storage::nar_extract::{ExtractError, extract_file_from_nar_bytes};
 use core::types::input::vec_to_hex;
 use core::types::*;
 use entity::build::BuildStatus;
@@ -27,7 +28,6 @@ use sea_orm::{
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::fs;
 use uuid::Uuid;
 
 #[derive(Deserialize, Default)]
@@ -316,8 +316,8 @@ pub async fn get_project_entry_points(
 struct EntryPointRelatedData {
     builds: HashMap<Uuid, MBuild>,
     derivations: HashMap<Uuid, MDerivation>,
-    /// Derivation IDs whose outputs have `has_artefacts = true`.
-    has_artefacts: HashMap<Uuid, bool>,
+    /// Derivation IDs that have at least one `build_product` row.
+    has_products: HashMap<Uuid, bool>,
 }
 
 impl EntryPointRelatedData {
@@ -350,17 +350,28 @@ impl EntryPointRelatedData {
             .map(|b| b.derivation)
             .collect();
 
-        let has_artefacts: HashMap<Uuid, bool> = if completed_drv_ids.is_empty() {
+        // Determine which derivations have at least one build_product by looking
+        // at their outputs.
+        let has_products: HashMap<Uuid, bool> = if completed_drv_ids.is_empty() {
             HashMap::new()
         } else {
-            let mut m: HashMap<Uuid, bool> = HashMap::new();
-            for o in EDerivationOutput::find()
+            let outputs = EDerivationOutput::find()
                 .filter(CDerivationOutput::Derivation.is_in(completed_drv_ids))
-                .filter(CDerivationOutput::HasArtefacts.eq(true))
                 .all(&state.db)
-                .await?
-            {
-                m.insert(o.derivation, true);
+                .await?;
+            let output_ids: Vec<Uuid> = outputs.iter().map(|o| o.id).collect();
+            let mut m: HashMap<Uuid, bool> = HashMap::new();
+            if !output_ids.is_empty() {
+                for bp in EBuildProduct::find()
+                    .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
+                    .all(&state.db)
+                    .await?
+                {
+                    // Map back from output → derivation.
+                    if let Some(output) = outputs.iter().find(|o| o.id == bp.derivation_output) {
+                        m.insert(output.derivation, true);
+                    }
+                }
             }
             m
         };
@@ -368,7 +379,7 @@ impl EntryPointRelatedData {
         Ok(Self {
             builds,
             derivations,
-            has_artefacts,
+            has_products,
         })
     }
 
@@ -392,7 +403,7 @@ impl EntryPointRelatedData {
                 derivation_path: drv.derivation_path.clone(),
                 eval: ep.eval.clone(),
                 build_status: build.status.clone(),
-                has_artefacts: *self.has_artefacts.get(&build.derivation).unwrap_or(&false),
+                has_artefacts: *self.has_products.get(&build.derivation).unwrap_or(&false),
                 architecture: drv.architecture.clone(),
                 evaluation_id: evaluation.id,
                 evaluation_status: evaluation.status.clone(),
@@ -418,60 +429,103 @@ pub struct EntryPointDownloadQuery {
     pub token: Option<String>,
 }
 
-/// Ensure every derivation output path is realised in the local store, then
-/// scan `nix-support/hydra-build-products` across all outputs and stream the
-/// first output whose filename matches `filename`.
+/// Look up `build_product` rows for the given outputs, find the one whose
+/// `name` matches `filename`, and stream its bytes from `nar_storage`.
 ///
-/// Returns `None` when no matching file is found.
+/// Returns `None` when no matching product is found.
 async fn serve_hydra_artifact(
     state: &Arc<ServerState>,
     build_outputs: Vec<MDerivationOutput>,
     filename: &str,
 ) -> WebResult<Option<Response>> {
-    // Best-effort realisation — log and continue on failure.
-    for output in &build_outputs {
-        if let Err(e) = state.web_nix_store.ensure_path(output.output.clone()).await {
-            tracing::warn!(
-                error = format!("{:#}", e),
-                path = %output.output,
-                "Failed to ensure output path is realised"
-            );
-        }
+    let output_ids: Vec<Uuid> = build_outputs.iter().map(|o| o.id).collect();
+    if output_ids.is_empty() {
+        return Ok(None);
     }
 
-    for output in build_outputs {
-        let products_path = format!("{}/nix-support/hydra-build-products", output.output);
-        let Ok(content) = fs::read_to_string(&products_path).await else {
+    let rows = match EBuildProduct::find()
+        .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
+        .all(&state.db)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to query build_product rows for artifact serve");
+            return Ok(None);
+        }
+    };
+
+    for product in rows {
+        let product_name = &product.name;
+        let path_basename = std::path::Path::new(&product.path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        if product_name != filename && path_basename != filename {
             continue;
-        };
-        for line in content.lines() {
-            let Some((_, file_path)) = parse_hydra_product_line(line) else {
-                continue;
-            };
-            let file_name = std::path::Path::new(&file_path)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
-            if file_name != filename {
+        }
+
+        let output = build_outputs
+            .iter()
+            .find(|o| o.id == product.derivation_output);
+        let output_root = match output {
+            Some(o) => &o.output,
+            None => {
+                tracing::warn!(%filename, "build_product references unknown output");
                 continue;
             }
-            let contents = fs::read(&file_path)
-                .await
-                .map_err(|_| WebError::InternalServerError("Failed to read file".to_string()))?;
-            return Ok(Some(
-                (
-                    StatusCode::OK,
-                    [
-                        (header::CONTENT_TYPE, content_type_for_filename(filename)),
-                        (
-                            header::CONTENT_DISPOSITION,
-                            &format!("attachment; filename=\"{}\"", filename),
-                        ),
-                    ],
-                    contents,
-                )
-                    .into_response(),
-            ));
+        };
+
+        let hash = output_root
+            .strip_prefix("/nix/store/")
+            .unwrap_or(output_root)
+            .split('-')
+            .next()
+            .unwrap_or("");
+        if hash.is_empty() {
+            continue;
+        }
+
+        let prefix = format!("{}/", output_root);
+        let rel = product
+            .path
+            .strip_prefix(&prefix)
+            .map(str::to_owned)
+            .unwrap_or_else(|| product.path.trim_start_matches('/').to_owned());
+
+        let compressed = match state.nar_storage.get(hash).await {
+            Ok(Some(b)) => b,
+            Ok(None) => continue,
+            Err(e) => {
+                tracing::warn!(output_path = %output_root, error = %e, "Failed to fetch NAR from nar_storage");
+                continue;
+            }
+        };
+
+        match extract_file_from_nar_bytes(compressed, &rel).await {
+            Ok(extracted) => {
+                return Ok(Some(
+                    (
+                        StatusCode::OK,
+                        [
+                            (header::CONTENT_TYPE, content_type_for_filename(filename)),
+                            (
+                                header::CONTENT_DISPOSITION,
+                                &format!("attachment; filename=\"{}\"", filename),
+                            ),
+                        ],
+                        extracted.contents,
+                    )
+                        .into_response(),
+                ));
+            }
+            Err(ExtractError::NotFound) => continue,
+            Err(e) => {
+                tracing::error!(output_path = %output_root, %rel, error = %e, "Failed to extract file from NAR");
+                return Err(WebError::InternalServerError(
+                    "Failed to extract file from NAR".to_string(),
+                ));
+            }
         }
     }
 

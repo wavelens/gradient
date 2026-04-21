@@ -65,7 +65,7 @@ mod tests {
             hash: "aaaa".into(),
             nar_size: None,
             nar_hash: None,
-            has_artefacts: false,
+            products: vec![],
         }
     }
 

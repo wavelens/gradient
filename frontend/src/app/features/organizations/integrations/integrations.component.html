@@ -202,7 +202,7 @@
       <label for="int-secret">Webhook Secret</label>
       <div class="copy-row">
         <input pInputText id="int-secret" [(ngModel)]="formData.secret" class="w-full" placeholder="Leave blank to omit verification" />
-        <button pButton type="button" label="Generate" icon="pi pi-refresh" severity="secondary" (click)="generateSecret()"></button>
+        <button pButton type="button" icon="pi pi-refresh" severity="secondary" (click)="generateSecret()"></button>
       </div>
       <small class="text-secondary">Copy this into your forge's webhook secret field. Store it now — it will not be shown again.</small>
     </div>
@@ -262,7 +262,7 @@
         <label for="edit-secret">Webhook Secret</label>
         <div class="copy-row">
           <input pInputText id="edit-secret" [(ngModel)]="formData.secret" class="w-full" placeholder="Leave blank to keep existing" />
-          <button pButton type="button" label="Generate" icon="pi pi-refresh" severity="secondary" (click)="generateSecret()"></button>
+          <button pButton type="button" icon="pi pi-refresh" severity="secondary" (click)="generateSecret()"></button>
         </div>
         <small class="text-secondary">Currently {{ target.has_secret ? 'configured' : 'not set' }}. Entering a new value replaces it.</small>
         @if (target.has_secret) {

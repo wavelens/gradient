@@ -29,7 +29,6 @@ pub use self::secret::{SecretBytes, SecretString};
 pub use self::wildcard::*;
 
 use super::ci::webhook::WebhookClient;
-use super::executer::pool::NixStoreProvider;
 use super::storage::LogStorage;
 use super::storage::NarStore;
 use super::storage::email::EmailSender;
@@ -131,8 +130,6 @@ pub struct Cli {
     pub delete_state: bool,
     #[arg(long, env = "GRADIENT_KEEP_EVALUATIONS", default_value = "0")]
     pub keep_evaluations: usize,
-    #[arg(long, env = "GRADIENT_MAX_NIXDAEMON_CONNECTIONS", value_parser = greater_than_zero::<usize>, default_value = "8")]
-    pub max_nixdaemon_connections: usize,
     /// Number of long-lived Nix evaluator worker subprocesses to keep around.
     /// Each worker hosts one persistent embedded `NixEvaluator`, paying the
     /// libnix init cost only once. Must be at least `1`: in-process evaluation
@@ -243,8 +240,6 @@ pub struct ServerState {
     pub db: DatabaseConnection,
     pub cli: Cli,
     pub log_storage: Arc<dyn LogStorage>,
-    pub nix_store: Arc<dyn NixStoreProvider>,
-    pub web_nix_store: Arc<dyn NixStoreProvider>,
     pub webhooks: Arc<dyn WebhookClient>,
     pub email: Arc<dyn EmailSender>,
     pub nar_storage: NarStore,

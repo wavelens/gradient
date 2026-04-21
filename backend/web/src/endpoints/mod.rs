@@ -75,21 +75,6 @@ pub async fn user_is_org_member(
         .is_some())
 }
 
-// ── Hydra build product helpers ───────────────────────────────────────────────
-
-/// Parse a single `hydra-build-products` line.
-///
-/// Returns `(file_type, file_path)` for lines of the form `file <type> <path>`,
-/// `None` for blank lines or lines with a different prefix.
-pub fn parse_hydra_product_line(line: &str) -> Option<(String, String)> {
-    let parts: Vec<&str> = line.split_whitespace().collect();
-    if parts.len() >= 3 && parts[0] == "file" {
-        Some((parts[1].to_string(), parts[2..].join(" ")))
-    } else {
-        None
-    }
-}
-
 pub fn content_type_for_filename(filename: &str) -> &'static str {
     match std::path::Path::new(filename)
         .extension()
@@ -153,6 +138,7 @@ pub async fn get_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::hydra::parse_hydra_product_line;
 
     #[test]
     fn parse_hydra_product_line_typical() {

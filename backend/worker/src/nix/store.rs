@@ -28,9 +28,9 @@ pub struct LocalNixStore {
 }
 
 impl LocalNixStore {
-    /// Connect to the local nix-daemon at the default socket path.
-    pub async fn connect() -> Result<Self> {
-        Self::connect_at(DEFAULT_DAEMON_SOCKET, 4)
+    /// Connect to the local nix-daemon at the default socket path with the given pool size.
+    pub fn connect(pool_size: usize) -> Result<Self> {
+        Self::connect_at(DEFAULT_DAEMON_SOCKET, pool_size)
     }
 
     /// Connect to a nix-daemon at a custom socket path with the given pool size.

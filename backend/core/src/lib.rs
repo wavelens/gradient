@@ -7,6 +7,7 @@
 pub mod ci;
 pub mod db;
 pub mod executer;
+pub mod hydra;
 pub mod nix;
 pub mod repo;
 pub mod sources;
@@ -17,7 +18,6 @@ pub mod types;
 
 use ci::ReqwestWebhookClient;
 use db::connect_db;
-use executer::LocalNixStoreProvider;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
@@ -87,11 +87,6 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
             std::process::exit(1);
         }
     };
-
-    let nix_store: Arc<dyn executer::NixStoreProvider> =
-        Arc::new(LocalNixStoreProvider::new(cli.max_nixdaemon_connections));
-    let web_nix_store: Arc<dyn executer::NixStoreProvider> =
-        Arc::new(LocalNixStoreProvider::new(1));
 
     let webhook_client = match ReqwestWebhookClient::new() {
         Ok(c) => c,
@@ -180,8 +175,6 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         db,
         cli,
         log_storage,
-        nix_store,
-        web_nix_store,
         webhooks,
         email,
         nar_storage,

@@ -176,16 +176,9 @@
         imports = [ ../../../modules/gradient-worker.nix ];
 
         nix.settings = {
-          experimental-features = [
-            "nix-command"
-            "flakes"
-            "ca-derivations"
-          ];
-
           trusted-users = [
             "root"
             "@wheel"
-            "gradient-worker"
           ];
 
           max-jobs = lib.mkForce 8;

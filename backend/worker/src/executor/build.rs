@@ -34,7 +34,8 @@ use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, Derivat
 use harmonia_store_core::store_path::{ContentAddress, ContentAddressMethod, StorePath};
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::{Algorithm, Hash};
-use proto::messages::{BuildOutput, BuildTask};
+use gradient_core::hydra::parse_hydra_product_line;
+use proto::messages::{BuildOutput, BuildProduct, BuildTask};
 use std::collections::BTreeMap;
 use std::pin::{Pin, pin};
 use tracing::{debug, info, warn};
@@ -142,19 +143,14 @@ impl ParsedDerivation {
                     let store_path_str = format!("/nix/store/{}", realisation.out_path);
                     let (hash, _package) = get_hash_from_path(store_path_str.clone())
                         .with_context(|| format!("parse output path: {}", store_path_str))?;
-                    let has_artefacts = tokio::fs::metadata(format!(
-                        "{}/nix-support/hydra-build-products",
-                        store_path_str
-                    ))
-                    .await
-                    .is_ok();
+                    let products = load_products(&store_path_str).await;
                     outputs.push(BuildOutput {
                         name: output_name.to_string(),
                         store_path: store_path_str,
                         hash,
                         nar_size: None, // filled in by compress step
                         nar_hash: None,
-                        has_artefacts,
+                        products,
                     });
                 }
                 Ok(outputs)
@@ -167,6 +163,35 @@ impl ParsedDerivation {
             }
         }
     }
+}
+
+// ── Hydra product loader ──────────────────────────────────────────────────────
+
+/// Read and parse `nix-support/hydra-build-products` from `store_path`, returning
+/// one [`BuildProduct`] per valid line. Returns an empty vec if the file is absent.
+async fn load_products(store_path: &str) -> Vec<BuildProduct> {
+    let file_path = format!("{}/nix-support/hydra-build-products", store_path);
+    let Ok(content) = tokio::fs::read_to_string(&file_path).await else {
+        return Vec::new();
+    };
+    let mut products = Vec::new();
+    for line in content.lines() {
+        if let Some((file_type, path)) = parse_hydra_product_line(line) {
+            let name = std::path::Path::new(&path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_owned)
+                .unwrap_or_else(|| path.clone());
+            let size = tokio::fs::metadata(&path).await.ok().map(|m| m.len());
+            products.push(BuildProduct {
+                file_type,
+                name,
+                path,
+                size,
+            });
+        }
+    }
+    products
 }
 
 // ── Orchestrator ──────────────────────────────────────────────────────────────

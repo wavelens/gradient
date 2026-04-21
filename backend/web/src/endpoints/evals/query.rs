@@ -131,18 +131,26 @@ pub async fn get_evaluation_builds(
             .collect()
     };
 
-    // has_artefacts is per-derivation: any output of the derivation has artefacts.
+    // has_artefacts is per-derivation: any output of the derivation has build_product rows.
     let has_artefacts_map: HashMap<Uuid, bool> = if drv_ids.is_empty() {
         HashMap::new()
     } else {
-        let mut m: HashMap<Uuid, bool> = HashMap::new();
         let outputs = EDerivationOutput::find()
             .filter(CDerivationOutput::Derivation.is_in(drv_ids))
-            .filter(CDerivationOutput::HasArtefacts.eq(true))
             .all(&state.db)
             .await?;
-        for o in outputs {
-            m.insert(o.derivation, true);
+        let output_ids: Vec<Uuid> = outputs.iter().map(|o| o.id).collect();
+        let mut m: HashMap<Uuid, bool> = HashMap::new();
+        if !output_ids.is_empty() {
+            for bp in EBuildProduct::find()
+                .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
+                .all(&state.db)
+                .await?
+            {
+                if let Some(output) = outputs.iter().find(|o| o.id == bp.derivation_output) {
+                    m.insert(output.derivation, true);
+                }
+            }
         }
         m
     };

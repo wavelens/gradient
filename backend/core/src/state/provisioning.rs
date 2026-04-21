@@ -5,9 +5,10 @@
  */
 
 use super::{
-    StateApiKey, StateCache, StateConfiguration, StateOrganization, StateProject, StateUpstream,
-    StateUser, StateWorker,
+    StateApiKey, StateCache, StateConfiguration, StateIntegration, StateOrganization, StateProject,
+    StateUpstream, StateUser, StateWorker,
 };
+use crate::ci::{ForgeType, IntegrationKind, encrypt_webhook_secret};
 use crate::types::consts::BASE_ROLE_ADMIN_ID;
 use crate::types::input::load_secret_bytes;
 use crate::types::*;
@@ -41,6 +42,9 @@ pub(super) async fn apply_state_to_database(
     app.apply_users(&config.users).await?;
     app.apply_organizations(&config.organizations).await?;
     app.apply_projects(&config.projects).await?;
+    app.apply_integrations(&config.integrations).await?;
+    app.apply_project_integration_links(&config.projects, &config.integrations)
+        .await?;
     app.apply_caches(&config.caches).await?;
     app.apply_api_keys(&config.api_keys).await?;
     app.apply_workers(&config.workers).await?;
@@ -60,6 +64,36 @@ pub(super) async fn apply_state_to_database(
 struct StateApplicator<'a> {
     db: &'a DatabaseConnection,
     crypt_secret_file: &'a str,
+}
+
+async fn resolve_integration_id(
+    db: &DatabaseConnection,
+    org_id: Uuid,
+    name: &str,
+    kind: IntegrationKind,
+    state_integrations: &HashMap<String, StateIntegration>,
+    project_name: &str,
+) -> Result<Uuid, Box<dyn std::error::Error>> {
+    if !state_integrations.contains_key(name) {
+        return Err(format!(
+            "Project '{}' references unknown integration '{}'",
+            project_name, name
+        )
+        .into());
+    }
+    let row = integration::Entity::find()
+        .filter(integration::Column::Organization.eq(org_id))
+        .filter(integration::Column::Kind.eq(kind.as_i16()))
+        .filter(integration::Column::Name.eq(name))
+        .one(db)
+        .await?
+        .ok_or_else(|| {
+            format!(
+                "Integration '{}' ({:?}) for project '{}' not yet provisioned",
+                name, kind, project_name
+            )
+        })?;
+    Ok(row.id)
 }
 
 impl<'a> StateApplicator<'a> {
@@ -630,6 +664,223 @@ impl<'a> StateApplicator<'a> {
                 reg.insert(self.db).await?;
                 tracing::info!("Created worker registration: {}", state_worker.worker_id);
             }
+        }
+
+        Ok(())
+    }
+
+    // ── apply_integrations ────────────────────────────────────────────────────
+
+    async fn apply_integrations(
+        &self,
+        state_integrations: &HashMap<String, StateIntegration>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if state_integrations.is_empty() {
+            return Ok(());
+        }
+
+        let org_map = self.org_lookup().await?;
+        let user_map = self.user_lookup().await?;
+
+        let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
+            .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
+
+        for state_int in state_integrations.values() {
+            let org_id = *org_map.get(&state_int.organization).ok_or_else(|| {
+                format!(
+                    "Integration '{}' references unknown organization '{}'",
+                    state_int.name, state_int.organization
+                )
+            })?;
+
+            let created_by_id = *user_map
+                .get(&state_int.created_by)
+                .ok_or_else(|| format!("User '{}' not found", state_int.created_by))?;
+
+            let kind = match state_int.kind.as_str() {
+                "inbound" => IntegrationKind::Inbound,
+                "outbound" => IntegrationKind::Outbound,
+                other => {
+                    return Err(format!(
+                        "Integration '{}' has invalid kind '{}': expected 'inbound' or 'outbound'",
+                        state_int.name, other
+                    )
+                    .into());
+                }
+            };
+
+            let forge = ForgeType::from_path_segment(&state_int.forge_type).ok_or_else(|| {
+                format!(
+                    "Integration '{}' has invalid forge_type '{}': expected gitea/forgejo/gitlab/github",
+                    state_int.name, state_int.forge_type
+                )
+            })?;
+
+            let encrypted_secret = match state_int.secret_file.as_deref() {
+                Some(_) => {
+                    let path = format!(
+                        "{}/gradient_integration_{}_secret",
+                        credentials_dir, state_int.name
+                    );
+                    let plain = fs::read_to_string(&path)
+                        .map_err(|e| format!("Failed to read integration secret file {}: {}", path, e))?;
+                    Some(
+                        encrypt_webhook_secret(self.crypt_secret_file, plain.trim()).map_err(
+                            |e| {
+                                format!(
+                                    "Failed to encrypt secret for integration '{}': {}",
+                                    state_int.name, e
+                                )
+                            },
+                        )?,
+                    )
+                }
+                None => None,
+            };
+
+            let encrypted_token = match state_int.access_token_file.as_deref() {
+                Some(_) => {
+                    let path = format!(
+                        "{}/gradient_integration_{}_token",
+                        credentials_dir, state_int.name
+                    );
+                    let plain = fs::read_to_string(&path).map_err(|e| {
+                        format!("Failed to read integration token file {}: {}", path, e)
+                    })?;
+                    Some(
+                        encrypt_webhook_secret(self.crypt_secret_file, plain.trim()).map_err(
+                            |e| {
+                                format!(
+                                    "Failed to encrypt token for integration '{}': {}",
+                                    state_int.name, e
+                                )
+                            },
+                        )?,
+                    )
+                }
+                None => None,
+            };
+
+            let endpoint = state_int
+                .endpoint_url
+                .as_deref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+
+            let existing = integration::Entity::find()
+                .filter(integration::Column::Organization.eq(org_id))
+                .filter(integration::Column::Kind.eq(kind.as_i16()))
+                .filter(integration::Column::Name.eq(&state_int.name))
+                .one(self.db)
+                .await?;
+
+            if let Some(existing) = existing {
+                let mut active: integration::ActiveModel = existing.into();
+                active.forge_type = Set(forge.as_i16());
+                active.endpoint_url = Set(endpoint);
+                active.secret = Set(encrypted_secret);
+                active.access_token = Set(encrypted_token);
+                active.created_by = Set(created_by_id);
+                active.update(self.db).await?;
+                tracing::info!("Updated managed integration: {}", state_int.name);
+            } else {
+                let row = integration::ActiveModel {
+                    id: Set(Uuid::new_v4()),
+                    organization: Set(org_id),
+                    name: Set(state_int.name.clone()),
+                    kind: Set(kind.as_i16()),
+                    forge_type: Set(forge.as_i16()),
+                    secret: Set(encrypted_secret),
+                    endpoint_url: Set(endpoint),
+                    access_token: Set(encrypted_token),
+                    created_by: Set(created_by_id),
+                    created_at: Set(Utc::now().naive_utc()),
+                };
+                row.insert(self.db).await?;
+                tracing::info!("Created managed integration: {}", state_int.name);
+            }
+        }
+
+        Ok(())
+    }
+
+    // ── apply_project_integration_links ───────────────────────────────────────
+
+    async fn apply_project_integration_links(
+        &self,
+        state_projects: &HashMap<String, StateProject>,
+        state_integrations: &HashMap<String, StateIntegration>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let org_map = self.org_lookup().await?;
+
+        for state_project in state_projects.values() {
+            if state_project.inbound_integration.is_none()
+                && state_project.outbound_integration.is_none()
+            {
+                continue;
+            }
+
+            let org_id = *org_map.get(&state_project.organization).ok_or_else(|| {
+                format!("Organization '{}' not found", state_project.organization)
+            })?;
+
+            let project_row = project::Entity::find()
+                .filter(project::Column::Name.eq(&state_project.name))
+                .filter(project::Column::Organization.eq(org_id))
+                .one(self.db)
+                .await?
+                .ok_or_else(|| format!("Project '{}' not found", state_project.name))?;
+
+            let inbound_id = match state_project.inbound_integration.as_deref() {
+                None => None,
+                Some(name) => Some(
+                    resolve_integration_id(
+                        self.db,
+                        org_id,
+                        name,
+                        IntegrationKind::Inbound,
+                        state_integrations,
+                        &state_project.name,
+                    )
+                    .await?,
+                ),
+            };
+            let outbound_id = match state_project.outbound_integration.as_deref() {
+                None => None,
+                Some(name) => Some(
+                    resolve_integration_id(
+                        self.db,
+                        org_id,
+                        name,
+                        IntegrationKind::Outbound,
+                        state_integrations,
+                        &state_project.name,
+                    )
+                    .await?,
+                ),
+            };
+
+            let existing = project_integration::Entity::find_by_id(project_row.id)
+                .one(self.db)
+                .await?;
+
+            if let Some(row) = existing {
+                let mut active: project_integration::ActiveModel = row.into();
+                active.inbound_integration = Set(inbound_id);
+                active.outbound_integration = Set(outbound_id);
+                active.update(self.db).await?;
+            } else {
+                let row = project_integration::ActiveModel {
+                    project: Set(project_row.id),
+                    inbound_integration: Set(inbound_id),
+                    outbound_integration: Set(outbound_id),
+                };
+                row.insert(self.db).await?;
+            }
+            tracing::info!(
+                "Updated project integration link for '{}'",
+                state_project.name
+            );
         }
 
         Ok(())

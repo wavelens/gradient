@@ -38,7 +38,7 @@ use uuid::Uuid;
 use crate::jobs::{PendingBuildJob, PendingEvalJob};
 use crate::{build as build_handler, eval as eval_handler};
 use gradient_core::types::proto::{
-    BuildOutput, DerivationOutput, DiscoveredDerivation, FlakeJob, FlakeTask,
+    BuildOutput, BuildProduct, DerivationOutput, DiscoveredDerivation, FlakeJob, FlakeTask,
 };
 use test_support::prelude::test_state_recorded;
 
@@ -103,7 +103,6 @@ fn make_drv_output(id: Uuid, drv_id: Uuid, name: &str, path: &str) -> MDerivatio
         file_size: None,
         nar_size: None,
         is_cached: false,
-        has_artefacts: false,
         cached_path: None,
         created_at: test_date(),
     }
@@ -989,8 +988,8 @@ async fn build_failed_cascade_skips_building_status() {
 
 // ── Group D: handle_build_output ─────────────────────────────────────────────
 
-/// Build outputs update the `nar_size`, `file_hash`, and `has_artefacts` fields
-/// of the corresponding `derivation_output` row.
+/// Build outputs update the `nar_size` and `file_hash` fields
+/// of the corresponding `derivation_output` row, then delete+insert `build_product` rows.
 #[tokio::test]
 async fn build_output_updates_derivation_output() {
     let eval_id = Uuid::new_v4();
@@ -1010,7 +1009,6 @@ async fn build_output_updates_derivation_output() {
         let mut o = drv_out.clone();
         o.nar_size = Some(12345);
         o.file_hash = Some("sha256:abc".into());
-        o.has_artefacts = false;
         o
     };
 
@@ -1020,7 +1018,7 @@ async fn build_output_updates_derivation_output() {
         hash: "aaaa".into(),
         nar_size: Some(12345),
         nar_hash: Some("sha256:abc".into()),
-        has_artefacts: false,
+        products: vec![],
     }];
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1030,6 +1028,12 @@ async fn build_output_updates_derivation_output() {
         .append_query_results([vec![drv_out]])
         // 3. update derivation_output (UPDATE...RETURNING)
         .append_query_results([vec![drv_out_updated]])
+        // 4. delete_many build_product rows → exec
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 0,
+        }])
+        // No product inserts (products is empty)
         .into_connection();
 
     let state = make_state(db);
@@ -1055,7 +1059,7 @@ async fn build_output_missing_row_warns_not_errors() {
         hash: "aaaa".into(),
         nar_size: None,
         nar_hash: None,
-        has_artefacts: false,
+        products: vec![],
     }];
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -1071,6 +1075,84 @@ async fn build_output_missing_row_warns_not_errors() {
 
     let result = build_handler::handle_build_output(&state, &job, build_id, outputs).await;
     assert!(result.is_ok());
+}
+
+/// When the output has products, `handle_build_output` inserts `build_product` rows
+/// after updating the `derivation_output` row.
+#[tokio::test]
+async fn build_output_inserts_build_product_rows() {
+    let eval_id = Uuid::new_v4();
+    let drv_id = Uuid::new_v4();
+    let build_id = Uuid::new_v4();
+    let drv_out_id = Uuid::new_v4();
+    let org_id = Uuid::new_v4();
+
+    let build = make_build(build_id, eval_id, drv_id, BuildStatus::Building);
+    let drv_out = make_drv_output(
+        drv_out_id,
+        drv_id,
+        "out",
+        "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out",
+    );
+    let drv_out_updated = {
+        let mut o = drv_out.clone();
+        o.nar_size = Some(99);
+        o.file_hash = Some("sha256:abc".into());
+        o
+    };
+
+    // A fake build_product row that the insert mock needs to return.
+    let fake_bp = entity::build_product::Model {
+        id: Uuid::new_v4(),
+        derivation_output: drv_out_id,
+        file_type: "iso".into(),
+        name: "image.iso".into(),
+        path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out/image.iso".into(),
+        size: Some(1024),
+        created_at: test_date(),
+    };
+
+    let outputs = vec![BuildOutput {
+        name: "out".into(),
+        store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out".into(),
+        hash: "aaaa".into(),
+        nar_size: Some(99),
+        nar_hash: Some("sha256:abc".into()),
+        products: vec![BuildProduct {
+            file_type: "iso".into(),
+            name: "image.iso".into(),
+            path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out/image.iso".into(),
+            size: Some(1024),
+        }],
+    }];
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        // 1. find_by_id(build)
+        .append_query_results([vec![build]])
+        // 2. find derivation_output row
+        .append_query_results([vec![drv_out]])
+        // 3. update derivation_output (UPDATE...RETURNING)
+        .append_query_results([vec![drv_out_updated]])
+        // 4. delete_many prior build_product rows → exec
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 0,
+        }])
+        // 5. insert build_product row → exec (single insert with explicit PK)
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .into_connection();
+
+    // Silence the unused warning from fake_bp in the mock setup.
+    let _ = fake_bp;
+
+    let state = make_state(db);
+    let job = make_build_job(build_id, eval_id, org_id);
+
+    let result = build_handler::handle_build_output(&state, &job, build_id, outputs).await;
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
 }
 
 /// Build not found → handler returns an Err (build context is mandatory).

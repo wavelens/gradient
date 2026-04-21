@@ -9,7 +9,6 @@ use crate::error::{WebError, WebResult};
 use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::Engine;
-use core::executer::strip_nix_store_prefix;
 use core::sources::get_path_from_derivation_output;
 use core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -167,57 +166,27 @@ impl<'a> CacheOpsHandler<'a> {
 
         let path = get_path_from_derivation_output(build_output.clone());
 
-        // Try to get path info from the local store. For paths built on remote
-        // workers the store won't have the path, so we fall back to cached_path.
-        let pathinfo_opt = self
-            .state
-            .web_nix_store
-            .query_pathinfo(path.to_string())
-            .await
-            .ok()
-            .flatten();
-
-        let nar_hash;
-        let nar_size;
-        let references;
-        let deriver;
-        let ca;
-
-        if let Some(pathinfo) = pathinfo_opt {
-            nar_hash = normalize_nar_hash(&pathinfo.nar_hash);
-            nar_size = pathinfo.nar_size;
-            references = pathinfo
-                .references
-                .into_iter()
-                .map(|s| s.strip_prefix("/nix/store/").unwrap_or(&s).to_string())
-                .collect();
-            deriver = pathinfo
-                .deriver
-                .map(|d| strip_nix_store_prefix(d.as_str()));
-            ca = pathinfo.ca;
-        } else {
-            // Path is not in the local store (built on a remote worker).
-            // Use metadata stored in cached_path when the worker uploaded the NAR.
-            nar_hash = cached_path_row
-                .nar_hash
-                .as_deref()
-                .map(normalize_nar_hash)
-                .ok_or_else(|| WebError::not_found("NarHash not recorded"))?;
-            nar_size = cached_path_row
-                .nar_size
-                .ok_or_else(|| WebError::not_found("NarSize not recorded"))?
-                as u64;
-            references = cached_path_row
-                .references
-                .as_deref()
-                .unwrap_or("")
-                .split_whitespace()
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-                .collect();
-            deriver = None;
-            ca = cached_path_row.ca.clone();
-        }
+        // All metadata comes from the cached_path row written by the worker
+        // when it uploaded the NAR.  No daemon probe is needed.
+        let nar_hash = cached_path_row
+            .nar_hash
+            .as_deref()
+            .map(normalize_nar_hash)
+            .ok_or_else(|| WebError::not_found("NarHash not recorded"))?;
+        let nar_size = cached_path_row
+            .nar_size
+            .ok_or_else(|| WebError::not_found("NarSize not recorded"))?
+            as u64;
+        let references: Vec<String> = cached_path_row
+            .references
+            .as_deref()
+            .unwrap_or("")
+            .split_whitespace()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+        let deriver: Option<String> = None;
+        let ca = cached_path_row.ca.clone();
 
         let sig_url = self
             .state

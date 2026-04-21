@@ -85,7 +85,6 @@ impl DerivationInsertBatch {
                     file_size: Set(None),
                     nar_size: Set(None),
                     is_cached: Set(false),
-                    has_artefacts: Set(false),
                     cached_path: Set(None),
                     created_at: Set(now),
                 });

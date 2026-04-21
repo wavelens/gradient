@@ -1506,16 +1506,36 @@ captured by `RecordingWebhookClient` (returned alongside the state by
 
 ---
 
+## `core::storage::nar_extract` — NAR Single-File Extractor
+
+### NAR extraction (`core/tests/nar_extract.rs`)
+
+Tests for `extract_file_from_nar_bytes`, which decompresses a zstd-compressed NAR
+from `nar_storage` and returns the contents of a single file identified by its
+relative path.
+
+| Test | Scenario | What it checks |
+|------|----------|----------------|
+| `extracts_file_at_relative_path` | Round-trip: build a NAR with one file, zstd-compress, extract by name | Contents and `executable` flag match |
+| `extracts_file_in_nested_directory` | Target path under a subdirectory (`nix-support/hydra-build-products`) | Correct file returned when stack depth is 1 |
+| `returns_not_found_for_missing_file` | Path absent from NAR | `ExtractError::NotFound` returned |
+
+> Note: tests use sync `#[test]` + manual `tokio::runtime::Builder::block_on` because
+> the `core` package name shadows stdlib `::core`, which breaks `#[tokio::test]` macro
+> expansion. See the MEMORY.md entry on the "core crate name shadowing" gotcha.
+
+---
+
 ## Test count summary
 
 | Crate | Runner | Count |
 |-------|--------|-------|
-| `core` | inline unit tests + `tests/` | 205 |
+| `core` | inline unit tests + `tests/` | 208 |
 | `proto` | inline unit tests | 73 |
 | `test-support` | inline unit tests | 11 |
 | `web` | inline unit tests | 11 |
 | `worker` | inline unit tests | 79 |
-| **Total** | | **379** |
+| **Total** | | **382** |
 
 ---
 

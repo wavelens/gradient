@@ -105,16 +105,9 @@
         environment.variables.TEST_PKGS = [ self.inputs.nixpkgs ];
 
         nix.settings = {
-          experimental-features = [
-            "nix-command"
-            "flakes"
-            "ca-derivations"
-          ];
-
           trusted-users = [
             "root"
             "@wheel"
-            "gradient-worker"
           ];
         };
 

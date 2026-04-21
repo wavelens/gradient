@@ -248,7 +248,7 @@ impl Worker<Connected> {
     }
 
     async fn build_executor(config: &WorkerConfig) -> Result<(JobExecutor, JobScorer)> {
-        let store = LocalNixStore::connect().await?;
+        let store = LocalNixStore::connect(config.max_nixdaemon_connections)?;
         let evaluator = WorkerEvaluator::new(config.eval_workers, config.max_evals_per_worker);
         let executor = JobExecutor::new(
             store,

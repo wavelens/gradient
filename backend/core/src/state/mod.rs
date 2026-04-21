@@ -225,6 +225,86 @@ impl StateConfiguration {
                     message: "Repository URL must start with http or git".to_string(),
                 });
             }
+
+            for (field_name, binding, expected_kind) in [
+                (
+                    "inbound_integration",
+                    &project.inbound_integration,
+                    "inbound",
+                ),
+                (
+                    "outbound_integration",
+                    &project.outbound_integration,
+                    "outbound",
+                ),
+            ] {
+                let Some(int_name) = binding else { continue };
+                match self.integrations.get(int_name) {
+                    None => errors.push(ValidationError {
+                        field: format!("projects.{}.{}", project.name, field_name),
+                        message: format!("Integration '{}' does not exist", int_name),
+                    }),
+                    Some(int) => {
+                        if int.organization != project.organization {
+                            errors.push(ValidationError {
+                                field: format!("projects.{}.{}", project.name, field_name),
+                                message: format!(
+                                    "Integration '{}' belongs to organization '{}', not '{}'",
+                                    int_name, int.organization, project.organization
+                                ),
+                            });
+                        }
+                        if int.kind != expected_kind {
+                            errors.push(ValidationError {
+                                field: format!("projects.{}.{}", project.name, field_name),
+                                message: format!(
+                                    "Integration '{}' is {}, expected {}",
+                                    int_name, int.kind, expected_kind
+                                ),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        for integration in self.integrations.values() {
+            if !self.organizations.contains_key(&integration.organization) {
+                errors.push(ValidationError {
+                    field: format!("integrations.{}.organization", integration.name),
+                    message: format!(
+                        "Organization '{}' does not exist",
+                        integration.organization
+                    ),
+                });
+            }
+            if !self.users.contains_key(&integration.created_by) {
+                errors.push(ValidationError {
+                    field: format!("integrations.{}.created_by", integration.name),
+                    message: format!("User '{}' does not exist", integration.created_by),
+                });
+            }
+            if !matches!(integration.kind.as_str(), "inbound" | "outbound") {
+                errors.push(ValidationError {
+                    field: format!("integrations.{}.kind", integration.name),
+                    message: format!(
+                        "Invalid kind '{}': expected 'inbound' or 'outbound'",
+                        integration.kind
+                    ),
+                });
+            }
+            if !matches!(
+                integration.forge_type.as_str(),
+                "gitea" | "forgejo" | "gitlab" | "github"
+            ) {
+                errors.push(ValidationError {
+                    field: format!("integrations.{}.forge_type", integration.name),
+                    message: format!(
+                        "Invalid forge_type '{}': expected gitea/forgejo/gitlab/github",
+                        integration.forge_type
+                    ),
+                });
+            }
         }
 
         for cache in self.caches.values() {

@@ -19,6 +19,7 @@ pub type ListResponse = Vec<ListItem>;
 
 pub type EApi = api::Entity;
 pub type EBuild = build::Entity;
+pub type EBuildProduct = build_product::Entity;
 pub type ECache = cache::Entity;
 pub type ECacheDerivation = cache_derivation::Entity;
 pub type ECacheMetric = cache_metric::Entity;
@@ -49,6 +50,7 @@ pub type EWorkerRegistration = worker_registration::Entity;
 
 pub type MApi = api::Model;
 pub type MBuild = build::Model;
+pub type MBuildProduct = build_product::Model;
 pub type MCache = cache::Model;
 pub type MCacheDerivation = cache_derivation::Model;
 pub type MCacheMetric = cache_metric::Model;
@@ -79,6 +81,7 @@ pub type MWorkerRegistration = worker_registration::Model;
 
 pub type AApi = api::ActiveModel;
 pub type ABuild = build::ActiveModel;
+pub type ABuildProduct = build_product::ActiveModel;
 pub type ACache = cache::ActiveModel;
 pub type ACacheDerivation = cache_derivation::ActiveModel;
 pub type ACacheMetric = cache_metric::ActiveModel;
@@ -109,6 +112,7 @@ pub type AWorkerRegistration = worker_registration::ActiveModel;
 
 pub type CApi = api::Column;
 pub type CBuild = build::Column;
+pub type CBuildProduct = build_product::Column;
 pub type CCache = cache::Column;
 pub type CCacheDerivation = cache_derivation::Column;
 pub type CCacheMetric = cache_metric::Column;

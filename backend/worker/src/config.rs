@@ -78,6 +78,10 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_MAX_CONCURRENT_BUILDS", default_value_t = 1)]
     pub max_concurrent_builds: u32,
 
+    /// Maximum number of simultaneous connections in the local nix-daemon pool.
+    #[arg(long, env = "GRADIENT_MAX_NIXDAEMON_CONNECTIONS", default_value_t = 8)]
+    pub max_nixdaemon_connections: usize,
+
     // ── Logging ───────────────────────────────────────────────────────────────
     #[arg(long, env = "GRADIENT_LOG_LEVEL", default_value = "info")]
     pub log_level: String,
@@ -278,6 +282,7 @@ mod tests {
             max_evals_per_worker: 1,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
+            max_nixdaemon_connections: 4,
             log_level: "info".to_owned(),
             eval_log_level: None,
             build_log_level: None,
@@ -354,6 +359,7 @@ mod tests {
             max_evals_per_worker: 1,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
+            max_nixdaemon_connections: 4,
             log_level: "info".to_owned(),
             eval_log_level: None,
             build_log_level: None,
@@ -414,6 +420,7 @@ mod tests {
             max_evals_per_worker: 1,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
+            max_nixdaemon_connections: 4,
             log_level: "info".to_owned(),
             eval_log_level: None,
             build_log_level: None,

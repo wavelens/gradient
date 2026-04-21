@@ -181,7 +181,6 @@ pub fn test_cli() -> Cli {
         state_file: None,
         delete_state: true,
         keep_evaluations: 30,
-        max_nixdaemon_connections: 2,
         nar_ttl_hours: 0,
     }
 }

@@ -267,6 +267,20 @@ pub struct DerivationOutput {
     pub path: String,
 }
 
+/// One product declared in a build output's `nix-support/hydra-build-products`.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct BuildProduct {
+    /// Hydra product type, e.g. "file", "doc", "report".
+    pub file_type: String,
+    /// Basename of `path`.
+    pub name: String,
+    /// Absolute store path to the product file (e.g. `/nix/store/abc-pkg/image.iso`).
+    pub path: String,
+    /// Product file size in bytes (from `stat`); `None` on stat failure.
+    pub size: Option<u64>,
+}
+
 /// Build output reported after a derivation successfully builds.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
@@ -276,7 +290,7 @@ pub struct BuildOutput {
     pub hash: String,
     pub nar_size: Option<i64>,
     pub nar_hash: Option<String>,
-    pub has_artefacts: bool,
+    pub products: Vec<BuildProduct>,
 }
 
 // ── Credential types ─────────────────────────────────────────────────────────

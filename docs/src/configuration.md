@@ -238,7 +238,7 @@ The token must be the 48-byte random secret returned by the registration API (ge
 | `settings.evalWorkers` | `1` | Number of evaluator subprocesses |
 | `settings.maxConcurrentEvaluations` | `1` | Parallel evaluations |
 | `settings.maxEvaluationsPerWorker` | `20` | Recycle evaluator subprocess after N jobs (0 = never) |
-| `settings.maxNixdaemonConnections` | `24` | Nix daemon connection pool size |
+| `settings.maxNixdaemonConnections` | `8` | Worker's local nix-daemon connection pool size |
 | `settings.maxProtoConnections` | `16` | Max simultaneous WebSocket connections (for discoverable mode) |
 | `settings.logLevel.default` | `info` | Worker log level |
 | `settings.logLevel.eval` | null | Evaluator log level override |

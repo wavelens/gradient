@@ -150,7 +150,7 @@ in {
       maxNixdaemonConnections = lib.mkOption {
         description = "Maximum number of simultaneous local Nix daemon connections in the connection pool";
         type = lib.types.ints.positive;
-        default = 24;
+        default = 8;
       };
 
       evalWorkers = lib.mkOption {

@@ -640,7 +640,7 @@ sequenceDiagram
     W->>S: JobUpdate::EvaluatingFlake
     Note over W: nix eval (uses local clone)
     W->>S: JobUpdate::EvaluatingDerivations
-    Note over W: BFS closure walk; for each new .drv:
+    Note over W: BFS closure walk; for each new .drv
     W->>S: CacheQuery { paths: [output + drv paths] }
     S->>W: CacheStatus { cached: [subset] }
     Note over W: compress + upload each uncached .drv
@@ -876,7 +876,14 @@ struct BuildOutput {
     hash: String,                       // <base64>-<package>
     nar_size: Option<i64>,              // NAR bytes (from query_pathinfo)
     nar_hash: Option<String>,           // NAR hash SRI (sha256-<base64>)
-    has_artefacts: bool,                // true if <output>/nix-support/hydra-build-products exists
+    products: Vec<BuildProduct>,        // parsed from <output>/nix-support/hydra-build-products (empty when file absent)
+}
+
+struct BuildProduct {
+    file_type: String,                  // Hydra product type (e.g. "file", "doc", "report")
+    name: String,                       // basename of `path`
+    path: String,                       // absolute store path to the product (e.g. /nix/store/xxx-name/image.iso)
+    size: Option<u64>,                  // product file size in bytes, if stat succeeded
 }
 ```
 
@@ -1108,13 +1115,15 @@ Caches behind a federation peer are exposed upstream. When a remote peer's build
 
 ## Build Artefacts
 
-After a successful build, the worker checks for `<output>/nix-support/hydra-build-products`. If present, `BuildOutput.has_artefacts` is set to `true`. The server stores this flag on `derivation_output.has_artefacts` for the frontend to display download links.
+After a successful build, the worker reads `<output>/nix-support/hydra-build-products` (when present), parses each line into a `BuildProduct { file_type, name, path, size }`, and ships the list on `BuildOutput.products`. The server persists them as `build_product` rows (FK → `derivation_output`, one row per product). The listing endpoint (`GET /api/v1/builds/{id}/downloads`) reads directly from this table — no NAR access. The single-file download endpoint (`GET /api/v1/builds/{id}/download/{filename}`) resolves the requested basename against `build_product.name`, then streams the file out of the output's NAR via `core::storage::nar_extract`.
+
+Outputs with no `hydra-build-products` file send `products: []` and have no `build_product` rows.
 
 ---
 
 ## DependencyFailed Cascade
 
-When a build fails (`JobFailed` or `AbortJob`), the server walks reverse `derivation_dependency` edges within the same evaluation and marks all dependent builds as `DependencyFailed` (6). This is a server-side graph walk — workers are not notified about cascaded failures unless they hold an in-flight job for an affected build, in which case they receive `AbortJob`.
+When a build fails (`JobFailed` or `AbortJob`), the server walks reverse `derivation_dependency` edges within the same evaluation and marks all dependent builds as `DependencyFailed` (6). This is a server-side graph walk — workers are not notified about cascaded failures.
 
 The evaluation's final status is determined by aggregating all build statuses:
 

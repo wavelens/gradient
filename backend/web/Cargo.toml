@@ -50,6 +50,8 @@ url           = "2.5"
 
 [dev-dependencies]
 axum-test    = "19.1"
+harmonia-nar = { workspace = true, features = ["test"] }
 test-support = { workspace = true }
 tokio-test   = { workspace = true }
 tower        = "0.5"
+zstd         = { workspace = true }

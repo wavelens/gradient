@@ -55,7 +55,6 @@ pub fn test_cli_with_crypt(crypt_secret_file: String) -> Cli {
         delete_state: true,
         keep_evaluations: 30,
         keep_orphan_derivations_hours: 24,
-        max_nixdaemon_connections: 2,
         eval_workers: 1,
         max_evaluations_per_worker: 0,
         nar_ttl_hours: 0,
