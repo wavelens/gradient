@@ -24,7 +24,7 @@ use crate::proto::nar;
 /// server via direct WebSocket transfer. Used for fetched flake inputs,
 /// evaluated `.drv` files, and built outputs.
 pub async fn compress_and_push_paths(
-    _store: &LocalNixStore,
+    store: &LocalNixStore,
     store_paths: &[String],
     updater: &mut JobUpdater,
 ) -> Result<()> {
@@ -35,7 +35,13 @@ pub async fn compress_and_push_paths(
     updater.report_compressing()?;
 
     for store_path in store_paths {
-        nar::push_direct(&updater.job_id.clone(), store_path, &updater.writer, None).await?;
+        nar::push_direct(
+            &updater.job_id.clone(),
+            store_path,
+            &updater.writer,
+            Some(store),
+        )
+        .await?;
         info!(store_path, "compressed and pushed NAR");
     }
 

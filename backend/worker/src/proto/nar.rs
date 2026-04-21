@@ -82,10 +82,9 @@ async fn gather_references(store: &LocalNixStore, store_path: &str) -> Option<Ve
 ///
 /// This is the "direct" transfer mode — no S3 involved.
 ///
-/// When `store` and `signing_key_str` are provided the function also queries
-/// the local store for references and computes a cache signature; both are
-/// included in the final [`ClientMessage::NarUploaded`] so the server can
-/// populate `cached_path` / `cached_path_signature` rows.
+/// When `store` is provided the function also queries the local store for
+/// references and includes them in the final [`ClientMessage::NarUploaded`]
+/// so the server can populate `cached_path` / `cached_path_signature` rows.
 pub async fn push_direct(
     job_id: &str,
     store_path: &str,
@@ -184,9 +183,8 @@ pub async fn push_direct(
 /// `method` is the HTTP method the server expects (usually `"PUT"`).
 /// `headers` are additional HTTP headers to include (e.g. `x-amz-*` for S3).
 ///
-/// When `store` and `signing_key_str` are provided the function also queries
-/// the local store for references and computes a cache signature; both are
-/// included in the final [`ClientMessage::NarUploaded`].
+/// When `store` is provided the function also queries the local store for
+/// references and includes them in the final [`ClientMessage::NarUploaded`].
 pub async fn upload_presigned(
     job_id: &str,
     store_path: &str,

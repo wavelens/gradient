@@ -607,8 +607,9 @@ The flow for getting any store path (fetched flake input, evaluated `.drv`, or b
 
  1. **Worker produces** the path locally (fetch, eval, or build).
  2. **Worker zstd-compresses** the NAR. The compressed stream is the only form in which a NAR is ever transmitted or stored.
- 3. **Worker uploads** the compressed NAR via `NarPush` (local mode) or S3 PUT (cloud mode), then sends a single `NarUploaded` carrying `file_hash`, `file_size`, `nar_size`, `nar_hash`, and `references`. `nar_hash` and `nar_size` are computed locally over the uncompressed NAR; `file_hash` and `file_size` over the compressed stream.
- 4. **Server records** `cached_path` metadata from `NarUploaded`. No local re-packing, re-compression, or re-hashing ever happens.
+ 3. **Worker uploads** the compressed NAR via `NarPush` (local mode) or S3 PUT (cloud mode), then sends a single `NarUploaded` carrying `file_hash`, `file_size`, `nar_size`, `nar_hash`, and `references`. `nar_hash` and `nar_size` are computed locally over the uncompressed NAR; `file_hash` and `file_size` over the compressed stream. `references` is read from the local nix-daemon via harmonia's `DaemonStore::query_path_info` (no subprocess) — for build outputs this is the runtime reference set scanned out of the NAR; for `.drv` and fetched-source paths it's whatever the daemon records.
+ 4. **Server records** `cached_path` metadata (including `references` as a space-separated hash-name string in the `cached_path.references` column) from `NarUploaded`. No local re-packing, re-compression, or re-hashing ever happens.
+ 5. **Signing** is deferred. `mark_nar_stored` inserts one `cached_path_signature` row per org-cache with `signature = NULL`. A background sweep (`cache::cacher::sign_sweep`, ticking every 60 s) finds NULL rows, reads `nar_hash` / `nar_size` / `references` from `cached_path`, computes the narinfo fingerprint, and fills in the signature. New org ↔ cache subscriptions also enqueue NULL rows for every existing `cached_path` the org owns, so the same sweep back-fills signatures without any extra code path.
 
 The server does **not** use `ensure_path` or GC roots. All cached content lives in the NAR store (S3 or local files), not in the server's Nix store.
 
@@ -823,7 +824,8 @@ enum ClientMessage {
         file_size: u64,        // size in bytes of the compressed NAR file
         nar_size: u64,         // uncompressed NAR size in bytes
         nar_hash: String,      // sha256:<nix32> or SRI — hash of the uncompressed NAR
-        references: Vec<String>, // store-path references in hash-name format (no /nix/store/ prefix)
+        references: Vec<String>, // store-path references in hash-name format (no /nix/store/ prefix);
+                                 // sourced from the local daemon via harmonia query_path_info
     },
 
     // Cache queries

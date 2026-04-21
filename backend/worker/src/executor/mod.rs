@@ -67,14 +67,18 @@ async fn query_fetched_paths(updater: &mut JobUpdater, all_paths: Vec<String>) -
 /// For each `.drv` discovered during eval, push the compressed NAR.
 /// The server computes and stores narinfo signatures from the uploaded
 /// NAR metadata; the worker never signs.
-async fn push_drvs(drv_paths: &[String], updater: &mut JobUpdater) {
+async fn push_drvs(
+    drv_paths: &[String],
+    updater: &mut JobUpdater,
+    store: &LocalNixStore,
+) {
     if drv_paths.is_empty() {
         return;
     }
 
     let cache_entries = query_fetched_paths(updater, drv_paths.to_vec()).await;
     for cp in &cache_entries {
-        push_one_fetched_nar(updater, cp).await;
+        push_one_fetched_nar(updater, cp, store).await;
     }
 }
 
@@ -83,7 +87,11 @@ async fn push_drvs(drv_paths: &[String], updater: &mut JobUpdater) {
 ///
 /// Errors are logged and swallowed; a failed push for a source path is not
 /// fatal — the build proceeds and fails cleanly if the daemon truly needs it.
-async fn push_one_fetched_nar(updater: &mut JobUpdater, cp: &CachedPath) {
+async fn push_one_fetched_nar(
+    updater: &mut JobUpdater,
+    cp: &CachedPath,
+    store: &LocalNixStore,
+) {
     match cp.as_info() {
         CachedPathInfo::Cached { .. } => {
             tracing::debug!(store_path = %cp.path, "skipping NAR push — already cached");
@@ -93,8 +101,16 @@ async fn push_one_fetched_nar(updater: &mut JobUpdater, cp: &CachedPath) {
             upload_url: Some(url),
         } => {
             tracing::debug!(store_path = %path, "uploading NAR via presigned PUT URL");
-            if let Err(e) =
-                nar::upload_presigned(&updater.job_id, path, url, "PUT", &[], &updater.writer, None).await
+            if let Err(e) = nar::upload_presigned(
+                &updater.job_id,
+                path,
+                url,
+                "PUT",
+                &[],
+                &updater.writer,
+                Some(store),
+            )
+            .await
             {
                 tracing::warn!(store_path = %path, error = %e, "presigned NAR upload failed; continuing");
             }
@@ -109,7 +125,9 @@ async fn push_one_fetched_nar(updater: &mut JobUpdater, cp: &CachedPath) {
                  (expected for local-mode caches; check server logs for \
                  'presigned PUT URL generation failed' if you have S3 configured)"
             );
-            if let Err(e) = nar::push_direct(&updater.job_id, path, &updater.writer, None).await {
+            if let Err(e) =
+                nar::push_direct(&updater.job_id, path, &updater.writer, Some(store)).await
+            {
                 tracing::warn!(store_path = %path, error = %e, "failed to push NAR for fetched input; continuing");
             }
         }
@@ -179,7 +197,7 @@ impl JobExecutor {
                     let cache_entries =
                         query_fetched_paths(updater, outcome.archived_paths.clone()).await;
                     for cp in &cache_entries {
-                        push_one_fetched_nar(updater, cp).await;
+                        push_one_fetched_nar(updater, cp, &self.store).await;
                     }
 
                     updater.report_fetch_result(outcome.flake_source.clone())?;
@@ -203,7 +221,7 @@ impl JobExecutor {
                     // matter (the server keys cached_path by hash). The
                     // server computes narinfo signatures from the uploaded
                     // metadata.
-                    push_drvs(&produced_drvs, updater).await;
+                    push_drvs(&produced_drvs, updater, &self.store).await;
                 }
             }
         }
