@@ -39,13 +39,12 @@ pub fn org() -> organization::Model {
         description: "".into(),
         public_key: "ssh-ed25519 AAAA test".into(),
         private_key: "encrypted".into(),
-        use_nix_store: false,
         public: false,
         created_by: user_id(),
         created_at: test_date(),
         managed: false,
         github_installation_id: None,
-        forge_webhook_secret: None,
+        github_app_enabled: false,
     }
 }
 

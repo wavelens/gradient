@@ -13,10 +13,11 @@ Key functions inside each crate.
 - `push` → calls `core::evaluation_trigger::trigger_evaluation` for each matching project.
 - `installation` / `installation_repositories` → stores or clears `organization.github_installation_id`.
 
-**Generic forges** (`POST /api/v1/hooks/{forge}/{org}`):
-- Looks up the organization by name.
-- Decrypts `organization.forge_webhook_secret` (same `crypt_secret_file` infrastructure as SSH keys).
-- Verifies the forge-specific signature header.
+**Generic forges** (`POST /api/v1/hooks/{forge}/{org}/{integration_name}`):
+- `{forge}` ∈ `gitea`, `forgejo`, `gitlab`. GitHub deliveries route to the App webhook above.
+- Looks up the integration by `(organization, kind=inbound, name=integration_name)` — `forge_type` is **not** part of the filter, so one inbound row can serve all three generic forges.
+- Decrypts `integration.secret` (same `crypt_secret_file` infrastructure as SSH keys).
+- Picks the HMAC scheme from the `{forge}` path segment (`X-Gitea-Signature`, `X-Gitlab-Token`, etc).
 - `push` → calls `trigger_evaluation` for each matching project.
 
 **Shared trigger** (`core::evaluation_trigger::trigger_evaluation`):

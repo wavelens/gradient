@@ -14,10 +14,11 @@ import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { ProjectsService } from '@core/services/projects.service';
 import { OrganizationsService } from '@core/services/organizations.service';
+import { IntegrationsService } from '@core/services/integrations.service';
 import { AutoCompleteModule } from 'primeng/autocomplete';
 import { SelectModule } from 'primeng/select';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { Project } from '@core/models';
+import { Integration, Project, ProjectIntegrationLink } from '@core/models';
 
 @Component({
   selector: 'app-project-settings',
@@ -42,6 +43,7 @@ export class ProjectSettingsComponent implements OnInit {
   private router = inject(Router);
   private projectsService = inject(ProjectsService);
   private orgsService = inject(OrganizationsService);
+  private integrationsService = inject(IntegrationsService);
 
   loading = signal(true);
   saving = signal(false);
@@ -71,22 +73,24 @@ export class ProjectSettingsComponent implements OnInit {
     keep_evaluations: 30,
   };
 
-  ciProviders = [
-    { label: 'None', value: '' },
-    { label: 'Gitea', value: 'gitea' },
-    { label: 'GitHub', value: 'github' },
-  ];
+  integrationsLoading = signal(true);
+  savingIntegration = signal(false);
+  integrationSaveSuccess = signal(false);
+  integrationErrorMessage = signal<string | null>(null);
+  availableIntegrations = signal<Integration[]>([]);
+  projectIntegration = signal<ProjectIntegrationLink | null>(null);
 
-  ciFormData = {
-    ci_reporter_type: '',
-    ci_reporter_url: '',
-    ci_reporter_token: '',
+  integrationForm = {
+    inbound_integration: null as string | null,
+    outbound_integration: null as string | null,
   };
 
-  savingCi = signal(false);
-  removingCi = signal(false);
-  ciSaveSuccess = signal(false);
-  ciErrorMessage = signal<string | null>(null);
+  inboundIntegrationOptions = signal<{ label: string; value: string | null }[]>([
+    { label: 'None', value: null },
+  ]);
+  outboundIntegrationOptions = signal<{ label: string; value: string | null }[]>([
+    { label: 'None', value: null },
+  ]);
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
@@ -96,6 +100,68 @@ export class ProjectSettingsComponent implements OnInit {
       error: () => {},
     });
     this.loadProject();
+    this.loadIntegrations();
+  }
+
+  loadIntegrations(): void {
+    this.integrationsLoading.set(true);
+    this.integrationsService.listOrgIntegrations(this.orgName).subscribe({
+      next: (list) => {
+        this.availableIntegrations.set(list);
+        const inbound: { label: string; value: string | null }[] = [{ label: 'None', value: null }];
+        const outbound: { label: string; value: string | null }[] = [{ label: 'None', value: null }];
+        for (const i of list) {
+          const label = `${i.name} (${i.forge_type})`;
+          if (i.kind === 'inbound') inbound.push({ label, value: i.id });
+          else outbound.push({ label, value: i.id });
+        }
+        this.inboundIntegrationOptions.set(inbound);
+        this.outboundIntegrationOptions.set(outbound);
+        this.loadProjectIntegration();
+      },
+      error: () => {
+        this.integrationsLoading.set(false);
+      },
+    });
+  }
+
+  loadProjectIntegration(): void {
+    this.integrationsService.getProjectIntegration(this.orgName, this.projectName).subscribe({
+      next: (link) => {
+        this.projectIntegration.set(link);
+        this.integrationForm = {
+          inbound_integration: link.inbound_integration,
+          outbound_integration: link.outbound_integration,
+        };
+        this.integrationsLoading.set(false);
+      },
+      error: () => {
+        this.integrationForm = { inbound_integration: null, outbound_integration: null };
+        this.integrationsLoading.set(false);
+      },
+    });
+  }
+
+  saveIntegrationLink(): void {
+    this.savingIntegration.set(true);
+    this.integrationErrorMessage.set(null);
+    this.integrationSaveSuccess.set(false);
+    this.integrationsService
+      .setProjectIntegration(this.orgName, this.projectName, {
+        inbound_integration: this.integrationForm.inbound_integration,
+        outbound_integration: this.integrationForm.outbound_integration,
+      })
+      .subscribe({
+        next: (link) => {
+          this.projectIntegration.set(link);
+          this.savingIntegration.set(false);
+          this.integrationSaveSuccess.set(true);
+        },
+        error: (error) => {
+          this.integrationErrorMessage.set(error.message || 'Failed to save integration link.');
+          this.savingIntegration.set(false);
+        },
+      });
   }
 
   loadProject(): void {
@@ -109,11 +175,6 @@ export class ProjectSettingsComponent implements OnInit {
           repository: project.repository,
           evaluation_wildcard: project.evaluation_wildcard,
           keep_evaluations: project.keep_evaluations,
-        };
-        this.ciFormData = {
-          ci_reporter_type: project.ci_reporter_type ?? '',
-          ci_reporter_url: project.ci_reporter_url ?? '',
-          ci_reporter_token: '',
         };
         this.loading.set(false);
       },
@@ -200,50 +261,6 @@ export class ProjectSettingsComponent implements OnInit {
       error: (error) => {
         this.transferError.set(error.message || 'Failed to transfer ownership.');
         this.transferring.set(false);
-      },
-    });
-  }
-
-  saveCiSettings(): void {
-    this.savingCi.set(true);
-    this.ciErrorMessage.set(null);
-    this.ciSaveSuccess.set(false);
-
-    const patch: Record<string, string> = {
-      ci_reporter_type: this.ciFormData.ci_reporter_type,
-      ci_reporter_url: this.ciFormData.ci_reporter_url,
-    };
-    if (this.ciFormData.ci_reporter_token.trim()) {
-      patch['ci_reporter_token'] = this.ciFormData.ci_reporter_token;
-    }
-
-    this.projectsService.updateProject(this.orgName, this.projectName, patch as any).subscribe({
-      next: () => {
-        this.savingCi.set(false);
-        this.ciSaveSuccess.set(true);
-        this.ciFormData.ci_reporter_token = '';
-        this.loadProject();
-      },
-      error: (error) => {
-        this.ciErrorMessage.set(error.message || 'Failed to save integration settings.');
-        this.savingCi.set(false);
-      },
-    });
-  }
-
-  removeCiIntegration(): void {
-    this.removingCi.set(true);
-    this.ciErrorMessage.set(null);
-    this.ciSaveSuccess.set(false);
-    this.projectsService.removeIntegration(this.orgName, this.projectName).subscribe({
-      next: () => {
-        this.removingCi.set(false);
-        this.ciSaveSuccess.set(true);
-        this.loadProject();
-      },
-      error: (error) => {
-        this.ciErrorMessage.set(error.message || 'Failed to remove integration.');
-        this.removingCi.set(false);
       },
     });
   }

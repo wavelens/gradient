@@ -47,7 +47,6 @@ pub struct OrganizationSummary {
     pub display_name: String,
     pub description: String,
     pub public_key: Option<String>,
-    pub use_nix_store: bool,
     pub public: bool,
     pub managed: bool,
     pub created_by: Uuid,
@@ -63,13 +62,17 @@ pub struct OrgResponse {
     pub display_name: String,
     pub description: String,
     pub public_key: Option<String>,
-    pub use_nix_store: bool,
     pub public: bool,
     pub managed: bool,
     pub created_by: Uuid,
     pub created_at: chrono::NaiveDateTime,
     pub github_installation_id: Option<i64>,
-    pub forge_webhook_secret_set: bool,
+    /// True when this org has opted into receiving GitHub App deliveries.
+    /// Only meaningful when the server has `GRADIENT_GITHUB_APP_*` configured.
+    pub github_app_enabled: bool,
+    /// Whether the server has a GitHub App configured at all. The frontend
+    /// hides the GitHub integration row entirely when this is `false`.
+    pub github_app_available: bool,
     pub role: Option<String>,
 }
 
@@ -201,7 +204,6 @@ pub async fn get(
             display_name: o.display_name,
             description: o.description,
             public_key: Some(o.public_key),
-            use_nix_store: o.use_nix_store,
             public: o.public,
             managed: o.managed,
             created_by: o.created_by,
@@ -255,13 +257,12 @@ pub async fn put(
         description: Set(body.description.trim().to_string()),
         public_key: Set(public_key),
         private_key: Set(private_key),
-        use_nix_store: Set(true),
         public: Set(body.public.unwrap_or(false)),
         created_by: Set(user.id),
         created_at: Set(Utc::now().naive_utc()),
         managed: Set(false),
         github_installation_id: Set(None),
-        forge_webhook_secret: Set(None),
+        github_app_enabled: Set(false),
     };
 
     let organization = organization.insert(&state.db).await?;
@@ -337,18 +338,18 @@ pub async fn get_organization(
     Ok(Json(BaseResponse {
         error: false,
         message: OrgResponse {
-            forge_webhook_secret_set: org.forge_webhook_secret.is_some(),
             id: org.id,
             name: org.name,
             display_name: org.display_name,
             description: org.description,
             public_key: Some(org.public_key),
-            use_nix_store: org.use_nix_store,
             public: org.public,
             managed: org.managed,
             created_by: org.created_by,
             created_at: org.created_at,
             github_installation_id: org.github_installation_id,
+            github_app_enabled: org.github_app_enabled,
+            github_app_available: state.cli.github_app_config().is_some(),
             role,
         },
     }))

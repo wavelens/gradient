@@ -5,7 +5,6 @@ Minimal setup: Gradient server + co-located worker on a single NixOS host.
 ## 1. Add the Flake Input
 
 ```nix
-# flake.nix
 {
   inputs.gradient.url = "github:wavelens/gradient";
 
@@ -51,7 +50,6 @@ echo "*:$(cat /run/secrets/gradient-worker-token)" > /run/secrets/gradient-worke
 ## 3. NixOS Configuration
 
 ```nix
-# configuration.nix
 {
   services.gradient = {
     enable            = true;
@@ -68,13 +66,12 @@ echo "*:$(cat /run/secrets/gradient-worker-token)" > /run/secrets/gradient-worke
   services.gradient.worker = {
     enable    = true;
     serverUrl = "ws://127.0.0.1:3000/proto";
-    workerId  = "<uuid from uuidgen>";
+    workerId  = "<uuid from uuidgen>"; # if not provided, a random UUID will be generated and saved in /var/lib/gradient/worker-id
     peersFile = "/run/secrets/gradient-worker-peers";
     capabilities = {
       fetch = true;
       eval  = true;
       build = true;
-      sign  = true;
     };
   };
 }

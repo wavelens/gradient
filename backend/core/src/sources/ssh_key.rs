@@ -174,13 +174,12 @@ mod tests {
             description: String::new(),
             public_key: public_key.to_string(),
             private_key: String::new(),
-            use_nix_store: false,
             public: false,
             created_by: Uuid::nil(),
             created_at: NaiveDateTime::default(),
             managed: false,
             github_installation_id: None,
-            forge_webhook_secret: None,
+            github_app_enabled: false,
         }
     }
 

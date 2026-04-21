@@ -31,8 +31,8 @@ pub struct StateOrganization {
     pub description: String,
     pub private_key_file: String,
     pub public: bool,
-    #[serde(default = "default_true")]
-    pub use_nix_store: bool,
+    #[serde(default)]
+    pub github_app_enabled: bool,
     pub created_by: String,
 }
 
@@ -54,17 +54,29 @@ pub struct StateProject {
     /// default of 30 for new projects). Must not exceed `GRADIENT_KEEP_EVALUATIONS` if set.
     #[serde(default)]
     pub keep_evaluations: Option<i32>,
-    /// CI reporter type: `"gitea"` or `"github"`. `None` disables CI reporting.
+    /// Name of an inbound integration in the same org. `None` unlinks.
     #[serde(default)]
-    pub ci_reporter_type: Option<String>,
-    /// Base URL for the CI reporter (required for Gitea; defaults to github.com for GitHub).
+    pub inbound_integration: Option<String>,
+    /// Name of an outbound integration in the same org. `None` unlinks.
     #[serde(default)]
-    pub ci_reporter_url: Option<String>,
-    /// Whether a CI reporter token credential is provided. When true, state management
-    /// reads the token from the systemd credential `gradient_project_{name}_ci_token`
-    /// (loaded via `LoadCredential`), encrypts it, and stores it in the database.
+    pub outbound_integration: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateIntegration {
+    pub name: String,
+    pub organization: String,
+    /// `"inbound"` or `"outbound"`.
+    pub kind: String,
+    /// `"gitea"`, `"forgejo"`, `"gitlab"`, or `"github"`.
+    pub forge_type: String,
     #[serde(default)]
-    pub ci_reporter_has_token: bool,
+    pub secret_file: Option<String>,
+    #[serde(default)]
+    pub endpoint_url: Option<String>,
+    #[serde(default)]
+    pub access_token_file: Option<String>,
+    pub created_by: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +147,8 @@ pub struct StateConfiguration {
     pub api_keys: HashMap<String, StateApiKey>,
     #[serde(default)]
     pub workers: HashMap<String, StateWorker>,
+    #[serde(default)]
+    pub integrations: HashMap<String, StateIntegration>,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]

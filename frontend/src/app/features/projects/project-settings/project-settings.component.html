@@ -99,63 +99,55 @@
     <!-- Integrations -->
     <div class="settings-section">
       <h2>Integrations</h2>
-      @if (ciSaveSuccess()) {
+      @if (integrationSaveSuccess()) {
         <div class="message-banner success">
           <span class="material-symbols-outlined">check_circle</span>
-          Integration settings saved.
+          Integration link saved.
         </div>
       }
-      @if (ciErrorMessage()) {
+      @if (integrationErrorMessage()) {
         <div class="message-banner error">
           <span class="material-symbols-outlined">error</span>
-          {{ ciErrorMessage() }}
+          {{ integrationErrorMessage() }}
         </div>
       }
       <div class="settings-card">
-        <div class="form-group">
-          <label for="ci-provider">CI Provider</label>
-          <p-select
-            inputId="ci-provider"
-            [(ngModel)]="ciFormData.ci_reporter_type"
-            [options]="ciProviders"
-            optionLabel="label"
-            optionValue="value"
-            styleClass="w-full"
-            [disabled]="proj.managed || !proj.can_edit"
-          />
-          <small class="text-secondary">Reports a commit status per entry point back to your Git host.</small>
-        </div>
-
-        @if (ciFormData.ci_reporter_type) {
+        @if (integrationsLoading()) {
+          <app-loading-spinner message="Loading integrations..." />
+        } @else {
           <div class="form-group">
-            <label for="ci-url">
-              @if (ciFormData.ci_reporter_type === 'gitea') { Gitea Base URL }
-              @if (ciFormData.ci_reporter_type === 'github') { GitHub API URL }
-            </label>
-            <input pInputText id="ci-url" [(ngModel)]="ciFormData.ci_reporter_url" class="w-full"
-              [placeholder]="ciFormData.ci_reporter_type === 'github' ? 'https://api.github.com (default)' : 'https://gitea.example.com'"
-              [disabled]="proj.managed || !proj.can_edit" />
-            @if (ciFormData.ci_reporter_type === 'github') {
-              <small class="text-secondary">Leave blank to use github.com. For GitHub Enterprise Server, enter the API root (e.g. <code>https://github.example.com/api/v3</code>).</small>
-            }
+            <label for="inbound-integration">Inbound Integration</label>
+            <p-select
+              inputId="inbound-integration"
+              [(ngModel)]="integrationForm.inbound_integration"
+              [options]="inboundIntegrationOptions()"
+              optionLabel="label"
+              optionValue="value"
+              styleClass="w-full"
+              [disabled]="proj.managed || !proj.can_edit"
+            />
+            <small class="text-secondary">Forge webhook source that will trigger evaluations for this project.</small>
           </div>
-
           <div class="form-group">
-            <label for="ci-token">API Token</label>
-            <input pInputText id="ci-token" type="password" [(ngModel)]="ciFormData.ci_reporter_token" class="w-full"
-              placeholder="Leave blank to keep existing token"
-              [disabled]="proj.managed || !proj.can_edit" />
-            <small class="text-secondary">Token is write-only — it will not be shown after saving.</small>
+            <label for="outbound-integration">Outbound Integration</label>
+            <p-select
+              inputId="outbound-integration"
+              [(ngModel)]="integrationForm.outbound_integration"
+              [options]="outboundIntegrationOptions()"
+              optionLabel="label"
+              optionValue="value"
+              styleClass="w-full"
+              [disabled]="proj.managed || !proj.can_edit"
+            />
+            <small class="text-secondary">Status reporter used to report build results per entry point.</small>
           </div>
-        }
 
-        @if (!proj.managed && proj.can_edit) {
-          <div class="form-actions">
-            <button pButton label="Save Integration" icon="pi pi-check" (click)="saveCiSettings()" [loading]="savingCi()" [disabled]="savingCi() || removingCi()"></button>
-            @if (proj.ci_reporter_type) {
-              <button pButton label="Remove Integration" icon="pi pi-trash" severity="danger" (click)="removeCiIntegration()" [loading]="removingCi()" [disabled]="savingCi() || removingCi()"></button>
-            }
-          </div>
+          @if (!proj.managed && proj.can_edit) {
+            <div class="form-actions">
+              <button pButton label="Save Integrations" icon="pi pi-check" (click)="saveIntegrationLink()" [loading]="savingIntegration()" [disabled]="savingIntegration()"></button>
+              <button pButton label="Manage Integrations" icon="pi pi-external-link" severity="secondary" [routerLink]="['/organization', orgName, 'integrations']"></button>
+            </div>
+          }
         }
       </div>
     </div>

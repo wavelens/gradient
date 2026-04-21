@@ -9,7 +9,7 @@ pub mod endpoints;
 pub mod error;
 
 use axum::body::Body;
-use axum::routing::{delete, get, patch, post, put};
+use axum::routing::{get, patch, post, put};
 use axum::{Router, middleware};
 use bytes::Bytes;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
@@ -103,17 +103,26 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
                 .delete(orgs::delete_organization_subscribe_cache),
         )
         .route(
-            "/orgs/{organization}/forge-webhook-secret",
-            post(forge_hooks::post_forge_webhook_secret)
-                .delete(forge_hooks::delete_forge_webhook_secret),
-        )
-        .route(
             "/orgs/{organization}/workers",
             get(orgs::get_org_workers).post(orgs::post_org_worker),
         )
         .route(
             "/orgs/{organization}/workers/{worker_id}",
             patch(orgs::patch_org_worker).delete(orgs::delete_org_worker),
+        )
+        .route(
+            "/orgs/{organization}/integrations",
+            get(orgs::get_integrations).put(orgs::put_integration),
+        )
+        .route(
+            "/orgs/{organization}/integrations/{id}",
+            get(orgs::get_integration)
+                .patch(orgs::patch_integration)
+                .delete(orgs::delete_integration),
+        )
+        .route(
+            "/orgs/{organization}/github-app",
+            patch(orgs::patch_github_app),
         )
         .route("/projects/{organization}", put(projects::put))
         .route(
@@ -142,7 +151,9 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route(
             "/projects/{organization}/{project}/integration",
-            delete(projects::delete_project_integration),
+            get(projects::get_project_integration)
+                .put(projects::put_project_integration)
+                .delete(projects::delete_project_integration),
         )
         .route("/evals/{evaluation}", post(evals::post_evaluation))
         .route(
@@ -316,7 +327,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/config", get(get_config))
         // ── Incoming forge webhooks (unauthenticated, HMAC-verified) ─────────
         .route("/hooks/github", post(forge_hooks::github_app_webhook))
-        .route("/hooks/{forge}/{org}", post(forge_hooks::forge_webhook));
+        .route(
+            "/hooks/{forge}/{org}/{integration_name}",
+            post(forge_hooks::forge_webhook),
+        );
 
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
     scheduler.start();

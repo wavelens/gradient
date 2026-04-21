@@ -96,8 +96,8 @@ tags:
     description: Outgoing webhook management (Gradient → external URLs)
   - name: forge-webhooks
     description: Incoming forge webhooks (external forges → Gradient push triggers)
-  - name: nix-cache
-    description: Nix binary cache protocol endpoints (outside /api/v1)
+  - name: integrations
+    description: Per-organization named forge integrations (inbound HMAC secrets + outbound API credentials)
 
 security:
   - bearerAuth: []
@@ -1314,21 +1314,78 @@ paths:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
       - $ref: '#/components/parameters/ProjectSlug'
-    delete:
-      tags: [projects]
-      summary: Remove CI integration
+    get:
+      tags: [integrations]
+      summary: Get project integration link
       description: >-
-        Clears the CI reporter type, URL, and token for the project, disabling
-        commit-status reporting. Use `PATCH /projects/{organization}/{project}`
-        to configure a new integration.
-      operationId: deleteProjectIntegration
+        Returns the inbound/outbound integration IDs linked to this project.
+        Both fields are `null` when no link exists.
+      operationId: getProjectIntegration
       responses:
         '200':
-          description: Integration removed
+          description: Current link
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StringResponse'
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ProjectIntegrationLink'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [integrations]
+      summary: Set project integration link
+      description: >-
+        Upserts the project → org-integration link. Each ID must reference an
+        integration in the same organization whose `kind` matches the field
+        (inbound/outbound). Pass `null` to unset either side. Requires
+        Admin/Write on the project.
+      operationId: putProjectIntegration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutProjectIntegrationRequest'
+      responses:
+        '200':
+          description: Link updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/ProjectIntegrationLink'
+        '400':
+          description: Integration kind mismatch or not in org
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [integrations]
+      summary: Remove project integration link
+      description: >-
+        Removes the project → integration link row entirely. Disables
+        commit-status reporting and inbound webhook routing for this project.
+      operationId: deleteProjectIntegration
+      responses:
+        '200':
+          description: Link removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -2955,30 +3012,19 @@ paths:
         '500':
           description: Webhook delivery failed
 
-  # ── Forge Webhooks (incoming) ────────────────────────────────────────────────
+  # ── Organization integrations ────────────────────────────────────────────────
 
-  /orgs/{organization}/forge-webhook-secret:
+  /orgs/{organization}/integrations:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-    post:
-      tags: [organizations]
-      summary: Generate or rotate forge webhook secret
-      description: |-
-        Generates a new per-organization HMAC-SHA256 secret for incoming forge webhooks
-        (Gitea, Forgejo, GitLab, or GitHub without the App). The secret is shown **once**
-        and stored encrypted; it cannot be retrieved again. Requires Admin or Write role.
-
-        Use the returned `webhook_url` as the push webhook destination in your forge.
-        The HMAC-SHA256 header name varies by forge:
-        - Gitea/Forgejo: `X-Gitea-Signature`
-        - GitLab: `X-Gitlab-Token` (plain token, not HMAC)
-        - GitHub: `X-Hub-Signature-256`
-      operationId: generateForgeWebhookSecret
-      security:
-        - bearerAuth: []
+    get:
+      tags: [integrations]
+      summary: List integrations
+      description: List all inbound and outbound integrations in this organization.
+      operationId: listOrgIntegrations
       responses:
         '200':
-          description: Secret generated
+          description: List of integrations
           content:
             application/json:
               schema:
@@ -2987,13 +3033,179 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/ForgeWebhookSecretResponse'
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Integration'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+    put:
+      tags: [integrations]
+      summary: Create integration
+      description: |-
+        Creates a named inbound or outbound integration. `secret` and
+        `access_token` are stored encrypted and never returned in responses.
+        Name is unique within `(organization, kind)`.
+
+        One **inbound** integration can serve Gitea/Forgejo/GitLab
+        simultaneously — the caller picks the forge path segment in the webhook
+        URL (`/hooks/gitea/...`, `/hooks/forgejo/...`, `/hooks/gitlab/...`).
+        The stored `forge_type` is display metadata only for inbound.
+
+        For **outbound** GitHub integrations, credentials come from the
+        server-configured GitHub App, not from `access_token` — create one with
+        `forge_type: "github"` and no token.
+      operationId: createOrgIntegration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIntegrationRequest'
+      responses:
+        '200':
+          description: Integration created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Integration'
+        '400':
+          description: Invalid name / kind / forge_type
+        '409':
+          description: Name already in use within this kind
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orgs/{organization}/integrations/{id}:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Integration UUID
+    get:
+      tags: [integrations]
+      summary: Get integration
+      operationId: getOrgIntegration
+      responses:
+        '200':
+          description: Integration
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Integration'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [integrations]
+      summary: Update integration
+      description: |-
+        Patch-updates an integration. Omit a field to leave it unchanged.
+        Pass an empty string for `secret` or `access_token` to **clear** it.
+      operationId: patchOrgIntegration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchIntegrationRequest'
+      responses:
+        '200':
+          description: Updated integration
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/Integration'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Name already in use within this kind
+    delete:
+      tags: [integrations]
+      summary: Delete integration
+      description: >-
+        Deletes an integration. Any project `project_integration` rows
+        referencing it are cleared via `ON DELETE SET NULL`.
+      operationId: deleteOrgIntegration
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /orgs/{organization}/github-app:
+    parameters:
+      - $ref: '#/components/parameters/OrganizationSlug'
+    patch:
+      tags: [integrations]
+      summary: Toggle GitHub App opt-in
+      description: >-
+        Enables or disables GitHub App deliveries for this organization.
+        Rejected with `400` when the server has no GitHub App configured
+        (`github_app_available` is false on `GET /orgs/{organization}`).
+      operationId: toggleGithubApp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GithubAppToggleRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoolResponse'
+        '400':
+          description: GitHub App not configured on this server
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Forge Webhooks (incoming) ────────────────────────────────────────────────
 
   /hooks/github:
     post:
@@ -3040,34 +3252,44 @@ paths:
         '503':
           description: GitHub App not configured on this server
 
-  /hooks/{forge}/{org}:
+  /hooks/{forge}/{org}/{integration_name}:
     parameters:
       - name: forge
         in: path
         required: true
         schema:
           type: string
-          enum: [gitea, forgejo, gitlab, github]
-        description: Forge type
+          enum: [gitea, forgejo, gitlab]
+        description: >-
+          Forge type path segment. Determines the HMAC scheme; does **not**
+          filter the integration lookup — a single inbound integration can
+          serve all three forges. GitHub deliveries go through
+          `POST /hooks/github` (the App webhook) instead.
       - name: org
         in: path
         required: true
         schema:
           type: string
         description: Gradient organization name
+      - name: integration_name
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Name of the inbound integration within the organization
     post:
       tags: [forge-webhooks]
       summary: Receive forge push webhook
       description: |-
-        Receives push events from Gitea, Forgejo, GitLab, or GitHub (without the App).
-        Authenticated via the per-organization `forge_webhook_secret`.
+        Receives push events for a named inbound integration.
+        Authenticated via the integration's stored HMAC secret.
 
         Signature header by forge:
         - `gitea` / `forgejo`: `X-Gitea-Signature` (HMAC-SHA256 hex)
         - `gitlab`: `X-Gitlab-Token` (plain token comparison)
-        - `github`: `X-Hub-Signature-256` (HMAC-SHA256 `sha256=<hex>`)
 
         On a matching push, queues an evaluation for every active project whose
+        `project_integration.inbound_integration` points at this row and whose
         repository URL matches the webhook payload's clone URL.
 
         This endpoint is unauthenticated (verified via forge-specific signature).
@@ -3085,9 +3307,9 @@ paths:
         '401':
           description: Invalid signature
         '404':
-          description: Organization not found
+          description: Organization or integration not found, or `forge=github`
         '503':
-          description: No forge webhook secret configured for this organization
+          description: Integration has no secret configured
 
   # ── Nix Cache Protocol ───────────────────────────────────────────────────────
   # These endpoints live outside /api/v1. The server URL for these is the root,
@@ -3236,6 +3458,14 @@ components:
           properties:
             message:
               type: string
+
+    BoolResponse:
+      allOf:
+        - $ref: '#/components/schemas/BaseResponse'
+        - type: object
+          properties:
+            message:
+              type: boolean
 
     RegisterWorkerResponse:
       type: object
@@ -3526,7 +3756,7 @@ components:
 
     Organization:
       type: object
-      required: [id, name, display_name, created_by, created_at]
+      required: [id, name, display_name, created_by, created_at, github_app_enabled, github_app_available]
       properties:
         id:
           type: string
@@ -3541,6 +3771,24 @@ components:
         created_at:
           type: string
           format: date-time
+        github_installation_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: >-
+            GitHub App installation ID bound to this org. Populated automatically
+            when the App is installed against the org's GitHub account.
+        github_app_enabled:
+          type: boolean
+          description: >-
+            Whether this org has opted into GitHub App deliveries. Toggle via
+            `PATCH /orgs/{organization}/github-app`.
+        github_app_available:
+          type: boolean
+          description: >-
+            True when the Gradient server has a GitHub App configured at all.
+            Clients should hide GitHub-related integration UI when this is
+            false.
 
     # ── Projects ──────────────────────────────────────────────────────────────
 
@@ -3585,29 +3833,6 @@ components:
           type: integer
           minimum: 1
           description: Number of completed evaluations to retain for metrics and history
-        ci_reporter_type:
-          type: string
-          nullable: true
-          description: >-
-            CI provider identifier: `"gitea"` or `"github"`.
-            Pass an empty string to clear.
-        ci_reporter_url:
-          type: string
-          nullable: true
-          description: >-
-            Base URL of the CI host.
-            For Gitea: `https://gitea.example.com`.
-            For GitHub: omit or leave blank to use `https://api.github.com`;
-            for GitHub Enterprise Server supply the API root
-            (e.g. `https://github.example.com/api/v3`).
-            Pass an empty string to clear.
-        ci_reporter_token:
-          type: string
-          nullable: true
-          description: >-
-            API token for the CI host. Write-only — omit to keep the existing token.
-            For GitHub, use a personal access token or GitHub App installation token
-            with `repo:status` (or `statuses:write`) permission.
 
     Project:
       type: object
@@ -3635,14 +3860,6 @@ components:
         keep_evaluations:
           type: integer
           description: Number of completed evaluations retained for metrics and history
-        ci_reporter_type:
-          type: string
-          nullable: true
-          description: Active CI provider (`"gitea"` or `"github"`) or `null` if no integration is configured.
-        ci_reporter_url:
-          type: string
-          nullable: true
-          description: Base URL of the CI host. The API token is intentionally excluded from responses.
         created_by:
           type: string
           format: uuid
@@ -4390,21 +4607,130 @@ components:
           type: boolean
           description: Enable or disable the webhook
 
-    ForgeWebhookSecretResponse:
+    Integration:
       type: object
-      required: [webhook_url, secret]
+      required: [id, organization, name, kind, forge_type, has_secret, has_access_token, created_by, created_at]
       properties:
-        webhook_url:
+        id:
           type: string
-          format: uri
-          description: |-
-            The URL to configure as the push webhook destination in your forge.
-            Substitute `gitea` with the appropriate forge type in the path
-            (`forgejo`, `gitlab`, or `github`) if needed.
-          example: https://gradient.example.com/api/v1/hooks/gitea/my-org
+          format: uuid
+        organization:
+          type: string
+          format: uuid
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+          example: production
+        kind:
+          type: string
+          enum: [inbound, outbound]
+          description: >-
+            `inbound` — the forge calls Gradient (HMAC-verified webhook).
+            `outbound` — Gradient calls the forge (status reports, etc).
+        forge_type:
+          type: string
+          enum: [gitea, forgejo, gitlab, github]
+          description: >-
+            Which forge this integration targets. For inbound integrations this
+            is display metadata only — a single inbound row can serve
+            Gitea/Forgejo/GitLab via the forge path segment of the webhook URL.
+        endpoint_url:
+          type: string
+          nullable: true
+          description: Forge base URL (outbound integrations only).
+          example: https://gitea.example.com
+        has_secret:
+          type: boolean
+          description: Whether an HMAC secret is stored (inbound integrations).
+        has_access_token:
+          type: boolean
+          description: Whether an API token is stored (outbound integrations).
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    CreateIntegrationRequest:
+      type: object
+      required: [name, kind, forge_type]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+        kind:
+          type: string
+          enum: [inbound, outbound]
+        forge_type:
+          type: string
+          enum: [gitea, forgejo, gitlab, github]
         secret:
           type: string
-          description: |-
-            The HMAC-SHA256 signing secret. Shown **once** — store it immediately.
-            It is never returned again by the API.
-          example: "a1b2c3d4..."
+          description: >-
+            Plaintext HMAC secret for inbound integrations. Stored encrypted.
+            Omit for outbound integrations.
+        endpoint_url:
+          type: string
+          description: Forge base URL for outbound integrations.
+        access_token:
+          type: string
+          description: >-
+            Plaintext API token for outbound integrations. Stored encrypted.
+            Omit for inbound integrations and for GitHub outbound (credentials
+            come from the server-configured GitHub App instead).
+
+    PatchIntegrationRequest:
+      type: object
+      description: >-
+        All fields optional. Omit to leave unchanged. Pass an empty string for
+        `secret` or `access_token` to **clear** the stored value.
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+        forge_type:
+          type: string
+          enum: [gitea, forgejo, gitlab, github]
+        endpoint_url:
+          type: string
+          nullable: true
+        secret:
+          type: string
+        access_token:
+          type: string
+
+    ProjectIntegrationLink:
+      type: object
+      required: [project, inbound_integration, outbound_integration]
+      properties:
+        project:
+          type: string
+          format: uuid
+        inbound_integration:
+          type: string
+          format: uuid
+          nullable: true
+        outbound_integration:
+          type: string
+          format: uuid
+          nullable: true
+
+    PutProjectIntegrationRequest:
+      type: object
+      properties:
+        inbound_integration:
+          type: string
+          format: uuid
+          nullable: true
+        outbound_integration:
+          type: string
+          format: uuid
+          nullable: true
+
+    GithubAppToggleRequest:
+      type: object
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean

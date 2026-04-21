@@ -106,6 +106,41 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
 
 // ── Project evaluation trigger ─────────────────────────────────────────────
 
+/// Canonicalises a git repository URL so that equivalent forms compare equal.
+///
+/// Handles:
+/// - Trailing whitespace, `/`, and `.git`.
+/// - `git+ssh://` / `git+https://` scheme prefixes (flake/fetchGit form) →
+///   `ssh://` / `https://`.
+/// - SCP-style SSH refs (`user@host:path`) → `ssh://user@host/path`.
+/// - `http://` → `https://` so both schemes match.
+///
+/// TODO: save canonicalised URLs in the DB (on project create/update) so the
+/// webhook path can do a cheap indexed lookup instead of scanning every active
+/// project and canonicalising on every push.
+pub(super) fn canonicalise_repo_url(u: &str) -> String {
+    let u = u.trim();
+    let u = u.trim_end_matches('/');
+    let u = u.trim_end_matches(".git");
+    let u = u.strip_prefix("git+").unwrap_or(u);
+    // SCP form: `user@host:path` (no `://`) → `ssh://user@host/path`
+    let normalised = if !u.contains("://") {
+        if let Some((userhost, path)) = u.split_once(':') {
+            format!("ssh://{}/{}", userhost, path)
+        } else {
+            u.to_string()
+        }
+    } else {
+        u.to_string()
+    };
+    // Treat http and https as equivalent — forges typically redirect one to the other.
+    if let Some(rest) = normalised.strip_prefix("http://") {
+        format!("https://{}", rest)
+    } else {
+        normalised
+    }
+}
+
 /// Finds all active projects whose repository URL matches any of `candidate_urls`
 /// and queues an evaluation for each one.
 pub(super) async fn trigger_for_repo_urls(
@@ -115,8 +150,10 @@ pub(super) async fn trigger_for_repo_urls(
     commit_message: Option<String>,
     author_name: Option<String>,
 ) {
-    let normalise = |u: &str| u.trim_end_matches(".git").to_string();
-    let normalised_candidates: Vec<String> = candidate_urls.iter().map(|u| normalise(u)).collect();
+    let normalised_candidates: Vec<String> = candidate_urls
+        .iter()
+        .map(|u| canonicalise_repo_url(u))
+        .collect();
 
     let projects = match EProject::find()
         .filter(CProject::Active.eq(true))
@@ -131,7 +168,7 @@ pub(super) async fn trigger_for_repo_urls(
     };
 
     for project in projects {
-        let repo_normalised = normalise(&project.repository);
+        let repo_normalised = canonicalise_repo_url(&project.repository);
         if !normalised_candidates.iter().any(|c| c == &repo_normalised) {
             continue;
         }
@@ -160,5 +197,73 @@ pub(super) async fn trigger_for_repo_urls(
                 warn!(error = %e, project_id = %project.id, "DB error triggering evaluation from forge webhook");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonicalise_repo_url;
+
+    #[test]
+    fn canonicalise_strips_dot_git_and_trailing_slash() {
+        assert_eq!(
+            canonicalise_repo_url("https://git.example.com/org/repo.git/"),
+            "https://git.example.com/org/repo"
+        );
+    }
+
+    #[test]
+    fn canonicalise_strips_git_plus_ssh_prefix() {
+        assert_eq!(
+            canonicalise_repo_url("git+ssh://git@git.example.com/org/repo.git"),
+            "ssh://git@git.example.com/org/repo"
+        );
+    }
+
+    #[test]
+    fn canonicalise_strips_git_plus_https_prefix() {
+        assert_eq!(
+            canonicalise_repo_url("git+https://git.example.com/org/repo"),
+            "https://git.example.com/org/repo"
+        );
+    }
+
+    #[test]
+    fn canonicalise_converts_scp_form_to_ssh_url() {
+        assert_eq!(
+            canonicalise_repo_url("git@git.example.com:org/repo.git"),
+            "ssh://git@git.example.com/org/repo"
+        );
+    }
+
+    #[test]
+    fn canonicalise_upgrades_http_to_https() {
+        assert_eq!(
+            canonicalise_repo_url("http://git.example.com/org/repo"),
+            "https://git.example.com/org/repo"
+        );
+    }
+
+    #[test]
+    fn canonicalise_equates_flake_ssh_and_scp_forms() {
+        let scp = canonicalise_repo_url("git@git.example.com:org/repo.git");
+        let flake = canonicalise_repo_url("git+ssh://git@git.example.com/org/repo.git");
+        let plain_ssh = canonicalise_repo_url("ssh://git@git.example.com/org/repo");
+        assert_eq!(scp, flake);
+        assert_eq!(flake, plain_ssh);
+    }
+
+    #[test]
+    fn canonicalise_equates_flake_https_and_plain_https() {
+        let a = canonicalise_repo_url("git+https://git.example.com/org/repo.git");
+        let b = canonicalise_repo_url("https://git.example.com/org/repo");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn canonicalise_is_idempotent() {
+        let once = canonicalise_repo_url("git+ssh://git@git.example.com/org/repo.git/");
+        let twice = canonicalise_repo_url(&once);
+        assert_eq!(once, twice);
     }
 }

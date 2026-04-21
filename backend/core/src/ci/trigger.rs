@@ -249,9 +249,6 @@ mod tests {
             created_at: NaiveDateTime::default(),
             managed: false,
             keep_evaluations: 10,
-            ci_reporter_type: None,
-            ci_reporter_url: None,
-            ci_reporter_token: None,
         }
     }
 

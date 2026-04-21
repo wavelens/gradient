@@ -98,6 +98,11 @@
   gap: $spacing-sm;
 }
 
+.worker-action-btn {
+  min-width: 110px;
+  justify-content: center;
+}
+
 .cap-badge {
   padding: 1px $spacing-xs;
   border-radius: $border-radius-sm;

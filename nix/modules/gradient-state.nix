@@ -111,16 +111,20 @@
         description = "Path to SSH private key file for Git access";
       };
 
-      use_nix_store = mkOption {
-        type = types.bool;
-        default = true;
-        description = "Whether to use Nix store for this organization";
-      };
-
       public = mkOption {
         type = types.bool;
         default = false;
         description = "Whether the organization is public (visible to all users)";
+      };
+
+      github_app_enabled = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Whether this organization has opted into GitHub App deliveries.
+          Only meaningful when the server has a GitHub App configured
+          (`GRADIENT_GITHUB_APP_*`). Defaults to false — admins opt in explicitly.
+        '';
       };
 
       created_by = mkOption {
@@ -185,25 +189,94 @@
         description = "Username of the user who created this project";
       };
 
-      ci_reporter_type = mkOption {
-        type = types.nullOr (types.enum [ "gitea" "github" ]);
-        default = null;
-        description = "CI reporter type. Null disables CI status reporting";
-      };
-
-      ci_reporter_url = mkOption {
+      inbound_integration = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Base URL for the CI reporter (required for Gitea; omit to use github.com for GitHub)";
+        description = ''
+          Name of an **inbound** integration in the same organization that
+          receives push webhooks for this project. Null disables inbound
+          webhook routing for the project. The integration must be declared
+          in `services.gradient.state.integrations`.
+        '';
       };
 
-      ci_reporter_token_file = mkOption {
+      outbound_integration = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          Name of an **outbound** integration in the same organization that
+          receives CI status reports for this project. Null disables status
+          reporting. The integration must be declared in
+          `services.gradient.state.integrations`.
+        '';
+      };
+    };
+  });
+
+  integrationType = types.submodule ({ config, name, ... }: {
+    options = {
+      name = mkOption {
+        type = types.str;
+        default = name;
+        defaultText = "<attrset key>";
+        description = "Unique name for the integration within (organization, kind)";
+      };
+
+      organization = mkOption {
+        type = types.str;
+        description = "Name of the organization this integration belongs to";
+      };
+
+      kind = mkOption {
+        type = types.enum [ "inbound" "outbound" ];
+        description = ''
+          `inbound` — the forge calls Gradient (HMAC-verified webhooks).
+          `outbound` — Gradient calls the forge (CI status reports).
+        '';
+      };
+
+      forge_type = mkOption {
+        type = types.enum [ "gitea" "forgejo" "gitlab" "github" ];
+        description = ''
+          Which forge this integration targets. For inbound integrations this
+          is display metadata only — a single inbound row can serve
+          Gitea/Forgejo/GitLab via the forge path segment of the webhook URL.
+        '';
+      };
+
+      secret_file = mkOption {
         type = types.nullOr types.path;
         default = null;
         description = ''
-          Path to a file containing the CI reporter API token.
-          The token is loaded as a systemd credential and encrypted into the database at startup.
+          Path to a file containing the HMAC signing secret for inbound
+          integrations. Loaded as a systemd credential and encrypted into
+          the database at startup. Ignored for outbound integrations.
         '';
+      };
+
+      endpoint_url = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          Base URL of the forge API for outbound integrations
+          (e.g. `https://gitea.example.com`). Ignored for inbound.
+        '';
+      };
+
+      access_token_file = mkOption {
+        type = types.nullOr types.path;
+        default = null;
+        description = ''
+          Path to a file containing the forge API token for outbound
+          integrations. Loaded as a systemd credential and encrypted into
+          the database at startup. Not used for GitHub outbound — those
+          credentials come from the server-configured GitHub App.
+        '';
+      };
+
+      created_by = mkOption {
+        type = types.str;
+        description = "Username of the user who created this integration";
       };
     };
   });
@@ -369,6 +442,37 @@
         description = "Attribute set of projects to create, keyed by name";
       };
 
+      integrations = mkOption {
+        type = types.attrsOf integrationType;
+        default = { };
+        description = ''
+          Attribute set of per-organization forge integrations, keyed by name.
+          Each entry inserts a row into `integration`. For inbound integrations,
+          `secret_file` is read as a systemd credential and stored encrypted.
+          For outbound integrations, `access_token_file` is similarly encrypted.
+        '';
+
+        example = literalExpression ''
+          {
+            acme-prod-inbound = {
+              organization = "acme-corp";
+              kind = "inbound";
+              forge_type = "gitea";
+              secret_file = "/etc/gradient/secrets/acme-inbound-hmac";
+              created_by = "alice";
+            };
+            acme-status-reports = {
+              organization = "acme-corp";
+              kind = "outbound";
+              forge_type = "gitea";
+              endpoint_url = "https://gitea.example.com";
+              access_token_file = "/etc/gradient/secrets/acme-gitea-token";
+              created_by = "alice";
+            };
+          }
+        '';
+      };
+
       caches = mkOption {
         type = types.attrsOf cacheType;
         default = { };
@@ -427,7 +531,6 @@ in
               display_name = "ACME Corporation";
               description = "Main development organization";
               private_key_file = "/etc/gradient/secrets/acme_ssh_key";
-              use_nix_store = true;
               created_by = "alice";
             };
           };

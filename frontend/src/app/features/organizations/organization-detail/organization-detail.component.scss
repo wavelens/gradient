@@ -172,6 +172,12 @@
 @keyframes spin { to { transform: rotate(-360deg); } }
 .spinning { display: inline-block; animation: spin 1.2s linear infinite; }
 
+@keyframes pulsing-kf {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+.pulsing { display: inline-block; animation: pulsing-kf 1.6s ease-in-out infinite; }
+
 .dialog-error {
   display: flex;
   align-items: center;

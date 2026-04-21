@@ -18,23 +18,6 @@
         </div>
         <h1>{{ proj.display_name }}</h1>
         <p class="text-secondary">{{ proj.description || 'No description' }}</p>
-        <div class="project-meta">
-          <span class="meta-item">
-            <span class="material-symbols-outlined">link</span>
-            @if (proj.repository.startsWith('http://') || proj.repository.startsWith('https://')) {
-              <a [href]="proj.repository" target="_blank" rel="noopener noreferrer">{{ proj.repository }}</a>
-            } @else {
-              {{ proj.repository }}
-            }
-          </span>
-          <span class="meta-item">
-            <span class="material-symbols-outlined">category</span>
-            {{ proj.evaluation_wildcard }}
-          </span>
-          <span class="status-badge" [class.active]="proj.active" [class.inactive]="!proj.active">
-            {{ proj.active ? 'Active' : 'Inactive' }}
-          </span>
-        </div>
       </div>
       <div class="header-actions">
         @if (authService.isAuthenticated()) {
@@ -71,6 +54,23 @@
           severity="secondary"
           [routerLink]="['/organization', orgName, 'project', projectName, 'metrics']"
         ></button>
+      </div>
+      <div class="project-meta">
+        <span class="meta-item">
+          <span class="material-symbols-outlined">link</span>
+          @if (proj.repository.startsWith('http://') || proj.repository.startsWith('https://')) {
+            <a [href]="proj.repository" target="_blank" rel="noopener noreferrer">{{ proj.repository }}</a>
+          } @else {
+            {{ proj.repository }}
+          }
+        </span>
+        <span class="meta-item">
+          <span class="material-symbols-outlined">category</span>
+          {{ proj.evaluation_wildcard }}
+        </span>
+        <span class="status-badge" [class.active]="proj.active" [class.inactive]="!proj.active">
+          {{ proj.active ? 'Active' : 'Inactive' }}
+        </span>
       </div>
     </div>
 

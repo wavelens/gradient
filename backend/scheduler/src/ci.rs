@@ -5,7 +5,7 @@
  */
 
 use gradient_core::ci::{
-    CiReport, CiStatus, ProjectCiConfig, decrypt_webhook_secret, parse_owner_repo,
+    CiReport, CiStatus, parse_owner_repo, resolve_outbound_reporter_for_project,
 };
 use gradient_core::types::*;
 use sea_orm::EntityTrait;
@@ -42,22 +42,7 @@ pub async fn report_ci_for_entry_points(
         }
     };
 
-    let decrypted_token = project.ci_reporter_token.as_deref().and_then(|enc| {
-        match decrypt_webhook_secret(&state.cli.crypt_secret_file, enc) {
-            Ok(t) => Some(t),
-            Err(e) => {
-                warn!(error = %e, "Failed to decrypt CI token, skipping CI reporting");
-                None
-            }
-        }
-    });
-
-    let reporter = ProjectCiConfig::from_db(
-        project.ci_reporter_type.as_deref(),
-        project.ci_reporter_url.as_deref(),
-        decrypted_token.as_ref().map(|t| t.expose()),
-    )
-    .into_reporter();
+    let reporter = resolve_outbound_reporter_for_project(&state, project_id).await;
 
     let commit = match ECommit::find_by_id(commit_id).one(&state.db).await {
         Ok(Some(c)) => c,
@@ -143,22 +128,7 @@ pub async fn report_ci_for_evaluation(
         }
     };
 
-    let decrypted_token = project.ci_reporter_token.as_deref().and_then(|enc| {
-        match decrypt_webhook_secret(&state.cli.crypt_secret_file, enc) {
-            Ok(t) => Some(t),
-            Err(e) => {
-                warn!(error = %e, "Failed to decrypt CI token, skipping CI evaluation report");
-                None
-            }
-        }
-    });
-
-    let reporter = ProjectCiConfig::from_db(
-        project.ci_reporter_type.as_deref(),
-        project.ci_reporter_url.as_deref(),
-        decrypted_token.as_ref().map(|t| t.expose()),
-    )
-    .into_reporter();
+    let reporter = resolve_outbound_reporter_for_project(&state, project_id).await;
 
     let commit = match ECommit::find_by_id(commit_id).one(&state.db).await {
         Ok(Some(c)) => c,

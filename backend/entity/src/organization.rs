@@ -21,7 +21,6 @@ pub struct Model {
     pub description: String,
     pub public_key: String,
     pub private_key: String,
-    pub use_nix_store: bool,
     pub public: bool,
     pub created_by: Uuid,
     pub created_at: NaiveDateTime,
@@ -29,8 +28,10 @@ pub struct Model {
     /// GitHub App installation ID for this organization.
     /// Set automatically when the GitHub App is installed on the org's GitHub account.
     pub github_installation_id: Option<i64>,
-    /// Encrypted per-org secret for verifying incoming forge webhooks (Gitea/Forgejo/GitLab).
-    pub forge_webhook_secret: Option<String>,
+    /// Whether this org accepts GitHub App-delivered events. Only meaningful
+    /// when the server has a GitHub App configured. Defaults to `false` so
+    /// admins must explicitly opt in.
+    pub github_app_enabled: bool,
 }
 
 impl std::fmt::Debug for Model {
@@ -42,12 +43,11 @@ impl std::fmt::Debug for Model {
             .field("description", &self.description)
             .field("public_key", &format!("{} {}", self.public_key, self.id))
             .field("private_key", &"[redacted]")
-            .field("use_nix_store", &self.use_nix_store)
             .field("public", &self.public)
             .field("created_by", &self.created_by)
             .field("created_at", &self.created_at)
             .field("github_installation_id", &self.github_installation_id)
-            .field("forge_webhook_secret", &"[redacted]")
+            .field("github_app_enabled", &self.github_app_enabled)
             .finish()
     }
 }

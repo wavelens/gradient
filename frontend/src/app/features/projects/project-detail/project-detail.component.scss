@@ -10,6 +10,8 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: $spacing-md;
   margin-bottom: $spacing-xxl;
 
   .breadcrumb {
@@ -51,17 +53,23 @@
   .project-meta {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: $spacing-lg;
     font-size: $font-size-sm;
     color: $text-light;
+    flex-basis: 100%;
+    min-width: 0;
 
     .meta-item {
       display: flex;
       align-items: center;
       gap: $spacing-xs;
+      min-width: 0;
+      word-break: break-all;
 
       .material-symbols-outlined {
         font-size: 16px;
+        flex-shrink: 0;
       }
     }
   }

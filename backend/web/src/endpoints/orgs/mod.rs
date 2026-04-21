@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod integrations;
 pub mod management;
 pub mod members;
 pub mod settings;
 pub mod ssh;
 pub mod workers;
 
+pub use self::integrations::*;
 pub use self::management::*;
 pub use self::members::*;
 pub use self::settings::*;

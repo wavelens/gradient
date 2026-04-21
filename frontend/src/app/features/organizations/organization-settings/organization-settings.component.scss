@@ -115,6 +115,23 @@
 
 .w-full { width: 100%; }
 
+.copy-row {
+  display: flex;
+  align-items: stretch;
+  gap: $spacing-sm;
+
+  .w-full { flex: 1; min-width: 0; }
+
+  button { flex-shrink: 0; }
+}
+
+.forge-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-xs;
+}
+
 .members-list {
   display: flex;
   flex-direction: column;

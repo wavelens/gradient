@@ -24,8 +24,6 @@ export interface Project {
   created_at?: string;
   managed: boolean;
   can_edit: boolean;
-  ci_reporter_type?: string | null;
-  ci_reporter_url?: string | null;
 }
 
 export interface EvaluationSummary {

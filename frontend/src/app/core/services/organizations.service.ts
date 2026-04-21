@@ -97,12 +97,4 @@ export class OrganizationsService {
   unsubscribeCache(org: string, cache: string): Observable<string> {
     return this.api.delete<string>(`orgs/${org}/subscribe/${cache}`);
   }
-
-  generateForgeWebhookSecret(org: string): Observable<{ webhook_url: string; secret: string }> {
-    return this.api.post<{ webhook_url: string; secret: string }>(`orgs/${org}/forge-webhook-secret`);
-  }
-
-  deleteForgeWebhookSecret(org: string): Observable<string> {
-    return this.api.delete<string>(`orgs/${org}/forge-webhook-secret`);
-  }
 }

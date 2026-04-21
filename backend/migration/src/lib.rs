@@ -63,6 +63,9 @@ mod m20260416_000000_create_table_cached_path;
 mod m20260418_000000_rename_feature_add_kind;
 mod m20260418_000001_add_name_to_worker_registration;
 mod m20260420_000000_add_flake_source_to_evaluation;
+mod m20260421_000000_create_table_integration;
+mod m20260421_000001_add_github_app_enabled_to_organization;
+mod m20260421_000002_drop_use_nix_store_from_organization;
 
 pub struct Migrator;
 
@@ -127,6 +130,9 @@ impl MigratorTrait for Migrator {
             Box::new(m20260418_000000_rename_feature_add_kind::Migration),
             Box::new(m20260418_000001_add_name_to_worker_registration::Migration),
             Box::new(m20260420_000000_add_flake_source_to_evaluation::Migration),
+            Box::new(m20260421_000000_create_table_integration::Migration),
+            Box::new(m20260421_000001_add_github_app_enabled_to_organization::Migration),
+            Box::new(m20260421_000002_drop_use_nix_store_from_organization::Migration),
         ]
     }
 }

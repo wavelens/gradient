@@ -168,6 +168,14 @@
           </div>
           <button pButton label="Manage Caches" icon="pi pi-database" severity="secondary" [routerLink]="['/organization', orgName, 'caches']"></button>
         </div>
+        <p-divider />
+        <div class="nav-row">
+          <div>
+            <h3>Integrations</h3>
+            <p class="text-secondary">Inbound forge webhooks and outbound status reporters</p>
+          </div>
+          <button pButton label="Manage Integrations" icon="pi pi-sitemap" severity="secondary" [routerLink]="['/organization', orgName, 'integrations']"></button>
+        </div>
       </div>
     </div>
 
@@ -206,70 +214,6 @@
           }
         </div>
       }
-    </div>
-
-    <!-- Forge Webhooks -->
-    <div class="settings-section">
-      <h2>Forge Webhooks</h2>
-      <div class="settings-card">
-        <p class="text-secondary">
-          Generate a per-organization webhook secret. Configure your Git forge (Gitea, Forgejo, GitLab, or GitHub
-          without the App) to send push events to the displayed URL using this secret for HMAC-SHA256 verification.
-          Gradient will automatically trigger evaluations on matching projects when a push is received.
-        </p>
-        <p class="text-secondary">
-          The secret is shown <strong>once</strong> after generation. Store it securely before closing this page.
-        </p>
-        @if (forgeWebhookResult()) {
-          <div class="form-group">
-            <label>Webhook URL</label>
-            <div class="copy-row">
-              <input pInputText [value]="forgeWebhookResult()!.webhook_url" readonly class="w-full" />
-              <button pButton icon="pi pi-copy" severity="secondary" (click)="copyForgeWebhookUrl()"></button>
-            </div>
-          </div>
-          <div class="form-group">
-            <label>Webhook Secret (shown once)</label>
-            <div class="copy-row">
-              <input pInputText [value]="forgeWebhookResult()!.secret" readonly class="w-full secret-field" />
-              <button pButton icon="pi pi-copy" severity="secondary" (click)="copyForgeWebhookSecret()"></button>
-            </div>
-          </div>
-          <p class="text-secondary">
-            Select the forge type that matches your setup:
-            <code>{{ forgeWebhookResult()!.webhook_url.replace('/gitea/', '/forgejo/') }}</code> for Forgejo,
-            <code>{{ forgeWebhookResult()!.webhook_url.replace('/gitea/', '/gitlab/') }}</code> for GitLab, or
-            <code>{{ forgeWebhookResult()!.webhook_url.replace('/gitea/', '/github/') }}</code> for GitHub (without App).
-          </p>
-        }
-        <div class="form-actions">
-          <button
-            pButton
-            [label]="(hasForgeSecret() || forgeWebhookResult()) ? 'Rotate Secret' : 'Generate Webhook Secret'"
-            icon="pi pi-key"
-            [severity]="(hasForgeSecret() || forgeWebhookResult()) ? 'warn' : 'primary'"
-            (click)="generateForgeWebhookSecret()"
-            [loading]="generatingForgeSecret()"
-            [disabled]="generatingForgeSecret() || deletingForgeSecret()"
-          ></button>
-          @if (hasForgeSecret() || forgeWebhookResult()) {
-            <button
-              pButton
-              label="Delete Webhook"
-              icon="pi pi-trash"
-              severity="danger"
-              (click)="showDeleteForgeSecretDialog.set(true)"
-              [disabled]="generatingForgeSecret() || deletingForgeSecret()"
-            ></button>
-          }
-        </div>
-        @if (forgeSecretError()) {
-          <div class="message-banner error">
-            <span class="material-symbols-outlined">error</span>
-            {{ forgeSecretError() }}
-          </div>
-        }
-      </div>
     </div>
 
     <!-- Danger Zone -->
@@ -370,22 +314,6 @@
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showRegenerateKeyDialog.set(false)" [disabled]="generatingSSH()"></button>
     <button pButton label="Regenerate" severity="danger" icon="pi pi-refresh" (click)="confirmRegenerateSSHKey()" [loading]="generatingSSH()" [disabled]="generatingSSH()"></button>
-  </ng-template>
-</p-dialog>
-
-<!-- Delete Forge Webhook Secret Dialog -->
-<p-dialog
-  header="Delete Webhook"
-  [(visible)]="showDeleteForgeSecretDialog"
-  [modal]="true"
-  [style]="{ width: '420px' }"
-  [draggable]="false"
-  [resizable]="false"
->
-  <p>Are you sure you want to delete the forge webhook secret? Your Git forge will no longer be able to trigger evaluations via push events.</p>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showDeleteForgeSecretDialog.set(false)" [disabled]="deletingForgeSecret()"></button>
-    <button pButton label="Delete" severity="danger" icon="pi pi-trash" (click)="deleteForgeWebhookSecret()" [loading]="deletingForgeSecret()" [disabled]="deletingForgeSecret()"></button>
   </ng-template>
 </p-dialog>
 

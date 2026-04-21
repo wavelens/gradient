@@ -1,0 +1,291 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
+        <span class="breadcrumb-separator">/</span>
+        <a [routerLink]="['/organization', orgName, 'settings']" class="breadcrumb-link">Settings</a>
+        <span class="breadcrumb-separator">/</span>
+        <span class="breadcrumb-current">Integrations</span>
+      </div>
+      <h1>Integrations</h1>
+      <p class="text-secondary">Forge webhooks and status reporters for this organization</p>
+    </div>
+    <button pButton label="New Integration" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+  </div>
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading integrations..." />
+  } @else {
+    @if (githubAppAvailable()) {
+      <div class="settings-section">
+        <h2>GitHub App</h2>
+        <div class="settings-card">
+          <div class="github-row">
+            <div>
+              <h3>Enable GitHub App for this organization</h3>
+              <p class="text-secondary">When enabled, commit statuses and webhooks from the installed GitHub App will be routed to this organization.</p>
+            </div>
+            <p-toggleSwitch
+              [ngModel]="githubAppEnabled()"
+              (ngModelChange)="onGithubAppToggle($event)"
+              [disabled]="togglingGithub()"
+            />
+          </div>
+        </div>
+      </div>
+    }
+
+    <div class="settings-section">
+      <h2>Configured Integrations</h2>
+      @if (integrations().length === 0) {
+        <div class="empty-state">
+          <span class="material-symbols-outlined">hub</span>
+          <h3>No integrations</h3>
+          <p class="text-secondary">Create an inbound integration to receive forge webhooks, or an outbound integration to report build statuses.</p>
+          <button pButton label="New Integration" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+        </div>
+      } @else {
+        <div class="integrations-list">
+          @for (integration of integrations(); track integration.id) {
+            <div class="integration-row">
+              <div class="integration-header">
+                <div class="integration-info">
+                  <span class="material-symbols-outlined">{{ integration.kind === 'inbound' ? 'call_received' : 'call_made' }}</span>
+                  <div>
+                    <div class="integration-name">{{ integration.name }}</div>
+                    <div class="integration-meta text-secondary">
+                      <span class="badge" [class.badge-inbound]="integration.kind === 'inbound'" [class.badge-outbound]="integration.kind === 'outbound'">
+                        {{ integration.kind === 'inbound' ? 'Inbound' : 'Outbound' }}
+                      </span>
+                      <span class="badge badge-forge">{{ forgeLabel(integration.forge_type) }}</span>
+                      <span>Created {{ formatDate(integration.created_at) }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="integration-actions">
+                  <button
+                    pButton
+                    label="Edit"
+                    icon="pi pi-pencil"
+                    severity="secondary"
+                    size="small"
+                    (click)="openEditDialog(integration)"
+                  ></button>
+                  <button
+                    pButton
+                    label="Delete"
+                    icon="pi pi-trash"
+                    severity="danger"
+                    size="small"
+                    [loading]="deletingId() === integration.id"
+                    [disabled]="deletingId() !== null"
+                    (click)="deleteIntegration(integration)"
+                  ></button>
+                </div>
+              </div>
+
+              @if (integration.kind === 'inbound') {
+                <div class="integration-body">
+                  <div class="form-group">
+                    <label>Forge</label>
+                    <div class="forge-selector">
+                      @for (opt of inboundForgeOptions; track opt.value) {
+                        <button
+                          pButton
+                          type="button"
+                          [label]="opt.label"
+                          size="small"
+                          [severity]="inboundForge(integration.id) === opt.value ? 'primary' : 'secondary'"
+                          (click)="setInboundForge(integration.id, opt.value)"
+                        ></button>
+                      }
+                    </div>
+                    <small class="text-secondary">This integration can serve webhooks from any supported forge. Pick the one you are configuring.</small>
+                  </div>
+                  <div class="form-group">
+                    <label>Webhook URL</label>
+                    <div class="copy-row">
+                      <input pInputText [value]="inboundUrl(integration)" readonly class="w-full" />
+                      <button
+                        pButton
+                        [icon]="copiedUrlId() === integration.id ? 'pi pi-check' : 'pi pi-copy'"
+                        [severity]="copiedUrlId() === integration.id ? 'success' : 'secondary'"
+                        (click)="copyInboundUrl(integration)"
+                      ></button>
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label>Secret</label>
+                    @if (integration.has_secret) {
+                      <span class="status-chip status-ok">Configured</span>
+                    } @else {
+                      <span class="status-chip status-warn">Not set</span>
+                    }
+                  </div>
+                </div>
+              } @else {
+                <div class="integration-body">
+                  <div class="form-group">
+                    <label>Endpoint URL</label>
+                    <div class="mono-value">{{ integration.endpoint_url || '(not set — defaults will be used)' }}</div>
+                  </div>
+                  <div class="form-group">
+                    <label>Access Token</label>
+                    @if (integration.has_access_token) {
+                      <span class="status-chip status-ok">Configured</span>
+                    } @else {
+                      <span class="status-chip status-warn">Not set</span>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          }
+        </div>
+      }
+    </div>
+  }
+</div>
+
+<!-- Create Dialog -->
+<p-dialog
+  header="New Integration"
+  [(visible)]="showCreateDialog"
+  [modal]="true"
+  [style]="{ width: '520px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  @if (errorMessage()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ errorMessage() }}
+    </div>
+  }
+  <div class="form-group">
+    <label for="int-name">Name</label>
+    <input pInputText id="int-name" [(ngModel)]="formData.name" class="w-full" placeholder="e.g. main-gitea" />
+    <small class="text-secondary">Used in the webhook URL. Use letters, digits, and dashes.</small>
+  </div>
+  <div class="form-group">
+    <label for="int-kind">Kind</label>
+    <p-select
+      inputId="int-kind"
+      [(ngModel)]="formData.kind"
+      [options]="kindOptions"
+      optionLabel="label"
+      optionValue="value"
+      styleClass="w-full"
+    />
+  </div>
+  <div class="form-group">
+    <label for="int-forge">Forge</label>
+    <p-select
+      inputId="int-forge"
+      [(ngModel)]="formData.forge_type"
+      [options]="formData.kind === 'outbound' ? outboundForgeOptions() : allForgeOptions()"
+      optionLabel="label"
+      optionValue="value"
+      styleClass="w-full"
+    />
+  </div>
+
+  @if (formData.kind === 'inbound') {
+    <div class="form-group">
+      <label for="int-secret">Webhook Secret</label>
+      <div class="copy-row">
+        <input pInputText id="int-secret" [(ngModel)]="formData.secret" class="w-full" placeholder="Leave blank to omit verification" />
+        <button pButton type="button" label="Generate" icon="pi pi-refresh" severity="secondary" (click)="generateSecret()"></button>
+      </div>
+      <small class="text-secondary">Copy this into your forge's webhook secret field. Store it now — it will not be shown again.</small>
+    </div>
+  } @else {
+    <div class="form-group">
+      <label for="int-endpoint">Endpoint URL</label>
+      <input pInputText id="int-endpoint" [(ngModel)]="formData.endpoint_url" class="w-full"
+        placeholder="e.g. https://gitea.example.com" />
+      <small class="text-secondary">Base URL of your forge instance. For GitHub, leave blank to use github.com.</small>
+    </div>
+    <div class="form-group">
+      <label for="int-token">Access Token</label>
+      <input pInputText id="int-token" type="password" [(ngModel)]="formData.access_token" class="w-full"
+        placeholder="API token with commit status write permission" />
+    </div>
+  }
+
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="saving()"></button>
+    <button pButton label="Create" icon="pi pi-check" (click)="createIntegration()" [loading]="saving()" [disabled]="saving() || !formData.name.trim()"></button>
+  </ng-template>
+</p-dialog>
+
+<!-- Edit Dialog -->
+<p-dialog
+  header="Edit Integration"
+  [(visible)]="showEditDialog"
+  [modal]="true"
+  [style]="{ width: '520px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  @if (editingIntegration(); as target) {
+    @if (errorMessage()) {
+      <div class="dialog-error">
+        <span class="material-symbols-outlined">error</span>
+        {{ errorMessage() }}
+      </div>
+    }
+    <div class="form-group">
+      <label for="edit-name">Name</label>
+      <input pInputText id="edit-name" [(ngModel)]="formData.name" class="w-full" />
+    </div>
+    <div class="form-group">
+      <label for="edit-forge">Forge</label>
+      <p-select
+        inputId="edit-forge"
+        [(ngModel)]="formData.forge_type"
+        [options]="target.kind === 'outbound' ? outboundForgeOptions() : allForgeOptions()"
+        optionLabel="label"
+        optionValue="value"
+        styleClass="w-full"
+      />
+    </div>
+    @if (target.kind === 'inbound') {
+      <div class="form-group">
+        <label for="edit-secret">Webhook Secret</label>
+        <div class="copy-row">
+          <input pInputText id="edit-secret" [(ngModel)]="formData.secret" class="w-full" placeholder="Leave blank to keep existing" />
+          <button pButton type="button" label="Generate" icon="pi pi-refresh" severity="secondary" (click)="generateSecret()"></button>
+        </div>
+        <small class="text-secondary">Currently {{ target.has_secret ? 'configured' : 'not set' }}. Entering a new value replaces it.</small>
+        @if (target.has_secret) {
+          <button pButton type="button" label="Clear Secret" icon="pi pi-trash" severity="danger" size="small" class="mt-sm" (click)="clearSecret()" [disabled]="saving()"></button>
+        }
+      </div>
+    } @else {
+      <div class="form-group">
+        <label for="edit-endpoint">Endpoint URL</label>
+        <input pInputText id="edit-endpoint" [(ngModel)]="formData.endpoint_url" class="w-full" />
+      </div>
+      <div class="form-group">
+        <label for="edit-token">Access Token</label>
+        <input pInputText id="edit-token" type="password" [(ngModel)]="formData.access_token" class="w-full" placeholder="Leave blank to keep existing" />
+        <small class="text-secondary">Currently {{ target.has_access_token ? 'configured' : 'not set' }}.</small>
+        @if (target.has_access_token) {
+          <button pButton type="button" label="Clear Token" icon="pi pi-trash" severity="danger" size="small" class="mt-sm" (click)="clearAccessToken()" [disabled]="saving()"></button>
+        }
+      </div>
+    }
+  }
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="saving()"></button>
+    <button pButton label="Save" icon="pi pi-check" (click)="saveEdit()" [loading]="saving()" [disabled]="saving()"></button>
+  </ng-template>
+</p-dialog>

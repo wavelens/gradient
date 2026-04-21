@@ -20,6 +20,7 @@ nav:
     - CLI: usage/cli.md
     - API: usage/api.md
     - Pull Deployment: usage/pull-deployment.md
+    - Forge Integration: usage/integration.md
   - Development:
     - Architecture: development/architecture.md
     - Internals: development/internals.md

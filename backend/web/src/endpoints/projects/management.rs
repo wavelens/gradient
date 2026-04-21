@@ -11,7 +11,6 @@ use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use chrono::Utc;
-use core::ci::encrypt_webhook_secret;
 use core::db::{get_any_organization_by_name, get_organization_by_name};
 use core::nix::RepositoryUrl;
 use core::sources::check_project_updates;
@@ -45,9 +44,6 @@ pub struct PatchProjectRequest {
     pub repository: Option<String>,
     pub evaluation_wildcard: Option<String>,
     pub keep_evaluations: Option<i32>,
-    pub ci_reporter_type: Option<String>,
-    pub ci_reporter_url: Option<String>,
-    pub ci_reporter_token: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -144,8 +140,6 @@ pub async fn get(
                 created_at: p.created_at,
                 managed: p.managed,
                 can_edit,
-                ci_reporter_type: p.ci_reporter_type,
-                ci_reporter_url: p.ci_reporter_url,
             }
         })
         .collect();
@@ -220,9 +214,6 @@ pub async fn put(
         created_at: Set(Utc::now().naive_utc()),
         managed: Set(false),
         keep_evaluations: Set(30),
-        ci_reporter_type: Set(None),
-        ci_reporter_url: Set(None),
-        ci_reporter_token: Set(None),
     };
 
     let project = project.insert(&state.db).await?;
@@ -282,8 +273,6 @@ pub async fn get_project(
             managed: project.managed,
             keep_evaluations: project.keep_evaluations,
             can_edit,
-            ci_reporter_type: project.ci_reporter_type,
-            ci_reporter_url: project.ci_reporter_url,
         },
     }))
 }
@@ -317,11 +306,6 @@ pub async fn patch_project(
     if let Some(keep) = body.keep_evaluations {
         patcher.apply_keep_evaluations(keep)?;
     }
-    patcher.apply_ci_reporter_fields(
-        body.ci_reporter_type,
-        body.ci_reporter_url,
-        body.ci_reporter_token,
-    )?;
 
     aproject.force_evaluation = Set(true);
     aproject.update(&state.db).await?;
@@ -407,32 +391,6 @@ impl<'a> ProjectPatcher<'a> {
         Ok(())
     }
 
-    /// Apply CI reporter fields — treat empty string as "remove" (set to None).
-    fn apply_ci_reporter_fields(
-        &mut self,
-        ci_type: Option<String>,
-        ci_url: Option<String>,
-        ci_token: Option<String>,
-    ) -> WebResult<()> {
-        if let Some(t) = ci_type {
-            self.aproject.ci_reporter_type = Set(if t.is_empty() { None } else { Some(t) });
-        }
-        if let Some(u) = ci_url {
-            self.aproject.ci_reporter_url = Set(if u.is_empty() { None } else { Some(u) });
-        }
-        if let Some(token) = ci_token {
-            if token.is_empty() {
-                self.aproject.ci_reporter_token = Set(None);
-            } else {
-                let encrypted = encrypt_webhook_secret(&self.state.cli.crypt_secret_file, &token)
-                    .map_err(|e| {
-                    WebError::BadRequest(format!("Failed to encrypt CI token: {}", e))
-                })?;
-                self.aproject.ci_reporter_token = Set(Some(encrypted));
-            }
-        }
-        Ok(())
-    }
 }
 
 pub async fn delete_project(
@@ -451,25 +409,6 @@ pub async fn delete_project(
     };
 
     Ok(Json(res))
-}
-
-pub async fn delete_project_integration(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Path((organization, project)): Path<(String, String)>,
-) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project) =
-        load_editable_project(&state, user.id, organization, project).await?;
-    let mut aproject: AProject = project.into();
-    aproject.ci_reporter_type = Set(None);
-    aproject.ci_reporter_url = Set(None);
-    aproject.ci_reporter_token = Set(None);
-    aproject.update(&state.db).await?;
-
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Integration removed".to_string(),
-    }))
 }
 
 pub async fn post_project_active(

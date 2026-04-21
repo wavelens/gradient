@@ -179,9 +179,9 @@ impl<'a> StateApplicator<'a> {
                 org.description = Set(state_org.description.clone());
                 org.public_key = Set(public_key);
                 org.private_key = Set(encrypted_private_key.clone());
-                org.use_nix_store = Set(state_org.use_nix_store);
                 org.created_by = Set(*created_by_id);
                 org.public = Set(state_org.public);
+                org.github_app_enabled = Set(state_org.github_app_enabled);
                 org.managed = Set(true);
                 org.update(self.db).await?;
                 tracing::info!("Updated managed organization: {}", state_org.name);
@@ -195,13 +195,12 @@ impl<'a> StateApplicator<'a> {
                     description: Set(state_org.description.clone()),
                     public_key: Set(public_key),
                     private_key: Set(encrypted_private_key),
-                    use_nix_store: Set(state_org.use_nix_store),
                     public: Set(state_org.public),
                     created_by: Set(*created_by_id),
                     created_at: Set(now),
                     managed: Set(true),
                     github_installation_id: Set(None),
-                    forge_webhook_secret: Set(None),
+                    github_app_enabled: Set(state_org.github_app_enabled),
                 };
                 org.insert(self.db).await?;
                 tracing::info!("Created managed organization: {}", state_org.name);
@@ -258,46 +257,6 @@ impl<'a> StateApplicator<'a> {
 
             let now = Utc::now().naive_utc();
 
-            let encrypted_ci_token: Option<Option<String>> = if state_project.ci_reporter_has_token
-            {
-                let credentials_dir =
-                    std::env::var("GRADIENT_CREDENTIALS_DIR").unwrap_or_else(|_| ".".to_string());
-                let token_path = format!(
-                    "{}/gradient_project_{}_ci_token",
-                    credentials_dir, state_project.name
-                );
-                match fs::read_to_string(&token_path) {
-                    Ok(token) => {
-                        let secret = load_secret_bytes(self.crypt_secret_file);
-                        match crypter::encrypt_with_password(secret.expose(), token.trim()) {
-                            Some(encrypted_bytes) => {
-                                Some(Some(general_purpose::STANDARD.encode(&encrypted_bytes)))
-                            }
-                            None => {
-                                tracing::warn!(
-                                    project = %state_project.name,
-                                    "Failed to encrypt CI reporter token, skipping"
-                                );
-                                None
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e,
-                            path = %token_path,
-                            project = %state_project.name,
-                            "Failed to read CI reporter token credential, skipping"
-                        );
-                        None
-                    }
-                }
-            } else if state_project.ci_reporter_type.is_some() {
-                Some(None)
-            } else {
-                None
-            };
-
             if let Some(existing) = existing_project {
                 let mut proj: project::ActiveModel = existing.into();
                 proj.organization = Set(*org_id);
@@ -308,15 +267,6 @@ impl<'a> StateApplicator<'a> {
                 proj.evaluation_wildcard = Set(state_project.evaluation_wildcard.clone());
                 proj.force_evaluation = Set(state_project.force_evaluation);
                 proj.created_by = Set(*created_by_id);
-                if let Some(ci_type) = &state_project.ci_reporter_type {
-                    proj.ci_reporter_type = Set(Some(ci_type.clone()));
-                }
-                if let Some(ci_url) = &state_project.ci_reporter_url {
-                    proj.ci_reporter_url = Set(Some(ci_url.clone()));
-                }
-                if let Some(token_opt) = encrypted_ci_token {
-                    proj.ci_reporter_token = Set(token_opt);
-                }
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
                 tracing::info!("Updated managed project: {}", state_project.name);
@@ -332,9 +282,6 @@ impl<'a> StateApplicator<'a> {
                     evaluation_wildcard: Set(state_project.evaluation_wildcard.clone()),
                     force_evaluation: Set(state_project.force_evaluation),
                     created_by: Set(*created_by_id),
-                    ci_reporter_type: Set(state_project.ci_reporter_type.clone()),
-                    ci_reporter_url: Set(state_project.ci_reporter_url.clone()),
-                    ci_reporter_token: Set(encrypted_ci_token.unwrap_or(None)),
                     last_evaluation: Set(None),
                     last_check_at: Set(now),
                     created_at: Set(now),

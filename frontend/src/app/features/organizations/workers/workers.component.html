@@ -95,10 +95,11 @@
               </span>
               <button
                 pButton
-                label="Rename"
+                label="Edit"
                 icon="pi pi-pencil"
                 severity="secondary"
                 size="small"
+                class="worker-action-btn"
                 [disabled]="worker.managed || deletingId() !== null || togglingId() !== null || renaming()"
                 (click)="openRenameDialog(worker)"
               ></button>
@@ -108,6 +109,7 @@
                 [icon]="worker.active ? 'pi pi-pause' : 'pi pi-play'"
                 [severity]="worker.active ? 'warn' : 'success'"
                 size="small"
+                class="worker-action-btn"
                 [disabled]="worker.managed || togglingId() !== null || deletingId() !== null"
                 [loading]="togglingId() === worker.worker_id"
                 (click)="requestToggleWorker(worker)"
@@ -117,6 +119,8 @@
                 label="Delete"
                 icon="pi pi-trash"
                 severity="danger"
+                size="small"
+                class="worker-action-btn"
                 [disabled]="worker.managed || deletingId() !== null || togglingId() !== null"
                 [loading]="deletingId() === worker.worker_id"
                 (click)="deleteWorker(worker)"

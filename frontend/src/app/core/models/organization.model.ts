@@ -10,14 +10,15 @@ export interface Organization {
   display_name: string;
   description: string;
   public_key?: string;
-  use_nix_store: boolean;
   public: boolean;
   managed: boolean;
   created_by?: string;
   created_at?: string;
   role?: 'Admin' | 'Write' | 'View';
   running_evaluations?: number;
-  forge_webhook_secret_set?: boolean;
+  github_installation_id?: number | null;
+  github_app_enabled?: boolean;
+  github_app_available?: boolean;
 }
 
 export interface OrganizationMember {

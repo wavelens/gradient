@@ -9,25 +9,25 @@
 //! These routes are **unauthenticated** — they verify callers via HMAC
 //! signatures or token headers instead of JWTs.
 //!
-//! | Endpoint                              | Forge          | Auth method             |
-//! |---------------------------------------|----------------|-------------------------|
-//! | `POST /hooks/github`                  | GitHub App     | `X-Hub-Signature-256`   |
-//! | `POST /hooks/{forge}/{org}`           | Gitea/Forgejo/GitLab | per-org secret   |
+//! | Endpoint                                              | Forge          | Auth method             |
+//! |-------------------------------------------------------|----------------|-------------------------|
+//! | `POST /hooks/github`                                  | GitHub App     | `X-Hub-Signature-256`   |
+//! | `POST /hooks/{forge}/{org}/{integration_name}`        | Gitea/Forgejo/GitLab | per-integration secret |
 
 mod events;
 mod trigger;
 
-use crate::error::{WebError, WebResult};
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
-use core::ci::decrypt_webhook_secret;
-use core::ci::{verify_gitea_signature, verify_github_signature};
+use core::ci::{
+    ForgeType, IntegrationKind, decrypt_webhook_secret, verify_gitea_signature,
+    verify_github_signature,
+};
 use core::types::input::load_secret;
 use core::types::*;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use tracing::{debug, warn};
 
@@ -87,16 +87,25 @@ pub async fn github_app_webhook(
 
 // ── Generic forge webhook ──────────────────────────────────────────────────
 
-/// `POST /api/v1/hooks/{forge}/{org_name}` — receives push events from
-/// Gitea, Forgejo, or GitLab configured to send webhooks to Gradient.
+/// `POST /api/v1/hooks/{forge}/{org_name}/{integration_name}` — receives push
+/// events from a named inbound integration.
 ///
 /// The `forge` path segment is one of: `gitea`, `forgejo`, `gitlab`.
 pub async fn forge_webhook(
     State(state): State<Arc<ServerState>>,
-    Path((forge, org_name)): Path<(String, String)>,
+    Path((forge, org_name, integration_name)): Path<(String, String, String)>,
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
+    let Some(forge_type) = ForgeType::from_path_segment(&forge) else {
+        warn!(forge = %forge, "Unknown forge path segment");
+        return StatusCode::NOT_FOUND;
+    };
+    // GitHub deliveries go through the App webhook at `/hooks/github`, not here.
+    if matches!(forge_type, ForgeType::GitHub) {
+        return StatusCode::NOT_FOUND;
+    }
+
     let org = match EOrganization::find()
         .filter(COrganization::Name.eq(org_name.as_str()))
         .one(&state.db)
@@ -110,8 +119,29 @@ pub async fn forge_webhook(
         }
     };
 
-    let Some(ref encrypted_secret) = org.forge_webhook_secret else {
-        warn!(org = %org_name, forge = %forge, "Forge webhook received but org has no forge_webhook_secret configured");
+    // A single inbound integration can serve Gitea/Forgejo/GitLab — the frontend
+    // chooses which forge's webhook URL to copy. Signature verification uses the
+    // `forge` path segment to pick the HMAC scheme.
+    let integration = match EIntegration::find()
+        .filter(CIntegration::Organization.eq(org.id))
+        .filter(CIntegration::Kind.eq(IntegrationKind::Inbound.as_i16()))
+        .filter(CIntegration::Name.eq(integration_name.as_str()))
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(i)) => i,
+        Ok(None) => {
+            warn!(org = %org_name, %forge, integration = %integration_name, "Integration not found");
+            return StatusCode::NOT_FOUND;
+        }
+        Err(e) => {
+            warn!(error = %e, "DB error looking up integration for forge webhook");
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
+
+    let Some(ref encrypted_secret) = integration.secret else {
+        warn!(integration_id = %integration.id, "Integration has no secret configured");
         return StatusCode::SERVICE_UNAVAILABLE;
     };
 
@@ -119,21 +149,20 @@ pub async fn forge_webhook(
         match decrypt_webhook_secret(&state.cli.crypt_secret_file, encrypted_secret) {
             Ok(s) => s,
             Err(e) => {
-                warn!(error = %e, org = %org_name, "Failed to decrypt forge_webhook_secret");
+                warn!(error = %e, integration_id = %integration.id, "Failed to decrypt integration secret");
                 return StatusCode::INTERNAL_SERVER_ERROR;
             }
         };
 
-    let verified = verify_forge_signature(&forge, plaintext_secret.expose(), &headers, &body);
-    if !verified {
-        warn!(org = %org_name, forge = %forge, "Forge webhook: invalid signature");
+    if !verify_forge_signature(forge_type, plaintext_secret.expose(), &headers, &body) {
+        warn!(org = %org_name, forge = %forge, integration = %integration_name, "Forge webhook: invalid signature");
         return StatusCode::UNAUTHORIZED;
     }
 
-    let event = match forge.as_str() {
-        "gitea" | "forgejo" | "github" => ParsedPushEvent::from_gitea(&body),
-        "gitlab" => ParsedPushEvent::from_gitlab(&body),
-        _ => None,
+    let event = match forge_type {
+        ForgeType::Gitea | ForgeType::Forgejo => ParsedPushEvent::from_gitea(&body),
+        ForgeType::GitLab => ParsedPushEvent::from_gitlab(&body),
+        ForgeType::GitHub => return StatusCode::NOT_FOUND, // unreachable; checked above
     };
     if let Some(event) = event {
         event.trigger(&state).await;
@@ -142,37 +171,36 @@ pub async fn forge_webhook(
     StatusCode::OK
 }
 
-fn verify_forge_signature(forge: &str, secret: &str, headers: &HeaderMap, body: &[u8]) -> bool {
+fn verify_forge_signature(
+    forge: ForgeType,
+    secret: &str,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> bool {
     match forge {
-        "gitea" | "forgejo" => {
+        ForgeType::Gitea | ForgeType::Forgejo => {
             let sig = headers
                 .get("X-Gitea-Signature")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
             verify_gitea_signature(secret, sig, body)
         }
-        "gitlab" => {
+        ForgeType::GitLab => {
             let token = headers
                 .get("X-Gitlab-Token")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
             token == secret
         }
-        "github" => {
+        ForgeType::GitHub => {
             let sig = headers
                 .get("X-Hub-Signature-256")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
             verify_github_signature(secret, sig, body)
         }
-        unknown => {
-            warn!(forge = %unknown, "Unknown forge type in webhook path");
-            false
-        }
     }
 }
-
-// ── Org forge webhook secret management ───────────────────────────────────
 
 #[cfg(test)]
 mod verify_tests {
@@ -183,119 +211,25 @@ mod verify_tests {
     fn gitlab_matches_token_exactly() {
         let mut h = HeaderMap::new();
         h.insert("X-Gitlab-Token", HeaderValue::from_static("s3cret"));
-        assert!(verify_forge_signature("gitlab", "s3cret", &h, b""));
+        assert!(verify_forge_signature(ForgeType::GitLab, "s3cret", &h, b""));
     }
 
     #[test]
     fn gitlab_rejects_mismatched_token() {
         let mut h = HeaderMap::new();
         h.insert("X-Gitlab-Token", HeaderValue::from_static("wrong"));
-        assert!(!verify_forge_signature("gitlab", "s3cret", &h, b""));
+        assert!(!verify_forge_signature(ForgeType::GitLab, "s3cret", &h, b""));
     }
 
     #[test]
     fn gitlab_rejects_missing_token() {
         let h = HeaderMap::new();
-        assert!(!verify_forge_signature("gitlab", "s3cret", &h, b""));
-    }
-
-    #[test]
-    fn unknown_forge_is_rejected() {
-        let h = HeaderMap::new();
-        assert!(!verify_forge_signature("bitbucket", "s3cret", &h, b""));
+        assert!(!verify_forge_signature(ForgeType::GitLab, "s3cret", &h, b""));
     }
 
     #[test]
     fn gitea_rejects_missing_signature() {
         let h = HeaderMap::new();
-        assert!(!verify_forge_signature("gitea", "s3cret", &h, b"body"));
+        assert!(!verify_forge_signature(ForgeType::Gitea, "s3cret", &h, b"body"));
     }
-}
-
-/// Response for the forge webhook secret endpoint.
-#[derive(serde::Serialize)]
-pub struct ForgeWebhookSecretResponse {
-    pub webhook_url: String,
-    pub secret: String,
-}
-
-async fn load_forge_editable_org(
-    state: &Arc<ServerState>,
-    user_id: uuid::Uuid,
-    org_name: &str,
-) -> WebResult<MOrganization> {
-    use super::projects::user_can_edit;
-
-    let org = EOrganization::find()
-        .filter(COrganization::Name.eq(org_name))
-        .one(&state.db)
-        .await?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
-
-    if !user_can_edit(state, user_id, org.id).await? {
-        return Err(WebError::Forbidden(
-            "You do not have permission to manage forge webhooks for this organization."
-                .to_string(),
-        ));
-    }
-
-    Ok(org)
-}
-
-/// `POST /api/v1/orgs/{organization}/forge-webhook-secret` — generates or
-/// rotates the per-org forge webhook secret.
-pub async fn post_forge_webhook_secret(
-    State(state): State<Arc<ServerState>>,
-    axum::Extension(user): axum::Extension<MUser>,
-    Path(organization): Path<String>,
-) -> WebResult<axum::Json<BaseResponse<ForgeWebhookSecretResponse>>> {
-    use core::ci::encrypt_webhook_secret;
-    use rand::RngExt;
-
-    let org = load_forge_editable_org(&state, user.id, &organization).await?;
-
-    let mut secret_bytes = [0u8; 32];
-    rand::rng().fill(&mut secret_bytes);
-    let plaintext = hex::encode(secret_bytes);
-
-    let encrypted =
-        encrypt_webhook_secret(&state.cli.crypt_secret_file, &plaintext).map_err(|e| {
-            WebError::InternalServerError(format!("Failed to encrypt webhook secret: {e}"))
-        })?;
-
-    let mut active = org.into_active_model();
-    active.forge_webhook_secret = Set(Some(encrypted));
-    active.update(&state.db).await?;
-
-    let webhook_url = format!(
-        "{}/api/v1/hooks/gitea/{}",
-        state.cli.serve_url, organization
-    );
-
-    Ok(axum::Json(BaseResponse {
-        error: false,
-        message: ForgeWebhookSecretResponse {
-            webhook_url,
-            secret: plaintext,
-        },
-    }))
-}
-
-/// `DELETE /api/v1/orgs/{organization}/forge-webhook-secret` — removes the
-/// per-org forge webhook secret.
-pub async fn delete_forge_webhook_secret(
-    State(state): State<Arc<ServerState>>,
-    axum::Extension(user): axum::Extension<MUser>,
-    Path(organization): Path<String>,
-) -> WebResult<axum::Json<BaseResponse<String>>> {
-    let org = load_forge_editable_org(&state, user.id, &organization).await?;
-
-    let mut active = org.into_active_model();
-    active.forge_webhook_secret = Set(None);
-    active.update(&state.db).await?;
-
-    Ok(axum::Json(BaseResponse {
-        error: false,
-        message: "Forge webhook secret deleted.".to_string(),
-    }))
 }

@@ -163,6 +163,16 @@ export const routes: Routes = [
           ),
       },
 
+      // Integrations
+      {
+        path: 'organization/:org/integrations',
+        title: 'Integrations',
+        loadComponent: () =>
+          import('./features/organizations/integrations/integrations.component').then(
+            (m) => m.IntegrationsComponent
+          ),
+      },
+
       // Cache Subscriptions
       {
         path: 'organization/:org/caches',

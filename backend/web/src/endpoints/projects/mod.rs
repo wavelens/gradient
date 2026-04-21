@@ -5,10 +5,12 @@
  */
 
 pub mod evaluations;
+pub mod integrations;
 pub mod management;
 pub mod metrics;
 
 pub use self::evaluations::*;
+pub use self::integrations::*;
 pub use self::management::*;
 pub use self::metrics::*;
 
@@ -43,9 +45,6 @@ pub struct ProjectResponse {
     pub managed: bool,
     pub keep_evaluations: i32,
     pub can_edit: bool,
-    pub ci_reporter_type: Option<String>,
-    // Base URL of the CI host. Token is intentionally omitted from GET responses.
-    pub ci_reporter_url: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

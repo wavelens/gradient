@@ -1,0 +1,201 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: $spacing-xxl;
+
+  h1 { font-size: $font-size-xxl; margin: 0 0 $spacing-sm 0; }
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-sm;
+  font-size: $font-size-sm;
+  color: $text-secondary;
+
+  .breadcrumb-link { color: $text-secondary; &:hover { color: $text-primary; } }
+  .breadcrumb-separator { color: $text-light; }
+  .breadcrumb-current { color: $text-primary; }
+}
+
+.settings-section {
+  margin-bottom: $spacing-xxl;
+
+  h2 { font-size: $font-size-xl; margin: 0 0 $spacing-md 0; }
+}
+
+.settings-card {
+  padding: $spacing-lg;
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: $spacing-xxl;
+  text-align: center;
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+
+  .material-symbols-outlined { font-size: 48px; color: $text-secondary; margin-bottom: $spacing-md; }
+  h3 { margin: 0 0 $spacing-sm 0; }
+  p { margin: 0 0 $spacing-lg 0; }
+}
+
+.integrations-list {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-md;
+}
+
+.integration-row {
+  display: flex;
+  flex-direction: column;
+  padding: $spacing-md $spacing-lg;
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+}
+
+.integration-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-md;
+}
+
+.integration-info {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+
+  .material-symbols-outlined { font-size: 24px; color: $text-secondary; }
+  .integration-name {
+    font-weight: 500;
+    font-family: $font-family-mono;
+    color: $text-primary;
+  }
+  .integration-meta {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    margin-top: $spacing-xs;
+    font-size: $font-size-sm;
+    flex-wrap: wrap;
+  }
+}
+
+.integration-actions {
+  display: flex;
+  gap: $spacing-sm;
+}
+
+.integration-body {
+  margin-top: $spacing-md;
+  padding-top: $spacing-md;
+  border-top: 1px solid $color-border;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: $border-radius-sm;
+  font-size: $font-size-xs;
+  font-weight: 500;
+
+  &.badge-inbound {
+    background: rgba($color-success, 0.15);
+    color: $color-success;
+  }
+  &.badge-outbound {
+    background: rgba($color-warning, 0.15);
+    color: $color-warning;
+  }
+  &.badge-forge {
+    background: $color-secondary;
+    color: $text-secondary;
+  }
+}
+
+.status-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: $border-radius-sm;
+  font-size: $font-size-sm;
+  font-weight: 500;
+
+  &.status-ok {
+    background: rgba($color-success, 0.15);
+    color: $color-success;
+  }
+  &.status-warn {
+    background: rgba($color-warning, 0.15);
+    color: $color-warning;
+  }
+}
+
+.forge-selector {
+  display: flex;
+  gap: $spacing-sm;
+  margin-bottom: $spacing-xs;
+}
+
+.copy-row {
+  display: flex;
+  gap: $spacing-sm;
+  align-items: stretch;
+}
+
+.mono-value {
+  font-family: $font-family-mono;
+  color: $text-primary;
+  word-break: break-all;
+}
+
+.form-group {
+  margin-bottom: $spacing-md;
+  label { display: block; margin-bottom: $spacing-sm; font-size: $font-size-sm; font-weight: 500; }
+  small { display: block; margin-top: $spacing-xs; }
+}
+
+.dialog-error {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  background: rgba($color-danger, 0.1);
+  border: 1px solid rgba($color-danger, 0.5);
+  border-radius: $border-radius-md;
+  padding: $spacing-md;
+  color: $color-danger;
+  margin-bottom: $spacing-md;
+
+  .material-symbols-outlined { font-size: 20px; }
+}
+
+.github-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-md;
+
+  h3 { margin: 0 0 $spacing-xs 0; font-size: $font-size-md; }
+  p { margin: 0; }
+}
+
+.w-full { width: 100%; }
+.mt-sm { margin-top: $spacing-sm; }

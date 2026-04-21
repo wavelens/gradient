@@ -7,12 +7,14 @@
 { lib, pkgs, config, ... }: let
   cfg = config.services.gradient;
   logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
-  augmentedProjects = lib.mapAttrs (_: proj: proj // {
-    ci_reporter_has_token = proj.ci_reporter_token_file != null;
-  }) cfg.state.projects;
+
+  augmentedIntegrations = lib.mapAttrs (_: int: int // {
+    has_secret_file = int.secret_file != null;
+    has_access_token_file = int.access_token_file != null;
+  }) cfg.state.integrations;
 
   stateJsonFile = pkgs.writers.writeJSON "gradient-state.json" (cfg.state // {
-    projects = augmentedProjects;
+    integrations = augmentedIntegrations;
   });
 
   userPasswordFiles = lib.mapAttrsToList (_: user: "gradient_user_${user.username}_password:${user.password_file}") cfg.state.users;
@@ -20,10 +22,14 @@
   cacheSigningKeyFiles = lib.mapAttrsToList (_: cache: "gradient_cache_${cache.name}_signing_key:${cache.signing_key_file}") cfg.state.caches;
   apiKeyFiles = lib.mapAttrsToList (_: api_key: "gradient_api_${api_key.name}_key:${api_key.key_file}") cfg.state.api_keys;
   workerTokenFiles = lib.mapAttrsToList (_: worker: "gradient_worker_${worker.worker_id}_token:${worker.token_file}") cfg.state.workers;
-  projectCiTokenFiles = lib.concatLists (lib.mapAttrsToList (_: proj:
-    lib.optional (proj.ci_reporter_token_file != null)
-      "gradient_project_${proj.name}_ci_token:${proj.ci_reporter_token_file}"
-  ) cfg.state.projects);
+  integrationSecretFiles = lib.concatLists (lib.mapAttrsToList (_: int:
+    lib.optional (int.secret_file != null)
+      "gradient_integration_${int.name}_secret:${int.secret_file}"
+  ) cfg.state.integrations);
+  integrationTokenFiles = lib.concatLists (lib.mapAttrsToList (_: int:
+    lib.optional (int.access_token_file != null)
+      "gradient_integration_${int.name}_token:${int.access_token_file}"
+  ) cfg.state.integrations);
 in {
   # disabledModules = [
   #   "services/gradient/default.nix"
@@ -359,7 +365,7 @@ in {
           "gradient_github_app_private_key:${cfg.githubApp.privateKeyFile}"
           "gradient_github_app_webhook_secret:${cfg.githubApp.webhookSecretFile}"
         ] ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
-          ++ workerTokenFiles ++ projectCiTokenFiles;
+          ++ workerTokenFiles ++ integrationSecretFiles ++ integrationTokenFiles;
       };
 
       environment = {

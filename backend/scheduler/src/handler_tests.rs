@@ -216,9 +216,6 @@ fn make_project(id: Uuid, org_id: Uuid) -> entity::project::Model {
         created_at: test_date(),
         managed: false,
         keep_evaluations: 30,
-        ci_reporter_type: None,
-        ci_reporter_url: None,
-        ci_reporter_token: None,
     }
 }
 
