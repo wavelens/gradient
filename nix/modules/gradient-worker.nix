@@ -116,7 +116,6 @@ in {
       fetch = lib.mkEnableOption "fetch capability - prefetch flake inputs and sources";
       eval  = lib.mkEnableOption "eval capability - run Nix flake evaluations";
       build = lib.mkEnableOption "build capability - execute Nix store builds";
-      sign  = lib.mkEnableOption "sign capability - sign and upload store paths";
     };
 
     settings = {
@@ -294,7 +293,6 @@ in {
           GRADIENT_WORKER_CAPABILITY_FETCH            = lib.boolToString cfg.capabilities.fetch;
           GRADIENT_WORKER_CAPABILITY_EVAL             = lib.boolToString cfg.capabilities.eval;
           GRADIENT_WORKER_CAPABILITY_BUILD            = lib.boolToString cfg.capabilities.build;
-          GRADIENT_WORKER_CAPABILITY_SIGN             = lib.boolToString cfg.capabilities.sign;
           GRADIENT_LOG_LEVEL                          = cfg.settings.logLevel.default;
           RUST_LOG                                    = cfg.settings.logLevel.default;
         } // lib.optionalAttrs (cfg.settings.logLevel.eval != null) {

@@ -149,7 +149,6 @@ fn make_build_job(build_id: Uuid, eval_id: Uuid, org_id: Uuid) -> PendingBuildJo
                 build_id: build_id.to_string(),
                 drv_path: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv".into(),
             }],
-            sign: false,
         },
         required_paths: vec![],
         architecture: "x86_64-linux".into(),
@@ -2361,55 +2360,6 @@ async fn build_failed_cascades_transitively_through_graph() {
 // The current fetch_repository() returns Ok(()) without cloning anything.
 // A proper implementation needs git2 integration.
 // See: worker/src/executor/fetch.rs:42-47
-
-// ── Group S: NarReady processing ────────────────────────────────────────────
-
-/// When the server receives NarReady with a store_path, nar_size, and nar_hash,
-/// it should update the matching derivation_output row with nar_size and file_hash.
-#[tokio::test]
-async fn nar_ready_updates_derivation_output() {
-    let output_id = Uuid::new_v4();
-    let drv_id = Uuid::new_v4();
-    let store_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-hello";
-
-    let existing_output = make_drv_output(output_id, drv_id, "out", store_path);
-
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. find derivation_output by store_path
-        .append_query_results([vec![existing_output.clone()]])
-        // 2. update derivation_output (RETURNING)
-        .append_query_results([vec![entity::derivation_output::Model {
-            nar_size: Some(12345),
-            file_hash: Some("sha256-abc123".into()),
-            ..existing_output
-        }]])
-        .into_connection();
-
-    let state = test_support::prelude::test_state(db);
-    let result = build_handler::handle_nar_ready(&state, store_path, 12345, "sha256-abc123").await;
-    assert!(
-        result.is_ok(),
-        "nar_ready should succeed: {:?}",
-        result.err()
-    );
-}
-
-/// When NarReady references a store_path that doesn't exist in the DB,
-/// the handler logs a warning but doesn't error.
-#[tokio::test]
-async fn nar_ready_unknown_path_warns() {
-    let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // 1. find derivation_output by store_path → empty
-        .append_query_results([Vec::<MDerivationOutput>::new()])
-        .into_connection();
-
-    let state = test_support::prelude::test_state(db);
-    let result = build_handler::handle_nar_ready(&state, "/nix/store/unknown-path", 0, "").await;
-    assert!(
-        result.is_ok(),
-        "nar_ready for unknown path should not error"
-    );
-}
 
 // ── Group T: Credentials ────────────────────────────────────────────────────
 // Credential delivery (SSH keys, signing keys) happens in the proto handler

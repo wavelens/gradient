@@ -212,7 +212,6 @@
           capabilities = {
             eval  = true;
             build = true;
-            sign  = true;
           };
         };
       };

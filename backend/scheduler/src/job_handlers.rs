@@ -25,15 +25,6 @@ use crate::jobs::{Assignment, PendingBuildJob, PendingEvalJob, PendingJob, Worke
 use crate::worker_pool::WorkerInfo;
 use crate::{build, ci, dispatch, eval};
 
-/// Worker-aware override: only enable `BuildJob.sign` when the receiving
-/// worker advertised the `sign` capability. Without this the worker would
-/// enter the signing branch with no delivered keys and log a warning.
-fn apply_sign_flag(assignment: &mut Assignment, worker_can_sign: bool) {
-    if let gradient_core::types::proto::Job::Build(ref mut bj) = assignment.job {
-        bj.sign = worker_can_sign;
-    }
-}
-
 impl Scheduler {
     // ── Job queue ─────────────────────────────────────────────────────────────
 
@@ -53,24 +44,6 @@ impl Scheduler {
             .write()
             .await
             .add_pending(job_id, PendingJob::Build(job));
-        self.job_notify.notify_waiters();
-        candidate
-    }
-
-    /// Enqueue a [`PendingSignJob`] — a batch narinfo-signing job that the
-    /// background scanner produces when `cached_path` rows are missing
-    /// `cached_path_signature` entries for one or more of the owning org's
-    /// caches.
-    pub async fn enqueue_sign_job(
-        &self,
-        job_id: String,
-        job: crate::jobs::PendingSignJob,
-    ) -> JobCandidate {
-        let candidate = self
-            .job_tracker
-            .write()
-            .await
-            .add_pending(job_id, PendingJob::Sign(job));
         self.job_notify.notify_waiters();
         candidate
     }
@@ -148,18 +121,12 @@ impl Scheduler {
         }
 
         let (authorized, caps) = self.worker_auth_and_caps(peer_id).await;
-        let can_sign = self
-            .worker_gradient_caps(peer_id)
-            .await
-            .map(|c| c.sign)
-            .unwrap_or(false);
 
         // ── First try: pick from what's already in the tracker ──────────────
-        if let Some(mut a) = self
+        if let Some(a) = self
             .try_assign(peer_id, authorized.as_ref(), caps.as_ref(), &kind)
             .await
         {
-            apply_sign_flag(&mut a, can_sign);
             info!(%peer_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob");
             return Some(a);
         }
@@ -180,11 +147,10 @@ impl Scheduler {
         }
 
         // ── Second try after refresh ────────────────────────────────────────
-        if let Some(mut a) = self
+        if let Some(a) = self
             .try_assign(peer_id, authorized.as_ref(), caps.as_ref(), &kind)
             .await
         {
-            apply_sign_flag(&mut a, can_sign);
             info!(%peer_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob (after DB refresh)");
             return Some(a);
         }
@@ -403,12 +369,6 @@ impl Scheduler {
                 // Same: the worker chains a RequestJob after JobCompleted,
                 // which triggers on-demand dispatch if needed.
             }
-            Some(PendingJob::Sign(_)) => {
-                // Sign job signatures are recorded as `JobUpdateKind::Signed`
-                // arrives during execution; completion itself is a no-op.
-                debug!(%job_id, "sign job completed");
-                Ok(())
-            }
             None => {
                 warn!(%job_id, "job_completed for unknown job");
                 Ok(())
@@ -425,10 +385,6 @@ impl Scheduler {
             }
             Some(PendingJob::Build(j)) => {
                 build::handle_build_job_failed(&self.state, j.build_id, error).await
-            }
-            Some(PendingJob::Sign(_)) => {
-                warn!(%job_id, %error, "sign job failed — server scanner will retry on the next pass");
-                Ok(())
             }
             None => {
                 warn!(%job_id, "job_failed for unknown job");
@@ -459,10 +415,6 @@ impl Scheduler {
                     .map(|t| t.build_id.clone()),
                 Some(PendingJob::Eval(_)) => {
                     debug!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: job is an eval, not a build");
-                    return Ok(());
-                }
-                Some(PendingJob::Sign(_)) => {
-                    debug!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: sign job has no logs");
                     return Ok(());
                 }
                 None => {

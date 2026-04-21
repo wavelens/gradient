@@ -219,7 +219,7 @@ impl WorkerPool {
     pub fn has_capacity(&self, worker_id: &str, kind: &JobKind) -> bool {
         match self.workers.get(worker_id) {
             Some(WorkerSlot::Active(w)) => match kind {
-                JobKind::Flake | JobKind::Sign => true,
+                JobKind::Flake => true,
                 JobKind::Build => w.has_build_capacity(),
             },
             Some(WorkerSlot::Draining(_)) => false,

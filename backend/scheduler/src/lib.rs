@@ -19,7 +19,6 @@ pub mod eval;
 pub mod jobs;
 pub mod peer_auth;
 pub mod policy;
-pub mod sign_scanner;
 pub mod worker_pool;
 pub mod worker_state;
 
@@ -99,6 +98,5 @@ impl Scheduler {
     /// Call once after creating the scheduler, before serving requests.
     pub fn start(self: &Arc<Self>) {
         dispatch::start_dispatch_loops(Arc::clone(self));
-        sign_scanner::start_sign_scanner(Arc::clone(self));
     }
 }

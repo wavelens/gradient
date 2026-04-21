@@ -103,7 +103,6 @@ pub(super) fn negotiate_capabilities(
         fetch: client.fetch,
         eval: client.eval,
         build: client.build,
-        sign: client.sign,
     }
 }
 
@@ -125,7 +124,6 @@ mod tests {
             fetch: val,
             eval: val,
             build: val,
-            sign: val,
         }
     }
 
@@ -254,13 +252,11 @@ mod tests {
             fetch: true,
             eval: true,
             build: true,
-            sign: true,
         };
         let result = negotiate_capabilities(&state, client);
         assert!(result.fetch);
         assert!(result.eval);
         assert!(result.build);
-        assert!(result.sign);
     }
 
     #[test]
@@ -273,6 +269,5 @@ mod tests {
         assert!(!result.fetch);
         assert!(!result.eval);
         assert!(!result.build);
-        assert!(!result.sign);
     }
 }

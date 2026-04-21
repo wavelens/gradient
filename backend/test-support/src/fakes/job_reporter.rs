@@ -33,7 +33,6 @@ pub enum ReportedEvent {
         outputs: Vec<BuildOutput>,
     },
     Compressing,
-    Signing,
     LogChunk {
         task_index: u32,
         data: Vec<u8>,
@@ -200,11 +199,6 @@ impl JobReporter for RecordingJobReporter {
 
     async fn report_compressing(&mut self) -> Result<()> {
         self.events.push(ReportedEvent::Compressing);
-        Ok(())
-    }
-
-    async fn report_signing(&mut self) -> Result<()> {
-        self.events.push(ReportedEvent::Signing);
         Ok(())
     }
 

@@ -89,7 +89,6 @@ The `worker-id` enables:
 | `fetch`    | AND          | Prefetch flake inputs and clone repositories                 |
 | `eval`     | AND          | Run Nix flake evaluations                                    |
 | `build`    | AND          | Execute Nix store builds                                     |
-| `sign`     | AND          | zstd-compress and Ed25519-sign store paths before upload     |
 | `cache`    | Server only  | Server serves as a binary cache (`GRADIENT_SERVE_CACHE`)     |
 
 ---
@@ -330,6 +329,7 @@ sequenceDiagram
  2. **Workers score in the background** — on receiving `JobOffer`, the worker adds candidates to its local cache and scores them against the local Nix store. Scores are kept in memory. After a build completes (populating store paths), the worker re-scores affected candidates whose `required_paths` overlap with the new outputs.
  3. **`RequestJobChunk`** (worker → server, delta-only) — the worker sends only **new or changed** scores. A score changes when a path becomes available in the local store (e.g. after a build). The server accumulates scores per worker in memory. Scores are paginated at **1 000 entries per message**; `is_final: true` marks the last chunk in each scoring pass. An empty chunk with `is_final: true` signals the end of a pass when no scores changed.
  4. **`RequestJob`** (worker → server, pull-based) — the worker signals it has capacity for **one** job. `kind` specifies whether it wants a `FlakeJob` or `BuildJob`. The server either responds with `AssignJob` immediately (if a matching job with good scores exists) or marks internally that this worker needs a job and assigns one when available. On receiving `AssignJob`, the worker immediately sends another `RequestJob` if it still has capacity — this naturally fills all available slots. Workers also re-send `RequestJob` every **10 seconds** as a heartbeat if no `AssignJob` arrived, ensuring the server recovers the "worker needs work" state after a restart without persistent storage.
+
  5. **`AssignJob`** (server → winning worker) — the server compares scores across all workers that have requested a job. Lowest `missing_nar_size` wins (fewest bytes to download). Ties are broken by `missing_count`, then by fewest assigned jobs. The server may assign as soon as it sees an optimal score (e.g. `missing_nar_size: 0`).
  6. **`RevokeJob`** (server → losing workers) — all other workers that had this candidate in their cache are told to remove it. Workers delete the candidate and its score from their local cache.
 
@@ -406,10 +406,10 @@ RequestJobChunk {
 // Sent again immediately after AssignJob if worker still has slots.
 // Re-sent every 10s as heartbeat if no AssignJob arrived.
 RequestJob {
-    kind: JobKind,                      // FlakeJob, BuildJob, or SignJob
+    kind: JobKind,                      // FlakeJob or BuildJob
 }
 
-enum JobKind { Flake, Build, Sign }
+enum JobKind { Flake, Build }
 
 // Worker → Server (startup-only — sent once at handshake completion; ask server to re-send all active candidates)
 RequestAllCandidates,
@@ -456,9 +456,9 @@ graph LR
 
 | Task | Requires | Input (from server) | Output (from worker) |
 |------|----------|---------------------|----------------------|
-| **FetchFlake** | `fetch` + `source: Repository` | `source.url` + `source.commit`, SSH credential; signing-key credentials when the worker also has the `sign` capability and the owning org has caches with keys | For each fetched path (source + flake inputs): zstd-compressed NAR uploaded via `NarPush` / S3 PUT, followed by `NarUploaded` with full metadata, and — if the worker has the `sign` capability and received keys — `JobUpdate::Signed { signatures }` with one entry per delivered cache key. Closing `FetchResult { flake_source: String }` reports the archived flake source store path the server passes to a subsequent eval-only job as `FlakeSource::Cached { store_path }`. |
+| **FetchFlake** | `fetch` + `source: Repository` | `source.url` + `source.commit`, SSH credential | For each fetched path (source + flake inputs): zstd-compressed NAR uploaded via `NarPush` / S3 PUT, followed by `NarUploaded` with full metadata (`file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`). Closing `FetchResult { flake_source: Option<String> }` reports the archived flake source store path — the server passes it to a subsequent eval-only job as `FlakeSource::Cached { store_path }`. |
 | **EvaluateFlake** | `eval` | `wildcards` (attribute patterns), `timeout` (seconds) | `attrs: Vec<String>` — discovered attribute paths |
-| **EvaluateDerivations** | `eval` | (uses attrs from previous task); signing-key credentials when the org has caches with keys | `derivations: Vec<DiscoveredDerivation>` — drv paths, outputs, closure, required features; each produced `.drv` is also pushed (compressed) and signed via `NarUploaded` + `Signed` before the batch is reported |
+| **EvaluateDerivations** | `eval` | (uses attrs from previous task) | `derivations: Vec<DiscoveredDerivation>` — drv paths, outputs, closure, required features; each produced `.drv` is also pushed (compressed) via `NarUploaded` before the batch is reported |
 
 ```rust
 FlakeJob {
@@ -481,25 +481,20 @@ enum FlakeSource {
 }
 ```
 
-Whether a job signs is not a proto field on `FlakeJob`: the server decides at dispatch time by checking the org→cache relations. If any cache owned by the job's org has a signing key configured, the server sends one `Credential { SigningKey }` per cache before `AssignJob`, and the worker signs every path it uploads using whichever keys arrived. If no keys arrive, the worker skips signing entirely.
-
 When `FetchFlake` and `EvaluateFlake`/`EvaluateDerivations` are in the **same `FlakeJob`**, the worker reuses the local clone from the fetch step for evaluation. The repository is cloned exactly once; subsequent eval tasks reference the source as `path:/nix/store/xxx` — a pure, content-addressed reference. On fallback (temp checkout), `git+file://...?rev=` is used to keep Nix in pure evaluation mode.
 
 When the tasks are in **separate jobs** — typical for a mix of fetch-only and eval-only workers — the scheduler dispatches FetchFlake as its own job to a `fetch`-capable worker (source = `Repository`), and later dispatches the Evaluate tasks as another job with source = `Cached { store_path }` pointing at the NAR the fetch worker archived into the cache. The eval worker never touches a remote URL and never needs an SSH key.
 
 #### FetchFlake
 
-Fetch runs on a worker that has the `fetch` capability. If the worker **also** has the `sign` capability the server delivers signing-key credentials so the worker can sign inline; without `sign`, the NARs land in the cache unsigned and the server's scanner later dispatches a [`SignJob`](#signjob) to a sign-capable worker to fill in the signatures.
-
-The fetch step performs up to four things:
+Fetch runs on a worker that has the `fetch` capability. The fetch step performs up to four things:
 
  1. **Clone** the repository at the specified commit using libgit2 (handles SSH keys, `git://`, `https://`).
  2. **Archive** the flake source and all locked transitive inputs into the local Nix store by running `nix flake archive --json`. This goes through the nix daemon (subprocess) so network fetching and store-write access work correctly. Returns the nix store source path (e.g. `/nix/store/xxx-source`) and all input store paths.
- 3. **Compress and push every uncached NAR** — the worker sends `CacheQuery { mode: Push }` for every fetched path. For uncached paths, it **zstd-compresses the NAR locally** and uploads (presigned S3 PUT or chunked `NarPush`); on completion it emits `NarUploaded` with the full metadata (`file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`). **NARs are never transmitted uncompressed.** This step is unconditional — even a worker without `sign` capability uploads.
- 4. **Sign each pushed path** (only when the worker has the `sign` capability **and** the server delivered at least one `Credential { kind: SigningKey }`). The worker signs each path once per key and emits `JobUpdate::Signed { signatures }` carrying one `PathSignature` per uploaded path. If the capability or keys are missing, this step is skipped entirely and the paths remain unsigned until the server dispatches a `SignJob` to a sign-capable worker.
- 5. **Report `FetchResult`** carrying only the archived flake source store path (not the full input list — the server already has every `cached_path` row from the NarUploaded stream). The server hands this path to any subsequent eval-only job via `FlakeSource::Cached { store_path }`.
+ 3. **Compress and push every uncached NAR** — the worker sends `CacheQuery { mode: Push }` for every fetched path. For uncached paths, it **zstd-compresses the NAR locally** and uploads (presigned S3 PUT or chunked `NarPush`); on completion it emits `NarUploaded` with the full metadata (`file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`). **NARs are never transmitted uncompressed.**
+ 4. **Report `FetchResult`** carrying only the archived flake source store path (not the full input list — the server already has every `cached_path` row from the `NarUploaded` stream). The server hands this path to any subsequent eval-only job via `FlakeSource::Cached { store_path }`.
 
-If `nix flake archive` fails (e.g. network unavailable), the worker falls back to the temporary git checkout path, skips steps 3–4 (nothing to push/sign), and sets `flake_source` to `None` to signal the fallback — no follow-up eval-only job can then use `FlakeSource::Cached`.
+If `nix flake archive` fails (e.g. network unavailable), the worker falls back to the temporary git checkout path, skips step 3 (nothing to push), and sets `flake_source` to `None` to signal the fallback — no follow-up eval-only job can then use `FlakeSource::Cached`.
 
 ```rust
 FetchResult {
@@ -519,9 +514,8 @@ Every `.drv` file discovered during `EvaluateDerivations` is a cacheable store p
 
  1. Runs `CacheQuery { mode: Push, paths: <new drv paths in wave> }` alongside each `EvalResult` batch.
  2. For uncached drvs, reads the `.drv` file from the local store, packs it into a NAR, **zstd-compresses it**, and uploads (S3 PUT or chunked `NarPush`) followed by `NarUploaded`.
- 3. If the worker has the `sign` capability *and* the server delivered signing-key credentials, signs each drv store path once per delivered key and emits a `Signed` update.
 
-The server records the drv's `cached_path` row directly from the `NarUploaded` message; `cached_path_signature` rows come from the inline `Signed` update. If the eval worker had no `sign` capability (step 3 skipped), the drv sits in the cache unsigned until the server's background scanner dispatches a `SignJob` to a sign-capable worker — see the **SignJob** section below. The server never re-packs, re-hashes, or re-signs itself.
+The server records the drv's `cached_path` row directly from the `NarUploaded` message. The server never re-packs or re-hashes — it trusts the NAR metadata the worker reports.
 
 
 ```rust
@@ -603,29 +597,20 @@ sequenceDiagram
 
 The server checks its local NAR store first. For paths not found locally, it fetches `.narinfo` from any upstream external caches configured for the org (`org → organization_cache → cache → cache_upstream`). Found upstream paths are returned with `cached: true` and `url: Some(absolute_nar_url)`.
 
-The worker marks derivations as `substituted` for all entries with `cached: true` regardless of `url`. For upstream paths (`url: Some`), the worker downloads the NAR directly from the provided URL, re-zstd-compresses (upstream compression may differ), signs it with every delivered cache key, and then uploads the compressed bytes to the Gradient cache.
+The worker marks derivations as `substituted` for all entries with `cached: true` regardless of `url`. For upstream paths (`url: Some`), the worker downloads the NAR directly from the provided URL, re-zstd-compresses (upstream compression may differ), and uploads the compressed bytes to the Gradient cache.
 
 ### Cache population
 
-The worker is the sole producer of compressed+signed NARs. The server never packs, compresses, or signs — it only stores the bytes delivered over `NarPush`/S3 PUT and records the metadata the worker reports.
+The worker is the sole producer of compressed NARs. The server never packs or compresses — it only stores the bytes delivered over `NarPush`/S3 PUT and records the metadata the worker reports.
 
 The flow for getting any store path (fetched flake input, evaluated `.drv`, or build output) into the cache:
 
  1. **Worker produces** the path locally (fetch, eval, or build).
  2. **Worker zstd-compresses** the NAR. The compressed stream is the only form in which a NAR is ever transmitted or stored.
- 3. **Worker signs** the path once per delivered signing key — one signature per org cache.
- 4. **Worker uploads** the compressed NAR via `NarPush` (local mode) or S3 PUT (cloud mode), then sends a single `NarUploaded` carrying `file_hash`, `file_size`, `nar_size`, `nar_hash`, and `references`.
- 5. **Worker emits** `JobUpdate::Signed { signatures }` carrying one `PathSignature { store_path, signatures: Vec<String> }` per path, with one entry per cache in `signatures`.
- 6. **Server records** `cached_path` metadata from `NarUploaded` and `cached_path_signature` rows from `Signed` — one row per (cached_path, cache). No local re-packing, re-compression, or re-signing ever happens.
+ 3. **Worker uploads** the compressed NAR via `NarPush` (local mode) or S3 PUT (cloud mode), then sends a single `NarUploaded` carrying `file_hash`, `file_size`, `nar_size`, `nar_hash`, and `references`. `nar_hash` and `nar_size` are computed locally over the uncompressed NAR; `file_hash` and `file_size` over the compressed stream.
+ 4. **Server records** `cached_path` metadata from `NarUploaded`. No local re-packing, re-compression, or re-hashing ever happens.
 
 The server does **not** use `ensure_path` or GC roots. All cached content lives in the NAR store (S3 or local files), not in the server's Nix store.
-
-**Signing-gap recovery.** Because signing is always worker-side, two scenarios leave a `cached_path` temporarily unsigned for one or more caches:
-
- 1. A non-sign-capable worker (e.g. `eval`-only) pushed the NAR. The worker had no keys; step 5 above is skipped.
- 2. A new cache with a signing key is added to the org after the path was uploaded.
-
-A background scanner on the server enumerates `cached_path` rows with `file_hash IS NOT NULL` that are missing a `cached_path_signature` row for any of their owning org's active caches-with-keys, batches them into a [`SignJob`](#signjob), and enqueues the job for a sign-capable worker. The worker signs purely from the metadata on `cached_path` (no NAR download) and reports signatures via `JobUpdate::Signed`. The server inserts the missing `cached_path_signature` rows as usual. There is no fingerprinting, NAR packing, or key access server-side at any point.
 
 ### Incremental Evaluation
 
@@ -648,19 +633,17 @@ sequenceDiagram
         W->>S: NarPush { path:A, compressed chunks ... is_final }
         W->>S: NarPush { path:B, compressed chunks ... is_final }
     end
-    Note over W: sign each path once per delivered cache key (no-op if none)
     W->>S: NarUploaded { file_hash, file_size, nar_size, nar_hash, references } ×paths
-    W->>S: JobUpdate::FetchResult { fetched_paths (with per-cache signatures) }
-    Note right of S: records cached_path + cached_path_signature
+    W->>S: JobUpdate::FetchResult { flake_source }
+    Note right of S: records cached_path rows
     W->>S: JobUpdate::EvaluatingFlake
     Note over W: nix eval (uses local clone)
     W->>S: JobUpdate::EvaluatingDerivations
     Note over W: BFS closure walk; for each new .drv:
     W->>S: CacheQuery { paths: [output + drv paths] }
     S->>W: CacheStatus { cached: [subset] }
-    Note over W: compress + upload + sign each uncached .drv
+    Note over W: compress + upload each uncached .drv
     W->>S: NarUploaded { ... } ×drvs
-    W->>S: JobUpdate::Signed { signatures (per cache) } ×drvs
     W->>S: JobUpdate::EvalResult (batch 1: 50 derivations, 12 substituted)
     Note right of S: inserts rows, marks substituted
     W->>S: JobUpdate::EvalResult (batch 2: 30 derivations)
@@ -700,26 +683,19 @@ This means builds can start **while evaluation is still in progress**, significa
 
 ### BuildJob
 
-Requires negotiated capability: `build` and/or `sign`. The server includes only the tasks the worker's capabilities allow.
+Requires negotiated capability: `build`.
 
 A `BuildJob` carries the **full dependency chain** in topological order — the worker executes them sequentially without round-tripping to the server for each dependency. Dependencies already present in the worker's store are skipped.
 
 ```mermaid
 graph LR
-    A["Build [dep₀, dep₁, ..., depₙ, target]<br/>(if build)"] --> B["Compress + Upload<br/>(always)"]
-    B --> C["Sign<br/>(if sign)"]
+    A["Build [dep₀, dep₁, ..., depₙ, target]"] --> B["Compress + Upload"]
 ```
 
 ```rust
 BuildJob {
     // Ordered list of derivations to build (dependencies first, target last).
     builds: Vec<BuildTask>,
-    /// When true, the worker signs every realised output inline (once per
-    /// delivered signing key). When false, the worker pushes the NARs but
-    /// skips signing; the server then dispatches a `SignJob` to a
-    /// sign-capable worker to fill in the missing `cached_path_signature`
-    /// rows later.
-    sign: bool,
 }
 
 BuildTask {
@@ -728,13 +704,12 @@ BuildTask {
 }
 ```
 
-The worker always zstd-compresses before upload — that's invariant. `sign` controls only whether the build-time worker also produces signatures inline. The scheduler typically sets `sign = true` whenever the target worker has the `sign` capability **and** the owning org has at least one cache with a signing key; otherwise it sets `sign = false` and the `SignJob` path takes over after the build.
+The worker always zstd-compresses before upload — that's invariant.
 
 | Task | Requires | Input (from server) | Output (from worker) |
 |------|----------|---------------------|----------------------|
 | **Build** | `build` | `builds` + `required_paths` — full chain with pre-computed closure | Per-build `BuildOutput` via `JobUpdate` |
 | **Compress + Upload** | `build` | (implicit) | zstd-compressed NAR uploaded via `NarPush` / S3 PUT, followed by `NarUploaded` carrying file/NAR metadata |
-| **Sign** | `BuildJob.sign == true` + `sign` capability + at least one delivered `Credential { kind: SigningKey }` (`"cache-name:base64"`) | `Signed { signatures: Vec<PathSignature> }` via `JobUpdate` — per-output Ed25519 signatures, one entry per delivered cache key. When `BuildJob.sign == false` the step is skipped and the server's scanner will issue a `SignJob` later. |
 
 **NAR transfer flow:**
 
@@ -743,7 +718,6 @@ sequenceDiagram
     participant W as Worker
     participant S as Server
 
-    S->>W: Credential { SigningKey } ×N (one per org cache, skipped if none)
     S->>W: AssignJob { builds }
     W->>S: AssignJobResponse { accepted: true }
     W->>S: NarRequest { missing paths }
@@ -756,9 +730,6 @@ sequenceDiagram
     W->>S: JobUpdate::Compressing
     Note over W: packs outputs into zstd NARs,<br/>uploads compressed bytes only
     W->>S: NarUploaded { store_path, file_hash, file_size, nar_size, nar_hash, references }
-    W->>S: JobUpdate::Signing
-    Note over W: signs each output once per delivered cache key
-    W->>S: JobUpdate::Signed { signatures }  // PathSignature.signatures: Vec<String>
     W->>S: JobCompleted
 ```
 
@@ -767,45 +738,6 @@ The `required_paths` were already sent in `JobCandidate` during the offer phase.
 The server pre-computes `required_paths` from the evaluation's `derivation_dependency` and `derivation_output` tables — no `.drv` parsing on either side for dependency resolution. The worker parses each `.drv` file locally to construct a `BasicDerivation` and drives the build through harmonia's `BuildDerivation` RPC against the local nix-daemon. The daemon's log stream is consumed in parallel and forwarded to the server via `LogChunk` frames so the build log is captured live.
 
 If any derivation in the chain fails, the worker skips the rest and reports `JobFailed` — the server cascades `DependencyFailed` to downstream builds.
-
-### SignJob
-
-Requires negotiated capability: `sign`. Dispatched by the server when a `cached_path` row is missing a `cached_path_signature` for one or more of the owning org's caches — for example, after a non-sign-capable `eval` worker pushed a `.drv` NAR, or after a new cache with a signing key is added to the org.
-
-The worker signs each entry **purely from the metadata** the server provides: a Nix signature's fingerprint is `"1;<store_path>;<nar_hash>;<nar_size>;<refs>"`, all of which are recorded on `cached_path`. The NAR bytes themselves are not needed, so the worker does **not** download anything — the whole round-trip is metadata + signatures.
-
-```mermaid
-sequenceDiagram
-    participant W as Worker (sign-capable)
-    participant S as Server
-
-    Note right of S: background scanner finds cached_path rows<br/>with missing cached_path_signature per org cache
-    S->>W: Credential { SigningKey } ×N (one per org cache with a key)
-    S->>W: AssignJob { Job::Sign(SignJob { items }) }
-    W->>S: AssignJobResponse { accepted: true }
-    Note over W: for each item: build fingerprint from metadata,<br/>sign with every delivered key
-    W->>S: JobUpdate::Signed { signatures }  // PathSignature.signatures: Vec<String>
-    W->>S: JobCompleted
-```
-
-```rust
-SignJob {
-    items: Vec<SignItem>,
-}
-
-SignItem {
-    store_path: String,                 // /nix/store/xxx-name
-    nar_hash: String,                   // "sha256:<nix32>" — canonical narinfo form
-    nar_size: u64,                      // uncompressed NAR size in bytes
-    references: Vec<String>,            // bare hash-name references (no /nix/store/ prefix)
-}
-```
-
-The server populates `items` from `cached_path` columns (`store_path`, `nar_hash`, `nar_size`, `references`). Entries whose metadata is incomplete (any required field `NULL`) are filtered out — those rows must be re-uploaded via a full build before they can be signed.
-
-`JobKind::Sign` is added to the `RequestJob` kinds; only workers with the `sign` capability request or are assigned sign jobs.
-
-Because the worker never touches the NAR bytes, a single `SignJob` can carry hundreds of items cheaply. Batch size is bounded server-side to keep messages below the WebSocket frame limit; the scanner picks the oldest unsigned paths first.
 
 ---
 
@@ -851,7 +783,7 @@ enum ServerMessage {
 }
 
 struct FailedPeer { peer_id: Uuid, reason: String }
-enum CredentialKind { SshKey, SigningKey }
+enum CredentialKind { SshKey }
 ```
 
 ### Worker → Server
@@ -884,7 +816,6 @@ enum ClientMessage {
     // NAR transfer
     NarRequest { job_id: Uuid, paths: Vec<String> },    // "send me these paths"
     NarPush { job_id: Uuid, store_path: String, data: Vec<u8>, offset: u64, is_final: bool },
-    NarReady { job_id: Uuid, store_path: String, nar_size: u64, nar_hash: String },
     NarUploaded {
         job_id: Uuid,
         store_path: String,
@@ -935,17 +866,6 @@ enum JobUpdateKind {
     Building { build_id: Uuid },                        // → Building (per derivation in chain)
     BuildOutput { build_id: Uuid, outputs: Vec<BuildOutput> }, // per-derivation result
     Compressing,                                        // packing outputs into zstd NARs (no DB status change)
-    Signing,                                            // (no DB status change; signing in progress)
-    Signed {                                            // Sign task complete — report computed signatures to server
-        signatures: Vec<PathSignature>,
-    },
-}
-
-struct PathSignature {
-    store_path: String,        // /nix/store/xxx-name
-    signatures: Vec<String>,   // one entry per delivered cache signing key
-                               // each entry: "<cache-name>:<base64>" (standard Nix narinfo Ed25519 format)
-                               // empty when no signing keys were delivered for the job
 }
 
 struct BuildOutput {
@@ -963,15 +883,13 @@ struct BuildOutput {
 | `JobUpdateKind` | DB Entity | Status set |
 |-----------------|-----------|------------|
 | `Fetching` | `evaluation` | `Fetching` (8) |
-| `FetchResult` | `evaluation` | Stays `Fetching`; server records `flake_source` as the evaluation's source store path (used later to dispatch eval-only jobs with `FlakeSource::Cached`). `cached_path` / `cached_path_signature` rows for the archived NARs were already written by the preceding `NarUploaded` / `Signed` messages. |
+| `FetchResult` | `evaluation` | Stays `Fetching`; server records `flake_source` as the evaluation's source store path (used later to dispatch eval-only jobs with `FlakeSource::Cached`). `cached_path` rows for the archived NARs were already written by the preceding `NarUploaded` messages. |
 | `EvaluatingFlake` | `evaluation` | `EvaluatingFlake` (1) |
 | `EvaluatingDerivations` | `evaluation` | `EvaluatingDerivation` (2) |
 | `EvalResult` | `evaluation` + `derivation` + `build` + `entry_point` + `evaluation_message` | Inserts rows per batch; substituted → `Substituted` (7), rest → `Created` (0) → `Queued` (1). Creates `entry_point` rows for root derivations (non-empty `attr`). Immediately dispatches ready builds to workers. First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. Errors stored as `evaluation_message` rows with level `Error`; if `derivations` is empty and `errors` is non-empty, evaluation is immediately marked `Failed`. |
 | `Building` | `build` | `Building` (2) — per derivation in chain |
 | `BuildOutput` | `build` + `derivation_output` | `Completed` (3); updates output hash/size/path |
 | `Compressing` | — | No status change; informational — packing outputs into zstd NARs |
-| `Signing` | — | No status change; informational — signing in progress |
-| `Signed` | `cached_path_signature` | No status change; server records each signature in `cached_path_signature` for the org's caches so narinfo can serve them |
 
 `JobCompleted` sets the final terminal status. `JobFailed` sets `Failed` and cascades `DependencyFailed` to downstream builds.
 
@@ -1022,10 +940,8 @@ sequenceDiagram
     Note right of S: B already cached, generates presigned PUT URLs for A, C
     S->>W: CacheStatus [A: cached=false url=s3, B: cached=true, C: cached=false url=s3]
     W->>S3: PUT A (direct, no data through server)
-    W->>S: NarReady path=A
     W->>S: NarUploaded {path:A, file_hash, file_size}
     W->>S3: PUT C
-    W->>S: NarReady path=C
     W->>S: NarUploaded {path:C, file_hash, file_size}
 ```
 
@@ -1188,23 +1104,6 @@ Caches behind a federation peer are exposed upstream. When a remote peer's build
 
 ---
 
-## Signing Details
-
-Whenever the server delivered one or more `Credential { kind: SigningKey }` messages for a job, the worker performs pure-Rust Ed25519 signing locally for every store path it uploads (fetched flake inputs, evaluated `.drv` files, built outputs):
-
- 1. Query the local store for `PathInfo` (NAR hash, NAR size, references).
- 2. Convert NAR hash from SRI format (`sha256-<base64>`) to Nix format (`sha256:<nix-base32>`).
- 3. Compute fingerprint: `fingerprint_path(store_path, nar_hash, nar_size, references)`.
- 4. For **each** `Credential { kind: SigningKey }` delivered for this job, sign the fingerprint with that secret key and format the signature as `"<cache-name>:<base64>"`. One path therefore produces `N` signatures, where `N` is the number of org caches with signing keys.
- 5. Register all signatures in the local nix-daemon via `add_signatures` (so subsequent local substitutes also see them).
- 6. Report the signatures — either inline on `FetchedInput.signatures` (fetch task) or via `JobUpdate { Signed { signatures: Vec<PathSignature> } }` (eval-drv and build tasks).
-
-Server behaviour: for each entry in `PathSignature.signatures`, parse the `cache-name:` prefix, resolve it to a `cache` row in the job's owning org, and upsert a `cached_path_signature` row. Entries naming an unknown/foreign cache are logged and dropped. The server never re-computes a fingerprint — it trusts the worker's signatures because the signing key was delivered by the server itself.
-
-The server performs **no** compression, NAR packing, or signing on its own. A cache that is added to an org after a path was uploaded will have no signature for that path until the path is re-uploaded (e.g. by a fresh build).
-
----
-
 ## Build Artefacts
 
 After a successful build, the worker checks for `<output>/nix-support/hydra-build-products`. If present, `BuildOutput.has_artefacts` is set to `true`. The server stores this flag on `derivation_output.has_artefacts` for the frontend to display download links.
@@ -1244,15 +1143,12 @@ The server sends credentials to workers before tasks that need them:
 | Credential | Used by | Contents |
 |------------|---------|----------|
 | `SshKey` | `FetchFlake` task on a `fetch`-capable worker | Organization's SSH private key for cloning private repos. Sent at most once per job, **only if the negotiated `fetch` capability is true for the target worker** (otherwise the worker can't run `FetchFlake` anyway). |
-| `SigningKey` | Every job assigned to a `sign`-capable worker when the owning org has caches with signing keys | Cache Ed25519 secret key in `"<cache-name>:<base64>"` format. **Sent once per org cache** — the server iterates the org's active caches that have a `private_key` and emits one `Credential { kind: SigningKey, data }` message per cache before `AssignJob`, **only if the negotiated `sign` capability is true for the target worker**. The worker accumulates the keys and signs every uploaded path once per entry. Workers without the `sign` capability receive zero signing-key credentials and skip the inline sign step — they still push NARs, but the paths land in the cache unsigned. The server's background scanner then dispatches a `SignJob` (see above) to a sign-capable worker to fill in the missing signatures. |
-
-The cache name embedded in the signing key is authoritative for mapping a reported `PathSignature` back to a `cache` row server-side: the server parses the `"<cache-name>:..."` prefix of each entry in `signatures` and writes a `cached_path_signature` row for the cache with that name (provided it belongs to the job's owning org). Signatures for unknown cache names are dropped with a warning.
 
 Credentials are encrypted in transit (TLS). Workers MUST:
 
  - Keep credentials in memory only — never write to disk
  - Zeroize memory on drop
- - Discard all signing keys when the job completes or the connection closes (they are not reused across jobs)
+ - Discard credentials when the job completes or the connection closes (they are not reused across jobs)
 
 ---
 

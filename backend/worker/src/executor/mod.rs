@@ -13,7 +13,6 @@ pub mod build;
 pub mod compress;
 pub mod eval;
 pub mod fetch;
-pub mod sign;
 
 use std::sync::Arc;
 
@@ -66,17 +65,9 @@ async fn query_fetched_paths(updater: &mut JobUpdater, all_paths: Vec<String>) -
 }
 
 /// For each `.drv` discovered during eval, push the compressed NAR.
-/// If this worker received any signing keys (i.e. has the `sign`
-/// capability and the owning org has caches with keys), also sign each
-/// drv inline. Otherwise the drv goes into the cache unsigned; the
-/// server's background scanner will dispatch a dedicated `SignJob` to a
-/// sign-capable worker later so the narinfo eventually gets a `Sig:`.
-async fn push_and_sign_drvs(
-    drv_paths: &[String],
-    updater: &mut JobUpdater,
-    credentials: &CredentialStore,
-    store: &LocalNixStore,
-) {
+/// The server computes and stores narinfo signatures from the uploaded
+/// NAR metadata; the worker never signs.
+async fn push_drvs(drv_paths: &[String], updater: &mut JobUpdater) {
     if drv_paths.is_empty() {
         return;
     }
@@ -84,20 +75,6 @@ async fn push_and_sign_drvs(
     let cache_entries = query_fetched_paths(updater, drv_paths.to_vec()).await;
     for cp in &cache_entries {
         push_one_fetched_nar(updater, cp).await;
-    }
-
-    if credentials.signing_keys().is_empty() {
-        tracing::debug!(
-            count = drv_paths.len(),
-            "drvs pushed unsigned — server will dispatch a SignJob to a sign-capable worker"
-        );
-        return;
-    }
-
-    if let Err(e) =
-        sign::sign_outputs(store, credentials, drv_paths, updater).await
-    {
-        tracing::warn!(error = %e, "failed to sign drvs after eval (non-fatal)");
     }
 }
 
@@ -205,19 +182,6 @@ impl JobExecutor {
                         push_one_fetched_nar(updater, cp).await;
                     }
 
-                    // Sign archived paths inline when the worker has keys.
-                    if !credentials.signing_keys().is_empty()
-                        && let Err(e) = sign::sign_outputs(
-                            &self.store,
-                            credentials,
-                            &outcome.archived_paths,
-                            updater,
-                        )
-                        .await
-                    {
-                        tracing::warn!(error = %e, "failed to sign fetched paths (non-fatal)");
-                    }
-
                     updater.report_fetch_result(outcome.flake_source.clone())?;
                     local_flake_path = Some(outcome.local_flake_path);
                 }
@@ -232,25 +196,21 @@ impl JobExecutor {
                     )
                     .await?;
 
-                    // Push+sign each produced `.drv` to the cache so
+                    // Push each produced `.drv` to the cache so
                     // substituters can fetch `<drv-hash>.narinfo`. Runs
                     // after eval so the server already has the derivation
                     // rows; ordering between the NAR and the row doesn't
-                    // matter (the server keys cached_path by hash).
-                    push_and_sign_drvs(
-                        &produced_drvs,
-                        updater,
-                        credentials,
-                        &self.store,
-                    )
-                    .await;
+                    // matter (the server keys cached_path by hash). The
+                    // server computes narinfo signatures from the uploaded
+                    // metadata.
+                    push_drvs(&produced_drvs, updater).await;
                 }
             }
         }
         Ok(())
     }
 
-    /// Execute a `BuildJob` (builds → compress → sign).
+    /// Execute a `BuildJob` (builds → compress → push).
     ///
     /// Before each derivation is built, we prefetch any of its input store
     /// paths that aren't in the local store from the server's cache (via
@@ -263,7 +223,7 @@ impl JobExecutor {
         &self,
         job: BuildJob,
         updater: &mut JobUpdater,
-        credentials: &CredentialStore,
+        _credentials: &CredentialStore,
     ) -> Result<()> {
         let mut all_output_paths: Vec<String> = Vec::new();
         for (index, build_task) in job.builds.iter().enumerate() {
@@ -296,32 +256,10 @@ impl JobExecutor {
         }
 
         // Always compress+push every realised output. The worker is the sole
-        // producer of compressed NARs; the server only stores them.
+        // producer of compressed NARs; the server stores them and computes
+        // narinfo signatures from the uploaded metadata.
         compress::compress_and_push_paths(&self.store, &all_output_paths, updater).await?;
 
-        // Sign every realised output once per delivered cache key — but
-        // only when the job explicitly opted in. When `job.sign == false`,
-        // the server's scanner will dispatch a SignJob to a sign-capable
-        // worker later. `sign_outputs` also short-circuits if no signing
-        // keys were delivered.
-        if job.sign {
-            sign::sign_outputs(&self.store, credentials, &all_output_paths, updater).await?;
-        }
-
         Ok(())
-    }
-
-    /// Execute a `SignJob` — sign a batch of cached_path entries from
-    /// metadata alone. No NAR bytes are needed: the narinfo fingerprint
-    /// is built from the (store_path, nar_hash, nar_size, references)
-    /// tuple already known to the server.
-    #[instrument(skip_all, fields(items = job.items.len()))]
-    pub async fn execute_sign_job(
-        &self,
-        job: proto::messages::SignJob,
-        updater: &mut JobUpdater,
-        credentials: &CredentialStore,
-    ) -> Result<()> {
-        sign::sign_items(credentials, &job.items, updater).await
     }
 }

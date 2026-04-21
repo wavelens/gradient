@@ -187,7 +187,7 @@ impl Rule for DependencyCountRule {
     fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
         match job.job {
             PendingJob::Build(j) => j.dependency_count as f64 * self.dep_bonus_per_dep,
-            PendingJob::Eval(_) | PendingJob::Sign(_) => 0.0,
+            PendingJob::Eval(_) => 0.0,
         }
     }
 }
@@ -296,7 +296,6 @@ mod tests {
                     build_id: Uuid::new_v4().to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                 }],
-                sign: false,
             },
             required_paths: vec![],
             architecture: arch.into(),
@@ -382,7 +381,6 @@ mod tests {
                     build_id: Uuid::new_v4().to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                 }],
-                sign: false,
             },
             required_paths: vec![],
             architecture: "x86_64-linux".into(),

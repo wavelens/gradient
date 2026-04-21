@@ -101,7 +101,7 @@ pub enum ServerMessage {
     },
 
     /// Presigned S3 upload URL for a build output.  Worker uploads directly
-    /// then confirms with [`super::client::ClientMessage::NarReady`].
+    /// then confirms with [`super::client::ClientMessage::NarUploaded`].
     PresignedUpload {
         job_id: String,
         store_path: String,

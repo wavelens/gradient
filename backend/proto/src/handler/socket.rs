@@ -12,7 +12,7 @@ use axum::extract::ws::{Message as AxumMessage, WebSocket};
 use futures::{SinkExt, StreamExt};
 use gradient_core::types::*;
 use rkyv::rancor::Error as RkyvError;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::EntityTrait;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, tungstenite::Message as TungsteniteMessage,
@@ -230,30 +230,14 @@ pub(super) async fn send_credentials_for_job(
 
     let caps = scheduler.worker_gradient_caps(worker_id).await;
     let worker_can_fetch = caps.as_ref().map(|c| c.fetch).unwrap_or(false);
-    let worker_can_sign = caps.as_ref().map(|c| c.sign).unwrap_or(false);
 
     match job {
         Job::Flake(flake_job) => {
             if worker_can_fetch && flake_job.tasks.contains(&FlakeTask::FetchFlake) {
                 send_ssh_key_credential(socket, state, org_id).await;
             }
-            if worker_can_sign {
-                send_signing_key_credentials(socket, state, org_id).await;
-            }
         }
-        Job::Build(_) => {
-            if worker_can_sign {
-                send_signing_key_credentials(socket, state, org_id).await;
-            }
-        }
-        Job::Sign(_) => {
-            // Sign jobs require at least one signing key; if the worker
-            // has no `sign` capability the scheduler shouldn't have
-            // routed the job here, but guard anyway.
-            if worker_can_sign {
-                send_signing_key_credentials(socket, state, org_id).await;
-            }
-        }
+        Job::Build(_) => {}
     }
 }
 
@@ -285,67 +269,5 @@ async fn send_ssh_key_credential(socket: &mut ProtoSocket, state: &ServerState, 
         }
         Ok(None) => warn!(%org_id, "org not found for SSH key lookup"),
         Err(e) => warn!(%org_id, error = %e, "failed to fetch org for SSH key"),
-    }
-}
-
-/// Send one `Credential { SigningKey }` per cache in the org that has a
-/// private key configured. The worker accumulates them and signs each
-/// uploaded path once per key.
-async fn send_signing_key_credentials(
-    socket: &mut ProtoSocket,
-    state: &ServerState,
-    org_id: Uuid,
-) {
-    use gradient_core::sources::format_cache_key;
-    use gradient_core::types::proto::CredentialKind;
-
-    let org_caches = match EOrganizationCache::find()
-        .filter(COrganizationCache::Organization.eq(org_id))
-        .all(&state.db)
-        .await
-    {
-        Ok(v) => v,
-        Err(e) => {
-            warn!(%org_id, error = %e, "failed to fetch org caches for signing keys");
-            return;
-        }
-    };
-
-    let mut sent = 0usize;
-    for oc in org_caches {
-        let cache = match ECache::find_by_id(oc.cache).one(&state.db).await {
-            Ok(Some(c)) if !c.private_key.is_empty() => c,
-            Ok(_) => continue,
-            Err(e) => {
-                warn!(error = %e, "failed to fetch cache for signing key");
-                continue;
-            }
-        };
-
-        match format_cache_key(
-            state.cli.crypt_secret_file.clone(),
-            cache.clone(),
-            state.cli.serve_url.clone(),
-        ) {
-            Ok(key_str) => {
-                let _ = send_server_msg(
-                    socket,
-                    &ServerMessage::Credential {
-                        kind: CredentialKind::SigningKey,
-                        data: key_str.into_bytes(),
-                    },
-                )
-                .await;
-                debug!(cache_name = %cache.name, %org_id, "signing key credential sent");
-                sent += 1;
-            }
-            Err(e) => {
-                warn!(cache_name = %cache.name, %org_id, error = %e, "failed to decrypt signing key");
-            }
-        }
-    }
-
-    if sent == 0 {
-        debug!(%org_id, "no cache with signing key found for org");
     }
 }

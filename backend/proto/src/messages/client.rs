@@ -108,16 +108,6 @@ pub enum ClientMessage {
         is_final: bool,
     },
 
-    /// Worker has finished uploading a NAR directly to S3 and reports its
-    /// hash/size so the server can record the path info.
-    NarReady {
-        job_id: String,
-        store_path: String,
-        nar_size: u64,
-        /// SRI-format hash: `sha256-<base64>`.
-        nar_hash: String,
-    },
-
     /// Worker has finished uploading a NAR (via NarPush or presigned S3) and
     /// reports metadata so the server can update `cached_path` / `derivation_output`.
     NarUploaded {

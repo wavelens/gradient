@@ -17,7 +17,7 @@ use gradient_core::types::*;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use super::jobs::PendingBuildJob;
@@ -73,40 +73,6 @@ impl<'a> BuildStateHandler<'a> {
         }
 
         info!(%build_id, output_count = outputs.len(), "build outputs recorded");
-        Ok(())
-    }
-
-    /// Records NAR metadata (size and hash) on the `derivation_output` row matching
-    /// `store_path`.  Called when the server receives `ClientMessage::NarReady` after
-    /// a worker finishes compressing and uploading a build output.
-    pub async fn handle_nar_ready(
-        &self,
-        store_path: &str,
-        nar_size: u64,
-        nar_hash: &str,
-    ) -> Result<()> {
-        let existing = EDerivationOutput::find()
-            .filter(CDerivationOutput::Output.eq(store_path))
-            .one(&self.state.db)
-            .await
-            .context("fetch derivation_output by store_path")?;
-
-        if let Some(row) = existing {
-            let mut active = row.into_active_model();
-            active.nar_size = Set(Some(nar_size as i64));
-            active.file_hash = Set(Some(nar_hash.to_string()));
-            if let Err(e) = active.update(&self.state.db).await {
-                error!(store_path, error = %e, "failed to update derivation_output from NarReady");
-            } else {
-                info!(store_path, nar_size, "NarReady recorded");
-            }
-        } else {
-            debug!(
-                store_path,
-                "NarReady for store path not in derivation_output (expected for source paths)"
-            );
-        }
-
         Ok(())
     }
 
@@ -328,17 +294,6 @@ pub async fn handle_build_output(
 ) -> Result<()> {
     BuildStateHandler::new(state)
         .handle_build_output(job, build_id, outputs)
-        .await
-}
-
-pub async fn handle_nar_ready(
-    state: &Arc<ServerState>,
-    store_path: &str,
-    nar_size: u64,
-    nar_hash: &str,
-) -> Result<()> {
-    BuildStateHandler::new(state)
-        .handle_nar_ready(store_path, nar_size, nar_hash)
         .await
 }
 

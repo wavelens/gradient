@@ -31,8 +31,6 @@ pub struct GradientCapabilities {
     pub eval: bool,
     /// Client supports executing Nix builds.
     pub build: bool,
-    /// Client supports signing store paths and uploading signatures.
-    pub sign: bool,
     /// Peer serves as a Nix binary cache.
     /// Set by the server when `GRADIENT_SERVE_CACHE=true`, never by workers.
     pub cache: bool,
@@ -47,7 +45,6 @@ pub struct GradientCapabilities {
 pub enum Job {
     Flake(FlakeJob),
     Build(BuildJob),
-    Sign(SignJob),
 }
 
 /// Where to obtain the flake source for a [`FlakeJob`].
@@ -82,18 +79,12 @@ pub enum FlakeTask {
 }
 
 /// Build job: build derivations. The worker always zstd-compresses
-/// uploaded NARs, and always signs every realised output once per
-/// signing-key credential delivered by the server. Whether signing
-/// happens at all is therefore implicit in the org→cache relations on the
-/// server side — no proto-level flag is needed.
+/// uploaded NARs and reports NAR metadata in `NarUploaded`; the server
+/// computes and stores narinfo signatures from that metadata.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct BuildJob {
     pub builds: Vec<BuildTask>,
-    /// When `true`, the worker signs every realised output inline using the
-    /// delivered signing keys. When `false`, signing is skipped and the
-    /// server's scanner will dispatch a [`SignJob`] later.
-    pub sign: bool,
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -101,41 +92,6 @@ pub struct BuildJob {
 pub struct BuildTask {
     pub build_id: String,
     pub drv_path: String,
-}
-
-/// Sign job: compute narinfo signatures for a batch of already-uploaded
-/// cache paths. The worker fingerprints each item from metadata alone
-/// (no NAR bytes needed) and signs once per delivered signing key.
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
-pub struct SignJob {
-    pub items: Vec<SignItem>,
-}
-
-/// One entry in a [`SignJob`]. Carries exactly the metadata needed to
-/// compute the narinfo fingerprint `"1;<store_path>;<nar_hash>;<nar_size>;<refs>"`.
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
-pub struct SignItem {
-    pub store_path: String,
-    /// `"sha256:<nix32>"` — canonical narinfo form.
-    pub nar_hash: String,
-    pub nar_size: u64,
-    /// Bare hash-name references (no `/nix/store/` prefix).
-    pub references: Vec<String>,
-}
-
-/// A store path and the list of Ed25519 narinfo signatures computed for it.
-///
-/// Each entry is in the standard Nix format `cache-name:base64`; there is
-/// one entry per signing-key credential the worker received for the job.
-/// An empty `signatures` vec means the worker did not sign (either `sign`
-/// was false or no keys were delivered).
-#[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[rkyv(derive(Debug, PartialEq))]
-pub struct PathSignature {
-    pub store_path: String,
-    pub signatures: Vec<String>,
 }
 
 /// Progress events for job updates.
@@ -170,12 +126,6 @@ pub enum JobUpdateKind {
         outputs: Vec<BuildOutput>,
     },
     Compressing,
-    Signing,
-    /// Worker has finished signing store paths and reports each signature so
-    /// the server can record them in `cached_path_signature`.
-    Signed {
-        signatures: Vec<PathSignature>,
-    },
 }
 
 // ── Scheduling types ─────────────────────────────────────────────────────────
@@ -336,7 +286,6 @@ pub struct BuildOutput {
 #[rkyv(derive(Debug, PartialEq))]
 pub enum CredentialKind {
     SshKey,
-    SigningKey,
 }
 
 /// Discriminates between the two schedulable job kinds.
@@ -349,6 +298,4 @@ pub enum JobKind {
     Flake,
     /// Nix build job.
     Build,
-    /// Sign job (batch narinfo signing).
-    Sign,
 }

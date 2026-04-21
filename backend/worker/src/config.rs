@@ -134,10 +134,6 @@ pub struct WorkerConfig {
     )]
     pub capability_build: bool,
 
-    /// Sign store paths and upload signatures.
-    #[arg(long, env = "GRADIENT_WORKER_CAPABILITY_SIGN", default_value = "false")]
-    pub capability_sign: bool,
-
     // ── Build environment ─────────────────────────────────────────────────────
     /// Comma-separated Nix system strings this worker can build for.
     /// Defaults to the host system (e.g. `x86_64-linux`). Override to add
@@ -257,7 +253,6 @@ impl WorkerConfig {
             fetch: self.capability_fetch,
             eval: self.capability_eval,
             build: self.capability_build,
-            sign: self.capability_sign,
             cache: false, // workers never serve as cache
         }
     }
@@ -294,7 +289,6 @@ mod tests {
             capability_fetch: false,
             capability_eval: false,
             capability_build: false,
-            capability_sign: false,
             architectures: None,
             system_features: None,
         }
@@ -371,7 +365,6 @@ mod tests {
             capability_fetch: false,
             capability_eval: false,
             capability_build: false,
-            capability_sign: false,
             architectures: None,
             system_features: None,
         };
@@ -432,7 +425,6 @@ mod tests {
             capability_fetch: false,
             capability_eval: false,
             capability_build: false,
-            capability_sign: false,
             architectures: None,
             system_features: None,
         };

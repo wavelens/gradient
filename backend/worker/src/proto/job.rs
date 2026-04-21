@@ -16,8 +16,7 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use proto::messages::{
-    BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, JobUpdateKind, PathSignature,
-    QueryMode,
+    BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, JobUpdateKind, QueryMode,
 };
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -128,14 +127,6 @@ impl JobUpdater {
 
     pub fn report_compressing(&self) -> Result<()> {
         self.send_update(JobUpdateKind::Compressing)
-    }
-
-    pub fn report_signing(&self) -> Result<()> {
-        self.send_update(JobUpdateKind::Signing)
-    }
-
-    pub fn report_signed(&self, signatures: Vec<PathSignature>) -> Result<()> {
-        self.send_update(JobUpdateKind::Signed { signatures })
     }
 
     /// Forward a chunk of build log output to the server. Sync — returns
@@ -290,10 +281,6 @@ impl JobReporter for JobUpdater {
 
     async fn report_compressing(&mut self) -> Result<()> {
         self.send_update(JobUpdateKind::Compressing)
-    }
-
-    async fn report_signing(&mut self) -> Result<()> {
-        self.send_update(JobUpdateKind::Signing)
     }
 
     async fn send_log_chunk(&mut self, task_index: u32, data: Vec<u8>) -> Result<()> {

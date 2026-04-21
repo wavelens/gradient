@@ -449,7 +449,6 @@ impl BuildDispatchMaps {
                 build_id: build.id.to_string(),
                 drv_path: derivation.derivation_path.clone(),
             }],
-            sign: false,
         };
         let pending = PendingBuildJob {
             build_id: build.id,

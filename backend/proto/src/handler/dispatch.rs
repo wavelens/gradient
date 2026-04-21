@@ -18,7 +18,7 @@ use scheduler::Scheduler;
 
 use super::auth::{lookup_registered_peers, validate_tokens};
 use super::cache::handle_cache_query;
-use super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric, record_worker_signatures};
+use super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
 use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoSocket, push_pending_candidates, send_credentials_for_job,
     send_error, send_server_msg, serve_nar_request,
@@ -115,16 +115,6 @@ impl<'a> DispatchContext<'a> {
                 is_final,
             } => {
                 self.on_nar_push(job_id, store_path, data, offset, is_final, nar_buffers)
-                    .await;
-                true
-            }
-            ClientMessage::NarReady {
-                job_id,
-                store_path,
-                nar_size,
-                nar_hash,
-            } => {
-                self.on_nar_ready(job_id, store_path, nar_size, nar_hash)
                     .await;
                 true
             }
@@ -373,19 +363,7 @@ impl<'a> DispatchContext<'a> {
                     error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_build_output failed");
                 }
             }
-            JobUpdateKind::Compressing | JobUpdateKind::Signing => {}
-            JobUpdateKind::Signed { signatures } => {
-                if let Err(e) = record_worker_signatures(
-                    self.state,
-                    self.scheduler,
-                    &job_id,
-                    &signatures,
-                )
-                .await
-                {
-                    warn!(%job_id, error = %e, "failed to record worker signatures");
-                }
-            }
+            JobUpdateKind::Compressing => {}
         }
     }
 
@@ -480,21 +458,6 @@ impl<'a> DispatchContext<'a> {
             None => {
                 warn!(peer_id = %self.peer_id, %job_id, %store_path, "NarPush: could not parse store path hash")
             }
-        }
-    }
-
-    async fn on_nar_ready(
-        &mut self,
-        job_id: String,
-        store_path: String,
-        nar_size: u64,
-        nar_hash: String,
-    ) {
-        debug!(peer_id = %self.peer_id, %job_id, %store_path, nar_size, %nar_hash, "NarReady");
-        if let Err(e) =
-            scheduler::build::handle_nar_ready(self.state, &store_path, nar_size, &nar_hash).await
-        {
-            error!(peer_id = %self.peer_id, %job_id, error = %e, "handle_nar_ready failed");
         }
     }
 

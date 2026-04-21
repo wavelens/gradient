@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use gradient_core::types::proto::{
-    BuildJob, CandidateScore, FlakeJob, Job, JobCandidate, JobKind, RequiredPath, SignJob,
+    BuildJob, CandidateScore, FlakeJob, Job, JobCandidate, JobKind, RequiredPath,
 };
 
 use crate::policy::{JobContext, Policy, WorkerContext};
@@ -75,21 +75,10 @@ impl WorkerBuildCaps {
     }
 }
 
-/// Sign jobs pushed by the server's background scanner when `cached_path`
-/// rows are missing `cached_path_signature` entries for one or more of the
-/// owning org's caches. Only workers with the `sign` capability receive them.
-#[derive(Debug, Clone)]
-pub struct PendingSignJob {
-    pub peer_id: Uuid,
-    pub job: SignJob,
-    pub queued_at: chrono::NaiveDateTime,
-}
-
 #[derive(Debug, Clone)]
 pub enum PendingJob {
     Eval(PendingEvalJob),
     Build(PendingBuildJob),
-    Sign(PendingSignJob),
 }
 
 impl PendingJob {
@@ -97,7 +86,6 @@ impl PendingJob {
         match self {
             PendingJob::Eval(j) => &j.required_paths,
             PendingJob::Build(j) => &j.required_paths,
-            PendingJob::Sign(_) => &[],
         }
     }
 
@@ -105,14 +93,13 @@ impl PendingJob {
         match self {
             PendingJob::Eval(j) => j.peer_id,
             PendingJob::Build(j) => j.peer_id,
-            PendingJob::Sign(j) => j.peer_id,
         }
     }
 
     pub fn as_candidate(&self, job_id: &str) -> JobCandidate {
         let drv_paths = match self {
             PendingJob::Build(j) => j.job.builds.iter().map(|t| t.drv_path.clone()).collect(),
-            PendingJob::Eval(_) | PendingJob::Sign(_) => vec![],
+            PendingJob::Eval(_) => vec![],
         };
         JobCandidate {
             job_id: job_id.to_owned(),
@@ -125,7 +112,6 @@ impl PendingJob {
         match self {
             PendingJob::Eval(j) => Job::Flake(j.job),
             PendingJob::Build(j) => Job::Build(j.job),
-            PendingJob::Sign(j) => Job::Sign(j.job),
         }
     }
 
@@ -133,15 +119,13 @@ impl PendingJob {
         match self {
             PendingJob::Eval(j) => j.evaluation_id,
             PendingJob::Build(j) => j.evaluation_id,
-            // Sign jobs are not tied to a specific evaluation.
-            PendingJob::Sign(_) => Uuid::nil(),
         }
     }
 
     pub fn dependency_count(&self) -> u32 {
         match self {
             PendingJob::Build(j) => j.dependency_count,
-            PendingJob::Eval(_) | PendingJob::Sign(_) => 0,
+            PendingJob::Eval(_) => 0,
         }
     }
 
@@ -149,7 +133,6 @@ impl PendingJob {
         match self {
             PendingJob::Build(j) => j.queued_at,
             PendingJob::Eval(j) => j.queued_at,
-            PendingJob::Sign(j) => j.queued_at,
         }
     }
 }
@@ -169,8 +152,8 @@ fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerBuildCaps>) -> bo
         // No capability info known → don't block (legacy behaviour for callers
         // that don't supply caps, e.g. unit tests for unrelated logic).
         (_, None) => true,
-        // Eval and Sign jobs aren't gated by build caps.
-        (PendingJob::Eval(_), Some(_)) | (PendingJob::Sign(_), Some(_)) => true,
+        // Eval jobs aren't gated by build caps.
+        (PendingJob::Eval(_), Some(_)) => true,
         (PendingJob::Build(j), Some(c)) => c.can_build(&j.architecture, &j.required_features),
     }
 }
@@ -278,7 +261,6 @@ impl JobTracker {
                         (kind, j),
                         (JobKind::Flake, PendingJob::Eval(_))
                             | (JobKind::Build, PendingJob::Build(_))
-                            | (JobKind::Sign, PendingJob::Sign(_))
                     )
                     && job_eligible_for_caps(j, caps)
             })
@@ -454,7 +436,6 @@ mod tests {
                     build_id: Uuid::new_v4().to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                 }],
-                sign: false,
             },
             required_paths: required,
             architecture: architecture.into(),

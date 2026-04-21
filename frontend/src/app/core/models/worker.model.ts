@@ -10,7 +10,6 @@ export interface GradientCapabilities {
   fetch: boolean;
   eval: boolean;
   build: boolean;
-  sign: boolean;
   cache: boolean;
 }
 

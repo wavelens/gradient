@@ -13,7 +13,7 @@
 //!   `PresignedUpload` message that includes no URL (direct mode sentinel).
 //! - **S3**: server sends a [`ServerMessage::PresignedUpload`] with a URL;
 //!   worker compresses the NAR, HTTP-PUTs it to S3, then confirms with
-//!   [`ClientMessage::NarReady`].
+//!   [`ClientMessage::NarUploaded`].
 
 use std::io::Write as _;
 
@@ -179,7 +179,7 @@ pub async fn push_direct(
 }
 
 /// Upload `store_path` as a zstd-compressed NAR to the presigned `url`, then
-/// send [`ClientMessage::NarReady`] with the compressed size and SHA-256 hash.
+/// send [`ClientMessage::NarUploaded`] with compressed+uncompressed metadata.
 ///
 /// `method` is the HTTP method the server expects (usually `"PUT"`).
 /// `headers` are additional HTTP headers to include (e.g. `x-amz-*` for S3).
@@ -257,13 +257,6 @@ pub async fn upload_presigned(
     };
 
     // --- 4. Confirm to the server ---
-    writer.send(ClientMessage::NarReady {
-        job_id: job_id.to_owned(),
-        store_path: store_path.to_owned(),
-        nar_size: file_size,
-        nar_hash: file_hash.clone(),
-    })?;
-
     writer.send(ClientMessage::NarUploaded {
         job_id: job_id.to_owned(),
         store_path: store_path.to_owned(),
@@ -440,7 +433,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn upload_presigned_sends_nar_ready() {
+    async fn upload_presigned_sends_nar_uploaded() {
         let store_path = make_temp_store_path();
         let store_path_str = store_path.to_str().unwrap().to_owned();
 
@@ -452,22 +445,30 @@ mod tests {
         let server_task = tokio::spawn(async move {
             let mut sc = server.accept().await;
             let msg = sc.recv().await.unwrap();
-            if let ClientMessage::NarReady {
+            if let ClientMessage::NarUploaded {
                 job_id,
                 store_path: sp,
+                file_hash,
+                file_size,
                 nar_size,
                 nar_hash,
+                ..
             } = msg
             {
                 assert_eq!(job_id, "job-xyz");
                 assert!(!sp.is_empty());
+                assert!(file_size > 0, "file_size should be nonzero");
                 assert!(nar_size > 0, "nar_size should be nonzero");
                 assert!(
+                    file_hash.starts_with("sha256:"),
+                    "file_hash should be sha256: prefixed, got {file_hash}"
+                );
+                assert!(
                     nar_hash.starts_with("sha256:"),
-                    "nar_hash should be sha256: SRI, got {nar_hash}"
+                    "nar_hash should be sha256: prefixed, got {nar_hash}"
                 );
             } else {
-                panic!("expected NarReady, got {msg:?}");
+                panic!("expected NarUploaded, got {msg:?}");
             }
         });
 

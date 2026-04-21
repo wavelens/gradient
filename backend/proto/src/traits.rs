@@ -81,6 +81,5 @@ pub trait JobReporter: Send {
         outputs: Vec<BuildOutput>,
     ) -> Result<()>;
     async fn report_compressing(&mut self) -> Result<()>;
-    async fn report_signing(&mut self) -> Result<()>;
     async fn send_log_chunk(&mut self, task_index: u32, data: Vec<u8>) -> Result<()>;
 }

@@ -122,7 +122,6 @@ mod tests {
             fetch: true,
             eval: true,
             build: true,
-            sign: true,
             cache: false,
         }
     }
@@ -134,7 +133,6 @@ mod tests {
             fetch: false,
             eval: false,
             build: false,
-            sign: false,
             cache: false,
         }
     }

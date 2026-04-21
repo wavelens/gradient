@@ -41,7 +41,6 @@ export class WorkersComponent implements OnInit {
     { key: 'fetch',    label: 'fetch' },
     { key: 'eval',     label: 'eval' },
     { key: 'build',    label: 'build' },
-    { key: 'sign',     label: 'sign' },
   ];
 
   loading = signal(true);
