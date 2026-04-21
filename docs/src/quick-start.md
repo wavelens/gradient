@@ -14,7 +14,6 @@ Minimal setup: Gradient server + co-located worker on a single NixOS host.
       modules = [
         ./configuration.nix
         gradient.nixosModules.default
-        gradient.nixosModules.gradient-worker
       ];
     };
   };
@@ -68,11 +67,6 @@ echo "*:$(cat /run/secrets/gradient-worker-token)" > /run/secrets/gradient-worke
     serverUrl = "ws://127.0.0.1:3000/proto";
     workerId  = "<uuid from uuidgen>"; # if not provided, a random UUID will be generated and saved in /var/lib/gradient/worker-id
     peersFile = "/run/secrets/gradient-worker-peers";
-    capabilities = {
-      fetch = true;
-      eval  = true;
-      build = true;
-    };
   };
 }
 ```

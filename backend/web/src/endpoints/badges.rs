@@ -467,5 +467,4 @@ mod tests {
         assert_eq!(char_width('é'), 70);
         assert_eq!(char_width('日'), 70);
     }
-
 }

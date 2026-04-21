@@ -137,8 +137,5 @@ pub enum ServerMessage {
     /// Contains the subset of the queried `.drv` paths that are already
     /// recorded in the server's derivation table for the owning org.
     /// The worker skips subtree traversal for these paths during BFS.
-    KnownDerivations {
-        job_id: String,
-        known: Vec<String>,
-    },
+    KnownDerivations { job_id: String, known: Vec<String> },
 }

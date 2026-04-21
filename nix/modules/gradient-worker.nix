@@ -113,9 +113,9 @@ in {
 
     capabilities = {
       federate = lib.mkEnableOption "federate capability - relay work and NAR traffic between workers and servers (requires discoverable)";
-      fetch = lib.mkEnableOption "fetch capability - prefetch flake inputs and sources";
-      eval  = lib.mkEnableOption "eval capability - run Nix flake evaluations";
-      build = lib.mkEnableOption "build capability - execute Nix store builds";
+      fetch = lib.mkEnableOption "fetch capability - prefetch flake inputs and sources" // { default = true; };
+      eval  = lib.mkEnableOption "eval capability - run Nix flake evaluations" // { default = true; };
+      build = lib.mkEnableOption "build capability - execute Nix store builds" // { default = true; };
     };
 
     settings = {

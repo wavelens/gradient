@@ -263,7 +263,10 @@ mod tests {
         let (priv_out, pub_out) =
             decrypt_ssh_private_key(path, org, "https://example.com").expect("should succeed");
         assert!(priv_out.starts_with("-----BEGIN"));
-        assert!(priv_out.ends_with('\n'), "trailing newline must be appended");
+        assert!(
+            priv_out.ends_with('\n'),
+            "trailing newline must be appended"
+        );
         assert_eq!(pub_out, "ssh-ed25519 AAAA example.com-o");
     }
 

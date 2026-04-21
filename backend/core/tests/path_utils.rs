@@ -15,10 +15,7 @@ use gradient_core::executer::path_utils::{
 
 #[test]
 fn nix_store_path_prepends_prefix_to_bare_hash_name() {
-    assert_eq!(
-        nix_store_path("abc123-foo"),
-        "/nix/store/abc123-foo"
-    );
+    assert_eq!(nix_store_path("abc123-foo"), "/nix/store/abc123-foo");
 }
 
 #[test]

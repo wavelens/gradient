@@ -263,9 +263,10 @@ impl<'a> InputPrefetcher<'a> {
         for (path, bytes, meta) in results {
             if imports.len() >= PREFETCH_CONCURRENCY
                 && let Some(r) = imports.next().await
-                    && let Err(e) = r {
-                        warn!(error = %e, "dep NAR import failed");
-                    }
+                && let Err(e) = r
+            {
+                warn!(error = %e, "dep NAR import failed");
+            }
             imports.push(async move {
                 import_received_nar(store, &path, bytes, &meta)
                     .await

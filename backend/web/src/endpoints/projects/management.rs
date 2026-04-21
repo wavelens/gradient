@@ -390,7 +390,6 @@ impl<'a> ProjectPatcher<'a> {
         self.aproject.keep_evaluations = Set(keep);
         Ok(())
     }
-
 }
 
 pub async fn delete_project(

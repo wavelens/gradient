@@ -14,9 +14,7 @@
 //! become cached for a given cache.
 
 use core::types::*;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{debug, warn};
@@ -48,7 +46,10 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
             }
         };
 
-        let cp = match ECachedPath::find_by_id(row.cached_path).one(&state.db).await {
+        let cp = match ECachedPath::find_by_id(row.cached_path)
+            .one(&state.db)
+            .await
+        {
             Ok(Some(c)) => c,
             Ok(None) => continue,
             Err(e) => {
@@ -254,7 +255,11 @@ mod tests {
         assert!(out.starts_with("sha256:"));
         let suffix = out.strip_prefix("sha256:").unwrap();
         assert_eq!(suffix.len(), 52);
-        assert!(suffix.chars().all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c)));
+        assert!(
+            suffix
+                .chars()
+                .all(|c| "0123456789abcdfghijklmnpqrsvwxyz".contains(c))
+        );
     }
 
     #[test]

@@ -56,7 +56,10 @@ async fn gather_references(store: &LocalNixStore, store_path: &str) -> Option<Ve
     let path_info = match guard.client().query_path_info(&sp).await {
         Ok(Some(pi)) => pi,
         Ok(None) => {
-            warn!(store_path, "gather_references: path not found in local store");
+            warn!(
+                store_path,
+                "gather_references: path not found in local store"
+            );
             return None;
         }
         Err(e) => {
@@ -474,9 +477,17 @@ mod tests {
             .await
             .unwrap();
         let (writer, _reader) = conn.split();
-        upload_presigned("job-xyz", &store_path_str, &http_url, "PUT", &[], &writer, None)
-            .await
-            .unwrap();
+        upload_presigned(
+            "job-xyz",
+            &store_path_str,
+            &http_url,
+            "PUT",
+            &[],
+            &writer,
+            None,
+        )
+        .await
+        .unwrap();
 
         server_task.await.unwrap();
         let _ = std::fs::remove_dir_all(&store_path);

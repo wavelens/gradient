@@ -480,8 +480,14 @@ impl<'a> DispatchContext<'a> {
             nar_hash: &nar_hash,
             references: &references,
         };
-        if let Err(e) =
-            mark_nar_stored(self.state, self.scheduler, &job_id, &store_path, &nar_record).await
+        if let Err(e) = mark_nar_stored(
+            self.state,
+            self.scheduler,
+            &job_id,
+            &store_path,
+            &nar_record,
+        )
+        .await
         {
             warn!(%store_path, error = %e, "failed to mark NAR as stored");
         }
@@ -509,11 +515,7 @@ impl<'a> DispatchContext<'a> {
             .is_ok()
     }
 
-    async fn on_query_known_derivations(
-        &mut self,
-        job_id: String,
-        drv_paths: Vec<String>,
-    ) -> bool {
+    async fn on_query_known_derivations(&mut self, job_id: String, drv_paths: Vec<String>) -> bool {
         debug!(peer_id = %self.peer_id, %job_id, count = drv_paths.len(), "QueryKnownDerivations");
         let known = match self.scheduler.peer_id_for_job(&job_id).await {
             Some(org_id) => {
@@ -537,10 +539,10 @@ impl<'a> DispatchContext<'a> {
                     let drv_ids: Vec<Uuid> = candidates.iter().map(|d| d.id).collect();
                     let built: std::collections::HashSet<Uuid> = EBuild::find()
                         .filter(CBuild::Derivation.is_in(drv_ids))
-                        .filter(CBuild::Status.is_in(vec![
-                            BuildStatus::Completed,
-                            BuildStatus::Substituted,
-                        ]))
+                        .filter(
+                            CBuild::Status
+                                .is_in(vec![BuildStatus::Completed, BuildStatus::Substituted]),
+                        )
                         .all(&self.state.db)
                         .await
                         .unwrap_or_default()
@@ -561,8 +563,11 @@ impl<'a> DispatchContext<'a> {
             }
         };
         debug!(peer_id = %self.peer_id, %job_id, known = known.len(), "KnownDerivations");
-        send_server_msg(self.socket, &ServerMessage::KnownDerivations { job_id, known })
-            .await
-            .is_ok()
+        send_server_msg(
+            self.socket,
+            &ServerMessage::KnownDerivations { job_id, known },
+        )
+        .await
+        .is_ok()
     }
 }

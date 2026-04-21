@@ -50,10 +50,7 @@ pub async fn extract_file_from_reader<R>(
 where
     R: tokio::io::AsyncRead + Unpin,
 {
-    let target: Vec<&str> = relative_path
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .collect();
+    let target: Vec<&str> = relative_path.split('/').filter(|s| !s.is_empty()).collect();
 
     let mut stream = parse_nar(reader);
     let mut stack: Vec<Vec<u8>> = Vec::new();

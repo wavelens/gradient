@@ -420,7 +420,11 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uui
         [evaluation_id.into()],
     );
 
-    let rows = state.db.query_all(find_sql).await.context("expand_substituted_closure: query")?;
+    let rows = state
+        .db
+        .query_all(find_sql)
+        .await
+        .context("expand_substituted_closure: query")?;
     if rows.is_empty() {
         return Ok(());
     }
@@ -445,10 +449,7 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uui
 
     let count = builds.len();
     for chunk in builds.chunks(BATCH_SIZE) {
-        if let Err(e) = EBuild::insert_many(chunk.to_vec())
-            .exec(&state.db)
-            .await
-        {
+        if let Err(e) = EBuild::insert_many(chunk.to_vec()).exec(&state.db).await {
             error!(error = %e, %evaluation_id, "expand_substituted_closure: failed to insert builds");
         }
     }

@@ -123,10 +123,7 @@ mod tests {
             file_size: 1234,
             nar_hash: "sha256:nhash".into(),
             nar_size: 5678,
-            references: vec![
-                "/nix/store/x-a".into(),
-                "/nix/store/y-b".into(),
-            ],
+            references: vec!["/nix/store/x-a".into(), "/nix/store/y-b".into()],
             sig: "key:signature".into(),
             deriver: None,
             ca: None,

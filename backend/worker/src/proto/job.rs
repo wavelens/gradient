@@ -31,8 +31,7 @@ pub(crate) type CacheWaiters = Arc<Mutex<HashMap<String, oneshot::Sender<Vec<Cac
 
 /// Shared map from job-id to a oneshot sender that delivers `KnownDerivations`
 /// responses back to the waiting job task.
-pub(crate) type KnownDerivationWaiters =
-    Arc<Mutex<HashMap<String, oneshot::Sender<Vec<String>>>>>;
+pub(crate) type KnownDerivationWaiters = Arc<Mutex<HashMap<String, oneshot::Sender<Vec<String>>>>>;
 
 /// Upper bound for how long a single `CacheQuery` may wait for its `CacheStatus`
 /// response. The worker dispatch loop processes server messages serially, so a
@@ -325,7 +324,13 @@ mod tests {
         let cache_waiters = Arc::new(Mutex::new(HashMap::new()));
         let known_derivation_waiters = Arc::new(Mutex::new(HashMap::new()));
         let nar_recv = NarReceiver::new();
-        let updater = JobUpdater::new(job_id, writer, cache_waiters, known_derivation_waiters, nar_recv);
+        let updater = JobUpdater::new(
+            job_id,
+            writer,
+            cache_waiters,
+            known_derivation_waiters,
+            nar_recv,
+        );
         (updater, reader)
     }
 

@@ -25,6 +25,7 @@ use bytes::Bytes;
 use futures::StreamExt as _;
 use gradient_core::db::{DrvOutputSpec, parse_drv};
 use gradient_core::executer::path_utils::{nix_store_path, strip_nix_store_prefix};
+use gradient_core::hydra::parse_hydra_product_line;
 use gradient_core::sources::get_hash_from_path;
 use harmonia_protocol::build_result::BuildResultInner;
 use harmonia_protocol::daemon_wire::types2::BuildMode;
@@ -34,7 +35,6 @@ use harmonia_store_core::derivation::{BasicDerivation, DerivationOutput, Derivat
 use harmonia_store_core::store_path::{ContentAddress, ContentAddressMethod, StorePath};
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::{Algorithm, Hash};
-use gradient_core::hydra::parse_hydra_product_line;
 use proto::messages::{BuildOutput, BuildProduct, BuildTask};
 use std::collections::BTreeMap;
 use std::pin::{Pin, pin};

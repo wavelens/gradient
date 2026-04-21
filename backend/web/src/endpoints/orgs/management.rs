@@ -191,7 +191,11 @@ pub async fn get(
     let role_name_map: HashMap<Uuid, String> = roles.into_iter().map(|r| (r.id, r.name)).collect();
     let org_role_map: HashMap<Uuid, String> = org_users
         .into_iter()
-        .filter_map(|ou| role_name_map.get(&ou.role).map(|n| (ou.organization, n.clone())))
+        .filter_map(|ou| {
+            role_name_map
+                .get(&ou.role)
+                .map(|n| (ou.organization, n.clone()))
+        })
         .collect();
 
     let items: Vec<OrganizationSummary> = orgs

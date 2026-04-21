@@ -6,6 +6,10 @@
  - Transitive cascade (M1) — needs proper graph walk test, but the current cascade_dependency_failed logic uses DB queries that are hard to stage for transitive walks with MockDB.
  - only grey out capabilities do not stright through
 
+ - improve log: "expected for local-mode caches"
+ - frontend: forward to error pages "Try again" does not work
+ - users state with oidc not working
+
  - missing Child::kill() plumbing through WorkerPoolResolver.
  - save "env"."preferLocalBuild" in database parsed from .drv
  - save which worker was used for each build in the database

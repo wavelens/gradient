@@ -132,7 +132,6 @@ impl EvalWorker {
             _ => anyhow::bail!("eval worker: unexpected response to Resolve"),
         }
     }
-
 }
 
 impl std::fmt::Debug for EvalWorker {

@@ -111,9 +111,7 @@ pub(super) async fn mark_nar_stored(
         );
     }
 
-    let hash_name = store_path
-        .strip_prefix("/nix/store/")
-        .unwrap_or(store_path);
+    let hash_name = store_path.strip_prefix("/nix/store/").unwrap_or(store_path);
     let hash = hash_name.split('-').next().unwrap_or("");
     let package = hash_name
         .find('-')
@@ -187,7 +185,10 @@ pub(super) async fn mark_nar_stored(
     // the signatures in the background.
     ensure_signature_placeholders(state, scheduler, job_id, &cached_path_row, now).await;
 
-    info!(store_path, "cached_path metadata recorded after NarUploaded");
+    info!(
+        store_path,
+        "cached_path metadata recorded after NarUploaded"
+    );
     Ok(())
 }
 
@@ -246,4 +247,3 @@ async fn ensure_signature_placeholders(
         }
     }
 }
-

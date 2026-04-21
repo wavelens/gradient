@@ -217,9 +217,7 @@ impl Default for WaitTimeRule {
 impl Rule for WaitTimeRule {
     fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
         let now = chrono::Utc::now().naive_utc();
-        let waited = (now - job.queued_at)
-            .num_seconds()
-            .max(0) as f64;
+        let waited = (now - job.queued_at).num_seconds().max(0) as f64;
         waited.min(self.max_wait_secs) * self.bonus_per_second
     }
 }
@@ -286,7 +284,11 @@ mod tests {
         }
     }
 
-    fn build_job_ctx(arch: &str, missing_count: Option<u32>, missing_nar_size: Option<u64>) -> (PendingJob, u32, u64) {
+    fn build_job_ctx(
+        arch: &str,
+        missing_count: Option<u32>,
+        missing_nar_size: Option<u64>,
+    ) -> (PendingJob, u32, u64) {
         let job = PendingJob::Build(PendingBuildJob {
             build_id: Uuid::new_v4(),
             evaluation_id: Uuid::new_v4(),
@@ -303,7 +305,11 @@ mod tests {
             dependency_count: 0,
             queued_at: chrono::Utc::now().naive_utc(),
         });
-        (job, missing_count.unwrap_or(0), missing_nar_size.unwrap_or(0))
+        (
+            job,
+            missing_count.unwrap_or(0),
+            missing_nar_size.unwrap_or(0),
+        )
     }
 
     #[test]
@@ -315,9 +321,21 @@ mod tests {
 
         let now = chrono::Utc::now().naive_utc();
         let (job, ..) = build_job_ctx("x86_64-linux", Some(0), None);
-        let ctx_scored = JobContext { job: &job, missing_count: Some(0), missing_nar_size: None, dependency_count: 0, queued_at: now };
+        let ctx_scored = JobContext {
+            job: &job,
+            missing_count: Some(0),
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: now,
+        };
         let (job2, ..) = build_job_ctx("x86_64-linux", None, None);
-        let ctx_unscored = JobContext { job: &job2, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now };
+        let ctx_unscored = JobContext {
+            job: &job2,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: now,
+        };
 
         // Scored with 0 missing beats unscored.
         assert!(rule.score(&ctx_scored, &w) > rule.score(&ctx_unscored, &w));
@@ -333,8 +351,20 @@ mod tests {
         let now = chrono::Utc::now().naive_utc();
         let (j1, ..) = build_job_ctx("x86_64-linux", Some(2), None);
         let (j2, ..) = build_job_ctx("x86_64-linux", Some(10), None);
-        let c1 = JobContext { job: &j1, missing_count: Some(2), missing_nar_size: None, dependency_count: 0, queued_at: now };
-        let c2 = JobContext { job: &j2, missing_count: Some(10), missing_nar_size: None, dependency_count: 0, queued_at: now };
+        let c1 = JobContext {
+            job: &j1,
+            missing_count: Some(2),
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: now,
+        };
+        let c2 = JobContext {
+            job: &j2,
+            missing_count: Some(10),
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: now,
+        };
 
         assert!(rule.score(&c1, &w) > rule.score(&c2, &w));
     }
@@ -349,8 +379,20 @@ mod tests {
         let now = chrono::Utc::now().naive_utc();
         let (j1, ..) = build_job_ctx("x86_64-linux", None, None);
         let (j2, ..) = build_job_ctx("x86_64-linux", None, None);
-        let c1 = JobContext { job: &j1, missing_count: None, missing_nar_size: Some(1_048_576), dependency_count: 0, queued_at: now }; // 1 MB
-        let c2 = JobContext { job: &j2, missing_count: None, missing_nar_size: Some(100_000_000), dependency_count: 0, queued_at: now }; // ~95 MB
+        let c1 = JobContext {
+            job: &j1,
+            missing_count: None,
+            missing_nar_size: Some(1_048_576),
+            dependency_count: 0,
+            queued_at: now,
+        }; // 1 MB
+        let c2 = JobContext {
+            job: &j2,
+            missing_count: None,
+            missing_nar_size: Some(100_000_000),
+            dependency_count: 0,
+            queued_at: now,
+        }; // ~95 MB
 
         assert!(rule.score(&c1, &w) > rule.score(&c2, &w));
     }
@@ -365,8 +407,20 @@ mod tests {
         let now = chrono::Utc::now().naive_utc();
         let (j_real, ..) = build_job_ctx("x86_64-linux", None, None);
         let (j_builtin, ..) = build_job_ctx("builtin", None, None);
-        let c_real = JobContext { job: &j_real, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now };
-        let c_builtin = JobContext { job: &j_builtin, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now };
+        let c_real = JobContext {
+            job: &j_real,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: now,
+        };
+        let c_builtin = JobContext {
+            job: &j_builtin,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: now,
+        };
 
         assert!(rule.score(&c_real, &w) > rule.score(&c_builtin, &w));
     }
@@ -402,8 +456,20 @@ mod tests {
 
         let j_few = build_job_with_deps(1);
         let j_many = build_job_with_deps(20);
-        let c_few = JobContext { job: &j_few, missing_count: None, missing_nar_size: None, dependency_count: 1, queued_at: now };
-        let c_many = JobContext { job: &j_many, missing_count: None, missing_nar_size: None, dependency_count: 20, queued_at: now };
+        let c_few = JobContext {
+            job: &j_few,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 1,
+            queued_at: now,
+        };
+        let c_many = JobContext {
+            job: &j_many,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 20,
+            queued_at: now,
+        };
 
         assert!(rule.score(&c_many, &w) > rule.score(&c_few, &w));
         assert!(rule.score(&c_few, &w) > 0.0, "positive bonus expected");
@@ -418,7 +484,13 @@ mod tests {
         let now = chrono::Utc::now().naive_utc();
 
         let j = build_job_with_deps(0);
-        let ctx = JobContext { job: &j, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now };
+        let ctx = JobContext {
+            job: &j,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: now,
+        };
         assert_eq!(rule.score(&ctx, &w), 0.0);
     }
 
@@ -437,9 +509,27 @@ mod tests {
 
         let (j, ..) = build_job_ctx("x86_64-linux", None, None);
 
-        let ctx_fresh = JobContext { job: &j, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now };
-        let ctx_mid = JobContext { job: &j, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now - chrono::Duration::seconds(60) };
-        let ctx_ancient = JobContext { job: &j, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now - chrono::Duration::seconds(10_000) };
+        let ctx_fresh = JobContext {
+            job: &j,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: now,
+        };
+        let ctx_mid = JobContext {
+            job: &j,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: now - chrono::Duration::seconds(60),
+        };
+        let ctx_ancient = JobContext {
+            job: &j,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: now - chrono::Duration::seconds(10_000),
+        };
 
         let fresh = rule.score(&ctx_fresh, &w);
         let mid = rule.score(&ctx_mid, &w);
@@ -451,7 +541,10 @@ mod tests {
             ancient <= cap + 0.01,
             "ancient wait must be capped at {cap}, got {ancient}"
         );
-        assert!(ancient >= cap - 0.01, "ancient wait should reach the cap, got {ancient}");
+        assert!(
+            ancient >= cap - 0.01,
+            "ancient wait should reach the cap, got {ancient}"
+        );
     }
 
     #[test]
@@ -464,11 +557,23 @@ mod tests {
         let now = chrono::Utc::now().naive_utc();
         // Job A: worker has everything, real arch
         let (ja, ..) = build_job_ctx("x86_64-linux", Some(0), Some(0));
-        let ca = JobContext { job: &ja, missing_count: Some(0), missing_nar_size: Some(0), dependency_count: 0, queued_at: now };
+        let ca = JobContext {
+            job: &ja,
+            missing_count: Some(0),
+            missing_nar_size: Some(0),
+            dependency_count: 0,
+            queued_at: now,
+        };
 
         // Job B: worker missing 5 paths, large NAR, builtin
         let (jb, ..) = build_job_ctx("builtin", Some(5), Some(50_000_000));
-        let cb = JobContext { job: &jb, missing_count: Some(5), missing_nar_size: Some(50_000_000), dependency_count: 0, queued_at: now };
+        let cb = JobContext {
+            job: &jb,
+            missing_count: Some(5),
+            missing_nar_size: Some(50_000_000),
+            dependency_count: 0,
+            queued_at: now,
+        };
 
         assert!(policy.score(&ca, &w) > policy.score(&cb, &w));
     }

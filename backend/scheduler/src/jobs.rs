@@ -469,10 +469,7 @@ mod tests {
         };
         assert!(caps.can_build("x86_64-linux", &["kvm".into()]));
         // kvm is provided but big-parallel is not → must reject.
-        assert!(!caps.can_build(
-            "x86_64-linux",
-            &["kvm".into(), "big-parallel".into()],
-        ));
+        assert!(!caps.can_build("x86_64-linux", &["kvm".into(), "big-parallel".into()],));
     }
 
     #[test]
@@ -548,7 +545,8 @@ mod tests {
         };
         // Worker requesting Build → arm-only build is filtered out → no assignment.
         let p = Policy::default_build_policy();
-        let assignment = tracker.take_best_of_kind("w1", None, Some(&x86_caps), &JobKind::Build, &p);
+        let assignment =
+            tracker.take_best_of_kind("w1", None, Some(&x86_caps), &JobKind::Build, &p);
         assert!(assignment.is_none());
         assert_eq!(tracker.pending_count(), 1);
     }
@@ -670,8 +668,20 @@ mod tests {
         tracker.add_pending("j1".into(), eval_job(peer));
         tracker.add_pending("j2".into(), eval_job(peer));
 
-        tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &Policy::default_build_policy());
-        tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &Policy::default_build_policy());
+        tracker.take_best_of_kind(
+            "w1",
+            None,
+            None,
+            &JobKind::Flake,
+            &Policy::default_build_policy(),
+        );
+        tracker.take_best_of_kind(
+            "w1",
+            None,
+            None,
+            &JobKind::Flake,
+            &Policy::default_build_policy(),
+        );
         assert_eq!(tracker.active_count(), 2);
         assert_eq!(tracker.pending_count(), 0);
 
@@ -715,9 +725,27 @@ mod tests {
         tracker.add_pending("jb1".into(), eval_job(org_b));
 
         // Assign all three to worker w1.
-        tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &Policy::default_build_policy());
-        tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &Policy::default_build_policy());
-        tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &Policy::default_build_policy());
+        tracker.take_best_of_kind(
+            "w1",
+            None,
+            None,
+            &JobKind::Flake,
+            &Policy::default_build_policy(),
+        );
+        tracker.take_best_of_kind(
+            "w1",
+            None,
+            None,
+            &JobKind::Flake,
+            &Policy::default_build_policy(),
+        );
+        tracker.take_best_of_kind(
+            "w1",
+            None,
+            None,
+            &JobKind::Flake,
+            &Policy::default_build_policy(),
+        );
         assert_eq!(tracker.active_jobs().count(), 3);
 
         // Revoke only org_a.
@@ -736,7 +764,13 @@ mod tests {
         let mut tracker = JobTracker::new();
         let org_a = Uuid::new_v4();
         tracker.add_pending("j1".into(), eval_job(org_a));
-        tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &Policy::default_build_policy());
+        tracker.take_best_of_kind(
+            "w1",
+            None,
+            None,
+            &JobKind::Flake,
+            &Policy::default_build_policy(),
+        );
 
         let aborted = tracker.drain_peer_jobs_on_worker("w1", &HashSet::new());
         assert!(aborted.is_empty());
@@ -751,7 +785,13 @@ mod tests {
         assert!(tracker.contains_job("j1"));
         assert!(!tracker.contains_job("j2"));
 
-        tracker.take_best_of_kind("w1", None, None, &JobKind::Flake, &Policy::default_build_policy());
+        tracker.take_best_of_kind(
+            "w1",
+            None,
+            None,
+            &JobKind::Flake,
+            &Policy::default_build_policy(),
+        );
         // Now in active, not pending — should still be "contained".
         assert!(tracker.contains_job("j1"));
     }

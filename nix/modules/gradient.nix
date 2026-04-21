@@ -342,6 +342,7 @@ in {
         ProtectKernelTunables = true;
         ProtectProc = "invisible";
         ProtectSystem = "strict";
+        ReadWritePaths = [ cfg.baseDir ];
         Restart = "on-failure";
         RestartSec = 10;
         LimitNOFILE = 65535;

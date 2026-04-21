@@ -395,7 +395,7 @@
       };
 
       token_file = mkOption {
-        type = types.str;
+        type = types.path;
         description = "Path to a file containing the authentication token for this worker";
       };
     };

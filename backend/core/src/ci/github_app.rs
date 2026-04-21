@@ -355,7 +355,11 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
         let payload: serde_json::Value = serde_json::from_slice(&payload_json).unwrap();
         let iat = payload["iat"].as_u64().expect("iat must be a u64");
         let exp = payload["exp"].as_u64().expect("exp must be a u64");
-        assert_eq!(exp - iat, 660, "exp should be iat + 660 (60 back-date + 600 window)");
+        assert_eq!(
+            exp - iat,
+            660,
+            "exp should be iat + 660 (60 back-date + 600 window)"
+        );
     }
 
     #[test]

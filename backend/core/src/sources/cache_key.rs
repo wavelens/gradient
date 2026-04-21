@@ -363,16 +363,9 @@ mod tests {
             &bare,
         )
         .unwrap();
-        let s2 = sign_narinfo_fingerprint(
-            path,
-            cache,
-            url,
-            "/nix/store/x-y",
-            "sha256:AAAA",
-            42,
-            &full,
-        )
-        .unwrap();
+        let s2 =
+            sign_narinfo_fingerprint(path, cache, url, "/nix/store/x-y", "sha256:AAAA", 42, &full)
+                .unwrap();
         assert_eq!(s1, s2);
     }
 
@@ -393,16 +386,9 @@ mod tests {
             &[],
         )
         .unwrap();
-        let s2 = sign_narinfo_fingerprint(
-            path,
-            cache,
-            url,
-            "/nix/store/x-y",
-            "sha256:AAAA",
-            101,
-            &[],
-        )
-        .unwrap();
+        let s2 =
+            sign_narinfo_fingerprint(path, cache, url, "/nix/store/x-y", "sha256:AAAA", 101, &[])
+                .unwrap();
         assert_ne!(s1, s2, "nar_size must participate in the fingerprint");
     }
 
@@ -423,16 +409,9 @@ mod tests {
             &[],
         )
         .unwrap();
-        let s2 = sign_narinfo_fingerprint(
-            path,
-            cache,
-            url,
-            "/nix/store/bbbb-b",
-            "sha256:AAAA",
-            1,
-            &[],
-        )
-        .unwrap();
+        let s2 =
+            sign_narinfo_fingerprint(path, cache, url, "/nix/store/bbbb-b", "sha256:AAAA", 1, &[])
+                .unwrap();
         assert_ne!(s1, s2);
     }
 

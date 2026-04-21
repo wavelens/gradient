@@ -130,7 +130,10 @@ pub async fn resolve_outbound_reporter_for_project(
 
     match forge {
         ForgeType::Gitea | ForgeType::Forgejo => {
-            let Some(base_url) = integration.endpoint_url.as_deref().filter(|s| !s.is_empty())
+            let Some(base_url) = integration
+                .endpoint_url
+                .as_deref()
+                .filter(|s| !s.is_empty())
             else {
                 warn!(integration_id = %integration.id, "Gitea/Forgejo outbound integration missing endpoint_url");
                 return Arc::new(NoopCiReporter);

@@ -145,14 +145,16 @@ pub async fn forge_webhook(
         return StatusCode::SERVICE_UNAVAILABLE;
     };
 
-    let plaintext_secret =
-        match decrypt_webhook_secret(&state.cli.crypt_secret_file, encrypted_secret) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!(error = %e, integration_id = %integration.id, "Failed to decrypt integration secret");
-                return StatusCode::INTERNAL_SERVER_ERROR;
-            }
-        };
+    let plaintext_secret = match decrypt_webhook_secret(
+        &state.cli.crypt_secret_file,
+        encrypted_secret,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(error = %e, integration_id = %integration.id, "Failed to decrypt integration secret");
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
 
     if !verify_forge_signature(forge_type, plaintext_secret.expose(), &headers, &body) {
         warn!(org = %org_name, forge = %forge, integration = %integration_name, "Forge webhook: invalid signature");
@@ -218,18 +220,33 @@ mod verify_tests {
     fn gitlab_rejects_mismatched_token() {
         let mut h = HeaderMap::new();
         h.insert("X-Gitlab-Token", HeaderValue::from_static("wrong"));
-        assert!(!verify_forge_signature(ForgeType::GitLab, "s3cret", &h, b""));
+        assert!(!verify_forge_signature(
+            ForgeType::GitLab,
+            "s3cret",
+            &h,
+            b""
+        ));
     }
 
     #[test]
     fn gitlab_rejects_missing_token() {
         let h = HeaderMap::new();
-        assert!(!verify_forge_signature(ForgeType::GitLab, "s3cret", &h, b""));
+        assert!(!verify_forge_signature(
+            ForgeType::GitLab,
+            "s3cret",
+            &h,
+            b""
+        ));
     }
 
     #[test]
     fn gitea_rejects_missing_signature() {
         let h = HeaderMap::new();
-        assert!(!verify_forge_signature(ForgeType::Gitea, "s3cret", &h, b"body"));
+        assert!(!verify_forge_signature(
+            ForgeType::Gitea,
+            "s3cret",
+            &h,
+            b"body"
+        ));
     }
 }

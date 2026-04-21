@@ -113,21 +113,22 @@ impl JobScorer {
                 let input_full = nix_store_path(input_drv);
                 // Read the input .drv to get its output paths.
                 if let Ok(input_bytes) = tokio::fs::read(&input_full).await
-                    && let Ok(input_parsed) = parse_drv(&input_bytes) {
-                        for o in &input_parsed.outputs {
-                            if o.path.is_empty() {
-                                continue;
-                            }
-                            match store.has_path(&o.path).await {
-                                Ok(true) => {}
-                                _ => {
-                                    missing_count += 1;
-                                    missing_nar_size +=
-                                        path_nar_size.get(o.path.as_str()).copied().unwrap_or(0);
-                                }
+                    && let Ok(input_parsed) = parse_drv(&input_bytes)
+                {
+                    for o in &input_parsed.outputs {
+                        if o.path.is_empty() {
+                            continue;
+                        }
+                        match store.has_path(&o.path).await {
+                            Ok(true) => {}
+                            _ => {
+                                missing_count += 1;
+                                missing_nar_size +=
+                                    path_nar_size.get(o.path.as_str()).copied().unwrap_or(0);
                             }
                         }
                     }
+                }
             }
 
             // Check inputSrcs.

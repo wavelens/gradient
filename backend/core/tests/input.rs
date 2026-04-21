@@ -518,8 +518,14 @@ fn display_name_invalid_chars_rejected() {
 #[test]
 fn display_name_leading_or_trailing_space_rejected() {
     let msg = "Display name cannot start or end with spaces";
-    assert_eq!(validate_display_name(" Alice").unwrap_err().to_string(), msg);
-    assert_eq!(validate_display_name("Alice ").unwrap_err().to_string(), msg);
+    assert_eq!(
+        validate_display_name(" Alice").unwrap_err().to_string(),
+        msg
+    );
+    assert_eq!(
+        validate_display_name("Alice ").unwrap_err().to_string(),
+        msg
+    );
 }
 
 #[test]

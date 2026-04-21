@@ -272,10 +272,7 @@ impl StateConfiguration {
             if !self.organizations.contains_key(&integration.organization) {
                 errors.push(ValidationError {
                     field: format!("integrations.{}.organization", integration.name),
-                    message: format!(
-                        "Organization '{}' does not exist",
-                        integration.organization
-                    ),
+                    message: format!("Organization '{}' does not exist", integration.organization),
                 });
             }
             if !self.users.contains_key(&integration.created_by) {

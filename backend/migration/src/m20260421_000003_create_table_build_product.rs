@@ -27,21 +27,9 @@ impl MigrationTrait for Migration {
                             .uuid()
                             .not_null(),
                     )
-                    .col(
-                        ColumnDef::new(BuildProduct::FileType)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(BuildProduct::Name)
-                            .string()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(BuildProduct::Path)
-                            .string()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(BuildProduct::FileType).string().not_null())
+                    .col(ColumnDef::new(BuildProduct::Name).string().not_null())
+                    .col(ColumnDef::new(BuildProduct::Path).string().not_null())
                     .col(ColumnDef::new(BuildProduct::Size).big_integer().null())
                     .col(
                         ColumnDef::new(BuildProduct::CreatedAt)

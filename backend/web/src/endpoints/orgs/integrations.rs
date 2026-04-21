@@ -24,9 +24,7 @@ use core::ci::{ForgeType, IntegrationKind, encrypt_webhook_secret};
 use core::types::input::check_index_name;
 use core::types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -214,12 +212,10 @@ pub async fn put_integration(
         _ => None,
     };
 
-    let endpoint_url = body
-        .endpoint_url
-        .and_then(|s| {
-            let t = s.trim().to_string();
-            if t.is_empty() { None } else { Some(t) }
-        });
+    let endpoint_url = body.endpoint_url.and_then(|s| {
+        let t = s.trim().to_string();
+        if t.is_empty() { None } else { Some(t) }
+    });
 
     let integration = AIntegration {
         id: Set(Uuid::new_v4()),
@@ -292,7 +288,11 @@ pub async fn patch_integration(
 
     if let Some(url) = body.endpoint_url {
         let trimmed = url.trim().to_string();
-        active.endpoint_url = Set(if trimmed.is_empty() { None } else { Some(trimmed) });
+        active.endpoint_url = Set(if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        });
     }
 
     if let Some(secret) = body.secret {

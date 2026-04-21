@@ -14,8 +14,8 @@ extern crate core as gradient_core;
 
 use bytes::Bytes;
 use gradient_core::storage::nar_extract::{ExtractError, extract_file_from_nar_bytes};
-use harmonia_nar::archive::write_nar;
 use harmonia_nar::archive::test_data::{TestNarEvent, TestNarEvents};
+use harmonia_nar::archive::write_nar;
 
 fn dir_with_file(name: &str, contents: &[u8], executable: bool) -> Vec<u8> {
     let events: TestNarEvents = vec![
@@ -58,8 +58,7 @@ fn returns_not_found_for_missing_file() {
     let nar = dir_with_file("present.txt", b"x", false);
     let compressed = zstd_compress(&nar);
 
-    let err =
-        block_on(extract_file_from_nar_bytes(compressed, "missing.txt")).unwrap_err();
+    let err = block_on(extract_file_from_nar_bytes(compressed, "missing.txt")).unwrap_err();
     assert!(matches!(err, ExtractError::NotFound));
 }
 
@@ -68,7 +67,9 @@ fn extracts_file_in_nested_directory() {
     let inner = Bytes::from_static(b"file text/tmp/out.txt");
     let events: TestNarEvents = vec![
         TestNarEvent::StartDirectory { name: Bytes::new() },
-        TestNarEvent::StartDirectory { name: Bytes::from_static(b"nix-support") },
+        TestNarEvent::StartDirectory {
+            name: Bytes::from_static(b"nix-support"),
+        },
         TestNarEvent::File {
             name: Bytes::from_static(b"hydra-build-products"),
             executable: false,

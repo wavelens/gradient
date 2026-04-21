@@ -326,18 +326,14 @@ fn download_streams_file_from_nar() {
         let server = TestServer::new(router);
 
         let response = server
-            .get(&format!(
-                "/api/v1/builds/{}/download/image.iso",
-                build_id()
-            ))
+            .get(&format!("/api/v1/builds/{}/download/image.iso", build_id()))
             .await;
 
         response.assert_status_ok();
         let body = response.as_bytes().to_vec();
 
         assert_eq!(
-            body,
-            ISO_BYTES,
+            body, ISO_BYTES,
             "downloaded bytes do not match expected ISO content"
         );
     });

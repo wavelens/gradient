@@ -14,9 +14,7 @@ use axum::{Extension, Json};
 use core::ci::IntegrationKind;
 use core::types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -77,7 +75,8 @@ pub async fn get_project_integration(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectIntegrationResponse>>> {
-    let user = maybe_user.ok_or_else(|| WebError::Unauthorized("Authentication required.".to_string()))?;
+    let user =
+        maybe_user.ok_or_else(|| WebError::Unauthorized("Authentication required.".to_string()))?;
     let (_org, proj) = load_project(&state, user.id, organization, project).await?;
 
     let link = EProjectIntegration::find_by_id(proj.id)
@@ -126,13 +125,15 @@ pub async fn put_project_integration(
             active.outbound_integration = Set(body.outbound_integration);
             active.update(&state.db).await?
         }
-        None => AProjectIntegration {
-            project: Set(proj.id),
-            inbound_integration: Set(body.inbound_integration),
-            outbound_integration: Set(body.outbound_integration),
+        None => {
+            AProjectIntegration {
+                project: Set(proj.id),
+                inbound_integration: Set(body.inbound_integration),
+                outbound_integration: Set(body.outbound_integration),
+            }
+            .insert(&state.db)
+            .await?
         }
-        .insert(&state.db)
-        .await?,
     };
 
     Ok(Json(BaseResponse {

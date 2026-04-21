@@ -549,10 +549,12 @@ fn read_head_from_pktlines(reader: &mut dyn std::io::Read) -> Result<Vec<u8>, So
             }
 
             // Remember the first real ref as fallback (skip zero-id capabilities marker).
-            if first_ref.is_none() && sha != "0000000000000000000000000000000000000000"
-                && let Ok(bytes) = hex::decode(sha) {
-                    first_ref = Some(bytes);
-                }
+            if first_ref.is_none()
+                && sha != "0000000000000000000000000000000000000000"
+                && let Ok(bytes) = hex::decode(sha)
+            {
+                first_ref = Some(bytes);
+            }
         } else {
             // Non-ref pkt-line (e.g. version advertisement).
             let preview = std::str::from_utf8(&data).unwrap_or("<binary>").trim_end();
@@ -642,10 +644,9 @@ mod tests {
 
     #[test]
     fn parse_nix_git_url_rev_among_multiple_query_params() {
-        let (url, rev) = parse_nix_git_url(
-            "git+ssh://git@host/repo.git?ref=main&rev=cafef00d&shallow=1",
-        )
-        .unwrap();
+        let (url, rev) =
+            parse_nix_git_url("git+ssh://git@host/repo.git?ref=main&rev=cafef00d&shallow=1")
+                .unwrap();
         assert_eq!(url, "ssh://git@host/repo.git");
         assert_eq!(rev, "cafef00d");
     }
@@ -678,7 +679,8 @@ mod tests {
 
     #[test]
     fn parse_git_protocol_url_default_port() {
-        let (host, port, path) = parse_git_protocol_url("git://server.example.com/repo.git").unwrap();
+        let (host, port, path) =
+            parse_git_protocol_url("git://server.example.com/repo.git").unwrap();
         assert_eq!(host, "server.example.com");
         assert_eq!(port, 9418);
         assert_eq!(path, "repo.git");

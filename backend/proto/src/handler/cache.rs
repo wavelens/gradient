@@ -401,9 +401,10 @@ impl<'a> CacheQueryHandler<'a> {
         }
 
         if matches!(mode, QueryMode::Push)
-            && let Some(oid) = org_id {
-                self.ensure_push_signatures(oid, &cached_path_rows).await;
-            }
+            && let Some(oid) = org_id
+        {
+            self.ensure_push_signatures(oid, &cached_path_rows).await;
+        }
 
         let expire = std::time::Duration::from_secs(3600);
         let mut result: Vec<gradient_core::types::proto::CachedPath> = Vec::new();
@@ -432,10 +433,11 @@ impl<'a> CacheQueryHandler<'a> {
             .collect();
 
         if !uncached_pairs.is_empty()
-            && let Some(oid) = org_id {
-                self.extend_with_upstream_results(oid, uncached_pairs, &mut result)
-                    .await;
-            }
+            && let Some(oid) = org_id
+        {
+            self.extend_with_upstream_results(oid, uncached_pairs, &mut result)
+                .await;
+        }
 
         result
     }
@@ -594,9 +596,7 @@ mod tests {
         // exactly 32 chars. Guards against an `== 32` → `>= 32` length-check
         // relaxation.
         let state = make_state();
-        let paths = vec![
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
-        ];
+        let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         for mode in [QueryMode::Normal, QueryMode::Pull, QueryMode::Push] {
             let result = CacheQueryHandler::new(&state)
                 .query(None, &paths, mode)

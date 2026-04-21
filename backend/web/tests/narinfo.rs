@@ -139,9 +139,7 @@ async fn narinfo_served_from_db_inner() {
         file_size: Some(12345),
         nar_size: Some(67890),
         // Valid nix32 SHA-256 (of the empty string, as a stable test vector).
-        nar_hash: Some(
-            "sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into(),
-        ),
+        nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
         references: Some(String::new()),
         ca: None,
         created_at: test_date(),

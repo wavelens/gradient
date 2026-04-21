@@ -722,8 +722,9 @@ impl<'a> StateApplicator<'a> {
                         "{}/gradient_integration_{}_secret",
                         credentials_dir, state_int.name
                     );
-                    let plain = fs::read_to_string(&path)
-                        .map_err(|e| format!("Failed to read integration secret file {}: {}", path, e))?;
+                    let plain = fs::read_to_string(&path).map_err(|e| {
+                        format!("Failed to read integration secret file {}: {}", path, e)
+                    })?;
                     Some(
                         encrypt_webhook_secret(self.crypt_secret_file, plain.trim()).map_err(
                             |e| {

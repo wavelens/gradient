@@ -203,15 +203,17 @@ fn on_heartbeat(
     if want_eval
         && let Err(e) = writer.send(ClientMessage::RequestJob {
             kind: JobKind::Flake,
-        }) {
-            warn!(error = %e, "heartbeat RequestJob Flake send failed");
-        }
+        })
+    {
+        warn!(error = %e, "heartbeat RequestJob Flake send failed");
+    }
     if want_build
         && let Err(e) = writer.send(ClientMessage::RequestJob {
             kind: JobKind::Build,
-        }) {
-            warn!(error = %e, "heartbeat RequestJob Build send failed");
-        }
+        })
+    {
+        warn!(error = %e, "heartbeat RequestJob Build send failed");
+    }
 }
 
 // ── Message handler ───────────────────────────────────────────────────────────
@@ -552,7 +554,12 @@ impl<'a> MessageHandler<'a> {
     }
 
     fn on_known_derivations(self, job_id: String, known: Vec<String>) {
-        if let Some(tx) = self.known_derivation_waiters.lock().unwrap().remove(&job_id) {
+        if let Some(tx) = self
+            .known_derivation_waiters
+            .lock()
+            .unwrap()
+            .remove(&job_id)
+        {
             let _ = tx.send(known);
         } else {
             debug!(%job_id, count = known.len(), "KnownDerivations arrived after waiter cleared");

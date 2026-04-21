@@ -71,7 +71,9 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
     let threshold = now - chrono::Duration::seconds(state.cli.evaluation_timeout);
     let webhook_threshold = now - chrono::Duration::seconds(WEBHOOK_BACKUP_POLL_SECS);
 
-    // Single query joining organization to apply different thresholds per project.
+    // Webhook delivery is configured via the project's inbound integration: when
+    // that integration has a `secret` set, the forge pushes events and we only
+    // need a slow backup poll. Otherwise we poll at the full evaluation_timeout.
     // LEFT JOIN evaluation so new projects (no last_evaluation) are also included.
     // Terminal statuses: 5=Completed, 6=Failed, 7=Aborted.
     let sql = sea_orm::Statement::from_string(
@@ -80,13 +82,14 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
             r#"
             SELECT p.*
             FROM project p
-            JOIN organization o ON p.organization = o.id
+            LEFT JOIN project_integration pi ON pi.project = p.id
+            LEFT JOIN integration i ON i.id = pi.inbound_integration
             LEFT JOIN evaluation e ON p.last_evaluation = e.id
             WHERE p.active = true
             AND (
-                (o.forge_webhook_secret IS NULL     AND p.last_check_at <= '{threshold}')
+                (i.secret IS NULL     AND p.last_check_at <= '{threshold}')
                 OR
-                (o.forge_webhook_secret IS NOT NULL AND p.last_check_at <= '{webhook_threshold}')
+                (i.secret IS NOT NULL AND p.last_check_at <= '{webhook_threshold}')
             )
             AND (
                 e.status IN (5, 6, 7)
@@ -213,7 +216,8 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
                 url: eval.repository.clone(),
                 commit: commit_sha,
             },
-            wildcards: eval.wildcard
+            wildcards: eval
+                .wildcard
                 .parse::<Wildcard>()
                 .map(|w| w.patterns().to_vec())
                 .unwrap_or_else(|_| vec![eval.wildcard.clone()]),
