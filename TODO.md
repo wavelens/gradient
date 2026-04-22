@@ -4,11 +4,15 @@
 
  - Final CI reporting (L2, L3, Q1, Q2) — needs injectable CI reporter to assert CiStatus::Success/Failure is sent when evaluation reaches terminal state. Currently the CI path is hard-coded to reporter_for_project() which creates reporters from DB config, not injectable.
  - Transitive cascade (M1) — needs proper graph walk test, but the current cascade_dependency_failed logic uses DB queries that are hard to stage for transitive walks with MockDB.
- - only grey out capabilities do not stright through
 
- - improve log: "expected for local-mode caches"
- - frontend: forward to error pages "Try again" does not work
+ - allow worker capability settings
+ - display name for workers (+ created_by value)
+ - display name for integrations (+ created_by value)
+ - inbound webhook should have response body messages (which eval was queued, or non if e.g. webhook is not configured in any project)
+ - show message in webhook creation that the URL will be shown after creation
  - users state with oidc not working
+ - organization members state configuration
+ - "Manage Integrations" button can be a link button (href) to the integrations page instead of using javascript
 
  - missing Child::kill() plumbing through WorkerPoolResolver.
  - save "env"."preferLocalBuild" in database parsed from .drv

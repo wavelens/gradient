@@ -61,7 +61,11 @@ async fn derivation_closure_reachable(
     Ok(visited)
 }
 
-/// Sum `file_size` of derivation outputs for `drv_ids`.
+/// Sum uncompressed NAR size of derivation outputs for `drv_ids`.
+///
+/// `nar_size` is populated when the worker reports build output metadata;
+/// `file_size` (compressed) is only populated per-cache, so it's unreliable
+/// as a per-output total.
 ///
 /// Returns `Some(total)` when the total is > 0, `None` otherwise.
 async fn sum_output_sizes(
@@ -75,7 +79,7 @@ async fn sum_output_sizes(
         .filter(CDerivationOutput::Derivation.is_in(drv_ids))
         .all(db)
         .await?;
-    let total: i64 = outputs.iter().filter_map(|o| o.file_size).sum();
+    let total: i64 = outputs.iter().filter_map(|o| o.nar_size).sum();
     Ok(if total > 0 { Some(total) } else { None })
 }
 

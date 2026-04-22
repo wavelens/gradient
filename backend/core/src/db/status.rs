@@ -53,8 +53,25 @@ pub async fn update_build_status(
     let mut active_build: ABuild = build.clone().into_active_model();
 
     let webhook_status = status.clone();
+    let now = Utc::now().naive_utc();
+    // When transitioning out of `Building` into a terminal state, record the
+    // elapsed wall-clock time. `build.updated_at` is the timestamp of the
+    // previous transition (into `Building` via `claim_for_build_machine`).
+    if build.status == BuildStatus::Building
+        && matches!(
+            status,
+            BuildStatus::Completed
+                | BuildStatus::Failed
+                | BuildStatus::Aborted
+                | BuildStatus::DependencyFailed
+        )
+        && build.build_time_ms.is_none()
+    {
+        let elapsed_ms = (now - build.updated_at).num_milliseconds().max(0);
+        active_build.build_time_ms = Set(Some(elapsed_ms));
+    }
     active_build.status = Set(status);
-    active_build.updated_at = Set(Utc::now().naive_utc());
+    active_build.updated_at = Set(now);
 
     match active_build.update(&state.db).await {
         Ok(updated_build) => {

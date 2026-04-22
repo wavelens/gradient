@@ -640,7 +640,7 @@ sequenceDiagram
     W->>S: JobUpdate::EvaluatingFlake
     Note over W: nix eval (uses local clone)
     W->>S: JobUpdate::EvaluatingDerivations
-    Note over W: BFS closure walk; for each new .drv
+    Note over W: BFS closure walk - for each new .drv
     W->>S: CacheQuery { paths: [output + drv paths] }
     S->>W: CacheStatus { cached: [subset] }
     Note over W: compress + upload each uncached .drv

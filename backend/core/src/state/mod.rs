@@ -127,7 +127,8 @@ pub struct StateApiKey {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateWorker {
     pub worker_id: String,
-    pub url: String,
+    #[serde(default)]
+    pub url: Option<String>,
     pub organization: String,
     pub token_file: String,
     pub name: String,

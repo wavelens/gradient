@@ -139,7 +139,6 @@ pub async fn handle(cmd: Commands) {
 
             println!("Name: {}", res.message.name);
             println!("Description: {}", res.message.description);
-            println!("Use Nix Store: {}", res.message.use_nix_store);
         }
 
         Commands::List => {

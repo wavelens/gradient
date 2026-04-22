@@ -14,7 +14,6 @@ pub struct OrganizationResponse {
     pub display_name: String,
     pub description: String,
     pub public_key: String,
-    pub use_nix_store: bool,
     pub created_by: String,
     pub created_at: String,
 }

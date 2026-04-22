@@ -15,7 +15,7 @@
 //! and never returned in responses — responses only expose a boolean
 //! "has_secret" / "has_access_token" flag.
 
-use super::load_editable_org;
+use super::{load_editable_org, load_org_member};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -154,7 +154,7 @@ pub async fn get_integrations(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<IntegrationResponse>>>> {
-    let org = load_editable_org(&state, user.id, organization).await?;
+    let org = load_org_member(&state, user.id, organization).await?;
 
     let rows = EIntegration::find()
         .filter(CIntegration::Organization.eq(org.id))
@@ -244,7 +244,7 @@ pub async fn get_integration(
     Extension(user): Extension<MUser>,
     Path((organization, integration_id)): Path<(String, Uuid)>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
-    let org = load_editable_org(&state, user.id, organization).await?;
+    let org = load_org_member(&state, user.id, organization).await?;
     let integration = load_integration(&state, org.id, integration_id).await?;
     Ok(Json(BaseResponse {
         error: false,

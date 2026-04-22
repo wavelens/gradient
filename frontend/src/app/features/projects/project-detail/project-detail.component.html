@@ -66,7 +66,7 @@
         </span>
         <span class="meta-item">
           <span class="material-symbols-outlined">category</span>
-          {{ proj.evaluation_wildcard }}
+          <span class="meta-truncate" [title]="proj.evaluation_wildcard">{{ proj.evaluation_wildcard }}</span>
         </span>
         <span class="status-badge" [class.active]="proj.active" [class.inactive]="!proj.active">
           {{ proj.active ? 'Active' : 'Inactive' }}
@@ -167,7 +167,10 @@
               <div class="evaluation-content">
                 <div class="evaluation-header">
                   <h3>
-                    <a [routerLink]="['/organization', orgName, 'log', evaluation.id]">
+                    <a
+                      [routerLink]="['/organization', orgName, 'log', evaluation.id]"
+                      [queryParams]="evaluation.status === 'Failed' && evaluation.total_builds === 0 ? { eval: 1 } : null"
+                    >
                       Evaluation {{ evaluation.commit.substring(0, 8) }}
                     </a>
                   </h3>

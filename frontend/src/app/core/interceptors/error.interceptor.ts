@@ -30,13 +30,13 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
 
         case 0:
           // Network error or server completely unreachable — treat as 503
-          router.navigate(['/error/503']);
+          router.navigate(['/error/503'], { queryParams: { from: router.url } });
           break;
 
         case 502:
         case 503:
         case 504:
-          router.navigate([`/error/${error.status}`]);
+          router.navigate([`/error/${error.status}`], { queryParams: { from: router.url } });
           break;
 
         case 403:

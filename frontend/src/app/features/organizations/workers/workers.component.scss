@@ -110,7 +110,7 @@
   font-family: $font-family-mono;
 
   &.cap-on  { background: rgba($color-success, 0.12); color: $color-success; }
-  &.cap-off { background: rgba($text-secondary, 0.08); color: $text-light; text-decoration: line-through; }
+  &.cap-off { background: rgba($text-secondary, 0.08); color: $text-light; opacity: 0.5; }
 }
 
 .badge {

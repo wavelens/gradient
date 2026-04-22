@@ -119,7 +119,8 @@
             <label for="inbound-integration">Inbound Integration</label>
             <p-select
               inputId="inbound-integration"
-              [(ngModel)]="integrationForm.inbound_integration"
+              [ngModel]="inboundSelection()"
+              (ngModelChange)="inboundSelection.set($event)"
               [options]="inboundIntegrationOptions()"
               optionLabel="label"
               optionValue="value"
@@ -132,7 +133,8 @@
             <label for="outbound-integration">Outbound Integration</label>
             <p-select
               inputId="outbound-integration"
-              [(ngModel)]="integrationForm.outbound_integration"
+              [ngModel]="outboundSelection()"
+              (ngModelChange)="outboundSelection.set($event)"
               [options]="outboundIntegrationOptions()"
               optionLabel="label"
               optionValue="value"

@@ -184,11 +184,6 @@
         description = "Whether to force evaluation on next check";
       };
 
-      created_by = mkOption {
-        type = types.str;
-        description = "Username of the user who created this project";
-      };
-
       inbound_integration = mkOption {
         type = types.nullOr types.str;
         default = null;
@@ -209,6 +204,11 @@
           reporting. The integration must be declared in
           `services.gradient.state.integrations`.
         '';
+      };
+
+      created_by = mkOption {
+        type = types.str;
+        description = "Username of the user who created this project";
       };
     };
   });
@@ -383,8 +383,8 @@
       };
 
       url = mkOption {
-        type = types.str;
-        default = "";
+        type = types.nullOr types.str;
+        default = null;
         description = "WebSocket URL where the worker accepts incoming server connections. When set, the server connects outbound to this URL. Leave empty for worker-initiated connections.";
         example = "wss://worker.example.com/proto";
       };

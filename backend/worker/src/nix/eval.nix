@@ -6,13 +6,24 @@ flake_ref: wildcard_ref: let
   else
     builtins.genList (n: first + n) (last - first + 1);
 
-  # Check whether an attrset looks like a derivation (has type = "derivation")
-  # without touching drvPath.
-  isDerivation = v:
-    builtins.isAttrs v
-    && (v ? type)
-    && (builtins.tryEval v.type).success
-    && (builtins.tryEval v.type).value == "derivation";
+  # Cheap attribute peek — does not fall through to module evaluation when the
+  # value lacks `.type`. Wrapped in tryEval at call sites because forcing
+  # `value.type` itself can still throw on broken NixOS modules.
+  isDerivation = value: value.type or null == "derivation";
+
+  # tryEval-wrapped helpers used during traversal so that one failing attribute
+  # (e.g. a NixOS module that throws) does not abort the entire listing.
+  safeIsDerivation = v: let
+    p = builtins.tryEval (isDerivation v);
+  in p.success && p.value;
+
+  safeAttrNames = v: let
+    p = builtins.tryEval (
+      if builtins.isAttrs v then builtins.attrNames v else [ ]
+    );
+  in if p.success then p.value else [ ];
+
+  safeGetAttr = name: v: builtins.tryEval (builtins.getAttr name v);
 
   # Check whether a path (list of strings) matches an exclude pattern (list of strings).
   matchesExclude = path: pattern: (
@@ -40,7 +51,7 @@ flake_ref: wildcard_ref: let
   in
     if patLen == 0 then
       # Leaf: check if this node is a derivation and not excluded.
-      if isDerivation node && !(isExcluded excludes prefix) then
+      if safeIsDerivation node && !(isExcluded excludes prefix) then
         [ (builtins.concatStringsSep "." prefix) ]
       else
         [ ]
@@ -50,40 +61,34 @@ flake_ref: wildcard_ref: let
     in
       if seg == "*" then
         # Recursive wildcard: enumerate all attributes of the current node.
-        if builtins.isAttrs node then
-          builtins.concatMap (name: let
-            child = builtins.tryEval (builtins.getAttr name node);
-            newPrefix = prefix ++ [ name ];
-          in
-            if !child.success then
-              [ ]
-            else
-              if rest == [ ] then (
-                # Last segment: check derivation + recurse one level deeper
-                # to handle the `*.*` collapse (consecutive `*` segments are
-                # collapsed to a single `*` by build_wildcard_nix_expr, so a
-                # trailing `*` may represent multiple wildcard levels).
-                if isDerivation child.value && !(isExcluded excludes newPrefix) then
-                  [ (builtins.concatStringsSep "." newPrefix) ]
+        builtins.concatMap (name: let
+          child = safeGetAttr name node;
+          newPrefix = prefix ++ [ name ];
+        in
+          if !child.success then
+            [ ]
+          else
+            if rest == [ ] then (
+              # Last segment: check derivation + recurse one level deeper
+              # to handle the `*.*` collapse (consecutive `*` segments are
+              # collapsed to a single `*` by build_wildcard_nix_expr, so a
+              # trailing `*` may represent multiple wildcard levels).
+              if safeIsDerivation child.value && !(isExcluded excludes newPrefix) then
+                [ (builtins.concatStringsSep "." newPrefix) ]
+              else
+                builtins.concatMap (subName: let
+                  subChild = safeGetAttr subName child.value;
+                  subPrefix = newPrefix ++ [ subName ];
+                in if !subChild.success then
+                  [ ]
+                else if safeIsDerivation subChild.value && !(isExcluded excludes subPrefix) then
+                  [ (builtins.concatStringsSep "." subPrefix) ]
                 else
-                  if builtins.isAttrs child.value then
-                    builtins.concatMap (subName: let
-                      subChild = builtins.tryEval (builtins.getAttr subName child.value);
-                      subPrefix = newPrefix ++ [ subName ];
-                    in if !subChild.success then
-                      [ ]
-                    else if isDerivation subChild.value && !(isExcluded excludes subPrefix) then
-                      [ (builtins.concatStringsSep "." subPrefix) ]
-                    else
-                      [ ]
-                  ) (builtins.attrNames child.value)
-                  else
-                    [ ]
-              ) else
-                resolve excludes child.value rest newPrefix
-          ) (builtins.attrNames node)
-        else
-          [ ]
+                  [ ]
+              ) (safeAttrNames child.value)
+            ) else
+              resolve excludes child.value rest newPrefix
+        ) (safeAttrNames node)
       else
         if seg == "#" then
           # Non-recursive wildcard: enumerate all attributes of the current node.
@@ -91,35 +96,30 @@ flake_ref: wildcard_ref: let
           # `type == "derivation"` — no further descent (unlike `*`).
           # When more segments follow (e.g. `#.foo` or `#.#`), recurse into each
           # child with the remaining pattern, preserving the depth-precise semantics.
-          if builtins.isAttrs node then
-            builtins.concatMap (name: let
-              child = builtins.tryEval (builtins.getAttr name node);
-              newPrefix = prefix ++ [ name ];
-            in
-              if !child.success then
-                [ ]
-              else
-                if rest == [ ] then
-                  if isDerivation child.value && !(isExcluded excludes newPrefix) then
-                    [ (builtins.concatStringsSep "." newPrefix) ]
-                  else
-                    [ ]
+          builtins.concatMap (name: let
+            child = safeGetAttr name node;
+            newPrefix = prefix ++ [ name ];
+          in
+            if !child.success then
+              [ ]
+            else
+              if rest == [ ] then
+                if safeIsDerivation child.value && !(isExcluded excludes newPrefix) then
+                  [ (builtins.concatStringsSep "." newPrefix) ]
                 else
-                  resolve excludes child.value rest newPrefix
-            ) (builtins.attrNames node)
-          else
-            [ ]
+                  [ ]
+              else
+                resolve excludes child.value rest newPrefix
+          ) (safeAttrNames node)
         else
           # Literal segment: descend directly.
-          if builtins.isAttrs node && node ? ${seg} then let
-            child = builtins.tryEval (builtins.getAttr seg node);
+          let
+            child = safeGetAttr seg node;
           in
             if child.success then
               resolve excludes child.value rest (prefix ++ [ seg ])
             else
-              [ ]
-          else
-            [ ];
+              [ ];
 in builtins.toJSON (
   builtins.concatMap (pattern:
     resolve wildcard_ref.exclude flake pattern [ ]

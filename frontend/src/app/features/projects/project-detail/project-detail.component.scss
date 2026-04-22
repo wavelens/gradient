@@ -71,6 +71,13 @@
         font-size: 16px;
         flex-shrink: 0;
       }
+
+      .meta-truncate {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 32ch;
+      }
     }
   }
 

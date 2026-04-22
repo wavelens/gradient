@@ -99,7 +99,6 @@
                   display_name = "Corporation";
                   description = "Main development organization";
                   private_key_file = "/etc/gradient/secrets/corp_ssh_key";
-                  use_nix_store = true;
                   created_by = "alice";
                 };
               };

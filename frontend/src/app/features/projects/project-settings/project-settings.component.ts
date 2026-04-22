@@ -8,6 +8,8 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { forkJoin, of } from 'rxjs';
+import { catchError } from 'rxjs/operators';
 import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
@@ -80,10 +82,8 @@ export class ProjectSettingsComponent implements OnInit {
   availableIntegrations = signal<Integration[]>([]);
   projectIntegration = signal<ProjectIntegrationLink | null>(null);
 
-  integrationForm = {
-    inbound_integration: null as string | null,
-    outbound_integration: null as string | null,
-  };
+  inboundSelection = signal<string | null>(null);
+  outboundSelection = signal<string | null>(null);
 
   inboundIntegrationOptions = signal<{ label: string; value: string | null }[]>([
     { label: 'None', value: null },
@@ -105,40 +105,28 @@ export class ProjectSettingsComponent implements OnInit {
 
   loadIntegrations(): void {
     this.integrationsLoading.set(true);
-    this.integrationsService.listOrgIntegrations(this.orgName).subscribe({
-      next: (list) => {
-        this.availableIntegrations.set(list);
-        const inbound: { label: string; value: string | null }[] = [{ label: 'None', value: null }];
-        const outbound: { label: string; value: string | null }[] = [{ label: 'None', value: null }];
-        for (const i of list) {
-          const label = `${i.name} (${i.forge_type})`;
-          if (i.kind === 'inbound') inbound.push({ label, value: i.id });
-          else outbound.push({ label, value: i.id });
-        }
-        this.inboundIntegrationOptions.set(inbound);
-        this.outboundIntegrationOptions.set(outbound);
-        this.loadProjectIntegration();
-      },
-      error: () => {
-        this.integrationsLoading.set(false);
-      },
-    });
-  }
-
-  loadProjectIntegration(): void {
-    this.integrationsService.getProjectIntegration(this.orgName, this.projectName).subscribe({
-      next: (link) => {
-        this.projectIntegration.set(link);
-        this.integrationForm = {
-          inbound_integration: link.inbound_integration,
-          outbound_integration: link.outbound_integration,
-        };
-        this.integrationsLoading.set(false);
-      },
-      error: () => {
-        this.integrationForm = { inbound_integration: null, outbound_integration: null };
-        this.integrationsLoading.set(false);
-      },
+    forkJoin({
+      list: this.integrationsService.listOrgIntegrations(this.orgName).pipe(
+        catchError(() => of<Integration[]>([])),
+      ),
+      link: this.integrationsService.getProjectIntegration(this.orgName, this.projectName).pipe(
+        catchError(() => of<ProjectIntegrationLink | null>(null)),
+      ),
+    }).subscribe(({ list, link }) => {
+      this.availableIntegrations.set(list);
+      const inbound: { label: string; value: string | null }[] = [{ label: 'None', value: null }];
+      const outbound: { label: string; value: string | null }[] = [{ label: 'None', value: null }];
+      for (const i of list) {
+        const label = `${i.name} (${i.forge_type})`;
+        if (i.kind === 'inbound') inbound.push({ label, value: i.id });
+        else outbound.push({ label, value: i.id });
+      }
+      this.inboundIntegrationOptions.set(inbound);
+      this.outboundIntegrationOptions.set(outbound);
+      this.projectIntegration.set(link);
+      this.inboundSelection.set(link?.inbound_integration ?? null);
+      this.outboundSelection.set(link?.outbound_integration ?? null);
+      this.integrationsLoading.set(false);
     });
   }
 
@@ -148,8 +136,8 @@ export class ProjectSettingsComponent implements OnInit {
     this.integrationSaveSuccess.set(false);
     this.integrationsService
       .setProjectIntegration(this.orgName, this.projectName, {
-        inbound_integration: this.integrationForm.inbound_integration,
-        outbound_integration: this.integrationForm.outbound_integration,
+        inbound_integration: this.inboundSelection(),
+        outbound_integration: this.outboundSelection(),
       })
       .subscribe({
         next: (link) => {

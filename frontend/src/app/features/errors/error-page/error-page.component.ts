@@ -5,7 +5,7 @@
  */
 
 import { Component, computed, inject } from '@angular/core';
-import { ActivatedRoute, RouterModule } from '@angular/router';
+import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 
 interface ErrorMeta {
   title: string;
@@ -63,11 +63,17 @@ const FALLBACK_META: ErrorMeta = {
 })
 export class ErrorPageComponent {
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
 
   code = computed<number>(() => this.route.snapshot.data['code'] ?? 0);
   meta = computed<ErrorMeta>(() => ERROR_META[this.code()] ?? FALLBACK_META);
 
   retry(): void {
-    window.location.reload();
+    const from = this.route.snapshot.queryParamMap.get('from');
+    if (from && from.startsWith('/') && !from.startsWith('/error/')) {
+      this.router.navigateByUrl(from);
+    } else {
+      window.location.reload();
+    }
   }
 }

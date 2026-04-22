@@ -66,6 +66,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   orgDisplayName = signal('');
   evaluationId = '';
   private initialBuildId: string | null = null;
+  private initialShowEval = false;
 
   // Derived from backend totals — accurate regardless of how many builds are loaded.
   completedBuildsCount = computed(() => this.totalBuildsCount() - this.activeBuildsCount());
@@ -109,6 +110,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') || '';
     this.initialBuildId = this.route.snapshot.queryParamMap.get('build');
+    this.initialShowEval = this.route.snapshot.queryParamMap.get('eval') !== null;
     if (!this.evaluationId) {
       this.loading.set(false);
       return;
@@ -204,8 +206,15 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           // First load: show everything we have immediately
           this.visibleBuilds.set(this.builds());
           this.isInitialBuildsLoad = false;
-          // Auto-select first Building build when no explicit build was requested
-          if (!this.initialBuildId) {
+          const evalStatus = this.evaluation()?.status;
+          const failedWithNoBuilds = result.total === 0 && evalStatus === 'Failed';
+          if (this.initialShowEval || failedWithNoBuilds) {
+            // Open the evaluation messages view directly (explicit request via ?eval,
+            // or implicit fallback when there is nothing to build).
+            this.initialShowEval = false;
+            this.selectEvaluationSection();
+          } else if (!this.initialBuildId) {
+            // Auto-select first Building build when no explicit build was requested
             const firstBuilding = this.builds().find(b => b.status === 'Building');
             if (firstBuilding) {
               this.selectBuild(firstBuilding); // isUserAction=false → auto-follow mode
@@ -370,7 +379,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.logHtml.set('');
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { build: null },
+      queryParams: { build: null, eval: 1 },
+      queryParamsHandling: 'merge',
       replaceUrl: true,
     });
   }
@@ -390,7 +400,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { build: build.id },
+      queryParams: { build: build.id, eval: null },
+      queryParamsHandling: 'merge',
       replaceUrl: true,
     });
 

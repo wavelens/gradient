@@ -635,11 +635,12 @@ impl<'a> StateApplicator<'a> {
 
             let now = chrono::Utc::now().naive_utc();
 
-            let url = if state_worker.url.is_empty() {
-                None
-            } else {
-                Some(state_worker.url.clone())
-            };
+            let url = state_worker
+                .url
+                .as_ref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
 
             if let Some(existing) = existing {
                 let mut reg: worker_registration::ActiveModel = existing.into();
