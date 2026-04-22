@@ -126,9 +126,11 @@ impl<'a> DispatchContext<'a> {
                 nar_size,
                 nar_hash,
                 references,
+                deriver,
             } => {
                 self.on_nar_uploaded(
                     job_id, store_path, file_hash, file_size, nar_size, nar_hash, references,
+                    deriver,
                 )
                 .await;
                 true
@@ -470,8 +472,9 @@ impl<'a> DispatchContext<'a> {
         nar_size: u64,
         nar_hash: String,
         references: Vec<String>,
+        deriver: Option<String>,
     ) {
-        debug!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, "NarUploaded");
+        debug!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, ?deriver, "NarUploaded");
         let file_size_i64 = file_size as i64;
         let nar_record = NarUploadRecord {
             file_hash: &file_hash,
@@ -479,6 +482,7 @@ impl<'a> DispatchContext<'a> {
             nar_size: nar_size as i64,
             nar_hash: &nar_hash,
             references: &references,
+            deriver: deriver.as_deref(),
         };
         if let Err(e) = mark_nar_stored(
             self.state,

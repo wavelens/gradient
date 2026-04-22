@@ -142,6 +142,7 @@ async fn narinfo_served_from_db_inner() {
         nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
         references: Some(String::new()),
         ca: None,
+        deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_HASH)),
         created_at: test_date(),
     };
 
@@ -207,5 +208,9 @@ async fn narinfo_served_from_db_inner() {
     assert!(
         body.contains("Sig:"),
         "narinfo body missing Sig field:\n{body}"
+    );
+    assert!(
+        body.contains(&format!("Deriver: /nix/store/{FIXTURE_HASH}-hello.drv")),
+        "narinfo body missing Deriver field from cached_path row:\n{body}"
     );
 }

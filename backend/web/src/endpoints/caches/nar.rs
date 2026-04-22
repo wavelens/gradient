@@ -178,6 +178,7 @@ mod tests {
             nar_hash: Some(format!("sha256:{FILE_HASH_NIX32}")),
             references: Some(String::new()),
             ca: None,
+            deriver: None,
             created_at: Utc::now().naive_utc(),
         }
     }

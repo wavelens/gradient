@@ -91,4 +91,30 @@ Frontend (`pnpm --dir frontend exec ng test --include='**/github-app.component.s
 - `shows the setup view when ready=1 is absent`
 - `clicking create-button calls requestGithubAppManifest with host`
 - `renders credentials when ready=1 and the API returns them`
+
+## Narinfo Deriver field
+
+Backend (`cargo test -p web --tests narinfo`):
+- `narinfo_served_from_db_without_daemon_probe` — verifies the `.narinfo`
+  response is assembled from DB rows (no nix-daemon probe) and now also asserts
+  that the optional `Deriver:` line is emitted when `cached_path.deriver` is
+  populated. Worker-supplied deriver metadata arrives via `NarUploaded.deriver`
+  and is persisted in `mark_nar_stored`.
 - `shows a friendly error when credentials are no longer available`
+
+## Upstream narinfo metadata for worker prefetch
+
+Backend (`cargo test -p proto --lib handler::cache::tests`):
+- `parse_upstream_narinfo_full_fields` — verifies the server parses
+  `NarHash`, `NarSize`, `FileSize`, `References`, `Deriver`, and `Sig` from an
+  upstream `.narinfo` body so the worker receives enough metadata to build a
+  `ValidPathInfo` and call `add_to_store_nar`. Without this the worker
+  silently failed imports and the build died with
+  "dependency does not exist, and substitution is disabled".
+- `parse_upstream_narinfo_requires_url` — a narinfo without `URL:` is rejected.
+- `parse_upstream_narinfo_trims_base_url_trailing_slash` — joins
+  `base_url` + `URL:` without double slashes.
+- `parse_upstream_narinfo_empty_references_is_some_empty` — `References:` with
+  no paths yields `Some(vec![])`, not `None`.
+- `parse_upstream_narinfo_ignores_unparseable_sizes` — malformed `NarSize` /
+  `FileSize` fall back to `None` rather than aborting the parse.

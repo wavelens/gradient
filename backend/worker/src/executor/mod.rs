@@ -240,20 +240,22 @@ impl JobExecutor {
             // would show the build hanging in `Queued` forever.
             updater.report_building(build_task.build_id.clone())?;
 
-            // Best-effort prefetch: import any cache-resident inputs the
-            // daemon will need. A failure here doesn't abort the build —
-            // the daemon will error out cleanly if a critical input is
-            // truly missing, and that error is more diagnosable than the
-            // generic "prefetch failed" we'd raise here.
-            if let Err(e) =
-                crate::proto::nar_import::prefetch_inputs(&self.store, build_task, updater).await
-            {
-                tracing::warn!(
-                    build_id = %build_task.build_id,
-                    error = %e,
-                    "input prefetch failed; build will proceed and fail fast if any input is unavailable"
-                );
-            }
+            // Import cache-resident inputs the daemon will need. A hard
+            // local-store error (e.g. `store.has_path` failing) aborts the
+            // build — we can't safely proceed without knowing what's already
+            // in the store. Other prefetch errors (CacheQuery transport,
+            // individual NAR downloads) are logged inside `prefetch_inputs`
+            // and don't reach here as `Err`.
+            crate::proto::nar_import::prefetch_inputs(&self.store, build_task, updater)
+                .await
+                .map_err(|e| {
+                    tracing::error!(
+                        build_id = %build_task.build_id,
+                        error = %e,
+                        "input prefetch failed; aborting build"
+                    );
+                    e
+                })?;
             let outputs =
                 build::build_derivation(&self.store, build_task, index as u32, updater).await?;
             all_output_paths.extend(outputs.into_iter().map(|o| o.store_path));

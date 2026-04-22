@@ -9,10 +9,11 @@ use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
-use core::sources::get_hash_from_url;
+use core::sources::{get_hash_from_url, verify_narinfo_signature};
 use core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
+use tracing::warn;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -99,13 +100,36 @@ async fn fetch_from_upstream(
 
     let http_client = reqwest::Client::new();
     for upstream in upstreams {
-        let base_url = upstream.url.as_deref()?;
+        let Some(base_url) = upstream.url.as_deref() else {
+            continue;
+        };
+        let Some(public_key) = upstream.public_key.as_deref() else {
+            warn!(upstream = %upstream.id, "upstream missing public_key; skipping");
+            continue;
+        };
         let narinfo_url = format!("{}/{}.narinfo", base_url.trim_end_matches('/'), path_hash);
-        let resp = http_client.get(&narinfo_url).send().await.ok()?;
+        let Ok(resp) = http_client.get(&narinfo_url).send().await else {
+            continue;
+        };
         if !resp.status().is_success() {
             continue;
         }
-        let body = resp.text().await.ok()?;
+        let Ok(body) = resp.text().await else {
+            continue;
+        };
+
+        // Only forward narinfos whose Sig matches the upstream's configured
+        // trusted public key. Unsigned / wrong-key / tampered narinfos are
+        // dropped and we fall through to the next upstream (or 404).
+        if !verify_narinfo_signature(public_key, &body) {
+            warn!(
+                upstream = %upstream.id,
+                path_hash,
+                "upstream narinfo Sig did not verify against configured public_key; dropping"
+            );
+            continue;
+        }
+
         // Rewrite the URL: field to proxy through our upstream_nar endpoint.
         let rewritten = body
             .lines()

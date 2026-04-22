@@ -31,16 +31,25 @@ use crate::nix::store::{LocalNixStore, strip_store_prefix};
 /// Chunk size for direct NAR streaming (64 KiB).
 const NAR_CHUNK_SIZE: usize = 64 * 1024;
 
-/// Query the local nix-daemon for `store_path`'s references.
+/// Local path metadata gathered from the nix-daemon prior to a NAR upload.
+#[derive(Default)]
+struct PathMeta {
+    /// Store-path references in hash-name format (no `/nix/store/` prefix).
+    references: Vec<String>,
+    /// Full deriver `.drv` path, if the daemon reports one.
+    deriver: Option<String>,
+}
+
+/// Query the local nix-daemon for `store_path`'s references and deriver.
 ///
 /// Returns `None` (and logs a warning) if the path is not found or the query
-/// fails — NAR upload continues with an empty references list in that case.
-async fn gather_references(store: &LocalNixStore, store_path: &str) -> Option<Vec<String>> {
+/// fails — NAR upload continues with default metadata in that case.
+async fn gather_path_meta(store: &LocalNixStore, store_path: &str) -> Option<PathMeta> {
     let base = strip_store_prefix(store_path);
     let sp = match StorePath::from_base_path(base) {
         Ok(sp) => sp,
         Err(e) => {
-            warn!(store_path, error = %e, "gather_references: invalid store path");
+            warn!(store_path, error = %e, "gather_path_meta: invalid store path");
             return None;
         }
     };
@@ -48,7 +57,7 @@ async fn gather_references(store: &LocalNixStore, store_path: &str) -> Option<Ve
     let mut guard = match store.pool().acquire().await {
         Ok(g) => g,
         Err(e) => {
-            warn!(store_path, error = %e, "gather_references: could not acquire store connection");
+            warn!(store_path, error = %e, "gather_path_meta: could not acquire store connection");
             return None;
         }
     };
@@ -58,12 +67,12 @@ async fn gather_references(store: &LocalNixStore, store_path: &str) -> Option<Ve
         Ok(None) => {
             warn!(
                 store_path,
-                "gather_references: path not found in local store"
+                "gather_path_meta: path not found in local store"
             );
             return None;
         }
         Err(e) => {
-            warn!(store_path, error = %e, "gather_references: query_path_info failed");
+            warn!(store_path, error = %e, "gather_path_meta: query_path_info failed");
             return None;
         }
     };
@@ -77,7 +86,12 @@ async fn gather_references(store: &LocalNixStore, store_path: &str) -> Option<Ve
         })
         .collect();
 
-    Some(references)
+    let deriver = path_info.deriver.as_ref().map(|d| d.to_string());
+
+    Some(PathMeta {
+        references,
+        deriver,
+    })
 }
 
 /// Compress `store_path` into a zstd-compressed NAR and push it to the server
@@ -154,10 +168,10 @@ pub async fn push_direct(
     let file_hash = format!("sha256:{}", hex::encode(file_hasher.finalize()));
     let nar_hash = format!("sha256:{}", hex::encode(nar_hasher.finalize()));
 
-    let references = if let Some(s) = store {
-        gather_references(s, store_path).await.unwrap_or_default()
+    let meta = if let Some(s) = store {
+        gather_path_meta(s, store_path).await.unwrap_or_default()
     } else {
-        vec![]
+        PathMeta::default()
     };
 
     // Report metadata so the server can update cache records.
@@ -168,7 +182,8 @@ pub async fn push_direct(
         file_size: offset,
         nar_size,
         nar_hash,
-        references,
+        references: meta.references,
+        deriver: meta.deriver,
     })?;
 
     info!(
@@ -250,11 +265,11 @@ pub async fn upload_presigned(
         anyhow::bail!("presigned upload returned {}: {}", status, body);
     }
 
-    // --- 3. Gather path metadata (references for server-side signing) ---
-    let references = if let Some(s) = store {
-        gather_references(s, store_path).await.unwrap_or_default()
+    // --- 3. Gather path metadata (references + deriver for narinfo) ---
+    let meta = if let Some(s) = store {
+        gather_path_meta(s, store_path).await.unwrap_or_default()
     } else {
-        vec![]
+        PathMeta::default()
     };
 
     // --- 4. Confirm to the server ---
@@ -265,7 +280,8 @@ pub async fn upload_presigned(
         file_size,
         nar_size,
         nar_hash,
-        references,
+        references: meta.references,
+        deriver: meta.deriver,
     })?;
 
     info!(

@@ -8,7 +8,7 @@ use super::SourceError;
 use crate::types::*;
 use anyhow::Result;
 use base64::{Engine, engine::general_purpose};
-use ed25519_compact::{KeyPair, SecretKey};
+use ed25519_compact::{KeyPair, PublicKey, SecretKey, Signature};
 
 /// Returns `(encrypted_private_key, public_key_b64)`.
 /// The private key is the full 64-byte ed25519 keypair encrypted and base64-encoded.
@@ -152,6 +152,94 @@ pub fn sign_narinfo_fingerprint(
         .replace(":", "-");
 
     Ok(format!("{}-{}:{}", base_url, cache.name, sig_b64))
+}
+
+/// Verifies that `narinfo_body` carries at least one `Sig:` line signed by the
+/// holder of `public_key`.
+///
+/// `public_key` is the standard Nix narinfo format: `{name}:{base64-32-byte-pubkey}`.
+///
+/// The fingerprint signed by Nix caches is:
+///
+/// ```text
+/// 1;{StorePath};{NarHash};{NarSize};{sorted-/nix/store/-prefixed-refs-comma-joined}
+/// ```
+///
+/// Returns `true` if any `Sig: {name}:{sig}` line with a matching key name
+/// verifies under the given public key. Returns `false` if the body is
+/// malformed, the public key can't be decoded, or no matching signature
+/// verifies — the caller is expected to treat `false` as "upstream lacks
+/// a trusted signature for this path".
+pub fn verify_narinfo_signature(public_key: &str, narinfo_body: &str) -> bool {
+    let Some((key_name, pub_b64)) = public_key.split_once(':') else {
+        return false;
+    };
+    let Ok(pub_bytes) = general_purpose::STANDARD.decode(pub_b64.trim()) else {
+        return false;
+    };
+    let Ok(pubkey) = PublicKey::from_slice(&pub_bytes) else {
+        return false;
+    };
+
+    let mut store_path: Option<&str> = None;
+    let mut nar_hash: Option<&str> = None;
+    let mut nar_size: Option<&str> = None;
+    let mut references: Vec<&str> = Vec::new();
+    let mut sigs: Vec<&str> = Vec::new();
+
+    for line in narinfo_body.lines() {
+        if let Some(v) = line.strip_prefix("StorePath: ") {
+            store_path = Some(v.trim());
+        } else if let Some(v) = line.strip_prefix("NarHash: ") {
+            nar_hash = Some(v.trim());
+        } else if let Some(v) = line.strip_prefix("NarSize: ") {
+            nar_size = Some(v.trim());
+        } else if let Some(v) = line.strip_prefix("References: ") {
+            references = v.split_whitespace().collect();
+        } else if let Some(v) = line.strip_prefix("Sig: ") {
+            sigs.push(v.trim());
+        }
+    }
+
+    let (Some(store_path), Some(nar_hash), Some(nar_size)) = (store_path, nar_hash, nar_size)
+    else {
+        return false;
+    };
+
+    let mut full_refs: Vec<String> = references
+        .into_iter()
+        .map(|r| {
+            if r.starts_with("/nix/store/") {
+                r.to_owned()
+            } else {
+                format!("/nix/store/{}", r)
+            }
+        })
+        .collect();
+    full_refs.sort();
+    let refs_str = full_refs.join(",");
+
+    let fingerprint = format!("1;{};{};{};{}", store_path, nar_hash, nar_size, refs_str);
+
+    for sig_token in sigs {
+        let Some((sig_name, sig_b64)) = sig_token.split_once(':') else {
+            continue;
+        };
+        if sig_name != key_name {
+            continue;
+        }
+        let Ok(sig_bytes) = general_purpose::STANDARD.decode(sig_b64) else {
+            continue;
+        };
+        let Ok(sig) = Signature::from_slice(&sig_bytes) else {
+            continue;
+        };
+        if pubkey.verify(fingerprint.as_bytes(), &sig).is_ok() {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -434,5 +522,108 @@ mod tests {
             &[],
         );
         assert!(matches!(result, Err(SourceError::KeyPairConversion)));
+    }
+
+    /// Build a narinfo body whose Sig line was produced by
+    /// `sign_narinfo_fingerprint`. Returns `(body, public_key_string)` where
+    /// `public_key_string` is the `{sig_key_name}:{pub_b64}` form that
+    /// `verify_narinfo_signature` consumes.
+    fn signed_narinfo_fixture() -> (String, String) {
+        let (_f, path) = temp_secret_file();
+        let (encrypted_priv, pub_b64) =
+            generate_signing_key(path.clone()).expect("generate failed");
+        let cache = make_cache("upstream", &pub_b64, &encrypted_priv);
+        let store_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo";
+        let nar_hash = "sha256:0000000000000000000000000000000000000000000000000000";
+        let nar_size: u64 = 1234;
+        let refs = vec!["bbbb-b".to_string(), "cccc-c".to_string()];
+        let sig = sign_narinfo_fingerprint(
+            path,
+            cache,
+            "https://cache.example.com".to_string(),
+            store_path,
+            nar_hash,
+            nar_size,
+            &refs,
+        )
+        .expect("sign failed");
+        // sig is "{base_url}-{cache.name}:{sig_b64}" — the sig-key name is
+        // everything before the last ':'.
+        let (sig_key_name, _) = sig.rsplit_once(':').unwrap();
+        let body = format!(
+            "StorePath: {store_path}\n\
+             URL: nar/xxxx.nar.xz\n\
+             Compression: xz\n\
+             FileHash: sha256:ffff\n\
+             FileSize: 10\n\
+             NarHash: {nar_hash}\n\
+             NarSize: {nar_size}\n\
+             References: {}\n\
+             Sig: {sig}\n",
+            refs.join(" "),
+        );
+        (body, format!("{sig_key_name}:{pub_b64}"))
+    }
+
+    #[test]
+    fn verify_narinfo_signature_accepts_valid() {
+        let (body, public_key) = signed_narinfo_fixture();
+        assert!(verify_narinfo_signature(&public_key, &body));
+    }
+
+    #[test]
+    fn verify_narinfo_signature_rejects_wrong_public_key() {
+        let (body, _real_key) = signed_narinfo_fixture();
+        // Different keypair, same key name.
+        let (_f, path) = temp_secret_file();
+        let (_, other_pub_b64) = generate_signing_key(path).expect("generate failed");
+        let name = _real_key.rsplit_once(':').unwrap().0;
+        let wrong = format!("{name}:{other_pub_b64}");
+        assert!(!verify_narinfo_signature(&wrong, &body));
+    }
+
+    #[test]
+    fn verify_narinfo_signature_rejects_name_mismatch() {
+        // Same key bytes but wrong name — no Sig line matches.
+        let (body, real_key) = signed_narinfo_fixture();
+        let pub_b64 = real_key.rsplit_once(':').unwrap().1;
+        let wrong = format!("other-name:{pub_b64}");
+        assert!(!verify_narinfo_signature(&wrong, &body));
+    }
+
+    #[test]
+    fn verify_narinfo_signature_rejects_tampered_nar_size() {
+        let (body, public_key) = signed_narinfo_fixture();
+        let tampered = body.replace("NarSize: 1234", "NarSize: 9999");
+        assert!(!verify_narinfo_signature(&public_key, &tampered));
+    }
+
+    #[test]
+    fn verify_narinfo_signature_rejects_missing_sig() {
+        let (body, public_key) = signed_narinfo_fixture();
+        let stripped: String = body
+            .lines()
+            .filter(|l| !l.starts_with("Sig: "))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!verify_narinfo_signature(&public_key, &stripped));
+    }
+
+    #[test]
+    fn verify_narinfo_signature_rejects_malformed_public_key() {
+        let (body, _) = signed_narinfo_fixture();
+        assert!(!verify_narinfo_signature("no-colon-here", &body));
+        assert!(!verify_narinfo_signature("name:!!not-base64!!", &body));
+    }
+
+    #[test]
+    fn verify_narinfo_signature_rejects_missing_fingerprint_fields() {
+        let public_key = {
+            let (_f, path) = temp_secret_file();
+            let (_, pub_b64) = generate_signing_key(path).expect("generate failed");
+            format!("upstream:{pub_b64}")
+        };
+        let body = "URL: nar/x.nar.xz\nSig: upstream:AAAA\n";
+        assert!(!verify_narinfo_signature(&public_key, body));
     }
 }

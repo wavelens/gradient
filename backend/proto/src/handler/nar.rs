@@ -19,6 +19,8 @@ pub(super) struct NarUploadRecord<'a> {
     pub nar_hash: &'a str,
     /// Store-path references in hash-name format (no `/nix/store/` prefix).
     pub references: &'a [String],
+    /// Full deriver `.drv` path, if the worker reported one.
+    pub deriver: Option<&'a str>,
 }
 
 /// Record a cache metric entry for a NAR push (direct or presigned).
@@ -145,6 +147,9 @@ pub(super) async fn mark_nar_stored(
             if references_str.is_some() {
                 active.references = Set(references_str);
             }
+            if record.deriver.is_some() {
+                active.deriver = Set(record.deriver.map(str::to_owned));
+            }
             active.update(&state.db).await?
         }
         None => {
@@ -159,6 +164,7 @@ pub(super) async fn mark_nar_stored(
                 nar_hash: Set(Some(record.nar_hash.to_owned())),
                 references: Set(references_str),
                 ca: Set(None),
+                deriver: Set(record.deriver.map(str::to_owned)),
                 created_at: Set(now),
             };
             match am.insert(&state.db).await {

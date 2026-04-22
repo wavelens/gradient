@@ -39,6 +39,8 @@ pub struct Model {
     pub references: Option<String>,
     /// Content-address field, if the path is content-addressed.
     pub ca: Option<String>,
+    /// Full `.drv` path that produced this output, if known.
+    pub deriver: Option<String>,
     pub created_at: NaiveDateTime,
 }
 

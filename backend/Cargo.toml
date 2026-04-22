@@ -65,6 +65,8 @@ tracing          = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid             = { version = "1.23", features = ["fast-rng", "macro-diagnostics", "v4"] }
 zstd             = "0.13"
+xz2              = "0.1"
+bzip2            = "0.6"
 
 [dependencies]
 cache            = { workspace = true }

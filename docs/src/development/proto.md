@@ -493,7 +493,7 @@ Fetch runs on a worker that has the `fetch` capability. The fetch step performs 
 
  1. **Clone** the repository at the specified commit using libgit2 (handles SSH keys, `git://`, `https://`).
  2. **Archive** the flake source and all locked transitive inputs into the local Nix store by running `nix flake archive --json`. This goes through the nix daemon (subprocess) so network fetching and store-write access work correctly. Returns the nix store source path (e.g. `/nix/store/xxx-source`) and all input store paths.
- 3. **Compress and push every uncached NAR** — the worker sends `CacheQuery { mode: Push }` for every fetched path. For uncached paths, it **zstd-compresses the NAR locally** and uploads (presigned S3 PUT or chunked `NarPush`); on completion it emits `NarUploaded` with the full metadata (`file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`). **NARs are never transmitted uncompressed.**
+ 3. **Compress and push every uncached NAR** — the worker sends `CacheQuery { mode: Push }` for every fetched path. For uncached paths, it **zstd-compresses the NAR locally** and uploads via chunked `NarPush` over the WebSocket; on completion it emits `NarUploaded` with the full metadata (`file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`, `deriver`). **NARs are never transmitted uncompressed.**
  4. **Report `FetchResult`** carrying only the archived flake source store path (not the full input list — the server already has every `cached_path` row from the `NarUploaded` stream). The server hands this path to any subsequent eval-only job via `FlakeSource::Cached { store_path }`.
 
 If `nix flake archive` fails (e.g. network unavailable), the worker falls back to the temporary git checkout path, skips step 3 (nothing to push), and sets `flake_source` to `None` to signal the fallback — no follow-up eval-only job can then use `FlakeSource::Cached`.
@@ -515,7 +515,7 @@ FetchResult {
 Every `.drv` file discovered during `EvaluateDerivations` is a cacheable store path that substituters ask for by `<drv-hash>.narinfo`. The eval worker therefore:
 
  1. Runs `CacheQuery { mode: Push, paths: <new drv paths in wave> }` alongside each `EvalResult` batch.
- 2. For uncached drvs, reads the `.drv` file from the local store, packs it into a NAR, **zstd-compresses it**, and uploads (S3 PUT or chunked `NarPush`) followed by `NarUploaded`.
+ 2. For uncached drvs, reads the `.drv` file from the local store, packs it into a NAR, **zstd-compresses it**, and uploads via chunked `NarPush` followed by `NarUploaded`.
 
 The server records the drv's `cached_path` row directly from the `NarUploaded` message. The server never re-packs or re-hashes — it trusts the NAR metadata the worker reports.
 
@@ -542,9 +542,9 @@ The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`
 
 | Mode | Use case | Server returns |
 |------|----------|----------------|
-| `Normal` | Eval: mark derivations as substituted | Only cached paths (`cached: true`), no URLs |
-| `Pull` | Build: fetch required store paths | Cached paths with presigned S3 GET URL (or `url: None` for local — use `NarRequest`) |
-| `Push` | Fetch: upload new inputs | **All** queried paths; uncached ones include presigned S3 PUT URL (or `url: None` — use `NarPush`) |
+| `Normal` | Eval: mark derivations as substituted | Only cached paths (`cached: true`), no URLs, no metadata |
+| `Pull` | Build: fetch required store paths | Cached paths with full import metadata (`nar_hash`, `references`, `signatures`, `deriver`, `ca`) and presigned S3 GET URL (or `url: None` for local — use `NarRequest`). Also consults org-configured upstream caches for paths not in the local store. |
+| `Push` | Fetch: upload new inputs | **All** queried paths. Cached paths carry only `path` + `cached: true`. Uncached paths carry `path`, `cached: false`, and `url` — a presigned S3 PUT URL on S3-backed stores (`None` on local; worker falls back to `NarPush`). No other metadata, no upstream lookup. |
 
 ```rust
 // Worker → Server
@@ -555,9 +555,9 @@ CacheQuery {
 }
 
 enum QueryMode {
-    Normal,   // return only cached paths — no URLs generated
-    Pull,     // return cached paths with presigned GET URL (S3) or None (local)
-    Push,     // return all paths; uncached get presigned PUT URL (S3) or None (local)
+    Normal,   // return only cached paths — no URLs, no metadata
+    Pull,     // return cached paths with full import metadata + presigned GET URL
+    Push,     // return all paths with path + cached; uncached also gets presigned PUT URL (S3)
 }
 
 // Server → Worker
@@ -569,19 +569,25 @@ CacheStatus {
 CachedPath {
     path: String,                       // /nix/store/xxx-name
     cached: bool,                       // true = path is in the Gradient cache
+    // — Pull-mode-only fields (None/empty in Normal and Push) —
     file_size: Option<u64>,             // compressed NAR size on disk (bytes)
     nar_size: Option<u64>,              // uncompressed NAR size (bytes)
-    url: Option<String>,                // presigned S3 URL (mode-dependent; see below)
-                                        // None = use WebSocket direct transfer instead
+    url: Option<String>,                // presigned S3 GET URL; None = use NarRequest
+    nar_hash: Option<String>,           // sha256:<nix32> of the uncompressed NAR
+    references: Vec<String>,            // full /nix/store/... runtime references
+    signatures: Vec<String>,            // narinfo wire format `<key-name>:<base64>`
+    deriver: Option<String>,            // full /nix/store/*.drv that produced this path
+    ca: Option<String>,                 // content-address (e.g. fixed:r:sha256:...)
 }
 ```
 
-**`url` semantics by mode:**
+**Field population by mode:**
 
-- `Normal` — always `None`.
-- `Pull` + `cached: true` — presigned GET URL for S3-backed stores; `None` for local (use `NarRequest`).
-- `Push` + `cached: false` — presigned PUT URL for S3-backed stores; `None` for local (use `NarPush`).
-- `Push` + `cached: true` — always `None` (path is already in cache; skip upload).
+- `Normal` — `path`, `cached` only (and `cached` is always `true`, since uncached paths are omitted).
+- `Pull` + `cached: true` — every field populated from `cached_path` / `cached_path_signature`; `url` is a presigned S3 GET for S3-backed stores or `None` for local (use `NarRequest`). Upstream hits populate the same fields from the sig-verified upstream narinfo.
+- `Pull` + `cached: false` — omitted from the response (server has nothing to offer).
+- `Push` + `cached: true` — only `path` + `cached`; worker skips the path.
+- `Push` + `cached: false` — `path`, `cached`, and `url` (presigned S3 PUT on S3-backed stores; `None` on local, worker falls back to `NarPush`). No other metadata. No upstream lookup in Push mode.
 
 **`Normal` mode during `EvaluateDerivations`:**
 
@@ -609,8 +615,8 @@ The flow for getting any store path (fetched flake input, evaluated `.drv`, or b
 
  1. **Worker produces** the path locally (fetch, eval, or build).
  2. **Worker zstd-compresses** the NAR. The compressed stream is the only form in which a NAR is ever transmitted or stored.
- 3. **Worker uploads** the compressed NAR via `NarPush` (local mode) or S3 PUT (cloud mode), then sends a single `NarUploaded` carrying `file_hash`, `file_size`, `nar_size`, `nar_hash`, and `references`. `nar_hash` and `nar_size` are computed locally over the uncompressed NAR; `file_hash` and `file_size` over the compressed stream. `references` is read from the local nix-daemon via harmonia's `DaemonStore::query_path_info` (no subprocess) — for build outputs this is the runtime reference set scanned out of the NAR; for `.drv` and fetched-source paths it's whatever the daemon records.
- 4. **Server records** `cached_path` metadata (including `references` as a space-separated hash-name string in the `cached_path.references` column) from `NarUploaded`. No local re-packing, re-compression, or re-hashing ever happens.
+ 3. **Worker uploads** the compressed NAR via `NarPush` (local mode) or S3 PUT (cloud mode), then sends a single `NarUploaded` carrying `file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`, and `deriver` (the full `.drv` path, when the daemon knows one). `nar_hash` and `nar_size` are computed locally over the uncompressed NAR; `file_hash` and `file_size` over the compressed stream. `references` is read from the local nix-daemon via harmonia's `DaemonStore::query_path_info` (no subprocess) — for build outputs this is the runtime reference set scanned out of the NAR; for `.drv` and fetched-source paths it's whatever the daemon records.
+ 4. **Server records** `cached_path` metadata (including `references` as a space-separated hash-name string in the `cached_path.references` column, and `deriver` in `cached_path.deriver` when the worker supplied one) from `NarUploaded`. No local re-packing, re-compression, or re-hashing ever happens.
  5. **Signing** is deferred. `mark_nar_stored` inserts one `cached_path_signature` row per org-cache with `signature = NULL`. A background sweep (`cache::cacher::sign_sweep`, ticking every 60 s) finds NULL rows, reads `nar_hash` / `nar_size` / `references` from `cached_path`, computes the narinfo fingerprint, and fills in the signature. New org ↔ cache subscriptions also enqueue NULL rows for every existing `cached_path` the org owns, so the same sweep back-fills signatures without any extra code path.
 
 The server does **not** use `ensure_path` or GC roots. All cached content lives in the NAR store (S3 or local files), not in the server's Nix store.
@@ -629,14 +635,14 @@ sequenceDiagram
     W->>S: CacheQuery { mode: Push, paths: [source + all inputs] }
     Note over W: zstd-compress every uncached path
     alt S3 mode
-        S->>W: CacheStatus { [{A,cached:false,url:s3}, {B,cached:false,url:s3}, {C,cached:true}, {D,cached:true}] }
+        S->>W: CacheStatus { [{A,cached:false,url:s3_put}, {B,cached:false,url:s3_put}, {C,cached:true}, {D,cached:true}] }
         W->>S3: PUT A.zst, PUT B.zst (compressed bytes, direct to S3)
     else local mode
         S->>W: CacheStatus { [{A,cached:false,url:None}, {B,cached:false,url:None}, {C,cached:true}, {D,cached:true}] }
         W->>S: NarPush { path:A, compressed chunks ... is_final }
         W->>S: NarPush { path:B, compressed chunks ... is_final }
     end
-    W->>S: NarUploaded { file_hash, file_size, nar_size, nar_hash, references } ×paths
+    W->>S: NarUploaded { file_hash, file_size, nar_size, nar_hash, references, deriver } ×paths
     W->>S: JobUpdate::FetchResult { flake_source }
     Note right of S: records cached_path rows
     W->>S: JobUpdate::EvaluatingFlake
@@ -732,7 +738,7 @@ sequenceDiagram
     W->>S: JobUpdate::BuildOutput { target }
     W->>S: JobUpdate::Compressing
     Note over W: packs outputs into zstd NARs,<br/>uploads compressed bytes only
-    W->>S: NarUploaded { store_path, file_hash, file_size, nar_size, nar_hash, references }
+    W->>S: NarUploaded { store_path, file_hash, file_size, nar_size, nar_hash, references, deriver }
     W->>S: JobCompleted
 ```
 
@@ -828,6 +834,8 @@ enum ClientMessage {
         nar_hash: String,      // sha256:<nix32> or SRI — hash of the uncompressed NAR
         references: Vec<String>, // store-path references in hash-name format (no /nix/store/ prefix);
                                  // sourced from the local daemon via harmonia query_path_info
+        deriver: Option<String>, // full /nix/store/*.drv path that produced this output, if any;
+                                 // sourced from the same daemon query. None for sources / .drv files.
     },
 
     // Cache queries
@@ -912,13 +920,15 @@ Two modes, chosen by the server based on `NarStore` configuration. Both support 
 
 ### Worker → Server (upload, FetchFlake)
 
-Before uploading fetched flake inputs, the worker sends `CacheQuery { mode: Push }` to filter out paths that are already cached and obtain upload URLs for uncached paths.
+Before uploading fetched flake inputs, the worker sends `CacheQuery { mode: Push }` to filter out paths that are already cached and obtain a presigned PUT URL for uncached paths when the store is S3-backed.
 
 The server responds with a single `CacheStatus` containing **all** queried paths:
 
- - `cached: true` — path is already in the cache; worker skips it.
+ - `cached: true` — path already in the cache; worker skips it. No URL.
  - `cached: false, url: Some(presigned_put)` — S3 mode; worker uploads directly to S3.
  - `cached: false, url: None` — local mode; worker uses `NarPush` WebSocket frames.
+
+Push responses carry **no** other metadata (no `nar_hash`, `references`, `signatures`, `deriver`, `ca`, `file_size`, `nar_size`), and Push mode **does not** query upstream caches.
 
 **Local mode** — uncached paths have `url: None`; worker uses `NarPush`:
 
@@ -932,11 +942,11 @@ sequenceDiagram
     S->>W: CacheStatus { cached: [{A,cached:false,url:None}, {B,cached:true}, {C,cached:false,url:None}] }
     W-->>S: NarPush {path:A, offset:0, data:...}
     W-->>S: NarPush {path:A, is_final}
-    W->>S: NarUploaded {path:A, file_hash, file_size}
+    W->>S: NarUploaded {path:A, file_hash, file_size, nar_size, nar_hash, references, deriver}
     W-->>S: NarPush {path:C, offset:0, data:...}
     W-->>S: NarPush {path:C, is_final}
-    W->>S: NarUploaded {path:C, file_hash, file_size}
-    Note right of S: stores in local NarStore,<br/>updates cached_path rows
+    W->>S: NarUploaded {path:C, file_hash, file_size, nar_size, nar_hash, references, deriver}
+    Note right of S: stores in NAR storage,<br/>updates cached_path rows
 ```
 
 **S3 mode** — uncached paths have `url: Some(presigned_put)`; worker uploads directly to S3:
@@ -951,9 +961,9 @@ sequenceDiagram
     Note right of S: B already cached, generates presigned PUT URLs for A, C
     S->>W: CacheStatus [A: cached=false url=s3, B: cached=true, C: cached=false url=s3]
     W->>S3: PUT A (direct, no data through server)
-    W->>S: NarUploaded {path:A, file_hash, file_size}
+    W->>S: NarUploaded {path:A, file_hash, file_size, nar_size, nar_hash, references, deriver}
     W->>S3: PUT C
-    W->>S: NarUploaded {path:C, file_hash, file_size}
+    W->>S: NarUploaded {path:C, file_hash, file_size, nar_size, nar_hash, references, deriver}
 ```
 
 ### Server → Worker (download, BuildJob)

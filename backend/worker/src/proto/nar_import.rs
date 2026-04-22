@@ -42,7 +42,7 @@ use harmonia_utils_hash::Hash;
 use harmonia_utils_hash::fmt::Any;
 use proto::messages::{BuildTask, CachedPath, QueryMode};
 use sha2::{Digest as _, Sha256};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
@@ -125,6 +125,12 @@ impl<'a> InputPrefetcher<'a> {
     }
 
     /// Stage 2 — filter `wanted` down to paths absent from the local store.
+    ///
+    /// A `has_path` failure means we can't tell whether the daemon already
+    /// holds a path — proceeding would either skip an actually-missing input
+    /// (build fails late with "dependency does not exist") or re-import one
+    /// the daemon already has (wasted work and confusing logs). Neither is
+    /// acceptable, so we fail the build immediately.
     async fn filter_missing(&self, wanted: HashSet<String>) -> Result<Vec<String>> {
         let mut missing = Vec::new();
         for p in wanted {
@@ -132,8 +138,12 @@ impl<'a> InputPrefetcher<'a> {
                 Ok(true) => {}
                 Ok(false) => missing.push(p),
                 Err(e) => {
-                    warn!(path = %p, error = %e, "store.has_path failed; assuming missing");
-                    missing.push(p);
+                    error!(path = %p, error = %e, "store.has_path failed during prefetch; aborting build");
+                    return Err(anyhow::anyhow!(
+                        "store.has_path failed for {}: {}",
+                        p,
+                        e
+                    ));
                 }
             }
         }
@@ -252,46 +262,135 @@ impl<'a> InputPrefetcher<'a> {
         results
     }
 
-    /// Stage 5 — import every downloaded NAR into the local nix-daemon.
+    /// Stage 5 — import every downloaded NAR into the local nix-daemon in
+    /// topological order: a path's `references` (from its `CachedPath.references`)
+    /// that are also in the download set must finish importing before the
+    /// path itself is imported. References already present in the local store
+    /// impose no ordering constraint.
     ///
-    /// Returns the count of successfully imported paths.
-    async fn import_all(&self, results: Vec<(String, Vec<u8>, CachedPath)>) -> usize {
+    /// Independent paths (those with no remaining unresolved deps) are imported
+    /// in parallel up to [`PREFETCH_CONCURRENCY`]. Any import failure aborts
+    /// the whole prefetch: proceeding with a partial closure would let the
+    /// daemon fail later with a confusing "dependency does not exist" error
+    /// instead of the real transport/metadata problem. In-flight imports are
+    /// cancelled by dropping the `FuturesUnordered`.
+    ///
+    /// Returns the total number of imports attempted on success.
+    async fn import_all(&self, results: Vec<(String, Vec<u8>, CachedPath)>) -> Result<usize> {
         let store = self.store;
         let total = results.len();
-        let mut imports = FuturesUnordered::new();
-
-        for (path, bytes, meta) in results {
-            if imports.len() >= PREFETCH_CONCURRENCY
-                && let Some(r) = imports.next().await
-                && let Err(e) = r
-            {
-                warn!(error = %e, "dep NAR import failed");
-            }
-            imports.push(async move {
-                import_received_nar(store, &path, bytes, &meta)
-                    .await
-                    .with_context(|| format!("import {} into local store", path))
-            });
+        if total == 0 {
+            return Ok(0);
         }
 
-        while let Some(r) = imports.next().await {
-            if let Err(e) = r {
-                warn!(error = %e, "dep NAR import failed");
+        let download_paths: HashSet<String> =
+            results.iter().map(|(p, _, _)| p.clone()).collect();
+
+        let mut payload: HashMap<String, (Vec<u8>, CachedPath)> = results
+            .into_iter()
+            .map(|(p, b, m)| (p, (b, m)))
+            .collect();
+
+        // For each path, the subset of its references that are also in the
+        // download set — i.e. the deps we must wait for. Refs already in the
+        // local store (and thus not downloaded) aren't tracked here.
+        let mut pending_deps: HashMap<String, HashSet<String>> = HashMap::new();
+        // Reverse edges: when X imports successfully, promote each entry in
+        // `dependents[X]` one step closer to ready.
+        let mut dependents: HashMap<String, Vec<String>> = HashMap::new();
+
+        for (path, (_, meta)) in &payload {
+            let refs = meta.references.clone().unwrap_or_default();
+            let restricted: HashSet<String> = refs
+                .into_iter()
+                .filter(|r| r != path && download_paths.contains(r))
+                .collect();
+            for r in &restricted {
+                dependents.entry(r.clone()).or_default().push(path.clone());
+            }
+            pending_deps.insert(path.clone(), restricted);
+        }
+
+        let mut ready: Vec<String> = pending_deps
+            .iter()
+            .filter(|(_, deps)| deps.is_empty())
+            .map(|(p, _)| p.clone())
+            .collect();
+
+        let mut imports: FuturesUnordered<_> = FuturesUnordered::new();
+        let mut completed = 0usize;
+
+        loop {
+            while !ready.is_empty() && imports.len() < PREFETCH_CONCURRENCY {
+                let path = ready.pop().expect("ready is non-empty");
+                let (bytes, meta) = payload.remove(&path).expect("payload present for ready path");
+                pending_deps.remove(&path);
+                imports.push(async move {
+                    let result = import_received_nar(store, &path, bytes, &meta)
+                        .await
+                        .with_context(|| format!("import {} into local store", path));
+                    (path, result)
+                });
+            }
+
+            let Some((path, result)) = imports.next().await else {
+                break;
+            };
+
+            completed += 1;
+            if let Err(e) = result {
+                error!(path = %path, error = %e, "dep NAR import failed; aborting prefetch");
+                return Err(e.context(format!("prefetch import failed for {}", path)));
+            }
+
+            if let Some(kids) = dependents.remove(&path) {
+                for k in kids {
+                    if let Some(deps) = pending_deps.get_mut(&k) {
+                        deps.remove(&path);
+                        if deps.is_empty() {
+                            ready.push(k);
+                        }
+                    }
+                }
             }
         }
 
-        total
+        if !pending_deps.is_empty() {
+            // Should not happen: nix store references are acyclic. If it does,
+            // we've left paths unimported — log so the build failure is
+            // diagnosable.
+            warn!(
+                remaining = pending_deps.len(),
+                "topo import left paths unimported (cycle in references?)"
+            );
+        }
+
+        Ok(completed)
     }
 
     /// Run the full prefetch pipeline.
+    ///
+    /// The drv's declared inputs (`input_sources` + `input_derivation` outputs)
+    /// are only the first hop. Each of those paths has its own runtime
+    /// `references` — the transitive closure — which must also be in the
+    /// local store before the daemon can accept the import of a dependent.
+    /// We therefore run `CacheQuery Pull` in a loop: on each iteration we
+    /// inspect the references of everything we just fetched and queue any
+    /// that are absent locally and haven't been queried yet. The loop ends
+    /// when no new references surface.
+    ///
+    /// A safety cap bounds worst-case iterations so a pathological cycle or
+    /// misbehaving upstream cannot loop forever.
     async fn run(&mut self) -> Result<()> {
+        const MAX_ITERATIONS: usize = 1024;
+
         let wanted = self.enumerate_inputs().await?;
         if wanted.is_empty() {
             return Ok(());
         }
 
-        let missing = self.filter_missing(wanted).await?;
-        if missing.is_empty() {
+        let initial_missing = self.filter_missing(wanted).await?;
+        if initial_missing.is_empty() {
             debug!(
                 build_id = %self.build_id,
                 "all inputs already in local store; no prefetch needed"
@@ -301,15 +400,81 @@ impl<'a> InputPrefetcher<'a> {
 
         info!(
             build_id = %self.build_id,
-            missing = missing.len(),
-            "prefetching missing inputs from server cache"
+            missing = initial_missing.len(),
+            "prefetching missing inputs from server cache (closure-expanding)"
         );
 
-        let (by_url, by_request) = self.query_and_split(missing).await?;
-        let mut results = self.fetch_by_request(by_request).await?;
-        results.extend(self.download_by_url(by_url).await);
+        let mut all_results: Vec<(String, Vec<u8>, CachedPath)> = Vec::new();
+        // Every path we've already asked the server about (success or not),
+        // so we don't re-query the same one across iterations.
+        let mut queried: HashSet<String> = initial_missing.iter().cloned().collect();
+        let mut to_query: Vec<String> = initial_missing;
+        let mut iterations = 0usize;
 
-        let imported = self.import_all(results).await;
+        while !to_query.is_empty() {
+            iterations += 1;
+            if iterations > MAX_ITERATIONS {
+                warn!(
+                    build_id = %self.build_id,
+                    pending = to_query.len(),
+                    "closure expansion exceeded MAX_ITERATIONS; proceeding with what we have"
+                );
+                break;
+            }
+
+            let (by_url, by_request) = self.query_and_split(to_query).await?;
+            let mut batch = self.fetch_by_request(by_request).await?;
+            batch.extend(self.download_by_url(by_url).await);
+
+            // Collect any references from this batch that we haven't yet
+            // queried and that aren't already in the local store.
+            let refs: HashSet<String> = batch
+                .iter()
+                .flat_map(|(_, _, meta)| meta.references.clone().unwrap_or_default())
+                .filter(|r| !queried.contains(r))
+                .collect();
+
+            all_results.extend(batch);
+
+            let mut next_batch = Vec::with_capacity(refs.len());
+            for r in refs {
+                match self.store.has_path(&r).await {
+                    Ok(true) => {
+                        // Already in the local store — nothing to do; still
+                        // record it as queried so we don't revisit.
+                        queried.insert(r);
+                    }
+                    Ok(false) => {
+                        queried.insert(r.clone());
+                        next_batch.push(r);
+                    }
+                    Err(e) => {
+                        error!(
+                            path = %r,
+                            error = %e,
+                            "store.has_path failed during closure expansion; aborting build"
+                        );
+                        return Err(anyhow::anyhow!(
+                            "store.has_path failed for {}: {}",
+                            r,
+                            e
+                        ));
+                    }
+                }
+            }
+
+            to_query = next_batch;
+        }
+
+        let total_queried = all_results.len();
+        debug!(
+            build_id = %self.build_id,
+            iterations,
+            total_downloaded = total_queried,
+            "closure expansion complete"
+        );
+
+        let imported = self.import_all(all_results).await?;
         info!(build_id = %self.build_id, imported, "prefetch complete");
 
         Ok(())
@@ -359,8 +524,18 @@ impl<'a> NarImporter<'a> {
     }
 
     fn decompress(&self, compressed: &[u8]) -> Result<Vec<u8>> {
-        decompress_zstd(compressed)
-            .with_context(|| format!("zstd decompress failed for {}", self.store_path))
+        // Compression is inferred from the `URL:` field in the narinfo that
+        // was rewritten into `meta.url`. When the bytes came in via
+        // `NarRequest` (WebSocket, no URL), we default to zstd — that's
+        // the only format our own cache ever produces.
+        let kind = self
+            .meta
+            .url
+            .as_deref()
+            .map(detect_compression)
+            .unwrap_or(Compression::Zstd);
+        decompress(compressed, kind)
+            .with_context(|| format!("{kind:?} decompress failed for {}", self.store_path))
     }
 
     fn verify_size(&self, decompressed: &[u8]) -> Result<()> {
@@ -464,8 +639,48 @@ pub async fn import_received_nar(
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
-/// Decompress a zstd-compressed buffer. Synchronous; NARs are bounded by
-/// `nar_size` from the path info, so memory pressure is predictable.
+/// Compression format for a NAR as declared by the cache it came from.
+/// Identified by filename extension on the `URL:` field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Compression {
+    None,
+    Zstd,
+    Xz,
+    Bzip2,
+}
+
+/// Infer a NAR's compression format from the URL extension. Unknown or
+/// missing extension → `Zstd`, since our own cache always produces zstd;
+/// this keeps the `NarRequest` / S3 path correct while letting upstream
+/// URLs like `.nar.xz` dispatch accordingly.
+fn detect_compression(url: &str) -> Compression {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".nar.xz") || lower.ends_with(".xz") {
+        Compression::Xz
+    } else if lower.ends_with(".nar.bz2") || lower.ends_with(".bz2") {
+        Compression::Bzip2
+    } else if lower.ends_with(".nar.zst") || lower.ends_with(".zst") {
+        Compression::Zstd
+    } else if lower.ends_with(".nar") {
+        Compression::None
+    } else {
+        Compression::Zstd
+    }
+}
+
+/// Decompress a NAR payload per its compression format. Synchronous; NAR
+/// payloads are bounded by `nar_size` from the path info, so memory
+/// pressure is predictable.
+fn decompress(compressed: &[u8], kind: Compression) -> Result<Vec<u8>> {
+    match kind {
+        Compression::None => Ok(compressed.to_vec()),
+        Compression::Zstd => decompress_zstd(compressed),
+        Compression::Xz => decompress_xz(compressed),
+        Compression::Bzip2 => decompress_bzip2(compressed),
+    }
+}
+
 fn decompress_zstd(compressed: &[u8]) -> Result<Vec<u8>> {
     let mut decoder = zstd::stream::Decoder::new(std::io::Cursor::new(compressed))
         .context("init zstd decoder")?;
@@ -473,6 +688,22 @@ fn decompress_zstd(compressed: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity(compressed.len() * 4);
     decoder.read_to_end(&mut out).context("read zstd stream")?;
 
+    Ok(out)
+}
+
+fn decompress_xz(compressed: &[u8]) -> Result<Vec<u8>> {
+    let mut decoder = xz2::read::XzDecoder::new(std::io::Cursor::new(compressed));
+    let mut out = Vec::with_capacity(compressed.len() * 4);
+    decoder.read_to_end(&mut out).context("read xz stream")?;
+    Ok(out)
+}
+
+fn decompress_bzip2(compressed: &[u8]) -> Result<Vec<u8>> {
+    let mut decoder = bzip2::read::BzDecoder::new(std::io::Cursor::new(compressed));
+    let mut out = Vec::with_capacity(compressed.len() * 4);
+    decoder
+        .read_to_end(&mut out)
+        .context("read bzip2 stream")?;
     Ok(out)
 }
 
@@ -580,6 +811,65 @@ fn build_unkeyed_path_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detect_compression_from_url_extensions() {
+        assert_eq!(
+            detect_compression("https://cache.nixos.org/nar/abc.nar.xz"),
+            Compression::Xz
+        );
+        assert_eq!(
+            detect_compression("https://cache.example/nar/abc.nar.bz2"),
+            Compression::Bzip2
+        );
+        assert_eq!(
+            detect_compression("https://cache.example/nar/abc.nar.zst"),
+            Compression::Zstd
+        );
+        assert_eq!(
+            detect_compression("https://cache.example/nar/abc.nar"),
+            Compression::None
+        );
+        // S3 presigned URLs carry a query string — must not confuse the matcher.
+        assert_eq!(
+            detect_compression("https://s3.example/abc.nar.xz?sig=XYZ&exp=1"),
+            Compression::Xz
+        );
+        // Unknown / no extension defaults to zstd (our own cache).
+        assert_eq!(
+            detect_compression("https://example/some/opaque"),
+            Compression::Zstd
+        );
+    }
+
+    #[test]
+    fn decompress_none_passthrough() {
+        let raw = b"raw NAR bytes".to_vec();
+        let out = decompress(&raw, Compression::None).unwrap();
+        assert_eq!(out, raw);
+    }
+
+    #[test]
+    fn decompress_roundtrip_xz() {
+        use std::io::Write;
+        let payload = b"hello gradient xz world";
+        let mut encoder = xz2::write::XzEncoder::new(Vec::new(), 6);
+        encoder.write_all(payload).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let out = decompress(&compressed, Compression::Xz).unwrap();
+        assert_eq!(out, payload);
+    }
+
+    #[test]
+    fn decompress_roundtrip_bzip2() {
+        use std::io::Write;
+        let payload = b"hello gradient bzip2 world";
+        let mut encoder = bzip2::write::BzEncoder::new(Vec::new(), bzip2::Compression::default());
+        encoder.write_all(payload).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let out = decompress(&compressed, Compression::Bzip2).unwrap();
+        assert_eq!(out, payload);
+    }
 
     #[test]
     fn parse_sha256_nix32_roundtrip() {

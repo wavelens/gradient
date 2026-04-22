@@ -46,6 +46,8 @@ tracing-subscriber = { workspace = true }
 uuid              = { workspace = true }
 tempfile          = "3"
 zstd              = { workspace = true }
+xz2               = { workspace = true }
+bzip2             = { workspace = true }
 
 [dev-dependencies]
 test-support = { path = "../test-support" }

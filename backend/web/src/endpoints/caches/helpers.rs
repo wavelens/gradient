@@ -185,7 +185,7 @@ impl<'a> CacheOpsHandler<'a> {
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
             .collect();
-        let deriver: Option<String> = None;
+        let deriver = cached_path_row.deriver.clone();
         let ca = cached_path_row.ca.clone();
 
         let sig_url = self
@@ -306,7 +306,7 @@ impl<'a> CacheOpsHandler<'a> {
             nar_hash,
             nar_size,
             references,
-            deriver: None,
+            deriver: cached_path_row.deriver.clone(),
             sig,
             ca: cached_path_row.ca.clone(),
         })

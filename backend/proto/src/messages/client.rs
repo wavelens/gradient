@@ -124,6 +124,10 @@ pub enum ClientMessage {
         /// Store-path references in hash-name format (without `/nix/store/` prefix).
         /// Empty when the worker could not query local path info.
         references: Vec<String>,
+        /// Full deriver `.drv` path that produced this output, if known.
+        /// `None` when the worker could not query local path info or when the
+        /// path has no deriver (e.g. sources, `.drv` files themselves).
+        deriver: Option<String>,
     },
 
     /// Pull-based capacity signal: worker is ready to accept one job of the

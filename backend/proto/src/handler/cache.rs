@@ -120,23 +120,6 @@ impl<'a> CacheQueryHandler<'a> {
         }
     }
 
-    async fn resolve_deriver(&self, hash: &str) -> Option<String> {
-        match EDerivationOutput::find()
-            .filter(CDerivationOutput::Hash.eq(hash))
-            .one(&self.state.db)
-            .await
-        {
-            Ok(Some(out)) => match EDerivation::find_by_id(out.derivation)
-                .one(&self.state.db)
-                .await
-            {
-                Ok(Some(d)) => Some(d.derivation_path),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
     /// Resolve the import metadata a worker needs to construct a `ValidPathInfo`
     /// and call `add_to_store_nar` on its local nix-daemon.
     ///
@@ -166,13 +149,12 @@ impl<'a> CacheQueryHandler<'a> {
 
         let references = expand_references(cached_row.references.as_deref());
         let signatures = self.load_cached_path_signatures(cached_row.id, hash).await;
-        let deriver = self.resolve_deriver(hash).await;
 
         (
             cached_row.nar_hash,
             references,
             signatures,
-            deriver,
+            cached_row.deriver,
             cached_row.ca,
         )
     }
@@ -187,6 +169,22 @@ impl<'a> CacheQueryHandler<'a> {
         expire: std::time::Duration,
     ) -> gradient_core::types::proto::CachedPath {
         use gradient_core::types::proto::{CachedPath, QueryMode};
+
+        // Push mode carries only `path` + `cached`. No URL, no metadata.
+        if matches!(mode, QueryMode::Push) {
+            return CachedPath {
+                path: path.to_string(),
+                cached: true,
+                file_size: None,
+                nar_size: None,
+                url: None,
+                nar_hash: None,
+                references: None,
+                signatures: None,
+                deriver: None,
+                ca: None,
+            };
+        }
 
         let (url, nar_hash, references, signatures, deriver, ca) = match mode {
             QueryMode::Pull => {
@@ -217,6 +215,10 @@ impl<'a> CacheQueryHandler<'a> {
         }
     }
 
+    /// Push-mode response for an uncached path: `path` + `cached: false` plus
+    /// a presigned PUT URL when the NAR store supports one (S3). Local stores
+    /// return `url: None` and the worker uploads via `NarPush` over the
+    /// WebSocket. No metadata, no upstream lookup.
     async fn build_uncached_push_entry(
         &self,
         hash: &str,
@@ -457,6 +459,12 @@ pub(super) async fn handle_cache_query(
 /// Probe each `upstream_url` for `<hash>.narinfo` until one responds 2xx.
 /// Returns `Some(CachedPath)` pointing at the upstream NAR URL on first hit,
 /// `None` if no upstream has the path.
+///
+/// The full narinfo body is parsed so the worker receives the metadata it
+/// needs to construct a `ValidPathInfo` (NarHash, NarSize, FileSize,
+/// References, Deriver, Sig, CA). Without these, `add_to_store_nar` on the
+/// worker's local daemon cannot accept the import and the build fails with
+/// a missing-dependency error.
 async fn lookup_upstream_narinfo(
     http: reqwest::Client,
     upstream_urls: Arc<Vec<String>>,
@@ -472,26 +480,88 @@ async fn lookup_upstream_narinfo(
             },
             _ => continue,
         };
-        if let Some(nar_path) = body
-            .lines()
-            .find_map(|l| l.strip_prefix("URL: ").map(str::trim))
-        {
-            let url = format!("{}/{}", base_url.trim_end_matches('/'), nar_path);
-            return Some(crate::messages::CachedPath {
-                path: store_path,
-                cached: true,
-                file_size: None,
-                nar_size: None,
-                url: Some(url),
-                nar_hash: None,
-                references: None,
-                signatures: None,
-                deriver: None,
-                ca: None,
-            });
+        if let Some(cp) = parse_upstream_narinfo(base_url, &store_path, &body) {
+            return Some(cp);
         }
     }
     None
+}
+
+/// Parse a narinfo body into a [`CachedPath`] rooted at `base_url`.
+///
+/// Returns `None` when the body lacks a `URL:` line (without it the worker
+/// has nowhere to download from). All other fields are best-effort —
+/// missing/unparseable `NarSize` / `FileSize` are silently dropped; `NarHash`
+/// / `References` / `Deriver` / `Sig` / `CA` default to `None`.
+fn parse_upstream_narinfo(
+    base_url: &str,
+    store_path: &str,
+    body: &str,
+) -> Option<crate::messages::CachedPath> {
+    let mut nar_path: Option<&str> = None;
+    let mut nar_hash: Option<String> = None;
+    let mut nar_size: Option<u64> = None;
+    let mut file_size: Option<u64> = None;
+    let mut references: Option<Vec<String>> = None;
+    let mut deriver: Option<String> = None;
+    let mut ca: Option<String> = None;
+    let mut sigs: Vec<String> = Vec::new();
+
+    for line in body.lines() {
+        if let Some(v) = line.strip_prefix("URL: ") {
+            nar_path = Some(v.trim());
+        } else if let Some(v) = line.strip_prefix("NarHash: ") {
+            nar_hash = Some(v.trim().to_owned());
+        } else if let Some(v) = line.strip_prefix("NarSize: ") {
+            nar_size = v.trim().parse().ok();
+        } else if let Some(v) = line.strip_prefix("FileSize: ") {
+            file_size = v.trim().parse().ok();
+        } else if let Some(v) = line.strip_prefix("References: ") {
+            references = Some(
+                v.split_whitespace()
+                    .map(|r| {
+                        if r.starts_with("/nix/store/") {
+                            r.to_owned()
+                        } else {
+                            format!("/nix/store/{}", r)
+                        }
+                    })
+                    .collect(),
+            );
+        } else if let Some(v) = line.strip_prefix("Deriver: ") {
+            let d = v.trim();
+            if !d.is_empty() {
+                deriver = Some(if d.starts_with("/nix/store/") {
+                    d.to_owned()
+                } else {
+                    format!("/nix/store/{}", d)
+                });
+            }
+        } else if let Some(v) = line.strip_prefix("CA: ") {
+            let c = v.trim();
+            if !c.is_empty() {
+                ca = Some(c.to_owned());
+            }
+        } else if let Some(v) = line.strip_prefix("Sig: ") {
+            sigs.push(v.trim().to_owned());
+        }
+    }
+
+    let nar_path = nar_path?;
+    let url = format!("{}/{}", base_url.trim_end_matches('/'), nar_path);
+
+    Some(crate::messages::CachedPath {
+        path: store_path.to_string(),
+        cached: true,
+        file_size,
+        nar_size,
+        url: Some(url),
+        nar_hash,
+        references,
+        signatures: if sigs.is_empty() { None } else { Some(sigs) },
+        deriver,
+        ca,
+    })
 }
 
 fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {
@@ -516,6 +586,77 @@ mod tests {
     fn make_state() -> ServerState {
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection();
         Arc::try_unwrap(test_support::prelude::test_state(db)).unwrap()
+    }
+
+    #[test]
+    fn parse_upstream_narinfo_full_fields() {
+        let body = "StorePath: /nix/store/6ak2iyrql4xlj0mpxcibqnzdlwl0vlwj-bzip2-0.6.1\n\
+                    URL: nar/abc.nar.xz\n\
+                    Compression: xz\n\
+                    FileHash: sha256:124l7vc762nsgl8wmfgp1gm9vsl3gk0j6136nyv3ff7s7da11yvz\n\
+                    FileSize: 35372\n\
+                    NarHash: sha256:1bnnhb0pfx49mg15fmk3jx34wj8j24ygqcq7xww9g8qcyaf23rkf\n\
+                    NarSize: 102760\n\
+                    References: aaaa-dep1 /nix/store/bbbb-dep2\n\
+                    Deriver: vmc3d9j1qnwhqyxqkwzsnf3pv98shq18-bzip2-0.6.1.drv\n\
+                    Sig: cache.nixos.org-1:a84Gyv6ieXj7HclpmXu/i+so=\n";
+        let cp = parse_upstream_narinfo(
+            "https://upstream.example/",
+            "/nix/store/6ak2iyrql4xlj0mpxcibqnzdlwl0vlwj-bzip2-0.6.1",
+            body,
+        )
+        .unwrap();
+        assert!(cp.cached);
+        assert_eq!(cp.url.as_deref(), Some("https://upstream.example/nar/abc.nar.xz"));
+        assert_eq!(cp.nar_size, Some(102760));
+        assert_eq!(cp.file_size, Some(35372));
+        assert_eq!(
+            cp.nar_hash.as_deref(),
+            Some("sha256:1bnnhb0pfx49mg15fmk3jx34wj8j24ygqcq7xww9g8qcyaf23rkf")
+        );
+        let refs = cp.references.unwrap();
+        assert_eq!(refs.len(), 2);
+        assert!(refs.contains(&"/nix/store/aaaa-dep1".to_string()));
+        assert!(refs.contains(&"/nix/store/bbbb-dep2".to_string()));
+        assert_eq!(
+            cp.deriver.as_deref(),
+            Some("/nix/store/vmc3d9j1qnwhqyxqkwzsnf3pv98shq18-bzip2-0.6.1.drv")
+        );
+        assert_eq!(cp.signatures.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn parse_upstream_narinfo_empty_references_is_some_empty() {
+        let body = "URL: nar/x.nar.xz\n\
+                    NarHash: sha256:deadbeef\n\
+                    NarSize: 1\n\
+                    References: \n";
+        let cp =
+            parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).unwrap();
+        assert_eq!(cp.references.as_deref(), Some(&[][..]));
+    }
+
+    #[test]
+    fn parse_upstream_narinfo_requires_url() {
+        let body = "NarHash: sha256:abc\nNarSize: 1\n";
+        assert!(parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).is_none());
+    }
+
+    #[test]
+    fn parse_upstream_narinfo_trims_base_url_trailing_slash() {
+        let body = "URL: nar/x.nar\n";
+        let cp =
+            parse_upstream_narinfo("https://up.example/", "/nix/store/aa-x", body).unwrap();
+        assert_eq!(cp.url.as_deref(), Some("https://up.example/nar/x.nar"));
+    }
+
+    #[test]
+    fn parse_upstream_narinfo_ignores_unparseable_sizes() {
+        let body = "URL: nar/x.nar\nNarSize: not-a-number\nFileSize: also-bad\n";
+        let cp =
+            parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).unwrap();
+        assert!(cp.nar_size.is_none());
+        assert!(cp.file_size.is_none());
     }
 
     #[tokio::test]
@@ -579,11 +720,17 @@ mod tests {
         assert_eq!(result.len(), 2, "Push should return all queried paths");
         for cp in &result {
             assert!(!cp.cached, "all should be uncached (empty DB): {}", cp.path);
-            assert!(
-                cp.url.is_none(),
-                "local store → no presigned URL: {}",
-                cp.path
-            );
+            // Local NAR storage returns None for presigned PUT (no S3); Push
+            // with S3 would populate `url` — that's the only field Push may set
+            // beyond `path` + `cached`.
+            assert!(cp.url.is_none(), "local store → no presigned URL");
+            assert!(cp.file_size.is_none(), "Push carries no file_size");
+            assert!(cp.nar_size.is_none(), "Push carries no nar_size");
+            assert!(cp.nar_hash.is_none(), "Push carries no nar_hash");
+            assert!(cp.references.is_none(), "Push carries no references");
+            assert!(cp.signatures.is_none(), "Push carries no signatures");
+            assert!(cp.deriver.is_none(), "Push carries no deriver");
+            assert!(cp.ca.is_none(), "Push carries no ca");
         }
         let returned_paths: Vec<&str> = result.iter().map(|c| c.path.as_str()).collect();
         assert!(returned_paths.contains(&paths[0].as_str()));
