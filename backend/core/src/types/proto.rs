@@ -31,8 +31,7 @@ pub struct GradientCapabilities {
     pub eval: bool,
     /// Client supports executing Nix builds.
     pub build: bool,
-    /// Peer serves as a Nix binary cache.
-    /// Set by the server when `GRADIENT_SERVE_CACHE=true`, never by workers.
+    /// Peer serves as a Nix binary cache. Always advertised by the server.
     pub cache: bool,
 }
 

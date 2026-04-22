@@ -19,7 +19,8 @@ use crate::messages::{
 use scheduler::Scheduler;
 
 use super::auth::{
-    has_any_registrations, lookup_registered_peers, negotiate_capabilities, validate_tokens,
+    filter_org_peers_without_cache, has_any_registrations, lookup_registered_peers,
+    negotiate_capabilities, validate_tokens,
 };
 use super::dispatch::DispatchContext;
 use super::socket::{
@@ -144,7 +145,10 @@ impl ProtoSession<Opening> {
             None => return None,
         };
 
-        let (authorized_peers, failed_peers) = validate_tokens(&registered_peers, &tokens);
+        let (authorized_peers, mut failed_peers) = validate_tokens(&registered_peers, &tokens);
+        let (authorized_peers, demoted) =
+            filter_org_peers_without_cache(&self.state, authorized_peers).await;
+        failed_peers.extend(demoted);
 
         if registered_peers.is_empty() {
             if has_any_registrations(&self.state, peer_id).await {

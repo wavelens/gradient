@@ -171,11 +171,7 @@ async fn narinfo_served_from_db_inner() {
         .append_query_results([vec![cached_path_sig_row]])
         .into_connection();
 
-    let cli = {
-        let mut c = test_cli();
-        c.serve_cache = true; // enable /cache/{cache}/{path} routes
-        c
-    };
+    let cli = test_cli();
     let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
         db,

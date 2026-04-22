@@ -90,7 +90,6 @@
       GRADIENT_STORE_PATH = "./testing/store";
       GRADIENT_CRYPT_SECRET_FILE = pkgs.writeText "crypt_secret_file" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK";
       GRADIENT_JWT_SECRET_FILE = pkgs.writeText "jwt_secret_file" "8a2eb7ba959570ff8842f148207524c7b8d731d7a1998584105e951599221f9d";
-      GRADIENT_SERVE_CACHE = "true";
       GRADIENT_REPORT_ERRORS = "false";
     };
   }) // {

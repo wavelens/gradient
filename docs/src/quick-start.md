@@ -58,7 +58,6 @@ echo "*:$(cat /run/secrets/gradient-worker-token)" > /run/secrets/gradient-worke
     cryptSecretFile   = "/run/secrets/gradient-crypt";
     configurePostgres = true;
     configureNginx    = true;
-    serveCache        = true;
     reportErrors      = true; # optional: will send crash reports to us
   };
 

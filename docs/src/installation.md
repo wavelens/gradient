@@ -54,7 +54,6 @@ In your `configuration.nix`:
     # Convenience options
     configurePostgres = true;
     configureNginx    = true;
-    serveCache        = true;
   };
 }
 ```

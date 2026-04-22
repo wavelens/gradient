@@ -47,7 +47,6 @@ in {
       enable = lib.mkEnableOption "Gradient";
       configureNginx = lib.mkEnableOption "Nginx configuration";
       configurePostgres = lib.mkEnableOption "PostgreSQL configuration";
-      serveCache = lib.mkEnableOption "cache serving";
       reportErrors = lib.mkEnableOption "error reporting to Sentry";
       useTls = lib.mkEnableOption "TLS" // { default = true; };
       enableQuic = lib.mkEnableOption "Quic support";
@@ -382,7 +381,6 @@ in {
         GRADIENT_ENABLE_REGISTRATION = lib.boolToString cfg.settings.enableRegistration;
         GRADIENT_CRYPT_SECRET_FILE = "%d/gradient_crypt_secret";
         GRADIENT_JWT_SECRET_FILE = "%d/gradient_jwt_secret";
-        GRADIENT_SERVE_CACHE = lib.boolToString cfg.serveCache;
         GRADIENT_REPORT_ERRORS = lib.boolToString cfg.reportErrors;
         GRADIENT_KEEP_EVALUATIONS = toString cfg.settings.keepEvaluations;
         GRADIENT_MAX_PROTO_CONNECTIONS = toString cfg.settings.maxProtoConnections;
@@ -464,7 +462,7 @@ in {
               '';
             };
 
-            "/cache/" = lib.mkIf cfg.serveCache {
+            "/cache/" = {
               proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
               proxyWebsockets = true;
             };

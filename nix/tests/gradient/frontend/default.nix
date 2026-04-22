@@ -50,7 +50,6 @@
           gradient = {
             enable = true;
             frontend.enable = true;
-            serveCache = true;
             configureNginx = true;
             configurePostgres = true;
             domain = "gradient.local";

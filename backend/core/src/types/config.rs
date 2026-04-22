@@ -163,7 +163,6 @@ mod tests {
             oidc_discovery_url: None,
             crypt_secret_file: "test-secret".into(),
             jwt_secret_file: "test-jwt".into(),
-            serve_cache: false,
             report_errors: false,
             email_enabled: false,
             email_require_verification: false,

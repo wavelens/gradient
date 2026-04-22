@@ -15,7 +15,6 @@
         services = {
           gradient = {
             enable = true;
-            serveCache = true;
             configureNginx = true;
             configurePostgres = true;
             domain = "gradient.local";

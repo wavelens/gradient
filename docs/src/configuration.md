@@ -44,7 +44,6 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `jwtSecretFile` | — | Path to JWT secret file (required) |
 | `cryptSecretFile` | — | Path to encryption secret file (required) |
 | `databaseUrlFile` | auto | Override the PostgreSQL connection string file |
-| `serveCache` | `false` | Enable Nix binary cache serving |
 | `reportErrors` | `false` | Send errors to Sentry |
 | `discoverable` | `true` | Accept incoming `/proto` WebSocket connections from workers |
 | `settings.maxProtoConnections` | `256` | Max simultaneous worker WebSocket connections |

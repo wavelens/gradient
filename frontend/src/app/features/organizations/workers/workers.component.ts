@@ -55,6 +55,7 @@ export class WorkersComponent implements OnInit {
   pendingToggleWorker = signal<Worker | null>(null);
   renamingWorker = signal<Worker | null>(null);
   errorMessage = signal<string | null>(null);
+  hasNoCacheSubscribed = signal(false);
 
   orgName = '';
   orgDisplayName = signal('');
@@ -74,6 +75,7 @@ export class WorkersComponent implements OnInit {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.loadOrgId();
     this.loadWorkers();
+    this.loadCacheSubscriptions();
   }
 
   private loadOrgId(): void {
@@ -97,6 +99,13 @@ export class WorkersComponent implements OnInit {
         console.error('Failed to load workers:', err);
         this.loading.set(false);
       },
+    });
+  }
+
+  private loadCacheSubscriptions(): void {
+    this.orgsService.getSubscribedCaches(this.orgName).subscribe({
+      next: (caches) => this.hasNoCacheSubscribed.set(caches.length === 0),
+      error: () => this.hasNoCacheSubscribed.set(false),
     });
   }
 

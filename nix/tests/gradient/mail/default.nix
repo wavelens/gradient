@@ -31,7 +31,6 @@
           mailhog.enable = true;
           gradient = {
             enable = true;
-            serveCache = true;
             configureNginx = true;
             configurePostgres = true;
             domain = "gradient.local";

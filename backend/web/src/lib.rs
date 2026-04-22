@@ -341,20 +341,18 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .merge(proto_router())
         .layer(axum::Extension(scheduler));
 
-    if state.cli.serve_cache {
-        app = app
-            .route(
-                "/cache/{cache}/gradient-cache-info",
-                get(caches::gradient_cache_info),
-            )
-            .route("/cache/{cache}/nix-cache-info", get(caches::nix_cache_info))
-            .route("/cache/{cache}/{path}", get(caches::path))
-            .route(
-                "/cache/{cache}/nar/upstream/{upstream_id}/{*path}",
-                get(caches::upstream_nar),
-            )
-            .route("/cache/{cache}/nar/{path}", get(caches::nar));
-    }
+    app = app
+        .route(
+            "/cache/{cache}/gradient-cache-info",
+            get(caches::gradient_cache_info),
+        )
+        .route("/cache/{cache}/nix-cache-info", get(caches::nix_cache_info))
+        .route("/cache/{cache}/{path}", get(caches::path))
+        .route(
+            "/cache/{cache}/nar/upstream/{upstream_id}/{*path}",
+            get(caches::upstream_nar),
+        )
+        .route("/cache/{cache}/nar/{path}", get(caches::nar));
 
     app.fallback(handle_404)
         .layer(cors)

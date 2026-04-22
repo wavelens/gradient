@@ -20,6 +20,19 @@
     <button pButton label="Register Worker" icon="pi pi-plus" (click)="openRegisterDialog()"></button>
   </div>
 
+  @if (hasNoCacheSubscribed()) {
+    <div class="no-cache-banner" data-testid="no-cache-banner" role="alert">
+      <span class="material-symbols-outlined">warning</span>
+      <div>
+        <div class="no-cache-title">No cache subscribed</div>
+        <div class="no-cache-body">
+          Workers cannot connect to this organization until you subscribe a cache.
+          <a [routerLink]="['/organization', orgName, 'caches']">Manage cache subscriptions →</a>
+        </div>
+      </div>
+    </div>
+  }
+
   @if (orgId()) {
     <div class="peer-id-banner">
       <span class="material-symbols-outlined">vpn_key</span>

@@ -232,3 +232,31 @@
 }
 
 .w-full { width: 100%; }
+
+.no-cache-banner {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding: 0.875rem 1rem;
+  margin: 0 0 1rem 0;
+  border: 1px solid var(--p-yellow-300, #fde68a);
+  background: var(--p-yellow-50, #fffbeb);
+  color: var(--p-yellow-900, #78350f);
+  border-radius: 0.5rem;
+
+  .material-symbols-outlined {
+    font-size: 1.5rem;
+    line-height: 1;
+  }
+
+  .no-cache-title {
+    font-weight: 600;
+    margin-bottom: 0.125rem;
+  }
+
+  .no-cache-body a {
+    margin-left: 0.25rem;
+    color: inherit;
+    text-decoration: underline;
+  }
+}

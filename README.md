@@ -78,7 +78,6 @@ Configure Gradient in your `configuration.nix`:
   services.gradient = {
     enable = true;
     frontend.enable = true;
-    serveCache = true;
     reportErrors = true;
     configurePostgres = true;
     configureNginx = true;

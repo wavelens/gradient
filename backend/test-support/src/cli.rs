@@ -40,7 +40,6 @@ pub fn test_cli_with_crypt(crypt_secret_file: String) -> Cli {
         oidc_discovery_url: None,
         crypt_secret_file,
         jwt_secret_file: "test-jwt".into(),
-        serve_cache: false,
         report_errors: false,
         email_enabled: false,
         email_require_verification: false,

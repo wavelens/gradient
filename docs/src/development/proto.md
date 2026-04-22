@@ -89,7 +89,7 @@ The `worker-id` enables:
 | `fetch`    | AND          | Prefetch flake inputs and clone repositories                 |
 | `eval`     | AND          | Run Nix flake evaluations                                    |
 | `build`    | AND          | Execute Nix store builds                                     |
-| `cache`    | Server only  | Server serves as a binary cache (`GRADIENT_SERVE_CACHE`)     |
+| `cache`    | Server only  | Always `true` on the server — Gradient always serves as a binary cache |
 
 ---
 
@@ -130,6 +130,8 @@ AuthResponse {
 ```
 
 The server validates each token independently. The worker is authorized for every peer whose token is valid. If some tokens fail, the connection continues with the successful peers — only a total failure causes `Reject`.
+
+When validating peer tokens, the server additionally checks each authorized peer that is an organization against the `organization_cache` table. If the organization has no subscribed cache, that peer is moved into `failed_peers` with reason `"organization has no cache subscribed"`. If this leaves the authorized peer set empty, the connection is rejected with `401 no valid peer tokens provided`.
 
 What authorization means depends on the peer type:
  - **Org** — worker receives jobs from that org's projects
