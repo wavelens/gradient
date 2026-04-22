@@ -26,6 +26,7 @@ nav:
     - Internals: development/internals.md
     - Proto: development/proto.md
     - Tests: development/tests.md
+    - GitHub App setup: development/github-app-setup.md
     - Contributing: development/contributing.md
 
 plugins:

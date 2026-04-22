@@ -68,6 +68,8 @@ mod m20260421_000001_add_github_app_enabled_to_organization;
 mod m20260421_000002_drop_use_nix_store_from_organization;
 mod m20260421_000003_create_table_build_product;
 mod m20260421_000004_drop_has_artefacts_from_derivation_output;
+mod m20260422_000000_rename_worker_name_and_add_created_by;
+mod m20260422_000001_add_display_name_to_integration;
 
 pub struct Migrator;
 
@@ -137,6 +139,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260421_000002_drop_use_nix_store_from_organization::Migration),
             Box::new(m20260421_000003_create_table_build_product::Migration),
             Box::new(m20260421_000004_drop_has_artefacts_from_derivation_output::Migration),
+            Box::new(m20260422_000000_rename_worker_name_and_add_created_by::Migration),
+            Box::new(m20260422_000001_add_display_name_to_integration::Migration),
         ]
     }
 }

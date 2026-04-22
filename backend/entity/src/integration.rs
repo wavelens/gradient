@@ -16,6 +16,8 @@ pub struct Model {
     pub id: Uuid,
     pub organization: Uuid,
     pub name: String,
+    /// Human-readable display name for this integration.
+    pub display_name: String,
     /// 0 = inbound, 1 = outbound
     pub kind: i16,
     /// 0 = gitea, 1 = forgejo, 2 = gitlab, 3 = github
@@ -52,6 +54,7 @@ impl std::fmt::Debug for Model {
             .field("id", &self.id)
             .field("organization", &self.organization)
             .field("name", &self.name)
+            .field("display_name", &self.display_name)
             .field("kind", &self.kind)
             .field("forge_type", &self.forge_type)
             .field("secret", &self.secret.as_ref().map(|_| "[redacted]"))

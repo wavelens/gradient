@@ -8,6 +8,7 @@
 
 use core::ci::{TriggerError, trigger_evaluation};
 use core::types::*;
+use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::Deserialize;
@@ -141,15 +142,15 @@ pub(super) fn canonicalise_repo_url(u: &str) -> String {
     }
 }
 
-/// Finds all active projects whose repository URL matches any of `candidate_urls`
-/// and queues an evaluation for each one.
+/// Finds all active projects whose repository URL matches any of `candidate_urls`,
+/// queues an evaluation for each, and returns a per-project breakdown.
 pub(super) async fn trigger_for_repo_urls(
     state: &Arc<ServerState>,
     candidate_urls: &[&str],
     commit_hash: Vec<u8>,
     commit_message: Option<String>,
     author_name: Option<String>,
-) {
+) -> WebhookTriggerOutcome {
     let normalised_candidates: Vec<String> = candidate_urls
         .iter()
         .map(|u| canonicalise_repo_url(u))
@@ -163,15 +164,25 @@ pub(super) async fn trigger_for_repo_urls(
         Ok(p) => p,
         Err(e) => {
             warn!(error = %e, "DB error fetching projects for forge webhook");
-            return;
+            return WebhookTriggerOutcome::default();
         }
     };
 
+    let mut outcome = WebhookTriggerOutcome::default();
     for project in projects {
         let repo_normalised = canonicalise_repo_url(&project.repository);
         if !normalised_candidates.iter().any(|c| c == &repo_normalised) {
             continue;
         }
+        outcome.projects_scanned += 1;
+
+        let org_name = match EOrganization::find_by_id(project.organization)
+            .one(&state.db)
+            .await
+        {
+            Ok(Some(o)) => o.name,
+            _ => String::new(),
+        };
 
         match trigger_evaluation(
             &state.db,
@@ -188,21 +199,48 @@ pub(super) async fn trigger_for_repo_urls(
                     evaluation_id = %eval.id,
                     "Forge webhook triggered evaluation"
                 );
+                outcome.queued.push(QueuedEvaluation {
+                    project_id: project.id,
+                    project_name: project.name.clone(),
+                    organization: org_name,
+                    evaluation_id: eval.id,
+                });
             }
             Err(TriggerError::AlreadyInProgress) => {
                 debug!(project_id = %project.id, "Evaluation already in progress, skipping webhook trigger");
+                outcome.skipped.push(SkippedProject {
+                    project_id: project.id,
+                    project_name: project.name.clone(),
+                    organization: org_name,
+                    reason: "already_in_progress".to_string(),
+                });
             }
-            Err(TriggerError::NoPreviousEvaluation) => {}
+            Err(TriggerError::NoPreviousEvaluation) => {
+                outcome.skipped.push(SkippedProject {
+                    project_id: project.id,
+                    project_name: project.name.clone(),
+                    organization: org_name,
+                    reason: "no_previous_evaluation".to_string(),
+                });
+            }
             Err(TriggerError::Db(e)) => {
                 warn!(error = %e, project_id = %project.id, "DB error triggering evaluation from forge webhook");
+                outcome.skipped.push(SkippedProject {
+                    project_id: project.id,
+                    project_name: project.name.clone(),
+                    organization: org_name,
+                    reason: "db_error".to_string(),
+                });
             }
         }
     }
+    outcome
 }
 
 #[cfg(test)]
 mod tests {
     use super::canonicalise_repo_url;
+    use super::super::WebhookTriggerOutcome;
 
     #[test]
     fn canonicalise_strips_dot_git_and_trailing_slash() {
@@ -265,5 +303,13 @@ mod tests {
         let once = canonicalise_repo_url("git+ssh://git@git.example.com/org/repo.git/");
         let twice = canonicalise_repo_url(&once);
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn trigger_outcome_default_is_empty() {
+        let o = WebhookTriggerOutcome::default();
+        assert_eq!(o.projects_scanned, 0);
+        assert!(o.queued.is_empty());
+        assert!(o.skipped.is_empty());
     }
 }

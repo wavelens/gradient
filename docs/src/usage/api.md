@@ -86,7 +86,10 @@ Workers are `gradient-worker` processes that connect to the server over WebSocke
 | `POST` | `/orgs/{org}/workers` | Register a worker — returns `peer_id` and optionally a one-time `token` |
 | `GET` | `/orgs/{org}/workers` | List registered workers (merges live state) |
 | `DELETE` | `/orgs/{org}/workers/{worker_id}` | Unregister a worker |
-| `GET` | `/workers` | List all currently connected workers (superuser or `GRADIENT_GLOBAL_STATS_PUBLIC`) |
+| `GET` | `/admin/workers` | List all currently connected workers (superuser or `GRADIENT_GLOBAL_STATS_PUBLIC`) |
+
+All endpoints under `/admin/*` require the calling user to have the
+`superuser` flag set on their account.
 
 **Register a worker:**
 

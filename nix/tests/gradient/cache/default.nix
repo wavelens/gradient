@@ -252,7 +252,7 @@
       server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
       server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.lock")
 
-      nixpkgs_hash = server.succeed("${lib.getExe pkgs.nix} hash path ${self.inputs.nixpkgs}").strip()
+      nixpkgs_hash = server.succeed("${lib.getExe pkgs.nix} hash path ${self.inputs.nixpkgs} --extra-experimental-features nix-command").strip()
       server.succeed(f"sed -i 's#\\[hash\\]#{nixpkgs_hash}#g' /var/lib/git/test/flake.lock")
 
       server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add flake.nix")
@@ -370,10 +370,10 @@
           store_path_drv = drv if drv.startswith("/nix/store/") else f"/nix/store/{drv}"
           break
 
-      store_path = server.succeed(f"${lib.getExe pkgs.nix} path-info {store_path_drv}^out").strip()
+      store_path = server.succeed(f"${lib.getExe pkgs.nix} path-info {store_path_drv}^out --extra-experimental-features nix-command").strip()
       store_hash = store_path.split("-")[0].replace("/nix/store/", "")
       print(f"Detected store path: {store_path}")
-      print(server.succeed(f"${lib.getExe pkgs.nix} path-info {store_path} --json"))
+      print(server.succeed(f"${lib.getExe pkgs.nix} path-info {store_path} --json --extra-experimental-features nix-command"))
 
       print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM organization_cache;\"'"))
       print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM cache;\"'"))

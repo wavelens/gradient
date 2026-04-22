@@ -36,6 +36,7 @@ pub struct IntegrationResponse {
     pub id: Uuid,
     pub organization: Uuid,
     pub name: String,
+    pub display_name: String,
     pub kind: String,
     pub forge_type: String,
     pub endpoint_url: Option<String>,
@@ -51,6 +52,7 @@ impl From<MIntegration> for IntegrationResponse {
             id: m.id,
             organization: m.organization,
             name: m.name,
+            display_name: m.display_name,
             kind: kind_to_str(m.kind).to_string(),
             forge_type: forge_to_str(m.forge_type).to_string(),
             endpoint_url: m.endpoint_url,
@@ -65,6 +67,9 @@ impl From<MIntegration> for IntegrationResponse {
 #[derive(Deserialize, Debug)]
 pub struct CreateIntegrationRequest {
     pub name: String,
+    /// Human-readable display name. Defaults to `name` when omitted.
+    #[serde(default)]
+    pub display_name: Option<String>,
     /// `"inbound"` or `"outbound"`.
     pub kind: String,
     /// `"gitea"`, `"forgejo"`, `"gitlab"`, or `"github"`.
@@ -80,6 +85,7 @@ pub struct CreateIntegrationRequest {
 #[derive(Deserialize, Debug)]
 pub struct PatchIntegrationRequest {
     pub name: Option<String>,
+    pub display_name: Option<String>,
     pub forge_type: Option<String>,
     pub endpoint_url: Option<String>,
     /// When present, replaces the stored secret. Empty string clears it.
@@ -217,10 +223,19 @@ pub async fn put_integration(
         if t.is_empty() { None } else { Some(t) }
     });
 
+    let display_name = body
+        .display_name
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| body.name.clone());
+
     let integration = AIntegration {
         id: Set(Uuid::new_v4()),
         organization: Set(org.id),
         name: Set(body.name),
+        display_name: Set(display_name),
         kind: Set(kind.as_i16()),
         forge_type: Set(forge.as_i16()),
         secret: Set(encrypted_secret),
@@ -280,6 +295,16 @@ pub async fn patch_integration(
             return Err(WebError::already_exists("Integration Name"));
         }
         active.name = Set(name);
+    }
+
+    if let Some(display_name) = body.display_name {
+        let trimmed = display_name.trim().to_string();
+        if trimmed.is_empty() {
+            return Err(WebError::BadRequest(
+                "display_name cannot be empty".to_string(),
+            ));
+        }
+        active.display_name = Set(trimmed);
     }
 
     if let Some(forge) = body.forge_type {

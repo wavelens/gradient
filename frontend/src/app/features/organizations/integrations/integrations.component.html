@@ -59,7 +59,10 @@
                 <div class="integration-info">
                   <span class="material-symbols-outlined">{{ integration.kind === 'inbound' ? 'call_received' : 'call_made' }}</span>
                   <div>
-                    <div class="integration-name">{{ integration.name }}</div>
+                    <div class="integration-name">{{ integration.display_name || integration.name }}</div>
+                    @if (integration.display_name && integration.display_name !== integration.name) {
+                      <div class="integration-id text-secondary">{{ integration.name }}</div>
+                    }
                     <div class="integration-meta text-secondary">
                       <span class="badge" [class.badge-inbound]="integration.kind === 'inbound'" [class.badge-outbound]="integration.kind === 'outbound'">
                         {{ integration.kind === 'inbound' ? 'Inbound' : 'Outbound' }}
@@ -175,6 +178,11 @@
     <small class="text-secondary">Used in the webhook URL. Use letters, digits, and dashes.</small>
   </div>
   <div class="form-group">
+    <label for="int-display-name">Display Name</label>
+    <input pInputText id="int-display-name" [(ngModel)]="formData.display_name" class="w-full" placeholder="Defaults to the name" />
+    <small class="text-secondary">Human-readable label shown in the integrations list.</small>
+  </div>
+  <div class="form-group">
     <label for="int-kind">Kind</label>
     <p-select
       inputId="int-kind"
@@ -198,6 +206,10 @@
   </div>
 
   @if (formData.kind === 'inbound') {
+    <div class="dialog-info">
+      <span class="material-symbols-outlined">info</span>
+      The webhook URL to register with your forge will be shown after the integration is created.
+    </div>
     <div class="form-group">
       <label for="int-secret">Webhook Secret</label>
       <div class="copy-row">
@@ -245,6 +257,10 @@
     <div class="form-group">
       <label for="edit-name">Name</label>
       <input pInputText id="edit-name" [(ngModel)]="formData.name" class="w-full" />
+    </div>
+    <div class="form-group">
+      <label for="edit-display-name">Display Name</label>
+      <input pInputText id="edit-display-name" [(ngModel)]="formData.display_name" class="w-full" />
     </div>
     <div class="form-group">
       <label for="edit-forge">Forge</label>

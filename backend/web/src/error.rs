@@ -22,6 +22,7 @@ pub enum WebError {
     Conflict(String),
     UnprocessableEntity(String),
     InternalServerError(String),
+    ServiceUnavailable(String),
     Database(DbErr),
     Validation(String),
     Authentication(String),
@@ -40,6 +41,7 @@ impl fmt::Display for WebError {
             WebError::Conflict(msg) => write!(f, "Conflict: {}", msg),
             WebError::UnprocessableEntity(msg) => write!(f, "Unprocessable Entity: {}", msg),
             WebError::InternalServerError(msg) => write!(f, "Internal Server Error: {}", msg),
+            WebError::ServiceUnavailable(msg) => write!(f, "Service Unavailable: {}", msg),
             WebError::Database(err) => write!(f, "Database error: {}", err),
             WebError::Validation(msg) => write!(f, "Validation error: {}", msg),
             WebError::Authentication(msg) => write!(f, "Authentication error: {}", msg),
@@ -97,6 +99,7 @@ impl IntoResponse for WebError {
             WebError::Conflict(msg) => (StatusCode::CONFLICT, msg),
             WebError::UnprocessableEntity(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg),
             WebError::InternalServerError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+            WebError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
             WebError::Database(err) => {
                 tracing::error!("Database error: {}", err);
                 (
@@ -186,5 +189,15 @@ impl WebError {
 
     pub fn invalid_username(reason: String) -> Self {
         WebError::BadRequest(format!("Invalid username: {}", reason))
+    }
+}
+
+/// Returns `Forbidden` when the user is not a superuser. Use at the top of
+/// admin handlers.
+pub fn require_superuser(user: &core::types::MUser) -> Result<(), WebError> {
+    if user.superuser {
+        Ok(())
+    } else {
+        Err(WebError::Forbidden("superuser required".into()))
     }
 }

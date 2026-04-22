@@ -82,6 +82,7 @@ export class IntegrationsComponent implements OnInit {
 
   formData: {
     name: string;
+    display_name: string;
     kind: IntegrationKind;
     forge_type: ForgeType;
     endpoint_url: string;
@@ -89,6 +90,7 @@ export class IntegrationsComponent implements OnInit {
     access_token: string;
   } = {
     name: '',
+    display_name: '',
     kind: 'inbound',
     forge_type: 'gitea',
     endpoint_url: '',
@@ -164,6 +166,7 @@ export class IntegrationsComponent implements OnInit {
   openCreateDialog(): void {
     this.formData = {
       name: '',
+      display_name: '',
       kind: 'inbound',
       forge_type: 'gitea',
       endpoint_url: '',
@@ -191,6 +194,9 @@ export class IntegrationsComponent implements OnInit {
       kind: this.formData.kind,
       forge_type: this.formData.forge_type,
     };
+    if (this.formData.display_name.trim()) {
+      body.display_name = this.formData.display_name.trim();
+    }
     if (this.formData.kind === 'inbound') {
       if (this.formData.secret.trim()) body.secret = this.formData.secret.trim();
     } else {
@@ -214,6 +220,7 @@ export class IntegrationsComponent implements OnInit {
     this.editingIntegration.set(integration);
     this.formData = {
       name: integration.name,
+      display_name: integration.display_name,
       kind: integration.kind,
       forge_type: integration.forge_type,
       endpoint_url: integration.endpoint_url ?? '',
@@ -232,6 +239,9 @@ export class IntegrationsComponent implements OnInit {
     const body: any = {};
     if (this.formData.name.trim() && this.formData.name !== target.name) {
       body.name = this.formData.name.trim();
+    }
+    if (this.formData.display_name.trim() && this.formData.display_name !== target.display_name) {
+      body.display_name = this.formData.display_name.trim();
     }
     if (this.formData.forge_type !== target.forge_type) {
       body.forge_type = this.formData.forge_type;

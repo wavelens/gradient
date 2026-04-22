@@ -16,6 +16,9 @@ pub enum Commands {
     Register {
         /// Persistent worker identity string
         worker_id: String,
+        /// Human-readable display name shown in the workers list
+        #[arg(short = 'n', long = "display-name")]
+        display_name: String,
         /// Optional WebSocket URL where the worker listens for incoming server connections
         #[arg(short, long)]
         url: Option<String>,
@@ -37,6 +40,7 @@ pub async fn handle(cmd: Commands) {
     match cmd {
         Commands::Register {
             worker_id,
+            display_name,
             url,
             token,
         } => {
@@ -56,6 +60,7 @@ pub async fn handle(cmd: Commands) {
                 get_request_config(load_config()).unwrap(),
                 organization,
                 worker_id,
+                display_name,
                 url,
                 token,
             )
@@ -118,8 +123,8 @@ pub async fn handle(cmd: Commands) {
                     };
                     let url_part = w.url.map(|u| format!(" (url: {})", u)).unwrap_or_default();
                     println!(
-                        "{}: {} [{}]{}",
-                        w.worker_id, w.registered_at, status, url_part
+                        "{} \"{}\": {} [{}]{}",
+                        w.worker_id, w.display_name, w.registered_at, status, url_part
                     );
                 }
             }

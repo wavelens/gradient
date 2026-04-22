@@ -32,11 +32,21 @@ pub struct Model {
     /// will not dispatch jobs to this worker.
     pub active: bool,
     /// Human-readable display name for this worker (empty string if not set).
-    pub name: String,
+    pub display_name: String,
+    /// User who created this registration. NULL for legacy rows registered
+    /// before this column was introduced.
+    pub created_by: Option<Uuid>,
     pub created_at: NaiveDateTime,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::user::Entity",
+        from = "Column::CreatedBy",
+        to = "super::user::Column::Id"
+    )]
+    CreatedBy,
+}
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -141,6 +141,10 @@ a {
     background: $color-quaternary;
     border-bottom: 1px solid $color-border;
   }
+
+  .p-dialog-content {
+    padding: $spacing-md;
+  }
 }
 
 .p-table {

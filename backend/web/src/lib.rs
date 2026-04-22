@@ -21,7 +21,7 @@ use tower_http::trace::TraceLayer;
 use tracing::Span;
 
 use core::types::ServerState;
-use endpoints::{workers, *};
+use endpoints::{admin, *};
 use proto::proto_router;
 use scheduler::Scheduler;
 use std::sync::Arc;
@@ -206,7 +206,6 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/user/settings",
             get(user::get_settings).patch(user::patch_settings),
         )
-        .route("/workers", get(workers::get_workers))
         .route("/commits/{commit}", get(commits::get_commit))
         .route(
             "/webhook/{organization}",
@@ -222,6 +221,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/webhook/{organization}/{webhook}/test",
             post(webhooks::post_webhook_test),
         )
+        .nest("/admin", admin::admin_router())
         .route_layer(middleware::from_fn_with_state(
             Arc::clone(&state),
             authorization::authorize,

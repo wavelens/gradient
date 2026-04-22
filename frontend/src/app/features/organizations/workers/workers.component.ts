@@ -193,7 +193,7 @@ export class WorkersComponent implements OnInit {
 
   openRenameDialog(worker: Worker): void {
     this.renamingWorker.set(worker);
-    this.newName = worker.name;
+    this.newName = worker.display_name;
     this.showRenameDialog.set(true);
   }
 

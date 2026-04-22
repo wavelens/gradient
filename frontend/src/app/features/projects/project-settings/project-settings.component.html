@@ -147,7 +147,7 @@
           @if (!proj.managed && proj.can_edit) {
             <div class="form-actions">
               <button pButton label="Save Integrations" icon="pi pi-check" (click)="saveIntegrationLink()" [loading]="savingIntegration()" [disabled]="savingIntegration()"></button>
-              <button pButton label="Manage Integrations" icon="pi pi-external-link" severity="secondary" [routerLink]="['/organization', orgName, 'integrations']"></button>
+              <a pButton label="Manage Integrations" icon="pi pi-external-link" severity="secondary" [routerLink]="['/organization', orgName, 'integrations']"></a>
             </div>
           }
         }

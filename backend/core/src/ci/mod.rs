@@ -5,7 +5,9 @@
  */
 
 pub mod github_app;
+pub mod github_app_manifest;
 pub mod integration_lookup;
+pub mod manifest_state;
 pub mod reporter;
 pub mod trigger;
 pub mod webhook;

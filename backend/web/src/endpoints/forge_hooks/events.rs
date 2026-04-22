@@ -150,7 +150,9 @@ impl ParsedPushEvent {
     }
 
     /// Queue evaluations for all active projects whose repository URL matches.
-    pub async fn trigger(self, state: &Arc<ServerState>) {
+    /// Returns a [`WebhookTriggerOutcome`] describing which projects were queued
+    /// and which were skipped.
+    pub async fn trigger(self, state: &Arc<ServerState>) -> super::response::WebhookTriggerOutcome {
         let url_refs: Vec<&str> = self.repository_urls.iter().map(String::as_str).collect();
         trigger_for_repo_urls(
             state,
@@ -159,7 +161,7 @@ impl ParsedPushEvent {
             self.commit_message,
             self.author_name,
         )
-        .await;
+        .await
     }
 }
 

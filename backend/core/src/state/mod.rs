@@ -65,6 +65,9 @@ pub struct StateProject {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateIntegration {
     pub name: String,
+    /// Defaults to `name` when unset.
+    #[serde(default)]
+    pub display_name: Option<String>,
     pub organization: String,
     /// `"inbound"` or `"outbound"`.
     pub kind: String,
@@ -131,7 +134,9 @@ pub struct StateWorker {
     pub url: Option<String>,
     pub organization: String,
     pub token_file: String,
-    pub name: String,
+    /// Human-readable display name shown in the workers list.
+    pub display_name: String,
+    pub created_by: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -337,6 +342,12 @@ impl StateConfiguration {
                 errors.push(ValidationError {
                     field: format!("workers.{}.organization", worker.worker_id),
                     message: format!("Organization '{}' does not exist", worker.organization),
+                });
+            }
+            if !self.users.contains_key(&worker.created_by) {
+                errors.push(ValidationError {
+                    field: format!("workers.{}.created_by", worker.worker_id),
+                    message: format!("User '{}' does not exist", worker.created_by),
                 });
             }
         }

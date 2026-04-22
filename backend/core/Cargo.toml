@@ -64,4 +64,5 @@ harmonia-nar = { workspace = true, features = ["test"] }
 mockall      = { workspace = true }
 test-support = { workspace = true }
 tokio-test   = { workspace = true }
+wiremock     = "0.6"
 zstd         = { workspace = true }

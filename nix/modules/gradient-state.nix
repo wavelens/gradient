@@ -222,6 +222,12 @@
         description = "Unique name for the integration within (organization, kind)";
       };
 
+      display_name = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "Human-readable display name for the integration. Defaults to `name` when null.";
+      };
+
       organization = mkOption {
         type = types.str;
         description = "Name of the organization this integration belongs to";
@@ -369,7 +375,7 @@
 
   workerType = types.submodule ({ name, ... }: {
     options = {
-      name = mkOption {
+      display_name = mkOption {
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
@@ -397,6 +403,11 @@
       token_file = mkOption {
         type = types.path;
         description = "Path to a file containing the authentication token for this worker";
+      };
+
+      created_by = mkOption {
+        type = types.str;
+        description = "Username of the user who created this worker registration";
       };
     };
   });
@@ -498,9 +509,10 @@
         example = literalExpression ''
           {
             builder-1 = {
-              name = "Primary Build Server";
+              display_name = "Primary Build Server";
               organization = "acme-corp";
               token_file = "/etc/gradient/secrets/builder-1-token";
+              created_by = "alice";
             };
           }
         '';

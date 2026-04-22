@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RegisterWorkerRequest {
     pub worker_id: String,
+    pub display_name: String,
     pub url: Option<String>,
     pub token: Option<String>,
 }
@@ -33,8 +34,10 @@ pub struct WorkerLiveInfo {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct OrgWorkerEntry {
     pub worker_id: String,
+    pub display_name: String,
     pub registered_at: String,
     pub url: Option<String>,
+    pub created_by: Option<String>,
     pub live: Option<WorkerLiveInfo>,
 }
 
@@ -42,11 +45,13 @@ pub async fn post_org_worker(
     config: RequestConfig,
     organization: String,
     worker_id: String,
+    display_name: String,
     url: Option<String>,
     token: Option<String>,
 ) -> Result<BaseResponse<RegisterWorkerResponse>, String> {
     let req = RegisterWorkerRequest {
         worker_id,
+        display_name,
         url,
         token,
     };

@@ -241,6 +241,10 @@ pub struct ServerState {
     pub webhooks: Arc<dyn WebhookClient>,
     pub email: Arc<dyn EmailSender>,
     pub nar_storage: NarStore,
+    /// Issued-but-unconsumed manifest CSRF state tokens with their issuance time.
+    pub manifest_state: Arc<crate::ci::manifest_state::ManifestStateStore>,
+    /// Manifest results awaiting one-shot pickup by the superuser's browser.
+    pub pending_credentials: Arc<crate::ci::manifest_state::PendingCredentialsStore>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

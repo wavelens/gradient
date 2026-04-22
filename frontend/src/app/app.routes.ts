@@ -6,6 +6,7 @@
 
 import { Routes } from '@angular/router';
 import { authGuard } from '@core/guards/auth.guard';
+import { adminGuard } from '@core/guards/admin.guard';
 
 export const routes: Routes = [
   // Authentication routes (public)
@@ -229,6 +230,16 @@ export const routes: Routes = [
           ),
       },
     ],
+  },
+
+  {
+    path: 'admin/github-app',
+    title: 'GitHub App (admin)',
+    canActivate: [authGuard, adminGuard],
+    loadComponent: () =>
+      import('./features/admin/github-app/github-app.component').then(
+        (m) => m.GithubAppComponent,
+      ),
   },
 
   // Error pages

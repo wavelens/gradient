@@ -178,5 +178,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         webhooks,
         email,
         nar_storage,
+        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
     })
 }

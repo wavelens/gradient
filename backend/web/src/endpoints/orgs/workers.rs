@@ -32,7 +32,7 @@ pub struct RegisterWorkerRequest {
     /// When set, the server connects outbound to this URL.
     pub url: Option<String>,
     /// Human-readable display name for this worker.
-    pub name: String,
+    pub display_name: String,
     /// Pre-generated token (output of `openssl rand -base64 48`, exactly 64 base64 chars).
     /// When provided the server stores its hash and does NOT return the token in the response.
     pub token: Option<String>,
@@ -50,12 +50,14 @@ pub struct RegisterWorkerResponse {
 pub struct OrgWorkerEntry {
     pub worker_id: String,
     /// Human-readable display name for this worker (empty string if not set).
-    pub name: String,
+    pub display_name: String,
     pub registered_at: NaiveDateTime,
     pub active: bool,
     /// WebSocket URL where the worker accepts incoming server connections.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// User who registered this worker. NULL for legacy or declarative rows.
+    pub created_by: Option<Uuid>,
     /// Present when the worker is currently connected to this server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live: Option<WorkerLiveInfo>,
@@ -66,7 +68,7 @@ pub struct PatchWorkerRequest {
     /// When present, update the active flag.
     pub active: Option<bool>,
     /// When present, update the display name. Empty string clears the name.
-    pub name: Option<String>,
+    pub display_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -127,8 +129,9 @@ pub async fn post_org_worker(
         token_hash: Set(token_hash),
         managed: Set(false),
         url: Set(body.url),
-        name: Set(body.name.trim().to_string()),
+        display_name: Set(body.display_name.trim().to_string()),
         active: Set(true),
+        created_by: Set(Some(user.id)),
         created_at: Set(Utc::now().naive_utc()),
     };
     row.insert(&state.db).await?;
@@ -182,10 +185,11 @@ pub async fn get_org_workers(
             });
             OrgWorkerEntry {
                 worker_id: reg.worker_id,
-                name: reg.name,
+                display_name: reg.display_name,
                 registered_at: reg.created_at,
                 active: reg.active,
                 url: reg.url,
+                created_by: reg.created_by,
                 live,
             }
         })
@@ -218,8 +222,8 @@ pub async fn patch_org_worker(
     if let Some(active) = body.active {
         active_model.active = Set(active);
     }
-    if let Some(ref name) = body.name {
-        active_model.name = Set(name.trim().to_string());
+    if let Some(ref name) = body.display_name {
+        active_model.display_name = Set(name.trim().to_string());
     }
     active_model.update(&state.db).await?;
 

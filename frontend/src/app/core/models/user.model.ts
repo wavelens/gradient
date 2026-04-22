@@ -12,6 +12,7 @@ export interface User {
   last_login_at?: string;
   created_at?: string;
   email_verified?: boolean;
+  superuser?: boolean;
 }
 
 export interface UserSettings {

@@ -25,12 +25,14 @@ export interface WorkerLiveInfo {
 export interface Worker {
   worker_id: string;
   /** Human-readable display name. */
-  name: string;
+  display_name: string;
   managed: boolean;
   active: boolean;
   registered_at?: string;
   /** WebSocket URL where the worker accepts incoming server connections. */
   url?: string;
+  /** User who registered this worker. Null for legacy or declarative rows. */
+  created_by?: string | null;
   /** Present when the worker is currently connected via proto. */
   live?: WorkerLiveInfo;
 }

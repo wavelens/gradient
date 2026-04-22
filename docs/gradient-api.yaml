@@ -98,6 +98,8 @@ tags:
     description: Incoming forge webhooks (external forges → Gradient push triggers)
   - name: integrations
     description: Per-organization named forge integrations (inbound HMAC secrets + outbound API credentials)
+  - name: admin
+    description: Server-wide administrative endpoints. All routes require the caller to have the `superuser` flag.
 
 security:
   - bearerAuth: []
@@ -2158,11 +2160,14 @@ paths:
           application/json:
             schema:
               type: object
-              required: [worker_id, name]
+              required: [worker_id, display_name]
               properties:
                 worker_id:
                   type: string
                   description: Persistent worker identity string (UUID or human-readable name)
+                display_name:
+                  type: string
+                  description: Human-readable display name for this worker.
                 url:
                   type: string
                   nullable: true
@@ -2174,9 +2179,6 @@ paths:
                     Pre-generated token (output of `openssl rand -base64 48`, exactly 64 standard-base64 characters).
                     When provided the server stores its hash and does NOT return the token in the response.
                     Omit to have the server generate a token — it will be returned once and cannot be retrieved again.
-                name:
-                  type: string
-                  description: Human-readable display name for this worker.
       responses:
         '200':
           description: Worker registered
@@ -2232,7 +2234,7 @@ paths:
                   type: boolean
                   nullable: true
                   description: Set to false to deactivate the worker, true to reactivate it. Omit to leave unchanged.
-                name:
+                display_name:
                   type: string
                   description: Update the display name. Omit to leave unchanged.
       responses:
@@ -2278,11 +2280,18 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /workers:
+  # ── Admin ────────────────────────────────────────────────────────────────────
+
+  /admin/workers:
     get:
-      tags: [workers]
+      tags: [admin, workers]
       summary: List connected workers
-      description: Returns all workers currently connected to the server via the `/proto` WebSocket, including their capabilities and assigned job counts.
+      description: |
+        Returns all workers currently connected to the server via the `/proto`
+        WebSocket, including their capabilities and assigned job counts.
+
+        Requires the caller to have the `superuser` flag, unless the server
+        is started with `GRADIENT_GLOBAL_STATS_PUBLIC=true`.
       operationId: listWorkers
       security:
         - bearerAuth: []
@@ -2302,6 +2311,180 @@ paths:
                           $ref: '#/components/schemas/WorkerInfo'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/github-app/manifest:
+    post:
+      tags: [admin]
+      summary: Build GitHub App manifest
+      description: |
+        Builds a GitHub App manifest pre-filled with this server's URLs,
+        permissions, and events, and returns a one-shot CSRF state token plus
+        the GitHub URL the browser should POST the manifest to.
+
+        Requires `superuser`. The state token is consumed by the matching
+        `GET /admin/github-app/callback` invocation; it expires after 10
+        minutes.
+      operationId: createGithubAppManifest
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                host:
+                  type: string
+                  description: GitHub Enterprise host (e.g. `ghe.example.com`). Defaults to `github.com` when omitted or empty.
+              example:
+                host: github.com
+      responses:
+        '200':
+          description: Manifest, post URL, and CSRF state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        required: [manifest, post_url, state]
+                        properties:
+                          manifest:
+                            type: object
+                            description: GitHub App manifest payload (`name`, `url`, `hook_attributes`, `redirect_url`, `setup_url`, `default_permissions`, `default_events`, `public`).
+                          post_url:
+                            type: string
+                            description: Absolute URL the browser should POST the manifest to (e.g. `https://github.com/settings/apps/new`).
+                          state:
+                            type: string
+                            description: Opaque one-shot CSRF token to be replayed in the callback's `state` query param.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/github-app/callback:
+    get:
+      tags: [admin]
+      summary: GitHub App manifest callback
+      description: |
+        Receives the redirect from GitHub after the operator submits the
+        manifest. Validates the `state` token, exchanges the temporary `code`
+        for the App's permanent credentials, stashes them in a one-shot
+        in-memory store, and redirects the browser to
+        `/admin/github-app?ready=1`.
+
+        Requires `superuser`.
+      operationId: githubAppManifestCallback
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema:
+            type: string
+          description: Temporary manifest exchange code issued by GitHub.
+        - in: query
+          name: state
+          required: true
+          schema:
+            type: string
+          description: The one-shot CSRF token issued by `POST /admin/github-app/manifest`.
+        - in: query
+          name: host
+          required: false
+          schema:
+            type: string
+          description: GitHub Enterprise host. Must match the host used to build the manifest.
+      responses:
+        '302':
+          description: Redirect to `/admin/github-app?ready=1` on success.
+          headers:
+            Location:
+              schema:
+                type: string
+                example: /admin/github-app?ready=1
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          description: GitHub rejected the code exchange.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: string
+
+  /admin/github-app/credentials:
+    get:
+      tags: [admin]
+      summary: Fetch pending GitHub App credentials
+      description: |
+        One-shot retrieval of the credentials produced by the most recent
+        successful manifest exchange. Calling this endpoint **consumes** the
+        pending credentials; a second call returns `404`. Pending entries
+        also expire 10 minutes after creation.
+
+        Requires `superuser`.
+      operationId: getGithubAppCredentials
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: GitHub App credentials (returned exactly once)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        required: [id, slug, html_url, pem, webhook_secret, client_id, client_secret]
+                        properties:
+                          id:
+                            type: integer
+                            format: int64
+                            description: Numeric GitHub App ID — set as `GRADIENT_GITHUB_APP_ID`.
+                          slug:
+                            type: string
+                            description: GitHub App slug.
+                          html_url:
+                            type: string
+                            description: Public GitHub URL of the App settings page.
+                          pem:
+                            type: string
+                            description: RS256 private key — write to `GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE`.
+                          webhook_secret:
+                            type: string
+                            description: Shared webhook secret — write to `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
+                          client_id:
+                            type: string
+                          client_secret:
+                            type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ── Caches ───────────────────────────────────────────────────────────────────
 
@@ -3246,11 +3429,26 @@ paths:
               description: GitHub event payload (varies by event type)
       responses:
         '200':
-          description: Event accepted
+          description: Webhook processed (may include zero queued evaluations)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/WebhookResponse'
+        '400':
+          description: Malformed payload or unsupported forge
         '401':
-          description: Invalid HMAC signature
+          description: Invalid webhook signature
+        '404':
+          description: Integration not found
+        '500':
+          description: Internal error
         '503':
-          description: GitHub App not configured on this server
+          description: GitHub App not configured (GitHub endpoint only)
 
   /hooks/{forge}/{org}/{integration_name}:
     parameters:
@@ -3303,13 +3501,24 @@ paths:
               description: Forge push event payload
       responses:
         '200':
-          description: Event accepted
+          description: Webhook processed (may include zero queued evaluations)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/WebhookResponse'
+        '400':
+          description: Malformed payload or unsupported forge
         '401':
-          description: Invalid signature
+          description: Invalid webhook signature
         '404':
-          description: Organization or integration not found, or `forge=github`
-        '503':
-          description: Integration has no secret configured
+          description: Integration not found
+        '500':
+          description: Internal error
 
   # ── Nix Cache Protocol ───────────────────────────────────────────────────────
   # These endpoints live outside /api/v1. The server URL for these is the root,
@@ -3510,12 +3719,12 @@ components:
 
     OrgWorkerEntry:
       type: object
-      required: [worker_id, registered_at, active]
+      required: [worker_id, display_name, registered_at, active]
       properties:
         worker_id:
           type: string
           description: Persistent worker identity string
-        name:
+        display_name:
           type: string
           description: 'Human-readable display name for this worker. Defaults to "worker".'
         registered_at:
@@ -3529,6 +3738,11 @@ components:
           type: string
           nullable: true
           description: WebSocket URL where the worker listens for incoming server connections (if configured)
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+          description: User who registered this worker. Null for legacy or declarative rows.
         live:
           allOf:
             - $ref: '#/components/schemas/WorkerLiveInfo'
@@ -4609,7 +4823,7 @@ components:
 
     Integration:
       type: object
-      required: [id, organization, name, kind, forge_type, has_secret, has_access_token, created_by, created_at]
+      required: [id, organization, name, display_name, kind, forge_type, has_secret, has_access_token, created_by, created_at]
       properties:
         id:
           type: string
@@ -4621,6 +4835,10 @@ components:
           type: string
           pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
           example: production
+        display_name:
+          type: string
+          description: Human-readable display name. Defaults to `name` when not set on creation.
+          example: Production Webhook
         kind:
           type: string
           enum: [inbound, outbound]
@@ -4659,6 +4877,9 @@ components:
         name:
           type: string
           pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+        display_name:
+          type: string
+          description: Human-readable display name. Defaults to `name` when omitted.
         kind:
           type: string
           enum: [inbound, outbound]
@@ -4689,6 +4910,9 @@ components:
         name:
           type: string
           pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
+        display_name:
+          type: string
+          description: Update the human-readable display name. Cannot be empty.
         forge_type:
           type: string
           enum: [gitea, forgejo, gitlab, github]
@@ -4734,3 +4958,54 @@ components:
       properties:
         enabled:
           type: boolean
+
+    WebhookResponse:
+      type: object
+      required: [event, repository_urls, projects_scanned, queued, skipped]
+      properties:
+        event:
+          type: string
+          example: push
+        repository_urls:
+          type: array
+          items:
+            type: string
+        projects_scanned:
+          type: integer
+          format: int32
+        queued:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueuedEvaluation'
+        skipped:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkippedProject'
+    QueuedEvaluation:
+      type: object
+      required: [project_id, project_name, organization, evaluation_id]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        project_name:
+          type: string
+        organization:
+          type: string
+        evaluation_id:
+          type: string
+          format: uuid
+    SkippedProject:
+      type: object
+      required: [project_id, project_name, organization, reason]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        project_name:
+          type: string
+        organization:
+          type: string
+        reason:
+          type: string
+          enum: [already_in_progress, no_previous_evaluation, db_error]

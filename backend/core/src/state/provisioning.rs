@@ -606,6 +606,7 @@ impl<'a> StateApplicator<'a> {
         use sha2::{Digest, Sha256};
 
         let org_map = self.org_lookup().await?;
+        let user_map = self.user_lookup().await?;
 
         let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
             .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
@@ -627,6 +628,10 @@ impl<'a> StateApplicator<'a> {
                 .get(&state_worker.organization)
                 .ok_or_else(|| format!("Organization '{}' not found", state_worker.organization))?;
 
+            let created_by_id = *user_map
+                .get(&state_worker.created_by)
+                .ok_or_else(|| format!("User '{}' not found", state_worker.created_by))?;
+
             let existing = worker_registration::Entity::find()
                 .filter(worker_registration::Column::PeerId.eq(peer_id))
                 .filter(worker_registration::Column::WorkerId.eq(&state_worker.worker_id))
@@ -647,7 +652,8 @@ impl<'a> StateApplicator<'a> {
                 reg.token_hash = Set(token_hash);
                 reg.managed = Set(true);
                 reg.url = Set(url);
-                reg.name = Set(state_worker.name.clone());
+                reg.display_name = Set(state_worker.display_name.clone());
+                reg.created_by = Set(Some(created_by_id));
                 reg.update(self.db).await?;
                 tracing::info!("Updated worker registration: {}", state_worker.worker_id);
             } else {
@@ -658,8 +664,9 @@ impl<'a> StateApplicator<'a> {
                     token_hash: Set(token_hash),
                     managed: Set(true),
                     url: Set(url),
-                    name: Set(state_worker.name.clone()),
+                    display_name: Set(state_worker.display_name.clone()),
                     active: Set(true),
+                    created_by: Set(Some(created_by_id)),
                     created_at: Set(now),
                 };
                 reg.insert(self.db).await?;
@@ -776,8 +783,14 @@ impl<'a> StateApplicator<'a> {
                 .one(self.db)
                 .await?;
 
+            let display_name = state_int
+                .display_name
+                .clone()
+                .unwrap_or_else(|| state_int.name.clone());
+
             if let Some(existing) = existing {
                 let mut active: integration::ActiveModel = existing.into();
+                active.display_name = Set(display_name);
                 active.forge_type = Set(forge.as_i16());
                 active.endpoint_url = Set(endpoint);
                 active.secret = Set(encrypted_secret);
@@ -790,6 +803,7 @@ impl<'a> StateApplicator<'a> {
                     id: Set(Uuid::new_v4()),
                     organization: Set(org_id),
                     name: Set(state_int.name.clone()),
+                    display_name: Set(display_name),
                     kind: Set(kind.as_i16()),
                     forge_type: Set(forge.as_i16()),
                     secret: Set(encrypted_secret),

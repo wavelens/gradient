@@ -1,0 +1,39 @@
+.container {
+  padding: 1.5rem;
+}
+
+.setup-panel,
+.result-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 720px;
+  margin-top: 1rem;
+}
+
+.error {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--p-red-300, #fca5a5);
+  background: var(--p-red-50, #fef2f2);
+  color: var(--p-red-900, #7f1d1d);
+  border-radius: 0.5rem;
+}
+
+.credential {
+  display: grid;
+  grid-template-columns: 9rem 1fr auto;
+  align-items: start;
+  gap: 0.75rem;
+
+  .label {
+    font-weight: 600;
+  }
+
+  pre {
+    margin: 0;
+    overflow: auto;
+    background: var(--p-gray-50, #f9fafb);
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+  }
+}

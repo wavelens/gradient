@@ -12,6 +12,7 @@ export interface Integration {
   id: string;
   organization: string;
   name: string;
+  display_name: string;
   kind: IntegrationKind;
   forge_type: ForgeType;
   endpoint_url: string | null;
@@ -23,6 +24,7 @@ export interface Integration {
 
 export interface CreateIntegrationRequest {
   name: string;
+  display_name?: string;
   kind: IntegrationKind;
   forge_type: ForgeType;
   secret?: string;
@@ -32,6 +34,7 @@ export interface CreateIntegrationRequest {
 
 export interface PatchIntegrationRequest {
   name?: string;
+  display_name?: string;
   forge_type?: ForgeType;
   secret?: string;
   endpoint_url?: string;

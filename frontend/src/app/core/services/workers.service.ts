@@ -17,10 +17,10 @@ export class WorkersService {
     return this.api.get<Worker[]>(`orgs/${org}/workers`);
   }
 
-  registerWorker(org: string, workerId: string, name: string, url?: string, token?: string): Observable<WorkerRegistration> {
+  registerWorker(org: string, workerId: string, displayName: string, url?: string, token?: string): Observable<WorkerRegistration> {
     return this.api.post<WorkerRegistration>(`orgs/${org}/workers`, {
       worker_id: workerId,
-      name,
+      display_name: displayName,
       url: url || undefined,
       token: token || undefined,
     });
@@ -30,8 +30,8 @@ export class WorkersService {
     return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, { active });
   }
 
-  renameWorker(org: string, workerId: string, name: string): Observable<string> {
-    return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, { name });
+  renameWorker(org: string, workerId: string, displayName: string): Observable<string> {
+    return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, { display_name: displayName });
   }
 
   deleteWorker(org: string, workerId: string): Observable<string> {

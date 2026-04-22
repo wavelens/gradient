@@ -58,14 +58,22 @@ integration's secret, trigger = *Push events*. Gradient compares the
 
 ### GitHub App
 
-Install the configured GitHub App on your GitHub org or repository. The
-installation ID is stored automatically on the matching Gradient organization.
-Deliveries are authenticated via the App's webhook secret
-(`GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`).
+The GitHub integration uses a single GitHub App registered against your
+Gradient server. There are three roles to consider:
 
-GitHub support appears in the UI only when the server has a GitHub App
-configured. In that case, each organization can toggle *Enable GitHub App*
-independently (default off) from the Integrations page.
+1. **Server operator** — once per Gradient instance, register the App and put
+   its credentials into the server's config. See the
+   [GitHub App setup](../development/github-app-setup.md) operator doc.
+2. **Organization admin** — once the server has the App configured, enable the
+   *GitHub App* toggle on the Integrations page for each organization that
+   wants to use it.
+3. **GitHub repository owner** — install the App on a GitHub user or
+   organization account. Gradient stores the installation ID automatically
+   when the `installation` webhook fires; deliveries from the matching
+   repositories then route to the corresponding Gradient organization.
+
+Webhook deliveries are signed with the App's webhook secret and verified
+server-side. Build statuses are reported back via the App's installation token.
 
 ## Rotating or deleting an integration
 
@@ -90,6 +98,47 @@ through the App webhook at `/api/v1/hooks/github` and are not per-integration.
 A single inbound integration can serve all three Gitea/Forgejo/GitLab forges
 simultaneously — the signature scheme is selected by the `{forge}` path
 segment.
+
+### Webhook response body
+
+Both `POST /api/v1/hooks/{forge}/{org}/{integration_name}` and `POST /api/v1/hooks/github`
+return the standard envelope with a `WebhookResponse` payload describing what happened:
+
+```json
+{
+  "error": false,
+  "message": {
+    "event": "push",
+    "repository_urls": ["https://github.com/acme/widgets.git"],
+    "projects_scanned": 2,
+    "queued": [
+      {
+        "project_id": "...",
+        "project_name": "widgets",
+        "organization": "acme",
+        "evaluation_id": "..."
+      }
+    ],
+    "skipped": [
+      {
+        "project_id": "...",
+        "project_name": "widgets-staging",
+        "organization": "acme",
+        "reason": "already_in_progress"
+      }
+    ]
+  }
+}
+```
+
+The `reason` field for skipped projects is one of:
+
+- `already_in_progress` — an evaluation for the same revision is already queued or running
+- `no_previous_evaluation` — the project has not yet been bootstrapped
+- `db_error` — a per-project persistence failure (the request as a whole still succeeded)
+
+Non-push GitHub App events (`ping`, `installation`, `installation_repositories`, unknown)
+return the same envelope with `event` set accordingly and empty `queued` / `skipped` arrays.
 
 ## Troubleshooting
 
