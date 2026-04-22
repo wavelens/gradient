@@ -20,7 +20,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { interval, Subscription } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
-import { EvaluationsService, BuildItem, PaginatedBuilds } from '@core/services/evaluations.service';
+import { EvaluationsService, BuildItem } from '@core/services/evaluations.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { Evaluation, EvaluationMessage } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
@@ -231,11 +231,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
             ...this.visibleBuilds().map(b => b.id),
             ...this.pendingBuilds.map(b => b.id),
           ]);
+
           const newBuilds = this.builds().filter(b => !knownIds.has(b.id));
           if (newBuilds.length > 0) {
             this.pendingBuilds.unshift(...newBuilds);
             this.startBuildRevealTimer();
           }
+
           // Refresh statuses & order of already-visible builds
           this.visibleBuilds.update(vbs =>
             this.sortBuilds(vbs.map(vb => this.builds().find(b => b.id === vb.id) ?? vb))
@@ -499,7 +501,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       }
       const next = this.pendingBuilds.shift()!;
       this.visibleBuilds.update(vbs => [next, ...vbs]);
-    }, 200);
+    }, 50);
   }
 
   private stopBuildRevealTimer(): void {

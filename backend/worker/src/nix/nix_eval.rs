@@ -27,8 +27,8 @@ use nix_bindings::sys::{
     nix_eval_state_builder_new, nix_expr_eval_from_string, nix_flake_settings,
     nix_flake_settings_add_to_eval_state_builder, nix_flake_settings_free, nix_flake_settings_new,
     nix_get_attr_byidx, nix_get_attrs_size, nix_get_string, nix_get_type, nix_libexpr_init,
-    nix_libstore_init, nix_libutil_init, nix_state_free, nix_store_free, nix_store_open, nix_value,
-    nix_value_force,
+    nix_libstore_init, nix_libutil_init, nix_setting_set, nix_state_free, nix_store_free,
+    nix_store_open, nix_value, nix_value_force,
 };
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_uint, c_void};
@@ -65,6 +65,14 @@ impl NixEvaluator {
             check(ctx, nix_libutil_init(ctx)).context("nix_libutil_init")?;
             check(ctx, nix_libstore_init(ctx)).context("nix_libstore_init")?;
             check(ctx, nix_libexpr_init(ctx)).context("nix_libexpr_init")?;
+
+            // Equivalent to passing `--show-trace` on the `nix` CLI: emit the
+            // full evaluation trace on errors so users can pinpoint the
+            // failing expression instead of seeing only the top-level message.
+            let key = CString::new("show-trace").unwrap();
+            let value = CString::new("true").unwrap();
+            check(ctx, nix_setting_set(ctx, key.as_ptr(), value.as_ptr()))
+                .context("nix_setting_set show-trace")?;
 
             // NULL uri → use the store from ambient settings (same as `nix eval`).
             let store = nix_store_open(ctx, ptr::null(), ptr::null_mut());

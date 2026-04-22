@@ -70,6 +70,9 @@ export class WorkersComponent implements OnInit {
   newEnableEval = true;
   newEnableBuild = true;
   newName = '';
+  editEnableFetch = true;
+  editEnableEval = true;
+  editEnableBuild = true;
   capUpdating = signal<string | null>(null);
   lastRegistration = signal<WorkerRegistration | null>(null);
   tokenCopied = signal(false);
@@ -205,6 +208,9 @@ export class WorkersComponent implements OnInit {
   openRenameDialog(worker: Worker): void {
     this.renamingWorker.set(worker);
     this.newName = worker.display_name;
+    this.editEnableFetch = worker.enable_fetch;
+    this.editEnableEval = worker.enable_eval;
+    this.editEnableBuild = worker.enable_build;
     this.showRenameDialog.set(true);
   }
 
@@ -212,7 +218,11 @@ export class WorkersComponent implements OnInit {
     const worker = this.renamingWorker();
     if (!worker || !this.newName.trim()) return;
     this.renaming.set(true);
-    this.workersService.renameWorker(this.orgName, worker.worker_id, this.newName.trim()).subscribe({
+    const body: any = { display_name: this.newName.trim() };
+    if (this.editEnableFetch !== worker.enable_fetch) body.enable_fetch = this.editEnableFetch;
+    if (this.editEnableEval !== worker.enable_eval) body.enable_eval = this.editEnableEval;
+    if (this.editEnableBuild !== worker.enable_build) body.enable_build = this.editEnableBuild;
+    this.workersService.patchWorker(this.orgName, worker.worker_id, body).subscribe({
       next: () => {
         this.renaming.set(false);
         this.showRenameDialog.set(false);
@@ -220,7 +230,7 @@ export class WorkersComponent implements OnInit {
         this.loadWorkers();
       },
       error: (err) => {
-        console.error('Failed to rename worker:', err);
+        console.error('Failed to update worker:', err);
         this.renaming.set(false);
       },
     });

@@ -55,6 +55,10 @@ export class WorkersService {
     return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, body);
   }
 
+  patchWorker(org: string, workerId: string, body: Record<string, unknown>): Observable<string> {
+    return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, body);
+  }
+
   deleteWorker(org: string, workerId: string): Observable<string> {
     return this.api.delete<string>(`orgs/${org}/workers/${workerId}`);
   }

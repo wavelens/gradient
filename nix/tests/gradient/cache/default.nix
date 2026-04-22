@@ -122,6 +122,7 @@
                   worker_id = "a0000000-0000-0000-0000-000000000001";
                   organization = "org";
                   token_file = "/etc/gradient/secrets/worker_token";
+                  created_by = "admin";
                 };
               };
             };

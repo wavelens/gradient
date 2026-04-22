@@ -82,8 +82,8 @@ export class ProjectSettingsComponent implements OnInit {
   availableIntegrations = signal<Integration[]>([]);
   projectIntegration = signal<ProjectIntegrationLink | null>(null);
 
-  inboundSelection = signal<string | null>(null);
-  outboundSelection = signal<string | null>(null);
+  inboundSelection: string | null = null;
+  outboundSelection: string | null = null;
 
   inboundIntegrationOptions = signal<{ label: string; value: string | null }[]>([
     { label: 'None', value: null },
@@ -117,15 +117,15 @@ export class ProjectSettingsComponent implements OnInit {
       const inbound: { label: string; value: string | null }[] = [{ label: 'None', value: null }];
       const outbound: { label: string; value: string | null }[] = [{ label: 'None', value: null }];
       for (const i of list) {
-        const label = `${i.name} (${i.forge_type})`;
+        const label = `${i.display_name} (${i.forge_type})`;
         if (i.kind === 'inbound') inbound.push({ label, value: i.id });
         else outbound.push({ label, value: i.id });
       }
       this.inboundIntegrationOptions.set(inbound);
       this.outboundIntegrationOptions.set(outbound);
       this.projectIntegration.set(link);
-      this.inboundSelection.set(link?.inbound_integration ?? null);
-      this.outboundSelection.set(link?.outbound_integration ?? null);
+      this.inboundSelection = link?.inbound_integration ?? null;
+      this.outboundSelection = link?.outbound_integration ?? null;
       this.integrationsLoading.set(false);
     });
   }
@@ -136,8 +136,8 @@ export class ProjectSettingsComponent implements OnInit {
     this.integrationSaveSuccess.set(false);
     this.integrationsService
       .setProjectIntegration(this.orgName, this.projectName, {
-        inbound_integration: this.inboundSelection(),
-        outbound_integration: this.outboundSelection(),
+        inbound_integration: this.inboundSelection,
+        outbound_integration: this.outboundSelection,
       })
       .subscribe({
         next: (link) => {

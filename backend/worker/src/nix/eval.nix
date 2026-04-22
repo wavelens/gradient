@@ -17,6 +17,16 @@ flake_ref: wildcard_ref: let
     p = builtins.tryEval (isDerivation v);
   in p.success && p.value;
 
+  # An attrset that carries a `type` or `_type` marker but is not a derivation
+  # is treated as opaque: stop wildcard recursion so we do not force module
+  # evaluation on NixOS modules, submodules, type definitions, optionTypes, etc.
+  # `?` does not force the attribute value, only checks presence.
+  isOpaqueTagged = v: let
+    p = builtins.tryEval (
+      builtins.isAttrs v && (v ? type || v ? _type) && !(isDerivation v)
+    );
+  in p.success && p.value;
+
   safeAttrNames = v: let
     p = builtins.tryEval (
       if builtins.isAttrs v then builtins.attrNames v else [ ]
@@ -75,6 +85,10 @@ flake_ref: wildcard_ref: let
               # trailing `*` may represent multiple wildcard levels).
               if safeIsDerivation child.value && !(isExcluded excludes newPrefix) then
                 [ (builtins.concatStringsSep "." newPrefix) ]
+              else if isOpaqueTagged child.value then
+                # Tagged non-derivation (e.g. NixOS module/optionType): do
+                # not descend further — forcing it would trigger module eval.
+                [ ]
               else
                 builtins.concatMap (subName: let
                   subChild = safeGetAttr subName child.value;
@@ -86,7 +100,10 @@ flake_ref: wildcard_ref: let
                 else
                   [ ]
               ) (safeAttrNames child.value)
-            ) else
+            ) else if isOpaqueTagged child.value then
+              # Skip recursive descent into tagged non-derivations.
+              [ ]
+            else
               resolve excludes child.value rest newPrefix
         ) (safeAttrNames node)
       else

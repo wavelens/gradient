@@ -73,34 +73,11 @@
                 @if (worker.url) {
                   <div class="worker-url text-secondary">{{ worker.url }}</div>
                 }
-                <div class="worker-cap-gates">
-                  <label class="cap-gate" [class.cap-gate-on]="worker.enable_fetch" [class.cap-gate-off]="!worker.enable_fetch">
-                    <input
-                      type="checkbox"
-                      [checked]="worker.enable_fetch"
-                      [disabled]="worker.managed || capUpdating() === worker.worker_id + ':fetch'"
-                      (change)="toggleCapability(worker, 'fetch', !worker.enable_fetch)"
-                    />
-                    <span>fetch</span>
-                  </label>
-                  <label class="cap-gate" [class.cap-gate-on]="worker.enable_eval" [class.cap-gate-off]="!worker.enable_eval">
-                    <input
-                      type="checkbox"
-                      [checked]="worker.enable_eval"
-                      [disabled]="worker.managed || capUpdating() === worker.worker_id + ':eval'"
-                      (change)="toggleCapability(worker, 'eval', !worker.enable_eval)"
-                    />
-                    <span>eval</span>
-                  </label>
-                  <label class="cap-gate" [class.cap-gate-on]="worker.enable_build" [class.cap-gate-off]="!worker.enable_build">
-                    <input
-                      type="checkbox"
-                      [checked]="worker.enable_build"
-                      [disabled]="worker.managed || capUpdating() === worker.worker_id + ':build'"
-                      (change)="toggleCapability(worker, 'build', !worker.enable_build)"
-                    />
-                    <span>build</span>
-                  </label>
+                <div class="worker-gate-summary text-secondary">
+                  Gates:
+                  <span class="gate-pill" [class.gate-on]="worker.enable_fetch" [class.gate-off]="!worker.enable_fetch">fetch</span>
+                  <span class="gate-pill" [class.gate-on]="worker.enable_eval" [class.gate-off]="!worker.enable_eval">eval</span>
+                  <span class="gate-pill" [class.gate-on]="worker.enable_build" [class.gate-off]="!worker.enable_build">build</span>
                 </div>
                 @if (worker.live) {
                   <div class="worker-caps">
@@ -248,21 +225,39 @@
   </div>
   <div class="form-group">
     <label>Server-side capability gates</label>
-    <div class="cap-toggles">
-      <label class="cap-toggle">
-        <input type="checkbox" [(ngModel)]="newEnableFetch" />
-        <span>fetch</span>
-      </label>
-      <label class="cap-toggle">
-        <input type="checkbox" [(ngModel)]="newEnableEval" />
-        <span>eval</span>
-      </label>
-      <label class="cap-toggle">
-        <input type="checkbox" [(ngModel)]="newEnableBuild" />
-        <span>build</span>
-      </label>
+    <div class="cap-tag-group">
+      <button
+        type="button"
+        class="cap-tag"
+        [class.cap-tag-on]="newEnableFetch"
+        [class.cap-tag-off]="!newEnableFetch"
+        (click)="newEnableFetch = !newEnableFetch"
+      >
+        <span class="material-symbols-outlined">{{ newEnableFetch ? 'check' : 'close' }}</span>
+        fetch
+      </button>
+      <button
+        type="button"
+        class="cap-tag"
+        [class.cap-tag-on]="newEnableEval"
+        [class.cap-tag-off]="!newEnableEval"
+        (click)="newEnableEval = !newEnableEval"
+      >
+        <span class="material-symbols-outlined">{{ newEnableEval ? 'check' : 'close' }}</span>
+        eval
+      </button>
+      <button
+        type="button"
+        class="cap-tag"
+        [class.cap-tag-on]="newEnableBuild"
+        [class.cap-tag-off]="!newEnableBuild"
+        (click)="newEnableBuild = !newEnableBuild"
+      >
+        <span class="material-symbols-outlined">{{ newEnableBuild ? 'check' : 'close' }}</span>
+        build
+      </button>
     </div>
-    <small class="text-secondary">Disabling a capability prevents the server from negotiating it with this worker, even if the worker advertises it.</small>
+    <small class="text-secondary">Click a tag to toggle. Disabling a capability prevents the server from negotiating it with this worker, even if the worker advertises it.</small>
   </div>
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showRegisterDialog.set(false)" [disabled]="registering()"></button>
@@ -354,12 +349,12 @@
   </ng-template>
 </p-dialog>
 
-<!-- Rename Worker Dialog -->
+<!-- Edit Worker Dialog -->
 <p-dialog
-  header="Rename Worker"
+  header="Edit Worker"
   [(visible)]="showRenameDialog"
   [modal]="true"
-  [style]="{ width: '440px' }"
+  [style]="{ width: '480px' }"
   [draggable]="false"
   [resizable]="false"
 >
@@ -377,6 +372,42 @@
         class="w-full"
         (keyup.enter)="confirmRename()"
       />
+    </div>
+    <div class="form-group">
+      <label>Server-side capability gates</label>
+      <div class="cap-tag-group">
+        <button
+          type="button"
+          class="cap-tag"
+          [class.cap-tag-on]="editEnableFetch"
+          [class.cap-tag-off]="!editEnableFetch"
+          (click)="editEnableFetch = !editEnableFetch"
+        >
+          <span class="material-symbols-outlined">{{ editEnableFetch ? 'check' : 'close' }}</span>
+          fetch
+        </button>
+        <button
+          type="button"
+          class="cap-tag"
+          [class.cap-tag-on]="editEnableEval"
+          [class.cap-tag-off]="!editEnableEval"
+          (click)="editEnableEval = !editEnableEval"
+        >
+          <span class="material-symbols-outlined">{{ editEnableEval ? 'check' : 'close' }}</span>
+          eval
+        </button>
+        <button
+          type="button"
+          class="cap-tag"
+          [class.cap-tag-on]="editEnableBuild"
+          [class.cap-tag-off]="!editEnableBuild"
+          (click)="editEnableBuild = !editEnableBuild"
+        >
+          <span class="material-symbols-outlined">{{ editEnableBuild ? 'check' : 'close' }}</span>
+          build
+        </button>
+      </div>
+      <small class="text-secondary">Changes take effect on the worker's next reconnect (a re-auth is triggered automatically).</small>
     </div>
   }
   <ng-template pTemplate="footer">
