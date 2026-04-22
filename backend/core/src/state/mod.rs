@@ -137,6 +137,15 @@ pub struct StateWorker {
     /// Human-readable display name shown in the workers list.
     pub display_name: String,
     pub created_by: String,
+    /// Per-registration server-side gate for `fetch`. Defaults to true.
+    #[serde(default = "default_true")]
+    pub enable_fetch: bool,
+    /// Per-registration server-side gate for `eval`. Defaults to true.
+    #[serde(default = "default_true")]
+    pub enable_eval: bool,
+    /// Per-registration server-side gate for `build`. Defaults to true.
+    #[serde(default = "default_true")]
+    pub enable_build: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

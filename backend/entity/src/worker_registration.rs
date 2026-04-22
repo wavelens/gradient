@@ -31,6 +31,14 @@ pub struct Model {
     /// When false, the server will refuse to authenticate this registration and
     /// will not dispatch jobs to this worker.
     pub active: bool,
+    /// Per-registration server-side gate for the `fetch` capability. When false,
+    /// this registration will not contribute the `fetch` capability to the
+    /// worker's negotiated capability set at handshake.
+    pub enable_fetch: bool,
+    /// Per-registration server-side gate for the `eval` capability.
+    pub enable_eval: bool,
+    /// Per-registration server-side gate for the `build` capability.
+    pub enable_build: bool,
     /// Human-readable display name for this worker (empty string if not set).
     pub display_name: String,
     /// User who created this registration. NULL for legacy rows registered

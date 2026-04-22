@@ -73,6 +73,35 @@
                 @if (worker.url) {
                   <div class="worker-url text-secondary">{{ worker.url }}</div>
                 }
+                <div class="worker-cap-gates">
+                  <label class="cap-gate" [class.cap-gate-on]="worker.enable_fetch" [class.cap-gate-off]="!worker.enable_fetch">
+                    <input
+                      type="checkbox"
+                      [checked]="worker.enable_fetch"
+                      [disabled]="worker.managed || capUpdating() === worker.worker_id + ':fetch'"
+                      (change)="toggleCapability(worker, 'fetch', !worker.enable_fetch)"
+                    />
+                    <span>fetch</span>
+                  </label>
+                  <label class="cap-gate" [class.cap-gate-on]="worker.enable_eval" [class.cap-gate-off]="!worker.enable_eval">
+                    <input
+                      type="checkbox"
+                      [checked]="worker.enable_eval"
+                      [disabled]="worker.managed || capUpdating() === worker.worker_id + ':eval'"
+                      (change)="toggleCapability(worker, 'eval', !worker.enable_eval)"
+                    />
+                    <span>eval</span>
+                  </label>
+                  <label class="cap-gate" [class.cap-gate-on]="worker.enable_build" [class.cap-gate-off]="!worker.enable_build">
+                    <input
+                      type="checkbox"
+                      [checked]="worker.enable_build"
+                      [disabled]="worker.managed || capUpdating() === worker.worker_id + ':build'"
+                      (change)="toggleCapability(worker, 'build', !worker.enable_build)"
+                    />
+                    <span>build</span>
+                  </label>
+                </div>
                 @if (worker.live) {
                   <div class="worker-caps">
                     @for (cap of capLabels; track cap.key) {
@@ -216,6 +245,24 @@
       class="w-full"
     />
     <small class="text-secondary">Pre-generated token. Leave blank to have the server generate one (it will be shown once after registration).</small>
+  </div>
+  <div class="form-group">
+    <label>Server-side capability gates</label>
+    <div class="cap-toggles">
+      <label class="cap-toggle">
+        <input type="checkbox" [(ngModel)]="newEnableFetch" />
+        <span>fetch</span>
+      </label>
+      <label class="cap-toggle">
+        <input type="checkbox" [(ngModel)]="newEnableEval" />
+        <span>eval</span>
+      </label>
+      <label class="cap-toggle">
+        <input type="checkbox" [(ngModel)]="newEnableBuild" />
+        <span>build</span>
+      </label>
+    </div>
+    <small class="text-secondary">Disabling a capability prevents the server from negotiating it with this worker, even if the worker advertises it.</small>
   </div>
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showRegisterDialog.set(false)" [disabled]="registering()"></button>

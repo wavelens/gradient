@@ -409,6 +409,24 @@
         type = types.str;
         description = "Username of the user who created this worker registration";
       };
+
+      enable_fetch = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Server-side gate for the worker's `fetch` capability for this registration. When false, the negotiated capability set excludes fetch.";
+      };
+
+      enable_eval = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Server-side gate for the worker's `eval` capability for this registration.";
+      };
+
+      enable_build = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Server-side gate for the worker's `build` capability for this registration.";
+      };
     };
   });
 

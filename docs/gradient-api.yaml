@@ -2179,6 +2179,18 @@ paths:
                     Pre-generated token (output of `openssl rand -base64 48`, exactly 64 standard-base64 characters).
                     When provided the server stores its hash and does NOT return the token in the response.
                     Omit to have the server generate a token — it will be returned once and cannot be retrieved again.
+                enable_fetch:
+                  type: boolean
+                  default: true
+                  description: Server-side gate for the worker's `fetch` capability for this registration.
+                enable_eval:
+                  type: boolean
+                  default: true
+                  description: Server-side gate for the worker's `eval` capability for this registration.
+                enable_build:
+                  type: boolean
+                  default: true
+                  description: Server-side gate for the worker's `build` capability for this registration.
       responses:
         '200':
           description: Worker registered
@@ -2237,6 +2249,15 @@ paths:
                 display_name:
                   type: string
                   description: Update the display name. Omit to leave unchanged.
+                enable_fetch:
+                  type: boolean
+                  description: Update the per-registration `fetch` gate. Omit to leave unchanged.
+                enable_eval:
+                  type: boolean
+                  description: Update the per-registration `eval` gate. Omit to leave unchanged.
+                enable_build:
+                  type: boolean
+                  description: Update the per-registration `build` gate. Omit to leave unchanged.
       responses:
         '200':
           description: Worker updated
@@ -3719,7 +3740,7 @@ components:
 
     OrgWorkerEntry:
       type: object
-      required: [worker_id, display_name, registered_at, active]
+      required: [worker_id, display_name, registered_at, active, enable_fetch, enable_eval, enable_build]
       properties:
         worker_id:
           type: string
@@ -3743,6 +3764,15 @@ components:
           format: uuid
           nullable: true
           description: User who registered this worker. Null for legacy or declarative rows.
+        enable_fetch:
+          type: boolean
+          description: Server-side gate for the worker's `fetch` capability for this registration.
+        enable_eval:
+          type: boolean
+          description: Server-side gate for the worker's `eval` capability for this registration.
+        enable_build:
+          type: boolean
+          description: Server-side gate for the worker's `build` capability for this registration.
         live:
           allOf:
             - $ref: '#/components/schemas/WorkerLiveInfo'

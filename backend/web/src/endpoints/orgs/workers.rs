@@ -25,6 +25,10 @@ use uuid::Uuid;
 
 use crate::error::{WebError, WebResult};
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Deserialize)]
 pub struct RegisterWorkerRequest {
     pub worker_id: String,
@@ -36,6 +40,15 @@ pub struct RegisterWorkerRequest {
     /// Pre-generated token (output of `openssl rand -base64 48`, exactly 64 base64 chars).
     /// When provided the server stores its hash and does NOT return the token in the response.
     pub token: Option<String>,
+    /// Per-registration server-side gate for `fetch`. Defaults to true.
+    #[serde(default = "default_true")]
+    pub enable_fetch: bool,
+    /// Per-registration server-side gate for `eval`. Defaults to true.
+    #[serde(default = "default_true")]
+    pub enable_eval: bool,
+    /// Per-registration server-side gate for `build`. Defaults to true.
+    #[serde(default = "default_true")]
+    pub enable_build: bool,
 }
 
 #[derive(Serialize)]
@@ -58,6 +71,9 @@ pub struct OrgWorkerEntry {
     pub url: Option<String>,
     /// User who registered this worker. NULL for legacy or declarative rows.
     pub created_by: Option<Uuid>,
+    pub enable_fetch: bool,
+    pub enable_eval: bool,
+    pub enable_build: bool,
     /// Present when the worker is currently connected to this server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live: Option<WorkerLiveInfo>,
@@ -69,6 +85,12 @@ pub struct PatchWorkerRequest {
     pub active: Option<bool>,
     /// When present, update the display name. Empty string clears the name.
     pub display_name: Option<String>,
+    /// When present, update the per-registration `fetch` gate.
+    pub enable_fetch: Option<bool>,
+    /// When present, update the per-registration `eval` gate.
+    pub enable_eval: Option<bool>,
+    /// When present, update the per-registration `build` gate.
+    pub enable_build: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -131,6 +153,9 @@ pub async fn post_org_worker(
         url: Set(body.url),
         display_name: Set(body.display_name.trim().to_string()),
         active: Set(true),
+        enable_fetch: Set(body.enable_fetch),
+        enable_eval: Set(body.enable_eval),
+        enable_build: Set(body.enable_build),
         created_by: Set(Some(user.id)),
         created_at: Set(Utc::now().naive_utc()),
     };
@@ -190,6 +215,9 @@ pub async fn get_org_workers(
                 active: reg.active,
                 url: reg.url,
                 created_by: reg.created_by,
+                enable_fetch: reg.enable_fetch,
+                enable_eval: reg.enable_eval,
+                enable_build: reg.enable_build,
                 live,
             }
         })
@@ -225,6 +253,18 @@ pub async fn patch_org_worker(
     if let Some(ref name) = body.display_name {
         active_model.display_name = Set(name.trim().to_string());
     }
+    let caps_changed = body.enable_fetch.is_some()
+        || body.enable_eval.is_some()
+        || body.enable_build.is_some();
+    if let Some(v) = body.enable_fetch {
+        active_model.enable_fetch = Set(v);
+    }
+    if let Some(v) = body.enable_eval {
+        active_model.enable_eval = Set(v);
+    }
+    if let Some(v) = body.enable_build {
+        active_model.enable_build = Set(v);
+    }
     active_model.update(&state.db).await?;
 
     // When deactivating: abort in-flight jobs from this org on the worker
@@ -236,9 +276,10 @@ pub async fn patch_org_worker(
             .await;
     }
 
-    // Trigger re-auth so the worker's authorized peer set is updated
-    // (or the worker is kicked if all registrations are now inactive).
-    if body.active.is_some() {
+    // Trigger re-auth so the worker's authorized peer set or negotiated
+    // capabilities are updated (or the worker is kicked if all registrations
+    // are now inactive).
+    if body.active.is_some() || caps_changed {
         scheduler.request_reauth(&worker_id).await;
     }
 

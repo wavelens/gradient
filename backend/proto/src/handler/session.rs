@@ -19,8 +19,8 @@ use crate::messages::{
 use scheduler::Scheduler;
 
 use super::auth::{
-    filter_org_peers_without_cache, has_any_registrations, lookup_registered_peers,
-    negotiate_capabilities, validate_tokens,
+    aggregate_enabled_caps, filter_org_peers_without_cache, has_any_registrations,
+    lookup_registered_peers, negotiate_capabilities, validate_tokens,
 };
 use super::dispatch::DispatchContext;
 use super::socket::{
@@ -81,7 +81,8 @@ impl ProtoSession<Opening> {
         }
         let (peer_id, client_capabilities) = self.recv_init_connection().await?;
         let (authorized_peers, failed_peers) = self.perform_auth(&peer_id).await?;
-        let negotiated = negotiate_capabilities(&self.state, client_capabilities);
+        let enabled_caps = aggregate_enabled_caps(&self.state, &peer_id).await;
+        let negotiated = negotiate_capabilities(&self.state, client_capabilities, enabled_caps);
         self.send_init_ack(&negotiated, &authorized_peers, &failed_peers)
             .await
             .ok()?;

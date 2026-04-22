@@ -70,6 +70,7 @@ mod m20260421_000003_create_table_build_product;
 mod m20260421_000004_drop_has_artefacts_from_derivation_output;
 mod m20260422_000000_rename_worker_name_and_add_created_by;
 mod m20260422_000001_add_display_name_to_integration;
+mod m20260422_000002_add_enable_caps_to_worker_registration;
 
 pub struct Migrator;
 
@@ -141,6 +142,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260421_000004_drop_has_artefacts_from_derivation_output::Migration),
             Box::new(m20260422_000000_rename_worker_name_and_add_created_by::Migration),
             Box::new(m20260422_000001_add_display_name_to_integration::Migration),
+            Box::new(m20260422_000002_add_enable_caps_to_worker_registration::Migration),
         ]
     }
 }

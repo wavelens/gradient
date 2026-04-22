@@ -653,6 +653,9 @@ impl<'a> StateApplicator<'a> {
                 reg.managed = Set(true);
                 reg.url = Set(url);
                 reg.display_name = Set(state_worker.display_name.clone());
+                reg.enable_fetch = Set(state_worker.enable_fetch);
+                reg.enable_eval = Set(state_worker.enable_eval);
+                reg.enable_build = Set(state_worker.enable_build);
                 reg.created_by = Set(Some(created_by_id));
                 reg.update(self.db).await?;
                 tracing::info!("Updated worker registration: {}", state_worker.worker_id);
@@ -666,6 +669,9 @@ impl<'a> StateApplicator<'a> {
                     url: Set(url),
                     display_name: Set(state_worker.display_name.clone()),
                     active: Set(true),
+                    enable_fetch: Set(state_worker.enable_fetch),
+                    enable_eval: Set(state_worker.enable_eval),
+                    enable_build: Set(state_worker.enable_build),
                     created_by: Set(Some(created_by_id)),
                     created_at: Set(now),
                 };

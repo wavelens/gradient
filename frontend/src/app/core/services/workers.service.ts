@@ -17,12 +17,22 @@ export class WorkersService {
     return this.api.get<Worker[]>(`orgs/${org}/workers`);
   }
 
-  registerWorker(org: string, workerId: string, displayName: string, url?: string, token?: string): Observable<WorkerRegistration> {
+  registerWorker(
+    org: string,
+    workerId: string,
+    displayName: string,
+    url?: string,
+    token?: string,
+    caps?: { enable_fetch: boolean; enable_eval: boolean; enable_build: boolean },
+  ): Observable<WorkerRegistration> {
     return this.api.post<WorkerRegistration>(`orgs/${org}/workers`, {
       worker_id: workerId,
       display_name: displayName,
       url: url || undefined,
       token: token || undefined,
+      enable_fetch: caps?.enable_fetch ?? true,
+      enable_eval: caps?.enable_eval ?? true,
+      enable_build: caps?.enable_build ?? true,
     });
   }
 
@@ -32,6 +42,17 @@ export class WorkersService {
 
   renameWorker(org: string, workerId: string, displayName: string): Observable<string> {
     return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, { display_name: displayName });
+  }
+
+  setWorkerCapability(
+    org: string,
+    workerId: string,
+    cap: 'fetch' | 'eval' | 'build',
+    enabled: boolean,
+  ): Observable<string> {
+    const body: Record<string, boolean> = {};
+    body[`enable_${cap}`] = enabled;
+    return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, body);
   }
 
   deleteWorker(org: string, workerId: string): Observable<string> {

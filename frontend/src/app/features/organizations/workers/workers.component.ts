@@ -66,7 +66,11 @@ export class WorkersComponent implements OnInit {
   newWorkerName = '';
   newWorkerUrl = '';
   newWorkerToken = '';
+  newEnableFetch = true;
+  newEnableEval = true;
+  newEnableBuild = true;
   newName = '';
+  capUpdating = signal<string | null>(null);
   lastRegistration = signal<WorkerRegistration | null>(null);
   tokenCopied = signal(false);
   peerIdCopied = signal(false);
@@ -114,6 +118,9 @@ export class WorkersComponent implements OnInit {
     this.newWorkerName = '';
     this.newWorkerUrl = '';
     this.newWorkerToken = '';
+    this.newEnableFetch = true;
+    this.newEnableEval = true;
+    this.newEnableBuild = true;
     this.errorMessage.set(null);
     this.showRegisterDialog.set(true);
   }
@@ -124,7 +131,11 @@ export class WorkersComponent implements OnInit {
     this.errorMessage.set(null);
     const url = this.newWorkerUrl.trim() || undefined;
     const token = this.newWorkerToken.trim() || undefined;
-    this.workersService.registerWorker(this.orgName, this.newWorkerId.trim(), this.newWorkerName.trim(), url, token).subscribe({
+    this.workersService.registerWorker(this.orgName, this.newWorkerId.trim(), this.newWorkerName.trim(), url, token, {
+      enable_fetch: this.newEnableFetch,
+      enable_eval: this.newEnableEval,
+      enable_build: this.newEnableBuild,
+    }).subscribe({
       next: (reg) => {
         this.registering.set(false);
         this.showRegisterDialog.set(false);
@@ -218,6 +229,21 @@ export class WorkersComponent implements OnInit {
   cancelRename(): void {
     this.showRenameDialog.set(false);
     this.renamingWorker.set(null);
+  }
+
+  toggleCapability(worker: Worker, cap: 'fetch' | 'eval' | 'build', enabled: boolean): void {
+    const key = `${worker.worker_id}:${cap}`;
+    this.capUpdating.set(key);
+    this.workersService.setWorkerCapability(this.orgName, worker.worker_id, cap, enabled).subscribe({
+      next: () => {
+        this.capUpdating.set(null);
+        this.loadWorkers();
+      },
+      error: (err) => {
+        console.error(`Failed to update worker ${cap} capability:`, err);
+        this.capUpdating.set(null);
+      },
+    });
   }
 
   copyToken(): void {

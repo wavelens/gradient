@@ -33,6 +33,12 @@ export interface Worker {
   url?: string;
   /** User who registered this worker. Null for legacy or declarative rows. */
   created_by?: string | null;
+  /** Per-registration server-side gate for `fetch`. */
+  enable_fetch: boolean;
+  /** Per-registration server-side gate for `eval`. */
+  enable_eval: boolean;
+  /** Per-registration server-side gate for `build`. */
+  enable_build: boolean;
   /** Present when the worker is currently connected via proto. */
   live?: WorkerLiveInfo;
 }

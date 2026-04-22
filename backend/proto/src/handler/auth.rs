@@ -111,6 +111,60 @@ pub(super) async fn lookup_registered_peers(
     }
 }
 
+/// Per-registration capability gate aggregated across all **active**
+/// registrations for a worker. A capability is enabled iff every active
+/// registration enables it (AND across peers). Used to clamp the
+/// worker-advertised capability set at handshake.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct EnabledCapsAggregate {
+    pub enable_fetch: bool,
+    pub enable_eval: bool,
+    pub enable_build: bool,
+}
+
+impl EnabledCapsAggregate {
+    /// All-enabled default: used when there are no active registrations
+    /// (so discovery-mode workers are not clamped).
+    pub fn all() -> Self {
+        Self {
+            enable_fetch: true,
+            enable_eval: true,
+            enable_build: true,
+        }
+    }
+}
+
+pub(super) async fn aggregate_enabled_caps(
+    state: &ServerState,
+    worker_id: &str,
+) -> EnabledCapsAggregate {
+    use entity::worker_registration::{Column, Entity};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let rows = match Entity::find()
+        .filter(Column::WorkerId.eq(worker_id))
+        .filter(Column::Active.eq(true))
+        .all(&state.db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(error = %e, %worker_id, "failed to aggregate enabled caps");
+            return EnabledCapsAggregate::all();
+        }
+    };
+
+    if rows.is_empty() {
+        return EnabledCapsAggregate::all();
+    }
+
+    EnabledCapsAggregate {
+        enable_fetch: rows.iter().all(|r| r.enable_fetch),
+        enable_eval: rows.iter().all(|r| r.enable_eval),
+        enable_build: rows.iter().all(|r| r.enable_build),
+    }
+}
+
 /// Returns `true` if *any* `worker_registration` row exists for this worker,
 /// regardless of the `active` flag.  Used to distinguish "no registrations at
 /// all" (open/discoverable mode) from "all registrations deactivated".
@@ -172,14 +226,15 @@ pub(super) fn validate_tokens(
 pub(super) fn negotiate_capabilities(
     state: &ServerState,
     client: GradientCapabilities,
+    enabled: EnabledCapsAggregate,
 ) -> GradientCapabilities {
     GradientCapabilities {
         core: true,
         cache: true,
         federate: client.federate && state.cli.federate_proto,
-        fetch: client.fetch,
-        eval: client.eval,
-        build: client.build,
+        fetch: client.fetch && enabled.enable_fetch,
+        eval: client.eval && enabled.enable_eval,
+        build: client.build && enabled.enable_build,
     }
 }
 
@@ -299,22 +354,22 @@ mod tests {
     #[test]
     fn negotiate_capabilities_core_always_true() {
         let state = make_state(false);
-        let result = negotiate_capabilities(&state, all_caps(false));
+        let result = negotiate_capabilities(&state, all_caps(false), EnabledCapsAggregate::all());
         assert!(result.core);
     }
 
     #[test]
     fn negotiate_capabilities_cache_always_true() {
         let state = make_state(false);
-        assert!(negotiate_capabilities(&state, all_caps(false)).cache);
-        assert!(negotiate_capabilities(&state, all_caps(true)).cache);
+        assert!(negotiate_capabilities(&state, all_caps(false), EnabledCapsAggregate::all()).cache);
+        assert!(negotiate_capabilities(&state, all_caps(true), EnabledCapsAggregate::all()).cache);
     }
 
     #[test]
     fn negotiate_capabilities_federate_requires_both() {
-        assert!(!negotiate_capabilities(&make_state(false), all_caps(true)).federate);
-        assert!(!negotiate_capabilities(&make_state(true), all_caps(false)).federate);
-        assert!(negotiate_capabilities(&make_state(true), all_caps(true)).federate);
+        assert!(!negotiate_capabilities(&make_state(false), all_caps(true), EnabledCapsAggregate::all()).federate);
+        assert!(!negotiate_capabilities(&make_state(true), all_caps(false), EnabledCapsAggregate::all()).federate);
+        assert!(negotiate_capabilities(&make_state(true), all_caps(true), EnabledCapsAggregate::all()).federate);
     }
 
     #[test]
@@ -328,16 +383,31 @@ mod tests {
             eval: true,
             build: true,
         };
-        let result = negotiate_capabilities(&state, client);
+        let result = negotiate_capabilities(&state, client, EnabledCapsAggregate::all());
         assert!(result.fetch);
         assert!(result.eval);
         assert!(result.build);
     }
 
     #[test]
+    fn negotiate_capabilities_clamped_by_enabled_aggregate() {
+        let state = make_state(false);
+        let client = all_caps(true);
+        let enabled = EnabledCapsAggregate {
+            enable_fetch: false,
+            enable_eval: true,
+            enable_build: false,
+        };
+        let result = negotiate_capabilities(&state, client, enabled);
+        assert!(!result.fetch);
+        assert!(result.eval);
+        assert!(!result.build);
+    }
+
+    #[test]
     fn negotiate_capabilities_all_false_client() {
         let state = make_state(false);
-        let result = negotiate_capabilities(&state, all_caps(false));
+        let result = negotiate_capabilities(&state, all_caps(false), EnabledCapsAggregate::all());
         assert!(result.core);
         assert!(result.cache);
         assert!(!result.federate);
