@@ -5,7 +5,7 @@
  */
 
 use gradient_core::types::proto::{
-    CandidateScore, GradientCapabilities, JobKind, JobUpdateKind, QueryMode,
+    CandidateScore, EvalMessageLevel, GradientCapabilities, JobKind, JobUpdateKind, QueryMode,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -162,6 +162,22 @@ pub enum ClientMessage {
         paths: Vec<String>,
         /// Defaults to [`QueryMode::Normal`] when deserialized from an older client.
         mode: QueryMode,
+    },
+
+    /// Surface an infrastructure-level message tied to the active job's
+    /// evaluation. The server inserts a row into `evaluation_message` so
+    /// operators see transport, prefetch, or NAR-import problems directly on
+    /// the evaluation page without drilling into individual build logs.
+    ///
+    /// This is **not** meant for build compile failures or user-initiated
+    /// aborts — those are already reported via `JobFailed` and deliberately
+    /// stay out of the evaluation log.
+    EvalMessage {
+        job_id: String,
+        level: EvalMessageLevel,
+        /// Short origin tag, e.g. `"build-prefetch"` or `"nar-import"`.
+        source: String,
+        message: String,
     },
 
     /// Query which of the given `.drv` paths the server already has recorded in

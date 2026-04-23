@@ -40,7 +40,7 @@ use harmonia_store_core::store_path::{StoreDir, StorePath};
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::Hash;
 use harmonia_utils_hash::fmt::Any;
-use proto::messages::{BuildTask, CachedPath, QueryMode};
+use proto::messages::{BuildTask, CachedPath, EvalMessageLevel, QueryMode};
 use sha2::{Digest as _, Sha256};
 use tracing::{debug, error, info, warn};
 
@@ -492,15 +492,29 @@ impl<'a> InputPrefetcher<'a> {
 ///   (local-mode cache), then imports.
 ///
 /// Imports run concurrently (capped at [`PREFETCH_CONCURRENCY`]) since each
-/// streams an `AddToStoreNar` into the daemon. Errors per-path are warnings
-/// — the build itself will fail loudly if a critical input is still missing
-/// when we hand off to `build_derivation`.
+/// streams an `AddToStoreNar` into the daemon. A failed import aborts the
+/// whole prefetch, so a surviving build always has a complete input closure.
+///
+/// On failure the error is mirrored onto the owning evaluation via
+/// `EvalMessage` so operators see infrastructure problems (unreachable
+/// upstream, bad narinfo metadata, …) on the evaluation page instead of
+/// having to dig into per-build logs.
 pub async fn prefetch_inputs(
     store: &LocalNixStore,
     task: &BuildTask,
     updater: &mut JobUpdater,
 ) -> Result<()> {
-    InputPrefetcher::new(store, task, updater).run().await
+    let drv = task.drv_path.clone();
+    let result = InputPrefetcher::new(store, task, updater).run().await;
+    if let Err(e) = &result {
+        let summary = format!("input prefetch failed for {}: {:#}", drv, e);
+        if let Err(send_err) =
+            updater.send_eval_message(EvalMessageLevel::Error, "build-prefetch", summary)
+        {
+            warn!(error = %send_err, "failed to surface prefetch error as EvalMessage");
+        }
+    }
+    result
 }
 
 // ── NarImporter ───────────────────────────────────────────────────────────────

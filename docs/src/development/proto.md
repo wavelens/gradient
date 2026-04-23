@@ -847,10 +847,51 @@ enum ClientMessage {
     /// with `KnownDerivations`.  The worker uses this to skip re-traversing
     /// subtrees that were fully recorded during a previous evaluation.
     QueryKnownDerivations { job_id: String, drv_paths: Vec<String> },
+
+    /// Surface an infrastructure-level message on the evaluation that owns
+    /// the given `job_id`.  The server resolves the active job → evaluation
+    /// and inserts a row into `evaluation_message` so operators see
+    /// transport / prefetch / cache problems on the evaluation page directly,
+    /// without drilling into individual build logs.
+    ///
+    /// **Not** used for build compile failures or user-initiated aborts —
+    /// those stay confined to the build log and `JobFailed`.  Use this only
+    /// for signals the user could not diagnose from a single build's output.
+    EvalMessage {
+        job_id: String,
+        level: EvalMessageLevel,  // Error | Warning | Notice
+        source: String,           // e.g. "build-prefetch", "nar-import"
+        message: String,
+    },
 }
 
 enum QueryMode { Normal, Pull, Push }  // default: Normal
+enum EvalMessageLevel { Error, Warning, Notice }
 ```
+
+### EvalMessage
+
+Workers emit `EvalMessage` to attach an error / warning / notice to the
+evaluation that owns the active job.  The server:
+
+1. Looks up `active_job(job_id)` in the scheduler's job tracker.
+2. If found, resolves `PendingJob::evaluation_id()` (both eval and build
+   jobs carry this) and inserts into `evaluation_message` via
+   `EvalRepo::insert_message`.
+3. If the job is not active (already completed or evicted), the message is
+   silently dropped — late infra signals for a finished job have no useful
+   destination.
+
+Because `check_evaluation_done` already treats any error-level
+`evaluation_message` row as a failure signal, an `EvalMessage { level: Error }`
+arriving during a build is enough to mark the whole evaluation `Failed`
+once its builds settle.
+
+Typical producer sites today:
+- worker `prefetch_inputs` (source `"build-prefetch"`) when an input NAR
+  download or daemon import can't complete — the build would otherwise die
+  with "dependency does not exist" in the build log with no evaluation-level
+  breadcrumb.
 
 ---
 

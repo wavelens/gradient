@@ -263,3 +263,77 @@ async fn test_request_reauth_noop_for_disconnected_worker() {
     // Should not panic when the worker is not connected.
     scheduler.request_reauth("nonexistent").await;
 }
+
+#[tokio::test]
+async fn record_eval_message_drops_when_job_unknown() {
+    // No active job → silently accepted, no DB insert attempted (MockDatabase
+    // would panic on an unexpected exec; absence of panic proves no insert).
+    let scheduler = test_scheduler();
+    let r = scheduler
+        .record_eval_message(
+            "ghost-job",
+            gradient_core::types::proto::EvalMessageLevel::Error,
+            "build-prefetch".into(),
+            "nope".into(),
+        )
+        .await;
+    assert!(r.is_ok(), "missing active job must not be an error");
+}
+
+#[tokio::test]
+async fn record_eval_message_inserts_for_active_build_job() {
+    use crate::jobs::PendingBuildJob;
+    use gradient_core::types::proto::{BuildJob, BuildTask};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use test_support::prelude::*;
+
+    let eval_id = Uuid::new_v4();
+    let peer = Uuid::new_v4();
+    let build_id = Uuid::new_v4();
+
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        .into_connection();
+    let state = test_state(db);
+    let scheduler = Arc::new(Scheduler::new(state));
+
+    scheduler
+        .enqueue_build_job(
+            "jbuild".into(),
+            PendingBuildJob {
+                build_id,
+                evaluation_id: eval_id,
+                peer_id: peer,
+                job: BuildJob {
+                    builds: vec![BuildTask {
+                        build_id: build_id.to_string(),
+                        drv_path: "aaaa-hello.drv".into(),
+                    }],
+                },
+                required_paths: vec![],
+                architecture: "x86_64-linux".into(),
+                required_features: vec![],
+                dependency_count: 0,
+                queued_at: chrono::Utc::now().naive_utc(),
+            },
+        )
+        .await;
+    // Move to assigned so active_job() finds it.
+    scheduler
+        .register_worker("w1", GradientCapabilities::default(), HashSet::new())
+        .await;
+    scheduler.request_job("w1", JobKind::Build).await;
+
+    scheduler
+        .record_eval_message(
+            "jbuild",
+            gradient_core::types::proto::EvalMessageLevel::Error,
+            "build-prefetch".into(),
+            "input prefetch failed: no nar_hash".into(),
+        )
+        .await
+        .expect("insert should succeed");
+}

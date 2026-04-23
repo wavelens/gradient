@@ -93,6 +93,16 @@ pub struct BuildTask {
     pub drv_path: String,
 }
 
+/// Severity of a worker-reported evaluation message. Mirrors
+/// `entity::evaluation_message::MessageLevel` on the wire.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum EvalMessageLevel {
+    Error,
+    Warning,
+    Notice,
+}
+
 /// Progress events for job updates.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]

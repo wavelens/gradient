@@ -16,7 +16,8 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use proto::messages::{
-    BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, JobUpdateKind, QueryMode,
+    BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation, EvalMessageLevel, JobUpdateKind,
+    QueryMode,
 };
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -126,6 +127,23 @@ impl JobUpdater {
 
     pub fn report_compressing(&self) -> Result<()> {
         self.send_update(JobUpdateKind::Compressing)
+    }
+
+    /// Report an infrastructure-level message that should surface on the
+    /// evaluation page. Use only for transport / prefetch / cache problems —
+    /// not for compile failures (those are implicit in `JobFailed`).
+    pub fn send_eval_message(
+        &self,
+        level: EvalMessageLevel,
+        source: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Result<()> {
+        self.writer.send(ClientMessage::EvalMessage {
+            job_id: self.job_id.clone(),
+            level,
+            source: source.into(),
+            message: message.into(),
+        })
     }
 
     /// Forward a chunk of build log output to the server. Sync — returns

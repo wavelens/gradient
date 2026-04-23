@@ -485,6 +485,50 @@ impl Scheduler {
             .remove_pending_for_evaluation(evaluation_id);
     }
 
+    /// Persist a worker-reported message on the evaluation that owns the
+    /// given active `job_id`.
+    ///
+    /// Used for infrastructure-level signals (NAR prefetch failures, transport
+    /// errors, etc.) that should surface on the evaluation page even when the
+    /// root cause was seen in a sub-job. Build compile failures and
+    /// user-initiated aborts deliberately do not flow through here.
+    pub async fn record_eval_message(
+        &self,
+        job_id: &str,
+        level: gradient_core::types::proto::EvalMessageLevel,
+        source: String,
+        message: String,
+    ) -> Result<()> {
+        use gradient_core::repo::eval::EvalRepo;
+
+        let evaluation_id = {
+            let tracker = self.job_tracker.read().await;
+            match tracker.active_job(job_id) {
+                Some(j) => j.evaluation_id(),
+                None => {
+                    debug!(%job_id, "EvalMessage dropped: no active job");
+                    return Ok(());
+                }
+            }
+        };
+
+        let entity_level = match level {
+            gradient_core::types::proto::EvalMessageLevel::Error => {
+                entity::evaluation_message::MessageLevel::Error
+            }
+            gradient_core::types::proto::EvalMessageLevel::Warning => {
+                entity::evaluation_message::MessageLevel::Warning
+            }
+            gradient_core::types::proto::EvalMessageLevel::Notice => {
+                entity::evaluation_message::MessageLevel::Notice
+            }
+        };
+
+        EvalRepo::new(&self.state.db)
+            .insert_message(evaluation_id, entity_level, message, Some(source))
+            .await
+    }
+
     /// Return the peer (org) UUID that owns the active job, if found.
     pub async fn peer_id_for_job(&self, job_id: &str) -> Option<Uuid> {
         self.job_tracker

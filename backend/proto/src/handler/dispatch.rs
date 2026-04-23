@@ -143,6 +143,32 @@ impl<'a> DispatchContext<'a> {
             ClientMessage::QueryKnownDerivations { job_id, drv_paths } => {
                 self.on_query_known_derivations(job_id, drv_paths).await
             }
+            ClientMessage::EvalMessage {
+                job_id,
+                level,
+                source,
+                message,
+            } => {
+                self.on_eval_message(job_id, level, source, message).await;
+                true
+            }
+        }
+    }
+
+    async fn on_eval_message(
+        &mut self,
+        job_id: String,
+        level: gradient_core::types::proto::EvalMessageLevel,
+        source: String,
+        message: String,
+    ) {
+        debug!(peer_id = %self.peer_id, %job_id, ?level, %source, "EvalMessage");
+        if let Err(e) = self
+            .scheduler
+            .record_eval_message(&job_id, level, source, message)
+            .await
+        {
+            warn!(peer_id = %self.peer_id, %job_id, error = %e, "record_eval_message failed");
         }
     }
 

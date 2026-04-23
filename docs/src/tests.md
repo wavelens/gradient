@@ -118,3 +118,15 @@ Backend (`cargo test -p proto --lib handler::cache::tests`):
   no paths yields `Some(vec![])`, not `None`.
 - `parse_upstream_narinfo_ignores_unparseable_sizes` — malformed `NarSize` /
   `FileSize` fall back to `None` rather than aborting the parse.
+
+## EvalMessage — worker-surfaced evaluation messages
+
+Backend (`cargo test -p scheduler --tests scheduler_tests::record_eval_message`):
+- `record_eval_message_drops_when_job_unknown` — a `ClientMessage::EvalMessage`
+  whose `job_id` is not an active scheduler job is silently accepted (no DB
+  insert, no error). Ensures stale messages from finished jobs can't poison
+  the evaluation log.
+- `record_eval_message_inserts_for_active_build_job` — for an enqueued build
+  job the handler resolves `PendingJob::evaluation_id()` and inserts one row
+  into `evaluation_message`. Build compile failures and user-initiated aborts
+  deliberately do not flow through this path.
