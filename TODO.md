@@ -9,7 +9,5 @@
 
  - missing Child::kill() plumbing through WorkerPoolResolver.
  - save "env"."preferLocalBuild" in database parsed from .drv
- - docs old for state configuration options
  - argon2 for user password hashing
- - update updater script
 

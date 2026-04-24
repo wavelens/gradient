@@ -23,17 +23,21 @@ fi
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 # ── Cargo crates ──────────────────────────────────────────────────────────────
-# All gradient crates share the same version; nix-daemon is an external crate
-# with its own release cycle and is intentionally excluded.
+# All gradient crates share the same version. The legacy `backend/builder` and
+# `backend/evaluator` crates are intentionally excluded — they live on disk
+# but are not in the workspace anymore.
 
 CARGO_FILES=(
     backend/Cargo.toml
-    backend/core/Cargo.toml
-    backend/builder/Cargo.toml
-    backend/web/Cargo.toml
     backend/cache/Cargo.toml
+    backend/core/Cargo.toml
     backend/entity/Cargo.toml
     backend/migration/Cargo.toml
+    backend/proto/Cargo.toml
+    backend/scheduler/Cargo.toml
+    backend/test-support/Cargo.toml
+    backend/web/Cargo.toml
+    backend/worker/Cargo.toml
     cli/Cargo.toml
     cli/connector/Cargo.toml
 )
@@ -53,7 +57,7 @@ echo "updated frontend/package.json"
 # ── Nix packages ─────────────────────────────────────────────────────────────
 
 NIX_FILES=(
-    nix/packages/gradient-server.nix
+    nix/packages/gradient.nix
     nix/packages/gradient-frontend.nix
     nix/packages/gradient-cli.nix
 )

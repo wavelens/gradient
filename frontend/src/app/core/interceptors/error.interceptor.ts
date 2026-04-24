@@ -13,11 +13,21 @@ import { catchError, throwError } from 'rxjs';
  * HTTP interceptor that handles global error responses.
  *
  * - 401: clears auth tokens, redirects to login
- * - 502/503/504/0: server unavailable, redirects to the matching error page
+ * - 502/503/504/0: server unavailable, render the matching error page in
+ *   place WITHOUT changing the URL — so F5 reloads the user's original
+ *   route and re-tries the failing request rather than reloading the
+ *   error page itself.
  * - Other errors: re-thrown so individual components can handle them
  */
 export const errorInterceptor: HttpInterceptorFn = (req, next) => {
   const router = inject(Router);
+
+  const showErrorPage = (status: number) => {
+    router.navigate([`/error/${status}`], {
+      queryParams: { from: router.url },
+      skipLocationChange: true,
+    });
+  };
 
   return next(req).pipe(
     catchError((error: HttpErrorResponse) => {
@@ -30,13 +40,13 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
 
         case 0:
           // Network error or server completely unreachable — treat as 503
-          router.navigate(['/error/503'], { queryParams: { from: router.url } });
+          showErrorPage(503);
           break;
 
         case 502:
         case 503:
         case 504:
-          router.navigate([`/error/${error.status}`], { queryParams: { from: router.url } });
+          showErrorPage(error.status);
           break;
 
         case 403:
