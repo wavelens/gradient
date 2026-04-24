@@ -44,7 +44,7 @@ use proto::messages::{BuildTask, CachedPath, EvalMessageLevel, QueryMode};
 use sha2::{Digest as _, Sha256};
 use tracing::{debug, error, info, warn};
 
-use crate::nix::store::LocalNixStore;
+use crate::nix::store::{LocalNixStore, is_connection_corrupt};
 use crate::proto::job::JobUpdater;
 
 /// Time budget for a single HTTP NAR download (presigned-URL path). Keep in
@@ -152,6 +152,14 @@ impl<'a> InputPrefetcher<'a> {
 
     /// Stage 3 — ask the server which missing paths it can serve, then split
     /// them into two buckets: presigned-URL downloads and `NarRequest` transfers.
+    ///
+    /// Any path the server reports as `Uncached` is a **hard failure**: the
+    /// path is known to be absent from the worker's local store (checked in
+    /// Stage 2) and builds run with `use_substitutes = false`, so the daemon
+    /// will not be able to fetch it from any upstream. Continuing would
+    /// eventually surface as a confusing `path '…' is not valid` error deep
+    /// inside `add_to_store_nar` when a dependent path is imported. Failing
+    /// here keeps the blame at the right layer.
     async fn query_and_split(
         &mut self,
         missing: Vec<String>,
@@ -168,18 +176,26 @@ impl<'a> InputPrefetcher<'a> {
                 )
             })?;
 
-        let mut by_url: Vec<CachedPath> = Vec::new();
-        let mut by_request: Vec<CachedPath> = Vec::new();
-        for cp in cached_entries {
-            let has_url = match cp.as_info() {
-                CachedPathInfo::Uncached { .. } => continue, // server can't serve this either
-                CachedPathInfo::Cached { download_url, .. } => download_url.is_some(),
-            };
-            if has_url {
-                by_url.push(cp);
-            } else {
-                by_request.push(cp);
-            }
+        let Classified {
+            by_url,
+            by_request,
+            uncached,
+        } = classify_cached_entries(cached_entries);
+
+        if !uncached.is_empty() {
+            error!(
+                build_id = %self.build_id,
+                drv = %self.drv_path,
+                missing = uncached.len(),
+                sample = ?uncached.iter().take(5).collect::<Vec<_>>(),
+                "prefetch: server cannot serve required inputs (not in gradient cache)"
+            );
+            return Err(anyhow::anyhow!(
+                "{} required input path(s) are missing from local store and \
+                 not available in the gradient cache; cannot build (first: {})",
+                uncached.len(),
+                uncached.first().map(String::as_str).unwrap_or("<none>")
+            ));
         }
 
         Ok((by_url, by_request))
@@ -608,21 +624,37 @@ impl<'a> NarImporter<'a> {
             .await
             .map_err(|e| anyhow::anyhow!("acquire local store for import: {}", e))?;
 
-        let logs = guard.client().add_to_store_nar(
-            valid_info,
-            decompressed,
-            false, // repair
-            true,  // dont_check_sigs — we trust the authenticated WS transport
-        );
+        let outcome = {
+            let logs = guard.client().add_to_store_nar(
+                valid_info,
+                decompressed,
+                false, // repair
+                true,  // dont_check_sigs — we trust the authenticated WS transport
+            );
 
-        let mut logs = pin!(logs);
-        while let Some(_msg) = logs.next().await {
-            // Daemon log frames during import are noisy and not user-facing — drop them.
+            let mut logs = pin!(logs);
+            while let Some(_msg) = logs.next().await {
+                // Daemon log frames during import are noisy and not user-facing — drop them.
+            }
+
+            logs.await
+        };
+
+        match outcome {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let corrupt = is_connection_corrupt(&e);
+                let err = anyhow::anyhow!(
+                    "daemon add_to_store_nar({}) failed: {}",
+                    self.store_path,
+                    e
+                );
+                if corrupt {
+                    guard.mark_broken();
+                }
+                Err(err)
+            }
         }
-
-        logs.await.map_err(|e| {
-            anyhow::anyhow!("daemon add_to_store_nar({}) failed: {}", self.store_path, e)
-        })
     }
 
     async fn import(&self, compressed_nar: Vec<u8>) -> Result<()> {
@@ -652,6 +684,40 @@ pub async fn import_received_nar(
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+/// Result of splitting a `CacheQuery Pull` response into its three categories.
+#[derive(Debug, Default)]
+struct Classified {
+    /// Cached paths the server will serve via a presigned HTTP URL.
+    by_url: Vec<CachedPath>,
+    /// Cached paths the server will serve via `NarRequest` over the WebSocket.
+    by_request: Vec<CachedPath>,
+    /// Paths the server reports it does **not** have. These are fatal during
+    /// prefetch (see [`InputPrefetcher::query_and_split`] for why).
+    uncached: Vec<String>,
+}
+
+/// Split a `CacheQuery Pull` response into URL-downloadable, WS-requestable,
+/// and uncached buckets. Pure helper, kept out of [`InputPrefetcher`] so the
+/// classification is unit-testable without a live WebSocket.
+fn classify_cached_entries(entries: Vec<CachedPath>) -> Classified {
+    let mut out = Classified::default();
+    for cp in entries {
+        match cp.as_info() {
+            CachedPathInfo::Uncached { path, .. } => {
+                out.uncached.push(path.to_owned());
+            }
+            CachedPathInfo::Cached { download_url, .. } => {
+                if download_url.is_some() {
+                    out.by_url.push(cp);
+                } else {
+                    out.by_request.push(cp);
+                }
+            }
+        }
+    }
+    out
+}
 
 /// Compression format for a NAR as declared by the cache it came from.
 /// Identified by filename extension on the `URL:` field.
@@ -945,6 +1011,78 @@ mod tests {
         assert!(info.deriver.is_some());
         // Both signatures were malformed and should have been skipped.
         assert_eq!(info.signatures.len(), 0);
+    }
+
+    fn cached(path: &str, url: Option<&str>) -> CachedPath {
+        CachedPath {
+            path: path.to_owned(),
+            cached: true,
+            file_size: None,
+            nar_size: Some(0),
+            url: url.map(|s| s.to_owned()),
+            nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
+            references: None,
+            signatures: None,
+            deriver: None,
+            ca: None,
+        }
+    }
+
+    fn uncached(path: &str) -> CachedPath {
+        CachedPath {
+            path: path.to_owned(),
+            cached: false,
+            file_size: None,
+            nar_size: None,
+            url: None,
+            nar_hash: None,
+            references: None,
+            signatures: None,
+            deriver: None,
+            ca: None,
+        }
+    }
+
+    #[test]
+    fn classify_splits_cached_by_url_presence() {
+        let out = classify_cached_entries(vec![
+            cached("/nix/store/aaaa-by-url", Some("https://s3.example/x")),
+            cached("/nix/store/bbbb-by-ws", None),
+        ]);
+        assert_eq!(out.by_url.len(), 1);
+        assert_eq!(out.by_request.len(), 1);
+        assert!(out.uncached.is_empty());
+        assert_eq!(out.by_url[0].path, "/nix/store/aaaa-by-url");
+        assert_eq!(out.by_request[0].path, "/nix/store/bbbb-by-ws");
+    }
+
+    #[test]
+    fn classify_collects_uncached_separately() {
+        // This is the regression the Stage-3 hard-fail guards against: if the
+        // server reports a required input as uncached, we must surface it so
+        // we don't silently hand the build a broken closure.
+        let out = classify_cached_entries(vec![
+            cached("/nix/store/aaaa-ok", None),
+            uncached("/nix/store/xxxx-missing-upstream"),
+            uncached("/nix/store/yyyy-also-missing"),
+        ]);
+        assert_eq!(out.by_request.len(), 1);
+        assert!(out.by_url.is_empty());
+        assert_eq!(
+            out.uncached,
+            vec![
+                "/nix/store/xxxx-missing-upstream".to_owned(),
+                "/nix/store/yyyy-also-missing".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn classify_empty_input_is_empty_output() {
+        let out = classify_cached_entries(vec![]);
+        assert!(out.by_url.is_empty());
+        assert!(out.by_request.is_empty());
+        assert!(out.uncached.is_empty());
     }
 
     #[test]

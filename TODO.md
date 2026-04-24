@@ -10,4 +10,7 @@
  - missing Child::kill() plumbing through WorkerPoolResolver.
  - save "env"."preferLocalBuild" in database parsed from .drv
  - argon2 for user password hashing
+ - frontend: main colors in single place, not hardcoded in multiple components
+ - no error message and recommendation when adding internal cache
+ - frontend: "Waiting for Workers" message blocks seeing log output
 

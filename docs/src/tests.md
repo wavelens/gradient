@@ -119,6 +119,33 @@ Backend (`cargo test -p proto --lib handler::cache::tests`):
 - `parse_upstream_narinfo_ignores_unparseable_sizes` — malformed `NarSize` /
   `FileSize` fall back to `None` rather than aborting the parse.
 
+## Worker prefetch robustness — uncached inputs and broken daemon connections
+
+Backend (`cargo test -p worker --tests`):
+- `nix::store::tests::remote_errors_are_recoverable` — `is_connection_corrupt`
+  returns `false` for daemon-side `Remote` errors (e.g. "build failed"); those
+  leave the protocol stream aligned and the pooled connection is safe to
+  reuse.
+- `nix::store::tests::io_errors_mark_connection_corrupt` — IO-level daemon
+  errors are flagged corrupt; without this a desynced pooled connection gets
+  handed to the next caller and surfaces as confusing downstream parse
+  errors (`parse error L, non-absolute store path "L"`).
+- `nix::store::tests::custom_errors_are_treated_as_corrupt` — opaque `Custom`
+  errors are conservatively flagged corrupt: we can't tell a framing bug
+  from anything else, so the connection is dropped.
+- `proto::nar_import::tests::classify_splits_cached_by_url_presence` — cached
+  entries with a presigned `download_url` go to the S3 bucket, those without
+  go to the WebSocket `NarRequest` bucket.
+- `proto::nar_import::tests::classify_collects_uncached_separately` —
+  regression guard for the Stage-3 prefetch hard-fail: when the server
+  reports a required input as `Uncached`, it is *not* silently skipped.
+  Previously the path was dropped on the floor and a dependent build
+  eventually failed inside `add_to_store_nar` with
+  `path '/nix/store/…' is not valid`; classifying it explicitly lets the
+  prefetcher abort with a clear message that names the missing path.
+- `proto::nar_import::tests::classify_empty_input_is_empty_output` — empty
+  cache responses produce empty buckets.
+
 ## State configuration — optional fields for OIDC-only users
 
 Backend (`cargo test -p core --lib state::tests`):

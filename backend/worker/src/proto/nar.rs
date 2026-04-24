@@ -26,7 +26,7 @@ use sha2::{Digest, Sha256};
 use tracing::{debug, info, warn};
 
 use crate::connection::ProtoWriter;
-use crate::nix::store::{LocalNixStore, strip_store_prefix};
+use crate::nix::store::{LocalNixStore, is_connection_corrupt, strip_store_prefix};
 
 /// Chunk size for direct NAR streaming (64 KiB).
 const NAR_CHUNK_SIZE: usize = 64 * 1024;
@@ -72,7 +72,11 @@ async fn gather_path_meta(store: &LocalNixStore, store_path: &str) -> Option<Pat
             return None;
         }
         Err(e) => {
-            warn!(store_path, error = %e, "gather_path_meta: query_path_info failed");
+            let corrupt = is_connection_corrupt(&e);
+            warn!(store_path, error = %e, corrupt, "gather_path_meta: query_path_info failed");
+            if corrupt {
+                guard.mark_broken();
+            }
             return None;
         }
     };

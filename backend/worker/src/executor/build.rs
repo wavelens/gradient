@@ -40,7 +40,7 @@ use std::collections::BTreeMap;
 use std::pin::{Pin, pin};
 use tracing::{debug, info, warn};
 
-use crate::nix::store::{LocalNixStore, strip_store_prefix};
+use crate::nix::store::{LocalNixStore, is_connection_corrupt, strip_store_prefix};
 use crate::proto::job::JobUpdater;
 
 // ── Type-state pipeline ───────────────────────────────────────────────────────
@@ -117,23 +117,45 @@ impl ParsedDerivation {
         opts.use_substitutes = false;
 
         if let Err(e) = guard.client().set_options(&opts).await {
-            warn!(error = %e, "set_options failed; build logs may be empty or substitution may be active");
+            let corrupt = is_connection_corrupt(&e);
+            warn!(error = %e, corrupt, "set_options failed; build logs may be empty or substitution may be active");
+            if corrupt {
+                // Transport is desynced — don't try to build on this connection,
+                // and prevent the pool from handing it out again.
+                guard.mark_broken();
+                return Err(anyhow::anyhow!(
+                    "set_options failed with protocol-level error for {}: {}",
+                    drv_path,
+                    e
+                ));
+            }
         }
 
         // `build_derivation` returns `impl ResultLog = Stream<Item=LogMessage> + Future`.
         // Drain the stream first, then await the future for the BuildResult.
-        let logs = guard.client().build_derivation(
-            &self.harmonia_path,
-            &self.basic_drv,
-            BuildMode::Normal,
-        );
-        let mut logs = pin!(logs);
-        let stats = drain_build_logs(logs.as_mut(), updater, task_index).await;
-        log_stream_summary(&stats, drv_path);
+        let outcome = {
+            let logs = guard.client().build_derivation(
+                &self.harmonia_path,
+                &self.basic_drv,
+                BuildMode::Normal,
+            );
+            let mut logs = pin!(logs);
+            let stats = drain_build_logs(logs.as_mut(), updater, task_index).await;
+            log_stream_summary(&stats, drv_path);
+            logs.await
+        };
 
-        let result = logs
-            .await
-            .map_err(|e| anyhow::anyhow!("build_derivation failed for {}: {}", drv_path, e))?;
+        let result = match outcome {
+            Ok(r) => r,
+            Err(e) => {
+                let corrupt = is_connection_corrupt(&e);
+                let err = anyhow::anyhow!("build_derivation failed for {}: {}", drv_path, e);
+                if corrupt {
+                    guard.mark_broken();
+                }
+                return Err(err);
+            }
+        };
 
         match result.inner {
             BuildResultInner::Success(s) => {
