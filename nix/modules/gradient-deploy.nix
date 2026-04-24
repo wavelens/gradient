@@ -119,34 +119,29 @@ in {
 
           API_KEY=$(cat ${cfg.apiKeyFile})
 
-          PROJECT_INFO=$(curl --silent --fail --max-time 10 \
+          PROJECT_DETAILS=$(curl --silent --fail --max-time 10 \
             --header "Authorization: Bearer $API_KEY" \
-            "${cfg.server}/api/v1/projects/${cfg.project}"
+            "${cfg.server}/api/v1/projects/${cfg.project}/details"
             )
 
-          if [ -z "$PROJECT_INFO" ]; then
-            echo "Error: No project info received"
+          if [ -z "$PROJECT_DETAILS" ]; then
+            echo "Error: No project details received"
             exit 1
           fi
 
-          PROJECT_LAST_EVAL=$(echo "$PROJECT_INFO" | jq -r '.message.last_evaluation')
-          if [ -z "$PROJECT_LAST_EVAL" ] || [ "$PROJECT_LAST_EVAL" = "null" ]; then
-            echo "Error: No last_evaluation found for project ${cfg.project}"
+          PROJECT_LAST_EVAL=$(echo "$PROJECT_DETAILS" | jq -r '.message.latest_evaluation.id // empty')
+          if [ -z "$PROJECT_LAST_EVAL" ]; then
+            echo "Error: No latest_evaluation found for project ${cfg.project}"
             exit 1
           fi
 
-          EVAL_BUILDS=$(curl --silent --fail --max-time 10 \
-            --header "Authorization: Bearer $API_KEY" \
-            "${cfg.server}/api/v1/evals/$PROJECT_LAST_EVAL/builds"
-            )
-
-          if [ -z "$EVAL_BUILDS" ]; then
-            echo "Error: No builds info received for evaluation $PROJECT_LAST_EVAL"
+          # Entry-point build IDs are the candidate deployments for this project.
+          BUILD_IDS=$(echo "$PROJECT_DETAILS" | jq -r '.message.entry_points[].build_id')
+          if [ -z "$BUILD_IDS" ]; then
+            echo "Error: No entry points found for evaluation $PROJECT_LAST_EVAL"
             exit 1
           fi
 
-          # Get build IDs and fetch output paths from individual build endpoints
-          BUILD_IDS=$(echo "$EVAL_BUILDS" | jq -r '.message[].id')
           DEPLOYMENT_STORE_PATH=""
 
           for BUILD_ID in $BUILD_IDS; do
@@ -156,7 +151,11 @@ in {
               )
 
             if [ -n "$BUILD_INFO" ]; then
-              STORE_PATH=$(echo "$BUILD_INFO" | jq -r '.message.output.out')
+              BUILD_STATUS=$(echo "$BUILD_INFO" | jq -r '.message.status')
+              if [ "$BUILD_STATUS" != "Succeeded" ]; then
+                continue
+              fi
+              STORE_PATH=$(echo "$BUILD_INFO" | jq -r '.message.output.out // empty')
               if echo "$STORE_PATH" | grep -qE "^/nix/store/[a-z0-9]{32}-nixos-system-${cfg.deployFor}-[0-9]{2}\.[0-9]{2}(\.[0-9]{8}\.[a-f0-9]+)?$"; then
                 DEPLOYMENT_STORE_PATH="$STORE_PATH"
                 break
