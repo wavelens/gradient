@@ -17,7 +17,10 @@
     integrations = augmentedIntegrations;
   });
 
-  userPasswordFiles = lib.mapAttrsToList (_: user: "gradient_user_${user.username}_password:${user.password_file}") cfg.state.users;
+  userPasswordFiles = lib.concatLists (lib.mapAttrsToList (_: user:
+    lib.optional (user.password_file != null)
+      "gradient_user_${user.username}_password:${user.password_file}"
+  ) cfg.state.users);
   orgPrivateKeyFiles = lib.mapAttrsToList (_: org: "gradient_org_${org.name}_private_key:${org.private_key_file}") cfg.state.organizations;
   cacheSigningKeyFiles = lib.mapAttrsToList (_: cache: "gradient_cache_${cache.name}_signing_key:${cache.signing_key_file}") cfg.state.caches;
   apiKeyFiles = lib.mapAttrsToList (_: api_key: "gradient_api_${api_key.name}_key:${api_key.key_file}") cfg.state.api_keys;

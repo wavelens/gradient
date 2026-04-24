@@ -751,6 +751,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     }, 0);
   }
 
+  trackBuildById = (_: number, build: BuildItem): string => build.id;
+
   buildDisplayName(path: string): string {
     // /nix/store/hash-name-version.drv → name-version (strip hash prefix only)
     const filename = path.split('/').pop() ?? path;

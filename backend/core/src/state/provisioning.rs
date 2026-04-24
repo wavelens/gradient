@@ -116,14 +116,26 @@ impl<'a> StateApplicator<'a> {
         state_users: &HashMap<String, StateUser>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         for state_user in state_users.values() {
-            let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
-                .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
-            let password_path = format!(
-                "{}/gradient_user_{}_password",
-                credentials_dir, state_user.username
-            );
-            let password = fs::read_to_string(&password_path)
-                .map_err(|e| format!("Failed to read password file {}: {}", password_path, e))?;
+            // When password_file is set in the state config, a matching
+            // systemd credential is loaded under GRADIENT_CREDENTIALS_DIR.
+            // When unset (OIDC-only user), we store `None` so the OIDC
+            // login flow in `web::authorization::oidc` will accept the
+            // account instead of rejecting with "already exists with
+            // password authentication".
+            let password_hash = if state_user.password_file.is_some() {
+                let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
+                    .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
+                let password_path = format!(
+                    "{}/gradient_user_{}_password",
+                    credentials_dir, state_user.username
+                );
+                let password = fs::read_to_string(&password_path).map_err(|e| {
+                    format!("Failed to read password file {}: {}", password_path, e)
+                })?;
+                Some(generate_hash(password.trim()))
+            } else {
+                None
+            };
 
             let existing_user = user::Entity::find()
                 .filter(user::Column::Username.eq(&state_user.username))
@@ -136,7 +148,7 @@ impl<'a> StateApplicator<'a> {
                 let mut user: user::ActiveModel = existing.into();
                 user.name = Set(state_user.name.clone());
                 user.email = Set(state_user.email.clone());
-                user.password = Set(Some(generate_hash(password.trim())));
+                user.password = Set(password_hash.clone());
                 user.email_verified = Set(state_user.email_verified);
                 user.superuser = Set(state_user.superuser);
                 user.managed = Set(true);
@@ -148,7 +160,7 @@ impl<'a> StateApplicator<'a> {
                     username: Set(state_user.username.clone()),
                     name: Set(state_user.name.clone()),
                     email: Set(state_user.email.clone()),
-                    password: Set(Some(generate_hash(password.trim()))),
+                    password: Set(password_hash),
                     last_login_at: Set(now),
                     created_at: Set(now),
                     email_verified: Set(state_user.email_verified),
@@ -210,7 +222,7 @@ impl<'a> StateApplicator<'a> {
                 let org_id = existing.id;
                 let mut org: organization::ActiveModel = existing.into();
                 org.display_name = Set(state_org.display_name.clone());
-                org.description = Set(state_org.description.clone());
+                org.description = Set(state_org.description.clone().unwrap_or_default());
                 org.public_key = Set(public_key);
                 org.private_key = Set(encrypted_private_key.clone());
                 org.created_by = Set(*created_by_id);
@@ -226,7 +238,7 @@ impl<'a> StateApplicator<'a> {
                     id: Set(org_id),
                     name: Set(state_org.name.clone()),
                     display_name: Set(state_org.display_name.clone()),
-                    description: Set(state_org.description.clone()),
+                    description: Set(state_org.description.clone().unwrap_or_default()),
                     public_key: Set(public_key),
                     private_key: Set(encrypted_private_key),
                     public: Set(state_org.public),
@@ -296,7 +308,7 @@ impl<'a> StateApplicator<'a> {
                 proj.organization = Set(*org_id);
                 proj.active = Set(state_project.active);
                 proj.display_name = Set(state_project.display_name.clone());
-                proj.description = Set(state_project.description.clone());
+                proj.description = Set(state_project.description.clone().unwrap_or_default());
                 proj.repository = Set(state_project.repository.clone());
                 proj.evaluation_wildcard = Set(state_project.evaluation_wildcard.clone());
                 proj.force_evaluation = Set(state_project.force_evaluation);
@@ -311,7 +323,7 @@ impl<'a> StateApplicator<'a> {
                     name: Set(state_project.name.clone()),
                     active: Set(state_project.active),
                     display_name: Set(state_project.display_name.clone()),
-                    description: Set(state_project.description.clone()),
+                    description: Set(state_project.description.clone().unwrap_or_default()),
                     repository: Set(state_project.repository.clone()),
                     evaluation_wildcard: Set(state_project.evaluation_wildcard.clone()),
                     force_evaluation: Set(state_project.force_evaluation),
@@ -398,7 +410,7 @@ impl<'a> StateApplicator<'a> {
             let cache_id = if let Some(existing) = existing_cache {
                 let mut cache_model: cache::ActiveModel = existing.clone().into();
                 cache_model.display_name = Set(state_cache.display_name.clone());
-                cache_model.description = Set(state_cache.description.clone());
+                cache_model.description = Set(state_cache.description.clone().unwrap_or_default());
                 cache_model.active = Set(state_cache.active);
                 cache_model.priority = Set(state_cache.priority);
                 cache_model.public_key = Set(public_key.clone());
@@ -415,7 +427,7 @@ impl<'a> StateApplicator<'a> {
                     id: Set(cache_id),
                     name: Set(state_cache.name.clone()),
                     display_name: Set(state_cache.display_name.clone()),
-                    description: Set(state_cache.description.clone()),
+                    description: Set(state_cache.description.clone().unwrap_or_default()),
                     active: Set(state_cache.active),
                     priority: Set(state_cache.priority),
                     public_key: Set(public_key),

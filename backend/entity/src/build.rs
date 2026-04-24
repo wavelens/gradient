@@ -41,9 +41,12 @@ pub struct Model {
     pub evaluation: Uuid,
     pub derivation: Uuid,
     pub status: BuildStatus,
-    pub server: Option<Uuid>,
     pub log_id: Option<Uuid>,
     pub build_time_ms: Option<i64>,
+    /// Worker identity (the `worker_id` string sent in `InitConnection`) that
+    /// executed this build. `None` for builds that never reached a worker
+    /// (still queued, aborted before dispatch, or pre-migration rows).
+    pub worker: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }

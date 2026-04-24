@@ -261,6 +261,13 @@ services.gradient.state.users = {
     email_verified = true;
     superuser      = false;
   };
+  # OIDC-only account: no local password. The first OIDC login matching
+  # this email/username claims the account.
+  bob = {
+    name  = "Bob";
+    email = "bob@example.com";
+    # password_file omitted (defaults to null)
+  };
 };
 ```
 
@@ -271,6 +278,12 @@ nix shell nixpkgs#libargon2 -c \
   sh -c 'argon2 "$(openssl rand -hex 16)" -id -e <<< "mypassword"' \
   > /run/secrets/alice-password
 ```
+
+Set `password_file = null` (or omit it) for users that authenticate
+exclusively via OIDC. Provisioning a user *with* a password and then
+attempting to sign in as that user via OIDC is rejected by the server
+(`User already exists with password authentication`), so OIDC-only users
+must be declared without one.
 
 ### Organizations
 
@@ -323,6 +336,19 @@ nix-store --generate-binary-cache-key main-cache \
   /run/secrets/cache-signing-key \
   /run/secrets/cache-signing-key.pub
 ```
+
+`nix-store` writes the keys with a `<name>:` prefix (e.g.
+`main-cache:AbCd…`). The state provisioner expects the **raw base64
+payload only** — strip the `main-cache:` prefix before wiring the file
+into `signing_key_file`:
+
+```sh
+sed -i 's/^[^:]*://' /run/secrets/cache-signing-key
+sed -i 's/^[^:]*://' /run/secrets/cache-signing-key.pub
+```
+
+Without this, startup fails with
+`Signing key for cache '…' is not a valid base64 encoded string`.
 
 ### API Keys
 

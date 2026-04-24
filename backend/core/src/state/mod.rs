@@ -17,7 +17,11 @@ pub struct StateUser {
     pub username: String,
     pub name: String,
     pub email: String,
-    pub password_file: String,
+    /// Path to a credential file containing the user's plaintext password.
+    /// `None` provisions an OIDC-only account (no stored password) so the
+    /// OIDC login flow can claim it by email.
+    #[serde(default)]
+    pub password_file: Option<String>,
     #[serde(default)]
     pub email_verified: bool,
     #[serde(default)]
@@ -28,7 +32,8 @@ pub struct StateUser {
 pub struct StateOrganization {
     pub name: String,
     pub display_name: String,
-    pub description: String,
+    #[serde(default)]
+    pub description: Option<String>,
     pub private_key_file: String,
     pub public: bool,
     #[serde(default)]
@@ -41,7 +46,8 @@ pub struct StateProject {
     pub name: String,
     pub organization: String,
     pub display_name: String,
-    pub description: String,
+    #[serde(default)]
+    pub description: Option<String>,
     pub repository: String,
     #[serde(default = "default_main")]
     pub evaluation_wildcard: String,
@@ -86,7 +92,8 @@ pub struct StateIntegration {
 pub struct StateCache {
     pub name: String,
     pub display_name: String,
-    pub description: String,
+    #[serde(default)]
+    pub description: Option<String>,
     #[serde(default = "default_true")]
     pub active: bool,
     #[serde(default = "default_priority")]
@@ -365,6 +372,79 @@ impl StateConfiguration {
             is_valid: errors.is_empty(),
             errors,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_accepts_missing_password_file() {
+        // OIDC-only users have `password_file = null`; serde must default to
+        // None instead of failing. This is the on-disk contract that lets
+        // gradient-state.nix emit `password_file = null` entries.
+        let json = r#"{
+            "users": {
+                "alice": {
+                    "username": "alice",
+                    "name": "Alice",
+                    "email": "alice@example.com",
+                    "password_file": null,
+                    "email_verified": true,
+                    "superuser": false
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        assert!(cfg.users["alice"].password_file.is_none());
+    }
+
+    #[test]
+    fn org_project_cache_descriptions_optional() {
+        let json = r#"{
+            "users": {
+                "alice": {
+                    "username": "alice",
+                    "name": "Alice",
+                    "email": "alice@example.com",
+                    "password_file": "/dev/null"
+                }
+            },
+            "organizations": {
+                "acme": {
+                    "name": "acme",
+                    "display_name": "ACME",
+                    "description": null,
+                    "private_key_file": "/dev/null",
+                    "public": false,
+                    "created_by": "alice"
+                }
+            },
+            "projects": {
+                "web": {
+                    "name": "web",
+                    "organization": "acme",
+                    "display_name": "Web",
+                    "repository": "https://example.com/acme/web.git",
+                    "created_by": "alice"
+                }
+            },
+            "caches": {
+                "main": {
+                    "name": "main",
+                    "display_name": "Main",
+                    "signing_key_file": "/dev/null",
+                    "public": false,
+                    "created_by": "alice"
+                }
+            }
+        }"#;
+        let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+        assert!(cfg.organizations["acme"].description.is_none());
+        assert!(cfg.projects["web"].description.is_none());
+        assert!(cfg.caches["main"].description.is_none());
+        assert!(cfg.validate().is_valid);
     }
 }
 

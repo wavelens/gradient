@@ -68,49 +68,56 @@
       @if (visibleBuilds().length === 0) {
         <div class="no-builds">No builds yet</div>
       } @else {
-        <div class="builds-list" (scroll)="onBuildsScroll($event)">
-          @for (build of visibleBuilds(); track build.id; let i = $index) {
-            <div
-              class="build-item status-{{ build.status.toLowerCase() }}"
-              [class.selected]="selectedBuildId() === build.id"
-              (click)="selectBuild(build, true)"
-              (keydown.enter)="selectBuild(build, true)"
-              (keydown.space)="$event.preventDefault(); selectBuild(build, true)"
-              (keydown.arrowdown)="$event.preventDefault(); selectAdjacentBuild(i + 1)"
-              (keydown.arrowup)="$event.preventDefault(); selectAdjacentBuild(i - 1)"
-              [title]="build.name"
-              tabindex="0"
-              role="option"
-              [attr.aria-selected]="selectedBuildId() === build.id"
-            >
-              <span class="build-dot status-{{ build.status.toLowerCase() }}"></span>
-              <span class="build-name">{{ buildDisplayName(build.name) }}</span>
-              @if (getBuildElapsed(build)) {
-                <span class="build-elapsed" [class.build-elapsed--running]="build.status === 'Building'">{{ getBuildElapsed(build) }}</span>
-              }
-              @if ((build.status === 'Completed' || build.status === 'Substituted') && build.has_artefacts) {
-                <a
-                  class="build-dl-link"
-                  [routerLink]="['/organization', orgName, 'artefacts', build.id]"
-                  [queryParams]="{ evalId: evaluationId }"
-                  (click)="$event.stopPropagation()"
-                  title="View build artefacts"
-                >
-                  <span class="material-symbols-outlined">download</span>
-                </a>
-              }
+        <cdk-virtual-scroll-viewport
+          #buildsViewport
+          itemSize="36"
+          minBufferPx="360"
+          maxBufferPx="720"
+          class="builds-list"
+          (scrolledIndexChange)="onBuildsViewportScroll()"
+        >
+          <div
+            *cdkVirtualFor="let build of visibleBuilds(); trackBy: trackBuildById; let i = index"
+            class="build-item status-{{ build.status.toLowerCase() }}"
+            [class.selected]="selectedBuildId() === build.id"
+            [attr.data-build-id]="build.id"
+            (click)="selectBuild(build, true)"
+            (keydown.enter)="selectBuild(build, true)"
+            (keydown.space)="$event.preventDefault(); selectBuild(build, true)"
+            (keydown.arrowdown)="$event.preventDefault(); selectAdjacentBuild(i + 1)"
+            (keydown.arrowup)="$event.preventDefault(); selectAdjacentBuild(i - 1)"
+            [title]="build.name"
+            tabindex="0"
+            role="option"
+            [attr.aria-selected]="selectedBuildId() === build.id"
+          >
+            <span class="build-dot status-{{ build.status.toLowerCase() }}"></span>
+            <span class="build-name">{{ buildDisplayName(build.name) }}</span>
+            @if (getBuildElapsed(build)) {
+              <span class="build-elapsed" [class.build-elapsed--running]="build.status === 'Building'">{{ getBuildElapsed(build) }}</span>
+            }
+            @if ((build.status === 'Completed' || build.status === 'Substituted') && build.has_artefacts) {
               <a
-                class="graph-link"
-                [routerLink]="['/organization', orgName, 'graph', build.id]"
+                class="build-dl-link"
+                [routerLink]="['/organization', orgName, 'artefacts', build.id]"
                 [queryParams]="{ evalId: evaluationId }"
                 (click)="$event.stopPropagation()"
-                title="View dependency graph"
+                title="View build artefacts"
               >
-                <span class="material-symbols-outlined">account_tree</span>
+                <span class="material-symbols-outlined">download</span>
               </a>
-            </div>
-          }
-        </div>
+            }
+            <a
+              class="graph-link"
+              [routerLink]="['/organization', orgName, 'graph', build.id]"
+              [queryParams]="{ evalId: evaluationId }"
+              (click)="$event.stopPropagation()"
+              title="View dependency graph"
+            >
+              <span class="material-symbols-outlined">account_tree</span>
+            </a>
+          </div>
+        </cdk-virtual-scroll-viewport>
       }
     </aside>
 

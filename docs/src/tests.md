@@ -119,6 +119,42 @@ Backend (`cargo test -p proto --lib handler::cache::tests`):
 - `parse_upstream_narinfo_ignores_unparseable_sizes` — malformed `NarSize` /
   `FileSize` fall back to `None` rather than aborting the parse.
 
+## State configuration — optional fields for OIDC-only users
+
+Backend (`cargo test -p core --lib state::tests`):
+- `user_accepts_missing_password_file` — `StateUser` accepts a JSON
+  document with `"password_file": null`, so the NixOS module may emit
+  OIDC-only users without a password credential file.
+- `org_project_cache_descriptions_optional` — `description` on
+  organizations, projects, and caches is optional; a full config without
+  them validates cleanly.
+
+These pin the wire contract between `nix/modules/gradient-state.nix`
+(`types.nullOr types.str` on `password_file` and the three `description`
+options) and `backend/core/src/state/mod.rs`. Without them, provisioning a
+user intended for OIDC failed at startup with "missing field
+`password_file`", and the user's subsequent OIDC login was rejected by
+`web::authorization::oidc` with `User already exists with password
+authentication`.
+
+## Build → worker attribution
+
+The `build.worker` column (text, nullable) records which worker executed a
+build. It replaces the dead `build.server` Uuid left over from the SSH
+build-machine era. `Scheduler::handle_build_status_update` writes the
+connected worker's `worker_id` (the identity it sent in `InitConnection`)
+the first time it reports `Building` for a given build, alongside the
+existing state-machine transition. The value surfaces via
+`GET /api/v1/builds/{build}` as the `worker` field of `BuildWithOutputs`.
+
+No dedicated scheduler test was added: the transition path is already
+covered by the compile-checked MockDatabase fixtures in
+`scheduler/src/handler_tests.rs`, and the one-line UPDATE added in
+`handle_build_status_update` is a trivial write that reuses the existing
+`ABuild::update` path. The migration and entity alignment are verified by
+`cargo test --workspace --tests` — any `entity::build::Model` literal
+that forgot the new field would fail to compile.
+
 ## EvalMessage — worker-surfaced evaluation messages
 
 Backend (`cargo test -p scheduler --tests scheduler_tests::record_eval_message`):

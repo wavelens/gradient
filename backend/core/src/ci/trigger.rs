@@ -187,9 +187,9 @@ pub async fn trigger_restart_builds(
             evaluation: Set(new_eval_id),
             derivation: Set(prev_build.derivation),
             status: Set(new_status),
-            server: Set(None),
             log_id: Set(None),
             build_time_ms: Set(None),
+            worker: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         };

@@ -380,7 +380,9 @@ impl<'a> DispatchContext<'a> {
                 push_pending_candidates(self.socket, self.scheduler, self.peer_id).await;
             }
             JobUpdateKind::Building { build_id } => {
-                self.scheduler.handle_build_status_update(&build_id).await;
+                self.scheduler
+                    .handle_build_status_update(&build_id, self.peer_id)
+                    .await;
             }
             JobUpdateKind::BuildOutput { build_id, outputs } => {
                 if let Err(e) = self

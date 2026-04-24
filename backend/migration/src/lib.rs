@@ -72,6 +72,7 @@ mod m20260422_000000_rename_worker_name_and_add_created_by;
 mod m20260422_000001_add_display_name_to_integration;
 mod m20260422_000002_add_enable_caps_to_worker_registration;
 mod m20260422_000003_add_deriver_to_cached_path;
+mod m20260425_000000_replace_build_server_with_worker;
 
 pub struct Migrator;
 
@@ -145,6 +146,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260422_000001_add_display_name_to_integration::Migration),
             Box::new(m20260422_000002_add_enable_caps_to_worker_registration::Migration),
             Box::new(m20260422_000003_add_deriver_to_cached_path::Migration),
+            Box::new(m20260425_000000_replace_build_server_with_worker::Migration),
         ]
     }
 }

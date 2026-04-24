@@ -24,7 +24,9 @@ pub struct BuildWithOutputs {
     pub status: entity::build::BuildStatus,
     pub derivation_path: String,
     pub architecture: entity::server::Architecture,
-    pub server: Option<Uuid>,
+    /// Worker identity (the `worker_id` string from `InitConnection`) that
+    /// executed this build. `None` if the build never reached a worker.
+    pub worker: Option<String>,
     pub output: HashMap<String, String>,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
@@ -66,7 +68,7 @@ pub async fn get_build(
         status: build.status,
         derivation_path: derivation.derivation_path,
         architecture: derivation.architecture,
-        server: build.server,
+        worker: build.worker,
         output: outputs,
         created_at: build.created_at,
         updated_at: build.updated_at,

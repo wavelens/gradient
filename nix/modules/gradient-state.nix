@@ -66,8 +66,13 @@
       };
 
       password_file = mkOption {
-        type = types.str;
-        description = "Path to file containing the hashed password";
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          Path to file containing the hashed password. Leave null for
+          OIDC-only users — the provisioned account will be created without
+          a local password, so the OIDC login flow can claim it by email.
+        '';
       };
 
       email_verified = mkOption {
@@ -101,8 +106,8 @@
       };
 
       description = mkOption {
-        type = types.str;
-        default = "";
+        type = types.nullOr types.str;
+        default = null;
         description = "Description of the organization";
       };
 
@@ -156,8 +161,8 @@
       };
 
       description = mkOption {
-        type = types.str;
-        default = "";
+        type = types.nullOr types.str;
+        default = null;
         description = "Description of the project";
       };
 
@@ -305,8 +310,8 @@
       };
 
       description = mkOption {
-        type = types.str;
-        default = "";
+        type = types.nullOr types.str;
+        default = null;
         description = "Description of the cache";
       };
 

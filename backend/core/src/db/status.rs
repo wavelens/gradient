@@ -56,7 +56,7 @@ pub async fn update_build_status(
     let now = Utc::now().naive_utc();
     // When transitioning out of `Building` into a terminal state, record the
     // elapsed wall-clock time. `build.updated_at` is the timestamp of the
-    // previous transition (into `Building` via `claim_for_build_machine`).
+    // previous transition (into `Building` by `Scheduler::handle_build_status_update`).
     if build.status == BuildStatus::Building
         && matches!(
             status,

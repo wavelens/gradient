@@ -252,7 +252,7 @@ impl Scheduler {
         }
     }
 
-    pub async fn handle_build_status_update(&self, build_id_str: &str) {
+    pub async fn handle_build_status_update(&self, build_id_str: &str, worker_id: &str) {
         let build_id = match build_id_str.parse::<Uuid>() {
             Ok(id) => id,
             Err(_) => {
@@ -261,8 +261,20 @@ impl Scheduler {
             }
         };
         use entity::build::BuildStatus;
+        use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
         match EBuild::find_by_id(build_id).one(&self.state.db).await {
             Ok(Some(build)) => {
+                // Record which worker is handling this build. Persisting here
+                // (rather than at dispatch time) means the worker that actually
+                // accepted the job is recorded, not whichever candidate the
+                // scheduler offered it to.
+                if build.worker.as_deref() != Some(worker_id) {
+                    let mut am: ABuild = build.clone().into_active_model();
+                    am.worker = Set(Some(worker_id.to_string()));
+                    if let Err(e) = am.update(&self.state.db).await {
+                        warn!(error = %e, %build_id, %worker_id, "failed to persist worker on build");
+                    }
+                }
                 gradient_core::db::update_build_status(
                     Arc::clone(&self.state),
                     build,

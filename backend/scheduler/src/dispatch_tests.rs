@@ -105,9 +105,9 @@ fn make_build_queued(id: Uuid, eval_id: Uuid, drv_id: Uuid) -> MBuild {
         evaluation: eval_id,
         derivation: drv_id,
         status: BuildStatus::Queued,
-        server: None,
         log_id: None,
         build_time_ms: None,
+        worker: None,
         created_at: test_date(),
         updated_at: test_date(),
     }

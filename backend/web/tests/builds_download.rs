@@ -166,9 +166,9 @@ fn build_row() -> entity::build::Model {
         evaluation: evaluation_id(),
         derivation: derivation_id(),
         status: BuildStatus::Completed,
-        server: None,
         log_id: None,
         build_time_ms: None,
+        worker: None,
         created_at: test_date(),
         updated_at: test_date(),
     }

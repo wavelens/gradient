@@ -14,8 +14,7 @@ use chrono::Utc;
 use entity::build::BuildStatus;
 use sea_orm::DatabaseConnection;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
-    QueryFilter,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use std::collections::HashSet;
 use std::time::Duration;
@@ -112,36 +111,6 @@ impl<'db> BuildRepo<'db> {
             .all(self.db)
             .await?;
         Ok(builds)
-    }
-
-    /// Claim a build atomically for a specific build machine, transitioning it
-    /// from `Queued` → `Building`. Returns the updated row if claimed, `None`
-    /// if another scheduler already claimed it.
-    pub async fn claim_for_build_machine(
-        &self,
-        build: MBuild,
-        build_machine_id: Uuid,
-    ) -> Result<Option<MBuild>> {
-        let mut active: ABuild = build.clone().into_active_model();
-        active.server = Set(Some(build_machine_id));
-        active.status = Set(BuildStatus::Building);
-        active.updated_at = Set(Utc::now().naive_utc());
-
-        match active.update(self.db).await {
-            Ok(updated) if updated.status == BuildStatus::Building => Ok(Some(updated)),
-            Ok(_) => Ok(None), // concurrent update won
-            Err(e) => Err(e.into()),
-        }
-    }
-
-    /// Count builds in `Building` state assigned to a specific build machine.
-    pub async fn count_building_on_machine(&self, build_machine_id: Uuid) -> Result<usize> {
-        let count = EBuild::find()
-            .filter(CBuild::Server.eq(build_machine_id))
-            .filter(CBuild::Status.eq(BuildStatus::Building))
-            .count(self.db)
-            .await?;
-        Ok(count as usize)
     }
 
     /// Return the IDs of builds to skip in the current scheduling cycle

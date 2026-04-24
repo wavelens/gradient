@@ -208,9 +208,9 @@ impl<'a> EvalResultProcessor<'a> {
                 evaluation: Set(self.evaluation_id),
                 derivation: Set(drv_id),
                 status: Set(status),
-                server: Set(None),
                 log_id: Set(None),
                 build_time_ms: Set(None),
+                worker: Set(None),
                 created_at: Set(now),
                 updated_at: Set(now),
             });
@@ -438,9 +438,9 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uui
                 evaluation: Set(evaluation_id),
                 derivation: Set(drv_id),
                 status: Set(BuildStatus::Substituted),
-                server: Set(None),
                 log_id: Set(None),
                 build_time_ms: Set(None),
+                worker: Set(None),
                 created_at: Set(now),
                 updated_at: Set(now),
             })

@@ -4428,11 +4428,14 @@ components:
           example: "/nix/store/abc123-hello-2.12.1.drv"
         architecture:
           $ref: '#/components/schemas/Architecture'
-        server:
+        worker:
           type: string
-          format: uuid
           nullable: true
-          description: UUID of the server that ran this build, or null if not yet dispatched
+          description: |-
+            Worker identity (the `worker_id` string the worker sent in
+            `InitConnection`) that executed this build. `null` if the
+            build has not yet reached a worker (still queued, aborted
+            before dispatch, or a pre-migration row).
         output:
           type: object
           additionalProperties:

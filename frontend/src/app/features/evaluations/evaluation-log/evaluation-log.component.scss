@@ -122,6 +122,14 @@
 .builds-list {
   flex: 1;
   overflow-y: auto;
+  display: block;
+  min-height: 0;
+}
+
+cdk-virtual-scroll-viewport.builds-list {
+  // CdkVirtualScrollViewport positions its content absolutely; it needs an
+  // explicit height (flex: 1 inside a flex column gives it one).
+  contain: strict;
 }
 
 .no-builds {
@@ -134,7 +142,9 @@
   display: flex;
   align-items: center;
   gap: $spacing-sm;
-  padding: 0.55rem $spacing-md 0.55rem calc($spacing-md - 3px);
+  height: 36px; // must match cdk-virtual-scroll-viewport itemSize
+  box-sizing: border-box;
+  padding: 0 $spacing-md 0 calc($spacing-md - 3px);
   cursor: pointer;
   border-left: 3px solid transparent;
   transition: background $transition-fast, border-color $transition-fast;
