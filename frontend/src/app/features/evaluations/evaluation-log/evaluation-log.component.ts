@@ -20,6 +20,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { interval, Subscription } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
+import { CdkVirtualScrollViewport, ScrollingModule } from '@angular/cdk/scrolling';
 import { EvaluationsService, BuildItem } from '@core/services/evaluations.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { Evaluation, EvaluationMessage } from '@core/models';
@@ -31,7 +32,7 @@ import { environment } from '@environments/environment';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonModule],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonModule, ScrollingModule],
   templateUrl: './evaluation-log.component.html',
   styleUrl: './evaluation-log.component.scss',
 })
@@ -45,6 +46,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private cdr = inject(ChangeDetectorRef);
 
   @ViewChild('logContainer') logContainerRef?: ElementRef<HTMLDivElement>;
+  @ViewChild('buildsViewport') buildsViewport?: CdkVirtualScrollViewport;
 
   loading = signal(true);
   evaluation = signal<Evaluation | null>(null);
@@ -647,10 +649,13 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   // ── Scroll management ───────────────────────────────────────────────────────
 
-  onBuildsScroll(event: Event): void {
-    const el = event.target as HTMLElement;
-    // Pre-fetch next page when within 500px of the bottom to avoid user waiting
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 500) {
+  onBuildsViewportScroll(): void {
+    const vp = this.buildsViewport;
+    if (!vp) return;
+    const total = vp.getDataLength();
+    const end = vp.getRenderedRange().end;
+    // Pre-fetch next page when rendered range reaches within ~20 rows of the end
+    if (total > 0 && end >= total - 20) {
       this.loadMoreBuilds();
     }
   }
@@ -737,9 +742,12 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const list = this.visibleBuilds();
     if (index < 0 || index >= list.length) return;
     this.selectBuild(list[index], true);
+    // Ensure the target row is rendered (virtual scroll may have recycled it)
+    this.buildsViewport?.scrollToIndex(index);
+    const targetId = list[index].id;
     setTimeout(() => {
-      const items = document.querySelectorAll<HTMLElement>('.build-item');
-      items[index]?.focus();
+      const el = document.querySelector<HTMLElement>(`.build-item[data-build-id="${targetId}"]`);
+      el?.focus();
     }, 0);
   }
 
