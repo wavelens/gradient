@@ -24,6 +24,7 @@ let
 in rustPlatform.buildRustPackage {
   pname = "gradient";
   version = "1.0.0";
+  separateDebugInfo = true;
 
   src = lib.cleanSourceWith {
     filter = name: type: !(type == "directory" && builtins.elem (baseNameOf name) ignoredPaths);
