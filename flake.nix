@@ -10,9 +10,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    crane.url = "github:ipetkov/crane";
   };
 
-  outputs = { self, nixpkgs, flake-utils, ... }@inputs: flake-utils.lib.eachDefaultSystem (system: let
+  outputs = { self, nixpkgs, flake-utils, crane, ... }@inputs: flake-utils.lib.eachDefaultSystem (system: let
     pkgs = import nixpkgs {
       inherit system;
       overlays = map (v: self.overlays.${v}) (builtins.attrNames self.overlays);
@@ -20,6 +21,7 @@
     };
 
     nixVersion = pkgs.nixVersions.nix_2_34;
+    craneLib = crane.mkLib pkgs;
 
     rustEnv = with pkgs.rustPackages; [
       clippy
@@ -30,9 +32,9 @@
     apps = import ./nix/vms { inherit inputs system pkgs; };
     packages = rec {
       store = pkgs.callPackage ./nix/scripts/store.nix { };
-      gradient = pkgs.callPackage ./nix/packages/gradient.nix { };
+      gradient = pkgs.callPackage ./nix/packages/gradient.nix { inherit craneLib; };
       gradient-frontend = pkgs.callPackage ./nix/packages/gradient-frontend.nix { };
-      gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix { };
+      gradient-cli = pkgs.callPackage ./nix/packages/gradient-cli.nix { inherit craneLib; };
       default = gradient;
     };
 

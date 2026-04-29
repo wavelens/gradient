@@ -5,37 +5,43 @@
  */
 
 { lib
+, craneLib
 , git
 , installShellFiles
 , nixVersions
 , openssl
 , pkg-config
-, rustPlatform
 , stdenv
-}: let
-  ignoredPaths = [ ".github" "target" ];
-in rustPlatform.buildRustPackage {
+}:
+let
+  nixVersion = nixVersions.nix_2_34;
+
+  src = craneLib.cleanCargoSource ../../cli;
+
+  commonArgs = {
+    inherit src;
+    strictDeps = true;
+
+    nativeBuildInputs = [
+      installShellFiles
+      pkg-config
+    ];
+
+    buildInputs = [
+      git
+      nixVersion
+      openssl
+    ];
+  };
+
+  # Cached dependency layer — only rebuilt when Cargo.lock changes
+  cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+in
+craneLib.buildPackage (commonArgs // {
+  inherit cargoArtifacts;
   pname = "gradient-cli";
   version = "1.0.0";
   separateDebugInfo = true;
-
-  src = lib.cleanSourceWith {
-    filter = name: type: !(type == "directory" && builtins.elem (baseNameOf name) ignoredPaths);
-    src = lib.cleanSource ../../cli;
-  };
-
-  nativeBuildInputs = [
-    installShellFiles
-    pkg-config
-  ];
-
-  buildInputs = [
-    git
-    nixVersions.nix_2_34
-    openssl
-  ];
-
-  cargoLock.lockFile = ../../cli/Cargo.lock;
 
   postInstall = lib.optionalString (stdenv.buildPlatform.canExecute stdenv.hostPlatform) ''
     installShellCompletion --cmd gradient \
@@ -50,4 +56,4 @@ in rustPlatform.buildRustPackage {
     license = lib.licenses.agpl3Only;
     mainProgram = "gradient";
   };
-}
+})

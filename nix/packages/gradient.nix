@@ -5,6 +5,7 @@
  */
 
 { lib
+, craneLib
 , git
 , glibc
 , installShellFiles
@@ -13,50 +14,85 @@
 , openssl
 , pkg-config
 , pkgs
-, rustPlatform
 , zstd
 }:
 let
   testStore = import ../scripts/store.nix { inherit pkgs; };
-
   nixVersion = nixVersions.nix_2_34;
-  ignoredPaths = [ ".github" "target" ];
-in rustPlatform.buildRustPackage {
+
+  unfilteredRoot = ../../backend;
+
+  # nix-bindings has readme in workspace crate; include md files alongside cargo sources
+  depsSrc = lib.fileset.toSource {
+    root = unfilteredRoot;
+    fileset = lib.fileset.unions [
+      (craneLib.fileset.commonCargoSources unfilteredRoot)
+      (lib.fileset.fileFilter (file: file.hasExt "md") unfilteredRoot)
+    ];
+  };
+
+  # Final build also needs .nix files (worker embeds eval.nix via include_str!)
+  src = lib.fileset.toSource {
+    root = unfilteredRoot;
+    fileset = lib.fileset.unions [
+      (craneLib.fileset.commonCargoSources unfilteredRoot)
+      (lib.fileset.fileFilter (file: file.hasExt "md") unfilteredRoot)
+      (lib.fileset.fileFilter (file: file.hasExt "nix") unfilteredRoot)
+    ];
+  };
+
+  # strip readme from all crate checkouts
+  cargoVendorDir = craneLib.vendorCargoDeps {
+    src = depsSrc;
+    overrideVendorGitCheckout = _ps: drv:
+      drv.overrideAttrs (old: {
+        postPatch = (old.postPatch or "") + ''
+          find . -name "Cargo.toml" | xargs sed -i '/^readme\s*=/d'
+        '';
+      });
+  };
+
+  commonArgs = {
+    inherit src cargoVendorDir;
+    strictDeps = true;
+
+    nativeBuildInputs = [
+      installShellFiles
+      pkg-config
+      (lib.getDev nixVersion)
+      (lib.getDev glibc)
+    ];
+
+    buildInputs = [
+      git
+      nixVersion
+      openssl
+      zstd
+    ];
+
+    LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
+    BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${glibc.dev}";
+  };
+
+  # crane's default dummy source. Provide a minimal stub that compiles
+  dummyrs = pkgs.writeText "dummy.rs" ''
+    #![allow(clippy::all)]
+    #![allow(dead_code)]
+    pub fn main() {}
+  '';
+
+  cargoArtifacts = craneLib.buildDepsOnly (commonArgs // {
+    src = depsSrc;
+    inherit dummyrs;
+  });
+in
+craneLib.buildPackage (commonArgs // {
+  inherit cargoArtifacts;
   pname = "gradient";
   version = "1.0.0";
   separateDebugInfo = true;
 
-  src = lib.cleanSourceWith {
-    filter = name: type: !(type == "directory" && builtins.elem (baseNameOf name) ignoredPaths);
-    src = lib.cleanSource ../../backend;
-  };
-
-  nativeBuildInputs = [
-    installShellFiles
-    pkg-config
-    (lib.getDev nixVersion)
-    (lib.getDev glibc)
-  ];
-
-  buildInputs = [
-    git
-    nixVersion
-    openssl
-    zstd
-  ];
-
-  cargoLock = {
-    lockFile = ../../backend/Cargo.lock;
-    allowBuiltinFetchGit = true;
-  };
-
-  LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
-  BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${glibc.dev}";
-
-  nativeCheckInputs = [
-    git
-  ];
-
+  nativeCheckInputs = [ git ];
   preCheck = ''
     ln -s ${testStore} ./test-store
   '';
@@ -68,4 +104,4 @@ in rustPlatform.buildRustPackage {
     platforms = lib.platforms.unix;
     mainProgram = "gradient-server";
   };
-}
+})
