@@ -1,15 +1,17 @@
 # Gradient
 
-[Options Search](https://wavelens.github.io/gradient-search)
-[Docs](https://wavelens.github.io/gradient)
-[Demo Instance](https://gradient.wavelens.io)
-[API Docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml)
-
 <p align="center">
-  <a href="https://gradient.wavelens.io/organization/gradient/project/gradient"><img src="https://gradient.wavelens.io/api/v1/projects/gradient/gradient/badge" alt="Gradient"></a>
+  <a href="https://gradient.wavelens.io/organization/gradient/project/gradient">
+    <img src="https://gradient.wavelens.io/api/v1/projects/gradient/gradient/badge" alt="Gradient Badge">
+  </a>
+  <br>
+  <strong>Modern Nix-CI System</strong>
 </p>
 
-Gradient is a web-based Nix-based Continuous Integration (CI) system.
+---
+
+| [🚀 Demo Instance](https://gradient.wavelens.io) | [📖 Documentation](https://wavelens.github.io/gradient) | [🔍 Options Search](https://wavelens.github.io/gradient-search) | [🛠️ API Docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml) |
+| :---: | :---: | :---: | :---: |
 
 > [!IMPORTANT]
 > This project is currently in the early stages of development. We are working on the initial implementation and documentation. If you are interested in contributing, please read the [Contributing Guidelines](CONTRIBUTING.md) for more information.
@@ -18,17 +20,18 @@ Gradient is a web-based Nix-based Continuous Integration (CI) system.
 
 ![Gradient](./docs/gradient.png)
 
-- **Modern UI**: has a clean and intuitive user interface
-- **Organizations**: multiple organizations, which work independently from each other (e.g. different servers, user access)
-- **API**: provides a RESTful API with API-Key management for authentication
-- **Streaming Logs**: real-time log streaming for builds
-- **Rich Project Configuration**: check all branches, pull requests, and tags (planned)
-- **OAuth2 / OIDC**: integrated single-sign-on support
-- **Binary Cache**: built-in Nix store cache with S3 storage backend support
-- **Remote Evals**: support for evaluating and building nix derviations without having nix installed locally
-- **Deployment Module**: Support for easy Pull-Deployment
-- **Dependency Graph**: interactive visualization of Nix build dependency trees
-- **Actions Integration**: GitHub App, Gitea and Gitlab Integration
+- **Modern UI** — clean and intuitive user interface
+- **Organizations** — multiple organizations, which work independently from each other (e.g. different workers, user access)
+- **API** — provides a RESTful API with API-Key management for authentication
+- **Streaming Logs** — real-time log streaming for builds
+- **Rich Project Configuration** — flake updates, check all branches, pull requests, and tags (planned)
+- **OAuth2 / OIDC** — integrated single-sign-on support
+- **Binary Cache** — built-in Nix store cache with S3 storage backend support
+- **Remote Evals** — evaluating and building nix derviations without having nix installed locally
+- **Proto Workers** — build and evaluate Nix derivations on distributed `gradient-worker` instances over a persistent WebSocket protocol
+- **Deployment Module** — Pull-Deployment via gradient-deploy module
+- **Dependency Graph** — interactive visualization of Nix build dependency trees
+- **Actions Integration** — GitHub App, Gitea and Gitlab Integration
 
 ## Installation
 
