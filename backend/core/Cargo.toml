@@ -42,6 +42,8 @@ rkyv             = { workspace = true }
 
 # Crate-specific dependencies
 async-compression = { version = "0.4", features = ["tokio", "zstd"] }
+zstd             = { workspace = true }
+tar              = "0.4"
 libc             = { workspace = true }
 async-ssh2-lite  = { version = "0.5", features = ["tokio"] }
 base64           = "0.22"

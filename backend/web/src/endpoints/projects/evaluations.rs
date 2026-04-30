@@ -17,7 +17,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use core::db::get_any_organization_by_name;
 use core::sources::check_project_updates;
-use core::storage::nar_extract::{ExtractError, extract_file_from_nar_bytes};
+use core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
 use core::types::input::vec_to_hex;
 use core::types::*;
 use entity::build::BuildStatus;
@@ -502,8 +502,8 @@ async fn serve_hydra_artifact(
             }
         };
 
-        match extract_file_from_nar_bytes(compressed, &rel).await {
-            Ok(extracted) => {
+        match extract_path_from_nar_bytes(compressed, &rel).await {
+            Ok(Extracted::File { contents, .. }) => {
                 return Ok(Some(
                     (
                         StatusCode::OK,
@@ -514,16 +514,33 @@ async fn serve_hydra_artifact(
                                 &format!("attachment; filename=\"{}\"", filename),
                             ),
                         ],
-                        extracted.contents,
+                        contents,
+                    )
+                        .into_response(),
+                ));
+            }
+            Ok(Extracted::Directory { tar_zst }) => {
+                let archive_name = format!("{}.tar.zst", filename);
+                return Ok(Some(
+                    (
+                        StatusCode::OK,
+                        [
+                            (header::CONTENT_TYPE, "application/zstd"),
+                            (
+                                header::CONTENT_DISPOSITION,
+                                &format!("attachment; filename=\"{}\"", archive_name),
+                            ),
+                        ],
+                        tar_zst,
                     )
                         .into_response(),
                 ));
             }
             Err(ExtractError::NotFound) => continue,
             Err(e) => {
-                tracing::error!(output_path = %output_root, %rel, error = %e, "Failed to extract file from NAR");
+                tracing::error!(output_path = %output_root, %rel, error = %e, "Failed to extract path from NAR");
                 return Err(WebError::InternalServerError(
-                    "Failed to extract file from NAR".to_string(),
+                    "Failed to extract path from NAR".to_string(),
                 ));
             }
         }

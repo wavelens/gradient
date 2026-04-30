@@ -61,6 +61,10 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
             Ok(v) => v,
             Err(_) => continue,
         };
+        let cache_id: Uuid = match row.try_get("", "cache") {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
         let drv_id: Uuid = match row.try_get("", "derivation") {
             Ok(v) => v,
             Err(_) => continue,
@@ -82,6 +86,42 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
             .flatten()
         {
             let _ = cd.into_active_model().delete(&state.db).await;
+        }
+
+        // Drop the cached_path_signature rows that tied each output to THIS
+        // cache, and (if no other cache still references the path) the
+        // cached_path row itself. Without this, the "compressed stored"
+        // metric — a SUM(file_size) joined via cached_path_signature — would
+        // stay inflated after TTL eviction even though the NAR file is gone.
+        for o in &outputs {
+            let cached_paths = ECachedPath::find()
+                .filter(CCachedPath::Hash.eq(&o.hash))
+                .all(&state.db)
+                .await
+                .unwrap_or_default();
+
+            for cp in cached_paths {
+                let sigs_for_cache = ECachedPathSignature::find()
+                    .filter(CCachedPathSignature::CachedPath.eq(cp.id))
+                    .filter(CCachedPathSignature::Cache.eq(cache_id))
+                    .all(&state.db)
+                    .await
+                    .unwrap_or_default();
+                for sig in sigs_for_cache {
+                    let _ = sig.into_active_model().delete(&state.db).await;
+                }
+
+                let still_signed = ECachedPathSignature::find()
+                    .filter(CCachedPathSignature::CachedPath.eq(cp.id))
+                    .one(&state.db)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some();
+                if !still_signed {
+                    let _ = cp.into_active_model().delete(&state.db).await;
+                }
+            }
         }
 
         // Best-effort: NAR file is shared by every cache for this output, so only

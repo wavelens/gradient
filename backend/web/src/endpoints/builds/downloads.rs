@@ -10,7 +10,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
-use core::storage::nar_extract::{ExtractError, extract_file_from_nar_bytes};
+use core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
 use core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -143,9 +143,9 @@ async fn find_and_serve_file(
             }
         };
 
-        match extract_file_from_nar_bytes(compressed, &rel).await {
-            Ok(extracted) => {
-                tracing::info!(%build_id, %filename, file_size = extracted.contents.len(), "Successfully extracted file for download");
+        match extract_path_from_nar_bytes(compressed, &rel).await {
+            Ok(Extracted::File { contents, .. }) => {
+                tracing::info!(%build_id, %filename, file_size = contents.len(), "Successfully extracted file for download");
                 return Ok(Some(
                     (
                         StatusCode::OK,
@@ -156,19 +156,37 @@ async fn find_and_serve_file(
                                 &format!("attachment; filename=\"{}\"", filename),
                             ),
                         ],
-                        extracted.contents,
+                        contents,
+                    )
+                        .into_response(),
+                ));
+            }
+            Ok(Extracted::Directory { tar_zst }) => {
+                tracing::info!(%build_id, %filename, archive_size = tar_zst.len(), "Successfully archived directory for download");
+                let archive_name = format!("{}.tar.zst", filename);
+                return Ok(Some(
+                    (
+                        StatusCode::OK,
+                        [
+                            (header::CONTENT_TYPE, "application/zstd"),
+                            (
+                                header::CONTENT_DISPOSITION,
+                                &format!("attachment; filename=\"{}\"", archive_name),
+                            ),
+                        ],
+                        tar_zst,
                     )
                         .into_response(),
                 ));
             }
             Err(ExtractError::NotFound) => {
-                tracing::debug!(%build_id, %filename, %rel, "File not found in NAR, trying next product");
+                tracing::debug!(%build_id, %filename, %rel, "Path not found in NAR, trying next product");
                 continue;
             }
             Err(e) => {
-                tracing::error!(%build_id, %filename, %rel, error = %e, "Failed to extract file from NAR");
+                tracing::error!(%build_id, %filename, %rel, error = %e, "Failed to extract path from NAR");
                 return Err(WebError::InternalServerError(
-                    "Failed to extract file from NAR".to_string(),
+                    "Failed to extract path from NAR".to_string(),
                 ));
             }
         }

@@ -124,6 +124,32 @@ Backend:
   resolves a `derivation_output` row whose `file_hash` is in canonical
   `sha256:<nix32>` form.
 
+## NAR path extraction — file or directory subtree
+
+`core::storage::nar_extract::extract_path_from_nar_bytes` returns either
+`Extracted::File` (regular file body) or `Extracted::Directory { tar_zst }`
+(zstd-compressed tar of the matched subtree). The download endpoints
+(`/builds/{build}/download/{filename}` and the project-level entry-point
+download) detect the variant and set `Content-Type: application/zstd` plus a
+`.tar.zst`-suffixed `Content-Disposition` filename for the directory case.
+
+Backend (`cargo test -p core --test nar_extract`):
+- `extracts_file_at_relative_path`, `extracts_file_in_nested_directory`,
+  `drains_non_matching_sibling_before_extracting_target`,
+  `returns_not_found_for_missing_path` — file-mode behaviours preserved.
+- `extracts_directory_as_tar_zst` — regression for "fails if build output is
+  a folder": when the build product's relative path resolves to a directory
+  in the NAR, the extractor walks the subtree, emits tar entries for nested
+  directories and files (preserving the executable bit), and zstd-compresses
+  the result.
+- `directory_tarball_preserves_symlinks` — symlinks inside the matched
+  subtree are written as `tar::EntryType::Symlink` with the original target
+  bytes, not flattened to regular files.
+- `directory_match_at_root_via_basename` — a build product whose path equals
+  the output store path returns the whole subtree as `tar.zst`, with entries
+  rooted at the matched directory's basename so extraction recreates that
+  name.
+
 ## Upstream narinfo metadata for worker prefetch
 
 Backend (`cargo test -p proto --lib handler::cache::tests`):

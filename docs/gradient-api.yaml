@@ -2037,8 +2037,13 @@ paths:
       tags: [builds]
       summary: Download build artefact
       description: |-
-        Streams a build artefact file. `Content-Type` and `Content-Disposition`
-        headers are set based on the file extension.
+        Streams a build artefact. When the build product is a regular file the
+        response carries the file's contents and a `Content-Type` derived from
+        the extension. When the build product points to a directory inside the
+        output, the response is a zstd-compressed tar archive of the subtree;
+        `Content-Type` is `application/zstd` and `Content-Disposition`'s
+        `filename` ends in `.tar.zst`. Clients should rely on the
+        `Content-Disposition` header for the suggested filename in either case.
 
         Access is granted when **any** of the following is satisfied:
         1. The owning organisation is public — no credentials required.
@@ -2058,12 +2063,17 @@ paths:
         - {}
       responses:
         '200':
-          description: File contents
+          description: File contents (regular file) or zstd-compressed tar archive (directory).
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
+            application/zstd:
+              schema:
+                type: string
+                format: binary
+                description: zstd-compressed tar of the directory subtree.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
