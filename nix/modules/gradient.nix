@@ -347,8 +347,6 @@ in {
         ReadWritePaths = [ cfg.baseDir ];
         Restart = "on-failure";
         RestartSec = 10;
-        StartLimitIntervalSec = 60;
-        StartLimitBurst = 5;
         LimitNOFILE = 65535;
         RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
         RestrictNamespaces = true;
@@ -371,6 +369,11 @@ in {
           "gradient_github_app_webhook_secret:${cfg.githubApp.webhookSecretFile}"
         ] ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
           ++ workerTokenFiles ++ integrationSecretFiles ++ integrationTokenFiles;
+      };
+
+      unitConfig = {
+        StartLimitIntervalSec = 60;
+        StartLimitBurst = 5;
       };
 
       environment = {
