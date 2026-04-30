@@ -3778,7 +3778,11 @@ components:
           allOf:
             - $ref: '#/components/schemas/WorkerLiveInfo'
           nullable: true
-          description: Present when the worker is currently connected to this server
+          description: |
+            Present when the worker is currently connected to this server **and**
+            successfully authenticated for this organization. A worker that is
+            globally connected (authorized for some other org) but did not
+            present a valid token for this org will have `live = null`.
 
     WorkerInfo:
       type: object

@@ -32,8 +32,12 @@ const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 fn main() -> Result<()> {
     let config = WorkerConfig::parse();
 
+    // stderr, not stdout: eval-worker subprocesses use stdout for line-delimited
+    // JSON to the parent (see worker_pool::pool), so any tracing line on stdout
+    // would be parsed as a protocol response and crash the eval.
     tracing_subscriber::fmt()
         .with_env_filter(&config.log_level)
+        .with_writer(std::io::stderr)
         .init();
 
     // Re-exec as eval subprocess when launched with the internal flag.

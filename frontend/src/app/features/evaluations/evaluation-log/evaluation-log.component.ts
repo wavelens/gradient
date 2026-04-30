@@ -503,7 +503,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       }
       const next = this.pendingBuilds.shift()!;
       this.visibleBuilds.update(vbs => [next, ...vbs]);
-    }, 50);
+    }, 10);
   }
 
   private stopBuildRevealTimer(): void {

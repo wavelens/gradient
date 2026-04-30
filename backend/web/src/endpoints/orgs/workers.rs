@@ -198,16 +198,26 @@ pub async fn get_org_workers(
     let entries = registrations
         .into_iter()
         .map(|reg| {
-            let live = live_workers.get(&reg.worker_id).map(|w| WorkerLiveInfo {
-                capabilities: w.capabilities.clone(),
-                // architectures/system_features are only non-empty for build-capable workers
-                // (WorkerCapabilities is only sent when `build` is negotiated)
-                architectures: w.architectures.clone(),
-                system_features: w.system_features.clone(),
-                max_concurrent_builds: w.max_concurrent_builds,
-                assigned_job_count: w.assigned_job_count,
-                draining: w.draining,
-            });
+            // Only expose live info when the worker has actually authenticated
+            // for THIS org. A worker may be globally connected (authorized for
+            // some other org) without having a valid token for this org.
+            let live = live_workers
+                .get(&reg.worker_id)
+                .filter(|w| {
+                    w.authorized_peers
+                        .as_ref()
+                        .is_none_or(|peers| peers.contains(&org.id))
+                })
+                .map(|w| WorkerLiveInfo {
+                    capabilities: w.capabilities.clone(),
+                    // architectures/system_features are only non-empty for build-capable workers
+                    // (WorkerCapabilities is only sent when `build` is negotiated)
+                    architectures: w.architectures.clone(),
+                    system_features: w.system_features.clone(),
+                    max_concurrent_builds: w.max_concurrent_builds,
+                    assigned_job_count: w.assigned_job_count,
+                    draining: w.draining,
+                });
             OrgWorkerEntry {
                 worker_id: reg.worker_id,
                 display_name: reg.display_name,

@@ -189,6 +189,8 @@ The `GET /api/v1/workers` endpoint shows all connected workers and their status.
  - **Superuser users** — users with the `superuser` flag set on their account can always access the endpoint
  - **`GRADIENT_GLOBAL_STATS_PUBLIC=true`** — when set, the workers/stats endpoints are publicly visible without authentication
 
+The per-org listing `GET /api/v1/orgs/{org}/workers` returns one entry per worker registration owned by that org. The `live` field on each entry is only populated when the worker is currently connected **and** the org's UUID is in the worker's `authorized_peers` set (i.e. the worker actually presented a valid token for this org during the handshake). A worker that registered with several orgs but only authenticated for a subset will therefore appear as connected for the orgs it authenticated for, and as disconnected (`live: null`) for the others.
+
 ---
 
 ## Capability Advertisement

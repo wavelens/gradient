@@ -256,6 +256,7 @@ impl WorkerPool {
                     max_concurrent_builds: s.max_concurrent_builds,
                     assigned_job_count: s.assigned_jobs.len(),
                     draining: slot.is_draining(),
+                    authorized_peers: s.peer_auth.as_filter().cloned(),
                 }
             })
             .collect()
@@ -274,6 +275,11 @@ pub struct WorkerInfo {
     pub max_concurrent_builds: u32,
     pub assigned_job_count: usize,
     pub draining: bool,
+    /// Peer (org) UUIDs the worker successfully authenticated for. `None`
+    /// means the worker is in open mode (no registrations) and is implicitly
+    /// authorized for all peers; this should not happen in normal operation
+    /// because workers must register with at least one org.
+    pub authorized_peers: Option<HashSet<Uuid>>,
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -457,6 +463,33 @@ mod tests {
         assert_eq!(workers[1].id, "w2");
         assert_eq!(workers[1].assigned_job_count, 0);
         assert!(workers[1].draining);
+    }
+
+    #[test]
+    fn test_all_workers_info_exposes_authorized_peers() {
+        let mut pool = WorkerPool::new();
+        let org_a = Uuid::new_v4();
+        let org_b = Uuid::new_v4();
+
+        // Restricted: worker authorized for org_a only.
+        pool.register("w1".into(), caps(), HashSet::from([org_a]));
+        // Open: no registrations.
+        pool.register("w2".into(), caps(), HashSet::new());
+
+        let mut workers = pool.all_workers();
+        workers.sort_by(|a, b| a.id.cmp(&b.id));
+
+        let w1_peers = workers[0]
+            .authorized_peers
+            .as_ref()
+            .expect("restricted worker should expose authorized peers");
+        assert!(w1_peers.contains(&org_a));
+        assert!(!w1_peers.contains(&org_b));
+
+        assert!(
+            workers[1].authorized_peers.is_none(),
+            "open-mode worker reports None"
+        );
     }
 
     #[test]
