@@ -78,8 +78,8 @@
   font-weight: 700;
   color: $text-primary;
 
-  &.success { color: #22c55e; }
-  &.error   { color: #ef4444; }
+  &.success { color: $color-graph-success; }
+  &.error   { color: $color-graph-danger; }
 }
 
 .summary-label {

@@ -17,7 +17,6 @@ use base64::{Engine, engine::general_purpose};
 use chrono::Utc;
 use entity::organization_cache::CacheSubscriptionMode;
 use entity::*;
-use password_auth::generate_hash;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use ssh_key::PrivateKey;
 use std::collections::HashMap;
@@ -129,10 +128,10 @@ impl<'a> StateApplicator<'a> {
                     "{}/gradient_user_{}_password",
                     credentials_dir, state_user.username
                 );
-                let password = fs::read_to_string(&password_path).map_err(|e| {
+                let contents = fs::read_to_string(&password_path).map_err(|e| {
                     format!("Failed to read password file {}: {}", password_path, e)
                 })?;
-                Some(generate_hash(password.trim()))
+                Some(parse_password_phc(&contents, &password_path)?)
             } else {
                 None
             };
@@ -1058,6 +1057,59 @@ impl<'a> StateApplicator<'a> {
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
+
+/// Validate the contents of a user password credential file. The file must
+/// contain an argon2 PHC hash (e.g. produced by `gradient-server hash` or the
+/// `argon2 -id -e` CLI). The plaintext password is never stored — the server
+/// only accepts the pre-hashed PHC string and passes it through to the DB.
+fn parse_password_phc(
+    contents: &str,
+    path: &str,
+) -> std::result::Result<String, Box<dyn std::error::Error>> {
+    let phc = contents.trim().to_string();
+    if !phc.starts_with("$argon2") {
+        return Err(format!(
+            "Password file {} does not contain an argon2 PHC hash (expected to start with `$argon2`). \
+             Generate one with `gradient-server hash` or `argon2 ... -id -e`.",
+            path
+        )
+        .into());
+    }
+    Ok(phc)
+}
+
+#[cfg(test)]
+mod password_phc_tests {
+    use super::parse_password_phc;
+
+    #[test]
+    fn accepts_argon2id_phc_hash() {
+        let h = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0$abcdefghijklmnopqrstuvwxyz0123456789ABCD";
+        let parsed = parse_password_phc(h, "/tmp/p").unwrap();
+        assert_eq!(parsed, h);
+    }
+
+    #[test]
+    fn trims_trailing_whitespace_and_newlines() {
+        let h = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$dGVzdA";
+        let with_ws = format!("{h}\n  \n");
+        let parsed = parse_password_phc(&with_ws, "/tmp/p").unwrap();
+        assert_eq!(parsed, h);
+    }
+
+    #[test]
+    fn rejects_plaintext_password() {
+        let err = parse_password_phc("hunter2\n", "/tmp/p").unwrap_err();
+        assert!(err.to_string().contains("argon2 PHC hash"));
+    }
+
+    #[test]
+    fn rejects_other_phc_algorithms() {
+        let h = "$pbkdf2-sha256$i=600000$c2FsdA$aGFzaA";
+        let err = parse_password_phc(h, "/tmp/p").unwrap_err();
+        assert!(err.to_string().contains("argon2"));
+    }
+}
 
 fn derive_public_key(private_key: &str) -> Result<String> {
     let private_key =

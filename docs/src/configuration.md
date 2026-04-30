@@ -271,13 +271,27 @@ services.gradient.state.users = {
 };
 ```
 
-The password file must contain an **argon2id PHC hash**. Generate one with:
+The password file must contain an **argon2id PHC hash** (a string starting
+with `$argon2id$…`). Generate one with the built-in `hash` subcommand:
+
+```sh
+# Interactive: prompts twice without echo, prints the PHC hash
+gradient-server hash > /run/secrets/alice-password
+
+# Non-interactive: pipe the password on stdin
+printf '%s' 'mypassword' | gradient-server hash > /run/secrets/alice-password
+```
+
+You can also use the standalone `argon2` CLI from `libargon2` if you prefer:
 
 ```sh
 nix shell nixpkgs#libargon2 -c \
   sh -c 'argon2 "$(openssl rand -hex 16)" -id -e <<< "mypassword"' \
   > /run/secrets/alice-password
 ```
+
+At server startup, the file content is validated to start with `$argon2`
+and stored verbatim — the server never sees the plaintext password.
 
 Set `password_file = null` (or omit it) for users that authenticate
 exclusively via OIDC. Provisioning a user *with* a password and then

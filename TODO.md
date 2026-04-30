@@ -12,5 +12,6 @@
  - argon2 for user password hashing
  - frontend: main colors in single place, not hardcoded in multiple components
  - no error message and recommendation when adding internal cache
- - frontend: "Waiting for Workers" message blocks seeing log output
+ - entry point metrics for builds that are completed but the eval is still running wont show up.
+ - peerFile wildcard does not work "*:[token]"
 

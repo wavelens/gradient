@@ -198,35 +198,37 @@
               </div>
             }
           </div>
-        } @else if (ev.status === 'Fetching') {
-          <div class="evaluating-hint">
-            <span class="material-symbols-outlined evaluating-icon">cloud_download</span>
-            <span class="evaluating-title">Fetching</span>
-            <span class="evaluating-sub">Prefetching the Nix flake&hellip;</span>
-          </div>
-        } @else if (ev.status === 'EvaluatingFlake' || ev.status === 'EvaluatingDerivation') {
-          <div class="evaluating-hint">
-            <span class="material-symbols-outlined evaluating-icon">manage_search</span>
-            <span class="evaluating-title">Evaluating</span>
-            <span class="evaluating-sub">Discovering builds from the Nix flake&hellip;</span>
-          </div>
-        } @else if (ev.status === 'Waiting') {
-          <div class="queued-hint">
-            <span class="material-symbols-outlined queued-icon">pause_circle</span>
-            <span class="queued-title">Waiting for Workers</span>
-            <span class="queued-sub">No build workers are currently available. Evaluation will resume when a worker connects&hellip;</span>
-          </div>
-        } @else if (ev.status === 'Queued') {
-          <div class="queued-hint">
-            <span class="material-symbols-outlined queued-icon">hourglass_empty</span>
-            <span class="queued-title">Waiting in Queue</span>
-            <span class="queued-sub">The evaluation will start when a slot becomes available&hellip;</span>
-          </div>
         } @else if (!selectedBuildId()) {
-          <div class="select-build-hint">
-            <span class="material-symbols-outlined hint-icon">terminal</span>
-            <span class="hint-text">Select a build to view its log</span>
-          </div>
+          @if (ev.status === 'Fetching') {
+            <div class="evaluating-hint">
+              <span class="material-symbols-outlined evaluating-icon">cloud_download</span>
+              <span class="evaluating-title">Fetching</span>
+              <span class="evaluating-sub">Prefetching the Nix flake&hellip;</span>
+            </div>
+          } @else if (ev.status === 'EvaluatingFlake' || ev.status === 'EvaluatingDerivation') {
+            <div class="evaluating-hint">
+              <span class="material-symbols-outlined evaluating-icon">manage_search</span>
+              <span class="evaluating-title">Evaluating</span>
+              <span class="evaluating-sub">Discovering builds from the Nix flake&hellip;</span>
+            </div>
+          } @else if (ev.status === 'Waiting') {
+            <div class="queued-hint">
+              <span class="material-symbols-outlined queued-icon">pause_circle</span>
+              <span class="queued-title">Waiting for Workers</span>
+              <span class="queued-sub">No build workers are currently available. Evaluation will resume when a worker connects&hellip;</span>
+            </div>
+          } @else if (ev.status === 'Queued') {
+            <div class="queued-hint">
+              <span class="material-symbols-outlined queued-icon">hourglass_empty</span>
+              <span class="queued-title">Waiting in Queue</span>
+              <span class="queued-sub">The evaluation will start when a slot becomes available&hellip;</span>
+            </div>
+          } @else {
+            <div class="select-build-hint">
+              <span class="material-symbols-outlined hint-icon">terminal</span>
+              <span class="hint-text">Select a build to view its log</span>
+            </div>
+          }
         } @else if (logLoading()) {
           <app-loading-spinner message="Loading log..." />
         } @else if (selectedBuild()?.status === 'Queued') {

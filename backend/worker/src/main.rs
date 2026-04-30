@@ -46,6 +46,13 @@ fn main() -> Result<()> {
     rt.block_on(async move {
         info!(server_url = %config.server_url, "gradient-worker starting");
 
+        if !config.server_url.contains("proto") {
+            warn!(
+                server_url = %config.server_url,
+                "server URL does not contain 'proto'; expected the server's /proto WebSocket endpoint (e.g. wss://gradient.example.com/proto)"
+            );
+        }
+
         // Start the listener for incoming server connections if discoverable.
         if config.discoverable {
             let listener_config = config.clone();

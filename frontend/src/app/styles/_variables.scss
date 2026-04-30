@@ -4,26 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// Color System - Dark Theme (from frontend-old)
-$color-primary: #0d1118;
-$color-secondary: #abb0b4;
-$color-tertiary: #21262d;
-$color-quaternary: #050708;
-
-// Additional UI Colors
-$color-hover: #252d33;
-$color-border: #2d333b;
-
-// Semantic Colors
-$color-success: #28a745;
-$color-danger: #dc3545;
-$color-warning: #ffc107;
-$color-info: #17a2b8;
-
-// Text Colors
-$text-primary: #ffffff;
-$text-secondary: #abb0b4;
-$text-light: #818181;
+@forward 'colors';
+@use 'colors' as *;
 
 // Spacing System
 $spacing-xs: 0.25rem;   // 4px

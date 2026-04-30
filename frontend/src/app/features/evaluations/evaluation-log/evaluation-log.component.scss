@@ -150,13 +150,13 @@ cdk-virtual-scroll-viewport.builds-list {
   transition: background $transition-fast, border-color $transition-fast;
 
   &:hover {
-    background: rgba(#fff, 0.04);
-    border-left-color: rgba(#fff, 0.12);
+    background: rgba($color-white, 0.04);
+    border-left-color: rgba($color-white, 0.12);
   }
 
   // Status-colored accent when selected
   &.selected {
-    background: rgba(#fff, 0.06);
+    background: rgba($color-white, 0.06);
 
     &.status-completed,
     &.status-substituted            { border-left-color: $color-success; }
@@ -183,6 +183,7 @@ cdk-virtual-scroll-viewport.builds-list {
 
 .build-name {
   flex: 1;
+  min-width: 0;
   font-size: $font-size-sm;
   color: $text-secondary;
   white-space: nowrap;
@@ -305,7 +306,7 @@ cdk-virtual-scroll-viewport.builds-list {
   font-family: $font-family-mono;
   font-size: $font-size-sm;
   color: $text-secondary;
-  background: rgba(#fff, 0.06);
+  background: rgba($color-white, 0.06);
   padding: 1px 6px;
   border-radius: $border-radius-sm;
 }
@@ -456,7 +457,7 @@ cdk-virtual-scroll-viewport.builds-list {
 
   .hint-icon {
     font-size: 40px;
-    color: rgba(#fff, 0.1);
+    color: rgba($color-white, 0.1);
   }
 
   .hint-text {
@@ -471,7 +472,7 @@ cdk-virtual-scroll-viewport.builds-list {
   align-items: center;
   justify-content: space-between;
   padding: $spacing-xs $spacing-md;
-  background: rgba(#fff, 0.03);
+  background: rgba($color-white, 0.03);
   border-bottom: 1px solid rgba($color-border, 0.5);
   flex-shrink: 0;
   gap: $spacing-sm;
@@ -564,12 +565,12 @@ cdk-virtual-scroll-viewport.builds-list {
   }
 
   &:hover {
-    background: rgba(#fff, 0.04);
-    border-left-color: rgba(#fff, 0.12);
+    background: rgba($color-white, 0.04);
+    border-left-color: rgba($color-white, 0.12);
   }
 
   &.selected {
-    background: rgba(#fff, 0.06);
+    background: rgba($color-white, 0.06);
     border-left-color: $color-danger;
   }
 }
@@ -603,7 +604,7 @@ cdk-virtual-scroll-viewport.builds-list {
   font-size: $font-size-sm;
   font-weight: 600;
   color: $text-secondary;
-  background: rgba(#fff, 0.03);
+  background: rgba($color-white, 0.03);
   border-bottom: 1px solid rgba($color-border, 0.5);
   flex-shrink: 0;
 }

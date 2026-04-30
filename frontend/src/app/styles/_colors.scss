@@ -1,0 +1,42 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+// ── Base Palette ─────────────────────────────────────────────────────────────
+
+$color-white: #ffffff;
+$color-black: #000000;
+
+// ── Dark Theme ───────────────────────────────────────────────────────────────
+
+$color-primary: #0d1118;
+$color-secondary: #abb0b4;
+$color-tertiary: #21262d;
+$color-quaternary: #050708;
+
+// ── UI Colors ────────────────────────────────────────────────────────────────
+
+$color-hover: #252d33;
+$color-border: #2d333b;
+
+// ── Semantic Colors ──────────────────────────────────────────────────────────
+
+$color-success: #28a745;
+$color-danger: #dc3545;
+$color-warning: #ffc107;
+$color-info: #17a2b8;
+
+// ── Graph / Badge Status Colors (Tailwind-derived) ───────────────────────────
+
+$color-graph-success: #22c55e;
+$color-graph-danger: #ef4444;
+$color-graph-warning: #f97316;
+$color-graph-running: #3b82f6;
+
+// ── Text Colors ──────────────────────────────────────────────────────────────
+
+$text-primary: #ffffff;
+$text-secondary: #abb0b4;
+$text-light: #818181;

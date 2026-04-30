@@ -31,7 +31,7 @@ let
     ];
   };
 
-  # Final build also needs .nix files (worker embeds eval.nix via include_str!)
+  # Final build also needs .nix files
   src = lib.fileset.toSource {
     root = unfilteredRoot;
     fileset = lib.fileset.unions [
