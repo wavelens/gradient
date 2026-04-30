@@ -95,9 +95,8 @@ impl EvalWorker {
             anyhow::bail!("eval worker closed pipe");
         }
 
-        serde_json::from_str(self.line.trim_end()).map_err(|e| {
+        serde_json::from_str(self.line.trim_end()).inspect_err(|_| {
             error!("Failed to parse JSON. Raw input: |{}|", self.line.trim_end());
-            e
         }).context("parsing eval worker response")
     }
 

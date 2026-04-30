@@ -9,6 +9,7 @@ pub mod db;
 pub mod executer;
 pub mod hydra;
 pub mod nix;
+pub mod nix_hash;
 pub mod repo;
 pub mod sources;
 pub mod state;

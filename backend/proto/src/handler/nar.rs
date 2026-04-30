@@ -5,6 +5,7 @@
  */
 
 use chrono::Timelike;
+use gradient_core::nix_hash::normalize_nar_hash;
 use gradient_core::types::*;
 use scheduler::Scheduler;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
@@ -141,9 +142,9 @@ pub(super) async fn mark_nar_stored(
         Some(row) => {
             let mut active = row.into_active_model();
             active.file_size = Set(Some(record.file_size));
-            active.file_hash = Set(Some(record.file_hash.to_owned()));
+            active.file_hash = Set(Some(normalize_nar_hash(record.file_hash)));
             active.nar_size = Set(Some(record.nar_size));
-            active.nar_hash = Set(Some(record.nar_hash.to_owned()));
+            active.nar_hash = Set(Some(normalize_nar_hash(record.nar_hash)));
             if references_str.is_some() {
                 active.references = Set(references_str);
             }
@@ -158,10 +159,10 @@ pub(super) async fn mark_nar_stored(
                 store_path: Set(store_path.to_owned()),
                 hash: Set(hash.to_owned()),
                 package: Set(package.to_owned()),
-                file_hash: Set(Some(record.file_hash.to_owned())),
+                file_hash: Set(Some(normalize_nar_hash(record.file_hash))),
                 file_size: Set(Some(record.file_size)),
                 nar_size: Set(Some(record.nar_size)),
-                nar_hash: Set(Some(record.nar_hash.to_owned())),
+                nar_hash: Set(Some(normalize_nar_hash(record.nar_hash))),
                 references: Set(references_str),
                 ca: Set(None),
                 deriver: Set(record.deriver.map(str::to_owned)),

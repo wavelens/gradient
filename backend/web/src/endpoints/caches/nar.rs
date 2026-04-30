@@ -152,6 +152,23 @@ fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: Uuid, 
     });
 }
 
+async fn fetch_upstream_nar(base_url: &str, path: &str) -> WebResult<bytes::Bytes> {
+    let nar_url = format!("{}/{}", base_url.trim_end_matches('/'), path);
+    let resp = reqwest::Client::new()
+        .get(&nar_url)
+        .send()
+        .await
+        .map_err(|e| WebError::InternalServerError(format!("Upstream request failed: {}", e)))?;
+
+    if !resp.status().is_success() {
+        return Err(WebError::not_found("NAR in upstream"));
+    }
+
+    resp.bytes().await.map_err(|e| {
+        WebError::InternalServerError(format!("Failed to read upstream response: {}", e))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,6 +181,24 @@ mod tests {
 
     fn empty_output_page() -> Vec<entity::derivation_output::Model> {
         Vec::new()
+    }
+
+    fn derivation_output_row() -> entity::derivation_output::Model {
+        entity::derivation_output::Model {
+            id: uuid::Uuid::new_v4(),
+            derivation: uuid::Uuid::new_v4(),
+            name: "out".to_string(),
+            output: format!("/nix/store/{STORE_HASH}-hello"),
+            hash: STORE_HASH.to_string(),
+            package: "hello".to_string(),
+            ca: None,
+            file_hash: Some(format!("sha256:{FILE_HASH_NIX32}")),
+            file_size: Some(1234),
+            nar_size: Some(2048),
+            is_cached: true,
+            cached_path: None,
+            created_at: Utc::now().naive_utc(),
+        }
     }
 
     fn cached_path_row() -> entity::cached_path::Model {
@@ -206,6 +241,23 @@ mod tests {
         assert_eq!(effective, STORE_HASH);
     }
 
+    /// Regression for the narinfo→NAR 404: a `derivation_output` row whose
+    /// `file_hash` column holds the canonical `sha256:<nix32>` form is
+    /// resolved by the same nix32 hash that appears in the narinfo URL.
+    /// Prior to the normalize-on-write fix the column held `sha256:<hex>`
+    /// and the lookup never matched, so the NAR endpoint 404'd.
+    #[test]
+    fn resolve_returns_store_hash_for_normalized_derivation_output() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![derivation_output_row()]])
+            .into_connection();
+
+        let effective = runtime()
+            .block_on(resolve_effective_hash_db(&db, FILE_HASH_NIX32))
+            .expect("resolve should succeed");
+        assert_eq!(effective, STORE_HASH);
+    }
+
     /// When neither table has a match, the URL hash is returned unchanged
     /// (legacy/direct-hash URL behaviour preserved).
     #[test]
@@ -220,21 +272,4 @@ mod tests {
             .expect("resolve should succeed");
         assert_eq!(effective, FILE_HASH_NIX32);
     }
-}
-
-async fn fetch_upstream_nar(base_url: &str, path: &str) -> WebResult<bytes::Bytes> {
-    let nar_url = format!("{}/{}", base_url.trim_end_matches('/'), path);
-    let resp = reqwest::Client::new()
-        .get(&nar_url)
-        .send()
-        .await
-        .map_err(|e| WebError::InternalServerError(format!("Upstream request failed: {}", e)))?;
-
-    if !resp.status().is_success() {
-        return Err(WebError::not_found("NAR in upstream"));
-    }
-
-    resp.bytes().await.map_err(|e| {
-        WebError::InternalServerError(format!("Failed to read upstream response: {}", e))
-    })
 }

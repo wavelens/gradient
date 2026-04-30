@@ -67,6 +67,18 @@ a {
   }
 }
 
+// Breadcrumb links should align with surrounding non-link items
+// (separator/current spans) — opt out of the global anchor padding/hover.
+.breadcrumb-link,
+.breadcrumb a {
+  padding: 0;
+
+  &:hover {
+    background-color: transparent;
+    border-radius: 0;
+  }
+}
+
 // Utility Classes
 .container {
   max-width: 1200px;

@@ -102,6 +102,28 @@ Backend (`cargo test -p web --tests narinfo`):
   and is persisted in `mark_nar_stored`.
 - `shows a friendly error when credentials are no longer available`
 
+## Hash column normalization (file_hash / nar_hash)
+
+The `derivation_output.file_hash`, `cached_path.file_hash`, and
+`cached_path.nar_hash` columns are persisted in the canonical `sha256:<nix32>`
+form so the URL hash extracted from a narinfo `URL:` field matches the column
+directly. Workers send `sha256:<hex>` over the wire; the proto handler and
+scheduler call `gradient_core::nix_hash::normalize_nar_hash` before
+`Set(...)`. Migration `m20260430_000000_normalize_hash_columns` backfills
+pre-existing rows.
+
+Backend:
+- `cargo test -p core --lib nix_hash` — round-trip and idempotency tests for
+  `normalize_nar_hash` covering SRI, prefixed hex, prefixed nix32, bare hex,
+  and rejection of malformed inputs.
+- `cargo test -p migration --lib normalize_hash_columns` — covers the
+  hex→nix32 conversion helper used by the backfill migration.
+- `cargo test -p web --lib endpoints::caches::nar::tests` —
+  `resolve_returns_store_hash_for_normalized_derivation_output` is the
+  regression test for the original 404 bug: a narinfo URL hash (nix32)
+  resolves a `derivation_output` row whose `file_hash` is in canonical
+  `sha256:<nix32>` form.
+
 ## Upstream narinfo metadata for worker prefetch
 
 Backend (`cargo test -p proto --lib handler::cache::tests`):

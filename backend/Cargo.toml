@@ -72,8 +72,6 @@ bzip2            = "0.6"
 cache            = { workspace = true }
 clap             = { workspace = true }
 gradient-core    = { path = "core", package = "core" }
-password-auth    = { version = "1.0", features = ["argon2"] }
-rpassword        = "7.4"
 sentry           = { workspace = true }
 tokio            = { workspace = true, features = ["process"] }
 tracing          = { workspace = true }

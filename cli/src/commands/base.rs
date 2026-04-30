@@ -92,6 +92,9 @@ enum MainCommands {
         #[command(subcommand)]
         cmd: generate::Commands,
     },
+    /// Hash a password as an argon2id PHC string for use in
+    /// `services.gradient.state.users.<name>.password_file`.
+    Hash,
 }
 
 pub async fn run_cli() -> std::io::Result<()> {
@@ -251,6 +254,15 @@ pub async fn run_cli() -> std::io::Result<()> {
         MainCommands::Worker { cmd } => worker::handle(cmd).await,
         MainCommands::Cache { cmd } => cache::handle(cmd).await,
         MainCommands::Generate { cmd } => generate::handle(cmd).await,
+        MainCommands::Hash => {
+            let password = ask_for_password();
+            let confirm = ask_for_password();
+            if password != confirm {
+                eprintln!("Passwords did not match.");
+                exit(1);
+            }
+            println!("{}", password_auth::generate_hash(password.as_bytes()));
+        }
     }
 
     exit(0);

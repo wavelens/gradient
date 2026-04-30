@@ -375,6 +375,45 @@ impl StateConfiguration {
     }
 }
 
+pub async fn load_and_apply_state(
+    db: &DatabaseConnection,
+    state_file_path: Option<&str>,
+    crypt_secret_file: &str,
+    delete_state: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(path) = state_file_path else {
+        tracing::info!("No state file configured, skipping state management");
+        return Ok(());
+    };
+
+    println!("Loading state configuration from: {}", path);
+    tracing::info!("Loading state configuration from: {}", path);
+
+    let config = StateConfiguration::from_file(path)?;
+
+    let validation = config.validate();
+    if !validation.is_valid {
+        let error_messages: Vec<String> = validation
+            .errors
+            .iter()
+            .map(|e| format!("{}: {}", e.field, e.message))
+            .collect();
+
+        return Err(format!(
+            "State configuration validation failed:\n{}",
+            error_messages.join("\n")
+        )
+        .into());
+    }
+
+    println!("State configuration validated successfully");
+    tracing::info!("State configuration validated successfully");
+
+    provisioning::apply_state_to_database(db, &config, crypt_secret_file, delete_state).await?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,43 +485,4 @@ mod tests {
         assert!(cfg.caches["main"].description.is_none());
         assert!(cfg.validate().is_valid);
     }
-}
-
-pub async fn load_and_apply_state(
-    db: &DatabaseConnection,
-    state_file_path: Option<&str>,
-    crypt_secret_file: &str,
-    delete_state: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let Some(path) = state_file_path else {
-        tracing::info!("No state file configured, skipping state management");
-        return Ok(());
-    };
-
-    println!("Loading state configuration from: {}", path);
-    tracing::info!("Loading state configuration from: {}", path);
-
-    let config = StateConfiguration::from_file(path)?;
-
-    let validation = config.validate();
-    if !validation.is_valid {
-        let error_messages: Vec<String> = validation
-            .errors
-            .iter()
-            .map(|e| format!("{}: {}", e.field, e.message))
-            .collect();
-
-        return Err(format!(
-            "State configuration validation failed:\n{}",
-            error_messages.join("\n")
-        )
-        .into());
-    }
-
-    println!("State configuration validated successfully");
-    tracing::info!("State configuration validated successfully");
-
-    provisioning::apply_state_to_database(db, &config, crypt_secret_file, delete_state).await?;
-
-    Ok(())
 }

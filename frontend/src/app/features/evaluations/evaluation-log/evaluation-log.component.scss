@@ -55,10 +55,7 @@
 
   .breadcrumb-link {
     color: $text-secondary;
-    padding: 0;
-    background: none;
-    border-radius: 0;
-    &:hover { color: $text-primary; background: none; }
+    &:hover { color: $text-primary; }
   }
   .breadcrumb-sep { color: $text-light; }
   .breadcrumb-cur { color: $text-primary; font-weight: 500; }

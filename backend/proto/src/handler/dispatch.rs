@@ -491,6 +491,7 @@ impl<'a> DispatchContext<'a> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // mirrors the wire-protocol message fields
     async fn on_nar_uploaded(
         &mut self,
         job_id: String,

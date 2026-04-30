@@ -272,14 +272,11 @@ services.gradient.state.users = {
 ```
 
 The password file must contain an **argon2id PHC hash** (a string starting
-with `$argon2id$…`). Generate one with the built-in `hash` subcommand:
+with `$argon2id$…`). Generate one with the `gradient` CLI:
 
 ```sh
-# Interactive: prompts twice without echo, prints the PHC hash
-gradient-server hash > /run/secrets/alice-password
-
-# Non-interactive: pipe the password on stdin
-printf '%s' 'mypassword' | gradient-server hash > /run/secrets/alice-password
+# Prompts for the password twice (without echo) and prints the PHC hash
+gradient hash > /run/secrets/alice-password
 ```
 
 You can also use the standalone `argon2` CLI from `libargon2` if you prefer:

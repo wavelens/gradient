@@ -1070,12 +1070,31 @@ fn parse_password_phc(
     if !phc.starts_with("$argon2") {
         return Err(format!(
             "Password file {} does not contain an argon2 PHC hash (expected to start with `$argon2`). \
-             Generate one with `gradient-server hash` or `argon2 ... -id -e`.",
+             Generate one with `gradient hash` or `argon2 ... -id -e`.",
             path
         )
         .into());
     }
     Ok(phc)
+}
+
+fn derive_public_key(private_key: &str) -> Result<String> {
+    let private_key =
+        PrivateKey::from_openssh(private_key).context("Failed to parse private key")?;
+
+    let public_key = private_key
+        .public_key()
+        .to_openssh()
+        .context("Failed to derive public key")?;
+
+    let key_parts: Vec<&str> = public_key.split_whitespace().collect();
+    let cleaned_key = if key_parts.len() >= 2 {
+        format!("{} {}", key_parts[0], key_parts[1])
+    } else {
+        public_key.to_string()
+    };
+
+    Ok(cleaned_key)
 }
 
 #[cfg(test)]
@@ -1109,23 +1128,4 @@ mod password_phc_tests {
         let err = parse_password_phc(h, "/tmp/p").unwrap_err();
         assert!(err.to_string().contains("argon2"));
     }
-}
-
-fn derive_public_key(private_key: &str) -> Result<String> {
-    let private_key =
-        PrivateKey::from_openssh(private_key).context("Failed to parse private key")?;
-
-    let public_key = private_key
-        .public_key()
-        .to_openssh()
-        .context("Failed to derive public key")?;
-
-    let key_parts: Vec<&str> = public_key.split_whitespace().collect();
-    let cleaned_key = if key_parts.len() >= 2 {
-        format!("{} {}", key_parts[0], key_parts[1])
-    } else {
-        public_key.to_string()
-    };
-
-    Ok(cleaned_key)
 }

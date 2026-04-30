@@ -25,6 +25,7 @@ pub struct UserInfoResponse {
     pub username: String,
     pub name: String,
     pub email: String,
+    pub superuser: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -90,6 +91,7 @@ pub async fn get(
         username: user.username.clone(),
         name: user.name.clone(),
         email: user.email.clone(),
+        superuser: user.superuser,
     };
 
     let res = BaseResponse {

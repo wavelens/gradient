@@ -230,13 +230,13 @@ pub(crate) fn hex_hash_to_nix32(hash: &str) -> String {
     };
 
     if let Some(rest) = hash.strip_prefix("sha256:") {
-        if rest.len() == 64 && rest.chars().all(|c| c.is_ascii_hexdigit()) {
-            if let Ok(bytes) = (0..32)
+        if rest.len() == 64
+            && rest.chars().all(|c| c.is_ascii_hexdigit())
+            && let Ok(bytes) = (0..32)
                 .map(|i| u8::from_str_radix(&rest[i * 2..i * 2 + 2], 16))
                 .collect::<Result<Vec<u8>, _>>()
-            {
-                return format!("sha256:{}", encode(&bytes));
-            }
+        {
+            return format!("sha256:{}", encode(&bytes));
         }
         return hash.to_string();
     }

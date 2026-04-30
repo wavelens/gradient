@@ -50,10 +50,7 @@ pub fn issue_state(store: &ManifestStateStore) -> String {
 /// not expired. One-shot consumption.
 pub fn validate_and_consume(store: &ManifestStateStore, state: &str) -> bool {
     let mut guard = store.lock().expect("manifest state store poisoned");
-    match guard.remove(state) {
-        Some(ts) if ts > Instant::now() - STATE_TTL => true,
-        _ => false,
-    }
+    matches!(guard.remove(state), Some(ts) if ts > Instant::now() - STATE_TTL)
 }
 
 /// Stores `creds` keyed by `user_id`, overwriting any prior entry. Prunes
