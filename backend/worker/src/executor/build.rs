@@ -115,6 +115,7 @@ impl ParsedDerivation {
         opts.verbose_build = Verbosity::Talkative;
         opts.verbosity = Verbosity::Notice;
         opts.use_substitutes = false;
+        opts.build_cores = 0;
 
         if let Err(e) = guard.client().set_options(&opts).await {
             let corrupt = is_connection_corrupt(&e);
