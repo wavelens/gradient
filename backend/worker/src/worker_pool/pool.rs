@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::nix::eval_worker::{EvalRequest, EvalResponse, ResolvedItem};
 
@@ -95,7 +95,10 @@ impl EvalWorker {
             anyhow::bail!("eval worker closed pipe");
         }
 
-        serde_json::from_str(self.line.trim_end()).context("parsing eval worker response")
+        serde_json::from_str(self.line.trim_end()).map_err(|e| {
+            error!("Failed to parse JSON. Raw input: |{}|", self.line.trim_end());
+            e
+        }).context("parsing eval worker response")
     }
 
     pub(super) async fn list(
