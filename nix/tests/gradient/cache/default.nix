@@ -25,6 +25,10 @@ in {
       virtualisation = {
         cores = 4;
         memorySize = 2048;
+        # Default 1024 MB diskSize is too small once the full hello build
+        # closure (built outputs of stdenv/gcc/glibc/coreutils/…) is staged
+        # into the VM via `additionalPaths` on the builder node.
+        diskSize = 8192;
         writableStore = true;
       };
       documentation.enable = false;
