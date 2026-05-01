@@ -28,8 +28,8 @@ impl RecordingCiReporter {
 
 #[async_trait]
 impl CiReporter for RecordingCiReporter {
-    async fn report(&self, report: &CiReport) -> Result<()> {
+    async fn report(&self, report: &CiReport) -> Result<Option<i64>> {
         self.calls.lock().unwrap().push(report.clone());
-        Ok(())
+        Ok(None)
     }
 }

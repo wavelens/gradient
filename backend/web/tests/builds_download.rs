@@ -156,6 +156,7 @@ fn evaluation_row() -> entity::evaluation::Model {
         created_at: test_date(),
         updated_at: test_date(),
         flake_source: None,
+        repo_check_id: None,
     }
 }
 

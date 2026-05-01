@@ -63,6 +63,7 @@ fn make_eval(id: Uuid, status: EvaluationStatus) -> MEvaluation {
         created_at: test_date(),
         updated_at: test_date(),
         flake_source: None,
+        repo_check_id: None,
     }
 }
 
@@ -194,6 +195,7 @@ fn make_eval_with_project(id: Uuid, project_id: Uuid, status: EvaluationStatus) 
         created_at: test_date(),
         updated_at: test_date(),
         flake_source: None,
+        repo_check_id: None,
     }
 }
 
@@ -2055,6 +2057,7 @@ async fn eval_result_creates_entry_points_for_project() {
             build: build_id,
             eval: "packages.x86_64-linux.hello".into(),
             created_at: test_date(),
+            repo_check_id: None,
         }]])
         // 8. find project (for GC)
         .append_query_results([vec![make_project(project_id, org_id)]])
@@ -2307,6 +2310,7 @@ async fn eval_result_all_substituted_with_project_completes() {
             build: build_id,
             eval: "packages.x86_64-linux.hello".into(),
             created_at: test_date(),
+            repo_check_id: None,
         }]])
         // 8. find project (for GC)
         .append_query_results([vec![make_project(project_id, org_id)]])

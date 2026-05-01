@@ -47,6 +47,7 @@ pub struct Model {
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
     pub flake_source: Option<String>,
+    pub repo_check_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

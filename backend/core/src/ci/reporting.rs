@@ -12,7 +12,8 @@ use crate::types::input::vec_to_hex;
 use crate::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::ActiveValue::Set;
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use std::sync::Arc;
 use tracing::{error, warn};
 
@@ -41,10 +42,11 @@ pub fn ci_status_for_evaluation(status: &EvaluationStatus) -> Option<CiStatus> {
 /// reported once at evaluation time.
 pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
     match status {
+        BuildStatus::Building => Some(CiStatus::Running),
         BuildStatus::Completed | BuildStatus::Substituted => Some(CiStatus::Success),
         BuildStatus::Failed | BuildStatus::DependencyFailed => Some(CiStatus::Failure),
         BuildStatus::Aborted => Some(CiStatus::Error),
-        BuildStatus::Created | BuildStatus::Queued | BuildStatus::Building => None,
+        BuildStatus::Created | BuildStatus::Queued => None,
     }
 }
 
@@ -148,9 +150,23 @@ pub async fn report_build_ci(state: Arc<ServerState>, build: MBuild, status: CiS
             status: status.clone(),
             description: None,
             details_url: details_url.clone(),
+            existing_check_id: ep.repo_check_id,
         };
-        if let Err(e) = reporter.report(&report).await {
-            warn!(error = format!("{e:#}"), eval = %ep.eval, build_id = %build.id, "Build CI status report failed");
+        match reporter.report(&report).await {
+            Ok(Some(new_id)) => {
+                let mut a = ep.clone().into_active_model();
+                a.repo_check_id = Set(Some(new_id));
+                if let Err(e) = a.update(&state.db).await {
+                    warn!(error = %e, eval = %ep.eval, "Failed to persist entry_point check_run id");
+                }
+            }
+            Ok(None) => {}
+            Err(e) => warn!(
+                error = format!("{e:#}"),
+                eval = %ep.eval,
+                build_id = %build.id,
+                "Build CI status report failed"
+            ),
         }
     }
 }
@@ -231,10 +247,19 @@ pub async fn report_evaluation_ci(
         status,
         description: None,
         details_url,
+        existing_check_id: evaluation.repo_check_id,
     };
 
-    if let Err(e) = reporter.report(&report).await {
-        warn!(error = %e, evaluation_id = %evaluation.id, "Evaluation CI status report failed");
+    match reporter.report(&report).await {
+        Ok(Some(new_id)) => {
+            let mut a = evaluation.clone().into_active_model();
+            a.repo_check_id = Set(Some(new_id));
+            if let Err(e) = a.update(&state.db).await {
+                warn!(error = %e, evaluation_id = %evaluation.id, "Failed to persist evaluation check_run id");
+            }
+        }
+        Ok(None) => {}
+        Err(e) => warn!(error = format!("{e:#}"), evaluation_id = %evaluation.id, "Evaluation CI status report failed"),
     }
 }
 
@@ -284,13 +309,17 @@ mod tests {
 
     #[test]
     fn skips_intermediate_build_states() {
-        for s in [
-            BuildStatus::Created,
-            BuildStatus::Queued,
-            BuildStatus::Building,
-        ] {
+        for s in [BuildStatus::Created, BuildStatus::Queued] {
             assert_eq!(ci_status_for_build(&s), None);
         }
+    }
+
+    #[test]
+    fn maps_building_to_running() {
+        assert_eq!(
+            ci_status_for_build(&BuildStatus::Building),
+            Some(CiStatus::Running)
+        );
     }
 
     #[test]
