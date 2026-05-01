@@ -1,0 +1,4 @@
+<div class="message-banner" [class]="'message-banner--' + type()" role="status">
+  <span class="material-symbols-outlined">{{ resolvedIcon() }}</span>
+  <span class="message-banner__content"><ng-content></ng-content></span>
+</div>

@@ -1,0 +1,40 @@
+<p-dialog
+  [header]="title()"
+  [(visible)]="visible"
+  [modal]="true"
+  [style]="{ width: width() }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <div class="form-dialog__content">
+    <ng-content></ng-content>
+  </div>
+  <ng-template pTemplate="footer">
+    <button
+      pButton
+      [label]="cancelLabel()"
+      severity="secondary"
+      (click)="onCancel()"
+      [disabled]="loading()"
+    ></button>
+    @if (submitIcon() || submitSeverity()) {
+      <button
+        pButton
+        [label]="submitLabel()"
+        [icon]="submitIcon() ?? ''"
+        [severity]="$any(submitSeverity())"
+        (click)="onSubmit()"
+        [loading]="loading()"
+        [disabled]="loading() || disabled()"
+      ></button>
+    } @else {
+      <button
+        pButton
+        [label]="submitLabel()"
+        (click)="onSubmit()"
+        [loading]="loading()"
+        [disabled]="loading() || disabled()"
+      ></button>
+    }
+  </ng-template>
+</p-dialog>

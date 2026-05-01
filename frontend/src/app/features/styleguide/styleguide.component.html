@@ -1,0 +1,473 @@
+<div class="styleguide">
+  <aside class="styleguide__toc">
+    <div class="styleguide__toc-inner">
+      <h2>Style Guide</h2>
+      <nav>
+        <ul>
+          @for (item of toc; track item.id) {
+            <li><a [href]="'#' + item.id">{{ item.label }}</a></li>
+          }
+        </ul>
+      </nav>
+    </div>
+  </aside>
+
+  <main class="styleguide__content">
+    <header class="styleguide__hero">
+      <h1>Gradient Style Guide</h1>
+      <p class="text-secondary">
+        Reference for colors, typography, components, and form primitives. Use this page to find
+        the right primitive before reinventing one in a feature.
+      </p>
+    </header>
+
+    <!-- ─── Colors ─── -->
+    <section id="colors" class="sg-section">
+      <h2>Colors</h2>
+      @for (group of [
+        { title: 'Base', items: baseColors },
+        { title: 'Theme', items: themeColors },
+        { title: 'UI', items: uiColors },
+        { title: 'Semantic', items: semanticColors },
+        { title: 'Graph / Badge', items: graphColors },
+        { title: 'Text', items: textColors },
+      ]; track group.title) {
+        <h3>{{ group.title }}</h3>
+        <div class="sg-swatches">
+          @for (c of group.items; track c.name) {
+            <button class="sg-swatch" type="button" (click)="copyHex(c.hex)" [title]="'Copy ' + c.hex">
+              <span class="sg-swatch__chip" [style.background-color]="c.hex"></span>
+              <span class="sg-swatch__name">{{ c.name }}</span>
+              <span class="sg-swatch__hex">{{ c.hex }}</span>
+            </button>
+          }
+        </div>
+      }
+    </section>
+
+    <!-- ─── Typography ─── -->
+    <section id="typography" class="sg-section">
+      <h2>Typography</h2>
+
+      <h3>Families</h3>
+      <div class="sg-stack">
+        <p style="font-family: Arial, sans-serif">Base — Arial, sans-serif</p>
+        <p style="font-family: 'Space Mono', monospace">Mono — 'Space Mono', monospace</p>
+        <p><span class="material-symbols-outlined">star</span> Icons — Material Symbols Outlined</p>
+      </div>
+
+      <h3>Sizes</h3>
+      <div class="sg-stack">
+        @for (s of fontSizes; track s.name) {
+          <p [style.font-size]="s.size">
+            <span class="text-secondary">{{ s.name }}</span> · {{ s.size }} · The quick brown fox.
+          </p>
+        }
+      </div>
+
+      <h3>Headings</h3>
+      <h1>Heading 1</h1>
+      <h2>Heading 2</h2>
+      <h3>Heading 3</h3>
+      <h4>Heading 4</h4>
+      <h5>Heading 5</h5>
+      <h6>Heading 6</h6>
+
+      <h3>Inline</h3>
+      <p>
+        Body text with a <a href="#">link</a>, <strong>strong</strong>, <em>emphasis</em>, and
+        <code>inline-code</code>.
+      </p>
+    </section>
+
+    <!-- ─── Spacing & Radius ─── -->
+    <section id="spacing" class="sg-section">
+      <h2>Spacing &amp; Radius</h2>
+
+      <h3>Spacing</h3>
+      <div class="sg-stack">
+        @for (s of spacings; track s.name) {
+          <div class="sg-spacing-row">
+            <span class="sg-spacing-bar" [style.width]="s.size"></span>
+            <span class="text-secondary">{{ s.name }}</span>
+            <span>{{ s.size }}</span>
+          </div>
+        }
+      </div>
+
+      <h3>Border radius</h3>
+      <div class="sg-radii">
+        @for (r of radii; track r.name) {
+          <div class="sg-radius">
+            <div class="sg-radius__box" [style.border-radius]="r.size"></div>
+            <span class="text-secondary">{{ r.name }}</span>
+            <span>{{ r.size }}</span>
+          </div>
+        }
+      </div>
+    </section>
+
+    <!-- ─── Icons ─── -->
+    <section id="icons" class="sg-section">
+      <h2>Icons</h2>
+
+      <h3>Material Symbols</h3>
+      <div class="sg-icons">
+        @for (i of materialIcons; track i) {
+          <div class="sg-icon">
+            <span class="material-symbols-outlined">{{ i }}</span>
+            <span class="sg-icon__name">{{ i }}</span>
+          </div>
+        }
+      </div>
+
+      <h3>PrimeIcons</h3>
+      <div class="sg-icons">
+        @for (i of primeIcons; track i) {
+          <div class="sg-icon">
+            <i class="pi" [class]="i"></i>
+            <span class="sg-icon__name">{{ i }}</span>
+          </div>
+        }
+      </div>
+    </section>
+
+    <!-- ─── Buttons ─── -->
+    <section id="buttons" class="sg-section">
+      <h2>Buttons</h2>
+
+      <h3>Severities</h3>
+      <div class="sg-row">
+        <button pButton label="Primary"></button>
+        <button pButton label="Secondary" severity="secondary"></button>
+        <button pButton label="Success" severity="success"></button>
+        <button pButton label="Danger" severity="danger"></button>
+        <button pButton label="Warn" severity="warn"></button>
+        <button pButton label="Info" severity="info"></button>
+        <button pButton label="Help" severity="help"></button>
+      </div>
+
+      <h3>Variants</h3>
+      <div class="sg-row">
+        <button pButton label="With icon" icon="pi pi-plus"></button>
+        <button pButton icon="pi pi-trash" severity="danger" aria-label="Delete"></button>
+        <button pButton label="Text" [text]="true"></button>
+        <button pButton label="Outlined" [outlined]="true"></button>
+        <button pButton label="Rounded" [rounded]="true"></button>
+      </div>
+
+      <h3>States</h3>
+      <div class="sg-row">
+        <button pButton label="Default"></button>
+        <button pButton label="Disabled" [disabled]="true"></button>
+        <button pButton label="Loading" [loading]="true"></button>
+      </div>
+    </section>
+
+    <!-- ─── Form Primitives ─── -->
+    <section id="form-primitives" class="sg-section">
+      <h2>Form Primitives</h2>
+      <p class="text-secondary">
+        Reusable components under <code>shared/components/form/</code>. Use these instead of
+        rebuilding label + input + error markup per feature.
+      </p>
+
+      <h3>Live demo</h3>
+      <div class="sg-card">
+        <form [formGroup]="demoForm" (ngSubmit)="submitDemoForm()">
+          <gr-form-field
+            label="Name"
+            for="sg-name"
+            [required]="true"
+            [control]="demoForm.controls['name']"
+            hint="At least 3 characters."
+          >
+            <input pInputText id="sg-name" formControlName="name" class="w-full" />
+          </gr-form-field>
+
+          <gr-form-field
+            label="Email"
+            for="sg-email"
+            [required]="true"
+            [control]="demoForm.controls['email']"
+          >
+            <input pInputText id="sg-email" type="email" formControlName="email" class="w-full" />
+          </gr-form-field>
+
+          <gr-form-field
+            label="Password"
+            for="sg-pass"
+            [required]="true"
+            [control]="demoForm.controls['password']"
+            hint="Must include upper, lower, digit and 8+ chars."
+          >
+            <gr-password-input
+              id="sg-pass"
+              [control]="$any(demoForm.controls['password'])"
+              autocomplete="new-password"
+            />
+          </gr-form-field>
+
+          <gr-form-field
+            label="Confirm Password"
+            for="sg-confirm"
+            [required]="true"
+            [control]="demoForm.controls['confirm']"
+          >
+            <gr-password-input
+              id="sg-confirm"
+              [control]="$any(demoForm.controls['confirm'])"
+              autocomplete="new-password"
+            />
+          </gr-form-field>
+
+          <gr-form-field
+            label="Role"
+            for="sg-role"
+            [control]="demoForm.controls['role']"
+          >
+            <p-select
+              inputId="sg-role"
+              [options]="roles"
+              optionLabel="label"
+              optionValue="value"
+              formControlName="role"
+              styleClass="w-full"
+            />
+          </gr-form-field>
+
+          <gr-form-field
+            label="Bio"
+            for="sg-bio"
+            [control]="demoForm.controls['bio']"
+            hint="Max 200 characters."
+          >
+            <textarea pTextarea id="sg-bio" formControlName="bio" rows="3" class="w-full"></textarea>
+          </gr-form-field>
+
+          <gr-form-field [control]="demoForm.controls['accept']">
+            <label class="sg-check">
+              <p-checkbox formControlName="accept" [binary]="true" />
+              <span>Accept terms</span>
+            </label>
+          </gr-form-field>
+
+          <div class="gr-form-actions">
+            <button pButton type="submit" label="Submit"></button>
+            <button pButton type="button" label="Reset" severity="secondary" (click)="demoForm.reset()"></button>
+          </div>
+        </form>
+
+        @if (demoForm_submitted()) {
+          <gr-message-banner type="success">
+            Submitted: <code>{{ demoForm_submitted() | json }}</code>
+          </gr-message-banner>
+        }
+      </div>
+
+      <h3>Message Banners</h3>
+      <gr-message-banner type="error">Something went wrong. Please try again.</gr-message-banner>
+      <gr-message-banner type="success">Changes saved successfully.</gr-message-banner>
+      <gr-message-banner type="warning">This action is irreversible.</gr-message-banner>
+      <gr-message-banner type="info">Heads up: this account is managed declaratively.</gr-message-banner>
+    </section>
+
+    <!-- ─── Popups & Overlays ─── -->
+    <section id="popups" class="sg-section">
+      <h2>Popups &amp; Overlays</h2>
+
+      <div class="sg-row">
+        <button pButton label="Open form dialog" icon="pi pi-pencil" (click)="openDialog()"></button>
+        <button pButton label="Confirm delete" severity="danger" icon="pi pi-trash" (click)="confirmDelete()"></button>
+        <button pButton label="Toast: success" severity="success" (click)="toast('success', 'Saved', 'Looking good.')"></button>
+        <button pButton label="Toast: error" severity="danger" (click)="toast('error', 'Failed', 'Could not save.')"></button>
+        <button pButton label="Toast: info" severity="info" (click)="toast('info', 'FYI', 'Just an info note.')"></button>
+        <button pButton label="Toast: warn" severity="warn" (click)="toast('warn', 'Heads up', 'Be careful.')"></button>
+        <button pButton label="Hover for tooltip" pTooltip="Tooltip content" tooltipPosition="top"></button>
+      </div>
+
+      <gr-form-dialog
+        [(visible)]="dialogVisible"
+        title="Edit label"
+        submitLabel="Save"
+        [loading]="dialogLoading()"
+        [disabled]="dialogForm.invalid"
+        (submit)="submitDialog()"
+      >
+        <form [formGroup]="dialogForm">
+          <gr-form-field
+            label="Label"
+            for="sg-dlg-label"
+            [required]="true"
+            [control]="dialogForm.controls['label']"
+          >
+            <input pInputText id="sg-dlg-label" formControlName="label" class="w-full" />
+          </gr-form-field>
+        </form>
+      </gr-form-dialog>
+
+      <p-confirmDialog />
+      <p-toast />
+    </section>
+
+    <!-- ─── Feedback ─── -->
+    <section id="feedback" class="sg-section">
+      <h2>Feedback</h2>
+
+      <h3>Loading spinner</h3>
+      <div class="sg-card">
+        <app-loading-spinner message="Loading…" />
+      </div>
+
+      <h3>Empty state</h3>
+      <div class="sg-card">
+        <app-empty-state
+          icon="inbox"
+          title="No items yet"
+          message="Create your first item to get started."
+          actionLabel="Create item"
+        />
+      </div>
+
+      <h3>Stat cards</h3>
+      <div class="gr-grid-stats">
+        <app-stat-card icon="folder" [value]="42" label="Projects" />
+        <app-stat-card icon="check_circle" [value]="128" label="Builds" />
+        <app-stat-card icon="warning" [value]="3" label="Failures" />
+        <app-stat-card icon="bolt" value="98%" label="Cache hit" />
+      </div>
+
+      <h3>Status chips</h3>
+      <div class="sg-row">
+        <span class="status-chip status-ok">Configured</span>
+        <span class="status-chip status-warn">Not set</span>
+      </div>
+
+      <h3>Badges</h3>
+      <div class="sg-row">
+        <span class="badge">default</span>
+        <span class="badge badge-inbound">inbound</span>
+        <span class="badge badge-outbound">outbound</span>
+      </div>
+    </section>
+
+    <!-- ─── Tables & Lists ─── -->
+    <section id="tables" class="sg-section">
+      <h2>Tables &amp; Lists</h2>
+
+      <h3>Table</h3>
+      <table class="sg-table">
+        <thead>
+          <tr><th>Name</th><th>Status</th><th>Updated</th></tr>
+        </thead>
+        <tbody>
+          @for (r of sampleRows; track r.id) {
+            <tr>
+              <td>{{ r.name }}</td>
+              <td>{{ r.status }}</td>
+              <td>{{ r.updated }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+
+      <h3>List rows (gr-grid-rows)</h3>
+      <div class="sg-card">
+        @for (r of sampleRows; track r.id) {
+          <div class="gr-grid-rows sg-row-item">
+            <span><strong>{{ r.name }}</strong></span>
+            <span class="text-secondary">{{ r.status }}</span>
+            <button pButton icon="pi pi-cog" severity="secondary" aria-label="Settings"></button>
+          </div>
+        }
+      </div>
+
+      <h3>Breadcrumb</h3>
+      <nav class="breadcrumb">
+        <a class="breadcrumb-link" href="#">Home</a>
+        <span class="text-secondary"> / </span>
+        <a class="breadcrumb-link" href="#">Organization</a>
+        <span class="text-secondary"> / </span>
+        <span>Settings</span>
+      </nav>
+    </section>
+
+    <!-- ─── Grids ─── -->
+    <section id="grids" class="sg-section">
+      <h2>Grids</h2>
+      <p class="text-secondary">
+        Utility classes from <code>app/styles/_grids.scss</code>.
+      </p>
+
+      <h3>.gr-grid-stats</h3>
+      <div class="gr-grid-stats">
+        <app-stat-card icon="folder" [value]="12" label="A" />
+        <app-stat-card icon="folder" [value]="34" label="B" />
+        <app-stat-card icon="folder" [value]="56" label="C" />
+        <app-stat-card icon="folder" [value]="78" label="D" />
+      </div>
+
+      <h3>.gr-grid-form</h3>
+      <div class="sg-card">
+        <div class="gr-grid-form">
+          <gr-form-field label="First"><input pInputText class="w-full" /></gr-form-field>
+          <gr-form-field label="Last"><input pInputText class="w-full" /></gr-form-field>
+          <gr-form-field label="Email" class="gr-grid-form__full">
+            <input pInputText class="w-full" />
+          </gr-form-field>
+        </div>
+      </div>
+
+      <h3>.gr-grid-cards</h3>
+      <div class="gr-grid-cards">
+        @for (n of [1,2,3,4,5,6]; track n) {
+          <div class="sg-mini-card">Card {{ n }}</div>
+        }
+      </div>
+
+      <h3>.gr-grid-rows</h3>
+      <div class="sg-card">
+        <div class="gr-grid-rows sg-row-item">
+          <span>Label</span><span>Value</span>
+          <button pButton label="Action" severity="secondary"></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Layouts ─── -->
+    <section id="layouts" class="sg-section">
+      <h2>Layouts</h2>
+      <p class="text-secondary">
+        Layout primitives under <code>shared/components/layout/</code>. Replaces the per-feature
+        page-header + settings-section + settings-card SCSS scattered across settings pages.
+      </p>
+
+      <h3>gr-page-layout + gr-settings-section</h3>
+      <div class="sg-card sg-card--flush">
+        <gr-page-layout title="Profile Settings" subtitle="Manage your personal information">
+          <button slot="actions" pButton label="Save" icon="pi pi-check"></button>
+
+          <gr-message-banner slot="banner" type="info">
+            This account is managed declaratively.
+          </gr-message-banner>
+
+          <gr-settings-section title="Personal Information" description="Public profile details.">
+            <gr-form-field label="Username" for="lay-uname">
+              <input pInputText id="lay-uname" class="w-full" value="john" />
+            </gr-form-field>
+            <gr-form-field label="Email" for="lay-email">
+              <input pInputText id="lay-email" class="w-full" value="john@example.com" />
+            </gr-form-field>
+          </gr-settings-section>
+
+          <gr-settings-section title="Preferences" [card]="false">
+            <p class="text-secondary">
+              Sections can be card-less when content has its own surface.
+            </p>
+          </gr-settings-section>
+        </gr-page-layout>
+      </div>
+    </section>
+
+  </main>
+</div>

@@ -1,0 +1,315 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../styles/variables' as *;
+
+:host {
+  display: block;
+  width: 100%;
+}
+
+.styleguide {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: $spacing-lg;
+  gap: $spacing-xl;
+
+  @media (max-width: $breakpoint-md) {
+    grid-template-columns: 1fr;
+  }
+
+  &__toc {
+    @media (max-width: $breakpoint-md) {
+      position: relative;
+    }
+  }
+
+  &__toc-inner {
+    position: sticky;
+    top: $spacing-lg;
+
+    h2 {
+      margin: 0 0 $spacing-md 0;
+      font-size: $font-size-md;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: $text-secondary;
+    }
+
+    nav ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+
+      li a {
+        display: block;
+        padding: $spacing-xs $spacing-sm;
+        color: $text-secondary;
+        text-decoration: none;
+        border-radius: $border-radius-sm;
+        font-size: $font-size-sm;
+
+        &:hover {
+          color: $text-primary;
+          background: $color-hover;
+        }
+      }
+    }
+  }
+
+  &__hero {
+    margin-bottom: $spacing-xxl;
+    padding-bottom: $spacing-lg;
+    border-bottom: 1px solid $color-border;
+
+    h1 {
+      margin: 0 0 $spacing-sm 0;
+      font-size: $font-size-xxl;
+    }
+
+    p { margin: 0; }
+  }
+}
+
+.sg-section {
+  margin-bottom: $spacing-xxl * 1.5;
+  scroll-margin-top: $spacing-lg;
+
+  h2 {
+    margin: 0 0 $spacing-lg 0;
+    font-size: $font-size-xl;
+    border-bottom: 1px solid $color-border;
+    padding-bottom: $spacing-sm;
+  }
+
+  h3 {
+    margin: $spacing-lg 0 $spacing-md 0;
+    font-size: $font-size-md;
+    color: $text-secondary;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+}
+
+.sg-stack > * + * {
+  margin-top: $spacing-sm;
+}
+
+.sg-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-sm;
+  align-items: center;
+}
+
+.sg-card {
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+  padding: $spacing-lg;
+  margin-bottom: $spacing-md;
+
+  &--flush {
+    padding: 0;
+  }
+}
+
+// ── Color swatches ─────────────────────────────────────────────────────────
+.sg-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: $spacing-sm;
+  margin-bottom: $spacing-md;
+}
+
+.sg-swatch {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  align-items: center;
+  gap: $spacing-sm;
+  padding: $spacing-sm;
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  cursor: pointer;
+  text-align: left;
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+  color: $text-primary;
+
+  &:hover {
+    background: $color-hover;
+  }
+
+  &__chip {
+    width: 40px;
+    height: 40px;
+    border-radius: $border-radius-sm;
+    border: 1px solid $color-border;
+  }
+
+  &__hex {
+    color: $text-secondary;
+  }
+}
+
+// ── Spacing ────────────────────────────────────────────────────────────────
+.sg-spacing-row {
+  display: grid;
+  grid-template-columns: 60px 200px 1fr;
+  align-items: center;
+  gap: $spacing-md;
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+}
+
+.sg-spacing-bar {
+  display: inline-block;
+  height: 16px;
+  background: $color-secondary;
+  border-radius: $border-radius-sm;
+}
+
+.sg-radii {
+  display: flex;
+  flex-wrap: wrap;
+  gap: $spacing-md;
+}
+
+.sg-radius {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: $spacing-xs;
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+
+  &__box {
+    width: 60px;
+    height: 60px;
+    background: $color-secondary;
+  }
+}
+
+// ── Icons ──────────────────────────────────────────────────────────────────
+.sg-icons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: $spacing-sm;
+}
+
+.sg-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: $spacing-xs;
+  padding: $spacing-sm;
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  font-family: $font-family-mono;
+  font-size: $font-size-xs;
+
+  .material-symbols-outlined,
+  .pi {
+    font-size: 24px;
+    color: $text-primary;
+  }
+
+  &__name {
+    color: $text-secondary;
+    text-align: center;
+    word-break: break-all;
+  }
+}
+
+// ── Tables ─────────────────────────────────────────────────────────────────
+.sg-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+  overflow: hidden;
+
+  th, td {
+    padding: $spacing-sm $spacing-md;
+    text-align: left;
+    border-bottom: 1px solid $color-border;
+  }
+
+  thead {
+    background: $color-quaternary;
+  }
+
+  tbody tr:hover {
+    background: $color-hover;
+  }
+}
+
+.sg-row-item + .sg-row-item {
+  border-top: 1px solid $color-border;
+  padding-top: $spacing-sm;
+  margin-top: $spacing-sm;
+}
+
+// ── Status chips & badges (locally inlined since not yet global) ───────────
+.status-chip {
+  display: inline-block;
+  padding: 2px $spacing-sm;
+  border-radius: $border-radius-sm;
+  font-size: $font-size-xs;
+  border: 1px solid $color-border;
+
+  &.status-ok {
+    color: $color-success;
+    border-color: $color-success;
+  }
+
+  &.status-warn {
+    color: $color-warning;
+    border-color: $color-warning;
+  }
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px $spacing-sm;
+  border-radius: 999px;
+  background: $color-quaternary;
+  border: 1px solid $color-border;
+  color: $text-secondary;
+  font-size: $font-size-xs;
+
+  &-inbound { color: $color-graph-running; border-color: $color-graph-running; }
+  &-outbound { color: $color-graph-warning; border-color: $color-graph-warning; }
+}
+
+// ── Mini cards (grid demo) ─────────────────────────────────────────────────
+.sg-mini-card {
+  background: $color-tertiary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-md;
+  padding: $spacing-lg;
+  text-align: center;
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+  color: $text-secondary;
+}
+
+.sg-check {
+  display: inline-flex;
+  align-items: center;
+  gap: $spacing-sm;
+  font-weight: normal;
+  cursor: pointer;
+}
+
+.w-full {
+  width: 100%;
+}

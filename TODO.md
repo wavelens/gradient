@@ -14,4 +14,6 @@
  - no error message and recommendation when adding internal cache
  - entry point metrics for builds that are completed but the eval is still running wont show up.
  - peerFile wildcard does not work "*:[token]"
+ - "Created" state has no colored dot in the log page
+ - the builds text name should cutoff with ... when to long for the sidebar
 
