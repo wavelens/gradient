@@ -20,7 +20,7 @@ use proto::messages::{FlakeJob, FlakeSource};
 use proto::traits::JobReporter;
 use tempfile::NamedTempFile;
 use tokio::sync::watch;
-use tracing::{debug, info};
+use tracing::{debug, info, trace};
 
 use crate::proto::credentials::CredentialStore;
 
@@ -165,6 +165,7 @@ async fn archive_flake(
 ) -> Result<(String, Vec<String>)> {
     use std::os::unix::fs::PermissionsExt;
 
+    trace!(binpath_nix, flake_ref, "executing nix flake archive");
     let mut cmd = tokio::process::Command::new(binpath_nix);
     cmd.args(["flake", "archive", "--json", flake_ref]);
     cmd.stdout(std::process::Stdio::piped());
@@ -266,6 +267,7 @@ async fn query_path_info(
         return Ok(vec![]);
     }
 
+    trace!(binpath_nix, count = paths.len(), "executing nix path-info");
     let mut cmd = tokio::process::Command::new(binpath_nix);
     cmd.arg("path-info").arg("--json");
     cmd.stdout(std::process::Stdio::piped());

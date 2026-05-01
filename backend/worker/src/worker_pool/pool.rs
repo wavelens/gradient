@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tracing::{debug, error};
+use tracing::{debug, error, trace, warn};
 
 use crate::nix::eval_worker::{EvalRequest, EvalResponse, ResolvedItem};
 
@@ -36,7 +36,8 @@ impl EvalWorker {
     /// Spawn a new worker by re-execing the current binary with `--eval-worker`.
     pub(super) async fn spawn() -> Result<Self> {
         let exe = std::env::current_exe().context("locating current executable")?;
-        let mut child = Command::new(exe)
+        trace!(exe = %exe.display(), "spawning eval worker subprocess");
+        let mut child = Command::new(&exe)
             .arg("--eval-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -72,6 +73,7 @@ impl EvalWorker {
     /// no longer usable (the caller marks it dead so it gets discarded
     /// instead of being returned to the pool).
     async fn request(&mut self, req: &EvalRequest) -> Result<EvalResponse> {
+        trace!(pid = self.child.id(), ?req, "sending eval worker request");
         let mut bytes = serde_json::to_vec(req).context("serializing request")?;
         bytes.push(b'\n');
         self.stdin
@@ -95,6 +97,7 @@ impl EvalWorker {
             anyhow::bail!("eval worker closed pipe");
         }
 
+        trace!(pid = self.child.id(), bytes = n, "received eval worker response");
         serde_json::from_str(self.line.trim_end()).inspect_err(|_| {
             error!("Failed to parse JSON. Raw input: |{}|", self.line.trim_end());
         }).context("parsing eval worker response")
@@ -116,6 +119,41 @@ impl EvalWorker {
             EvalResponse::ListOk { attrs, warnings } => Ok((attrs, warnings)),
             EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
             _ => anyhow::bail!("eval worker: unexpected response to List"),
+        }
+    }
+
+    /// Send a `Shutdown` request and wait briefly for the child to exit.
+    /// Used when the parent is recycling a still-healthy worker so the
+    /// subprocess can run libnix's atexit handlers (flush eval-cache
+    /// SQLite, release locks, drop temp roots) instead of being SIGKILL'd
+    /// by `kill_on_drop`.
+    async fn shutdown(mut self) {
+        let pid = self.child.id();
+        trace!(pid, "sending Shutdown to eval worker");
+        let mut bytes = match serde_json::to_vec(&EvalRequest::Shutdown) {
+            Ok(b) => b,
+            Err(e) => {
+                warn!(pid, "failed to serialize Shutdown request: {e}");
+                return;
+            }
+        };
+        bytes.push(b'\n');
+        if let Err(e) = self.stdin.write_all(&bytes).await {
+            debug!(pid, "failed to write Shutdown to eval worker: {e}");
+            return;
+        }
+        let _ = self.stdin.flush().await;
+        drop(self.stdin);
+        trace!(pid, "Shutdown sent; waiting for eval worker to exit");
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.child.wait(),
+        )
+        .await
+        {
+            Ok(Ok(status)) => trace!(pid, ?status, "eval worker exited cleanly"),
+            Ok(Err(e)) => debug!(pid, "waiting on eval worker exit: {e}"),
+            Err(_) => warn!(pid, "eval worker did not exit within 5s of Shutdown; will be killed"),
         }
     }
 
@@ -248,6 +286,16 @@ impl Drop for PooledEvalWorker {
                     evaluations = worker.evaluations_served,
                     "recycling eval worker (max evaluations reached)"
                 );
+                if self.healthy {
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        trace!("scheduling graceful shutdown of eval worker");
+                        handle.spawn(async move {
+                            worker.shutdown().await;
+                        });
+                        return;
+                    }
+                    trace!("no tokio runtime available; killing eval worker via Drop");
+                }
                 drop(worker);
                 return;
             }

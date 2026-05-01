@@ -4,7 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-{ self, pkgs, ... }: {
+{ self, pkgs, ... }: let
+  # Bundles `pkgs.hello`'s full closure (`.drv` files, source tarballs, AND
+  # directory outputs of every transitive build dep) at their canonical
+  # /nix/store paths.  Used so the worker's BFS finds every derivation as
+  # already substituted and never dispatches a source-fetch or compile job.
+  # `skipDirectories = false` overrides the default flat-files-only mode
+  # used by the Rust fixture loader.
+  testStore = import ../../../scripts/store.nix {
+    inherit pkgs;
+    skipDirectories = false;
+  };
+in {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     name = "gradient-cache";
     globalTimeout = 1800;
@@ -179,11 +190,12 @@
       builder = { config, pkgs, lib, ... }: {
         imports = [ ../../../modules/gradient-worker.nix ];
 
-        # Pre-seed the synthetic derivation's build closure (`coreutils` and
-        # `bash` from `/bin/sh`) into the worker's local store. The test VM
-        # has no internet access, so anything not already present here would
-        # fail to fetch and break every build.
-        environment.systemPackages = with pkgs; [ coreutils bash ];
+        # Ship hello's full build closure (`.drv` files, sources, and every
+        # transitive output directory) into the worker VM's nix store, so
+        # every derivation the worker walks is already substituted.  Without
+        # this the worker would try to fetch tarballs from the internet —
+        # which the test VM cannot reach — and every build would fail.
+        virtualisation.additionalPaths = [ testStore ];
 
         nix.settings = {
           trusted-users = [
@@ -370,7 +382,10 @@
           j = server.succeed("journalctl -u gradient-server --no-pager --since='-900s' -n 200")
           raise Exception(f"Evaluation did not complete after 900 s:\n{j[-2000:]}")
 
-      output = server.succeed("${lib.getExe pkgs.gradient-cli} project show")
+      # The CLI exits 1 when its log-fetch step fails (post_evaluation_builds),
+      # but the Project / Evaluation / Building sections we need have already
+      # been printed. Use `execute` so we can still parse them.
+      _, output = server.execute("${lib.getExe pkgs.gradient-cli} project show")
       print(output)
 
       store_path_drv = ""
@@ -380,7 +395,7 @@
           in_building = True
         elif line.strip() == "===== Log =====":
           break
-        elif in_building and "cache-test-product" in line and line.strip().endswith(".drv"):
+        elif in_building and "hello" in line and line.strip().endswith(".drv"):
           drv = line.strip()
           store_path_drv = drv if drv.startswith("/nix/store/") else f"/nix/store/{drv}"
           break
