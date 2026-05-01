@@ -42,7 +42,7 @@ pub struct RemoveUserRequest {
 async fn find_user_by_username(state: &Arc<ServerState>, username: &str) -> WebResult<MUser> {
     EUser::find()
         .filter(CUser::Username.eq(username))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("User"))
 }
@@ -58,7 +58,7 @@ async fn find_org_membership(
                 .add(COrganizationUser::Organization.eq(org_id))
                 .add(COrganizationUser::User.eq(user_id)),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await?)
 }
 
@@ -76,13 +76,13 @@ pub async fn get_organization_users(
         .join(JoinType::InnerJoin, ROrganizationUser::User.def())
         .select_also(entity::user::Entity)
         .filter(COrganizationUser::Organization.eq(organization.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let role_ids: Vec<Uuid> = organization_users.iter().map(|(ou, _)| ou.role).collect();
     let role_map: std::collections::HashMap<Uuid, String> = ERole::find()
         .filter(CRole::Id.is_in(role_ids))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?
         .into_iter()
         .map(|r| (r.id, r.name))
@@ -132,7 +132,7 @@ pub async fn post_organization_users(
                     .add(CRole::Organization.is_null()),
             ),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Role"))?;
 
@@ -142,7 +142,7 @@ pub async fn post_organization_users(
         user: Set(target_user.id),
         role: Set(role.id),
     }
-    .insert(&state.db)
+    .insert(&state.web_db)
     .await?;
 
     Ok(Json(BaseResponse {
@@ -166,13 +166,13 @@ pub async fn patch_organization_users(
 
     let role = ERole::find()
         .filter(CRole::Name.eq(body.role.clone()))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Role"))?;
 
     let mut active: AOrganizationUser = membership.into();
     active.role = Set(role.id);
-    active.update(&state.db).await?;
+    active.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -194,7 +194,7 @@ pub async fn delete_organization_users(
         .ok_or_else(|| WebError::BadRequest("User not in Organization".to_string()))?;
 
     let active: AOrganizationUser = membership.into();
-    active.delete(&state.db).await?;
+    active.delete(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,

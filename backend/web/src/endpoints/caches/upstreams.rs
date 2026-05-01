@@ -73,7 +73,7 @@ async fn load_upstream(
 ) -> WebResult<MCacheUpstream> {
     ECacheUpstream::find_by_id(upstream_id)
         .filter(CCacheUpstream::Cache.eq(cache_id))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Upstream cache"))
 }
@@ -89,7 +89,7 @@ pub async fn get_cache_upstreams(
 
     let upstreams = ECacheUpstream::find()
         .filter(CCacheUpstream::Cache.eq(cache.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?
         .into_iter()
         .map(|u| UpstreamCacheItem {
@@ -154,7 +154,7 @@ pub async fn put_cache_upstream(
         },
     };
 
-    let inserted = record.insert(&state.db).await?;
+    let inserted = record.insert(&state.web_db).await?;
     Ok(Json(BaseResponse {
         error: false,
         message: inserted.id,
@@ -192,7 +192,7 @@ pub async fn patch_cache_upstream(
         active.mode = Set(mode);
     }
 
-    active.update(&state.db).await?;
+    active.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -209,7 +209,7 @@ pub async fn delete_cache_upstream(
     let record = load_upstream(&state, cache.id, upstream_id).await?;
 
     let active: ACacheUpstream = record.into();
-    active.delete(&state.db).await?;
+    active.delete(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,

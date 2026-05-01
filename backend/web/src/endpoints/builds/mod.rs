@@ -42,12 +42,12 @@ impl BuildAccessContext {
         build_id: Uuid,
     ) -> WebResult<Self> {
         let build = EBuild::find_by_id(build_id)
-            .one(&state.db)
+            .one(&state.web_db)
             .await?
             .ok_or_else(|| WebError::not_found("Build"))?;
 
         let evaluation = EEvaluation::find_by_id(build.evaluation)
-            .one(&state.db)
+            .one(&state.web_db)
             .await?
             .ok_or_else(|| {
                 tracing::error!(
@@ -60,7 +60,7 @@ impl BuildAccessContext {
 
         let organization_id = if let Some(project_id) = evaluation.project {
             EProject::find_by_id(project_id)
-                .one(&state.db)
+                .one(&state.web_db)
                 .await?
                 .ok_or_else(|| {
                     tracing::error!(
@@ -74,7 +74,7 @@ impl BuildAccessContext {
         } else {
             EDirectBuild::find()
                 .filter(CDirectBuild::Evaluation.eq(evaluation.id))
-                .one(&state.db)
+                .one(&state.web_db)
                 .await?
                 .ok_or_else(|| {
                     tracing::error!("DirectBuild not found for evaluation {}", evaluation.id);
@@ -84,7 +84,7 @@ impl BuildAccessContext {
         };
 
         let organization = EOrganization::find_by_id(organization_id)
-            .one(&state.db)
+            .one(&state.web_db)
             .await?
             .ok_or_else(|| {
                 tracing::error!("Organization {} not found", organization_id);

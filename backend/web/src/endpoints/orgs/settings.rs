@@ -44,7 +44,7 @@ async fn require_write_permission(
                 .add(COrganizationUser::Organization.eq(org_id))
                 .add(COrganizationUser::User.eq(user_id)),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await?;
 
     let has_write = matches!(
@@ -91,7 +91,7 @@ pub async fn post_organization_public(
     let org = load_editable_org(&state, user.id, organization).await?;
     let mut active: AOrganization = org.into();
     active.public = Set(true);
-    active.update(&state.db).await?;
+    active.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -107,7 +107,7 @@ pub async fn delete_organization_public(
     let org = load_editable_org(&state, user.id, organization).await?;
     let mut active: AOrganization = org.into();
     active.public = Set(false);
-    active.update(&state.db).await?;
+    active.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -124,12 +124,12 @@ pub async fn get_organization_subscribe(
 
     let org_caches = EOrganizationCache::find()
         .filter(COrganizationCache::Organization.eq(org.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let mut subscribed = Vec::new();
     for oc in org_caches {
-        if let Ok(Some(cache)) = ECache::find_by_id(oc.cache).one(&state.db).await {
+        if let Ok(Some(cache)) = ECache::find_by_id(oc.cache).one(&state.web_db).await {
             subscribed.push(CacheSubscriptionItem {
                 id: oc.cache,
                 name: cache.name,
@@ -161,7 +161,7 @@ pub async fn post_organization_subscribe_cache(
                 .add(COrganizationCache::Organization.eq(org.id))
                 .add(COrganizationCache::Cache.eq(cache.id)),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await?;
 
     if already.is_some() {
@@ -180,7 +180,7 @@ pub async fn post_organization_subscribe_cache(
         cache: Set(cache.id),
         mode: Set(mode),
     }
-    .insert(&state.db)
+    .insert(&state.web_db)
     .await?;
 
     // Enqueue signing of every cached path the org already owns for this
@@ -201,7 +201,7 @@ pub async fn post_organization_subscribe_cache(
 async fn enqueue_backfill_signatures(state: &ServerState, org_id: Uuid, cache_id: Uuid) {
     let drv_ids: Vec<Uuid> = match EDerivation::find()
         .filter(CDerivation::Organization.eq(org_id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await
     {
         Ok(rows) => rows.into_iter().map(|d| d.id).collect(),
@@ -218,7 +218,7 @@ async fn enqueue_backfill_signatures(state: &ServerState, org_id: Uuid, cache_id
     let outputs = match EDerivationOutput::find()
         .filter(CDerivationOutput::Derivation.is_in(drv_ids))
         .filter(CDerivationOutput::CachedPath.is_not_null())
-        .all(&state.db)
+        .all(&state.web_db)
         .await
     {
         Ok(v) => v,
@@ -236,7 +236,7 @@ async fn enqueue_backfill_signatures(state: &ServerState, org_id: Uuid, cache_id
         let exists = ECachedPathSignature::find()
             .filter(CCachedPathSignature::CachedPath.eq(cp_id))
             .filter(CCachedPathSignature::Cache.eq(cache_id))
-            .one(&state.db)
+            .one(&state.web_db)
             .await
             .unwrap_or(None)
             .is_some();
@@ -250,7 +250,7 @@ async fn enqueue_backfill_signatures(state: &ServerState, org_id: Uuid, cache_id
             signature: Set(None),
             created_at: Set(now),
         };
-        if let Err(e) = am.insert(&state.db).await {
+        if let Err(e) = am.insert(&state.web_db).await {
             tracing::warn!(cached_path = %cp_id, cache = %cache_id, error = %e, "backfill: placeholder insert failed");
         }
     }
@@ -272,12 +272,12 @@ pub async fn delete_organization_subscribe_cache(
                 .add(COrganizationCache::Organization.eq(org.id))
                 .add(COrganizationCache::Cache.eq(cache.id)),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::BadRequest("Organization not subscribed to Cache".to_string()))?;
 
     let active: AOrganizationCache = record.into();
-    active.delete(&state.db).await?;
+    active.delete(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,

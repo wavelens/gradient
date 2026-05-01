@@ -74,14 +74,14 @@ pub async fn record_nar_traffic(state: Arc<ServerState>, cache_id: Uuid, bytes: 
     match ECacheMetric::find()
         .filter(CCacheMetric::Cache.eq(cache_id))
         .filter(CCacheMetric::BucketTime.eq(bucket))
-        .one(&state.db)
+        .one(&state.web_db)
         .await
     {
         Ok(Some(metric)) => {
             let mut am: ACacheMetric = metric.into_active_model();
             am.bytes_sent = Set(am.bytes_sent.unwrap() + bytes);
             am.nar_count = Set(am.nar_count.unwrap() + 1);
-            if let Err(e) = am.update(&state.db).await {
+            if let Err(e) = am.update(&state.web_db).await {
                 tracing::warn!(error = %e, "Failed to update cache metric");
             }
         }
@@ -93,7 +93,7 @@ pub async fn record_nar_traffic(state: Arc<ServerState>, cache_id: Uuid, bytes: 
                 bytes_sent: Set(bytes),
                 nar_count: Set(1),
             };
-            if let Err(e) = am.insert(&state.db).await {
+            if let Err(e) = am.insert(&state.web_db).await {
                 tracing::warn!(error = %e, "Failed to insert cache metric");
             }
         }
@@ -253,14 +253,14 @@ pub async fn get_cache_stats(
 
     let (storage_minutes, storage_hours, storage_days, storage_weeks, minutes, hours, days, weeks) =
         tokio::try_join!(
-            aggregate_storage(&state.db, cache.id, "minute", "59 minutes"),
-            aggregate_storage(&state.db, cache.id, "hour", "23 hours"),
-            aggregate_storage(&state.db, cache.id, "day", "29 days"),
-            aggregate_storage(&state.db, cache.id, "week", "11 weeks"),
-            aggregate_traffic(&state.db, cache.id, "minute", "59 minutes"),
-            aggregate_traffic(&state.db, cache.id, "hour", "23 hours"),
-            aggregate_traffic(&state.db, cache.id, "day", "29 days"),
-            aggregate_traffic(&state.db, cache.id, "week", "11 weeks"),
+            aggregate_storage(&state.web_db, cache.id, "minute", "59 minutes"),
+            aggregate_storage(&state.web_db, cache.id, "hour", "23 hours"),
+            aggregate_storage(&state.web_db, cache.id, "day", "29 days"),
+            aggregate_storage(&state.web_db, cache.id, "week", "11 weeks"),
+            aggregate_traffic(&state.web_db, cache.id, "minute", "59 minutes"),
+            aggregate_traffic(&state.web_db, cache.id, "hour", "23 hours"),
+            aggregate_traffic(&state.web_db, cache.id, "day", "29 days"),
+            aggregate_traffic(&state.web_db, cache.id, "week", "11 weeks"),
         )?;
 
     Ok(Json(BaseResponse {

@@ -30,14 +30,14 @@ pub async fn get_evaluation(
     let evaluation = ctx.evaluation;
 
     let commit_hash = ECommit::find_by_id(evaluation.commit)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .map(|c| vec_to_hex(&c.hash))
         .unwrap_or_default();
 
     let all_messages = EEvaluationMessage::find()
         .filter(CEvaluationMessage::Evaluation.eq(evaluation.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
     let error_count = all_messages
         .iter()
@@ -51,7 +51,7 @@ pub async fn get_evaluation(
     // Load entry points with their build statuses.
     let ep_rows = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
     let entry_points = if ep_rows.is_empty() {
         vec![]
@@ -59,7 +59,7 @@ pub async fn get_evaluation(
         let build_ids: Vec<Uuid> = ep_rows.iter().map(|ep| ep.build).collect();
         let builds: std::collections::HashMap<Uuid, entity::build::BuildStatus> = EBuild::find()
             .filter(CBuild::Id.is_in(build_ids))
-            .all(&state.db)
+            .all(&state.web_db)
             .await?
             .into_iter()
             .map(|b| (b.id, b.status))
@@ -114,7 +114,7 @@ pub async fn get_evaluation_builds(
 
     let builds = EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let drv_ids: Vec<Uuid> = builds.iter().map(|b| b.derivation).collect();
@@ -124,7 +124,7 @@ pub async fn get_evaluation_builds(
     } else {
         EDerivation::find()
             .filter(CDerivation::Id.is_in(drv_ids.clone()))
-            .all(&state.db)
+            .all(&state.web_db)
             .await?
             .into_iter()
             .map(|d| (d.id, d))
@@ -137,14 +137,14 @@ pub async fn get_evaluation_builds(
     } else {
         let outputs = EDerivationOutput::find()
             .filter(CDerivationOutput::Derivation.is_in(drv_ids))
-            .all(&state.db)
+            .all(&state.web_db)
             .await?;
         let output_ids: Vec<Uuid> = outputs.iter().map(|o| o.id).collect();
         let mut m: HashMap<Uuid, bool> = HashMap::new();
         if !output_ids.is_empty() {
             for bp in EBuildProduct::find()
                 .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
-                .all(&state.db)
+                .all(&state.web_db)
                 .await?
             {
                 if let Some(output) = outputs.iter().find(|o| o.id == bp.derivation_output) {
@@ -233,7 +233,7 @@ pub async fn get_evaluation_messages(
     let messages = EEvaluationMessage::find()
         .filter(CEvaluationMessage::Evaluation.eq(evaluation.id))
         .order_by(CEvaluationMessage::CreatedAt, Order::Asc)
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let msg_ids: Vec<Uuid> = messages.iter().map(|m| m.id).collect();
@@ -244,7 +244,7 @@ pub async fn get_evaluation_messages(
     } else {
         EEntryPointMessage::find()
             .filter(CEntryPointMessage::Message.is_in(msg_ids))
-            .all(&state.db)
+            .all(&state.web_db)
             .await?
     };
 

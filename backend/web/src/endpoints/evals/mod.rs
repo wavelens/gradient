@@ -42,14 +42,14 @@ impl EvalAccessContext {
         maybe_user: &Option<MUser>,
     ) -> WebResult<Self> {
         let evaluation = EEvaluation::find_by_id(evaluation_id)
-            .one(&state.db)
+            .one(&state.web_db)
             .await?
             .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
         let (organization_id, project_name, project_display_name) =
             if let Some(project_id) = evaluation.project {
                 let project = EProject::find_by_id(project_id)
-                    .one(&state.db)
+                    .one(&state.web_db)
                     .await?
                     .ok_or_else(|| {
                         tracing::error!(
@@ -67,7 +67,7 @@ impl EvalAccessContext {
             } else {
                 let org_id = EDirectBuild::find()
                     .filter(CDirectBuild::Evaluation.eq(evaluation.id))
-                    .one(&state.db)
+                    .one(&state.web_db)
                     .await?
                     .ok_or_else(|| {
                         tracing::error!("DirectBuild not found for evaluation {}", evaluation_id);
@@ -78,7 +78,7 @@ impl EvalAccessContext {
             };
 
         let organization = EOrganization::find_by_id(organization_id)
-            .one(&state.db)
+            .one(&state.web_db)
             .await?
             .ok_or_else(|| {
                 tracing::error!("Organization {} not found", organization_id);

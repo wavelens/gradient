@@ -69,7 +69,7 @@ pub async fn get_project_name_available(
     let exists = EProject::find()
         .filter(CProject::Name.eq(name.as_str()))
         .filter(CProject::Organization.eq(org.id))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .is_some();
     Ok(Json(BaseResponse {
@@ -97,7 +97,7 @@ pub async fn get(
     let paginator = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
         .order_by_asc(CProject::CreatedAt)
-        .paginate(&state.db, per_page);
+        .paginate(&state.web_db, per_page);
 
     let total = paginator.num_items().await?;
     let raw = paginator.fetch_page(page - 1).await?;
@@ -110,7 +110,7 @@ pub async fn get(
         } else {
             EEvaluation::find()
                 .filter(CEvaluation::Id.is_in(eval_ids))
-                .all(&state.db)
+                .all(&state.web_db)
                 .await?
                 .into_iter()
                 .map(|e| (e.id, e.status))
@@ -184,7 +184,7 @@ pub async fn put(
                 .add(CProject::Organization.eq(organization.id))
                 .add(CProject::Name.eq(body.name.clone())),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await?;
 
     if existing_project.is_some() {
@@ -216,7 +216,7 @@ pub async fn put(
         keep_evaluations: Set(30),
     };
 
-    let project = project.insert(&state.db).await?;
+    let project = project.insert(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -236,7 +236,7 @@ pub async fn get_project(
     let project: MProject = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
         .filter(CProject::Name.eq(project))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Project"))?;
 
@@ -247,7 +247,7 @@ pub async fn get_project(
 
     let last_evaluation_status = if let Some(eval_id) = project.last_evaluation {
         EEvaluation::find_by_id(eval_id)
-            .one(&state.db)
+            .one(&state.web_db)
             .await?
             .map(|e| e.status)
     } else {
@@ -308,7 +308,7 @@ pub async fn patch_project(
     }
 
     aproject.force_evaluation = Set(true);
-    aproject.update(&state.db).await?;
+    aproject.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -338,7 +338,7 @@ impl<'a> ProjectPatcher<'a> {
                     .add(CProject::Organization.eq(organization.id))
                     .add(CProject::Name.eq(name.clone())),
             )
-            .one(&self.state.db)
+            .one(&self.state.web_db)
             .await?;
         if existing.is_some() {
             return Err(WebError::already_exists("Project Name"));
@@ -400,7 +400,7 @@ pub async fn delete_project(
     let (_organization, project) =
         load_editable_project(&state, user.id, organization, project).await?;
     let aproject: AProject = project.into();
-    aproject.delete(&state.db).await?;
+    aproject.delete(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -418,7 +418,7 @@ pub async fn post_project_active(
     let (_organization, project) = load_project(&state, user.id, organization, project).await?;
     let mut aproject: AProject = project.into();
     aproject.active = Set(true);
-    aproject.update(&state.db).await?;
+    aproject.update(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -436,7 +436,7 @@ pub async fn delete_project_active(
     let (_organization, project) = load_project(&state, user.id, organization, project).await?;
     let mut aproject: AProject = project.into();
     aproject.active = Set(false);
-    aproject.update(&state.db).await?;
+    aproject.update(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -507,7 +507,7 @@ pub async fn post_project_transfer(
 
     let mut aproject: AProject = project.into();
     aproject.organization = Set(new_organization.id);
-    aproject.update(&state.db).await?;
+    aproject.update(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,

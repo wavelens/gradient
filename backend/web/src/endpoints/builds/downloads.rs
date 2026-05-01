@@ -55,7 +55,7 @@ async fn collect_build_products(
     }
     let rows = match EBuildProduct::find()
         .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
-        .all(&state.db)
+        .all(&state.web_db)
         .await
     {
         Ok(r) => r,
@@ -91,7 +91,7 @@ async fn find_and_serve_file(
 
     let rows = match EBuildProduct::find()
         .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
-        .all(&state.db)
+        .all(&state.web_db)
         .await
     {
         Ok(r) => r,
@@ -216,7 +216,7 @@ pub async fn get_build_downloads(
 
     let build_outputs = EDerivationOutput::find()
         .filter(CDerivationOutput::Derivation.eq(ctx.build.derivation))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let products = collect_build_products(&state, build_id, build_outputs).await;
@@ -272,7 +272,7 @@ pub async fn get_build_download(
 
     let build_outputs = EDerivationOutput::find()
         .filter(CDerivationOutput::Derivation.eq(ctx.build.derivation))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     tracing::debug!(

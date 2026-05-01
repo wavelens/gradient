@@ -89,7 +89,7 @@ pub async fn get_org_name_available(
     }
     let exists = EOrganization::find()
         .filter(COrganization::Name.eq(name.as_str()))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .is_some();
     Ok(Json(BaseResponse {
@@ -114,7 +114,7 @@ async fn count_running_evaluations(
 
     let projects = EProject::find()
         .filter(CProject::Organization.is_in(org_ids.to_vec()))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let project_ids: Vec<Uuid> = projects.iter().map(|p| p.id).collect();
@@ -136,7 +136,7 @@ async fn count_running_evaluations(
                     .add(CEvaluation::Status.eq(EvaluationStatus::Building))
                     .add(CEvaluation::Status.eq(EvaluationStatus::Waiting)),
             )
-            .all(&state.db)
+            .all(&state.web_db)
             .await?;
         for eval in running {
             if let Some(project_id) = eval.project
@@ -168,7 +168,7 @@ pub async fn get(
         )
         .filter(COrganizationUser::User.eq(user.id))
         .order_by_asc(COrganization::CreatedAt)
-        .paginate(&state.db, per_page);
+        .paginate(&state.web_db, per_page);
 
     let total = paginator.num_items().await?;
     let orgs = paginator.fetch_page(page - 1).await?;
@@ -180,13 +180,13 @@ pub async fn get(
     let org_users = EOrganizationUser::find()
         .filter(COrganizationUser::User.eq(user.id))
         .filter(COrganizationUser::Organization.is_in(org_ids.clone()))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let role_ids: Vec<Uuid> = org_users.iter().map(|ou| ou.role).collect();
     let roles = ERole::find()
         .filter(CRole::Id.is_in(role_ids))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
     let role_name_map: HashMap<Uuid, String> = roles.into_iter().map(|r| (r.id, r.name)).collect();
     let org_role_map: HashMap<Uuid, String> = org_users
@@ -241,7 +241,7 @@ pub async fn put(
 
     let existing_organization = EOrganization::find()
         .filter(COrganization::Name.eq(body.name.clone()))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?;
 
     if existing_organization.is_some() {
@@ -269,7 +269,7 @@ pub async fn put(
         github_app_enabled: Set(false),
     };
 
-    let organization = organization.insert(&state.db).await?;
+    let organization = organization.insert(&state.web_db).await?;
 
     let organization_user = AOrganizationUser {
         id: Set(Uuid::new_v4()),
@@ -278,7 +278,7 @@ pub async fn put(
         role: Set(BASE_ROLE_ADMIN_ID),
     };
 
-    organization_user.insert(&state.db).await?;
+    organization_user.insert(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -298,7 +298,7 @@ pub async fn get_public_organizations(
     let paginator = EOrganization::find()
         .filter(COrganization::Public.eq(true))
         .order_by_asc(COrganization::CreatedAt)
-        .paginate(&state.db, per_page);
+        .paginate(&state.web_db, per_page);
 
     let total = paginator.num_items().await?;
     let items = paginator.fetch_page(page - 1).await?;
@@ -325,11 +325,11 @@ pub async fn get_organization(
         let org_user = EOrganizationUser::find()
             .filter(COrganizationUser::User.eq(user.id))
             .filter(COrganizationUser::Organization.eq(org.id))
-            .one(&state.db)
+            .one(&state.web_db)
             .await?;
         if let Some(ou) = org_user {
             ERole::find_by_id(ou.role)
-                .one(&state.db)
+                .one(&state.web_db)
                 .await?
                 .map(|r| r.name)
         } else {
@@ -375,7 +375,7 @@ pub async fn patch_organization(
 
         let existing_organization = EOrganization::find()
             .filter(COrganization::Name.eq(name.clone()))
-            .one(&state.db)
+            .one(&state.web_db)
             .await?;
 
         if existing_organization.is_some() {
@@ -397,7 +397,7 @@ pub async fn patch_organization(
         aorganization.description = Set(description.trim().to_string());
     }
 
-    let organization = aorganization.update(&state.db).await?;
+    let organization = aorganization.update(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -414,7 +414,7 @@ pub async fn delete_organization(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization = load_editable_org(&state, user.id, organization).await?;
     let aorganization: AOrganization = organization.into();
-    aorganization.delete(&state.db).await?;
+    aorganization.delete(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,

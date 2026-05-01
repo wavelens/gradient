@@ -18,7 +18,7 @@ pub mod storage;
 pub mod types;
 
 use ci::ReqwestWebhookClient;
-use db::connect_db;
+use db::{connect_db, connect_web_db};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
@@ -38,6 +38,14 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         Ok(db) => db,
         Err(e) => {
             eprintln!("Failed to connect to database: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let web_db = match connect_web_db(&cli).await {
+        Ok(db) => db,
+        Err(e) => {
+            eprintln!("Failed to connect web database pool: {}", e);
             std::process::exit(1);
         }
     };
@@ -174,6 +182,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
 
     Arc::new(ServerState {
         db,
+        web_db,
         cli,
         log_storage,
         webhooks,

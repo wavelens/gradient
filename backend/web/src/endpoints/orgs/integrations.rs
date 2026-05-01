@@ -147,7 +147,7 @@ async fn load_integration(
     EIntegration::find()
         .filter(CIntegration::Id.eq(integration_id))
         .filter(CIntegration::Organization.eq(org_id))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Integration"))
 }
@@ -164,7 +164,7 @@ pub async fn get_integrations(
 
     let rows = EIntegration::find()
         .filter(CIntegration::Organization.eq(org.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     Ok(Json(BaseResponse {
@@ -194,7 +194,7 @@ pub async fn put_integration(
         .filter(CIntegration::Organization.eq(org.id))
         .filter(CIntegration::Kind.eq(kind.as_i16()))
         .filter(CIntegration::Name.eq(body.name.as_str()))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?;
     if existing.is_some() {
         return Err(WebError::already_exists("Integration Name"));
@@ -245,7 +245,7 @@ pub async fn put_integration(
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    let integration = integration.insert(&state.db).await?;
+    let integration = integration.insert(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -289,7 +289,7 @@ pub async fn patch_integration(
             .filter(CIntegration::Kind.eq(kind))
             .filter(CIntegration::Name.eq(name.as_str()))
             .filter(CIntegration::Id.ne(integration_id))
-            .one(&state.db)
+            .one(&state.web_db)
             .await?;
         if clash.is_some() {
             return Err(WebError::already_exists("Integration Name"));
@@ -344,7 +344,7 @@ pub async fn patch_integration(
         });
     }
 
-    let updated = active.update(&state.db).await?;
+    let updated = active.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -360,7 +360,7 @@ pub async fn delete_integration(
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let org = load_editable_org(&state, user.id, organization).await?;
     let integration = load_integration(&state, org.id, integration_id).await?;
-    integration.into_active_model().delete(&state.db).await?;
+    integration.into_active_model().delete(&state.web_db).await?;
     Ok(Json(BaseResponse {
         error: false,
         message: true,
@@ -384,7 +384,7 @@ pub async fn patch_github_app(
     let org = load_editable_org(&state, user.id, organization).await?;
     let mut active: AOrganization = org.into();
     active.github_app_enabled = Set(body.enabled);
-    active.update(&state.db).await?;
+    active.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,

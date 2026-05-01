@@ -91,7 +91,7 @@ pub async fn decode_jwt(
     let result = if jwt.starts_with("GRAD") {
         let api_key = EApi::find()
             .filter(CApi::Key.eq(jwt.strip_prefix("GRAD").ok_or(StatusCode::UNAUTHORIZED)?))
-            .one(&state.db)
+            .one(&state.web_db)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
@@ -104,7 +104,7 @@ pub async fn decode_jwt(
 
         aapi_key.last_used_at = Set(Utc::now().naive_utc());
         aapi_key
-            .save(&state.db)
+            .save(&state.web_db)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

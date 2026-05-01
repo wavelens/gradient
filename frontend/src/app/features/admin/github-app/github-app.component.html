@@ -76,14 +76,16 @@
         </div>
 
         <h3>Server configuration</h3>
-        <pre><code>GRADIENT_GITHUB_APP_ID={{ c.id }}
-GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE=/run/secrets/gradient-github-app.pem
-GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE=/run/secrets/gradient-github-app-webhook</code></pre>
+        <pre><code>services.gradient.githubApp = {{ '{' }}
+  enable = true;
+  appId = {{ c.id }};
+  privateKeyFile = "/run/secrets/gradient-github-app.pem";
+  webhookSecretFile = "/run/secrets/gradient-github-app-webhook";
+{{ '}' }};</code></pre>
 
         <p class="text-secondary">
-          Write the PEM and webhook secret to those paths, set the env vars (or
-          the matching nix module options under <code>services.gradient.githubApp.*</code>),
-          then restart the server.
+          Write the PEM and webhook secret to those paths, set the NixOS
+          module options above, then rebuild and restart the server.
         </p>
       </div>
     }

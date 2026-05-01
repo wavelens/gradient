@@ -49,7 +49,7 @@ async fn load_webhook(
     EWebhook::find()
         .filter(CWebhook::Id.eq(webhook_id))
         .filter(CWebhook::Organization.eq(org_id))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Webhook"))
 }
@@ -109,7 +109,7 @@ pub async fn get(
 
     let webhooks = EWebhook::find()
         .filter(CWebhook::Organization.eq(organization.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     Ok(Json(BaseResponse {
@@ -163,7 +163,7 @@ pub async fn put(
         created_at: Set(Utc::now().naive_utc()),
     };
 
-    let webhook = webhook.insert(&state.db).await?;
+    let webhook = webhook.insert(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -220,7 +220,7 @@ pub async fn patch_webhook(
         active_webhook.active = Set(active);
     }
 
-    let updated = active_webhook.update(&state.db).await?;
+    let updated = active_webhook.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -237,7 +237,7 @@ pub async fn delete_webhook(
     let organization = load_webhook_org(&state, user.id, organization).await?;
     let webhook = load_webhook(&state, organization.id, webhook_id).await?;
 
-    webhook.into_active_model().delete(&state.db).await?;
+    webhook.into_active_model().delete(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,

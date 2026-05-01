@@ -122,7 +122,7 @@ pub async fn post_direct_build(
         author_name: Set(user.name.clone()),
     };
     let commit = commit
-        .insert(&state.db)
+        .insert(&state.web_db)
         .await
         .map_err(|e| WebError::InternalServerError(format!("Failed to create commit: {}", e)))?;
 
@@ -141,7 +141,7 @@ pub async fn post_direct_build(
         updated_at: Set(now),
         flake_source: Set(None),
     };
-    let evaluation = evaluation.insert(&state.db).await.map_err(|e| {
+    let evaluation = evaluation.insert(&state.web_db).await.map_err(|e| {
         WebError::InternalServerError(format!("Failed to create evaluation: {}", e))
     })?;
 
@@ -155,7 +155,7 @@ pub async fn post_direct_build(
         created_by: Set(user.id),
         created_at: Set(chrono::Utc::now().naive_utc()),
     };
-    direct_build.insert(&state.db).await.map_err(|e| {
+    direct_build.insert(&state.web_db).await.map_err(|e| {
         WebError::InternalServerError(format!("Failed to create direct build record: {}", e))
     })?;
 
@@ -176,7 +176,7 @@ pub async fn get_recent_direct_builds(
     // Get user's organizations
     let organizations = EOrganization::find()
         .filter(COrganization::CreatedBy.eq(user.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let mut all_direct_builds = Vec::new();
@@ -187,18 +187,18 @@ pub async fn get_recent_direct_builds(
             .filter(CDirectBuild::Organization.eq(org.id))
             .order_by_desc(CDirectBuild::CreatedAt)
             .limit(10)
-            .all(&state.db)
+            .all(&state.web_db)
             .await?;
 
         for db in direct_builds {
             // Get evaluation info
             if let Ok(Some(evaluation)) =
-                EEvaluation::find_by_id(db.evaluation).one(&state.db).await
+                EEvaluation::find_by_id(db.evaluation).one(&state.web_db).await
             {
                 // Get a build from this evaluation to check status
                 let build_status = if let Ok(Some(build)) = EBuild::find()
                     .filter(CBuild::Evaluation.eq(evaluation.id))
-                    .one(&state.db)
+                    .one(&state.web_db)
                     .await
                 {
                     format!("{:?}", build.status)

@@ -76,7 +76,7 @@ pub async fn post_basic_register(
                 .add(CUser::Username.eq(body.username.clone()))
                 .add(CUser::Email.eq(body.email.clone())),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await?;
 
     if existing_user.is_some() {
@@ -107,7 +107,7 @@ pub async fn post_basic_register(
         superuser: Set(false),
     };
 
-    let user = user.insert(&state.db).await?;
+    let user = user.insert(&state.web_db).await?;
 
     if state.cli.email_enabled
         && state.cli.email_require_verification
@@ -151,7 +151,7 @@ pub async fn post_basic_login(
                 .add(CUser::Username.eq(body.loginname.clone()))
                 .add(CUser::Email.eq(body.loginname.clone())),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(WebError::invalid_credentials)?;
 
@@ -331,7 +331,7 @@ pub async fn post_check_username(
     // Check if username already exists
     let existing_user = EUser::find()
         .filter(CUser::Username.eq(body.username.clone()))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?;
 
     if existing_user.is_some() {
@@ -369,7 +369,7 @@ pub async fn get_verify_email(
 
     let user = EUser::find()
         .filter(CUser::EmailVerificationToken.eq(token.clone()))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::BadRequest("Invalid verification token".to_string()))?;
 
@@ -393,7 +393,7 @@ pub async fn get_verify_email(
     user_active.email_verification_token = Set(None);
     user_active.email_verification_token_expires = Set(None);
 
-    user_active.update(&state.db).await?;
+    user_active.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -413,7 +413,7 @@ pub async fn post_resend_verification(
 
     let user = EUser::find()
         .filter(CUser::Username.eq(body.username.clone()))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("User"))?;
 
@@ -430,7 +430,7 @@ pub async fn post_resend_verification(
     user_active.email_verification_token = Set(Some(verification_token.clone()));
     user_active.email_verification_token_expires = Set(Some(verification_expires));
 
-    user_active.update(&state.db).await?;
+    user_active.update(&state.web_db).await?;
 
     if let Err(e) = state
         .email

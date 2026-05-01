@@ -65,7 +65,7 @@ pub async fn get_search(
     let users = EUser::find()
         .filter(CUser::Username.contains(q.as_str()))
         .limit(10)
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let results = users
@@ -108,7 +108,7 @@ pub async fn delete(
 ) -> WebResult<Json<BaseResponse<String>>> {
     // TODO: Make sure to delete all related data and that cascade is working
     let auser: AUser = user.into();
-    auser.delete(&state.db).await?;
+    auser.delete(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -124,7 +124,7 @@ pub async fn get_keys(
 ) -> WebResult<Json<BaseResponse<ListResponse>>> {
     let api_keys = EApi::find()
         .filter(CApi::OwnedBy.eq(user.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let api_keys: ListResponse = api_keys
@@ -155,7 +155,7 @@ pub async fn post_keys(
                 .add(CApi::OwnedBy.eq(user.id))
                 .add(CApi::Name.eq(body.name.clone())),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await?;
 
     if existing_api_key.is_some() {
@@ -172,7 +172,7 @@ pub async fn post_keys(
         managed: Set(false),
     };
 
-    let api_key = api_key.insert(&state.db).await?;
+    let api_key = api_key.insert(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -193,7 +193,7 @@ pub async fn delete_keys(
                 .add(CApi::OwnedBy.eq(user.id))
                 .add(CApi::Name.eq(body.name.clone())),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("API-Key"))?;
 
@@ -204,7 +204,7 @@ pub async fn delete_keys(
     }
 
     let aapi_key: AApi = api_key.into();
-    aapi_key.delete(&state.db).await?;
+    aapi_key.delete(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,
@@ -255,7 +255,7 @@ pub async fn patch_settings(
 
         let existing_user = EUser::find()
             .filter(CUser::Username.eq(username.clone()))
-            .one(&state.db)
+            .one(&state.web_db)
             .await?;
 
         if existing_user.is_some() {
@@ -275,7 +275,7 @@ pub async fn patch_settings(
     if let Some(email) = body.email {
         let existing_user = EUser::find()
             .filter(CUser::Email.eq(email.clone()))
-            .one(&state.db)
+            .one(&state.web_db)
             .await?;
 
         if existing_user.is_some() {
@@ -285,7 +285,7 @@ pub async fn patch_settings(
         auser.email = Set(email);
     }
 
-    auser.update(&state.db).await?;
+    auser.update(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,

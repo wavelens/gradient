@@ -43,7 +43,7 @@ pub async fn post_evaluation_builds(
 
         let past_builds = match EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation.id))
-            .all(&state.db)
+            .all(&state.web_db)
             .await
         {
             Ok(builds) => builds,
@@ -54,7 +54,7 @@ pub async fn post_evaluation_builds(
         };
 
         for build in past_builds {
-            let drv_path = match EDerivation::find_by_id(build.derivation).one(&state.db).await {
+            let drv_path = match EDerivation::find_by_id(build.derivation).one(&state.web_db).await {
                 Ok(Some(d)) => d.derivation_path,
                 _ => String::new(),
             };
@@ -73,7 +73,7 @@ pub async fn post_evaluation_builds(
         loop {
             let builds = match EBuild::find()
                 .filter(condition.clone())
-                .all(&state.db)
+                .all(&state.web_db)
                 .await {
                 Ok(b) => b,
                 Err(e) => {
@@ -93,7 +93,7 @@ pub async fn post_evaluation_builds(
                                     .add(CBuild::Status.eq(entity::build::BuildStatus::Queued)),
                             ),
                     )
-                    .one(&state.db)
+                    .one(&state.web_db)
                     .await {
                     Ok(b) => b,
                     Err(e) => {
@@ -112,7 +112,7 @@ pub async fn post_evaluation_builds(
             }
 
             for build in builds {
-                let drv_path = match EDerivation::find_by_id(build.derivation).one(&state.db).await {
+                let drv_path = match EDerivation::find_by_id(build.derivation).one(&state.web_db).await {
                     Ok(Some(d)) => d.derivation_path,
                     _ => String::new(),
                 };

@@ -12,14 +12,19 @@ use gradient_core::ci::WebhookClient;
 use gradient_core::storage::EmailSender;
 use gradient_core::storage::NarStore;
 use gradient_core::types::ServerState;
-use sea_orm::DatabaseConnection;
+use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 use std::sync::Arc;
 
 /// Wrap a `DatabaseConnection` + `test_cli()` into a `ServerState`.
+///
+/// Tests that don't exercise the web layer get an empty mock for `web_db`.
+/// Tests that need a populated web pool should construct `ServerState`
+/// directly so they can supply their own mock query results.
 pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
     let cli = test_cli();
     let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
     Arc::new(ServerState {
+        web_db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
         db,
         cli,
         log_storage: Arc::new(NoopLogStorage),
@@ -41,6 +46,7 @@ pub fn test_state_recorded(
     let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
     let recorder = Arc::new(RecordingWebhookClient::new());
     let state = Arc::new(ServerState {
+        web_db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
         db,
         cli,
         log_storage: Arc::new(NoopLogStorage),

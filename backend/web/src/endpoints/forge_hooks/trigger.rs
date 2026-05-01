@@ -62,13 +62,13 @@ pub(super) async fn handle_github_installation(state: &Arc<ServerState>, body: &
 async fn clear_installation_id(state: &Arc<ServerState>, installation_id: i64) {
     if let Ok(orgs) = EOrganization::find()
         .filter(COrganization::GithubInstallationId.eq(installation_id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await
     {
         for org in orgs {
             let mut active = org.into_active_model();
             active.github_installation_id = Set(None);
-            if let Err(e) = active.update(&state.db).await {
+            if let Err(e) = active.update(&state.web_db).await {
                 warn!(error = %e, "Failed to clear github_installation_id");
             }
         }
@@ -79,13 +79,13 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
     let github_login = &payload.installation.account.login;
     if let Ok(Some(org)) = EOrganization::find()
         .filter(COrganization::Name.eq(github_login.as_str()))
-        .one(&state.db)
+        .one(&state.web_db)
         .await
     {
         let installation_id = payload.installation.id;
         let mut active = org.into_active_model();
         active.github_installation_id = Set(Some(installation_id));
-        if let Err(e) = active.update(&state.db).await {
+        if let Err(e) = active.update(&state.web_db).await {
             warn!(error = %e, installation_id, org_name = %github_login, "Failed to store github_installation_id");
         } else {
             info!(installation_id, org_name = %github_login, "GitHub App installed on organization");
@@ -158,7 +158,7 @@ pub(super) async fn trigger_for_repo_urls(
 
     let projects = match EProject::find()
         .filter(CProject::Active.eq(true))
-        .all(&state.db)
+        .all(&state.web_db)
         .await
     {
         Ok(p) => p,
@@ -177,7 +177,7 @@ pub(super) async fn trigger_for_repo_urls(
         outcome.projects_scanned += 1;
 
         let org_name = match EOrganization::find_by_id(project.organization)
-            .one(&state.db)
+            .one(&state.web_db)
             .await
         {
             Ok(Some(o)) => o.name,
@@ -185,7 +185,7 @@ pub(super) async fn trigger_for_repo_urls(
         };
 
         match trigger_evaluation(
-            &state.db,
+            &state.web_db,
             &project,
             commit_hash.clone(),
             commit_message.clone(),

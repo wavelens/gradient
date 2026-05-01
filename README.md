@@ -35,6 +35,7 @@
 
 ## Installation
 
+Please refer to the [Quick Start Guide](https://wavelens.github.io/gradient/quick-start/) for a step-by-step installation guide.
 Add Cache for prebuilt Gradient packages (optional):
 ```
 URL: https://gradient.wavelens.io/cache/main
@@ -79,16 +80,22 @@ Configure Gradient in your `configuration.nix`:
 ```nix
 {
   services.gradient = {
-    enable = true;
-    frontend.enable = true;
-    reportErrors = true;
+    enable            = true;
+    frontend.enable   = true;
+    domain            = "gradient.example.com";
+    jwtSecretFile     = "/run/secrets/gradient-jwt"; # openssl rand -base64 48 > /run/secrets/gradient-jwt
+    cryptSecretFile   = "/run/secrets/gradient-crypt"; # openssl rand -base64 48 > /run/secrets/gradient-crypt
     configurePostgres = true;
-    configureNginx = true;
-    domain = "gradient.wavelens.io";
+    configureNginx    = true;
+    reportErrors      = true; # optional: will send crash reports to us
+  };
 
-    # we recommend the use of sops-nix
-    cryptSecretFile = "/var/lib/gradient/crypt-secret"; # a password base64 encoded
-    jwtSecretFile = "/var/lib/gradient/jwt-secret"; # random alphanumeric string (RS256 JWT secret)
+  services.gradient.worker = {
+    enable    = true;
+    serverUrl = "ws://127.0.0.1:3000/proto";
+    workerId  = "<uuid from uuidgen>"; # if not provided, a random UUID will be generated and saved in /var/lib/gradient/worker-id
+    peersFile = "/run/secrets/gradient-worker-peers"; # format: *:<token> (token is generated with `openssl rand -base64 48`)
+    )
   };
 }
 ```

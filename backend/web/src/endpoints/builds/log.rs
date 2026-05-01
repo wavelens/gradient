@@ -61,7 +61,7 @@ pub async fn post_build_log(
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
 
-            let build = match EBuild::find_by_id(build_id).one(&state.db).await {
+            let build = match EBuild::find_by_id(build_id).one(&state.web_db).await {
                 Ok(Some(b)) => b,
                 Ok(None) => break,
                 Err(_) => break,

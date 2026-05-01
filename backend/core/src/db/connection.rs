@@ -21,17 +21,18 @@ use uuid::Uuid;
 use crate::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use crate::types::*;
 
-pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
-    let db_url = if let Some(file) = &cli.database_url_file {
-        std::fs::read_to_string(file).context("Failed to read database url from file")?
+fn db_url(cli: &Cli) -> Result<String> {
+    if let Some(file) = &cli.database_url_file {
+        Ok(std::fs::read_to_string(file).context("Failed to read database url from file")?)
     } else if let Some(url) = &cli.database_url {
-        url.clone()
+        Ok(url.clone())
     } else {
         anyhow::bail!("No database url provided")
-    };
+    }
+}
 
-    // Configure database connection options
-    let mut opt = ConnectOptions::new(db_url);
+fn make_connect_options(cli: &Cli, max_connections: u32, min_connections: u32) -> Result<ConnectOptions> {
+    let mut opt = ConnectOptions::new(db_url(cli)?);
 
     // Only enable SQL logging at trace level
     if cli.log_level == "trace" {
@@ -41,15 +42,18 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
         opt.sqlx_logging(false);
     }
 
-    // Set other connection options
-    opt.max_connections(100)
-        .min_connections(5)
+    opt.max_connections(max_connections)
+        .min_connections(min_connections)
         .connect_timeout(Duration::from_secs(8))
         .acquire_timeout(Duration::from_secs(8))
-        .idle_timeout(Duration::from_secs(8))
-        .max_lifetime(Duration::from_secs(8));
+        .idle_timeout(Duration::from_secs(600))
+        .max_lifetime(Duration::from_secs(1800));
 
-    let db = Database::connect(opt)
+    Ok(opt)
+}
+
+pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
+    let db = Database::connect(make_connect_options(cli, 100, 5)?)
         .await
         .context("Failed to connect to database")?;
     Migrator::up(&db, None)
@@ -57,6 +61,15 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
         .context("Failed to run database migrations")?;
     update_db(&db).await.context("Failed to update database")?;
     Ok(db)
+}
+
+/// Open a dedicated connection pool for the web/HTTP layer so that axum
+/// handlers do not contend with the busy proto/scheduler pool during heavy
+/// NarPush traffic.
+pub async fn connect_web_db(cli: &Cli) -> Result<DatabaseConnection> {
+    Database::connect(make_connect_options(cli, 32, 2)?)
+        .await
+        .context("Failed to connect web database pool")
 }
 
 async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
@@ -223,7 +236,7 @@ pub async fn get_organization_by_name(
                 .add(COrganizationUser::User.eq(user_id))
                 .add(COrganization::Name.eq(name)),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await
         .context("Failed to query organization")
 }
@@ -234,7 +247,7 @@ pub async fn get_any_organization_by_name(
 ) -> Result<Option<MOrganization>> {
     EOrganization::find()
         .filter(COrganization::Name.eq(name))
-        .one(&state.db)
+        .one(&state.web_db)
         .await
         .context("Failed to query organization")
 }
@@ -249,7 +262,7 @@ pub async fn get_project_by_name(
         Some(o) => Ok(EProject::find()
             .filter(CProject::Organization.eq(o.id))
             .filter(CProject::Name.eq(project_name))
-            .one(&state.db)
+            .one(&state.web_db)
             .await
             .context("Failed to query project")?
             .map(|p| (o, p))),
@@ -266,7 +279,7 @@ pub async fn get_any_project_by_name(
         Some(o) => Ok(EProject::find()
             .filter(CProject::Organization.eq(o.id))
             .filter(CProject::Name.eq(project_name))
-            .one(&state.db)
+            .one(&state.web_db)
             .await
             .context("Failed to query project")?
             .map(|p| (o, p))),
@@ -285,7 +298,7 @@ pub async fn get_cache_by_name(
                 .add(CCache::CreatedBy.eq(user_id))
                 .add(CCache::Name.eq(name)),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await
         .context("Failed to query cache")
 }
@@ -296,7 +309,7 @@ pub async fn get_any_cache_by_name(
 ) -> Result<Option<MCache>> {
     ECache::find()
         .filter(CCache::Name.eq(name))
-        .one(&state.db)
+        .one(&state.web_db)
         .await
         .context("Failed to query cache")
 }

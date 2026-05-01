@@ -51,7 +51,7 @@ async fn validate_integration(
     let row = EIntegration::find()
         .filter(CIntegration::Id.eq(integration_id))
         .filter(CIntegration::Organization.eq(org_id))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Integration"))?;
 
@@ -80,7 +80,7 @@ pub async fn get_project_integration(
     let (_org, proj) = load_project(&state, user.id, organization, project).await?;
 
     let link = EProjectIntegration::find_by_id(proj.id)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?;
 
     let message = match link {
@@ -115,7 +115,7 @@ pub async fn put_project_integration(
     }
 
     let existing = EProjectIntegration::find_by_id(proj.id)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?;
 
     let updated = match existing {
@@ -123,7 +123,7 @@ pub async fn put_project_integration(
             let mut active = row.into_active_model();
             active.inbound_integration = Set(body.inbound_integration);
             active.outbound_integration = Set(body.outbound_integration);
-            active.update(&state.db).await?
+            active.update(&state.web_db).await?
         }
         None => {
             AProjectIntegration {
@@ -131,7 +131,7 @@ pub async fn put_project_integration(
                 inbound_integration: Set(body.inbound_integration),
                 outbound_integration: Set(body.outbound_integration),
             }
-            .insert(&state.db)
+            .insert(&state.web_db)
             .await?
         }
     };
@@ -151,10 +151,10 @@ pub async fn delete_project_integration(
     let (_org, proj) = load_editable_project(&state, user.id, organization, project).await?;
 
     if let Some(row) = EProjectIntegration::find_by_id(proj.id)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
     {
-        row.into_active_model().delete(&state.db).await?;
+        row.into_active_model().delete(&state.web_db).await?;
     }
 
     Ok(Json(BaseResponse {

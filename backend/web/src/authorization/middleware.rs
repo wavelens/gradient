@@ -78,7 +78,7 @@ pub async fn authorize(
     };
 
     let current_user = match EUser::find_by_id(token_data.claims.id)
-        .one(&state.db)
+        .one(&state.web_db)
         .await
         .map_err(|_| {
             (
@@ -117,7 +117,7 @@ pub async fn authorize_optional(
     let maybe_user = if let Some(token_str) = extract_bearer_or_cookie(req.headers()) {
         if let Ok(token_data) = decode_jwt(State(Arc::clone(&state)), token_str).await {
             EUser::find_by_id(token_data.claims.id)
-                .one(&state.db)
+                .one(&state.web_db)
                 .await
                 .ok()
                 .flatten()
@@ -136,7 +136,7 @@ pub async fn update_last_login(state: State<Arc<ServerState>>, user: MUser) -> R
 
     auser.last_login_at = Set(Utc::now().naive_utc());
     auser
-        .update(&state.db)
+        .update(&state.web_db)
         .await
         .context("Failed to update user last login")
 }

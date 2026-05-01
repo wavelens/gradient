@@ -46,7 +46,7 @@ impl<'a> CacheOpsHandler<'a> {
             .await
             .ok()?;
         EUser::find_by_id(token_data.claims.id)
-            .one(&self.state.db)
+            .one(&self.state.web_db)
             .await
             .ok()
             .flatten()
@@ -62,7 +62,7 @@ impl<'a> CacheOpsHandler<'a> {
 
         let org_ids: Vec<uuid::Uuid> = EOrganizationUser::find()
             .filter(COrganizationUser::User.eq(user.id))
-            .all(&self.state.db)
+            .all(&self.state.web_db)
             .await
             .unwrap_or_default()
             .into_iter()
@@ -76,7 +76,7 @@ impl<'a> CacheOpsHandler<'a> {
         EOrganizationCache::find()
             .filter(COrganizationCache::Cache.eq(cache.id))
             .filter(COrganizationCache::Organization.is_in(org_ids))
-            .one(&self.state.db)
+            .one(&self.state.web_db)
             .await
             .unwrap_or(None)
             .is_some()
@@ -106,7 +106,7 @@ impl<'a> CacheOpsHandler<'a> {
                     .add(CDerivationOutput::IsCached.eq(true))
                     .add(CDerivationOutput::Hash.eq(hash.clone())),
             )
-            .one(&self.state.db)
+            .one(&self.state.web_db)
             .await
             .map_err(WebError::from)?;
 
@@ -120,7 +120,7 @@ impl<'a> CacheOpsHandler<'a> {
 
         // Verify the derivation belongs to an org that subscribes to this cache.
         let derivation = EDerivation::find_by_id(build_output.derivation)
-            .one(&self.state.db)
+            .one(&self.state.web_db)
             .await
             .map_err(WebError::from)?
             .ok_or_else(|| WebError::not_found("Path"))?;
@@ -133,7 +133,7 @@ impl<'a> CacheOpsHandler<'a> {
                     .add(COrganizationCache::Organization.eq(organization_id))
                     .add(COrganizationCache::Cache.eq(cache.id)),
             )
-            .one(&self.state.db)
+            .one(&self.state.web_db)
             .await
             .map_err(WebError::from)?
             .is_some();
@@ -145,7 +145,7 @@ impl<'a> CacheOpsHandler<'a> {
         // Look up signature via cached_path → cached_path_signature for this cache.
         let cached_path_row = ECachedPath::find()
             .filter(CCachedPath::Hash.eq(hash.clone()))
-            .one(&self.state.db)
+            .one(&self.state.web_db)
             .await
             .map_err(WebError::from)?
             .ok_or_else(|| WebError::not_found("CachedPath"))?;
@@ -156,7 +156,7 @@ impl<'a> CacheOpsHandler<'a> {
                     .add(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
                     .add(CCachedPathSignature::Cache.eq(cache.id)),
             )
-            .one(&self.state.db)
+            .one(&self.state.web_db)
             .await
             .map_err(WebError::from)?
             .ok_or_else(|| WebError::not_found("Signature"))?;
@@ -236,7 +236,7 @@ impl<'a> CacheOpsHandler<'a> {
     ) -> Result<NixPathInfo, WebError> {
         let cached_path_row = ECachedPath::find()
             .filter(CCachedPath::Hash.eq(hash.clone()))
-            .one(&self.state.db)
+            .one(&self.state.web_db)
             .await
             .map_err(WebError::from)?
             .ok_or_else(|| WebError::not_found("Path"))?;
@@ -251,7 +251,7 @@ impl<'a> CacheOpsHandler<'a> {
                     .add(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
                     .add(CCachedPathSignature::Cache.eq(cache.id)),
             )
-            .one(&self.state.db)
+            .one(&self.state.web_db)
             .await
             .map_err(WebError::from)?
             .ok_or_else(|| WebError::not_found("Signature"))?;
@@ -317,7 +317,7 @@ impl<'a> CacheOpsHandler<'a> {
         for org_id in org_ids {
             let remaining = EOrganizationCache::find()
                 .filter(COrganizationCache::Organization.eq(org_id))
-                .one(&self.state.db)
+                .one(&self.state.web_db)
                 .await
                 .unwrap_or(None);
 
@@ -327,7 +327,7 @@ impl<'a> CacheOpsHandler<'a> {
 
             let derivation_ids: Vec<Uuid> = EDerivation::find()
                 .filter(CDerivation::Organization.eq(org_id))
-                .all(&self.state.db)
+                .all(&self.state.web_db)
                 .await
                 .unwrap_or_default()
                 .into_iter()
@@ -340,7 +340,7 @@ impl<'a> CacheOpsHandler<'a> {
                         .add(CDerivationOutput::Derivation.is_in(derivation_ids))
                         .add(CDerivationOutput::IsCached.eq(true)),
                 )
-                .all(&self.state.db)
+                .all(&self.state.web_db)
                 .await
                 .unwrap_or_default();
 
@@ -351,7 +351,7 @@ impl<'a> CacheOpsHandler<'a> {
 
                 let mut active = output.into_active_model();
                 active.is_cached = Set(false);
-                if let Err(e) = active.update(&self.state.db).await {
+                if let Err(e) = active.update(&self.state.web_db).await {
                     error!(error = %e, "Failed to update derivation_output is_cached flag");
                 }
             }
@@ -411,7 +411,7 @@ impl CacheContext {
     ) -> WebResult<Self> {
         let cache = ECache::find()
             .filter(CCache::Name.eq(cache_name))
-            .one(&state.db)
+            .one(&state.web_db)
             .await?
             .ok_or_else(|| WebError::not_found("Cache"))?;
 

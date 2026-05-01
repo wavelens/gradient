@@ -95,7 +95,7 @@ pub async fn get_cache_name_available(
     }
     let exists = ECache::find()
         .filter(CCache::Name.eq(name.as_str()))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .is_some();
     Ok(Json(BaseResponse {
@@ -112,7 +112,7 @@ pub async fn get(
     // Find all orgs the user belongs to
     let org_memberships = EOrganizationUser::find()
         .filter(COrganizationUser::User.eq(user.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let org_ids: Vec<Uuid> = org_memberships
@@ -126,7 +126,7 @@ pub async fn get(
     } else {
         EOrganizationCache::find()
             .filter(COrganizationCache::Organization.is_in(org_ids))
-            .all(&state.db)
+            .all(&state.web_db)
             .await?
             .into_iter()
             .map(|oc| oc.cache)
@@ -139,7 +139,7 @@ pub async fn get(
                 .add(CCache::CreatedBy.eq(user.id))
                 .add(CCache::Id.is_in(org_cache_ids)),
         )
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     Ok(Json(BaseResponse {
@@ -163,7 +163,7 @@ pub async fn put(
 
     let existing_cache = ECache::find()
         .filter(CCache::Name.eq(body.name.clone()))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?;
 
     if existing_cache.is_some() {
@@ -191,7 +191,7 @@ pub async fn put(
         managed: Set(false),
     };
 
-    let cache = cache.insert(&state.db).await?;
+    let cache = cache.insert(&state.web_db).await?;
 
     ACacheUpstream {
         id: Set(Uuid::new_v4()),
@@ -204,7 +204,7 @@ pub async fn put(
             "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=".to_string(),
         )),
     }
-    .insert(&state.db)
+    .insert(&state.web_db)
     .await?;
 
     Ok(Json(BaseResponse {
@@ -218,7 +218,7 @@ pub async fn get_public_caches(
 ) -> WebResult<Json<BaseResponse<Vec<MCache>>>> {
     let caches = ECache::find()
         .filter(CCache::Public.eq(true))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     Ok(Json(BaseResponse {
@@ -289,7 +289,7 @@ pub async fn patch_cache(
         }
         if ECache::find()
             .filter(CCache::Name.eq(name.clone()))
-            .one(&state.db)
+            .one(&state.web_db)
             .await?
             .is_some()
         {
@@ -314,7 +314,7 @@ pub async fn patch_cache(
         acache.priority = Set(priority);
     }
 
-    acache.update(&state.db).await?;
+    acache.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -333,7 +333,7 @@ pub async fn delete_cache(
     // clean up orphaned NAR files in the background afterwards.
     let subscribing_orgs: Vec<Uuid> = EOrganizationCache::find()
         .filter(COrganizationCache::Cache.eq(cache.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -341,7 +341,7 @@ pub async fn delete_cache(
         .collect();
 
     let acache: ACache = cache.into();
-    acache.delete(&state.db).await?;
+    acache.delete(&state.web_db).await?;
 
     // Spawn background task to delete now-orphaned NAR files.
     let state_bg = Arc::clone(&state);
@@ -363,7 +363,7 @@ pub async fn post_cache_active(
     let cache = load_editable_cache(&state, user.id, cache).await?;
     let mut acache: ACache = cache.into();
     acache.active = Set(true);
-    acache.update(&state.db).await?;
+    acache.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -379,7 +379,7 @@ pub async fn delete_cache_active(
     let cache = load_editable_cache(&state, user.id, cache).await?;
     let mut acache: ACache = cache.into();
     acache.active = Set(false);
-    acache.update(&state.db).await?;
+    acache.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -395,7 +395,7 @@ pub async fn post_cache_public(
     let cache = load_editable_cache(&state, user.id, cache).await?;
     let mut acache: ACache = cache.into();
     acache.public = Set(true);
-    acache.update(&state.db).await?;
+    acache.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -411,7 +411,7 @@ pub async fn delete_cache_public(
     let cache = load_editable_cache(&state, user.id, cache).await?;
     let mut acache: ACache = cache.into();
     acache.public = Set(false);
-    acache.update(&state.db).await?;
+    acache.update(&state.web_db).await?;
 
     Ok(Json(BaseResponse {
         error: false,

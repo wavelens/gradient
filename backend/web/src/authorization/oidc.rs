@@ -182,7 +182,7 @@ async fn create_or_update_user(
                 .add(CUser::Email.eq(&user_info.email))
                 .add(CUser::Username.eq(&login_name)),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await
         .context("Database error while finding user")?
     {
@@ -197,7 +197,7 @@ async fn create_or_update_user(
                 let mut auser: AUser = user.into();
                 auser.email = Set(user_info.email.clone());
                 user = auser
-                    .update(&state.db)
+                    .update(&state.web_db)
                     .await
                     .context("Failed to update user email")?;
                 updated = true;
@@ -207,7 +207,7 @@ async fn create_or_update_user(
                 let mut auser: AUser = user.into();
                 auser.username = Set(login_name.clone());
                 user = auser
-                    .update(&state.db)
+                    .update(&state.web_db)
                     .await
                     .context("Failed to update username")?;
                 updated = true;
@@ -217,7 +217,7 @@ async fn create_or_update_user(
                 let mut auser: AUser = user.into();
                 auser.name = Set(user_info.name.clone());
                 user = auser
-                    .update(&state.db)
+                    .update(&state.web_db)
                     .await
                     .context("Failed to update user name")?;
                 updated = true;
@@ -248,7 +248,7 @@ async fn create_or_update_user(
             };
 
             let user = new_user
-                .insert(&state.db)
+                .insert(&state.web_db)
                 .await
                 .context("Failed to create user")?;
 

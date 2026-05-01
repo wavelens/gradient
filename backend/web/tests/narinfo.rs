@@ -175,7 +175,8 @@ async fn narinfo_served_from_db_inner() {
     let cli = test_cli();
     let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
-        db,
+        web_db: db,
+        db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
         cli,
         log_storage: Arc::new(NoopLogStorage),
         webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,

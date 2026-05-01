@@ -238,7 +238,7 @@ async fn resolve_badge_user(
                 .await
                 .map_err(|_| WebError::Unauthorized("Invalid token".to_string()))?;
             Ok(EUser::find_by_id(token_data.claims.id)
-                .one(&state.db)
+                .one(&state.web_db)
                 .await?)
         }
         None => Ok(maybe_user),
@@ -276,7 +276,7 @@ async fn badge_status_for_entry_point(
         .filter(CEvaluation::Project.eq(project_id))
         .filter(CEvaluation::Status.eq(EvaluationStatus::Completed))
         .order_by_desc(CEvaluation::CreatedAt)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?;
 
     let Some(ev) = evaluation else {
@@ -286,14 +286,14 @@ async fn badge_status_for_entry_point(
     let Some(ep) = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(ev.id))
         .filter(CEntryPoint::Eval.eq(eval_attr))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
     else {
         return Ok((None, false));
     };
 
     let build_status = EBuild::find_by_id(ep.build)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .map(|b| b.status);
 
@@ -322,13 +322,13 @@ async fn badge_status_for_latest_eval(
         return Ok((None, false));
     };
 
-    let eval = EEvaluation::find_by_id(eval_id).one(&state.db).await?;
+    let eval = EEvaluation::find_by_id(eval_id).one(&state.web_db).await?;
 
     let has_failed = match &eval {
         Some(e) if e.status == EvaluationStatus::Completed => {
             let ep_build_ids: Vec<uuid::Uuid> = EEntryPoint::find()
                 .filter(CEntryPoint::Evaluation.eq(e.id))
-                .all(&state.db)
+                .all(&state.web_db)
                 .await?
                 .into_iter()
                 .map(|ep| ep.build)
@@ -338,7 +338,7 @@ async fn badge_status_for_latest_eval(
                 && EBuild::find()
                     .filter(CBuild::Id.is_in(ep_build_ids))
                     .filter(CBuild::Status.eq(BuildStatus::Failed))
-                    .one(&state.db)
+                    .one(&state.web_db)
                     .await?
                     .is_some()
         }
@@ -372,7 +372,7 @@ pub async fn get_project_badge(
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
         .filter(CProject::Name.eq(&project))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Project"))?;
 

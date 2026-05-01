@@ -236,6 +236,9 @@ pub struct Cli {
 #[derive(Debug)]
 pub struct ServerState {
     pub db: DatabaseConnection,
+    /// Dedicated DB pool used by the axum/web layer so HTTP requests are
+    /// not starved by the busy proto/scheduler pool under heavy NarPush load.
+    pub web_db: DatabaseConnection,
     pub cli: Cli,
     pub log_storage: Arc<dyn LogStorage>,
     pub webhooks: Arc<dyn WebhookClient>,

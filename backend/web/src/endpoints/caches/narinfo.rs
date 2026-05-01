@@ -94,7 +94,7 @@ async fn fetch_from_upstream(
 ) -> Option<String> {
     let upstreams = ECacheUpstream::find()
         .filter(CCacheUpstream::Cache.eq(cache.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await
         .unwrap_or_default();
 

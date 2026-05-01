@@ -62,7 +62,7 @@ pub async fn upstream_nar(
 
     let upstream = ECacheUpstream::find_by_id(upstream_id)
         .filter(CCacheUpstream::Cache.eq(ctx.cache.id))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Upstream"))?;
 
@@ -88,7 +88,7 @@ pub async fn upstream_nar(
 /// `cached_path` (for standalone store paths such as `.drv` files).
 /// Falls back to the URL hash for legacy/direct-hash URLs.
 async fn resolve_effective_hash(state: &Arc<ServerState>, path_hash: &str) -> WebResult<String> {
-    resolve_effective_hash_db(&state.db, path_hash).await
+    resolve_effective_hash_db(&state.web_db, path_hash).await
 }
 
 pub(crate) async fn resolve_effective_hash_db(

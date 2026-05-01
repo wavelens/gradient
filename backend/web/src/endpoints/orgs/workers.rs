@@ -159,7 +159,7 @@ pub async fn post_org_worker(
         created_by: Set(Some(user.id)),
         created_at: Set(Utc::now().naive_utc()),
     };
-    row.insert(&state.db).await?;
+    row.insert(&state.web_db).await?;
 
     // Trigger re-auth if the worker is already connected, so it picks up
     // the new peer registration without requiring a reconnect.
@@ -184,7 +184,7 @@ pub async fn get_org_workers(
 
     let registrations = EWorkerRegistration::find()
         .filter(worker_registration::Column::PeerId.eq(org.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     // Build a map of worker_id → live info from the scheduler.
@@ -251,7 +251,7 @@ pub async fn patch_org_worker(
     let reg = EWorkerRegistration::find()
         .filter(worker_registration::Column::PeerId.eq(org.id))
         .filter(worker_registration::Column::WorkerId.eq(&worker_id))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("worker registration"))?;
 
@@ -275,7 +275,7 @@ pub async fn patch_org_worker(
     if let Some(v) = body.enable_build {
         active_model.enable_build = Set(v);
     }
-    active_model.update(&state.db).await?;
+    active_model.update(&state.web_db).await?;
 
     // When deactivating: abort in-flight jobs from this org on the worker
     // before triggering reauth, so the worker stops them immediately.
@@ -310,7 +310,7 @@ pub async fn delete_org_worker(
     let result = EWorkerRegistration::delete_many()
         .filter(worker_registration::Column::PeerId.eq(org.id))
         .filter(worker_registration::Column::WorkerId.eq(&worker_id))
-        .exec(&state.db)
+        .exec(&state.web_db)
         .await?;
 
     if result.rows_affected == 0 {

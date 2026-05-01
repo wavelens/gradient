@@ -44,14 +44,14 @@ pub(super) async fn evaluation_to_summary(
     evaluation: MEvaluation,
 ) -> Result<EvaluationSummary, WebError> {
     let commit_hash = ECommit::find_by_id(evaluation.commit)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .map(|c| vec_to_hex(&c.hash))
         .unwrap_or_default();
 
     let total_builds = EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation.id))
-        .count(&state.db)
+        .count(&state.web_db)
         .await? as i64;
 
     let failed_builds = EBuild::find()
@@ -60,12 +60,12 @@ pub(super) async fn evaluation_to_summary(
                 .add(CBuild::Evaluation.eq(evaluation.id))
                 .add(CBuild::Status.eq(BuildStatus::Failed)),
         )
-        .count(&state.db)
+        .count(&state.web_db)
         .await? as i64;
 
     let ep_builds: Vec<Uuid> = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?
         .into_iter()
         .map(|ep| ep.build)
@@ -82,12 +82,12 @@ pub(super) async fn evaluation_to_summary(
                     .add(CBuild::Status.eq(BuildStatus::Completed))
                     .add(CBuild::Status.eq(BuildStatus::Substituted)),
             )
-            .count(&state.db)
+            .count(&state.web_db)
             .await? as i64;
         let failed = EBuild::find()
             .filter(CBuild::Id.is_in(ep_builds.clone()))
             .filter(CBuild::Status.eq(BuildStatus::Failed))
-            .count(&state.db)
+            .count(&state.web_db)
             .await? as i64;
         (completed, failed, ep_builds.len() as i64)
     };
@@ -95,7 +95,7 @@ pub(super) async fn evaluation_to_summary(
     let entry_point_diff = if let Some(prev_id) = evaluation.previous {
         let prev_count = EEntryPoint::find()
             .filter(CEntryPoint::Evaluation.eq(prev_id))
-            .count(&state.db)
+            .count(&state.web_db)
             .await? as i64;
         Some(total_entry_points - prev_count)
     } else {
@@ -127,7 +127,7 @@ pub async fn post_project_evaluate(
     let mode = body.as_ref().and_then(|b| b.mode.as_deref());
 
     if mode == Some("restart_failed") {
-        core::ci::trigger_restart_builds(&state.db, &project)
+        core::ci::trigger_restart_builds(&state.web_db, &project)
             .await
             .map_err(|e| match e {
                 core::ci::TriggerError::AlreadyInProgress => {
@@ -157,7 +157,7 @@ pub async fn post_project_evaluate(
         ));
     }
 
-    core::ci::trigger_evaluation(&state.db, &project, commit_hash, None, None)
+    core::ci::trigger_evaluation(&state.web_db, &project, commit_hash, None, None)
         .await
         .map_err(|e| match e {
             core::ci::TriggerError::AlreadyInProgress => {
@@ -191,7 +191,7 @@ pub async fn get_project_evaluations(
         .filter(CEvaluation::Project.eq(project.id))
         .order_by_desc(CEvaluation::CreatedAt)
         .limit(project.keep_evaluations as u64)
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let mut summaries = Vec::with_capacity(evaluations.len());
@@ -218,7 +218,7 @@ pub async fn get_project_details(
         .filter(CEvaluation::Project.eq(project.id))
         .order_by_desc(CEvaluation::CreatedAt)
         .limit(5)
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let mut evaluation_summaries = Vec::with_capacity(evaluations.len());
@@ -279,7 +279,7 @@ pub async fn get_project_entry_points(
     };
 
     let evaluation = EEvaluation::find_by_id(eval_id)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
@@ -289,7 +289,7 @@ pub async fn get_project_entry_points(
 
     let entry_points = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(eval_id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     if entry_points.is_empty() {
@@ -325,7 +325,7 @@ impl EntryPointRelatedData {
         let build_ids: Vec<Uuid> = entry_points.iter().map(|ep| ep.build).collect();
         let builds: HashMap<Uuid, MBuild> = EBuild::find()
             .filter(CBuild::Id.is_in(build_ids))
-            .all(&state.db)
+            .all(&state.web_db)
             .await?
             .into_iter()
             .map(|b| (b.id, b))
@@ -337,7 +337,7 @@ impl EntryPointRelatedData {
         } else {
             EDerivation::find()
                 .filter(CDerivation::Id.is_in(drv_ids.clone()))
-                .all(&state.db)
+                .all(&state.web_db)
                 .await?
                 .into_iter()
                 .map(|d| (d.id, d))
@@ -357,14 +357,14 @@ impl EntryPointRelatedData {
         } else {
             let outputs = EDerivationOutput::find()
                 .filter(CDerivationOutput::Derivation.is_in(completed_drv_ids))
-                .all(&state.db)
+                .all(&state.web_db)
                 .await?;
             let output_ids: Vec<Uuid> = outputs.iter().map(|o| o.id).collect();
             let mut m: HashMap<Uuid, bool> = HashMap::new();
             if !output_ids.is_empty() {
                 for bp in EBuildProduct::find()
                     .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
-                    .all(&state.db)
+                    .all(&state.web_db)
                     .await?
                 {
                     // Map back from output → derivation.
@@ -445,7 +445,7 @@ async fn serve_hydra_artifact(
 
     let rows = match EBuildProduct::find()
         .filter(CBuildProduct::DerivationOutput.is_in(output_ids))
-        .all(&state.db)
+        .all(&state.web_db)
         .await
     {
         Ok(r) => r,
@@ -571,7 +571,7 @@ pub async fn get_entry_point_download(
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
         .filter(CProject::Name.eq(&project))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Project"))?;
 
@@ -581,7 +581,7 @@ pub async fn get_entry_point_download(
             .await
             .map_err(|_| WebError::Unauthorized("Invalid token".to_string()))?;
         EUser::find_by_id(token_data.claims.id)
-            .one(&state.db)
+            .one(&state.web_db)
             .await?
     } else {
         maybe_user
@@ -603,7 +603,7 @@ pub async fn get_entry_point_download(
         .filter(CEvaluation::Project.eq(project.id))
         .filter(CEvaluation::Status.eq(EvaluationStatus::Completed))
         .order_by_desc(CEvaluation::CreatedAt)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Evaluation"))?;
 
@@ -612,12 +612,12 @@ pub async fn get_entry_point_download(
     let ep = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation.id))
         .filter(CEntryPoint::Eval.eq(&params.eval))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Entry point"))?;
 
     let build = EBuild::find_by_id(ep.build)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Build"))?;
 
@@ -628,7 +628,7 @@ pub async fn get_entry_point_download(
     // Walk derivation outputs, locate the file via hydra-build-products.
     let build_outputs = EDerivationOutput::find()
         .filter(CDerivationOutput::Derivation.eq(build.derivation))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     match serve_hydra_artifact(&state, build_outputs, &params.filename).await? {

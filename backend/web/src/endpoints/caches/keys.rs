@@ -133,7 +133,7 @@ pub async fn get_cache_netrc(
     let raw_key = match EApi::find()
         .filter(CApi::OwnedBy.eq(user.id))
         .filter(CApi::Name.eq(key_name.clone()))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
     {
         Some(existing) => existing.key,
@@ -148,7 +148,7 @@ pub async fn get_cache_netrc(
                 created_at: Set(Utc::now().naive_utc()),
                 managed: Set(false),
             }
-            .insert(&state.db)
+            .insert(&state.web_db)
             .await?;
             new_key
         }

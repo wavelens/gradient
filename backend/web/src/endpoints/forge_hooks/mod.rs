@@ -127,7 +127,7 @@ pub async fn forge_webhook(
 
     let org = EOrganization::find()
         .filter(COrganization::Name.eq(org_name.as_str()))
-        .one(&state.db)
+        .one(&state.web_db)
         .await
         .map_err(|e| {
             warn!(error = %e, org = %org_name, "DB error looking up organization for forge webhook");
@@ -139,7 +139,7 @@ pub async fn forge_webhook(
         .filter(CIntegration::Organization.eq(org.id))
         .filter(CIntegration::Kind.eq(IntegrationKind::Inbound.as_i16()))
         .filter(CIntegration::Name.eq(integration_name.as_str()))
-        .one(&state.db)
+        .one(&state.web_db)
         .await
         .map_err(|e| {
             warn!(error = %e, "DB error looking up integration for forge webhook");

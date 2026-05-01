@@ -71,7 +71,7 @@ pub async fn user_is_org_member(
                 .add(COrganizationUser::Organization.eq(organization_id))
                 .add(COrganizationUser::User.eq(user_id)),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .is_some())
 }

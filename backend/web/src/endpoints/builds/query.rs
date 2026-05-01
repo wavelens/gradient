@@ -41,7 +41,7 @@ pub async fn get_build(
     let build = ctx.build;
 
     let derivation = EDerivation::find_by_id(build.derivation)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| {
             tracing::error!(
@@ -54,7 +54,7 @@ pub async fn get_build(
 
     let derivation_outputs = EDerivationOutput::find()
         .filter(CDerivationOutput::Derivation.eq(derivation.id))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let mut outputs = HashMap::new();

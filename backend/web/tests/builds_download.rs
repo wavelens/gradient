@@ -246,7 +246,8 @@ fn listing_returns_products_from_db() {
 
         let db = mock_db_for_downloads();
         let state = Arc::new(ServerState {
-            db,
+            web_db: db,
+            db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
             cli,
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
@@ -316,7 +317,8 @@ fn download_streams_file_from_nar() {
             .into_connection();
 
         let state = Arc::new(ServerState {
-            db,
+            web_db: db,
+            db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
             cli,
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,

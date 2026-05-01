@@ -80,13 +80,13 @@ async fn process_graph_wave(
 ) -> WebResult<GraphWaveResult> {
     let builds = EBuild::find()
         .filter(CBuild::Id.is_in(batch.to_vec()))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let drv_ids: Vec<Uuid> = builds.iter().map(|b| b.derivation).collect();
     let drv_by_id: HashMap<Uuid, MDerivation> = EDerivation::find()
         .filter(CDerivation::Id.is_in(drv_ids.clone()))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?
         .into_iter()
         .map(|d| (d.id, d))
@@ -108,7 +108,7 @@ async fn process_graph_wave(
 
     let dep_rows = EDerivationDependency::find()
         .filter(CDerivationDependency::Derivation.is_in(drv_ids))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     if dep_rows.is_empty() {
@@ -123,7 +123,7 @@ async fn process_graph_wave(
     let build_by_drv: HashMap<Uuid, Uuid> = EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation_id))
         .filter(CBuild::Derivation.is_in(dep_drv_ids))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?
         .iter()
         .map(|b| (b.derivation, b.id))
@@ -166,13 +166,13 @@ pub async fn get_build_dependencies(
     authorize_build_opt(&state, &maybe_user, build_id).await?;
 
     let build = EBuild::find_by_id(build_id)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Build"))?;
 
     let dep_edges = EDerivationDependency::find()
         .filter(CDerivationDependency::Derivation.eq(build.derivation))
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let dep_drv_ids: Vec<Uuid> = dep_edges.iter().map(|d| d.dependency).collect();
@@ -182,11 +182,11 @@ pub async fn get_build_dependencies(
         let dep_builds = EBuild::find()
             .filter(CBuild::Evaluation.eq(build.evaluation))
             .filter(CBuild::Derivation.is_in(dep_drv_ids.clone()))
-            .all(&state.db)
+            .all(&state.web_db)
             .await?;
         let dep_drvs = EDerivation::find()
             .filter(CDerivation::Id.is_in(dep_drv_ids))
-            .all(&state.db)
+            .all(&state.web_db)
             .await?;
         let drv_by_id: HashMap<Uuid, MDerivation> =
             dep_drvs.into_iter().map(|d| (d.id, d)).collect();
@@ -219,7 +219,7 @@ pub async fn get_build_graph(
     authorize_build_opt(&state, &maybe_user, build_id).await?;
 
     let root_build = EBuild::find_by_id(build_id)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Build"))?;
     let evaluation_id = root_build.evaluation;

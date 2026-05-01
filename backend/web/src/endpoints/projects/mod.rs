@@ -107,7 +107,7 @@ pub(crate) async fn load_readable_project(
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
         .filter(CProject::Name.eq(project_name))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Project"))?;
     Ok((organization, project))
@@ -166,7 +166,7 @@ pub(crate) async fn user_can_edit(
                 .add(COrganizationUser::Organization.eq(organization_id))
                 .add(COrganizationUser::User.eq(user_id)),
         )
-        .one(&state.db)
+        .one(&state.web_db)
         .await?;
 
     Ok(match org_user {

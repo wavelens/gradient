@@ -44,7 +44,7 @@ pub async fn post_organization_ssh(
 
     aorganization.private_key = Set(private_key.clone());
     aorganization.public_key = Set(public_key.clone());
-    let organization = aorganization.update(&state.db).await?;
+    let organization = aorganization.update(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,

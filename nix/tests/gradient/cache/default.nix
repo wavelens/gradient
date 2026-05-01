@@ -11,7 +11,11 @@
 
     defaults = {
       networking.firewall.enable = false;
-      virtualisation.writableStore = true;
+      virtualisation = {
+        cores = 4;
+        memorySize = 2048;
+        writableStore = true;
+      };
       documentation.enable = false;
       nix.settings.max-jobs = 0;
     };

@@ -18,7 +18,7 @@ pub async fn get_commit(
     Path(commit_id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<MCommit>>> {
     let commit = ECommit::find_by_id(commit_id)
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Commit"))?;
 

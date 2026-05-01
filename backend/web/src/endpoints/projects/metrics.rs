@@ -95,7 +95,7 @@ pub async fn get_project_metrics(
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
         .filter(CProject::Name.eq(project))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Project"))?;
 
@@ -104,7 +104,7 @@ pub async fn get_project_metrics(
         .filter(CEvaluation::Status.eq(entity::evaluation::EvaluationStatus::Completed))
         .order_by_desc(CEvaluation::CreatedAt)
         .limit(project.keep_evaluations as u64)
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let mut points = Vec::new();
@@ -114,7 +114,7 @@ pub async fn get_project_metrics(
 
         let builds = EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation.id))
-            .all(&state.db)
+            .all(&state.web_db)
             .await?;
         // Only sum actual build times; substituted builds contribute nothing.
         let build_time_total_ms: i64 = builds.iter().filter_map(|b| b.build_time_ms).sum();
@@ -122,7 +122,7 @@ pub async fn get_project_metrics(
         // Resolve entry-point builds for this evaluation.
         let ep_build_ids: Vec<Uuid> = EEntryPoint::find()
             .filter(CEntryPoint::Evaluation.eq(evaluation.id))
-            .all(&state.db)
+            .all(&state.web_db)
             .await?
             .into_iter()
             .map(|ep| ep.build)
@@ -133,7 +133,7 @@ pub async fn get_project_metrics(
         } else {
             EBuild::find()
                 .filter(CBuild::Id.is_in(ep_build_ids))
-                .all(&state.db)
+                .all(&state.web_db)
                 .await?
                 .into_iter()
                 .map(|b| b.derivation)
@@ -141,11 +141,11 @@ pub async fn get_project_metrics(
         };
 
         let entry_point_count = ep_drv_ids.len() as i64;
-        let closure = derivation_closure_reachable(&state.db, ep_drv_ids.clone()).await?;
+        let closure = derivation_closure_reachable(&state.web_db, ep_drv_ids.clone()).await?;
         let dependencies_count = (closure.len() as i64) - entry_point_count;
 
-        let output_size_bytes = sum_output_sizes(&state.db, ep_drv_ids).await?;
-        let closure_size_bytes = sum_output_sizes(&state.db, closure.into_iter().collect()).await?;
+        let output_size_bytes = sum_output_sizes(&state.web_db, ep_drv_ids).await?;
+        let closure_size_bytes = sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
 
         points.push(ProjectMetricPoint {
             evaluation_id: evaluation.id,
@@ -208,7 +208,7 @@ pub async fn get_entry_point_metrics(
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
         .filter(CProject::Name.eq(project))
-        .one(&state.db)
+        .one(&state.web_db)
         .await?
         .ok_or_else(|| WebError::not_found("Project"))?;
 
@@ -217,20 +217,20 @@ pub async fn get_entry_point_metrics(
         .filter(CEntryPoint::Eval.eq(&params.eval))
         .order_by_desc(CEntryPoint::CreatedAt)
         .limit(project.keep_evaluations as u64)
-        .all(&state.db)
+        .all(&state.web_db)
         .await?;
 
     let mut points = Vec::new();
 
     for ep in entry_points {
         let Some(evaluation) = EEvaluation::find_by_id(ep.evaluation)
-            .one(&state.db)
+            .one(&state.web_db)
             .await?
         else {
             continue;
         };
 
-        let Some(build) = EBuild::find_by_id(ep.build).one(&state.db).await? else {
+        let Some(build) = EBuild::find_by_id(ep.build).one(&state.web_db).await? else {
             continue;
         };
 
@@ -238,11 +238,11 @@ pub async fn get_entry_point_metrics(
         // falling back to (updated_at - created_at) which gives ~0 ms.
         let build_time_ms = build.build_time_ms;
 
-        let closure = derivation_closure_reachable(&state.db, vec![build.derivation]).await?;
+        let closure = derivation_closure_reachable(&state.web_db, vec![build.derivation]).await?;
         let dependencies_count = (closure.len() as i64).saturating_sub(1);
 
-        let output_size_bytes = sum_output_sizes(&state.db, vec![build.derivation]).await?;
-        let closure_size_bytes = sum_output_sizes(&state.db, closure.into_iter().collect()).await?;
+        let output_size_bytes = sum_output_sizes(&state.web_db, vec![build.derivation]).await?;
+        let closure_size_bytes = sum_output_sizes(&state.web_db, closure.into_iter().collect()).await?;
 
         points.push(EntryPointMetricPoint {
             evaluation_id: evaluation.id,
