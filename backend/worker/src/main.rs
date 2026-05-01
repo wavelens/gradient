@@ -22,6 +22,7 @@ use tracing::{error, info, warn};
 
 use config::WorkerConfig;
 use connection_state::RunOutcome;
+use tracing_subscriber::EnvFilter;
 use worker::Worker;
 
 /// Maximum delay between reconnect attempts.
@@ -36,7 +37,7 @@ fn main() -> Result<()> {
     // JSON to the parent (see worker_pool::pool), so any tracing line on stdout
     // would be parsed as a protocol response and crash the eval.
     tracing_subscriber::fmt()
-        .with_env_filter(&config.log_level)
+        .with_env_filter(build_env_filter(&config))
         .with_writer(std::io::stderr)
         .init();
 
@@ -119,4 +120,46 @@ fn main() -> Result<()> {
 
         Ok(())
     })
+}
+
+/// Build the tracing `EnvFilter` from the worker's log-level config.
+///
+/// `log_level` is the global default. The optional per-area overrides
+/// (`eval_log_level`, `build_log_level`, `proto_log_level`) are appended as
+/// per-target directives so e.g. `settings.logLevel.eval = "trace"` enables
+/// trace logging only for the evaluator-related modules.
+fn build_env_filter(config: &WorkerConfig) -> EnvFilter {
+    const EVAL_TARGETS: &[&str] = &[
+        "gradient_worker::nix",
+        "gradient_worker::worker_pool",
+        "gradient_worker::executor::eval",
+    ];
+    const BUILD_TARGETS: &[&str] = &[
+        "gradient_worker::executor::build",
+        "gradient_worker::executor::compress",
+    ];
+    const PROTO_TARGETS: &[&str] = &[
+        "gradient_worker::proto",
+        "gradient_worker::connection",
+        "gradient_worker::connection_state",
+    ];
+
+    let mut filter = EnvFilter::new(&config.log_level);
+    let mut overrides: Vec<(&str, &str)> = Vec::new();
+    if let Some(lvl) = &config.eval_log_level {
+        overrides.extend(EVAL_TARGETS.iter().map(|t| (*t, lvl.as_str())));
+    }
+    if let Some(lvl) = &config.build_log_level {
+        overrides.extend(BUILD_TARGETS.iter().map(|t| (*t, lvl.as_str())));
+    }
+    if let Some(lvl) = &config.proto_log_level {
+        overrides.extend(PROTO_TARGETS.iter().map(|t| (*t, lvl.as_str())));
+    }
+    for (target, lvl) in overrides {
+        match format!("{target}={lvl}").parse() {
+            Ok(d) => filter = filter.add_directive(d),
+            Err(e) => eprintln!("invalid log directive {target}={lvl}: {e}"),
+        }
+    }
+    filter
 }

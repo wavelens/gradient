@@ -388,16 +388,21 @@ in {
       _, output = server.execute("${lib.getExe pkgs.gradient-cli} project show")
       print(output)
 
+      # Strip ANSI escape codes from the CLI output before parsing — the
+      # `colored` crate emits them around build names which would otherwise
+      # break `.endswith(".drv")` checks.
+      import re
+      ansi_re = re.compile(r"\x1b\[[0-9;]*m")
       store_path_drv = ""
       in_building = False
       for line in output.split("\n"):
-        if line.strip() == "===== Building =====":
+        clean = ansi_re.sub("", line).strip()
+        if clean == "===== Building =====":
           in_building = True
-        elif line.strip() == "===== Log =====":
+        elif clean == "===== Log =====":
           break
-        elif in_building and "hello" in line and line.strip().endswith(".drv"):
-          drv = line.strip()
-          store_path_drv = drv if drv.startswith("/nix/store/") else f"/nix/store/{drv}"
+        elif in_building and "hello" in clean and clean.endswith(".drv"):
+          store_path_drv = clean if clean.startswith("/nix/store/") else f"/nix/store/{clean}"
           break
 
       store_path = server.succeed(f"${lib.getExe pkgs.nix} path-info {store_path_drv}^out --extra-experimental-features nix-command").strip()

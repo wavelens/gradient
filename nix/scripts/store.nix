@@ -46,7 +46,7 @@ in with pkgs; runCommand "store-${testPkgs.pname}" { } ''
     # Full-closure mode (for the integration test): copy every path,
     # including directory outputs, so the worker VM has the full build
     # closure already substituted in its local store.
-    xargs -a "${closureInfo}/store-paths" -P 8 -I {} cp -aL --reflink=auto {} $out/store/
+    xargs -a "${closureInfo}/store-paths" -P 8 -I {} cp -a --reflink=auto {} $out/store/
   ''}
 
   echo "${testPkgs.drvPath}" > $out/output
