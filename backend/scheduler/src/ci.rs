@@ -5,11 +5,13 @@
  */
 
 use gradient_core::ci::{
-    CiReport, CiStatus, parse_owner_repo, resolve_outbound_reporter_for_project,
+    CiReport, CiStatus, ci_status_for_build, parse_owner_repo,
+    resolve_outbound_reporter_for_project,
 };
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{error, warn};
 use uuid::Uuid;
@@ -100,13 +102,34 @@ pub async fn report_ci_for_entry_points(
         )
     });
 
+    // Pre-fetch the build status of each entry point so that builds which are
+    // already in a terminal state (notably `Substituted` — set at insert-time
+    // and never routed through `update_build_status`) report a terminal CI
+    // status on first POST instead of getting stuck at the initial `Pending`.
+    let build_ids: Vec<Uuid> = ep_rows.iter().map(|ep| ep.build).collect();
+    let build_statuses: HashMap<Uuid, entity::build::BuildStatus> = match EBuild::find()
+        .filter(CBuild::Id.is_in(build_ids))
+        .all(&state.db)
+        .await
+    {
+        Ok(rows) => rows.into_iter().map(|b| (b.id, b.status)).collect(),
+        Err(e) => {
+            warn!(error = %e, "Failed to load build statuses for entry-point CI report; defaulting to passed status");
+            HashMap::new()
+        }
+    };
+
     for ep in ep_rows {
+        let initial_status = build_statuses
+            .get(&ep.build)
+            .and_then(ci_status_for_build)
+            .unwrap_or_else(|| status.clone());
         let report = CiReport {
             owner: owner.clone(),
             repo: repo.clone(),
             sha: sha.clone(),
             context: format!("gradient/{}", ep.eval),
-            status: status.clone(),
+            status: initial_status,
             description: None,
             details_url: details_url.clone(),
             existing_check_id: ep.repo_check_id,
