@@ -43,7 +43,7 @@ Match the values Gradient expects:
 | Webhook URL | `{serveUrl}/api/v1/hooks/github` |
 | Setup URL | `{serveUrl}/admin/github-app` (optional) |
 | Permissions | `metadata: read`, `contents: read`, `pull_requests: read`, `statuses: write`, `checks: write` |
-| Events | `push`, `pull_request`, `installation`, `installation_repositories` |
+| Events | `push`, `pull_request` (`installation` and `installation_repositories` are delivered automatically and are not selectable) |
 
 Then download the private key, generate a webhook secret, and configure the
 env vars as below.

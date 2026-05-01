@@ -55,8 +55,6 @@ pub fn build_manifest(serve_url: &str) -> Value {
         "default_events": [
             "push",
             "pull_request",
-            "installation",
-            "installation_repositories",
         ],
     })
 }
@@ -161,7 +159,7 @@ mod tests {
         assert_eq!(m["default_permissions"]["pull_requests"], "read");
         assert_eq!(
             m["default_events"],
-            json!(["push", "pull_request", "installation", "installation_repositories"])
+            json!(["push", "pull_request"])
         );
     }
 
