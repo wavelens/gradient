@@ -1,0 +1,17 @@
+<section class="settings-section">
+  @if (title()) {
+    <header class="settings-section__header">
+      <h2>{{ title() }}</h2>
+      @if (description()) {
+        <p class="settings-section__description">{{ description() }}</p>
+      }
+    </header>
+  }
+  <div
+    class="settings-section__body"
+    [class.settings-section__body--card]="card()"
+    [style.max-width]="maxWidth()"
+  >
+    <ng-content></ng-content>
+  </div>
+</section>

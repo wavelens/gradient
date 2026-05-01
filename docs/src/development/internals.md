@@ -175,4 +175,4 @@ A worker may be authorized for multiple orgs simultaneously — it sees job cand
 
 ## State-Managed Resources
 
-Users, organizations, and caches created by the NixOS module configuration carry `managed = true`. The API rejects mutations and deletions of these records with `403 Forbidden`. This allows declarative configuration to be the source of truth without Gradient's UI overwriting it.
+See [Declarative State](../state.md#state-managed-resources).

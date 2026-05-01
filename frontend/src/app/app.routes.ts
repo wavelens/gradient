@@ -242,6 +242,14 @@ export const routes: Routes = [
       ),
   },
 
+  // Style guide (developer reference, intentionally unlinked)
+  {
+    path: 'styleguide',
+    title: 'Style Guide',
+    loadComponent: () =>
+      import('./features/styleguide/styleguide.component').then((m) => m.StyleguideComponent),
+  },
+
   // Error pages
   {
     path: 'error/500',

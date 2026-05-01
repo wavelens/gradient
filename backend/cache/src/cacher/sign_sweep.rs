@@ -13,7 +13,7 @@
 //! records `cache_derivation` rows when a derivation's full closure has
 //! become cached for a given cache.
 
-use core::types::*;
+use gradient_core::types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -73,7 +73,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 
         let nar_hash_nix32 = hex_hash_to_nix32(nar_hash);
 
-        let sig_token = match core::sources::sign_narinfo_fingerprint(
+        let sig_token = match gradient_core::sources::sign_narinfo_fingerprint(
             state.cli.crypt_secret_file.clone(),
             cache.clone(),
             state.cli.serve_url.clone(),

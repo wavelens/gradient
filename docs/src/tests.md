@@ -245,3 +245,72 @@ Backend (`cargo test -p scheduler --tests scheduler_tests::record_eval_message`)
   job the handler resolves `PendingJob::evaluation_id()` and inserts one row
   into `evaluation_message`. Build compile failures and user-initiated aborts
   deliberately do not flow through this path.
+
+## Cache GC — orphan files keep predicate
+
+`cleanup_orphaned_cache_files` (`backend/cache/src/cacher/cleanup.rs`) is the
+safety-net pass that removes NAR files in `nar_storage` with no DB references.
+Its keep predicate is build-status aware: a hash is retained when its
+`derivation_output` has any `build` row whose status is **not** `Failed`,
+`Aborted`, or `DependencyFailed`. This covers `Substituted` builds (where no
+worker ever uploaded the NAR locally and `is_cached` may stay false) as well
+as the upload race window where the NAR is on disk before
+`derivation_output.is_cached=true` is flipped. NARs referenced only by a
+fully-uploaded `cached_path` row (e.g. `.drv` files) are also kept.
+
+Run with: `cargo test -p cache --lib cacher::cleanup`
+
+- `cacher::cleanup::tests::keeps_active_drops_orphan` — file for an active
+  build's hash survives; file with no DB references is removed.
+- `cacher::cleanup::tests::keeps_cached_path_only` — a hash returned only by
+  the `cached_path.file_hash IS NOT NULL` UNION branch is kept (covers `.drv`
+  files that have no `derivation_output`).
+- `cacher::cleanup::tests::drops_everything_when_no_keep` — empty keep set
+  removes every on-disk NAR.
+
+## Cache GC — TTL pass orphan guard
+
+`cleanup_stale_cached_nars` (`backend/cache/src/cacher/cleanup.rs`) evicts
+`cache_derivation` rows whose `last_fetched_at` is older than
+`nar_ttl_hours`. Its SELECT now also requires
+`NOT EXISTS (build b WHERE b.derivation = cd.derivation AND b.status NOT IN
+(Failed, Aborted, DependencyFailed))`, so derivations still referenced by an
+active evaluation/build never get their NAR evicted purely because no one
+fetched it recently. This implements the design "old evals/builds removed by
+`keep_evaluations` → derivation becomes orphan → kept for `nar_ttl_hours` →
+evicted".
+
+- `cacher::cleanup::tests::stale_nars_disabled_when_ttl_zero` — pass is a
+  no-op when `nar_ttl_hours = 0`.
+- `cacher::cleanup::tests::stale_nars_no_eligible_rows` — empty SELECT
+  result leaves on-disk NARs untouched.
+
+## Frontend — form primitives & style guide
+
+Reusable form primitives live under
+`frontend/src/app/shared/components/form/` and consolidate the
+label + input + error + dialog + message-banner patterns previously
+duplicated across feature components. A `/styleguide` route at
+`frontend/src/app/features/styleguide/` exercises every primitive and
+serves as a living reference.
+
+Specs (vitest + jsdom):
+
+- `FormFieldComponent` — renders label/required marker; toggles
+  `has-error` class on touched + invalid control.
+  (`shared/components/form/form-field/form-field.component.spec.ts`)
+- `FormErrorComponent` — hidden until touched; resolves default
+  messages by error key; honours overrides; formats `minlength` with
+  required length.
+  (`shared/components/form/form-error/form-error.component.spec.ts`)
+- `MessageBannerComponent` — applies `--type` modifier class; uses
+  default icon per type; honours custom icon override.
+  (`shared/components/form/message-banner/message-banner.component.spec.ts`)
+- `PasswordInputComponent` — toggles input type between `password`
+  and `text` on the eye button.
+  (`shared/components/form/password-input/password-input.component.spec.ts`)
+- `FormFieldsBuilder` — typed wrappers for text/email/password/confirm
+  produce controls with the expected validators; password strength
+  validator covers length + character class requirements; cross-field
+  `confirm()` validates against the named control.
+  (`shared/components/form/form-fields-builder.spec.ts`)

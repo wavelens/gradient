@@ -1,0 +1,17 @@
+<div class="page-layout" [style.max-width]="maxWidth()">
+  <header class="page-layout__header">
+    <h1>{{ title() }}</h1>
+    @if (subtitle()) {
+      <p class="page-layout__subtitle">{{ subtitle() }}</p>
+    }
+    <div class="page-layout__actions">
+      <ng-content select="[slot=actions]"></ng-content>
+    </div>
+  </header>
+  <div class="page-layout__banners">
+    <ng-content select="[slot=banner]"></ng-content>
+  </div>
+  <div class="page-layout__body">
+    <ng-content></ng-content>
+  </div>
+</div>

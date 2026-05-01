@@ -1,0 +1,59 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use 'variables' as *;
+
+// ── Stat Grid ────────────────────────────────────────────────────────────────
+// Auto-fit grid of stat-cards, used on dashboards and overview pages.
+.gr-grid-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: $spacing-md;
+}
+
+// ── Form Grid ────────────────────────────────────────────────────────────────
+// Two-column form layout, collapses to one column on small screens.
+.gr-grid-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: $spacing-md $spacing-lg;
+
+  @media (max-width: $breakpoint-md) {
+    grid-template-columns: 1fr;
+  }
+
+  > .gr-grid-form__full {
+    grid-column: 1 / -1;
+  }
+}
+
+// ── Card Grid ────────────────────────────────────────────────────────────────
+// Auto-fit grid of feature/list cards, responsive.
+.gr-grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: $spacing-lg;
+}
+
+// ── Row Grid ─────────────────────────────────────────────────────────────────
+// Table-like rows: label + value + actions.
+.gr-grid-rows {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 2fr auto;
+  gap: $spacing-md;
+  align-items: center;
+}
+
+// ── Form Actions ─────────────────────────────────────────────────────────────
+.gr-form-actions {
+  display: flex;
+  gap: $spacing-sm;
+  margin-top: $spacing-lg;
+
+  &--end {
+    justify-content: flex-end;
+  }
+}

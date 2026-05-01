@@ -200,6 +200,10 @@ async fn build_github_app_reporter_for_project(
         .ok()
         .flatten()?;
 
+    if !is_github_repository_url(&project.repository) {
+        return None;
+    }
+
     let org = EOrganization::find_by_id(project.organization)
         .one(&state.db)
         .await
@@ -229,5 +233,99 @@ async fn build_github_app_reporter_for_project(
             warn!(error = %e, "Failed to build GithubAppReporter");
             None
         }
+    }
+}
+
+/// Returns `true` when `url` points at github.com.
+///
+/// Accepts the URL shapes that `parse_owner_repo` does (HTTPS, HTTP, git://,
+/// SCP-style SSH, and an optional `git+` prefix) plus `ssh://` URLs. The host
+/// match is exact: `github.com` and `*.github.com` only.
+fn is_github_repository_url(url: &str) -> bool {
+    let url = url.strip_prefix("git+").unwrap_or(url);
+
+    let host_and_rest = if let Some(rest) = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .or_else(|| url.strip_prefix("git://"))
+        .or_else(|| url.strip_prefix("ssh://"))
+    {
+        rest
+    } else if let Some(at_pos) = url.find('@')
+        && url[at_pos + 1..].contains(':')
+    {
+        &url[at_pos + 1..]
+    } else {
+        return false;
+    };
+
+    let host = host_and_rest
+        .split(|c| c == '/' || c == ':')
+        .next()
+        .unwrap_or("");
+    let host = host.rsplit('@').next().unwrap_or(host);
+
+    host.eq_ignore_ascii_case("github.com") || host.to_ascii_lowercase().ends_with(".github.com")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_github_repository_url;
+
+    #[test]
+    fn github_https_is_github() {
+        assert!(is_github_repository_url("https://github.com/acme/widgets.git"));
+        assert!(is_github_repository_url("https://github.com/acme/widgets"));
+    }
+
+    #[test]
+    fn github_ssh_scp_is_github() {
+        assert!(is_github_repository_url("git@github.com:acme/widgets.git"));
+    }
+
+    #[test]
+    fn github_git_plus_https_is_github() {
+        assert!(is_github_repository_url(
+            "git+https://github.com/acme/widgets.git"
+        ));
+    }
+
+    #[test]
+    fn github_case_insensitive() {
+        assert!(is_github_repository_url("https://GitHub.com/acme/widgets"));
+    }
+
+    #[test]
+    fn gitea_https_is_not_github() {
+        assert!(!is_github_repository_url(
+            "https://git.wavelens.io/Wavelens/nix-dotfiles.git"
+        ));
+    }
+
+    #[test]
+    fn gitea_ssh_scp_is_not_github() {
+        assert!(!is_github_repository_url(
+            "gitea@git.wavelens.io:Wavelens/nix-dotfiles.git"
+        ));
+    }
+
+    #[test]
+    fn gitea_ssh_url_is_not_github() {
+        // Reproduces the bug: ssh://gitea@git.wavelens.io:12/... was being
+        // routed through the GitHub App reporter.
+        assert!(!is_github_repository_url(
+            "ssh://gitea@git.wavelens.io:12/Wavelens/nix-dotfiles"
+        ));
+    }
+
+    #[test]
+    fn lookalike_host_is_not_github() {
+        assert!(!is_github_repository_url("https://github.com.evil/x/y"));
+        assert!(!is_github_repository_url("https://notgithub.com/x/y"));
+    }
+
+    #[test]
+    fn github_subdomain_is_github() {
+        assert!(is_github_repository_url("https://api.github.com/x/y"));
     }
 }

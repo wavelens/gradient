@@ -5,8 +5,8 @@
  */
 
 use anyhow::{Context, Result};
-use core::sources::get_hash_from_path;
-use core::types::*;
+use gradient_core::sources::get_hash_from_path;
+use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,

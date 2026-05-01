@@ -932,6 +932,7 @@ dependencies = [
  "sea-orm",
  "sentry",
  "serde_json",
+ "tempfile",
  "test-support",
  "thiserror",
  "tokio",

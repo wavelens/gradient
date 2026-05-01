@@ -420,7 +420,29 @@ in {
       # TODO: Investigate why the folder is not created
       # print(server.succeed("${lib.getExe pkgs.tree} /var/lib/gradient/nars/"))
       print(client.succeed("${lib.getExe pkgs.curl} http://server/cache/main/nix-cache-info -i --fail"))
-      print(client.succeed(f"${lib.getExe pkgs.curl} http://server/cache/main/{store_hash}.narinfo -i"))
+
+      # The sign-sweep loop ticks every 60 s; the freshly-built hello path
+      # may not have a signature row yet, in which case the cache returns
+      # 404. Poll for up to 120 s.
+      for sig_attempt in range(1, 25):
+          rc, _curl_out = client.execute(f"${lib.getExe pkgs.curl} -sf http://server/cache/main/{store_hash}.narinfo -o /dev/null")
+          if rc == 0:
+              break
+          client.sleep(5)
+      else:
+          # Diagnostic dump: show the final narinfo response body and the
+          # signature/cached_path/derivation_output rows for hello so we can
+          # tell *why* it's still 404 (missing cached_path row vs. missing
+          # signature row vs. signature still NULL).
+          print(client.succeed(f"${lib.getExe pkgs.curl} -i http://server/cache/main/{store_hash}.narinfo"))
+          print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT id, hash, store_path FROM cached_path WHERE hash = '{store_hash}';\\"" """))
+          print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT cps.id, cps.cache, cps.signature IS NULL AS sig_null FROM cached_path_signature cps JOIN cached_path cp ON cp.id = cps.cached_path WHERE cp.hash = '{store_hash}';\\"" """))
+          print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT id, hash, is_cached FROM derivation_output WHERE hash = '{store_hash}';\\"" """))
+          print(server.succeed("""su postgres -c "psql -U postgres -d gradient -c \\"SELECT id, name, active FROM cache;\\"" """))
+          print(server.succeed("""su postgres -c "psql -U postgres -d gradient -c \\"SELECT * FROM organization_cache;\\"" """))
+          print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT d.id, d.organization FROM derivation d JOIN derivation_output o ON o.derivation = d.id WHERE o.hash = '{store_hash}';\\"" """))
+          print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT id, hash, store_path, nar_hash, nar_size, file_hash, file_size FROM cached_path WHERE hash = '{store_hash}';\\"" """))
+      print(client.succeed(f"${lib.getExe pkgs.curl} http://server/cache/main/{store_hash}.narinfo -i --fail"))
 
       client.succeed(f"nix-store --delete {store_path} || true")
       client.fail(f"ls {store_path}")

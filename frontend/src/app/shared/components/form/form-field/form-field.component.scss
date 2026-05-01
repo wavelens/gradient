@@ -1,0 +1,32 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../../styles/variables' as *;
+
+.form-field {
+  display: block;
+  margin-bottom: $spacing-lg;
+
+  label {
+    display: block;
+    margin-bottom: $spacing-sm;
+    font-size: $font-size-sm;
+    font-weight: 500;
+    color: $text-primary;
+
+    .required {
+      color: $color-danger;
+      margin-left: $spacing-xs;
+    }
+  }
+
+  .hint {
+    display: block;
+    margin-top: $spacing-xs;
+    color: $text-secondary;
+    font-size: $font-size-xs;
+  }
+}

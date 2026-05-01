@@ -15,7 +15,7 @@ anyhow     = { workspace = true }
 async-trait = { workspace = true }
 base64     = { workspace = true }
 chrono     = { workspace = true }
-core       = { workspace = true }
+gradient-core = { path = "../core", package = "core" }
 entity     = { workspace = true }
 futures    = { workspace = true }
 harmonia-nar = { workspace = true }
@@ -32,6 +32,7 @@ zstd       = { workspace = true }
 
 [dev-dependencies]
 mockall      = { workspace = true }
+tempfile     = "3.27"
 test-support = { workspace = true }
 tokio        = { workspace = true, features = ["macros"] }
 tokio-test   = { workspace = true }

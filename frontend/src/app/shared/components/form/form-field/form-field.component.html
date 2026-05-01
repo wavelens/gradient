@@ -1,0 +1,17 @@
+<div class="form-field" [class.has-error]="control()?.invalid && control()?.touched">
+  @if (label()) {
+    <label [attr.for]="for() ?? null">
+      {{ label() }}
+      @if (required()) {
+        <span class="required" aria-hidden="true">*</span>
+      }
+    </label>
+  }
+  <ng-content></ng-content>
+  @if (control()) {
+    <gr-form-error [control]="control()" [messages]="errorMessages()" />
+  }
+  @if (hint()) {
+    <small class="hint">{{ hint() }}</small>
+  }
+</div>
