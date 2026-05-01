@@ -152,9 +152,14 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
         if let Ok(response) =
             builds::get_evaluation_builds(config.clone(), evaluation_id.clone()).await
             && !response.error
-            && !response.message.is_empty()
+            && !response.message.builds.is_empty()
         {
-            break response.message.iter().map(|b| b.id.clone()).collect();
+            break response
+                .message
+                .builds
+                .iter()
+                .map(|b| b.id.clone())
+                .collect();
         }
 
         max_retries -= 1;
@@ -196,27 +201,28 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
         Ok(response) => {
             if response.error {
                 if !quiet {
-                    eprintln!("Warning: Could not fetch build IDs: {:?}", response.message);
+                    eprintln!("Warning: Could not fetch build IDs");
                 }
-            } else if response.message.is_empty() {
+            } else if response.message.builds.is_empty() {
                 if !quiet {
                     println!("No builds created yet. The evaluation may still be processing.");
                 }
             } else {
+                let builds_list = &response.message.builds;
                 if quiet {
                     // In quiet mode, only output the build IDs
-                    for build in &response.message {
+                    for build in builds_list {
                         println!("{}", build.id);
                     }
                 } else {
                     println!("\nBuild IDs created:");
-                    for build in &response.message {
+                    for build in builds_list {
                         println!("  {}", build.id);
                     }
 
-                    if response.message.len() == 1 {
+                    if builds_list.len() == 1 {
                         println!("\nYou can download files with:");
-                        println!("  gradient download -b {}", response.message[0].id);
+                        println!("  gradient download -b {}", builds_list[0].id);
                     } else {
                         println!("\nYou can download files from any build with:");
                         println!("  gradient download -b <build-id>");
@@ -224,7 +230,7 @@ pub async fn handle_build(derivation: String, organization: Option<String>, quie
                 }
 
                 // Set the first build as selected-build for convenience
-                if let Some(first_build) = response.message.first() {
+                if let Some(first_build) = builds_list.first() {
                     use crate::config::{ConfigKey, set_get_value};
                     set_get_value(ConfigKey::SelectedBuild, Some(first_build.id.clone()), true);
 

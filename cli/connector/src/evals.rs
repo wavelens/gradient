@@ -16,6 +16,15 @@ pub struct BuildItem {
     pub status: String,
 }
 
+/// Server response shape for `GET /api/v1/evals/{id}/builds` — the builds
+/// endpoint paginates and returns aggregate counters alongside the page.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PaginatedBuilds {
+    pub builds: Vec<BuildItem>,
+    pub total: usize,
+    pub active_count: usize,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EvaluationResponse {
     pub id: String,
@@ -69,7 +78,7 @@ pub async fn post_evaluation(
 pub async fn get_evaluation_builds(
     config: RequestConfig,
     evaluation_id: String,
-) -> Result<BaseResponse<Vec<BuildItem>>, String> {
+) -> Result<BaseResponse<PaginatedBuilds>, String> {
     let res = get_client(
         config,
         format!("evals/{}/builds", evaluation_id),

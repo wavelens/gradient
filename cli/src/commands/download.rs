@@ -191,10 +191,10 @@ pub async fn handle_download(build_id: Option<String>, filename: Option<String>)
         {
             Ok(response) => {
                 if response.error {
-                    eprintln!("Failed to get evaluation builds: {:?}", response.message);
+                    eprintln!("Failed to get evaluation builds");
                     exit(1);
                 }
-                response.message
+                response.message.builds
             }
             Err(e) => {
                 eprintln!("Failed to get evaluation builds: {}", e);
