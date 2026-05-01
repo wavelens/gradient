@@ -94,7 +94,18 @@ impl EvalWorker {
             .context("reading eval worker response")?;
 
         if n == 0 {
-            anyhow::bail!("eval worker closed pipe");
+            let pid = self.child.id();
+            let status = match tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                self.child.wait(),
+            )
+            .await
+            {
+                Ok(Ok(s)) => format!("{s}"),
+                Ok(Err(e)) => format!("wait error: {e}"),
+                Err(_) => "still alive after 2s".to_string(),
+            };
+            anyhow::bail!("eval worker closed pipe (pid={pid:?}, exit={status})");
         }
 
         trace!(pid = self.child.id(), bytes = n, "received eval worker response");
