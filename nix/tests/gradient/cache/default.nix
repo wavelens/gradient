@@ -179,11 +179,11 @@
       builder = { config, pkgs, lib, ... }: {
         imports = [ ../../../modules/gradient-worker.nix ];
 
-        # Pre-seed the build closure of `hello` (the package the test flake
-        # builds) into the worker's local store. Without this the worker would
-        # try to fetch source tarballs from the internet — which the test VM
-        # cannot reach — and every build would fail with "Could not resolve host".
-        environment.systemPackages = with pkgs; [ hello stdenv ];
+        # Pre-seed the synthetic derivation's build closure (`coreutils` and
+        # `bash` from `/bin/sh`) into the worker's local store. The test VM
+        # has no internet access, so anything not already present here would
+        # fail to fetch and break every build.
+        environment.systemPackages = with pkgs; [ coreutils bash ];
 
         nix.settings = {
           trusted-users = [
@@ -380,7 +380,7 @@
           in_building = True
         elif line.strip() == "===== Log =====":
           break
-        elif in_building and "hello" in line and line.strip().endswith(".drv"):
+        elif in_building and "cache-test-product" in line and line.strip().endswith(".drv"):
           drv = line.strip()
           store_path_drv = drv if drv.startswith("/nix/store/") else f"/nix/store/{drv}"
           break
