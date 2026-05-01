@@ -96,7 +96,7 @@ pub async fn report_ci_for_entry_points(
         };
 
         if let Err(e) = reporter.report(&report).await {
-            warn!(error = %e, eval, "CI status report failed");
+            warn!(error = format!("{e:#}"), eval, "CI status report failed");
         }
     }
 }
@@ -181,6 +181,6 @@ pub async fn report_ci_for_evaluation(
     };
 
     if let Err(e) = reporter.report(&report).await {
-        warn!(error = %e, "CI evaluation status report failed");
+        warn!(error = format!("{e:#}"), "CI evaluation status report failed");
     }
 }

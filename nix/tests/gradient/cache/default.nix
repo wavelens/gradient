@@ -386,28 +386,24 @@ in {
           j = server.succeed("journalctl -u gradient-server --no-pager --since='-900s' -n 200")
           raise Exception(f"Evaluation did not complete after 900 s:\n{j[-2000:]}")
 
-      # The CLI exits 1 when its log-fetch step fails (post_evaluation_builds),
-      # but the Project / Evaluation / Building sections we need have already
-      # been printed. Use `execute` so we can still parse them.
-      _, output = server.execute("${lib.getExe pkgs.gradient-cli} project show")
-      print(output)
+      # Print the CLI output for the test log, but get the hello `.drv` path
+      # directly from the API: `gradient project show` exits 1 partway through
+      # on a deserialization mismatch and never reaches the Building section.
+      _, cli_output = server.execute("${lib.getExe pkgs.gradient-cli} project show")
+      print(cli_output)
 
-      # Strip ANSI escape codes from the CLI output before parsing — the
-      # `colored` crate emits them around build names which would otherwise
-      # break `.endswith(".drv")` checks.
-      import re
-      ansi_re = re.compile(r"\x1b\[[0-9;]*m")
-      store_path_drv = ""
-      in_building = False
-      for line in output.split("\n"):
-        clean = ansi_re.sub("", line).strip()
-        if clean == "===== Building =====":
-          in_building = True
-        elif clean == "===== Log =====":
-          break
-        elif in_building and "hello" in clean and clean.endswith(".drv"):
-          store_path_drv = clean if clean.startswith("/nix/store/") else f"/nix/store/{clean}"
-          break
+      eval_id = server.succeed(f"""
+        ${lib.getExe pkgs.curl} -sf \
+          -H "Authorization: Bearer {token}" \
+          http://gradient.local/api/v1/projects/org/project \
+          | ${lib.getExe pkgs.jq} -rj '.message.last_evaluation'
+      """).strip()
+      store_path_drv = server.succeed(f"""
+        ${lib.getExe pkgs.curl} -sf \
+          -H "Authorization: Bearer {token}" \
+          http://gradient.local/api/v1/evals/{eval_id}/builds \
+          | ${lib.getExe pkgs.jq} -rj '[.message.builds[] | select(.name | test("-hello-[0-9.]+\\\\.drv$"))][0].name'
+      """).strip()
 
       store_path = server.succeed(f"${lib.getExe pkgs.nix} path-info {store_path_drv}^out --extra-experimental-features nix-command").strip()
       store_hash = store_path.split("-")[0].replace("/nix/store/", "")
