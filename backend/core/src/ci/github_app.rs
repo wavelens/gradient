@@ -45,10 +45,7 @@ pub fn generate_jwt(app_id: u64, private_key_pem: &str) -> Result<String> {
         .encode(format!(r#"{{"iat":{iat},"exp":{exp},"iss":"{app_id}"}}"#));
     let signing_input = format!("{header}.{payload}");
 
-    // Parse DER-encoded RSA private key from PEM.
-    let der = pem_to_der(private_key_pem).context("failed to decode GitHub App private key PEM")?;
-    let key_pair =
-        RsaKeyPair::from_pkcs8(&der).map_err(|e| anyhow!("invalid RSA private key: {e:?}"))?;
+    let key_pair = parse_rsa_key(private_key_pem)?;
 
     let rng = ring::rand::SystemRandom::new();
     let mut signature = vec![0u8; key_pair.public().modulus_len()];
@@ -71,6 +68,20 @@ fn pem_to_der(pem: &str) -> Result<Vec<u8>> {
     general_purpose::STANDARD
         .decode(body.trim())
         .context("base64 decode of PEM body failed")
+}
+
+/// Parses a PEM-encoded RSA private key in either PKCS#8 (`BEGIN PRIVATE KEY`)
+/// or PKCS#1 (`BEGIN RSA PRIVATE KEY`) form. GitHub App manifests return PKCS#1.
+fn parse_rsa_key(pem: &str) -> Result<RsaKeyPair> {
+    let der = pem_to_der(pem).context("failed to decode GitHub App private key PEM")?;
+    let is_pkcs1 = pem.contains("BEGIN RSA PRIVATE KEY");
+    if is_pkcs1 {
+        RsaKeyPair::from_der(&der)
+            .map_err(|e| anyhow!("invalid PKCS#1 RSA private key: {e:?}"))
+    } else {
+        RsaKeyPair::from_pkcs8(&der)
+            .map_err(|e| anyhow!("invalid PKCS#8 RSA private key: {e:?}"))
+    }
 }
 
 // ── Installation token exchange ────────────────────────────────────────────
@@ -163,6 +174,36 @@ pub fn verify_gitea_signature(secret: &str, signature_header: &str, body: &[u8])
 mod tests {
     use super::*;
 
+    /// PKCS#1 form of `TEST_RSA_PEM` — same key, `BEGIN RSA PRIVATE KEY` header
+    /// (the format GitHub's manifest API returns).
+    const TEST_RSA_PEM_PKCS1: &str = "-----BEGIN RSA PRIVATE KEY-----\n\
+MIIEpAIBAAKCAQEAvGqpmY6nUPo1IQU0QWdpgD+9mJ6w0MqGk6ldyOLNlfieQust\n\
+Q7A+ttid4QSZdLM2my7w9+hGIvl0NtZgLh+zu5oebjurJaXBLZJFDv+daTCi5OfG\n\
+5LWue63ucWUezmRI8ulV/JdJlDZuftVPulpn44bZUvX86A4pxGF59gFcvdFOe+1q\n\
+y9Mn+J1nmt06jMT2s27FfRX63aMCK4HwNmAeve7wAJmgcOPFaSS/rypo2dNwr02R\n\
+0iJ4p4kzeCK3W0h1reqkQOBu7yMZ+tzzA+XXaNCotJhCvWOCJPjgX0tp/5QfV7Wc\n\
+hUittbY/8a5mYqEkq86kaN+cTmzWq4orVrAiAwIDAQABAoIBAAT3ywEBgefgsQXt\n\
+3TLcRyvagmVDyeW3cVTzYkWptUH/DC03hjoCq6SmkYMdW+53yzjMRA5FUZQaf7Xy\n\
+cRbGPzbzGVpOuHSFqlJJSQjcNIpRffoLInNlVvRr4Z2bzPQkMMg23s2KL6Z4yPEP\n\
+Lsr7F0IojBJj6gc0WGWVLGIQJyHaF1r4fwGnsTuzd+9CRCUzzkrs2OzlAau/r7DW\n\
+u/+lxN7lsUGEoXX6AEEoRaQQpCJMfWfF+4qMYSNKOTbjXzCfVJlgKuUntofkZp28\n\
+E60MGcKgNLJSnwsACDuQlLdV1CRVoDniEe3NDBC8Jmd5Z+6Pk8V4CsbLlkeTw19J\n\
+6lNTvgECgYEA7B/Esq++e2D9Z+kOLkRPCtiLfnPxE+gMaT5SRLSi2kTxrhcHHQo1\n\
+mebRfDhxmSWTy6UzkFNXJErkBdt0NvehMBW9W8RkjeMTITIRGcfj67Psw1KeRg0w\n\
+2l8ZcV3n+FK03ksEqKrfabpM8ZIzk6yQvQYhrYY16uj/w325AQHSnK8CgYEAzEbZ\n\
+BNP6LBbtrrKq/PRR2RR/JscUhamJDP8ygkPZCuR2H6izQdRjw+4ZXhSbJvjlnUv4\n\
+VGEtJ1+z6xO0tlDo3mDzwvT8hKlB+HfOAoyiGO6sSu8dVx1fNqXAk8IyVhh2SDvC\n\
+KmQLXAOs/T5SnWH9GK1oL/JQDV8ykFtBhNBpLO0CgYEAvrheQVIQkkliBTdKW/aS\n\
+vZjw+z+c3s5UkAFlo9cfnxuG9m3lMgCYEOpOFH7myqN+gEO8pXubbFYNXenHMcrM\n\
+aDF3FJNKAQ0D25E8HM3G/BAFUjL+YmivKAMeYuJNxtbO/qorZi02bYisM4c6n7IH\n\
+6pX0R9ua21Y9l+KJtxWIz0MCgYBrLhkb8WTn0TfwW4pfool3TsvQOtBHuUZRbWzA\n\
+8HxmvKxFvCwhtCCMYtcoh8NIVXuUZpHrI/mfGRW7l+FPb3BfjZsYhZYgvPYCOkn7\n\
+CHLchg4cWw2X8a9NavZ6EIB8r+UPzVr5Bvj21G7liNesAAfd9M4fqhHakkJjf54G\n\
+45rrmQKBgQDg7azTjviSvCHtHoACrp7mxilXiRLZr7uw1nwQqdmoG7XzAOJyP7eq\n\
+oCGBlwuA8ua+p+yGr8GB8VpOc+3clnpn7KDtlej4CBqSQrNrB77MgWne6k7HEcD1\n\
+5VwGx5Cr2GK8iOkwH9vw2kPrxHYhSosPPCuf6BXjBa+7Mgkikz3kAw==\n\
+-----END RSA PRIVATE KEY-----\n";
+
     /// 2048-bit RSA private key in PKCS#8 PEM format, generated for tests only.
     const TEST_RSA_PEM: &str = "-----BEGIN PRIVATE KEY-----\n\
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC8aqmZjqdQ+jUh\n\
@@ -233,6 +274,15 @@ iw88K5/oFeMFr7syCSKTPeQD\n\
     fn generate_jwt_invalid_pem_err() {
         let result = generate_jwt(1, "not a pem");
         assert!(result.is_err(), "expected Err for invalid PEM");
+    }
+
+    #[test]
+    fn generate_jwt_accepts_pkcs1_pem() {
+        // GitHub's App manifest conversion returns PKCS#1
+        // (`-----BEGIN RSA PRIVATE KEY-----`); we must accept it without
+        // requiring users to convert with openssl first.
+        let jwt = generate_jwt(7, TEST_RSA_PEM_PKCS1).expect("PKCS#1 must be accepted");
+        assert_eq!(jwt.split('.').count(), 3);
     }
 
     fn compute_github_sig(secret: &str, body: &[u8]) -> String {
