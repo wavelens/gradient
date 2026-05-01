@@ -17,9 +17,14 @@ use uuid::Uuid;
 
 use crate::ci::github_app_manifest::ManifestResult;
 
-/// Map of state-token → issuance time. Tokens older than 10 minutes are pruned
-/// on each `issue_state` call.
-pub type ManifestStateStore = Mutex<HashMap<String, Instant>>;
+/// Map of state-token → (initiating superuser id, issuance time). Tokens older
+/// than 10 minutes are pruned on each `issue_state` call.
+///
+/// The user id is recorded at issuance so the callback — which arrives as an
+/// unauthenticated top-level browser redirect from github.com and therefore
+/// carries no `Authorization` header — can recover which superuser initiated
+/// the manifest flow without trusting query-string input.
+pub type ManifestStateStore = Mutex<HashMap<String, (Uuid, Instant)>>;
 
 /// Map of superuser id → (pending credentials, deposit time). Entries older
 /// than 10 minutes are pruned on each `store_credentials` call.
@@ -33,7 +38,7 @@ pub const STATE_TTL: Duration = Duration::from_secs(10 * 60);
 
 /// Generates and stores a fresh URL-safe random state token. Prunes any
 /// expired entries as a side-effect.
-pub fn issue_state(store: &ManifestStateStore) -> String {
+pub fn issue_state(store: &ManifestStateStore, user_id: Uuid) -> String {
     let mut bytes = [0u8; 24];
     rand::rng().fill(&mut bytes);
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -41,16 +46,19 @@ pub fn issue_state(store: &ManifestStateStore) -> String {
 
     let mut guard = store.lock().expect("manifest state store poisoned");
     let cutoff = Instant::now() - STATE_TTL;
-    guard.retain(|_, ts| *ts > cutoff);
-    guard.insert(token.clone(), Instant::now());
+    guard.retain(|_, (_, ts)| *ts > cutoff);
+    guard.insert(token.clone(), (user_id, Instant::now()));
     token
 }
 
-/// Removes the state from the store and returns true iff it existed and is
-/// not expired. One-shot consumption.
-pub fn validate_and_consume(store: &ManifestStateStore, state: &str) -> bool {
+/// Removes the state from the store and returns the initiating user id iff
+/// the token existed and is not expired. One-shot consumption.
+pub fn validate_and_consume(store: &ManifestStateStore, state: &str) -> Option<Uuid> {
     let mut guard = store.lock().expect("manifest state store poisoned");
-    matches!(guard.remove(state), Some(ts) if ts > Instant::now() - STATE_TTL)
+    match guard.remove(state) {
+        Some((user_id, ts)) if ts > Instant::now() - STATE_TTL => Some(user_id),
+        _ => None,
+    }
 }
 
 /// Stores `creds` keyed by `user_id`, overwriting any prior entry. Prunes
@@ -91,35 +99,36 @@ mod tests {
     #[test]
     fn issue_state_returns_unique_tokens() {
         let store = empty_state_store();
-        let a = issue_state(&store);
-        let b = issue_state(&store);
+        let a = issue_state(&store, Uuid::new_v4());
+        let b = issue_state(&store, Uuid::new_v4());
         assert_ne!(a, b);
         assert!(a.len() >= 32);
     }
 
     #[test]
-    fn validate_and_consume_succeeds_then_fails_on_replay() {
+    fn validate_and_consume_returns_user_then_fails_on_replay() {
         let store = empty_state_store();
-        let s = issue_state(&store);
-        assert!(validate_and_consume(&store, &s));
-        assert!(!validate_and_consume(&store, &s));
+        let user = Uuid::new_v4();
+        let s = issue_state(&store, user);
+        assert_eq!(validate_and_consume(&store, &s), Some(user));
+        assert_eq!(validate_and_consume(&store, &s), None);
     }
 
     #[test]
     fn validate_and_consume_unknown_state_fails() {
         let store = empty_state_store();
-        assert!(!validate_and_consume(&store, "not-a-real-state"));
+        assert_eq!(validate_and_consume(&store, "not-a-real-state"), None);
     }
 
     #[test]
     fn issue_state_prunes_expired_entries() {
         let store = empty_state_store();
         let stale = "stale-token".to_string();
-        store
-            .lock()
-            .unwrap()
-            .insert(stale.clone(), Instant::now() - Duration::from_secs(11 * 60));
-        let _fresh = issue_state(&store);
+        store.lock().unwrap().insert(
+            stale.clone(),
+            (Uuid::new_v4(), Instant::now() - Duration::from_secs(11 * 60)),
+        );
+        let _fresh = issue_state(&store, Uuid::new_v4());
         assert!(!store.lock().unwrap().contains_key(&stale));
     }
 

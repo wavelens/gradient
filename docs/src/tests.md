@@ -75,9 +75,13 @@ Backend (`cargo test -p core --tests ci::github_app_manifest`):
 - `exchange_code_happy_path`
 - `exchange_code_non_2xx_errors`
 
+Backend (`cargo test -p core --tests ci::reporting`):
+- `maps_terminal_states` — `EvaluationStatus::{Completed, Failed, Aborted}` map to `CiStatus::{Success, Failure, Error}`.
+- `skips_intermediate_states` — non-terminal statuses produce no CI status (avoids double-reporting `Running`).
+
 Backend (`cargo test -p core --tests ci::manifest_state`):
 - `issue_state_returns_unique_tokens`
-- `validate_and_consume_succeeds_then_fails_on_replay`
+- `validate_and_consume_returns_user_then_fails_on_replay`
 - `validate_and_consume_unknown_state_fails`
 - `issue_state_prunes_expired_entries`
 - `store_and_take_credentials_one_shot`

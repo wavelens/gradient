@@ -2411,13 +2411,15 @@ paths:
         Receives the redirect from GitHub after the operator submits the
         manifest. Validates the `state` token, exchanges the temporary `code`
         for the App's permanent credentials, stashes them in a one-shot
-        in-memory store, and redirects the browser to
-        `/admin/github-app?ready=1`.
+        in-memory store keyed by the superuser who initiated the manifest
+        flow, and redirects the browser to `/admin/github-app?ready=1`.
 
-        Requires `superuser`.
+        **Unauthenticated** — GitHub redirects the operator's browser here
+        from `https://github.com/...` and that cross-site navigation does not
+        carry a bearer token. CSRF and identity binding are provided by the
+        one-shot `state` token issued at `POST /admin/github-app/manifest`,
+        which is bound to the initiating superuser at issuance.
       operationId: githubAppManifestCallback
-      security:
-        - bearerAuth: []
       parameters:
         - in: query
           name: code
@@ -2447,10 +2449,6 @@ paths:
                 example: /admin/github-app?ready=1
         '400':
           $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
         '500':
           description: GitHub rejected the code exchange.
           content:

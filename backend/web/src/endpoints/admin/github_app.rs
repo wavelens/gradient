@@ -14,6 +14,7 @@ use axum::{Extension, Json};
 use core::types::{BaseResponse, MUser, ServerState};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tracing::warn;
 
 #[derive(Deserialize, Default, Debug)]
 pub struct ManifestRequest {
@@ -65,7 +66,7 @@ pub async fn request_manifest(
     validate_host(&host)?;
 
     let manifest = core::ci::github_app_manifest::build_manifest(&state.cli.serve_url);
-    let token = core::ci::manifest_state::issue_state(&state.manifest_state);
+    let token = core::ci::manifest_state::issue_state(&state.manifest_state, user.id);
     let post_url = core::ci::github_app_manifest::manifest_post_url(&host, &token);
 
     Ok(Json(BaseResponse {
@@ -78,29 +79,38 @@ pub async fn request_manifest(
     }))
 }
 
+/// Unauthenticated callback target for GitHub's manifest redirect.
+///
+/// GitHub redirects the operator's browser here from `https://github.com/...`
+/// after the manifest is confirmed; that cross-site navigation never carries
+/// our `Authorization: Bearer …` header, so the route cannot live behind the
+/// usual auth middleware.
+///
+/// CSRF/identity is recovered from the one-shot `state` token that was issued
+/// (and bound to a superuser) at `/admin/github-app/manifest`.
 pub async fn callback(
     State(state): State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
     Query(q): Query<CallbackQuery>,
 ) -> WebResult<Redirect> {
-    require_superuser(&user)?;
-
     let host = q.host.unwrap_or_else(default_host);
     validate_host(&host)?;
 
-    if !core::ci::manifest_state::validate_and_consume(&state.manifest_state, &q.state) {
+    let Some(user_id) =
+        core::ci::manifest_state::validate_and_consume(&state.manifest_state, &q.state)
+    else {
         return Err(WebError::BadRequest(
             "manifest state invalid or expired".into(),
         ));
-    }
+    };
 
     let creds = core::ci::github_app_manifest::exchange_code(&host, &q.code)
         .await
         .map_err(|e| {
+            warn!(error = %e, "github manifest exchange failed");
             WebError::InternalServerError(format!("github exchange failed: {e}"))
         })?;
 
-    core::ci::manifest_state::store_credentials(&state.pending_credentials, user.id, creds);
+    core::ci::manifest_state::store_credentials(&state.pending_credentials, user_id, creds);
 
     Ok(Redirect::to("/admin/github-app?ready=1"))
 }

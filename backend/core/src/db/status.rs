@@ -180,6 +180,15 @@ pub async fn update_evaluation_status(
     tokio::spawn(async move {
         crate::ci::fire_evaluation_webhook(webhook_state, webhook_eval, webhook_status).await;
     });
+
+    if let Some(ci_status) = crate::ci::ci_status_for_evaluation(&updated_eval.status) {
+        let ci_state = Arc::clone(&state);
+        let ci_eval = updated_eval.clone();
+        tokio::spawn(async move {
+            crate::ci::report_evaluation_ci(ci_state, ci_eval, ci_status).await;
+        });
+    }
+
     updated_eval
 }
 

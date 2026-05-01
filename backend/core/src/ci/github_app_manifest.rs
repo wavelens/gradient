@@ -27,7 +27,7 @@ use serde_json::{Value, json};
 
 /// Default GitHub App name used in the manifest. The operator can edit the
 /// name on the GitHub-side review screen before confirming.
-pub const APP_NAME: &str = "Gradient";
+pub const APP_NAME: &str = "Gradient CI";
 
 /// Builds the manifest JSON payload that gets POSTed to GitHub at
 /// `https://{host}/settings/apps/new`. `serve_url` is the externally
@@ -148,7 +148,7 @@ mod tests {
     #[test]
     fn build_manifest_has_default_permissions_and_events() {
         let m = build_manifest("https://x.test");
-        assert_eq!(m["name"], "Gradient");
+        assert_eq!(m["name"], "Gradient CI");
         assert_eq!(m["public"], false);
         assert_eq!(m["hook_attributes"]["active"], true);
         assert_eq!(m["setup_on_update"], false);

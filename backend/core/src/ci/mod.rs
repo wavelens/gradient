@@ -9,11 +9,13 @@ pub mod github_app_manifest;
 pub mod integration_lookup;
 pub mod manifest_state;
 pub mod reporter;
+pub mod reporting;
 pub mod trigger;
 pub mod webhook;
 
 pub use self::github_app::*;
 pub use self::integration_lookup::*;
 pub use self::reporter::*;
+pub use self::reporting::*;
 pub use self::trigger::*;
 pub use self::webhook::*;

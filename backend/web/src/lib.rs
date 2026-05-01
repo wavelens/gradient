@@ -325,6 +325,13 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/auth/logout", post(auth::post_logout))
         .route("/health", get(get_health))
         .route("/config", get(get_config))
+        // GitHub App manifest callback — unauthenticated because GitHub's
+        // top-level browser redirect carries no bearer token; CSRF is bound
+        // via the one-shot manifest state token issued on /admin/github-app/manifest.
+        .route(
+            "/admin/github-app/callback",
+            get(admin::github_app::callback),
+        )
         // ── Incoming forge webhooks (unauthenticated, HMAC-verified) ─────────
         .route("/hooks/github", post(forge_hooks::github_app_webhook))
         .route(

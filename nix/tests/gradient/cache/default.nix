@@ -38,7 +38,7 @@
               mode = "0600";
               user = "gradient";
               group = "gradient";
-              text = "admin_password";
+              text = "$argon2id$v=19$m=4096,t=3,p=1$c29tZXNhbHQxMjM0NQ$hIKBEy9SOWlnAlcwUv2PLPBdsMkKhVlCyjTxaWIK+v4";
             };
 
             "gradient/secrets/corp_ssh_key" = {
