@@ -78,5 +78,6 @@ pub fn eval_at(id: Uuid, offset_secs: i64) -> evaluation::Model {
         created_at,
         updated_at: created_at,
         flake_source: None,
+        repo_check_id: None,
     }
 }

@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::warn;
@@ -48,6 +48,9 @@ pub struct CiReport {
     pub description: Option<String>,
     /// URL of the full details page (e.g. the Gradient evaluation page).
     pub details_url: Option<String>,
+    /// GitHub `check_run` id when an existing check run should be updated.
+    /// Only used by [`GithubAppReporter`]; ignored by all other reporters.
+    pub existing_check_id: Option<i64>,
 }
 
 /// Abstraction over external CI status providers.
@@ -66,7 +69,11 @@ pub struct CiReport {
 #[async_trait]
 pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
     /// Report or update a CI status for the given commit.
-    async fn report(&self, report: &CiReport) -> Result<()>;
+    ///
+    /// Returns `Ok(Some(id))` when the call created a new GitHub check run
+    /// whose id the caller should persist for future updates. All other
+    /// reporters (and PATCHes against an existing check run) return `Ok(None)`.
+    async fn report(&self, report: &CiReport) -> Result<Option<i64>>;
 }
 
 // ── NoopCiReporter ────────────────────────────────────────────────────────────
@@ -77,8 +84,8 @@ pub struct NoopCiReporter;
 
 #[async_trait]
 impl CiReporter for NoopCiReporter {
-    async fn report(&self, _report: &CiReport) -> Result<()> {
-        Ok(())
+    async fn report(&self, _report: &CiReport) -> Result<Option<i64>> {
+        Ok(None)
     }
 }
 
@@ -144,7 +151,7 @@ struct GiteaStatusPayload<'a> {
 
 #[async_trait]
 impl CiReporter for GiteaReporter {
-    async fn report(&self, report: &CiReport) -> Result<()> {
+    async fn report(&self, report: &CiReport) -> Result<Option<i64>> {
         let url = format!(
             "{}/api/v1/repos/{}/{}/statuses/{}",
             self.base_url, report.owner, report.repo, report.sha
@@ -179,7 +186,7 @@ impl CiReporter for GiteaReporter {
             anyhow::bail!("Gitea returned {}: {}", status, body);
         }
 
-        Ok(())
+        Ok(None)
     }
 }
 
@@ -261,7 +268,7 @@ struct GithubStatusPayload<'a> {
 
 #[async_trait]
 impl CiReporter for GithubReporter {
-    async fn report(&self, report: &CiReport) -> Result<()> {
+    async fn report(&self, report: &CiReport) -> Result<Option<i64>> {
         let url = format!(
             "{}/repos/{}/{}/statuses/{}",
             self.base_url, report.owner, report.repo, report.sha
@@ -297,22 +304,24 @@ impl CiReporter for GithubReporter {
             anyhow::bail!("GitHub returned {}: {}", status, body);
         }
 
-        Ok(())
+        Ok(None)
     }
 }
 
 // ── GithubAppReporter ────────────────────────────────────────────────────────
 
-/// CI reporter that posts commit statuses to GitHub authenticated as a GitHub
-/// App installation.
+/// CI reporter that creates and updates GitHub Check Runs as a GitHub App
+/// installation.
 ///
-/// Mints a fresh installation access token on every report (~1 round-trip
-/// extra per status). Tokens are valid for ~1 hour, so a future optimisation
-/// is to cache them; CI volumes are typically low enough that the overhead
-/// doesn't matter today.
+/// Uses the Check Runs API rather than the Commit Statuses API, so check
+/// lifecycle is `queued → in_progress → completed(success|failure|…)`. The
+/// caller stores the returned `check_run` id on the row that owns the check
+/// (entry_point / evaluation) and passes it back via
+/// [`CiReport::existing_check_id`] on the next call so the same check run
+/// gets PATCHed in place.
 ///
-/// The status payload is identical to [`GithubReporter`]; only the
-/// authentication path differs.
+/// Mints a fresh installation access token on every report; cheap enough at
+/// CI volume to not warrant caching.
 pub struct GithubAppReporter {
     api_base_url: String,
     app_id: u64,
@@ -363,9 +372,75 @@ impl GithubAppReporter {
     }
 }
 
+/// GitHub Check Run `status` field values.
+#[derive(Debug, Serialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+enum CheckRunStatus {
+    Queued,
+    InProgress,
+    Completed,
+}
+
+/// GitHub Check Run `conclusion` field values used by Gradient.
+#[derive(Debug, Serialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+enum CheckRunConclusion {
+    Success,
+    Failure,
+    ActionRequired,
+}
+
+fn map_ci_status(status: &CiStatus) -> (CheckRunStatus, Option<CheckRunConclusion>) {
+    match status {
+        CiStatus::Pending => (CheckRunStatus::Queued, None),
+        CiStatus::Running => (CheckRunStatus::InProgress, None),
+        CiStatus::Success => (CheckRunStatus::Completed, Some(CheckRunConclusion::Success)),
+        CiStatus::Failure => (CheckRunStatus::Completed, Some(CheckRunConclusion::Failure)),
+        CiStatus::Error => (
+            CheckRunStatus::Completed,
+            Some(CheckRunConclusion::ActionRequired),
+        ),
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct CheckRunOutput<'a> {
+    title: &'a str,
+    summary: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct CreateCheckRunPayload<'a> {
+    name: &'a str,
+    head_sha: &'a str,
+    status: CheckRunStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conclusion: Option<CheckRunConclusion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details_url: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output: Option<CheckRunOutput<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateCheckRunPayload<'a> {
+    status: CheckRunStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conclusion: Option<CheckRunConclusion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details_url: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output: Option<CheckRunOutput<'a>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CheckRunCreateResponse {
+    id: i64,
+}
+
 #[async_trait]
 impl CiReporter for GithubAppReporter {
-    async fn report(&self, report: &CiReport) -> Result<()> {
+    async fn report(&self, report: &CiReport) -> Result<Option<i64>> {
         let token = crate::ci::github_app::get_installation_token(
             self.app_id,
             &self.private_key_pem,
@@ -374,43 +449,87 @@ impl CiReporter for GithubAppReporter {
         .await
         .context("Failed to mint GitHub App installation token")?;
 
-        let url = format!(
-            "{}/repos/{}/{}/statuses/{}",
-            self.api_base_url, report.owner, report.repo, report.sha
-        );
+        let (gh_status, conclusion) = map_ci_status(&report.status);
+        let output = report.description.as_deref().map(|s| CheckRunOutput {
+            title: report.context.as_str(),
+            summary: s,
+        });
 
-        let payload = GithubStatusPayload {
-            state: GithubState::from(&report.status),
-            description: report.description.as_deref(),
-            context: &report.context,
-            target_url: report.details_url.as_deref(),
-        };
-
-        let resp = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", token))
-            .header("Accept", "application/vnd.github+json")
-            .header("X-GitHub-Api-Version", "2022-11-28")
-            .json(&payload)
-            .send()
-            .await
-            .context("Failed to send GitHub App status request")?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            warn!(
-                github_url = %url,
-                http_status = %status,
-                body = %body,
-                installation_id = self.installation_id,
-                "GitHub App CI status report failed"
+        if let Some(check_id) = report.existing_check_id {
+            let url = format!(
+                "{}/repos/{}/{}/check-runs/{}",
+                self.api_base_url, report.owner, report.repo, check_id
             );
-            anyhow::bail!("GitHub App returned {}: {}", status, body);
+            let payload = UpdateCheckRunPayload {
+                status: gh_status,
+                conclusion,
+                details_url: report.details_url.as_deref(),
+                output,
+            };
+            let resp = self
+                .client
+                .patch(&url)
+                .header("Authorization", format!("Bearer {}", token))
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .json(&payload)
+                .send()
+                .await
+                .context("Failed to send GitHub App check-run update")?;
+            let status = resp.status();
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                warn!(
+                    github_url = %url,
+                    http_status = %status,
+                    body = %body,
+                    installation_id = self.installation_id,
+                    "GitHub App check-run PATCH failed"
+                );
+                anyhow::bail!("GitHub App returned {}: {}", status, body);
+            }
+            Ok(None)
+        } else {
+            let url = format!(
+                "{}/repos/{}/{}/check-runs",
+                self.api_base_url, report.owner, report.repo
+            );
+            let payload = CreateCheckRunPayload {
+                name: &report.context,
+                head_sha: &report.sha,
+                status: gh_status,
+                conclusion,
+                details_url: report.details_url.as_deref(),
+                output,
+            };
+            let resp = self
+                .client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", token))
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .json(&payload)
+                .send()
+                .await
+                .context("Failed to send GitHub App check-run create")?;
+            let status = resp.status();
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                warn!(
+                    github_url = %url,
+                    http_status = %status,
+                    body = %body,
+                    installation_id = self.installation_id,
+                    "GitHub App check-run POST failed"
+                );
+                anyhow::bail!("GitHub App returned {}: {}", status, body);
+            }
+            let parsed: CheckRunCreateResponse = resp
+                .json()
+                .await
+                .context("Failed to parse GitHub check-run create response")?;
+            Ok(Some(parsed.id))
         }
-
-        Ok(())
     }
 }
 

@@ -54,6 +54,7 @@ fn make_eval_queued(id: Uuid, commit_id: Uuid, project_id: Option<Uuid>) -> MEva
         created_at: test_date(),
         updated_at: test_date(),
         flake_source: None,
+        repo_check_id: None,
     }
 }
 

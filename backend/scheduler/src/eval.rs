@@ -329,6 +329,7 @@ impl<'a> EvalResultProcessor<'a> {
                     build: Set(build_id),
                     eval: Set(d.attr.clone()),
                     created_at: Set(now),
+                    repo_check_id: Set(None),
                 });
             }
         }

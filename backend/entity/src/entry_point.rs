@@ -19,6 +19,7 @@ pub struct Model {
     pub build: Uuid,
     pub eval: String,
     pub created_at: NaiveDateTime,
+    pub repo_check_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
