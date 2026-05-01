@@ -42,7 +42,11 @@ pub fn build_manifest(serve_url: &str) -> Value {
             "active": true,
         },
         "redirect_url": format!("{base}/api/v1/admin/github-app/callback"),
-        "setup_url": format!("{base}/admin/github-app"),
+        // No `setup_url`: GitHub uses it as the post-install redirect target,
+        // and pointing it at our manifest-creation page (`/admin/github-app`)
+        // sent the operator straight back into the "Create on GitHub" UI as
+        // soon as they tried to install the App on a repository. Omitting it
+        // keeps the user on GitHub's own post-install confirmation page.
         "setup_on_update": false,
         "public": false,
         "default_permissions": {
@@ -142,7 +146,10 @@ mod tests {
             m["redirect_url"],
             "https://gradient.example.com/api/v1/admin/github-app/callback"
         );
-        assert_eq!(m["setup_url"], "https://gradient.example.com/admin/github-app");
+        assert!(
+            m.get("setup_url").is_none() || m["setup_url"].is_null(),
+            "setup_url must be absent so the post-install redirect doesn't loop back to /admin/github-app"
+        );
     }
 
     #[test]
