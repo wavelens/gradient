@@ -14,7 +14,7 @@
 | :---: | :---: | :---: | :---: |
 
 > [!IMPORTANT]
-> This project is currently in the early stages of development. We are working on the initial implementation and documentation. If you are interested in contributing, please read the [Contributing Guidelines](CONTRIBUTING.md) for more information.
+> If you are interested in contributing, please read the [Contributing Guidelines](CONTRIBUTING.md) for more information.
 
 ## Features
 

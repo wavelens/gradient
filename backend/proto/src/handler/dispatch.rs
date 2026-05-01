@@ -43,7 +43,11 @@ impl<'a> DispatchContext<'a> {
         msg: ClientMessage,
         nar_buffers: &mut std::collections::HashMap<String, Vec<u8>>,
     ) -> bool {
-        debug!(?msg, "received client message");
+        // Avoid Debug-printing the entire `msg` here: variants like `NarPush`
+        // carry up to 64 KiB of binary chunk data which would flood the log
+        // (and the test VM's serial console). Each match arm logs the
+        // semantically interesting fields itself.
+        debug!(variant = msg.variant_name(), "received client message");
         match msg {
             ClientMessage::InitConnection { .. } => {
                 send_error(self.socket, 400, "unexpected InitConnection".into()).await;

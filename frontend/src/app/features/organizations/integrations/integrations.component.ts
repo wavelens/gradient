@@ -101,29 +101,23 @@ export class IntegrationsComponent implements OnInit {
   githubAppAvailable = computed(() => this.organization()?.github_app_available === true);
   githubAppEnabled = signal(false);
 
-  outboundForgeOptions = computed<Option<ForgeType>[]>(() => {
-    const base: Option<ForgeType>[] = [
-      { label: 'Gitea', value: 'gitea' },
-      { label: 'Forgejo', value: 'forgejo' },
-      { label: 'GitLab', value: 'gitlab' },
-    ];
-    if (this.githubAppAvailable()) {
-      base.push({ label: 'GitHub', value: 'github' });
-    }
-    return base;
-  });
+  // GitHub is intentionally absent from these option lists: GitHub
+  // integration is provided by the server-wide GitHub App + the org-level
+  // `github_app_enabled` toggle, not by per-integration rows. Allowing
+  // operators to create an inbound/outbound integration with
+  // `forge_type=github` produced a row that was ignored by the dispatch and
+  // outbound CI paths and only confused setup.
+  outboundForgeOptions = computed<Option<ForgeType>[]>(() => [
+    { label: 'Gitea', value: 'gitea' },
+    { label: 'Forgejo', value: 'forgejo' },
+    { label: 'GitLab', value: 'gitlab' },
+  ]);
 
-  allForgeOptions = computed<Option<ForgeType>[]>(() => {
-    const base: Option<ForgeType>[] = [
-      { label: 'Gitea', value: 'gitea' },
-      { label: 'Forgejo', value: 'forgejo' },
-      { label: 'GitLab', value: 'gitlab' },
-    ];
-    if (this.githubAppAvailable()) {
-      base.push({ label: 'GitHub', value: 'github' });
-    }
-    return base;
-  });
+  allForgeOptions = computed<Option<ForgeType>[]>(() => [
+    { label: 'Gitea', value: 'gitea' },
+    { label: 'Forgejo', value: 'forgejo' },
+    { label: 'GitLab', value: 'gitlab' },
+  ]);
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';

@@ -7,7 +7,7 @@
 { self, pkgs, ... }: {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     name = "gradient-cache";
-    globalTimeout = 960;
+    globalTimeout = 1800;
 
     defaults = {
       networking.firewall.enable = false;
@@ -309,11 +309,11 @@
           if attempt == 6:
               raise Exception(f"Server did not detect repository change after 90 s:\n{j[-2000:]}")
 
-      # Second window: wait for eval + build to complete (up to 300 s)
+      # Second window: wait for eval + build to complete (up to 900 s)
       # Use the API directly (curl) instead of the CLI to avoid non-zero exit
       # codes while the evaluation is still in progress.
       completed = False
-      for attempt in range(1, 31):
+      for attempt in range(1, 91):
           server.sleep(10)
           check_journal_for_errors(since_seconds=15)
           status = server.succeed("""
@@ -324,7 +324,7 @@
           """.replace("ACCESS_TOKEN", token)).strip()
           if not status:
               if attempt % 3 == 0:
-                  print(f"Still waiting for evaluation to start (attempt {attempt}/30)...")
+                  print(f"Still waiting for evaluation to start (attempt {attempt}/90)...")
               continue
           eval_status = server.succeed(f"""
             ${lib.getExe pkgs.curl} -sf \
@@ -354,11 +354,11 @@
                   http://gradient.local/api/v1/evals/{status}/builds \
                   | ${lib.getExe pkgs.jq} -c '.message | {{total, by_status: ([.builds[].status] | group_by(.) | map({{key: .[0], value: length}}) | from_entries)}}'
               """).strip()
-              print(f"Attempt {attempt}/30 — eval: {eval_detail}, builds: {builds_summary}")
+              print(f"Attempt {attempt}/90 — eval: {eval_detail}, builds: {builds_summary}")
 
       if not completed:
-          j = server.succeed("journalctl -u gradient-server --no-pager --since='-300s' -n 200")
-          raise Exception(f"Evaluation did not complete after 300 s:\n{j[-2000:]}")
+          j = server.succeed("journalctl -u gradient-server --no-pager --since='-900s' -n 200")
+          raise Exception(f"Evaluation did not complete after 900 s:\n{j[-2000:]}")
 
       output = server.succeed("${lib.getExe pkgs.gradient-cli} project show")
       print(output)

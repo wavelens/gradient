@@ -192,3 +192,34 @@ pub enum ClientMessage {
         drv_paths: Vec<String>,
     },
 }
+
+impl ClientMessage {
+    /// Static name of the variant. Used for log messages where dumping the
+    /// full Debug-formatted message would be unsafe (e.g. `NarPush` carries
+    /// up to 64 KiB of binary chunk data).
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            ClientMessage::InitConnection { .. } => "InitConnection",
+            ClientMessage::AuthResponse { .. } => "AuthResponse",
+            ClientMessage::ReauthRequest => "ReauthRequest",
+            ClientMessage::Reject { .. } => "Reject",
+            ClientMessage::WorkerCapabilities { .. } => "WorkerCapabilities",
+            ClientMessage::RequestJobList => "RequestJobList",
+            ClientMessage::RequestJobChunk { .. } => "RequestJobChunk",
+            ClientMessage::AssignJobResponse { .. } => "AssignJobResponse",
+            ClientMessage::JobUpdate { .. } => "JobUpdate",
+            ClientMessage::JobCompleted { .. } => "JobCompleted",
+            ClientMessage::JobFailed { .. } => "JobFailed",
+            ClientMessage::Draining => "Draining",
+            ClientMessage::LogChunk { .. } => "LogChunk",
+            ClientMessage::NarRequest { .. } => "NarRequest",
+            ClientMessage::NarPush { .. } => "NarPush",
+            ClientMessage::NarUploaded { .. } => "NarUploaded",
+            ClientMessage::RequestJob { .. } => "RequestJob",
+            ClientMessage::RequestAllCandidates => "RequestAllCandidates",
+            ClientMessage::CacheQuery { .. } => "CacheQuery",
+            ClientMessage::EvalMessage { .. } => "EvalMessage",
+            ClientMessage::QueryKnownDerivations { .. } => "QueryKnownDerivations",
+        }
+    }
+}

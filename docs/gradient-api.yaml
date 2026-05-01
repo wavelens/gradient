@@ -3268,9 +3268,10 @@ paths:
         URL (`/hooks/gitea/...`, `/hooks/forgejo/...`, `/hooks/gitlab/...`).
         The stored `forge_type` is display metadata only for inbound.
 
-        For **outbound** GitHub integrations, credentials come from the
-        server-configured GitHub App, not from `access_token` — create one with
-        `forge_type: "github"` and no token.
+        `forge_type: "github"` is rejected with `400`: GitHub integration is
+        provided by the server-wide GitHub App together with the organization
+        flag set via `PATCH /orgs/{organization}/github-app`, not by per-org
+        integration rows.
       operationId: createOrgIntegration
       requestBody:
         required: true
@@ -4934,7 +4935,11 @@ components:
           enum: [inbound, outbound]
         forge_type:
           type: string
-          enum: [gitea, forgejo, gitlab, github]
+          enum: [gitea, forgejo, gitlab]
+          description: >-
+            `github` is intentionally excluded — GitHub integration is
+            provided by the server-wide GitHub App and the organization-level
+            `github_app_enabled` toggle, not by per-integration rows.
         secret:
           type: string
           description: >-
@@ -4947,8 +4952,7 @@ components:
           type: string
           description: >-
             Plaintext API token for outbound integrations. Stored encrypted.
-            Omit for inbound integrations and for GitHub outbound (credentials
-            come from the server-configured GitHub App instead).
+            Omit for inbound integrations.
 
     PatchIntegrationRequest:
       type: object
@@ -4964,7 +4968,10 @@ components:
           description: Update the human-readable display name. Cannot be empty.
         forge_type:
           type: string
-          enum: [gitea, forgejo, gitlab, github]
+          enum: [gitea, forgejo, gitlab]
+          description: >-
+            `github` is rejected here — GitHub integration is provided by the
+            server-wide GitHub App and `github_app_enabled` instead.
         endpoint_url:
           type: string
           nullable: true

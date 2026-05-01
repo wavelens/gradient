@@ -188,6 +188,13 @@ pub async fn put_integration(
 
     let kind = parse_kind(&body.kind)?;
     let forge = parse_forge(&body.forge_type)?;
+    if matches!(forge, ForgeType::GitHub) {
+        return Err(WebError::BadRequest(
+            "GitHub integrations are managed through the server-wide GitHub App; \
+             enable the App on the organization instead of creating an integration row."
+                .into(),
+        ));
+    }
 
     // Name must be unique within (organization, kind).
     let existing = EIntegration::find()
@@ -308,7 +315,15 @@ pub async fn patch_integration(
     }
 
     if let Some(forge) = body.forge_type {
-        active.forge_type = Set(parse_forge(&forge)?.as_i16());
+        let parsed = parse_forge(&forge)?;
+        if matches!(parsed, ForgeType::GitHub) {
+            return Err(WebError::BadRequest(
+                "GitHub integrations are managed through the server-wide GitHub App; \
+                 enable the App on the organization instead of switching forge_type to github."
+                    .into(),
+            ));
+        }
+        active.forge_type = Set(parsed.as_i16());
     }
 
     if let Some(url) = body.endpoint_url {

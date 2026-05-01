@@ -736,10 +736,19 @@ impl<'a> StateApplicator<'a> {
 
             let forge = ForgeType::from_path_segment(&state_int.forge_type).ok_or_else(|| {
                 format!(
-                    "Integration '{}' has invalid forge_type '{}': expected gitea/forgejo/gitlab/github",
+                    "Integration '{}' has invalid forge_type '{}': expected gitea/forgejo/gitlab",
                     state_int.name, state_int.forge_type
                 )
             })?;
+            if matches!(forge, ForgeType::GitHub) {
+                return Err(format!(
+                    "Integration '{}' has forge_type 'github': GitHub integrations are managed \
+                     through the server-wide GitHub App and the organization-level \
+                     `github_app_enabled` toggle, not via integration rows.",
+                    state_int.name
+                )
+                .into());
+            }
 
             let encrypted_secret = match state_int.secret_file.as_deref() {
                 Some(_) => {
