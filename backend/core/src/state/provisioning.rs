@@ -226,7 +226,12 @@ impl<'a> StateApplicator<'a> {
                 org.private_key = Set(encrypted_private_key.clone());
                 org.created_by = Set(*created_by_id);
                 org.public = Set(state_org.public);
-                org.github_app_enabled = Set(state_org.github_app_enabled);
+                // Only overwrite github_installation_id when state declares
+                // it; otherwise leave the existing value (likely set by the
+                // install webhook) intact.
+                if let Some(id) = state_org.github_installation_id {
+                    org.github_installation_id = Set(Some(id));
+                }
                 org.managed = Set(true);
                 org.update(self.db).await?;
                 tracing::info!("Updated managed organization: {}", state_org.name);
@@ -244,8 +249,7 @@ impl<'a> StateApplicator<'a> {
                     created_by: Set(*created_by_id),
                     created_at: Set(now),
                     managed: Set(true),
-                    github_installation_id: Set(None),
-                    github_app_enabled: Set(state_org.github_app_enabled),
+                    github_installation_id: Set(state_org.github_installation_id),
                 };
                 org.insert(self.db).await?;
                 tracing::info!("Created managed organization: {}", state_org.name);
@@ -743,8 +747,8 @@ impl<'a> StateApplicator<'a> {
             if matches!(forge, ForgeType::GitHub) {
                 return Err(format!(
                     "Integration '{}' has forge_type 'github': GitHub integrations are managed \
-                     through the server-wide GitHub App and the organization-level \
-                     `github_app_enabled` toggle, not via integration rows.",
+                     through the server-wide GitHub App; bind installations on the org via \
+                     `github_installation_id`, not via integration rows.",
                     state_int.name
                 )
                 .into());

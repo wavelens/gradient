@@ -120,7 +120,6 @@ fn org_row() -> entity::organization::Model {
         created_at: test_date(),
         managed: false,
         github_installation_id: None,
-        github_app_enabled: false,
     }
 }
 

@@ -12,7 +12,6 @@ import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
-import { ToggleSwitchModule } from 'primeng/toggleswitch';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import {
@@ -40,7 +39,6 @@ interface Option<T> {
     ButtonModule,
     InputTextModule,
     SelectModule,
-    ToggleSwitchModule,
     LoadingSpinnerComponent,
   ],
   templateUrl: './integrations.component.html',
@@ -54,7 +52,6 @@ export class IntegrationsComponent implements OnInit {
   loading = signal(true);
   saving = signal(false);
   deletingId = signal<string | null>(null);
-  togglingGithub = signal(false);
 
   orgName = '';
   orgDisplayName = signal('');
@@ -99,11 +96,12 @@ export class IntegrationsComponent implements OnInit {
   };
 
   githubAppAvailable = computed(() => this.organization()?.github_app_available === true);
-  githubAppEnabled = signal(false);
+  githubInstallationId = computed(() => this.organization()?.github_installation_id ?? null);
+  githubAppInstalled = computed(() => this.githubInstallationId() != null);
 
   // GitHub is intentionally absent from these option lists: GitHub
-  // integration is provided by the server-wide GitHub App + the org-level
-  // `github_app_enabled` toggle, not by per-integration rows. Allowing
+  // integration is provided by the server-wide GitHub App and the org's
+  // `github_installation_id`, not by per-integration rows. Allowing
   // operators to create an inbound/outbound integration with
   // `forge_type=github` produced a row that was ignored by the dispatch and
   // outbound CI paths and only confused setup.
@@ -130,7 +128,6 @@ export class IntegrationsComponent implements OnInit {
       next: (org) => {
         this.organization.set(org);
         this.orgDisplayName.set(org.display_name);
-        this.githubAppEnabled.set(org.github_app_enabled ?? false);
       },
       error: () => {},
     });
@@ -339,32 +336,6 @@ export class IntegrationsComponent implements OnInit {
       setTimeout(() => {
         if (this.copiedUrlId() === integration.id) this.copiedUrlId.set(null);
       }, 2000);
-    });
-  }
-
-  toggleGithubApp(): void {
-    const next = !this.githubAppEnabled();
-    this.togglingGithub.set(true);
-    this.integrationsService.setGithubAppEnabled(this.orgName, next).subscribe({
-      next: () => {
-        this.githubAppEnabled.set(next);
-        this.togglingGithub.set(false);
-      },
-      error: () => this.togglingGithub.set(false),
-    });
-  }
-
-  onGithubAppToggle(enabled: boolean): void {
-    this.togglingGithub.set(true);
-    this.integrationsService.setGithubAppEnabled(this.orgName, enabled).subscribe({
-      next: () => {
-        this.githubAppEnabled.set(enabled);
-        this.togglingGithub.set(false);
-      },
-      error: () => {
-        this.githubAppEnabled.set(!enabled);
-        this.togglingGithub.set(false);
-      },
     });
   }
 

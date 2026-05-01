@@ -66,12 +66,12 @@ pub struct OrgResponse {
     pub managed: bool,
     pub created_by: Uuid,
     pub created_at: chrono::NaiveDateTime,
+    /// GitHub App installation id for this org. `Some` is the single signal
+    /// that the org uses the GitHub App; outbound CI status reporting and
+    /// install-webhook routing both gate on this being populated.
     pub github_installation_id: Option<i64>,
-    /// True when this org has opted into receiving GitHub App deliveries.
-    /// Only meaningful when the server has `GRADIENT_GITHUB_APP_*` configured.
-    pub github_app_enabled: bool,
     /// Whether the server has a GitHub App configured at all. The frontend
-    /// hides the GitHub integration row entirely when this is `false`.
+    /// hides GitHub-specific UI entirely when this is `false`.
     pub github_app_available: bool,
     pub role: Option<String>,
 }
@@ -266,7 +266,6 @@ pub async fn put(
         created_at: Set(Utc::now().naive_utc()),
         managed: Set(false),
         github_installation_id: Set(None),
-        github_app_enabled: Set(false),
     };
 
     let organization = organization.insert(&state.web_db).await?;
@@ -352,7 +351,6 @@ pub async fn get_organization(
             created_by: org.created_by,
             created_at: org.created_at,
             github_installation_id: org.github_installation_id,
-            github_app_enabled: org.github_app_enabled,
             github_app_available: state.cli.github_app_config().is_some(),
             role,
         },

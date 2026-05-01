@@ -122,13 +122,22 @@
         description = "Whether the organization is public (visible to all users)";
       };
 
-      github_app_enabled = mkOption {
-        type = types.bool;
-        default = false;
+      github_installation_id = mkOption {
+        type = types.nullOr types.int;
+        default = null;
         description = ''
-          Whether this organization has opted into GitHub App deliveries.
-          Only meaningful when the server has a GitHub App configured
-          (`GRADIENT_GITHUB_APP_*`). Defaults to false — admins opt in explicitly.
+          GitHub App installation id to bind this organization to. Look it up
+          from the App's "Install App" page on github.com — it's the trailing
+          number in the installation URL.
+
+          When set, the state-driven provisioner writes it on every
+          reconciliation (state wins over runtime updates). When `null`, the
+          field is left untouched on update so a webhook-recorded id survives
+          reconciliation, and is initialised to null on create.
+
+          The presence of an installation id is the org-level signal that
+          this org uses the GitHub App; outbound CI status reporting and
+          install-webhook routing both gate on it.
         '';
       };
 

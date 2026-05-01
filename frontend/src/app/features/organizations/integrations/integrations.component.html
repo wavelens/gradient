@@ -29,14 +29,21 @@
         <div class="settings-card">
           <div class="github-row">
             <div>
-              <h3>Enable GitHub App for this organization</h3>
-              <p class="text-secondary">When enabled, commit statuses and webhooks from the installed GitHub App will be routed to this organization.</p>
+              <h3>GitHub App installation</h3>
+              @if (githubAppInstalled()) {
+                <p class="text-secondary">
+                  This organization is bound to GitHub App installation
+                  <code>{{ githubInstallationId() }}</code>. Outbound CI status
+                  reporting and webhook routing are active.
+                </p>
+              } @else {
+                <p class="text-secondary">
+                  No GitHub App installation is bound to this organization yet.
+                  Install the App on your GitHub account, or set
+                  <code>github_installation_id</code> on the org via state config.
+                </p>
+              }
             </div>
-            <p-toggleSwitch
-              [ngModel]="githubAppEnabled()"
-              (ngModelChange)="onGithubAppToggle($event)"
-              [disabled]="togglingGithub()"
-            />
           </div>
         </div>
       </div>

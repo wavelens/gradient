@@ -436,7 +436,6 @@ mod tests {
             created_at: chrono::Utc::now().naive_utc(),
             managed: false,
             github_installation_id: None,
-            github_app_enabled: false,
         }
     }
 

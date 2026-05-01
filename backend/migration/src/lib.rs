@@ -74,6 +74,7 @@ mod m20260422_000002_add_enable_caps_to_worker_registration;
 mod m20260422_000003_add_deriver_to_cached_path;
 mod m20260425_000000_replace_build_server_with_worker;
 mod m20260430_000000_normalize_hash_columns;
+mod m20260501_000000_drop_github_app_enabled_from_organization;
 
 pub struct Migrator;
 
@@ -149,6 +150,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260422_000003_add_deriver_to_cached_path::Migration),
             Box::new(m20260425_000000_replace_build_server_with_worker::Migration),
             Box::new(m20260430_000000_normalize_hash_columns::Migration),
+            Box::new(m20260501_000000_drop_github_app_enabled_from_organization::Migration),
         ]
     }
 }

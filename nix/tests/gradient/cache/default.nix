@@ -179,6 +179,12 @@
       builder = { config, pkgs, lib, ... }: {
         imports = [ ../../../modules/gradient-worker.nix ];
 
+        # Pre-seed the build closure of `hello` (the package the test flake
+        # builds) into the worker's local store. Without this the worker would
+        # try to fetch source tarballs from the internet — which the test VM
+        # cannot reach — and every build would fail with "Could not resolve host".
+        environment.systemPackages = with pkgs; [ hello stdenv ];
+
         nix.settings = {
           trusted-users = [
             "root"
@@ -287,7 +293,11 @@
       server.succeed("${lib.getExe pkgs.gradient-cli} project select project")
 
       server.sleep(10)
-      print(server.succeed("${lib.getExe pkgs.gradient-cli} project show"))
+      # Best-effort first show: the project may have a Queued evaluation that the
+      # CLI considers an error condition. Use `execute` instead of `succeed` so a
+      # transient non-zero exit doesn't abort the whole test.
+      _, output = server.execute("${lib.getExe pkgs.gradient-cli} project show")
+      print(output)
 
       # Wait for the server to detect the new commit (check cycle is 30 s).
       # Poll in short increments so we surface errors quickly instead of timing out.
@@ -338,7 +348,7 @@
               break
           elif eval_status == "Failed":
               j = server.succeed("journalctl -u gradient-server --no-pager --since='-300s' -n 200")
-              bj = server.succeed("journalctl -u gradient-worker --no-pager --since='-300s' -n 200") if True else ""
+              bj = builder.succeed("journalctl -u gradient-worker --no-pager --since='-300s' -n 200")
               raise Exception(f"Evaluation failed:\nServer:\n{j[-2000:]}\nWorker:\n{bj[-2000:]}")
           if attempt % 3 == 0:
               # Print eval status, entry point count, and build status breakdown

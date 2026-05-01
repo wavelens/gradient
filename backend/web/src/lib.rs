@@ -120,10 +120,6 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
                 .patch(orgs::patch_integration)
                 .delete(orgs::delete_integration),
         )
-        .route(
-            "/orgs/{organization}/github-app",
-            patch(orgs::patch_github_app),
-        )
         .route("/projects/{organization}", put(projects::put))
         .route(
             "/projects/{organization}/available",

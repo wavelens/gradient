@@ -36,8 +36,13 @@ pub struct StateOrganization {
     pub description: Option<String>,
     pub private_key_file: String,
     pub public: bool,
+    /// GitHub App installation id to bind to this org. When `Some`, the
+    /// state-driven provisioner writes it on every reconciliation (state wins
+    /// over runtime updates). When `None`, the field is left untouched on
+    /// update so a webhook-recorded id survives reconciliation, and is
+    /// initialised to `NULL` on create.
     #[serde(default)]
-    pub github_app_enabled: bool,
+    pub github_installation_id: Option<i64>,
     pub created_by: String,
 }
 

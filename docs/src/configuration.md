@@ -337,7 +337,7 @@ ssh-keygen -t ed25519 -N "" -f /run/secrets/acme-ssh-key
 | `description` | `null` | Optional description |
 | `private_key_file` | — | Path to SSH private key (required) |
 | `public` | `false` | Visible to all users |
-| `github_app_enabled` | `false` | Opt this org into the server-configured GitHub App. Ignored when no App is configured |
+| `github_installation_id` | `null` | GitHub App installation id to bind to this org (look it up on the App's "Install App" page on GitHub). Setting this enables outbound CI status reporting and webhook routing. When `null`, the field is left untouched on update so a webhook-recorded id survives reconciliation |
 | `created_by` | — | Username of creator (required) |
 
 ### Projects

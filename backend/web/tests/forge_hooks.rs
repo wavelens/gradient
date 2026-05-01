@@ -149,7 +149,6 @@ fn org_row(name: &str) -> entity::organization::Model {
         created_at: fixture_date(),
         managed: false,
         github_installation_id: None,
-        github_app_enabled: false,
     }
 }
 

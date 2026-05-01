@@ -94,11 +94,6 @@ pub struct PatchIntegrationRequest {
     pub access_token: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct PatchGithubAppRequest {
-    pub enabled: bool,
-}
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn parse_kind(s: &str) -> Result<IntegrationKind, WebError> {
@@ -382,27 +377,3 @@ pub async fn delete_integration(
     }))
 }
 
-/// `PATCH /orgs/{organization}/github-app` — toggle the per-org GitHub App
-/// opt-in flag. Rejected when the server has no GitHub App configured.
-pub async fn patch_github_app(
-    state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Path(organization): Path<String>,
-    Json(body): Json<PatchGithubAppRequest>,
-) -> WebResult<Json<BaseResponse<bool>>> {
-    if state.cli.github_app_config().is_none() {
-        return Err(WebError::BadRequest(
-            "This server has no GitHub App configured.".to_string(),
-        ));
-    }
-
-    let org = load_editable_org(&state, user.id, organization).await?;
-    let mut active: AOrganization = org.into();
-    active.github_app_enabled = Set(body.enabled);
-    active.update(&state.web_db).await?;
-
-    Ok(Json(BaseResponse {
-        error: false,
-        message: body.enabled,
-    }))
-}

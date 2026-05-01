@@ -179,7 +179,6 @@ mod tests {
             created_at: NaiveDateTime::default(),
             managed: false,
             github_installation_id: None,
-            github_app_enabled: false,
         }
     }
 

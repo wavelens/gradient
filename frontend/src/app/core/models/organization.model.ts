@@ -17,7 +17,6 @@ export interface Organization {
   role?: 'Admin' | 'Write' | 'View';
   running_evaluations?: number;
   github_installation_id?: number | null;
-  github_app_enabled?: boolean;
   github_app_available?: boolean;
 }
 

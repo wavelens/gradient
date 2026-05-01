@@ -3269,9 +3269,8 @@ paths:
         The stored `forge_type` is display metadata only for inbound.
 
         `forge_type: "github"` is rejected with `400`: GitHub integration is
-        provided by the server-wide GitHub App together with the organization
-        flag set via `PATCH /orgs/{organization}/github-app`, not by per-org
-        integration rows.
+        provided by the server-wide GitHub App together with the org's
+        `github_installation_id`, not by per-org integration rows.
       operationId: createOrgIntegration
       requestBody:
         required: true
@@ -3379,39 +3378,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BoolResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /orgs/{organization}/github-app:
-    parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
-    patch:
-      tags: [integrations]
-      summary: Toggle GitHub App opt-in
-      description: >-
-        Enables or disables GitHub App deliveries for this organization.
-        Rejected with `400` when the server has no GitHub App configured
-        (`github_app_available` is false on `GET /orgs/{organization}`).
-      operationId: toggleGithubApp
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/GithubAppToggleRequest'
-      responses:
-        '200':
-          description: Updated
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/BoolResponse'
-        '400':
-          description: GitHub App not configured on this server
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -4017,7 +3983,7 @@ components:
 
     Organization:
       type: object
-      required: [id, name, display_name, created_by, created_at, github_app_enabled, github_app_available]
+      required: [id, name, display_name, created_by, created_at, github_app_available]
       properties:
         id:
           type: string
@@ -4037,13 +4003,13 @@ components:
           format: int64
           nullable: true
           description: >-
-            GitHub App installation ID bound to this org. Populated automatically
-            when the App is installed against the org's GitHub account.
-        github_app_enabled:
-          type: boolean
-          description: >-
-            Whether this org has opted into GitHub App deliveries. Toggle via
-            `PATCH /orgs/{organization}/github-app`.
+            GitHub App installation ID bound to this org. The presence of this
+            value (non-null) is the single signal that this org uses the GitHub
+            App — outbound CI status reporting and webhook routing both gate on
+            it. Populated automatically by the `installation` webhook (when the
+            GitHub login matches the Gradient org name) and by the state-driven
+            provisioner (`StateOrganization.github_installation_id`); cleared
+            automatically when GitHub sends `installation.deleted`.
         github_app_available:
           type: boolean
           description: >-
@@ -4938,8 +4904,8 @@ components:
           enum: [gitea, forgejo, gitlab]
           description: >-
             `github` is intentionally excluded — GitHub integration is
-            provided by the server-wide GitHub App and the organization-level
-            `github_app_enabled` toggle, not by per-integration rows.
+            provided by the server-wide GitHub App and the org's
+            `github_installation_id`, not by per-integration rows.
         secret:
           type: string
           description: >-
@@ -4971,7 +4937,8 @@ components:
           enum: [gitea, forgejo, gitlab]
           description: >-
             `github` is rejected here — GitHub integration is provided by the
-            server-wide GitHub App and `github_app_enabled` instead.
+            server-wide GitHub App and the org's `github_installation_id`
+            instead.
         endpoint_url:
           type: string
           nullable: true
@@ -5007,13 +4974,6 @@ components:
           type: string
           format: uuid
           nullable: true
-
-    GithubAppToggleRequest:
-      type: object
-      required: [enabled]
-      properties:
-        enabled:
-          type: boolean
 
     WebhookResponse:
       type: object

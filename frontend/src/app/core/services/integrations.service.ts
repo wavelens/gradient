@@ -39,10 +39,6 @@ export class IntegrationsService {
     return this.api.delete<boolean>(`orgs/${org}/integrations/${id}`);
   }
 
-  setGithubAppEnabled(org: string, enabled: boolean): Observable<boolean> {
-    return this.api.patch<boolean>(`orgs/${org}/github-app`, { enabled });
-  }
-
   getProjectIntegration(org: string, project: string): Observable<ProjectIntegrationLink> {
     return this.api.get<ProjectIntegrationLink>(`projects/${org}/${project}/integration`);
   }

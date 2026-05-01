@@ -301,6 +301,119 @@ impl CiReporter for GithubReporter {
     }
 }
 
+// ── GithubAppReporter ────────────────────────────────────────────────────────
+
+/// CI reporter that posts commit statuses to GitHub authenticated as a GitHub
+/// App installation.
+///
+/// Mints a fresh installation access token on every report (~1 round-trip
+/// extra per status). Tokens are valid for ~1 hour, so a future optimisation
+/// is to cache them; CI volumes are typically low enough that the overhead
+/// doesn't matter today.
+///
+/// The status payload is identical to [`GithubReporter`]; only the
+/// authentication path differs.
+pub struct GithubAppReporter {
+    api_base_url: String,
+    app_id: u64,
+    private_key_pem: String,
+    installation_id: i64,
+    client: reqwest::Client,
+}
+
+impl std::fmt::Debug for GithubAppReporter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GithubAppReporter")
+            .field("api_base_url", &self.api_base_url)
+            .field("app_id", &self.app_id)
+            .field("installation_id", &self.installation_id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl GithubAppReporter {
+    const DEFAULT_API_URL: &'static str = "https://api.github.com";
+
+    pub fn new(
+        api_base_url: impl Into<String>,
+        app_id: u64,
+        private_key_pem: impl Into<String>,
+        installation_id: i64,
+    ) -> Result<Self> {
+        let raw = api_base_url.into();
+        let api_base_url = if raw.is_empty() {
+            Self::DEFAULT_API_URL.to_string()
+        } else {
+            raw.trim_end_matches('/').to_string()
+        };
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .user_agent("gradient-ci/1.0")
+            .build()
+            .context("Failed to build HTTP client for GithubAppReporter")?;
+
+        Ok(Self {
+            api_base_url,
+            app_id,
+            private_key_pem: private_key_pem.into(),
+            installation_id,
+            client,
+        })
+    }
+}
+
+#[async_trait]
+impl CiReporter for GithubAppReporter {
+    async fn report(&self, report: &CiReport) -> Result<()> {
+        let token = crate::ci::github_app::get_installation_token(
+            self.app_id,
+            &self.private_key_pem,
+            self.installation_id,
+        )
+        .await
+        .context("Failed to mint GitHub App installation token")?;
+
+        let url = format!(
+            "{}/repos/{}/{}/statuses/{}",
+            self.api_base_url, report.owner, report.repo, report.sha
+        );
+
+        let payload = GithubStatusPayload {
+            state: GithubState::from(&report.status),
+            description: report.description.as_deref(),
+            context: &report.context,
+            target_url: report.details_url.as_deref(),
+        };
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .json(&payload)
+            .send()
+            .await
+            .context("Failed to send GitHub App status request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            warn!(
+                github_url = %url,
+                http_status = %status,
+                body = %body,
+                installation_id = self.installation_id,
+                "GitHub App CI status report failed"
+            );
+            anyhow::bail!("GitHub App returned {}: {}", status, body);
+        }
+
+        Ok(())
+    }
+}
+
 // ── factory ──────────────────────────────────────────────────────────────────
 
 /// Builds a `CiReporter` from a project's CI configuration fields.
