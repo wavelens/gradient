@@ -10,8 +10,9 @@
 use crate::ci::{CiReport, CiStatus, parse_owner_repo, resolve_outbound_reporter_for_project};
 use crate::types::input::vec_to_hex;
 use crate::types::*;
+use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
-use sea_orm::EntityTrait;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use tracing::{error, warn};
 
@@ -31,6 +32,126 @@ pub fn ci_status_for_evaluation(status: &EvaluationStatus) -> Option<CiStatus> {
         | EvaluationStatus::EvaluatingDerivation
         | EvaluationStatus::Building
         | EvaluationStatus::Waiting => None,
+    }
+}
+
+/// Maps a [`BuildStatus`] to the [`CiStatus`] reported per-entry-point.
+///
+/// Returns `None` for non-terminal states; the per-eval-name `Pending` is
+/// reported once at evaluation time.
+pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
+    match status {
+        BuildStatus::Completed | BuildStatus::Substituted => Some(CiStatus::Success),
+        BuildStatus::Failed | BuildStatus::DependencyFailed => Some(CiStatus::Failure),
+        BuildStatus::Aborted => Some(CiStatus::Error),
+        BuildStatus::Created | BuildStatus::Queued | BuildStatus::Building => None,
+    }
+}
+
+/// Reports per-entry-point CI status for a finished build.
+///
+/// One `gradient/<eval-name>` status is sent per `entry_point` row pointing at
+/// this build (a single derivation can be exposed under multiple flake attrs).
+/// No-ops when the build has no entry-point rows (intermediate builds), the
+/// evaluation has no project (direct builds), or owner/repo can't be parsed.
+pub async fn report_build_ci(state: Arc<ServerState>, build: MBuild, status: CiStatus) {
+    let entry_points = match EEntryPoint::find()
+        .filter(CEntryPoint::Build.eq(build.id))
+        .all(&state.db)
+        .await
+    {
+        Ok(eps) => eps,
+        Err(e) => {
+            error!(error = %e, build_id = %build.id, "Failed to query entry_points for build CI report");
+            return;
+        }
+    };
+    if entry_points.is_empty() {
+        return;
+    }
+
+    let evaluation = match EEvaluation::find_by_id(build.evaluation)
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(e)) => e,
+        Ok(None) => {
+            warn!(evaluation_id = %build.evaluation, "Evaluation missing for build CI report");
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, evaluation_id = %build.evaluation, "Failed to query evaluation for build CI report");
+            return;
+        }
+    };
+
+    let Some(project_id) = evaluation.project else {
+        return;
+    };
+
+    let project = match EProject::find_by_id(project_id).one(&state.db).await {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            warn!(%project_id, "Project missing for build CI report");
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, %project_id, "Failed to query project for build CI report");
+            return;
+        }
+    };
+
+    let commit = match ECommit::find_by_id(evaluation.commit).one(&state.db).await {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            warn!(commit_id = %evaluation.commit, "Commit missing for build CI report");
+            return;
+        }
+        Err(e) => {
+            error!(error = %e, commit_id = %evaluation.commit, "Failed to query commit for build CI report");
+            return;
+        }
+    };
+
+    let sha = vec_to_hex(&commit.hash);
+
+    let (owner, repo) = match parse_owner_repo(&evaluation.repository) {
+        Some(pair) => pair,
+        None => {
+            warn!(repository_url = %evaluation.repository, "Could not parse owner/repo for build CI report");
+            return;
+        }
+    };
+
+    let reporter = resolve_outbound_reporter_for_project(&state, project_id).await;
+
+    let org_name = match EOrganization::find_by_id(project.organization)
+        .one(&state.db)
+        .await
+    {
+        Ok(Some(o)) => Some(o.name),
+        _ => None,
+    };
+    let details_url = org_name.map(|org| {
+        format!(
+            "{}/organization/{}/log/{}",
+            state.cli.frontend_url, org, evaluation.id
+        )
+    });
+
+    for ep in entry_points {
+        let report = CiReport {
+            owner: owner.clone(),
+            repo: repo.clone(),
+            sha: sha.clone(),
+            context: format!("gradient/{}", ep.eval),
+            status: status.clone(),
+            description: None,
+            details_url: details_url.clone(),
+        };
+        if let Err(e) = reporter.report(&report).await {
+            warn!(error = format!("{e:#}"), eval = %ep.eval, build_id = %build.id, "Build CI status report failed");
+        }
     }
 }
 
@@ -106,7 +227,7 @@ pub async fn report_evaluation_ci(
         owner,
         repo,
         sha,
-        context: "gradient".to_string(),
+        context: "Gradient Evaluation".to_string(),
         status,
         description: None,
         details_url,
@@ -135,6 +256,41 @@ mod tests {
             ci_status_for_evaluation(&EvaluationStatus::Aborted),
             Some(CiStatus::Error)
         );
+    }
+
+    #[test]
+    fn maps_build_terminal_states() {
+        assert_eq!(
+            ci_status_for_build(&BuildStatus::Completed),
+            Some(CiStatus::Success)
+        );
+        assert_eq!(
+            ci_status_for_build(&BuildStatus::Substituted),
+            Some(CiStatus::Success)
+        );
+        assert_eq!(
+            ci_status_for_build(&BuildStatus::Failed),
+            Some(CiStatus::Failure)
+        );
+        assert_eq!(
+            ci_status_for_build(&BuildStatus::DependencyFailed),
+            Some(CiStatus::Failure)
+        );
+        assert_eq!(
+            ci_status_for_build(&BuildStatus::Aborted),
+            Some(CiStatus::Error)
+        );
+    }
+
+    #[test]
+    fn skips_intermediate_build_states() {
+        for s in [
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+        ] {
+            assert_eq!(ci_status_for_build(&s), None);
+        }
     }
 
     #[test]
