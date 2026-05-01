@@ -18,6 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
+use tracing::trace;
 
 use crate::nix::flake::{discover_derivations, get_derivation_path};
 use crate::nix::nix_eval::{NixEvaluator, escape_nix_str};
@@ -132,8 +133,12 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             }
         };
 
+        trace!(?req, "eval worker received request");
         let resp = match req {
-            EvalRequest::Shutdown => return Ok(()),
+            EvalRequest::Shutdown => {
+                trace!("eval worker shutting down on request");
+                return Ok(());
+            }
             EvalRequest::List {
                 repository,
                 wildcards,
@@ -223,6 +228,13 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             }
         };
 
+        let kind = match &resp {
+            EvalResponse::ListOk { attrs, .. } => format!("ListOk({} attrs)", attrs.len()),
+            EvalResponse::ResolveOk { items, .. } => format!("ResolveOk({} items)", items.len()),
+            EvalResponse::AttrNamesOk { keys, .. } => format!("AttrNamesOk({} keys)", keys.len()),
+            EvalResponse::Err { message } => format!("Err({message})"),
+        };
+        trace!(%kind, "eval worker sending response");
         write_response(&mut writer, &resp)?;
     }
 }
