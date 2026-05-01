@@ -183,7 +183,7 @@ pub async fn get_recent_direct_builds(
 pub async fn get_evaluation_builds(
     config: RequestConfig,
     evaluation_id: String,
-) -> Result<BaseResponse<Vec<crate::ListItem>>, String> {
+) -> Result<BaseResponse<crate::evals::PaginatedBuilds>, String> {
     let res = get_client(
         config,
         format!("evals/{}/builds", evaluation_id),

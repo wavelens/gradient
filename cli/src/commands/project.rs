@@ -154,13 +154,13 @@ pub async fn handle(cmd: Commands) {
                 exit(1);
             }
 
-            if builds.message.is_empty() {
+            if builds.message.builds.is_empty() {
                 println!("No builds.");
                 exit(0);
             }
 
             println!("===== Building =====");
-            for build in builds.message.clone() {
+            for build in builds.message.builds.iter() {
                 // Use status from evaluation builds response (no need for individual API calls)
                 let colored_name = match build.status.as_str() {
                     "Completed" => build.name.green(),

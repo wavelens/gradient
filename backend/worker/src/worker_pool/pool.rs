@@ -37,12 +37,35 @@ impl EvalWorker {
     pub(super) async fn spawn() -> Result<Self> {
         let exe = std::env::current_exe().context("locating current executable")?;
         trace!(exe = %exe.display(), "spawning eval worker subprocess");
-        let mut child = Command::new(&exe)
+        let mut command = Command::new(&exe);
+        command
             .arg("--eval-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+
+        // Match the Nix CLI: bump the subprocess's stack to 64 MiB so libnix's
+        // libstdc++ std::regex DFS executor (used by `builtins.match` /
+        // `builtins.split`) doesn't overflow on deep patterns. Upstream Nix
+        // calls `setStackSize(64 * 1024 * 1024)` in `initNix`; we use the C
+        // API directly and inherit the default 8 MiB, which is too small for
+        // some flakes.
+        #[cfg(unix)]
+        unsafe {
+            command.pre_exec(|| {
+                let lim = libc::rlimit {
+                    rlim_cur: 64 * 1024 * 1024,
+                    rlim_max: 64 * 1024 * 1024,
+                };
+                if libc::setrlimit(libc::RLIMIT_STACK, &lim) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+
+        let mut child = command
             .spawn()
             .context("spawning eval worker subprocess")?;
 
