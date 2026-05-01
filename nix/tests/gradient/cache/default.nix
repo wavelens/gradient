@@ -407,10 +407,12 @@ in {
           store_path_drv = clean if clean.startswith("/nix/store/") else f"/nix/store/{clean}"
           break
 
-      store_path = server.succeed(f"${lib.getExe pkgs.nix} path-info {store_path_drv}^out --extra-experimental-features nix-command").strip()
+      # Resolve the .drv to its `^out` path. The `.drv` file is on the
+      # builder VM (its full closure was preseeded via `additionalPaths`),
+      # not on the server, so run the lookup there.
+      store_path = builder.succeed(f"${lib.getExe pkgs.nix} path-info {store_path_drv}^out --extra-experimental-features nix-command").strip()
       store_hash = store_path.split("-")[0].replace("/nix/store/", "")
       print(f"Detected store path: {store_path}")
-      print(server.succeed(f"${lib.getExe pkgs.nix} path-info {store_path} --json --extra-experimental-features nix-command"))
 
       print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM organization_cache;\"'"))
       print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM cache;\"'"))

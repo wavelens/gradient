@@ -174,7 +174,7 @@ pub async fn report_ci_for_evaluation(
         owner,
         repo,
         sha,
-        context: "gradient".to_string(),
+        context: "Gradient Evaluation".to_string(),
         status,
         description: None,
         details_url,

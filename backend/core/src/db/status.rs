@@ -99,6 +99,14 @@ pub async fn update_build_status(
                 });
             }
 
+            if let Some(ci_status) = crate::ci::ci_status_for_build(&updated_build.status) {
+                let ci_state = Arc::clone(&state);
+                let ci_build = updated_build.clone();
+                tokio::spawn(async move {
+                    crate::ci::report_build_ci(ci_state, ci_build, ci_status).await;
+                });
+            }
+
             updated_build
         }
         Err(e) => {
