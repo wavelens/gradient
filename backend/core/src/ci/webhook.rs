@@ -14,12 +14,138 @@ use entity::evaluation::EvaluationStatus;
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use sha2::Sha256;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, warn};
 use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
+
+/// Validate a user-supplied webhook URL against SSRF-style abuse.
+///
+/// Rejects:
+/// - schemes other than `http`/`https`,
+/// - URLs without a host,
+/// - IP literals in loopback / private / link-local / multicast /
+///   unspecified / broadcast / shared (CGNAT) ranges,
+/// - IPv6 literals in loopback / unspecified / multicast / unique-local
+///   (`fc00::/7`) / link-local (`fe80::/10`) / IPv4-mapped unsafe ranges.
+///
+/// Hostnames are accepted at validation time; delivery-time DNS resolution
+/// is re-checked in `ReqwestWebhookClient::deliver` to defend against DNS
+/// pointing at internal addresses.
+pub fn validate_webhook_url(url: &str) -> Result<reqwest::Url, String> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| format!("Invalid URL: {}", e))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        s => return Err(format!("URL scheme must be http or https, got '{}'", s)),
+    }
+    let host = parsed
+        .host()
+        .ok_or_else(|| "URL must include a host".to_string())?;
+    match host {
+        url::Host::Ipv4(ip) => {
+            if is_unsafe_ipv4(&ip) {
+                return Err(format!(
+                    "URL points to a disallowed address ({}); private/loopback/link-local/cloud-metadata addresses are blocked",
+                    ip
+                ));
+            }
+        }
+        url::Host::Ipv6(ip) => {
+            if is_unsafe_ipv6(&ip) {
+                return Err(format!(
+                    "URL points to a disallowed address ({}); private/loopback/link-local addresses are blocked",
+                    ip
+                ));
+            }
+        }
+        url::Host::Domain(d) => {
+            if d.is_empty() {
+                return Err("URL host is empty".to_string());
+            }
+            // Reject literal "localhost" — common typo bypass.
+            if d.eq_ignore_ascii_case("localhost") {
+                return Err("URL host 'localhost' is not allowed".to_string());
+            }
+        }
+    }
+    Ok(parsed)
+}
+
+/// Block IPv4 ranges that should never be reachable by an outbound webhook.
+fn is_unsafe_ipv4(ip: &Ipv4Addr) -> bool {
+    if ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_broadcast()
+        || ip.is_multicast()
+        || ip.is_unspecified()
+    {
+        return true;
+    }
+    let o = ip.octets();
+    // Shared address space (CGNAT) 100.64.0.0/10.
+    if o[0] == 100 && (o[1] & 0xC0) == 64 {
+        return true;
+    }
+    // 0.0.0.0/8 — current network.
+    if o[0] == 0 {
+        return true;
+    }
+    // 192.0.0.0/24 — IETF protocol assignments.
+    if o[0] == 192 && o[1] == 0 && o[2] == 0 {
+        return true;
+    }
+    // Reserved 240.0.0.0/4 (excluding 255.255.255.255 already caught).
+    if o[0] >= 240 {
+        return true;
+    }
+    false
+}
+
+/// Block IPv6 ranges that should never be reachable by an outbound webhook.
+fn is_unsafe_ipv6(ip: &Ipv6Addr) -> bool {
+    if ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() {
+        return true;
+    }
+    let segs = ip.segments();
+    // Unique-local fc00::/7
+    if (segs[0] & 0xfe00) == 0xfc00 {
+        return true;
+    }
+    // Link-local fe80::/10
+    if (segs[0] & 0xffc0) == 0xfe80 {
+        return true;
+    }
+    // IPv4-mapped ::ffff:0:0/96 — check the embedded v4.
+    if segs[0] == 0
+        && segs[1] == 0
+        && segs[2] == 0
+        && segs[3] == 0
+        && segs[4] == 0
+        && segs[5] == 0xffff
+    {
+        let v4 = Ipv4Addr::new(
+            (segs[6] >> 8) as u8,
+            (segs[6] & 0xff) as u8,
+            (segs[7] >> 8) as u8,
+            (segs[7] & 0xff) as u8,
+        );
+        if is_unsafe_ipv4(&v4) {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_unsafe_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => is_unsafe_ipv4(v4),
+        IpAddr::V6(v6) => is_unsafe_ipv6(v6),
+    }
+}
 
 /// HTTP delivery for webhook payloads. Production impl uses `reqwest`; tests
 /// can substitute an in-memory recorder.
@@ -40,6 +166,7 @@ impl ReqwestWebhookClient {
     pub fn new() -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
             .build()?;
         Ok(Self { client })
     }
@@ -48,9 +175,31 @@ impl ReqwestWebhookClient {
 #[async_trait]
 impl WebhookClient for ReqwestWebhookClient {
     async fn deliver(&self, url: &str, signature: &str, event: &str, body: String) -> Result<u16> {
+        let parsed = validate_webhook_url(url).map_err(|e| anyhow::anyhow!(e))?;
+
+        // DNS-rebinding defence: resolve the host now and reject if any
+        // resolved IP is in a disallowed range. We still hand the URL to
+        // reqwest, which performs its own resolution — so this is a guard,
+        // not a substitute for proper SSRF-aware connection wiring.
+        if let Some(host) = parsed.host_str() {
+            if matches!(parsed.host(), Some(url::Host::Domain(_))) {
+                let port = parsed.port_or_known_default().unwrap_or(0);
+                let lookup = tokio::net::lookup_host((host, port)).await?;
+                for sa in lookup {
+                    if is_unsafe_ip(&sa.ip()) {
+                        anyhow::bail!(
+                            "Webhook host '{}' resolved to a disallowed address ({})",
+                            host,
+                            sa.ip()
+                        );
+                    }
+                }
+            }
+        }
+
         let resp = self
             .client
-            .post(url)
+            .post(parsed)
             .header("Content-Type", "application/json")
             .header("X-Gradient-Signature", signature)
             .header("X-Gradient-Event", event)
@@ -357,6 +506,128 @@ mod tests {
         let a = sign_webhook_payload("secret", "body-one");
         let b = sign_webhook_payload("secret", "body-two");
         assert_ne!(a, b);
+    }
+
+    // ── validate_webhook_url ─────────────────────────────────────────────────
+
+    #[test]
+    fn validate_url_accepts_public_https() {
+        assert!(validate_webhook_url("https://example.com/hook").is_ok());
+        assert!(validate_webhook_url("http://example.com:8080/hook").is_ok());
+        assert!(validate_webhook_url("https://example.com").is_ok());
+    }
+
+    #[test]
+    fn validate_url_rejects_invalid_scheme() {
+        assert!(validate_webhook_url("file:///etc/passwd").is_err());
+        assert!(validate_webhook_url("ftp://example.com/").is_err());
+        assert!(validate_webhook_url("gopher://example.com/").is_err());
+        assert!(validate_webhook_url("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_unparseable() {
+        assert!(validate_webhook_url("not a url").is_err());
+        assert!(validate_webhook_url("").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_localhost_name() {
+        assert!(validate_webhook_url("http://localhost/").is_err());
+        assert!(validate_webhook_url("http://LOCALHOST/").is_err());
+        assert!(validate_webhook_url("http://Localhost:8080/path").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_loopback_ipv4() {
+        assert!(validate_webhook_url("http://127.0.0.1/").is_err());
+        assert!(validate_webhook_url("http://127.255.255.254/").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_aws_metadata_ip() {
+        // The motivating attack: cloud metadata service.
+        assert!(validate_webhook_url("http://169.254.169.254/latest/meta-data/").is_err());
+        // Generic link-local block.
+        assert!(validate_webhook_url("http://169.254.0.1/").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_rfc1918_ranges() {
+        assert!(validate_webhook_url("http://10.0.0.1/").is_err());
+        assert!(validate_webhook_url("http://10.255.255.255/").is_err());
+        assert!(validate_webhook_url("http://172.16.0.1/").is_err());
+        assert!(validate_webhook_url("http://172.31.255.255/").is_err());
+        assert!(validate_webhook_url("http://192.168.0.1/").is_err());
+        assert!(validate_webhook_url("http://192.168.255.255/").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_cgnat_shared_space() {
+        // 100.64.0.0/10 — RFC 6598.
+        assert!(validate_webhook_url("http://100.64.0.1/").is_err());
+        assert!(validate_webhook_url("http://100.127.255.254/").is_err());
+        // Boundary: 100.128.0.0 is public.
+        assert!(validate_webhook_url("http://100.128.0.1/").is_ok());
+        assert!(validate_webhook_url("http://100.63.255.255/").is_ok());
+    }
+
+    #[test]
+    fn validate_url_rejects_unspecified_and_broadcast() {
+        assert!(validate_webhook_url("http://0.0.0.0/").is_err());
+        assert!(validate_webhook_url("http://255.255.255.255/").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_multicast_ipv4() {
+        assert!(validate_webhook_url("http://224.0.0.1/").is_err());
+        assert!(validate_webhook_url("http://239.255.255.255/").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_reserved_ipv4() {
+        // 240.0.0.0/4 reserved for future use.
+        assert!(validate_webhook_url("http://240.0.0.1/").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_ipv6_loopback_and_unspecified() {
+        assert!(validate_webhook_url("http://[::1]/").is_err());
+        assert!(validate_webhook_url("http://[::]/").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_ipv6_link_and_unique_local() {
+        assert!(validate_webhook_url("http://[fe80::1]/").is_err());
+        assert!(validate_webhook_url("http://[febf::1]/").is_err());
+        assert!(validate_webhook_url("http://[fc00::1]/").is_err());
+        assert!(validate_webhook_url("http://[fdff::1]/").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_ipv6_multicast() {
+        assert!(validate_webhook_url("http://[ff00::1]/").is_err());
+        assert!(validate_webhook_url("http://[ff02::1]/").is_err());
+    }
+
+    #[test]
+    fn validate_url_rejects_ipv4_mapped_loopback_in_ipv6() {
+        // ::ffff:127.0.0.1
+        assert!(validate_webhook_url("http://[::ffff:7f00:1]/").is_err());
+        // ::ffff:169.254.169.254 — metadata IP via v4-mapped v6.
+        assert!(validate_webhook_url("http://[::ffff:a9fe:a9fe]/").is_err());
+    }
+
+    #[test]
+    fn validate_url_accepts_public_ipv4_literal() {
+        // 8.8.8.8 is a public address — this is allowed.
+        assert!(validate_webhook_url("http://8.8.8.8/").is_ok());
+    }
+
+    #[test]
+    fn validate_url_accepts_public_ipv6_literal() {
+        // 2001:4860:4860::8888 (Google public DNS) — allowed.
+        assert!(validate_webhook_url("http://[2001:4860:4860::8888]/").is_ok());
     }
 
     #[test]

@@ -60,6 +60,7 @@ rand_core        = "0.10"
 ssh-key          = { version = "0.6", features = ["ed25519"] }
 object_store     = { workspace = true }
 tempfile         = "3.27"
+url              = "2.5"
 
 [dev-dependencies]
 bytes        = { workspace = true }
