@@ -17,6 +17,27 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Query
 use std::sync::Arc;
 use tracing::{error, warn};
 
+/// `"{org}/{project}"` when both are known, falling back to `"{project}"` when
+/// the organization lookup turned up nothing. Used as the scope segment of
+/// every CI check name so multiple Gradient projects reporting to the same
+/// repository remain distinguishable.
+pub fn format_check_scope(org_name: Option<&str>, project_name: &str) -> String {
+    match org_name {
+        Some(org) => format!("{}/{}", org, project_name),
+        None => project_name.to_string(),
+    }
+}
+
+/// CI check name for the per-evaluation roll-up status.
+pub fn evaluation_check_context(scope: &str) -> String {
+    format!("Gradient Evaluation {}", scope)
+}
+
+/// CI check name for a single entry-point build under an evaluation.
+pub fn build_check_context(scope: &str, entry_point: &str) -> String {
+    format!("Gradient Build {}: {}", scope, entry_point)
+}
+
 /// Maps an [`EvaluationStatus`] to the [`CiStatus`] reported to external forges.
 ///
 /// Returns `None` for non-terminal/intermediate states that do not produce a
@@ -134,7 +155,8 @@ pub async fn report_build_ci(state: Arc<ServerState>, build: MBuild, status: CiS
         Ok(Some(o)) => Some(o.name),
         _ => None,
     };
-    let details_url = org_name.map(|org| {
+    let scope = format_check_scope(org_name.as_deref(), &project.name);
+    let details_url = org_name.as_ref().map(|org| {
         format!(
             "{}/organization/{}/log/{}",
             state.cli.frontend_url, org, evaluation.id
@@ -146,7 +168,7 @@ pub async fn report_build_ci(state: Arc<ServerState>, build: MBuild, status: CiS
             owner: owner.clone(),
             repo: repo.clone(),
             sha: sha.clone(),
-            context: format!("gradient/{}", ep.eval),
+            context: build_check_context(&scope, &ep.eval),
             status: status.clone(),
             description: None,
             details_url: details_url.clone(),
@@ -232,7 +254,9 @@ pub async fn report_evaluation_ci(
         _ => None,
     };
 
-    let details_url = org_name.map(|org| {
+    let scope = format_check_scope(org_name.as_deref(), &project.name);
+
+    let details_url = org_name.as_ref().map(|org| {
         format!(
             "{}/organization/{}/log/{}",
             state.cli.frontend_url, org, evaluation.id
@@ -243,7 +267,7 @@ pub async fn report_evaluation_ci(
         owner,
         repo,
         sha,
-        context: "Gradient Evaluation".to_string(),
+        context: evaluation_check_context(&scope),
         status,
         description: None,
         details_url,
@@ -266,6 +290,44 @@ pub async fn report_evaluation_ci(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_scope_with_org() {
+        assert_eq!(
+            format_check_scope(Some("wavelens"), "my-project"),
+            "wavelens/my-project"
+        );
+    }
+
+    #[test]
+    fn check_scope_without_org_falls_back_to_project() {
+        assert_eq!(format_check_scope(None, "my-project"), "my-project");
+    }
+
+    #[test]
+    fn evaluation_context_format() {
+        assert_eq!(
+            evaluation_check_context("wavelens/my-project"),
+            "Gradient Evaluation wavelens/my-project"
+        );
+    }
+
+    #[test]
+    fn build_context_format() {
+        assert_eq!(
+            build_check_context("wavelens/my-project", "my-package"),
+            "Gradient Build wavelens/my-project: my-package"
+        );
+    }
+
+    #[test]
+    fn build_context_falls_back_when_org_missing() {
+        let scope = format_check_scope(None, "solo-project");
+        assert_eq!(
+            build_check_context(&scope, "pkg"),
+            "Gradient Build solo-project: pkg"
+        );
+    }
 
     #[test]
     fn maps_terminal_states() {

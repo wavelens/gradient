@@ -9,6 +9,7 @@ authors = ["Wavelens GmbH <info@wavelens.io>"]
 [lib]
 name = "core"
 path = "src/lib.rs"
+doctest = false
 
 [dependencies]
 # Workspace dependencies

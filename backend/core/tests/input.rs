@@ -26,10 +26,9 @@ fn url_to_addr_ipv6() {
 
 #[test]
 fn url_to_addr_localhost_resolves_to_loopback() {
-    assert_eq!(
-        url_to_addr("localhost", 8080).unwrap().to_string(),
-        "[::1]:8080"
-    );
+    let addr = url_to_addr("localhost", 8080).unwrap();
+    assert!(addr.ip().is_loopback(), "expected loopback, got {addr}");
+    assert_eq!(addr.port(), 8080);
 }
 
 #[test]

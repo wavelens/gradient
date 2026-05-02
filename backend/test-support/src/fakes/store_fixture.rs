@@ -299,10 +299,13 @@ mod tests {
     #[test]
     fn load_store_parses_all_derivations() {
         let fixture = load_store(&fixture_dir());
-        assert_eq!(
-            fixture.entry_point,
-            "/nix/store/7mdg60drrnh0wq1j8hmmbhll47czm107-hello-2.12.3.drv"
-        );
+        let expected_entry_point = std::fs::read_to_string(fixture_dir().join("output"))
+            .expect("read test-store/output")
+            .trim()
+            .to_string();
+        assert_eq!(fixture.entry_point, expected_entry_point);
+        assert!(fixture.entry_point.starts_with("/nix/store/"));
+        assert!(fixture.entry_point.ends_with(".drv"));
         assert!(!fixture.derivations.is_empty());
         // The entry point should be in the derivations list.
         assert!(

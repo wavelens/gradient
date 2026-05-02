@@ -5,8 +5,8 @@
  */
 
 use gradient_core::ci::{
-    CiReport, CiStatus, ci_status_for_build, parse_owner_repo,
-    resolve_outbound_reporter_for_project,
+    CiReport, CiStatus, build_check_context, ci_status_for_build, evaluation_check_context,
+    format_check_scope, parse_owner_repo, resolve_outbound_reporter_for_project,
 };
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
@@ -95,7 +95,9 @@ pub async fn report_ci_for_entry_points(
         _ => None,
     };
 
-    let details_url = org_name.map(|org| {
+    let scope = format_check_scope(org_name.as_deref(), &project.name);
+
+    let details_url = org_name.as_ref().map(|org| {
         format!(
             "{}/organization/{}/log/{}",
             state.cli.frontend_url, org, evaluation_id
@@ -128,7 +130,7 @@ pub async fn report_ci_for_entry_points(
             owner: owner.clone(),
             repo: repo.clone(),
             sha: sha.clone(),
-            context: format!("gradient/{}", ep.eval),
+            context: build_check_context(&scope, &ep.eval),
             status: initial_status,
             description: None,
             details_url: details_url.clone(),
@@ -214,7 +216,9 @@ pub async fn report_ci_for_evaluation(
         _ => None,
     };
 
-    let details_url = org_name.map(|org| {
+    let scope = format_check_scope(org_name.as_deref(), &project.name);
+
+    let details_url = org_name.as_ref().map(|org| {
         format!(
             "{}/organization/{}/log/{}",
             state.cli.frontend_url, org, evaluation_id
@@ -237,7 +241,7 @@ pub async fn report_ci_for_evaluation(
         owner,
         repo,
         sha,
-        context: "Gradient Evaluation".to_string(),
+        context: evaluation_check_context(&scope),
         status,
         description: None,
         details_url,
