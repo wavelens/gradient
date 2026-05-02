@@ -258,7 +258,7 @@ pub(super) async fn send_credentials_for_job(
 async fn send_ssh_key_credential(socket: &mut ProtoSocket, state: &ServerState, org_id: Uuid) {
     use gradient_core::types::proto::CredentialKind;
 
-    match EOrganization::find_by_id(org_id).one(&state.db).await {
+    match EOrganization::find_by_id(org_id).one(&state.worker_db).await {
         Ok(Some(org)) => {
             match gradient_core::sources::ssh_key::decrypt_ssh_private_key(
                 &state.cli.crypt_secret_file,

@@ -34,7 +34,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
     let pending = ECachedPathSignature::find()
         .filter(CCachedPathSignature::Signature.is_null())
         .limit(SIGN_SWEEP_BATCH)
-        .all(&state.db)
+        .all(&state.worker_db)
         .await?;
 
     if pending.is_empty() {
@@ -51,7 +51,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 
     let caches: HashMap<Uuid, MCache> = ECache::find()
         .filter(CCache::Id.is_in(cache_ids))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await?
         .into_iter()
         .map(|c| (c.id, c))
@@ -59,7 +59,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 
     let cached_paths: HashMap<Uuid, MCachedPath> = ECachedPath::find()
         .filter(CCachedPath::Id.is_in(cached_path_ids))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await?
         .into_iter()
         .map(|c| (c.id, c))
@@ -127,7 +127,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 
         let mut am = row.into_active_model();
         am.signature = Set(Some(sig_b64));
-        if let Err(e) = am.update(&state.db).await {
+        if let Err(e) = am.update(&state.worker_db).await {
             warn!(store_path = %cp.store_path, cache = %cache.id, error = %e, "sign sweep: failed to persist signature");
             continue;
         }
@@ -162,7 +162,7 @@ async fn record_newly_completed_derivations(
 ) -> anyhow::Result<()> {
     let org_ids: Vec<Uuid> = EOrganizationCache::find()
         .filter(COrganizationCache::Cache.eq(cache_id))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await?
         .into_iter()
         .map(|oc| oc.organization)
@@ -174,7 +174,7 @@ async fn record_newly_completed_derivations(
 
     let drvs = EDerivation::find()
         .filter(CDerivation::Organization.is_in(org_ids))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await?;
 
     let now = chrono::Utc::now().naive_utc();
@@ -195,7 +195,7 @@ async fn try_record_cache_derivation(
     let any_uncached = EDerivationOutput::find()
         .filter(CDerivationOutput::Derivation.eq(derivation_id))
         .filter(CDerivationOutput::IsCached.eq(false))
-        .one(&state.db)
+        .one(&state.worker_db)
         .await?
         .is_some();
     if any_uncached {
@@ -204,13 +204,13 @@ async fn try_record_cache_derivation(
 
     let dep_edges = EDerivationDependency::find()
         .filter(CDerivationDependency::Derivation.eq(derivation_id))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await?;
     for edge in dep_edges {
         let present = ECacheDerivation::find()
             .filter(CCacheDerivation::Cache.eq(cache_id))
             .filter(CCacheDerivation::Derivation.eq(edge.dependency))
-            .one(&state.db)
+            .one(&state.worker_db)
             .await?
             .is_some();
         if !present {
@@ -221,7 +221,7 @@ async fn try_record_cache_derivation(
     let already = ECacheDerivation::find()
         .filter(CCacheDerivation::Cache.eq(cache_id))
         .filter(CCacheDerivation::Derivation.eq(derivation_id))
-        .one(&state.db)
+        .one(&state.worker_db)
         .await?
         .is_some();
     if already {
@@ -235,7 +235,7 @@ async fn try_record_cache_derivation(
         cached_at: Set(now),
         last_fetched_at: Set(None),
     };
-    row.insert(&state.db).await?;
+    row.insert(&state.worker_db).await?;
     Ok(())
 }
 

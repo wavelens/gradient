@@ -26,7 +26,7 @@ async fn build_local_cache_map(
                     .add(CDerivationOutput::IsCached.eq(true))
                     .add(CDerivationOutput::Hash.is_in(hashes.to_vec())),
             )
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
         {
             Ok(rows) => rows,
@@ -38,7 +38,7 @@ async fn build_local_cache_map(
 
         let cached_paths = match ECachedPath::find()
             .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
         {
             Ok(rows) => rows,
@@ -62,7 +62,7 @@ async fn build_local_cache_map(
 async fn load_cached_path_rows(state: &ServerState, hashes: &[&str]) -> Vec<entity::cached_path::Model> {
         match ECachedPath::find()
             .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
         {
             Ok(rows) => rows,
@@ -83,7 +83,7 @@ async fn ensure_push_signatures(
     ) {
         let org_caches = EOrganizationCache::find()
             .filter(COrganizationCache::Organization.eq(org_id))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
             .unwrap_or_default();
 
@@ -92,7 +92,7 @@ async fn ensure_push_signatures(
                 let exists = ECachedPathSignature::find()
                     .filter(CCachedPathSignature::CachedPath.eq(cp.id))
                     .filter(CCachedPathSignature::Cache.eq(oc.cache))
-                    .one(&state.db)
+                    .one(&state.worker_db)
                     .await
                     .unwrap_or(None)
                     .is_some();
@@ -105,7 +105,7 @@ async fn ensure_push_signatures(
                         signature: sea_orm::ActiveValue::Set(None),
                         created_at: sea_orm::ActiveValue::Set(chrono::Utc::now().naive_utc()),
                     };
-                    let _ = sig_row.insert(&state.db).await;
+                    let _ = sig_row.insert(&state.worker_db).await;
                 }
             }
         }
@@ -118,7 +118,7 @@ async fn load_cached_path_signatures(
     ) -> Option<Vec<String>> {
         match ECachedPathSignature::find()
             .filter(CCachedPathSignature::CachedPath.eq(cached_path_id))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
         {
             Ok(rows) => {
@@ -148,7 +148,7 @@ async fn fetch_pull_metadata(
     ) {
         let cached_row = match ECachedPath::find()
             .filter(CCachedPath::Hash.eq(hash))
-            .one(&state.db)
+            .one(&state.worker_db)
             .await
         {
             Ok(Some(row)) => row,
@@ -289,7 +289,7 @@ async fn extend_with_upstream_results(
                     .add(COrganizationCache::Organization.eq(org_id))
                     .add(COrganizationCache::Mode.ne(CacheSubscriptionMode::WriteOnly)),
             )
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
         {
             Ok(rows) => rows,
@@ -311,7 +311,7 @@ async fn extend_with_upstream_results(
                     .add(CCacheUpstream::Url.is_not_null())
                     .add(CCacheUpstream::Mode.ne(CacheSubscriptionMode::WriteOnly)),
             )
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
         {
             Ok(rows) => rows,

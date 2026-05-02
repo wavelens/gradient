@@ -38,8 +38,8 @@ pub struct ProjectMetricsResponse {
 /// BFS over `derivation_dependency` starting from `seed_drv_ids`.
 ///
 /// Returns all reachable derivation UUIDs (including the seeds themselves).
-async fn derivation_closure_reachable(
-    db: &sea_orm::DatabaseConnection,
+async fn derivation_closure_reachable<C: sea_orm::ConnectionTrait>(
+    db: &C,
     seed_drv_ids: Vec<Uuid>,
 ) -> WebResult<HashSet<Uuid>> {
     let mut visited: HashSet<Uuid> = seed_drv_ids.iter().cloned().collect();
@@ -68,8 +68,8 @@ async fn derivation_closure_reachable(
 /// as a per-output total.
 ///
 /// Returns `Some(total)` when the total is > 0, `None` otherwise.
-async fn sum_output_sizes(
-    db: &sea_orm::DatabaseConnection,
+async fn sum_output_sizes<C: sea_orm::ConnectionTrait>(
+    db: &C,
     drv_ids: Vec<Uuid>,
 ) -> WebResult<Option<i64>> {
     if drv_ids.is_empty() {

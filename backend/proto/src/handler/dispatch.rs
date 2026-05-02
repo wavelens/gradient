@@ -564,7 +564,7 @@ impl<'a> DispatchContext<'a> {
                 let candidates = EDerivation::find()
                     .filter(CDerivation::Organization.eq(org_id))
                     .filter(CDerivation::DerivationPath.is_in(drv_paths))
-                    .all(&self.state.db)
+                    .all(&self.state.worker_db)
                     .await
                     .unwrap_or_default();
 
@@ -581,7 +581,7 @@ impl<'a> DispatchContext<'a> {
                             CBuild::Status
                                 .is_in(vec![BuildStatus::Completed, BuildStatus::Substituted]),
                         )
-                        .all(&self.state.db)
+                        .all(&self.state.worker_db)
                         .await
                         .unwrap_or_default()
                         .into_iter()

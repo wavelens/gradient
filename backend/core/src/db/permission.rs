@@ -44,7 +44,7 @@ pub async fn set_permission(
     let mut arole = role.clone().into_active_model();
     arole.permission = Set(set_permission_bit(role.permission, permission, value));
     arole
-        .save(&state.db)
+        .save(&state.worker_db)
         .await
         .context("Failed to save role permission")?;
     Ok(())
@@ -62,13 +62,13 @@ pub async fn get_permission(
                 .add(COrganizationUser::Organization.eq(organization.id))
                 .add(COrganizationUser::User.eq(user.id)),
         )
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
         .context("Failed to query organization user")?
         .ok_or_else(|| anyhow::anyhow!("User not found in organization"))?;
 
     let role = ERole::find_by_id(organization_user.role)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
         .context("Failed to query user role")?
         .ok_or_else(|| anyhow::anyhow!("Role not found"))?;

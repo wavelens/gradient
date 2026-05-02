@@ -49,7 +49,7 @@ async fn connect_to_registered_workers(
     // Find all worker registrations that have a URL set.
     let registrations = match EWorkerRegistration::find()
         .filter(Column::Url.is_not_null())
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
     {
         Ok(rows) => rows,

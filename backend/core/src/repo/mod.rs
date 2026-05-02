@@ -12,7 +12,7 @@
 //!
 //! # Usage
 //! ```ignore
-//! let build_repo = BuildRepo::new(&state.db);
+//! let build_repo = BuildRepo::new(&state.worker_db);
 //! let build = build_repo.find(id).await?.ok_or(NotFound)?;
 //! let updated = build_repo.update_status(build, BuildStatus::Completed).await?;
 //! ```

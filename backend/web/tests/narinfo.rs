@@ -9,7 +9,7 @@
 use axum_test::TestServer;
 use core::ci::WebhookClient;
 use core::storage::{EmailSender, NarStore};
-use core::types::ServerState;
+use core::types::{ServerState, WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
 use test_support::fakes::email::InMemoryEmailSender;
@@ -170,8 +170,8 @@ async fn narinfo_served_from_db_inner() {
     let cli = test_cli();
     let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
-        web_db: db,
-        db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+        web_db: WebDb::new(db),
+        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         cli,
         log_storage: Arc::new(NoopLogStorage),
         webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,

@@ -34,7 +34,7 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
                 .add(CDerivationOutput::Package.eq(package.clone()))
                 .add(CDerivationOutput::IsCached.eq(true)),
         )
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
         .context("Database error while finding derivation outputs")?;
 
@@ -44,7 +44,7 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
         let mut active = output.clone().into_active_model();
         active.is_cached = Set(false);
         active
-            .update(&state.db)
+            .update(&state.worker_db)
             .await
             .context("Failed to update derivation output")?;
 
@@ -57,25 +57,25 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
         // Delete cached_path + signatures for this output.
         let cached_paths = ECachedPath::find()
             .filter(CCachedPath::Hash.eq(&hash))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
             .context("Failed to find cached_path rows")?;
 
         for cp in &cached_paths {
             let sigs = ECachedPathSignature::find()
                 .filter(CCachedPathSignature::CachedPath.eq(cp.id))
-                .all(&state.db)
+                .all(&state.worker_db)
                 .await
                 .unwrap_or_default();
             for sig in sigs {
                 sig.into_active_model()
-                    .delete(&state.db)
+                    .delete(&state.worker_db)
                     .await
                     .context("Failed to delete signature")?;
             }
             cp.clone()
                 .into_active_model()
-                .delete(&state.db)
+                .delete(&state.worker_db)
                 .await
                 .context("Failed to delete cached_path")?;
         }
@@ -104,7 +104,7 @@ async fn revoke_cache_derivation_closure(
     while !frontier.is_empty() {
         let edges = EDerivationDependency::find()
             .filter(CDerivationDependency::Dependency.is_in(frontier.clone()))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
             .context("Failed to walk reverse derivation_dependency")?;
         frontier.clear();
@@ -118,13 +118,13 @@ async fn revoke_cache_derivation_closure(
     let drv_ids: Vec<Uuid> = visited.into_iter().collect();
     let cache_rows = ECacheDerivation::find()
         .filter(CCacheDerivation::Derivation.is_in(drv_ids))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
         .context("Failed to query cache_derivation rows")?;
 
     for row in cache_rows {
         let active = row.into_active_model();
-        if let Err(e) = active.delete(&state.db).await {
+        if let Err(e) = active.delete(&state.worker_db).await {
             warn!(error = %e, "Failed to delete cache_derivation row");
         }
     }

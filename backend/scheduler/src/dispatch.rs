@@ -110,7 +110,7 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
         ),
     );
 
-    let projects = EProject::find().from_raw_sql(sql).all(&state.db).await?;
+    let projects = EProject::find().from_raw_sql(sql).all(&state.worker_db).await?;
 
     for project in &projects {
         let (has_update, commit_hash) = match check_project_updates(Arc::clone(state), project)
@@ -127,7 +127,7 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
             // Update last_check_at so we don't re-check immediately.
             let mut ap: AProject = project.clone().into();
             ap.last_check_at = sea_orm::ActiveValue::Set(Utc::now().naive_utc());
-            if let Err(e) = ap.update(&state.db).await {
+            if let Err(e) = ap.update(&state.worker_db).await {
                 warn!(project = %project.name, error = %e, "failed to update last_check_at");
             }
             continue;
@@ -143,7 +143,7 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
             };
 
         match gradient_core::ci::trigger_evaluation(
-            &state.db,
+            state.worker_db.inner(),
             project,
             commit_hash,
             Some(commit_message),
@@ -158,7 +158,7 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
                 let mut ap: AProject = project.clone().into();
                 ap.force_evaluation = sea_orm::ActiveValue::Set(false);
                 ap.last_check_at = sea_orm::ActiveValue::Set(Utc::now().naive_utc());
-                if let Err(e) = ap.update(&state.db).await {
+                if let Err(e) = ap.update(&state.worker_db).await {
                     warn!(project = %project.name, error = %e, "failed to clear force_evaluation");
                 }
             }
@@ -192,7 +192,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
 
     let evals = EEvaluation::find()
         .filter(CEvaluation::Status.eq(EvaluationStatus::Queued))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await?;
 
     for eval in evals {
@@ -203,7 +203,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             continue;
         }
 
-        let commit = match ECommit::find_by_id(eval.commit).one(&state.db).await? {
+        let commit = match ECommit::find_by_id(eval.commit).one(&state.worker_db).await? {
             Some(c) => c,
             None => {
                 error!(evaluation_id = %eval.id, "commit not found for evaluation");
@@ -310,7 +310,7 @@ impl BuildDispatchMaps {
 
         let derivations: HashMap<Uuid, MDerivation> = EDerivation::find()
             .filter(CDerivation::Id.is_in(drv_ids.clone()))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await?
             .into_iter()
             .map(|d| (d.id, d))
@@ -318,7 +318,7 @@ impl BuildDispatchMaps {
 
         let evaluations: HashMap<Uuid, MEvaluation> = EEvaluation::find()
             .filter(CEvaluation::Id.is_in(eval_ids))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await?
             .into_iter()
             .map(|e| (e.id, e))
@@ -336,7 +336,7 @@ impl BuildDispatchMaps {
         } else {
             EProject::find()
                 .filter(CProject::Id.is_in(project_ids))
-                .all(&state.db)
+                .all(&state.worker_db)
                 .await?
                 .into_iter()
                 .map(|p| (p.id, p.organization))
@@ -353,7 +353,7 @@ impl BuildDispatchMaps {
             } else {
                 EDirectBuild::find()
                     .filter(CDirectBuild::Evaluation.is_in(evals_without_project))
-                    .all(&state.db)
+                    .all(&state.worker_db)
                     .await?
                     .into_iter()
                     .map(|db| (db.evaluation, db.organization))
@@ -364,7 +364,7 @@ impl BuildDispatchMaps {
         // Required features: per-derivation list of feature names.
         let feature_edges = EDerivationFeature::find()
             .filter(CDerivationFeature::Derivation.is_in(drv_ids.clone()))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
             .unwrap_or_default();
         let mut features_by_drv: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
@@ -381,7 +381,7 @@ impl BuildDispatchMaps {
             EFeature::find()
                 .filter(CFeature::Id.is_in(feature_ids))
                 .filter(CFeature::Kind.eq(entity::feature::FeatureKind::Feature))
-                .all(&state.db)
+                .all(&state.worker_db)
                 .await
                 .unwrap_or_default()
                 .into_iter()
@@ -393,7 +393,7 @@ impl BuildDispatchMaps {
         let dep_counts: HashMap<Uuid, u32> = {
             let edges = EDerivationDependency::find()
                 .filter(CDerivationDependency::Derivation.is_in(drv_ids))
-                .all(&state.db)
+                .all(&state.worker_db)
                 .await
                 .unwrap_or_default();
             let mut counts: HashMap<Uuid, u32> = HashMap::new();
@@ -513,7 +513,7 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
     let started = std::time::Instant::now();
     let builds = EBuild::find()
         .from_raw_sql(builds_sql)
-        .all(&state.db)
+        .all(&state.worker_db)
         .await?;
     if builds.is_empty() {
         return Ok(());
@@ -555,7 +555,7 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
 async fn organization_id_for_eval(state: &Arc<ServerState>, eval: &MEvaluation) -> Option<Uuid> {
     if let Some(project_id) = eval.project {
-        match EProject::find_by_id(project_id).one(&state.db).await {
+        match EProject::find_by_id(project_id).one(&state.worker_db).await {
             Ok(Some(p)) => return Some(p.organization),
             Ok(None) => return None,
             Err(e) => {
@@ -568,7 +568,7 @@ async fn organization_id_for_eval(state: &Arc<ServerState>, eval: &MEvaluation) 
     // Direct build: look up DirectBuild record.
     match EDirectBuild::find()
         .filter(CDirectBuild::Evaluation.eq(eval.id))
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
     {
         Ok(Some(db)) => Some(db.organization),

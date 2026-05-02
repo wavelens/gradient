@@ -34,7 +34,7 @@ pub async fn gc_project_evaluations(
     let all_evals = EEvaluation::find()
         .filter(CEvaluation::Project.eq(project_id))
         .order_by_desc(CEvaluation::CreatedAt)
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
         .context("GC: failed to query evaluations")?;
 
@@ -66,7 +66,7 @@ pub async fn gc_project_evaluations(
     {
         let mut a: AEvaluation = oldest_surviving.clone().into_active_model();
         a.previous = Set(None);
-        a.update(&state.db)
+        a.update(&state.worker_db)
             .await
             .context("GC: failed to unlink oldest surviving evaluation")?;
     }
@@ -77,7 +77,7 @@ pub async fn gc_project_evaluations(
         let mut a: AEvaluation = eval.clone().into_active_model();
         a.previous = Set(None);
         a.next = Set(None);
-        a.update(&state.db)
+        a.update(&state.worker_db)
             .await
             .context("GC: failed to NULL evaluation linked-list pointers")?;
     }
@@ -85,7 +85,7 @@ pub async fn gc_project_evaluations(
     for eval in &to_delete {
         let builds = EBuild::find()
             .filter(CBuild::Evaluation.eq(eval.id))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
             .context("GC: failed to query builds")?;
 
@@ -103,25 +103,25 @@ pub async fn gc_project_evaluations(
         let commit_id = eval.commit;
 
         let a: AEvaluation = eval.clone().into_active_model();
-        a.delete(&state.db)
+        a.delete(&state.worker_db)
             .await
             .context("GC: failed to delete evaluation")?;
 
         // Clean up the commit record if no other evaluation references it.
         let still_referenced = EEvaluation::find()
             .filter(CEvaluation::Commit.eq(commit_id))
-            .one(&state.db)
+            .one(&state.worker_db)
             .await
             .context("GC: failed to check commit references")?;
 
         if still_referenced.is_none()
             && let Some(c) = ECommit::find_by_id(commit_id)
-                .one(&state.db)
+                .one(&state.worker_db)
                 .await
                 .context("GC: failed to query commit")?
         {
             let ac: ACommit = c.into_active_model();
-            if let Err(e) = ac.delete(&state.db).await {
+            if let Err(e) = ac.delete(&state.worker_db).await {
                 warn!(error = %e, commit_id = %commit_id, "GC: failed to delete orphaned commit");
             }
         }
@@ -146,7 +146,7 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
     // Find candidate derivations: no build rows, created before the cutoff.
     // Use raw SQL: SeaORM doesn't have a clean LEFT JOIN ... IS NULL builder.
     let rows = state
-        .db
+        .worker_db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"SELECT d.id
@@ -174,13 +174,13 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
         // 1. Cache presence rows + their NAR files.
         let cache_rows = ECacheDerivation::find()
             .filter(CCacheDerivation::Derivation.eq(drv_id))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
             .context("Failed to query cache_derivation rows")?;
 
         let outputs = EDerivationOutput::find()
             .filter(CDerivationOutput::Derivation.eq(drv_id))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
             .context("Failed to query derivation outputs")?;
 
@@ -193,18 +193,18 @@ pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) ->
                     warn!(error = %e, hash = %o.hash, "GC: failed to remove NAR file");
                 }
             }
-            let _ = cache_row.into_active_model().delete(&state.db).await;
+            let _ = cache_row.into_active_model().delete(&state.worker_db).await;
         }
 
         // 2. Delete the derivation row. FK cascade removes outputs / dep edges /
         //    features / signatures.
         if let Some(d) = EDerivation::find_by_id(drv_id)
-            .one(&state.db)
+            .one(&state.worker_db)
             .await
             .context("GC: failed to load derivation")?
         {
             let a: ADerivation = d.into_active_model();
-            if let Err(e) = a.delete(&state.db).await {
+            if let Err(e) = a.delete(&state.worker_db).await {
                 warn!(error = %e, drv_id = %drv_id, "GC: failed to delete orphan derivation");
             }
         }

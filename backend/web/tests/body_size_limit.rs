@@ -18,7 +18,7 @@
 use axum_test::TestServer;
 use core::ci::WebhookClient;
 use core::storage::{EmailSender, NarStore};
-use core::types::ServerState;
+use core::types::{ServerState, WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
 use test_support::fakes::email::InMemoryEmailSender;
@@ -37,8 +37,8 @@ fn make_state_with_limits(
     cli.max_direct_build_size = max_direct_build_size;
     let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
     Arc::new(ServerState {
-        web_db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
-        db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+        web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         cli,
         log_storage: Arc::new(NoopLogStorage),
         webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,

@@ -255,8 +255,8 @@ mod tests {
         let cli = test_cli();
         let nar_storage = NarStore::local(&cli.base_path).expect("nar store");
         Arc::new(ServerState {
-            web_db: db,
-            db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+            web_db: WebDb::new(db),
+            worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
             cli,
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,

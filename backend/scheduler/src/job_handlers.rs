@@ -191,7 +191,7 @@ impl Scheduler {
             }
         };
         match EEvaluation::find_by_id(evaluation_id)
-            .one(&self.state.db)
+            .one(&self.state.worker_db)
             .await
         {
             Ok(Some(eval)) => {
@@ -247,7 +247,7 @@ impl Scheduler {
             flake_source: Set(Some(path)),
             ..Default::default()
         };
-        if let Err(e) = am.update(&self.state.db).await {
+        if let Err(e) = am.update(&self.state.worker_db).await {
             warn!(error = %e, %evaluation_id, "failed to persist flake_source");
         }
     }
@@ -262,7 +262,7 @@ impl Scheduler {
         };
         use entity::build::BuildStatus;
         use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
-        match EBuild::find_by_id(build_id).one(&self.state.db).await {
+        match EBuild::find_by_id(build_id).one(&self.state.worker_db).await {
             Ok(Some(build)) => {
                 // Record which worker is handling this build. Persisting here
                 // (rather than at dispatch time) means the worker that actually
@@ -271,7 +271,7 @@ impl Scheduler {
                 if build.worker.as_deref() != Some(worker_id) {
                     let mut am: ABuild = build.clone().into_active_model();
                     am.worker = Set(Some(worker_id.to_string()));
-                    if let Err(e) = am.update(&self.state.db).await {
+                    if let Err(e) = am.update(&self.state.worker_db).await {
                         warn!(error = %e, %build_id, %worker_id, "failed to persist worker on build");
                     }
                 }
@@ -448,7 +448,7 @@ impl Scheduler {
             }
         };
 
-        let log_id = match EBuild::find_by_id(build_id).one(&self.state.db).await? {
+        let log_id = match EBuild::find_by_id(build_id).one(&self.state.worker_db).await? {
             Some(b) => b.log_id.unwrap_or(b.id),
             None => build_id,
         };
@@ -536,7 +536,7 @@ impl Scheduler {
             }
         };
 
-        EvalRepo::new(&self.state.db)
+        EvalRepo::new(self.state.worker_db.inner())
             .insert_message(evaluation_id, entity_level, message, Some(source))
             .await
     }

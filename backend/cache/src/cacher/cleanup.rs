@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
     let projects = EProject::find()
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
         .context("Failed to query projects for evaluation GC")?;
 
@@ -76,7 +76,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
     }
 
     let rows = state
-        .db
+        .worker_db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             STALE_CACHED_NARS_SELECT,
@@ -108,18 +108,18 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         // cache_derivation row keeps them alive).
         let outputs = EDerivationOutput::find()
             .filter(CDerivationOutput::Derivation.eq(drv_id))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
             .unwrap_or_default();
 
         // Drop the cache_derivation row first; revocation of dependents follows.
         if let Some(cd) = ECacheDerivation::find_by_id(cd_id)
-            .one(&state.db)
+            .one(&state.worker_db)
             .await
             .ok()
             .flatten()
         {
-            let _ = cd.into_active_model().delete(&state.db).await;
+            let _ = cd.into_active_model().delete(&state.worker_db).await;
         }
 
         // Drop the cached_path_signature rows that tied each output to THIS
@@ -130,7 +130,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         for o in &outputs {
             let cached_paths = ECachedPath::find()
                 .filter(CCachedPath::Hash.eq(&o.hash))
-                .all(&state.db)
+                .all(&state.worker_db)
                 .await
                 .unwrap_or_default();
 
@@ -138,22 +138,22 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
                 let sigs_for_cache = ECachedPathSignature::find()
                     .filter(CCachedPathSignature::CachedPath.eq(cp.id))
                     .filter(CCachedPathSignature::Cache.eq(cache_id))
-                    .all(&state.db)
+                    .all(&state.worker_db)
                     .await
                     .unwrap_or_default();
                 for sig in sigs_for_cache {
-                    let _ = sig.into_active_model().delete(&state.db).await;
+                    let _ = sig.into_active_model().delete(&state.worker_db).await;
                 }
 
                 let still_signed = ECachedPathSignature::find()
                     .filter(CCachedPathSignature::CachedPath.eq(cp.id))
-                    .one(&state.db)
+                    .one(&state.worker_db)
                     .await
                     .ok()
                     .flatten()
                     .is_some();
                 if !still_signed {
-                    let _ = cp.into_active_model().delete(&state.db).await;
+                    let _ = cp.into_active_model().delete(&state.worker_db).await;
                 }
             }
         }
@@ -162,7 +162,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         // delete when no cache_derivation row remains for the derivation.
         let still_held = ECacheDerivation::find()
             .filter(CCacheDerivation::Derivation.eq(drv_id))
-            .one(&state.db)
+            .one(&state.worker_db)
             .await
             .ok()
             .flatten()
@@ -225,7 +225,7 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<()>
 /// referenced; this pass is a safety net for stray files only.
 async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
     let rows = state
-        .db
+        .worker_db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"
@@ -293,8 +293,8 @@ mod tests {
             .append_query_results([kept.into_iter().map(hash_row).collect::<Vec<_>>()])
             .into_connection();
         Arc::new(ServerState {
-            web_db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
-            db,
+            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+            worker_db: WorkerDb::new(db),
             cli: test_cli(),
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()),
@@ -370,8 +370,8 @@ mod tests {
         let mut cli = test_cli();
         cli.nar_ttl_hours = 24;
         let state = Arc::new(ServerState {
-            web_db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
-            db,
+            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+            worker_db: WorkerDb::new(db),
             cli,
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()),

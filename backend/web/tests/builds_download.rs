@@ -18,7 +18,7 @@ use axum_test::TestServer;
 use bytes::Bytes;
 use core::ci::WebhookClient;
 use core::storage::{EmailSender, NarStore};
-use core::types::ServerState;
+use core::types::{ServerState, WebDb, WorkerDb};
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use harmonia_nar::archive::test_data::{TestNarEvent, TestNarEvents};
@@ -244,8 +244,8 @@ fn listing_returns_products_from_db() {
 
         let db = mock_db_for_downloads();
         let state = Arc::new(ServerState {
-            web_db: db,
-            db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+            web_db: WebDb::new(db),
+            worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
             cli,
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
@@ -315,8 +315,8 @@ fn download_streams_file_from_nar() {
             .into_connection();
 
         let state = Arc::new(ServerState {
-            web_db: db,
-            db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+            web_db: WebDb::new(db),
+            worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
             cli,
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,

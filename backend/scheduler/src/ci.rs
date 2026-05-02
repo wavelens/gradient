@@ -35,7 +35,7 @@ pub async fn report_ci_for_entry_points(
 
     let ep_rows = match EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation_id))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
     {
         Ok(rows) => rows,
@@ -48,7 +48,7 @@ pub async fn report_ci_for_entry_points(
         return;
     }
 
-    let project = match EProject::find_by_id(project_id).one(&state.db).await {
+    let project = match EProject::find_by_id(project_id).one(&state.worker_db).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             warn!(%project_id, "Project not found for CI reporting");
@@ -62,7 +62,7 @@ pub async fn report_ci_for_entry_points(
 
     let reporter = resolve_outbound_reporter_for_project(&state, project_id).await;
 
-    let commit = match ECommit::find_by_id(commit_id).one(&state.db).await {
+    let commit = match ECommit::find_by_id(commit_id).one(&state.worker_db).await {
         Ok(Some(c)) => c,
         Ok(None) => {
             warn!(%commit_id, "Commit not found for CI reporting");
@@ -88,7 +88,7 @@ pub async fn report_ci_for_entry_points(
     };
 
     let org_name = match EOrganization::find_by_id(project.organization)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
     {
         Ok(Some(org)) => Some(org.name),
@@ -111,7 +111,7 @@ pub async fn report_ci_for_entry_points(
     let build_ids: Vec<Uuid> = ep_rows.iter().map(|ep| ep.build).collect();
     let build_statuses: HashMap<Uuid, entity::build::BuildStatus> = match EBuild::find()
         .filter(CBuild::Id.is_in(build_ids))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
     {
         Ok(rows) => rows.into_iter().map(|b| (b.id, b.status)).collect(),
@@ -141,7 +141,7 @@ pub async fn report_ci_for_entry_points(
             Ok(Some(new_id)) => {
                 let mut a = ep.clone().into_active_model();
                 a.repo_check_id = Set(Some(new_id));
-                if let Err(e) = a.update(&state.db).await {
+                if let Err(e) = a.update(&state.worker_db).await {
                     warn!(error = %e, eval = %ep.eval, "Failed to persist entry_point check_run id");
                 }
             }
@@ -169,7 +169,7 @@ pub async fn report_ci_for_evaluation(
     evaluation_id: Uuid,
     status: CiStatus,
 ) {
-    let project = match EProject::find_by_id(project_id).one(&state.db).await {
+    let project = match EProject::find_by_id(project_id).one(&state.worker_db).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             warn!(%project_id, "Project not found for CI evaluation report");
@@ -183,7 +183,7 @@ pub async fn report_ci_for_evaluation(
 
     let reporter = resolve_outbound_reporter_for_project(&state, project_id).await;
 
-    let commit = match ECommit::find_by_id(commit_id).one(&state.db).await {
+    let commit = match ECommit::find_by_id(commit_id).one(&state.worker_db).await {
         Ok(Some(c)) => c,
         Ok(None) => {
             warn!(%commit_id, "Commit not found for CI evaluation report");
@@ -209,7 +209,7 @@ pub async fn report_ci_for_evaluation(
     };
 
     let org_name = match EOrganization::find_by_id(project.organization)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
     {
         Ok(Some(org)) => Some(org.name),
@@ -225,7 +225,7 @@ pub async fn report_ci_for_evaluation(
         )
     });
 
-    let evaluation = match EEvaluation::find_by_id(evaluation_id).one(&state.db).await {
+    let evaluation = match EEvaluation::find_by_id(evaluation_id).one(&state.worker_db).await {
         Ok(Some(e)) => e,
         Ok(None) => {
             warn!(%evaluation_id, "Evaluation not found for CI evaluation report");
@@ -252,7 +252,7 @@ pub async fn report_ci_for_evaluation(
         Ok(Some(new_id)) => {
             let mut a = evaluation.into_active_model();
             a.repo_check_id = Set(Some(new_id));
-            if let Err(e) = a.update(&state.db).await {
+            if let Err(e) = a.update(&state.worker_db).await {
                 warn!(error = %e, %evaluation_id, "Failed to persist evaluation check_run id");
             }
         }

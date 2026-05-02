@@ -755,3 +755,33 @@ Tests (`cargo test -p worker --bins reconnect`):
   is threaded through every attempt, proving the typestate-preservation
   contract that the real `Worker<Disconnected>` relies on for cached
   resources.
+
+## Typed DB pools — `WebDb` / `WorkerDb`
+
+`ServerState` previously held two raw `DatabaseConnection` fields named `db`
+and `web_db`; nothing in the type system stopped a web handler from
+reaching for `state.db` (the proto/scheduler/cache pool) or vice versa.
+The `db` field is now `worker_db: WorkerDb` and `web_db: WebDb`
+(`backend/core/src/types/db.rs`). Both newtypes forward `ConnectionTrait`
+to the inner pool so existing call sites
+(`find().one(&state.web_db)`, `state.worker_db.execute(stmt)`, …) work
+unchanged. The compile-time defense kicks in at any function boundary
+that types its parameter explicitly as `&WebDb` or `&WorkerDb`: the two
+newtypes are non-substitutable.
+
+While auditing, one inconsistency was fixed in
+`web::endpoints::stats::get_cache_stats` — the cache-totals query was
+reading from the worker pool while every other query in the same handler
+used `web_db`; it now uses `web_db` consistently. The fire-and-forget
+NAR-fetch bookkeeping in `web::endpoints::caches::nar` keeps using
+`worker_db` on purpose (it should not contend with foreground HTTP
+requests) and now carries a comment explaining the choice.
+
+Tests (`cargo test -p core --lib types::db`):
+
+- `types::db::tests::newtypes_are_non_substitutable` — regression for
+  #68: a function typed `fn(&WebDb)` must not accept a `&WorkerDb` and
+  vice versa, which is the compile-time defense the issue asked for.
+- `types::db::tests::forwards_connection_trait` — `&WebDb` / `&WorkerDb`
+  satisfy `&impl ConnectionTrait`, so existing SeaORM call sites keep
+  working without `.inner()` boilerplate.

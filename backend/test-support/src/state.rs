@@ -11,7 +11,7 @@ use crate::log_storage::NoopLogStorage;
 use gradient_core::ci::WebhookClient;
 use gradient_core::storage::EmailSender;
 use gradient_core::storage::NarStore;
-use gradient_core::types::ServerState;
+use gradient_core::types::{ServerState, WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 use std::sync::Arc;
 
@@ -24,8 +24,8 @@ pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
     let cli = test_cli();
     let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
     Arc::new(ServerState {
-        web_db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
-        db,
+        web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        worker_db: WorkerDb::new(db),
         cli,
         log_storage: Arc::new(NoopLogStorage),
         webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
@@ -46,8 +46,8 @@ pub fn test_state_recorded(
     let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
     let recorder = Arc::new(RecordingWebhookClient::new());
     let state = Arc::new(ServerState {
-        web_db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
-        db,
+        web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        worker_db: WorkerDb::new(db),
         cli,
         log_storage: Arc::new(NoopLogStorage),
         webhooks: Arc::clone(&recorder) as Arc<dyn WebhookClient>,

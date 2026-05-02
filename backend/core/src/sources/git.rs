@@ -37,7 +37,7 @@ impl<'a> ProjectGitContext<'a> {
         let url = &project.repository;
         let ssh_creds = if check_repository_url_is_ssh(url) {
             let organization = EOrganization::find_by_id(project.organization)
-                .one(&state.db)
+                .one(&state.worker_db)
                 .await
                 .map_err(|e| SourceError::Database {
                     reason: e.to_string(),
@@ -100,7 +100,7 @@ impl<'a> ProjectGitContext<'a> {
 
         if let Some(last_evaluation) = self.project.last_evaluation {
             let evaluation = EEvaluation::find_by_id(last_evaluation)
-                .one(&self.state.db)
+                .one(&self.state.worker_db)
                 .await
                 .map_err(|e| SourceError::Database {
                     reason: e.to_string(),
@@ -115,7 +115,7 @@ impl<'a> ProjectGitContext<'a> {
             }
 
             let commit = ECommit::find_by_id(evaluation.commit)
-                .one(&self.state.db)
+                .one(&self.state.worker_db)
                 .await
                 .map_err(|e| SourceError::Database {
                     reason: e.to_string(),
