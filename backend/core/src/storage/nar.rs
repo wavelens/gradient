@@ -100,11 +100,17 @@ impl NarStore {
     }
 
     fn object_path(&self, hash: &str) -> Path {
+        // Hash is validated at every callable entry point, but defend the
+        // formatter anyway: a too-short hash would otherwise panic on
+        // `&hash[..2]` / `&hash[2..]`.
+        let (shard, stem) = if hash.len() >= 2 {
+            (&hash[..2], &hash[2..])
+        } else {
+            ("__", hash)
+        };
         Path::from(format!(
             "{}nars/{}/{}.nar.zst",
-            self.prefix,
-            &hash[..2],
-            &hash[2..]
+            self.prefix, shard, stem,
         ))
     }
 

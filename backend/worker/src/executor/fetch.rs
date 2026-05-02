@@ -312,7 +312,7 @@ fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<
     let temp_dir = std::env::temp_dir().join(format!("gradient-fetch-{}", uuid::Uuid::new_v4()));
 
     let mut callbacks = RemoteCallbacks::new();
-    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificateOk));
+    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificatePassthrough));
 
     if let Some(key) = ssh_key {
         let key = key.to_owned();
