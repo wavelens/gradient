@@ -9,7 +9,6 @@ use crate::types::input::{check_repository_url_is_ssh, vec_to_hex};
 use crate::types::*;
 use anyhow::Result;
 use async_trait::async_trait;
-use entity::evaluation::EvaluationStatus;
 use git2::{Direction, RemoteCallbacks};
 use sea_orm::EntityTrait;
 use std::sync::Arc;
@@ -110,13 +109,7 @@ impl<'a> ProjectGitContext<'a> {
                     reason: "Evaluation not found".to_string(),
                 })?;
 
-            if evaluation.status == EvaluationStatus::Queued
-                || evaluation.status == EvaluationStatus::Fetching
-                || evaluation.status == EvaluationStatus::EvaluatingFlake
-                || evaluation.status == EvaluationStatus::EvaluatingDerivation
-                || evaluation.status == EvaluationStatus::Building
-                || evaluation.status == EvaluationStatus::Waiting
-            {
+            if evaluation.status.is_active() {
                 debug!(status = ?evaluation.status, "Evaluation already in progress, skipping");
                 return Ok((false, remote_hash));
             }

@@ -6,7 +6,6 @@
 
 use anyhow::{Context, Result};
 use chrono::{Duration as ChronoDuration, Utc};
-use entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
@@ -46,17 +45,7 @@ pub async fn gc_project_evaluations(
     // Never GC evaluations that are still running.
     let to_delete: Vec<MEvaluation> = all_evals[keep..]
         .iter()
-        .filter(|e| {
-            !matches!(
-                e.status,
-                EvaluationStatus::Queued
-                    | EvaluationStatus::Fetching
-                    | EvaluationStatus::EvaluatingFlake
-                    | EvaluationStatus::EvaluatingDerivation
-                    | EvaluationStatus::Building
-                    | EvaluationStatus::Waiting
-            )
-        })
+        .filter(|e| !e.status.is_active())
         .cloned()
         .collect();
 
