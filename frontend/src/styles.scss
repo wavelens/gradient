@@ -68,15 +68,20 @@ a {
   }
 }
 
-// Breadcrumb links should align with surrounding non-link items
-// (separator/current spans) — opt out of the global anchor padding/hover.
+// Breadcrumb links align with surrounding non-link items (separator/current
+// spans) — opt out of the global anchor padding/background-block hover but
+// keep a subtle visual indicator so the link still feels interactive.
 .breadcrumb-link,
 .breadcrumb a {
   padding: 0;
+  color: $text-secondary;
+  transition: color $transition-fast;
 
   &:hover {
     background-color: transparent;
     border-radius: 0;
+    color: $text-primary;
+    text-decoration: underline;
   }
 }
 

@@ -253,203 +253,228 @@ in {
 
     testScript = { nodes, ... }:
       ''
-      start_all()
+      import re
 
-      server.wait_for_unit("gradient-server.service")
-      server.sleep(5)
-      builder.wait_for_unit("gradient-worker.service")
+      # ── Helpers ───────────────────────────────────────────────────────────
+      ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+      GIT     = "${lib.getExe pkgs.git}"
+      CURL    = "${lib.getExe pkgs.curl}"
+      JQ      = "${lib.getExe pkgs.jq}"
+      NIX     = "${lib.getExe pkgs.nix}"
+      CLI     = "${lib.getExe pkgs.gradient-cli}"
+      API     = "http://gradient.local/api/v1"
+      CACHE   = "http://server/cache/main"
 
-      # Verify worker authenticated via state-managed registration
-      builder.sleep(10)
-      auth_logs = builder.succeed("journalctl -u gradient-worker --no-pager -n 100")
-      assert "handshake successful" in auth_logs, \
-          f"Worker did not authenticate successfully: {auth_logs[-500:]}"
-      print("=== Worker authenticated via state-managed registration ===")
+      def banner(msg):
+          """Loud step header, easy to grep in CI output."""
+          print(f"\n=== {msg} ===")
 
-      # Configure git
-      server.succeed("${lib.getExe pkgs.git} config --global --add safe.directory '*'")
-      server.succeed("${lib.getExe pkgs.git} config --global init.defaultBranch main")
-      server.succeed("${lib.getExe pkgs.git} config --global user.email 'nixos@localhost'")
-      server.succeed("${lib.getExe pkgs.git} config --global user.name 'NixOS test'")
+      def api_get(token, path):
+          """GET ``API/<path>``, return the parsed `.message` field as text."""
+          return server.succeed(
+              f'{CURL} -sf -H "Authorization: Bearer {token}" {API}/{path}'
+          )
 
-      # Initialize git repository
-      server.succeed("${lib.getExe pkgs.git} init /var/lib/git/test")
-      server.succeed("cp /var/lib/git/{,test/}flake.nix")
-      server.succeed("cp /var/lib/git/{,test/}flake.lock")
-
-      server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
-      server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.lock")
-
-      nixpkgs_hash = server.succeed("${lib.getExe pkgs.nix} hash path ${self.inputs.nixpkgs} --extra-experimental-features nix-command").strip()
-      server.succeed(f"sed -i 's#\\[hash\\]#{nixpkgs_hash}#g' /var/lib/git/test/flake.lock")
-
-      server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add flake.nix")
-      server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test add flake.lock")
-      server.succeed("${lib.getExe pkgs.git} -C /var/lib/git/test commit -m 'Initial commit'")
-      server.succeed("chown git:git -R /var/lib/git/test")
-
-      # Ensure git repository is available without authentication
-      server.succeed("${lib.getExe pkgs.git} clone git://localhost/test test")
-      print(server.succeed("${lib.getExe pkgs.git} ls-remote git://server/test"))
-
-      token = server.succeed("""
-        ${lib.getExe pkgs.curl} \
-          -X POST \
-          -H "Content-Type: application/json" \
-          -d '{"loginname": "admin", "password": "admin_password"}' \
-          http://gradient.local/api/v1/auth/basic/login \
-          | ${lib.getExe pkgs.jq} -rj '.message'
-      """)
-
-      print(f"Got Token: {token}")
-
-      server.succeed("${lib.getExe pkgs.gradient-cli} config Server http://gradient.local")
-      server.succeed("${lib.getExe pkgs.gradient-cli} config AuthToken ACCESS_TOKEN".replace("ACCESS_TOKEN", token))
-
-      server.succeed("${lib.getExe pkgs.gradient-cli} organization select org")
-      server.succeed("${lib.getExe pkgs.gradient-cli} project select project")
-
-      server.sleep(10)
-      # Best-effort first show: the project may have a Queued evaluation that the
-      # CLI considers an error condition. Use `execute` instead of `succeed` so a
-      # transient non-zero exit doesn't abort the whole test.
-      _, output = server.execute("${lib.getExe pkgs.gradient-cli} project show")
-      print(output)
-
-      # Wait for the server to detect the new commit (check cycle is 30 s).
-      # Poll in short increments so we surface errors quickly instead of timing out.
-      def check_journal_for_errors(since_seconds=45):
-          j = server.succeed(f"journalctl -u gradient-server --no-pager --since='-{since_seconds}s' -n 200")
+      def assert_no_server_panic(since_seconds=45):
+          """Fail fast if gradient-server panicked since `since_seconds` ago."""
+          j = server.succeed(
+              f"journalctl -u gradient-server --no-pager --since='-{since_seconds}s' -n 200"
+          )
           if "panicked" in j or "SIGABRT" in j:
               raise Exception(f"Gradient server crashed:\n{j[-2000:]}")
           return j
 
-      # First window: wait for repository detection
+      start_all()
+
+      # ── Phase 1: services come up and the worker authenticates ────────────
+      banner("Phase 1: bring services up")
+      server.wait_for_unit("gradient-server.service")
+      server.sleep(5)
+      builder.wait_for_unit("gradient-worker.service")
+
+      builder.sleep(10)
+      auth_logs = builder.succeed("journalctl -u gradient-worker --no-pager -n 100")
+      assert "handshake successful" in auth_logs, \
+          f"Worker did not authenticate successfully: {auth_logs[-500:]}"
+      banner("Worker authenticated via state-managed registration")
+
+      # ── Phase 2: seed the test git repository ─────────────────────────────
+      banner("Phase 2: prepare test repository")
+      server.succeed(f"{GIT} config --global --add safe.directory '*'")
+      server.succeed(f"{GIT} config --global init.defaultBranch main")
+      server.succeed(f"{GIT} config --global user.email 'nixos@localhost'")
+      server.succeed(f"{GIT} config --global user.name 'NixOS test'")
+
+      server.succeed(f"{GIT} init /var/lib/git/test")
+      server.succeed("cp /var/lib/git/{,test/}flake.nix")
+      server.succeed("cp /var/lib/git/{,test/}flake.lock")
+
+      # The seed flake.{nix,lock} both pin nixpkgs to a `[nixpkgs]` placeholder;
+      # rewrite them in-place so they point at the host nixpkgs path the test
+      # was launched with (no internet in the VM).
+      server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.nix")
+      server.succeed("sed -i 's#\\[nixpkgs\\]#${self.inputs.nixpkgs}#g' /var/lib/git/test/flake.lock")
+      nixpkgs_hash = server.succeed(f"{NIX} hash path ${self.inputs.nixpkgs} --extra-experimental-features nix-command").strip()
+      server.succeed(f"sed -i 's#\\[hash\\]#{nixpkgs_hash}#g' /var/lib/git/test/flake.lock")
+
+      server.succeed(f"{GIT} -C /var/lib/git/test add flake.nix flake.lock")
+      server.succeed(f"{GIT} -C /var/lib/git/test commit -m 'Initial commit'")
+      server.succeed("chown git:git -R /var/lib/git/test")
+
+      # Smoke-test that git-daemon serves the repo to anonymous clients.
+      server.succeed(f"{GIT} clone git://localhost/test test")
+      print(server.succeed(f"{GIT} ls-remote git://server/test"))
+
+      # ── Phase 3: log in and configure the CLI ─────────────────────────────
+      banner("Phase 3: authenticate and select project")
+      login_body = '{"loginname": "admin", "password": "admin_password"}'
+      token = server.succeed(
+          f"{CURL} -X POST -H 'Content-Type: application/json' "
+          f"-d '{login_body}' {API}/auth/basic/login | {JQ} -rj '.message'"
+      ).strip()
+      print(f"Got token: {token[:20]}…")
+
+      server.succeed(f"{CLI} config Server http://gradient.local")
+      server.succeed(f"{CLI} config AuthToken {token}")
+      server.succeed(f"{CLI} organization select org")
+      server.succeed(f"{CLI} project select project")
+
+      # First `project show` is best-effort: the project may already have a
+      # Queued evaluation, which the CLI exits 1 on. Use `execute` so a
+      # transient non-zero exit doesn't abort the whole test.
+      server.sleep(10)
+      _, output = server.execute(f"{CLI} project show")
+      print(output)
+
+      # ── Phase 4: wait for the server to notice the new commit ─────────────
+      # Project poll cycle is 30 s; we poll in 15 s slices so a panic shows
+      # up instantly instead of after the full timeout.
+      banner("Phase 4: wait for repository detection")
       detected = False
       for attempt in range(1, 7):
           server.sleep(15)
-          j = check_journal_for_errors(since_seconds=attempt * 15 + 15)
-          if "update needed" in j or "Force evaluation" in j or "triggered evaluation" in j or "Queued" in j:
+          j = assert_no_server_panic(since_seconds=attempt * 15 + 15)
+          if any(needle in j for needle in (
+              "update needed", "Force evaluation", "triggered evaluation", "Queued"
+          )):
               detected = True
-              print(f"=== Repository update detected on attempt {attempt} ===")
+              banner(f"Repository update detected on attempt {attempt}")
               break
-          if attempt == 6:
-              raise Exception(f"Server did not detect repository change after 90 s:\n{j[-2000:]}")
+      if not detected:
+          raise Exception(f"Server did not detect repository change after 90 s:\n{j[-2000:]}")
 
-      # Second window: wait for eval + build to complete (up to 900 s)
-      # Use the API directly (curl) instead of the CLI to avoid non-zero exit
-      # codes while the evaluation is still in progress.
+      # ── Phase 5: wait for the evaluation + builds to complete ─────────────
+      # We hit the REST API directly (instead of the CLI) so a 404/empty body
+      # while the eval is still being created doesn't crash us.
+      banner("Phase 5: wait for evaluation to complete (up to 900 s)")
+      eval_id = ""
       completed = False
       for attempt in range(1, 91):
           server.sleep(10)
-          check_journal_for_errors(since_seconds=15)
-          status = server.succeed("""
-            ${lib.getExe pkgs.curl} -sf \
-              -H "Authorization: Bearer ACCESS_TOKEN" \
-              http://gradient.local/api/v1/projects/org/project \
-              | ${lib.getExe pkgs.jq} -rj '.message.last_evaluation // empty'
-          """.replace("ACCESS_TOKEN", token)).strip()
-          if not status:
+          assert_no_server_panic(since_seconds=15)
+
+          eval_id = server.succeed(
+              f'{CURL} -sf -H "Authorization: Bearer {token}" '
+              f'{API}/projects/org/project | {JQ} -rj ".message.last_evaluation // empty"'
+          ).strip()
+          if not eval_id:
               if attempt % 3 == 0:
-                  print(f"Still waiting for evaluation to start (attempt {attempt}/90)...")
+                  print(f"  [{attempt:>2}/90] still waiting for evaluation to start…")
               continue
-          eval_status = server.succeed(f"""
-            ${lib.getExe pkgs.curl} -sf \
-              -H "Authorization: Bearer {token}" \
-              http://gradient.local/api/v1/evals/{status} \
-              | ${lib.getExe pkgs.jq} -rj '.message.status'
-          """).strip()
+
+          eval_status = server.succeed(
+              f'{CURL} -sf -H "Authorization: Bearer {token}" '
+              f'{API}/evals/{eval_id} | {JQ} -rj ".message.status"'
+          ).strip()
+
           if eval_status == "Completed":
               completed = True
-              print(f"=== Evaluation completed on attempt {attempt} ===")
+              banner(f"Evaluation completed on attempt {attempt}")
               break
-          elif eval_status == "Failed":
-              j = server.succeed("journalctl -u gradient-server --no-pager --since='-300s' -n 200")
+
+          if eval_status == "Failed":
+              j  = server.succeed("journalctl -u gradient-server --no-pager --since='-300s' -n 200")
               bj = builder.succeed("journalctl -u gradient-worker --no-pager --since='-300s' -n 200")
               raise Exception(f"Evaluation failed:\nServer:\n{j[-2000:]}\nWorker:\n{bj[-2000:]}")
+
           if attempt % 3 == 0:
-              # Print eval status, entry point count, and build status breakdown
-              eval_detail = server.succeed(f"""
-                ${lib.getExe pkgs.curl} -sf \
-                  -H "Authorization: Bearer {token}" \
-                  http://gradient.local/api/v1/evals/{status} \
-                  | ${lib.getExe pkgs.jq} -c '.message | {{status, entry_points: (.entry_points | length)}}'
-              """).strip()
-              builds_summary = server.succeed(f"""
-                ${lib.getExe pkgs.curl} -sf \
-                  -H "Authorization: Bearer {token}" \
-                  http://gradient.local/api/v1/evals/{status}/builds \
-                  | ${lib.getExe pkgs.jq} -c '.message | {{total, by_status: ([.builds[].status] | group_by(.) | map({{key: .[0], value: length}}) | from_entries)}}'
-              """).strip()
-              print(f"Attempt {attempt}/90 — eval: {eval_detail}, builds: {builds_summary}")
+              eval_detail = server.succeed(
+                  f'{CURL} -sf -H "Authorization: Bearer {token}" '
+                  f'{API}/evals/{eval_id} | '
+                  f'{JQ} -c ".message | {{status, entry_points: (.entry_points | length)}}"'
+              ).strip()
+              builds_summary = server.succeed(
+                  f'{CURL} -sf -H "Authorization: Bearer {token}" '
+                  f'{API}/evals/{eval_id}/builds | '
+                  f'{JQ} -c ".message | {{total, by_status: ([.builds[].status] | group_by(.) | map({{key: .[0], value: length}}) | from_entries)}}"'
+              ).strip()
+              print(f"  [{attempt:>2}/90] eval={eval_detail} builds={builds_summary}")
 
       if not completed:
           j = server.succeed("journalctl -u gradient-server --no-pager --since='-900s' -n 200")
           raise Exception(f"Evaluation did not complete after 900 s:\n{j[-2000:]}")
 
-      # The CLI exits 1 on the optional log-fetch step at the end, but the
-      # Project/Evaluation/Building sections we need are already printed.
-      _, output = server.execute("${lib.getExe pkgs.gradient-cli} project show")
+      # ── Phase 6: extract hello's `.drv` from the CLI output ───────────────
+      # The CLI's last step (log fetch) exits 1, so use `execute`. The
+      # Project / Evaluation / Building sections we need are already printed
+      # by then, and `colored` wraps build names in ANSI escapes which we
+      # have to strip before pattern-matching.
+      banner("Phase 6: extract hello's derivation path from `gradient project show`")
+      _, output = server.execute(f"{CLI} project show")
       print(output)
 
-      # Strip ANSI escape codes the `colored` crate emits around build names —
-      # they would otherwise break `.endswith(".drv")`.
-      import re
-      ansi_re = re.compile(r"\x1b\[[0-9;]*m")
       store_path_drv = ""
       in_building = False
       for line in output.split("\n"):
-        clean = ansi_re.sub("", line).strip()
-        if clean == "===== Building =====":
-          in_building = True
-        elif clean == "===== Log =====":
-          break
-        elif in_building and "hello" in clean and clean.endswith(".drv"):
-          store_path_drv = clean if clean.startswith("/nix/store/") else f"/nix/store/{clean}"
-          break
+          clean = ANSI_RE.sub("", line).strip()
+          if clean == "===== Building =====":
+              in_building = True
+              continue
+          if clean == "===== Log =====":
+              break
+          if in_building and "hello" in clean and clean.endswith(".drv"):
+              store_path_drv = clean if clean.startswith("/nix/store/") else f"/nix/store/{clean}"
+              break
+      assert store_path_drv, "could not find hello's .drv path in `gradient project show` output"
 
-      # Resolve the .drv to its `^out` path. The `.drv` file is on the
-      # builder VM (its full closure was preseeded via `additionalPaths`),
-      # not on the server, so run the lookup there.
-      store_path = builder.succeed(f"${lib.getExe pkgs.nix} path-info {store_path_drv}^out --extra-experimental-features nix-command").strip()
+      # The `.drv` file is on the builder VM (its full closure was preseeded
+      # via `additionalPaths`), not on the server, so resolve the output
+      # path there.
+      store_path = builder.succeed(
+          f"{NIX} path-info {store_path_drv}^out --extra-experimental-features nix-command"
+      ).strip()
       store_hash = store_path.split("-")[0].replace("/nix/store/", "")
-      print(f"Detected store path: {store_path}")
+      print(f"Built derivation: {store_path_drv}")
+      print(f"Output path:      {store_path}")
 
-      print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM organization_cache;\"'"))
-      print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM cache;\"'"))
-      print(server.succeed("su postgres -c 'psql -U postgres -d gradient -c \"SELECT * FROM cached_path_signature;\"'"))
-      # TODO: Investigate why the folder is not created
-      # print(server.succeed("${lib.getExe pkgs.tree} /var/lib/gradient/nars/"))
-      print(client.succeed("${lib.getExe pkgs.curl} http://server/cache/main/nix-cache-info -i --fail"))
+      # ── Phase 7: verify the cache serves the narinfo ──────────────────────
+      # `nix-cache-info` is unauthenticated and always available — a quick
+      # smoke test that `/cache/main/*` is wired up.
+      banner("Phase 7: cache serves nix-cache-info and the narinfo")
+      print(client.succeed(f"{CURL} {CACHE}/nix-cache-info -i --fail"))
 
       # The sign-sweep loop ticks every 60 s; the freshly-built hello path
       # may not have a signature row yet, in which case the cache returns
-      # 404. Poll for up to 120 s.
+      # 404. Poll up to 120 s for the signature to land.
       for sig_attempt in range(1, 25):
-          rc, _curl_out = client.execute(f"${lib.getExe pkgs.curl} -sf http://server/cache/main/{store_hash}.narinfo -o /dev/null")
+          rc, _ignored = client.execute(f"{CURL} -sf {CACHE}/{store_hash}.narinfo -o /dev/null")
           if rc == 0:
+              banner(f"narinfo signed and served on poll {sig_attempt}")
               break
           client.sleep(5)
-      else:
-          # Diagnostic dump: show the final narinfo response body and the
-          # signature/cached_path/derivation_output rows for hello so we can
-          # tell *why* it's still 404 (missing cached_path row vs. missing
-          # signature row vs. signature still NULL).
-          print(client.succeed(f"${lib.getExe pkgs.curl} -i http://server/cache/main/{store_hash}.narinfo"))
-          print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT id, hash, store_path FROM cached_path WHERE hash = '{store_hash}';\\"" """))
-          print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT cps.id, cps.cache, cps.signature IS NULL AS sig_null FROM cached_path_signature cps JOIN cached_path cp ON cp.id = cps.cached_path WHERE cp.hash = '{store_hash}';\\"" """))
-          print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT id, hash, is_cached FROM derivation_output WHERE hash = '{store_hash}';\\"" """))
-          print(server.succeed("""su postgres -c "psql -U postgres -d gradient -c \\"SELECT id, name, active FROM cache;\\"" """))
-          print(server.succeed("""su postgres -c "psql -U postgres -d gradient -c \\"SELECT * FROM organization_cache;\\"" """))
-          print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT d.id, d.organization FROM derivation d JOIN derivation_output o ON o.derivation = d.id WHERE o.hash = '{store_hash}';\\"" """))
-          print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT id, hash, store_path, nar_hash, nar_size, file_hash, file_size FROM cached_path WHERE hash = '{store_hash}';\\"" """))
-          print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT id, hash, is_cached, file_hash, file_size, nar_size, cached_path FROM derivation_output WHERE hash = '{store_hash}';\\"" """))
-      print(client.succeed(f"${lib.getExe pkgs.curl} http://server/cache/main/{store_hash}.narinfo -i --fail"))
+      print(client.succeed(f"{CURL} {CACHE}/{store_hash}.narinfo -i --fail"))
 
+      # ── Phase 8: client substitutes hello straight from the cache ─────────
+      # Drop the existing copy from the client store, then realize via
+      # gradient cache only (the client's `substituters` is locked to
+      # `http://server/cache/main`).
+      banner("Phase 8: client realizes hello from gradient cache")
       client.succeed(f"nix-store --delete {store_path} || true")
       client.fail(f"ls {store_path}")
       print(client.succeed(f"nix-store -vvv --realize {store_path}"))
       print(client.succeed(f"ls {store_path}"))
+
+      banner("Cache test PASSED")
       '';
   });
 }

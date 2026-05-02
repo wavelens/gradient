@@ -465,6 +465,70 @@
       </nav>
     </section>
 
+    <!-- ─── Rich Lists ─── -->
+    <section id="lists" class="sg-section">
+      <h2>Rich Lists</h2>
+      <p class="text-secondary">
+        List patterns for richer per-item content than the simple
+        <code>.gr-grid-rows</code> layout. Each row is its own card with status
+        badges and inline actions.
+      </p>
+
+      <h3>Worker-style list (item + meta + actions)</h3>
+      <p class="text-secondary">
+        Used on the Manage Workers page. Larger card row, icon, primary +
+        secondary text, a stack of status badges, and an action button.
+      </p>
+      <div class="sg-list">
+        @for (w of sampleWorkers; track w.id) {
+          <div class="sg-list-row">
+            <div class="sg-list-row__info">
+              <span class="material-symbols-outlined">construction</span>
+              <div>
+                <div class="sg-list-row__title">{{ w.name }}</div>
+                <div class="sg-list-row__id text-secondary">{{ w.id }}</div>
+                <div class="sg-list-row__meta text-secondary">
+                  {{ w.arch }} · caps: {{ w.caps.join(', ') }}
+                </div>
+              </div>
+            </div>
+            <div class="sg-list-row__actions">
+              @if (w.managed) {
+                <span class="badge">Managed</span>
+              }
+              <span
+                class="badge"
+                [class.badge-inbound]="w.status === 'connected'"
+                [class.badge-outbound]="w.status === 'offline'"
+              >
+                {{ w.status }}
+              </span>
+              <button pButton label="Edit" icon="pi pi-pencil" severity="secondary" size="small"></button>
+            </div>
+          </div>
+        }
+      </div>
+
+      <h3>Compact download list (artefact-style)</h3>
+      <p class="text-secondary">
+        Used on the Build Artefacts page. Tighter row, file-type badge, name
+        (mono, truncates), size, and a download link button on the right.
+      </p>
+      <div class="sg-compact-list">
+        @for (a of sampleArtefacts; track a.name) {
+          <div class="sg-compact-row">
+            <span class="sg-file-type">{{ a.type }}</span>
+            <span class="sg-compact-row__name">{{ a.name }}</span>
+            <span class="sg-compact-row__size text-secondary">{{ a.size }}</span>
+            <a class="sg-download-btn" href="javascript:void(0)" [title]="'Download ' + a.name">
+              <span class="material-symbols-outlined">download</span>
+              <span>Download</span>
+            </a>
+          </div>
+        }
+      </div>
+    </section>
+
     <!-- ─── Grids ─── -->
     <section id="grids" class="sg-section">
       <h2>Grids</h2>
@@ -516,10 +580,13 @@
       </p>
 
       <h3>gr-page-layout + gr-settings-section</h3>
-      <div class="sg-card sg-card--flush">
+      <p class="text-secondary">
+        The page-layout and settings-section render against the page background
+        (<code>$color-primary</code>) — the wrapper below sets that background
+        explicitly so the section looks the same as a real settings page.
+      </p>
+      <div class="sg-page-frame">
         <gr-page-layout title="Profile Settings" subtitle="Manage your personal information">
-          <button slot="actions" pButton label="Save" icon="pi pi-check"></button>
-
           <gr-message-banner slot="banner" type="info">
             This account is managed declaratively.
           </gr-message-banner>
@@ -531,6 +598,9 @@
             <gr-form-field label="Email" for="lay-email">
               <input pInputText id="lay-email" class="w-full" value="john@example.com" />
             </gr-form-field>
+            <div class="gr-form-actions">
+              <button pButton label="Save Changes" icon="pi pi-check"></button>
+            </div>
           </gr-settings-section>
 
           <gr-settings-section title="Preferences" [card]="false">
@@ -539,6 +609,52 @@
             </p>
           </gr-settings-section>
         </gr-page-layout>
+      </div>
+
+      <h3>Header action slot (alternate pattern)</h3>
+      <p class="text-secondary">
+        For pages where the primary action belongs in the header instead of in
+        a per-section form (e.g. list pages with a "New …" button), project a
+        button into <code>[slot=actions]</code> on <code>gr-page-layout</code>.
+      </p>
+      <div class="sg-page-frame">
+        <gr-page-layout title="Workers" subtitle="Build workers for this organization">
+          <button slot="actions" pButton label="Register Worker" icon="pi pi-plus"></button>
+          <p class="text-secondary">List of workers would go here.</p>
+        </gr-page-layout>
+      </div>
+
+      <h3>Settings Nav Row</h3>
+      <p class="text-secondary">
+        Title + description on the left, action button on the right. Used in
+        organization / project settings to send the user to a sub-page (Manage
+        Workers, Manage Caches, etc.). Stack rows in one card with
+        <code>p-divider</code> between them.
+      </p>
+      <div class="sg-card">
+        <div class="sg-nav-row">
+          <div>
+            <h4>Workers</h4>
+            <p class="text-secondary">Manage build workers for this organization</p>
+          </div>
+          <button pButton label="Manage Workers" icon="pi pi-cog" severity="secondary"></button>
+        </div>
+        <p-divider />
+        <div class="sg-nav-row">
+          <div>
+            <h4>Cache Subscriptions</h4>
+            <p class="text-secondary">Nix binary caches this organization pushes builds to</p>
+          </div>
+          <button pButton label="Manage Caches" icon="pi pi-database" severity="secondary"></button>
+        </div>
+        <p-divider />
+        <div class="sg-nav-row">
+          <div>
+            <h4>Integrations</h4>
+            <p class="text-secondary">Forge integrations for inbound webhooks and CI status</p>
+          </div>
+          <button pButton label="Manage Integrations" icon="pi pi-link" severity="secondary"></button>
+        </div>
       </div>
     </section>
 

@@ -18,6 +18,7 @@ import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { ToastModule } from 'primeng/toast';
 import { MenuModule } from 'primeng/menu';
 import { PopoverModule } from 'primeng/popover';
+import { DividerModule } from 'primeng/divider';
 import { ConfirmationService, MenuItem, MessageService } from 'primeng/api';
 
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
@@ -60,6 +61,7 @@ interface DemoCounty {
     ToastModule,
     MenuModule,
     PopoverModule,
+    DividerModule,
     LoadingSpinnerComponent,
     EmptyStateComponent,
     StatCardComponent,
@@ -161,6 +163,7 @@ export class StyleguideComponent {
     { id: 'popups', label: 'Popups & Overlays' },
     { id: 'feedback', label: 'Feedback' },
     { id: 'tables', label: 'Tables & Lists' },
+    { id: 'lists', label: 'Rich Lists' },
     { id: 'grids', label: 'Grids' },
     { id: 'layouts', label: 'Layouts' },
   ];
@@ -206,6 +209,31 @@ export class StyleguideComponent {
     { id: 1, name: 'gradient-cache', status: 'Active', updated: '2 min ago' },
     { id: 2, name: 'binary-cache', status: 'Idle', updated: '1 h ago' },
     { id: 3, name: 'staging', status: 'Failed', updated: '3 h ago' },
+  ];
+
+  sampleWorkers = [
+    {
+      name: 'builder-1',
+      id: '550e8400-e29b-41d4-a716-446655440001',
+      arch: 'x86_64-linux',
+      caps: ['fetch', 'eval', 'build'],
+      status: 'connected',
+      managed: true,
+    },
+    {
+      name: 'builder-2',
+      id: '550e8400-e29b-41d4-a716-446655440002',
+      arch: 'aarch64-linux',
+      caps: ['build'],
+      status: 'offline',
+      managed: false,
+    },
+  ];
+
+  sampleArtefacts = [
+    { type: 'doc', name: 'README.md', size: '4.2 KB' },
+    { type: 'bin', name: 'gradient-worker', size: '12.4 MB' },
+    { type: 'tar', name: 'docs.tar.zst', size: '128 KB' },
   ];
 
   // ── Demo handlers ──────────────────────────────────────────────────────────
