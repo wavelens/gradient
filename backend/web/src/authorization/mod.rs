@@ -13,4 +13,4 @@ pub use self::jwt::{
     extract_bearer_or_cookie, generate_api_key, hash_api_key,
 };
 pub use self::middleware::{MaybeUser, authorize, authorize_optional, update_last_login};
-pub use self::oidc::{OidcUser, oidc_login_create, oidc_login_verify};
+pub use self::oidc::{OidcAuthRequest, oidc_login_create, oidc_login_verify};
