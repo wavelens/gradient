@@ -588,3 +588,21 @@ Tests (`cargo test -p web --test body_size_limit`):
   `POST /api/v1/builds` with `max_request_size = 1024` and
   `max_direct_build_size = 1 MiB` is *not* rejected with 413, proving
   the per-route override is wired up.
+## Cache traffic metrics — atomic UPSERT (no lost updates)
+
+`record_nar_traffic` (`backend/web/src/endpoints/stats.rs`) records bytes
+served per `(cache, bucket_time)` row. The previous implementation used a
+SELECT-then-UPDATE/INSERT pattern, which dropped updates whenever two NAR
+fetches in the same minute bucket ran concurrently — both reads observed
+the same `bytes_sent` value and the second writer clobbered the first
+(see issue #50). It is now a single `INSERT … ON CONFLICT (cache,
+bucket_time) DO UPDATE SET bytes_sent = bytes_sent + EXCLUDED.bytes_sent,
+nar_count = nar_count + EXCLUDED.nar_count`, which Postgres serialises on
+the unique index so every caller's increment is preserved.
+
+Tests (`cargo test -p web --lib stats`):
+
+- `record_nar_traffic_stmt_is_atomic_upsert` — asserts the generated SQL
+  contains `INSERT INTO cache_metric`, `ON CONFLICT (cache, bucket_time)`,
+  the additive `bytes_sent`/`nar_count` updates, and contains no `SELECT`
+  (a `SELECT` would reintroduce the read-modify-write race).
