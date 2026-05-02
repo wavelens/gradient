@@ -241,5 +241,33 @@ fn proto_version_is_nonzero() {
     assert!(version >= 1);
 }
 
+/// Regression for #110: the `/proto` WebSocket cap must:
+/// - exceed the largest legitimate frame (`NarPush` at 64 KiB plus rkyv
+///   overhead, plus headroom for `LogChunk`/`CacheQuery` arrays), and
+/// - stay well below tungstenite's 64 MiB default so a malicious peer can't
+///   ask the server to allocate gigabytes from a single send.
+#[test]
+fn max_proto_message_size_is_sane() {
+    use crate::handler::{MAX_PROTO_MESSAGE_SIZE, NAR_PUSH_CHUNK_SIZE};
+    assert!(
+        MAX_PROTO_MESSAGE_SIZE >= NAR_PUSH_CHUNK_SIZE * 2,
+        "must fit a NarPush chunk plus framing/metadata"
+    );
+    assert!(
+        MAX_PROTO_MESSAGE_SIZE <= 16 * 1024 * 1024,
+        "guard against accidental relaxation back toward defaults"
+    );
+}
+
+/// Regression for #110: the handshake deadline must be long enough to cover
+/// a real auth round-trip but short enough that a stalled peer cannot pin a
+/// task and FD for minutes.
+#[test]
+fn handshake_timeout_is_sane() {
+    use crate::handler::HANDSHAKE_TIMEOUT;
+    assert!(HANDSHAKE_TIMEOUT.as_secs() >= 5);
+    assert!(HANDSHAKE_TIMEOUT.as_secs() <= 60);
+}
+
 // Full WebSocket handshake integration tests (InitConnection → InitAck) live in
 // the `web` crate's integration tests where `test-support` is available.

@@ -24,7 +24,8 @@ use super::auth::{
 };
 use super::dispatch::DispatchContext;
 use super::socket::{
-    JOB_OFFER_CHUNK_SIZE, ProtoSocket, recv_client_msg, send_error, send_reject, send_server_msg,
+    HANDSHAKE_TIMEOUT, JOB_OFFER_CHUNK_SIZE, ProtoSocket, recv_client_msg, send_error,
+    send_reject, send_server_msg,
 };
 
 // ── Session state markers ─────────────────────────────────────────────────────
@@ -362,8 +363,22 @@ pub(crate) async fn handle_socket(
 ) {
     info!(server_initiated, "WebSocket connection opened");
     let session = ProtoSession::new(socket, state, scheduler);
-    let Some(session) = session.handshake(server_initiated).await else {
-        return;
+    let session = match tokio::time::timeout(
+        HANDSHAKE_TIMEOUT,
+        session.handshake(server_initiated),
+    )
+    .await
+    {
+        Ok(Some(s)) => s,
+        Ok(None) => return,
+        Err(_) => {
+            warn!(
+                timeout_secs = HANDSHAKE_TIMEOUT.as_secs(),
+                server_initiated,
+                "WebSocket handshake timed out; dropping connection"
+            );
+            return;
+        }
     };
     let Some(session) = session.register().await else {
         return;

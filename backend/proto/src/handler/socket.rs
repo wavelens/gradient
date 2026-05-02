@@ -26,7 +26,21 @@ use scheduler::Scheduler;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub(super) const JOB_OFFER_CHUNK_SIZE: usize = 1_000;
-pub(super) const NAR_PUSH_CHUNK_SIZE: usize = 64 * 1024;
+pub const NAR_PUSH_CHUNK_SIZE: usize = 64 * 1024;
+
+/// Hard upper bound on any single inbound or outbound `/proto` WebSocket
+/// frame/message. Comfortably above the largest legitimate frame
+/// (`NarPush` carries 64 KiB chunks plus rkyv overhead and metadata) while
+/// preventing a peer from pinning gigabytes of memory with a single send.
+/// Applied to both the inbound axum upgrade and the outbound tungstenite
+/// connect.
+pub const MAX_PROTO_MESSAGE_SIZE: usize = 1024 * 1024;
+
+/// Maximum time the server will wait for a peer to complete the handshake
+/// (Discoverable check → InitConnection → AuthChallenge → AuthResponse →
+/// InitAck). A peer that opens the WebSocket and then stalls is dropped after
+/// this deadline so it cannot pin a tokio task and FD indefinitely.
+pub const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 // ── Socket abstraction ────────────────────────────────────────────────────────
 
