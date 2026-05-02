@@ -17,7 +17,7 @@
 use axum_test::TestServer;
 use core::ci::{WebhookClient, encrypt_webhook_secret};
 use core::storage::{EmailSender, NarStore};
-use core::types::ServerState;
+use core::types::{ServerState, WebDb, WorkerDb};
 use entity::evaluation::EvaluationStatus;
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
@@ -76,8 +76,8 @@ fn make_state(
     }
     let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
     Arc::new(ServerState {
-        web_db: db,
-        db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+        web_db: WebDb::new(db),
+        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         cli,
         log_storage: Arc::new(NoopLogStorage),
         webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,

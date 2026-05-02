@@ -107,7 +107,7 @@ impl DerivationInsertBatch {
         if !self.new_derivations.is_empty() {
             for chunk in self.new_derivations.chunks(BATCH_SIZE) {
                 if let Err(e) = EDerivation::insert_many(chunk.to_vec())
-                    .exec(&state.db)
+                    .exec(&state.worker_db)
                     .await
                 {
                     error!(error = %e, "failed to insert derivations");
@@ -126,7 +126,7 @@ impl DerivationInsertBatch {
         if !self.new_outputs.is_empty() {
             for chunk in self.new_outputs.chunks(BATCH_SIZE) {
                 if let Err(e) = EDerivationOutput::insert_many(chunk.to_vec())
-                    .exec(&state.db)
+                    .exec(&state.worker_db)
                     .await
                 {
                     error!(error = %e, "failed to insert derivation outputs");
@@ -178,7 +178,7 @@ impl<'a> EvalResultProcessor<'a> {
         EDerivation::find()
             .filter(CDerivation::Organization.eq(self.organization_id))
             .filter(CDerivation::DerivationPath.is_in(paths))
-            .all(&self.state.db)
+            .all(&self.state.worker_db)
             .await
             .context("query existing derivations")
     }
@@ -217,7 +217,7 @@ impl<'a> EvalResultProcessor<'a> {
         if !builds.is_empty() {
             for chunk in builds.chunks(BATCH_SIZE) {
                 if let Err(e) = EBuild::insert_many(chunk.to_vec())
-                    .exec(&self.state.db)
+                    .exec(&self.state.worker_db)
                     .await
                 {
                     error!(error = %e, "failed to insert builds");
@@ -302,7 +302,7 @@ impl<'a> EvalResultProcessor<'a> {
         // Build a lookup: derivation_uuid → build_uuid for this evaluation.
         let eval_builds = EBuild::find()
             .filter(CBuild::Evaluation.eq(self.evaluation_id))
-            .all(&self.state.db)
+            .all(&self.state.worker_db)
             .await
             .unwrap_or_default();
         let drv_id_to_build: HashMap<Uuid, Uuid> =
@@ -335,7 +335,7 @@ impl<'a> EvalResultProcessor<'a> {
         if !active_entry_points.is_empty() {
             for chunk in active_entry_points.chunks(BATCH_SIZE) {
                 if let Err(e) = EEntryPoint::insert_many(chunk.to_vec())
-                    .exec(&self.state.db)
+                    .exec(&self.state.worker_db)
                     .await
                 {
                     error!(error = %e, "failed to insert entry points");
@@ -364,7 +364,7 @@ impl<'a> EvalResultProcessor<'a> {
         }
 
         // GC: remove old evaluations beyond keep_evaluations for this project.
-        if let Ok(Some(project)) = EProject::find_by_id(project_id).one(&self.state.db).await {
+        if let Ok(Some(project)) = EProject::find_by_id(project_id).one(&self.state.worker_db).await {
             let gc_state = Arc::clone(self.state);
             let gc_keep = project.keep_evaluations as usize;
             tokio::spawn(async move {
@@ -420,7 +420,7 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uui
     );
 
     let rows = state
-        .db
+        .worker_db
         .query_all(find_sql)
         .await
         .context("expand_substituted_closure: query")?;
@@ -448,7 +448,7 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uui
 
     let count = builds.len();
     for chunk in builds.chunks(BATCH_SIZE) {
-        if let Err(e) = EBuild::insert_many(chunk.to_vec()).exec(&state.db).await {
+        if let Err(e) = EBuild::insert_many(chunk.to_vec()).exec(&state.worker_db).await {
             error!(error = %e, %evaluation_id, "expand_substituted_closure: failed to insert builds");
         }
     }
@@ -469,7 +469,7 @@ pub async fn handle_eval_result(
     let organization_id = job.peer_id;
 
     let current = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
         .context("fetch evaluation")?;
     let evaluation = match current {
@@ -543,7 +543,7 @@ pub async fn handle_eval_job_completed(
     let created = EBuild::find()
         .filter(CBuild::Evaluation.eq(evaluation_id))
         .filter(CBuild::Status.eq(BuildStatus::Created))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
         .unwrap_or_default();
     let queued_now = created.len();
@@ -552,7 +552,7 @@ pub async fn handle_eval_job_completed(
     }
 
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await?
         && matches!(
             eval.status,
@@ -603,7 +603,7 @@ pub async fn flush_deferred_deps(
     let drv_path_to_id: std::collections::HashMap<String, Uuid> = EDerivation::find()
         .filter(CDerivation::Organization.eq(organization_id))
         .filter(CDerivation::DerivationPath.is_in(all_paths))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
         .context("flush_deferred_deps: query derivations")?
         .into_iter()
@@ -642,7 +642,7 @@ pub async fn flush_deferred_deps(
                     .to_owned(),
                 )
                 .do_nothing()
-                .exec(&state.db)
+                .exec(&state.worker_db)
                 .await
             {
                 error!(error = %e, "flush_deferred_deps: failed to insert edges");
@@ -665,7 +665,7 @@ pub async fn handle_eval_job_failed(
     error: &str,
 ) -> Result<()> {
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await?
         && !matches!(
             eval.status,

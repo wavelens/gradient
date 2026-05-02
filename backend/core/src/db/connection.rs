@@ -161,7 +161,7 @@ pub async fn add_features(
         let feature = EFeature::find()
             .filter(CFeature::Name.eq(f.clone()))
             .filter(CFeature::Kind.eq(kind.clone()))
-            .one(&state.db)
+            .one(&state.worker_db)
             .await
             .context("Failed to query feature")?;
 
@@ -175,7 +175,7 @@ pub async fn add_features(
             };
 
             afeature
-                .insert(&state.db)
+                .insert(&state.worker_db)
                 .await
                 .context("Failed to insert feature")?
         };
@@ -202,7 +202,7 @@ pub async fn add_features(
                     .to_owned(),
                 )
                 .do_nothing()
-                .exec(&state.db)
+                .exec(&state.worker_db)
                 .await
                 .context("Failed to insert derivation feature")?;
         }

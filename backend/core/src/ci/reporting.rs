@@ -80,7 +80,7 @@ pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
 pub async fn report_build_ci(state: Arc<ServerState>, build: MBuild, status: CiStatus) {
     let entry_points = match EEntryPoint::find()
         .filter(CEntryPoint::Build.eq(build.id))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
     {
         Ok(eps) => eps,
@@ -94,7 +94,7 @@ pub async fn report_build_ci(state: Arc<ServerState>, build: MBuild, status: CiS
     }
 
     let evaluation = match EEvaluation::find_by_id(build.evaluation)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
     {
         Ok(Some(e)) => e,
@@ -112,7 +112,7 @@ pub async fn report_build_ci(state: Arc<ServerState>, build: MBuild, status: CiS
         return;
     };
 
-    let project = match EProject::find_by_id(project_id).one(&state.db).await {
+    let project = match EProject::find_by_id(project_id).one(&state.worker_db).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             warn!(%project_id, "Project missing for build CI report");
@@ -124,7 +124,7 @@ pub async fn report_build_ci(state: Arc<ServerState>, build: MBuild, status: CiS
         }
     };
 
-    let commit = match ECommit::find_by_id(evaluation.commit).one(&state.db).await {
+    let commit = match ECommit::find_by_id(evaluation.commit).one(&state.worker_db).await {
         Ok(Some(c)) => c,
         Ok(None) => {
             warn!(commit_id = %evaluation.commit, "Commit missing for build CI report");
@@ -149,7 +149,7 @@ pub async fn report_build_ci(state: Arc<ServerState>, build: MBuild, status: CiS
     let reporter = resolve_outbound_reporter_for_project(&state, project_id).await;
 
     let org_name = match EOrganization::find_by_id(project.organization)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
     {
         Ok(Some(o)) => Some(o.name),
@@ -178,7 +178,7 @@ pub async fn report_build_ci(state: Arc<ServerState>, build: MBuild, status: CiS
             Ok(Some(new_id)) => {
                 let mut a = ep.clone().into_active_model();
                 a.repo_check_id = Set(Some(new_id));
-                if let Err(e) = a.update(&state.db).await {
+                if let Err(e) = a.update(&state.worker_db).await {
                     warn!(error = %e, eval = %ep.eval, "Failed to persist entry_point check_run id");
                 }
             }
@@ -207,7 +207,7 @@ pub async fn report_evaluation_ci(
         return;
     };
 
-    let project = match EProject::find_by_id(project_id).one(&state.db).await {
+    let project = match EProject::find_by_id(project_id).one(&state.worker_db).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             warn!(%project_id, "Project not found for evaluation CI report");
@@ -221,7 +221,7 @@ pub async fn report_evaluation_ci(
 
     let reporter = resolve_outbound_reporter_for_project(&state, project_id).await;
 
-    let commit = match ECommit::find_by_id(evaluation.commit).one(&state.db).await {
+    let commit = match ECommit::find_by_id(evaluation.commit).one(&state.worker_db).await {
         Ok(Some(c)) => c,
         Ok(None) => {
             warn!(commit_id = %evaluation.commit, "Commit not found for evaluation CI report");
@@ -247,7 +247,7 @@ pub async fn report_evaluation_ci(
     };
 
     let org_name = match EOrganization::find_by_id(project.organization)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
     {
         Ok(Some(org)) => Some(org.name),
@@ -278,7 +278,7 @@ pub async fn report_evaluation_ci(
         Ok(Some(new_id)) => {
             let mut a = evaluation.clone().into_active_model();
             a.repo_check_id = Set(Some(new_id));
-            if let Err(e) = a.update(&state.db).await {
+            if let Err(e) = a.update(&state.worker_db).await {
                 warn!(error = %e, evaluation_id = %evaluation.id, "Failed to persist evaluation check_run id");
             }
         }

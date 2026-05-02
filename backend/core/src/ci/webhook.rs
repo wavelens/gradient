@@ -264,7 +264,7 @@ pub async fn fire_evaluation_webhook(
     };
 
     let org_id = match evaluation.project {
-        Some(project_id) => match EProject::find_by_id(project_id).one(&state.db).await {
+        Some(project_id) => match EProject::find_by_id(project_id).one(&state.worker_db).await {
             Ok(Some(project)) => project.organization,
             Ok(None) => {
                 warn!(evaluation_id = %evaluation.id, "Project not found for webhook delivery");
@@ -305,7 +305,7 @@ pub async fn fire_build_webhook(state: Arc<ServerState>, build: MBuild, status: 
 
     // Look up the derivation path for the webhook payload (best-effort).
     let derivation_path = EDerivation::find_by_id(build.derivation)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
         .ok()
         .flatten()
@@ -322,7 +322,7 @@ pub async fn fire_build_webhook(state: Arc<ServerState>, build: MBuild, status: 
 }
 
 async fn get_build_org_id(state: &Arc<ServerState>, evaluation_id: Uuid) -> Option<Uuid> {
-    let evaluation = match EEvaluation::find_by_id(evaluation_id).one(&state.db).await {
+    let evaluation = match EEvaluation::find_by_id(evaluation_id).one(&state.worker_db).await {
         Ok(Some(e)) => e,
         Ok(None) => {
             warn!(evaluation_id = %evaluation_id, "Evaluation not found for webhook delivery");
@@ -336,7 +336,7 @@ async fn get_build_org_id(state: &Arc<ServerState>, evaluation_id: Uuid) -> Opti
 
     let project_id = evaluation.project?;
 
-    match EProject::find_by_id(project_id).one(&state.db).await {
+    match EProject::find_by_id(project_id).one(&state.worker_db).await {
         Ok(Some(project)) => Some(project.organization),
         Ok(None) => {
             warn!(project_id = %project_id, "Project not found for webhook delivery");
@@ -358,7 +358,7 @@ async fn fire_webhooks(
     let webhooks = match EWebhook::find()
         .filter(CWebhook::Organization.eq(org_id))
         .filter(CWebhook::Active.eq(true))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
     {
         Ok(w) => w,

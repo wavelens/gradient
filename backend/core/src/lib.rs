@@ -181,8 +181,8 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     };
 
     Arc::new(ServerState {
-        db,
-        web_db,
+        worker_db: WorkerDb::new(db),
+        web_db: WebDb::new(web_db),
         cli,
         log_storage,
         webhooks,

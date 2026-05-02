@@ -39,7 +39,7 @@ pub(super) async fn filter_org_peers_without_cache(
 
     let org_ids: HashSet<Uuid> = match EOrg::find()
         .filter(OCol::Id.is_in(uuid_set.clone()))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
     {
         Ok(rows) => rows.into_iter().map(|r| r.id).collect(),
@@ -57,7 +57,7 @@ pub(super) async fn filter_org_peers_without_cache(
     } else {
         match EOrgCache::find()
             .filter(OCCol::Organization.is_in(org_ids.iter().copied().collect::<Vec<_>>()))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
         {
             Ok(rows) => rows.into_iter().map(|r| r.organization).collect(),
@@ -97,7 +97,7 @@ pub(super) async fn lookup_registered_peers(
     match Entity::find()
         .filter(Column::WorkerId.eq(worker_id))
         .filter(Column::Active.eq(true))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
     {
         Ok(rows) => rows
@@ -144,7 +144,7 @@ pub(super) async fn aggregate_enabled_caps(
     let rows = match Entity::find()
         .filter(Column::WorkerId.eq(worker_id))
         .filter(Column::Active.eq(true))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
     {
         Ok(rows) => rows,
@@ -174,7 +174,7 @@ pub(super) async fn has_any_registrations(state: &ServerState, worker_id: &str) 
 
     match Entity::find()
         .filter(Column::WorkerId.eq(worker_id))
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
     {
         Ok(row) => row.is_some(),

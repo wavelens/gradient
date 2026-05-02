@@ -84,7 +84,7 @@ pub async fn resolve_outbound_reporter_for_project(
     use sea_orm::QueryFilter;
 
     let link = match EProjectIntegration::find_by_id(project_id)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
     {
         Ok(Some(l)) => Some(l),
@@ -110,7 +110,7 @@ pub async fn resolve_outbound_reporter_for_project(
 
     let integration = match EIntegration::find_by_id(outbound_id)
         .filter(CIntegration::Kind.eq(IntegrationKind::Outbound.as_i16()))
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
     {
         Ok(Some(i)) => i,
@@ -195,7 +195,7 @@ async fn build_github_app_reporter_for_project(
     let github_app = state.cli.github_app_config()?;
 
     let project = EProject::find_by_id(project_id)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
         .ok()
         .flatten()?;
@@ -205,7 +205,7 @@ async fn build_github_app_reporter_for_project(
     }
 
     let org = EOrganization::find_by_id(project.organization)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
         .ok()
         .flatten()?;

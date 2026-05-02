@@ -8,6 +8,7 @@ pub mod build_output_metadata;
 pub mod cached_path_info;
 pub mod config;
 pub mod consts;
+pub mod db;
 pub mod input;
 pub mod proto;
 pub mod secret;
@@ -21,6 +22,7 @@ pub use self::build_output_metadata::BuildOutputMetadata;
 pub use self::cached_path_info::CachedPathInfo;
 pub use self::config::{EmailConfig, GitHubAppConfig, OidcConfig, S3Config};
 pub use self::consts::*;
+pub use self::db::{WebDb, WorkerDb};
 pub use self::entity_aliases::*;
 pub use self::input::*;
 pub use self::io::*;
@@ -33,7 +35,6 @@ use super::storage::LogStorage;
 use super::storage::NarStore;
 use super::storage::email::EmailSender;
 use clap::Parser;
-use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -257,10 +258,13 @@ pub struct Cli {
 
 #[derive(Debug)]
 pub struct ServerState {
-    pub db: DatabaseConnection,
+    /// Pool used by the proto handler, scheduler, cache GC, and any
+    /// fire-and-forget background task spawned from a web handler that
+    /// should not contend with foreground HTTP requests.
+    pub worker_db: WorkerDb,
     /// Dedicated DB pool used by the axum/web layer so HTTP requests are
     /// not starved by the busy proto/scheduler pool under heavy NarPush load.
-    pub web_db: DatabaseConnection,
+    pub web_db: WebDb,
     pub cli: Cli,
     pub log_storage: Arc<dyn LogStorage>,
     pub webhooks: Arc<dyn WebhookClient>,

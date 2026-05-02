@@ -42,7 +42,7 @@ impl<'a> BuildStateHandler<'a> {
         outputs: Vec<BuildOutput>,
     ) -> Result<()> {
         let build = EBuild::find_by_id(build_id)
-            .one(&self.state.db)
+            .one(&self.state.worker_db)
             .await
             .context("fetch build")?
             .with_context(|| format!("build {} not found", build_id))?;
@@ -53,7 +53,7 @@ impl<'a> BuildStateHandler<'a> {
             let existing = EDerivationOutput::find()
                 .filter(CDerivationOutput::Derivation.eq(derivation_id))
                 .filter(CDerivationOutput::Name.eq(&output.name))
-                .one(&self.state.db)
+                .one(&self.state.worker_db)
                 .await
                 .context("fetch derivation_output")?;
 
@@ -64,14 +64,14 @@ impl<'a> BuildStateHandler<'a> {
                 {
                     active.nar_size = Set(Some(nar_size));
                 }
-                if let Err(e) = active.update(&self.state.db).await {
+                if let Err(e) = active.update(&self.state.worker_db).await {
                     error!(error = %e, %build_id, output_name = %output.name, "failed to update derivation_output");
                 }
 
                 // Delete any prior products for this output (idempotency on retry).
                 if let Err(e) = EBuildProduct::delete_many()
                     .filter(CBuildProduct::DerivationOutput.eq(row_id))
-                    .exec(&self.state.db)
+                    .exec(&self.state.worker_db)
                     .await
                     .context("delete prior build_product rows")
                 {
@@ -89,7 +89,7 @@ impl<'a> BuildStateHandler<'a> {
                         size: Set(product.size.map(|s| s as i64)),
                         created_at: Set(Utc::now().naive_utc()),
                     };
-                    if let Err(e) = am.insert(&self.state.db).await {
+                    if let Err(e) = am.insert(&self.state.worker_db).await {
                         warn!(error = %e, %build_id, output_name = %output.name, "failed to insert build_product");
                     }
                 }
@@ -103,7 +103,7 @@ impl<'a> BuildStateHandler<'a> {
     }
 
     pub async fn handle_build_job_completed(&self, build_id: Uuid) -> Result<()> {
-        let build = match EBuild::find_by_id(build_id).one(&self.state.db).await? {
+        let build = match EBuild::find_by_id(build_id).one(&self.state.worker_db).await? {
             Some(b) => b,
             None => {
                 warn!(%build_id, "build not found on job_completed");
@@ -116,7 +116,7 @@ impl<'a> BuildStateHandler<'a> {
     }
 
     pub async fn handle_build_job_failed(&self, build_id: Uuid, _error: &str) -> Result<()> {
-        let build = match EBuild::find_by_id(build_id).one(&self.state.db).await? {
+        let build = match EBuild::find_by_id(build_id).one(&self.state.worker_db).await? {
             Some(b) => b,
             None => {
                 warn!(%build_id, "build not found on job_failed");
@@ -144,7 +144,7 @@ impl<'a> BuildStateHandler<'a> {
             let dependents = EBuild::find()
                 .filter(CBuild::Evaluation.eq(evaluation_id))
                 .filter(CBuild::Status.is_in(vec![BuildStatus::Created, BuildStatus::Queued]))
-                .all(&self.state.db)
+                .all(&self.state.worker_db)
                 .await
                 .context("fetch builds for cascade")?;
 
@@ -152,7 +152,7 @@ impl<'a> BuildStateHandler<'a> {
                 let dep_edge = EDerivationDependency::find()
                     .filter(CDerivationDependency::Derivation.eq(build.derivation))
                     .filter(CDerivationDependency::Dependency.eq(failed_drv))
-                    .one(&self.state.db)
+                    .one(&self.state.worker_db)
                     .await?;
                 if dep_edge.is_some() {
                     let cascaded_drv = build.derivation;
@@ -182,7 +182,7 @@ impl<'a> BuildStateHandler<'a> {
                 BuildStatus::Queued,
                 BuildStatus::Building,
             ]))
-            .all(&self.state.db)
+            .all(&self.state.worker_db)
             .await
             .context("fetch active builds")?;
 
@@ -191,7 +191,7 @@ impl<'a> BuildStateHandler<'a> {
         }
 
         let Some(eval) = EEvaluation::find_by_id(evaluation_id)
-            .one(&self.state.db)
+            .one(&self.state.worker_db)
             .await?
         else {
             return Ok(());
@@ -204,7 +204,7 @@ impl<'a> BuildStateHandler<'a> {
         let failed_builds = EBuild::find()
             .filter(CBuild::Evaluation.eq(evaluation_id))
             .filter(CBuild::Status.is_in(vec![BuildStatus::Failed, BuildStatus::DependencyFailed]))
-            .all(&self.state.db)
+            .all(&self.state.worker_db)
             .await
             .context("fetch failed builds")?;
 
@@ -214,7 +214,7 @@ impl<'a> BuildStateHandler<'a> {
         let eval_error_messages = EEvaluationMessage::find()
             .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
             .filter(CEvaluationMessage::Level.eq(entity::evaluation_message::MessageLevel::Error))
-            .all(&self.state.db)
+            .all(&self.state.worker_db)
             .await
             .context("fetch eval error messages")?;
 
@@ -258,7 +258,7 @@ impl<'a> BuildStateHandler<'a> {
                 CEvaluation::Status
                     .is_in(vec![EvaluationStatus::Building, EvaluationStatus::Waiting]),
             )
-            .all(&self.state.db)
+            .all(&self.state.worker_db)
             .await
             .context("fetch in-flight evaluations")?;
         if evals.is_empty() {
@@ -273,7 +273,7 @@ impl<'a> BuildStateHandler<'a> {
                     BuildStatus::Queued,
                     BuildStatus::Building,
                 ]))
-                .all(&self.state.db)
+                .all(&self.state.worker_db)
                 .await
                 .context("fetch pending builds")?;
 
@@ -381,14 +381,14 @@ impl BuildabilityChecker {
     async fn load(state: &Arc<ServerState>, drv_ids: &[Uuid]) -> Result<Self> {
         let drvs = EDerivation::find()
             .filter(CDerivation::Id.is_in(drv_ids.to_vec()))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
             .context("fetch derivations for pending builds")?;
         let drv_by_id: HashMap<Uuid, MDerivation> = drvs.into_iter().map(|d| (d.id, d)).collect();
 
         let edges = EDerivationFeature::find()
             .filter(CDerivationFeature::Derivation.is_in(drv_ids.to_vec()))
-            .all(&state.db)
+            .all(&state.worker_db)
             .await
             .context("fetch derivation_feature edges")?;
         let mut features_by_drv: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
@@ -405,7 +405,7 @@ impl BuildabilityChecker {
         } else {
             EFeature::find()
                 .filter(CFeature::Id.is_in(feature_ids))
-                .all(&state.db)
+                .all(&state.worker_db)
                 .await
                 .context("fetch feature names")?
         };

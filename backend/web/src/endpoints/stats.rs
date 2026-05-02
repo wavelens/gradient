@@ -94,8 +94,8 @@ fn build_record_nar_traffic_stmt(cache_id: Uuid, bucket: NaiveDateTime, bytes: i
     )
 }
 
-async fn aggregate_traffic(
-    db: &sea_orm::DatabaseConnection,
+async fn aggregate_traffic<C: sea_orm::ConnectionTrait>(
+    db: &C,
     cache_id: Uuid,
     trunc_unit: &str,
     back_interval: &str,
@@ -146,8 +146,8 @@ async fn aggregate_traffic(
     Ok(points)
 }
 
-async fn aggregate_storage(
-    db: &sea_orm::DatabaseConnection,
+async fn aggregate_storage<C: sea_orm::ConnectionTrait>(
+    db: &C,
     cache_id: Uuid,
     trunc_unit: &str,
     back_interval: &str,
@@ -215,7 +215,7 @@ pub async fn get_cache_stats(
 
     // Total compressed bytes and package count for this cache.
     let total_row = state
-        .db
+        .web_db
         .query_one(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"SELECT COALESCE(SUM(cp.file_size), 0)::bigint AS total_bytes,

@@ -12,7 +12,7 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use core::sources::get_hash_from_url;
 use core::types::*;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -91,8 +91,8 @@ async fn resolve_effective_hash(state: &Arc<ServerState>, path_hash: &str) -> We
     resolve_effective_hash_db(&state.web_db, path_hash).await
 }
 
-pub(crate) async fn resolve_effective_hash_db(
-    db: &DatabaseConnection,
+pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
+    db: &C,
     path_hash: &str,
 ) -> WebResult<String> {
     let file_hash_prefixed = format!("sha256:{}", path_hash);
@@ -115,12 +115,16 @@ fn spawn_nar_traffic_metric(state: Arc<ServerState>, cache_id: Uuid, bytes_len: 
     });
 }
 
+/// Bookkeeping update spawned after every successful NAR fetch. Uses
+/// `worker_db` (not `web_db`) on purpose: under heavy NAR traffic this
+/// fire-and-forget UPDATE would otherwise contend with foreground HTTP
+/// requests on the web pool.
 fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: Uuid, hash: String) {
     tokio::spawn(async move {
         use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
         let now = chrono::Utc::now().naive_utc();
         let _ = state
-            .db
+            .worker_db
             .execute(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 "UPDATE cache_derivation SET last_fetched_at = $1 \

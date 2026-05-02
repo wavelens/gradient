@@ -40,7 +40,7 @@ pub(super) async fn record_nar_push_metric(
 
     let org_cache = EOrganizationCache::find()
         .filter(COrganizationCache::Organization.eq(org_id))
-        .one(&state.db)
+        .one(&state.worker_db)
         .await?
         .ok_or_else(|| anyhow::anyhow!("no cache for org {}", org_id))?;
 
@@ -63,14 +63,14 @@ async fn upsert_cache_metric(
     match ECacheMetric::find()
         .filter(CCacheMetric::Cache.eq(cache_id))
         .filter(CCacheMetric::BucketTime.eq(bucket))
-        .one(&state.db)
+        .one(&state.worker_db)
         .await?
     {
         Some(metric) => {
             let mut am: ACacheMetric = metric.into_active_model();
             am.bytes_sent = Set(am.bytes_sent.unwrap() + bytes);
             am.nar_count = Set(am.nar_count.unwrap() + 1);
-            am.update(&state.db).await?;
+            am.update(&state.worker_db).await?;
         }
         None => {
             let am = ACacheMetric {
@@ -80,7 +80,7 @@ async fn upsert_cache_metric(
                 bytes_sent: Set(bytes),
                 nar_count: Set(1),
             };
-            am.insert(&state.db).await?;
+            am.insert(&state.worker_db).await?;
         }
     }
 
@@ -120,7 +120,7 @@ pub(super) async fn mark_nar_stored(
 
     let cached_path_row = match ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash))
-        .one(&state.db)
+        .one(&state.worker_db)
         .await?
     {
         Some(row) => {
@@ -135,7 +135,7 @@ pub(super) async fn mark_nar_stored(
             if record.deriver.is_some() {
                 active.deriver = Set(record.deriver.map(str::to_owned));
             }
-            active.update(&state.db).await?
+            active.update(&state.worker_db).await?
         }
         None => {
             let am = ACachedPath {
@@ -152,14 +152,14 @@ pub(super) async fn mark_nar_stored(
                 deriver: Set(record.deriver.map(str::to_owned)),
                 created_at: Set(now),
             };
-            match am.insert(&state.db).await {
+            match am.insert(&state.worker_db).await {
                 Ok(row) => row,
                 Err(e) => {
                     warn!(store_path, error = %e, "failed to insert cached_path (may be a race)");
                     // Try to find the row that was inserted concurrently.
                     match ECachedPath::find()
                         .filter(CCachedPath::Hash.eq(hash))
-                        .one(&state.db)
+                        .one(&state.worker_db)
                         .await?
                     {
                         Some(row) => row,
@@ -178,13 +178,13 @@ pub(super) async fn mark_nar_stored(
     // so this is the field that has to match.
     let outputs = EDerivationOutput::find()
         .filter(CDerivationOutput::Hash.eq(hash))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await?;
     for row in outputs {
         let mut active = row.into_active_model();
         active.is_cached = Set(true);
         active.cached_path = Set(Some(cached_path_row.id));
-        if let Err(e) = active.update(&state.db).await {
+        if let Err(e) = active.update(&state.worker_db).await {
             warn!(store_path, error = %e, "failed to mark derivation_output cached");
         } else {
             info!(
@@ -224,7 +224,7 @@ async fn ensure_signature_placeholders(
 
     let org_caches = match EOrganizationCache::find()
         .filter(COrganizationCache::Organization.eq(org_id))
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
     {
         Ok(v) => v,
@@ -238,7 +238,7 @@ async fn ensure_signature_placeholders(
         let exists = ECachedPathSignature::find()
             .filter(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
             .filter(CCachedPathSignature::Cache.eq(oc.cache))
-            .one(&state.db)
+            .one(&state.worker_db)
             .await
             .unwrap_or(None)
             .is_some();
@@ -253,7 +253,7 @@ async fn ensure_signature_placeholders(
             signature: Set(None),
             created_at: Set(now),
         };
-        if let Err(e) = am.insert(&state.db).await {
+        if let Err(e) = am.insert(&state.worker_db).await {
             warn!(
                 store_path = %cached_path_row.store_path,
                 cache = %oc.cache,

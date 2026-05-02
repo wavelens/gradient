@@ -73,7 +73,7 @@ pub async fn update_build_status(
     active_build.status = Set(status);
     active_build.updated_at = Set(now);
 
-    match active_build.update(&state.db).await {
+    match active_build.update(&state.worker_db).await {
         Ok(updated_build) => {
             let webhook_state = Arc::clone(&state);
             let webhook_build = updated_build.clone();
@@ -150,7 +150,7 @@ pub async fn update_evaluation_status(
                 .add(CEvaluation::Status.ne(EvaluationStatus::Failed))
                 .add(CEvaluation::Status.ne(EvaluationStatus::Completed)),
         )
-        .exec(&state.db)
+        .exec(&state.worker_db)
         .await;
 
     match update_result {
@@ -158,7 +158,7 @@ pub async fn update_evaluation_status(
             // Row was concurrently transitioned to a terminal state —
             // honor it and return the fresh value instead of clobbering.
             return EEvaluation::find_by_id(evaluation.id)
-                .one(&state.db)
+                .one(&state.worker_db)
                 .await
                 .ok()
                 .flatten()
@@ -172,7 +172,7 @@ pub async fn update_evaluation_status(
     }
 
     let updated_eval = EEvaluation::find_by_id(evaluation.id)
-        .one(&state.db)
+        .one(&state.worker_db)
         .await
         .ok()
         .flatten()
@@ -231,7 +231,7 @@ pub async fn update_evaluation_status_with_error(
         source: Set(source),
         created_at: Set(Utc::now().naive_utc()),
     };
-    if let Err(e) = EEvaluationMessage::insert(msg).exec(&state.db).await {
+    if let Err(e) = EEvaluationMessage::insert(msg).exec(&state.worker_db).await {
         error!(error = %e, evaluation_id = %evaluation.id, "Failed to insert evaluation_message");
     }
 
@@ -257,7 +257,7 @@ pub async fn record_evaluation_message(
         source: Set(source),
         created_at: Set(Utc::now().naive_utc()),
     };
-    if let Err(e) = EEvaluationMessage::insert(msg).exec(&state.db).await {
+    if let Err(e) = EEvaluationMessage::insert(msg).exec(&state.worker_db).await {
         error!(error = %e, %evaluation_id, "Failed to insert evaluation_message");
     }
 }
@@ -275,7 +275,7 @@ pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) 
                 .add(CBuild::Status.eq(BuildStatus::Queued))
                 .add(CBuild::Status.eq(BuildStatus::Building)),
         )
-        .all(&state.db)
+        .all(&state.worker_db)
         .await
     {
         Ok(builds) => builds,

@@ -14,8 +14,7 @@ use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter,
-    QueryOrder,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder,
 };
 use thiserror::Error;
 use uuid::Uuid;
@@ -38,8 +37,8 @@ pub enum TriggerError {
 /// - Inserts a `Commit` row, then an `Evaluation` row with status `Queued`.
 /// - Sets `project.force_evaluation = true` and resets `last_check_at` so the
 ///   scheduler picks it up immediately on its next tick.
-pub async fn trigger_evaluation(
-    db: &DatabaseConnection,
+pub async fn trigger_evaluation<C: ConnectionTrait>(
+    db: &C,
     project: &MProject,
     commit_hash: Vec<u8>,
     commit_message: Option<String>,
@@ -120,8 +119,8 @@ pub(crate) fn restart_build_status(prev: BuildStatus) -> BuildStatus {
 ///
 /// Entry points are copied from the previous evaluation and linked to the new builds.
 /// The scheduler's build-dispatch loop will pick up the `Queued` builds on its next tick.
-pub async fn trigger_restart_builds(
-    db: &DatabaseConnection,
+pub async fn trigger_restart_builds<C: ConnectionTrait>(
+    db: &C,
     project: &MProject,
 ) -> Result<MEvaluation, TriggerError> {
     // Guard: reject if an evaluation is already in progress.
