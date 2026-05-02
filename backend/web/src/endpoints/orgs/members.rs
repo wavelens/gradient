@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::load_org_member;
+use super::load_admin_org;
 use crate::authorization::MaybeUser;
 use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
@@ -114,7 +114,7 @@ pub async fn post_organization_users(
     Path(organization): Path<String>,
     Json(body): Json<AddUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization = load_org_member(&state, user.id, organization).await?;
+    let organization = load_admin_org(&state, user.id, organization).await?;
     let target_user = find_user_by_username(&state, &body.user).await?;
 
     if find_org_membership(&state, organization.id, target_user.id)
@@ -157,7 +157,7 @@ pub async fn patch_organization_users(
     Path(organization): Path<String>,
     Json(body): Json<AddUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization = load_org_member(&state, user.id, organization).await?;
+    let organization = load_admin_org(&state, user.id, organization).await?;
     let target_user = find_user_by_username(&state, &body.user).await?;
 
     let membership = find_org_membership(&state, organization.id, target_user.id)
@@ -186,7 +186,7 @@ pub async fn delete_organization_users(
     Path(organization): Path<String>,
     Json(body): Json<RemoveUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization = load_org_member(&state, user.id, organization).await?;
+    let organization = load_admin_org(&state, user.id, organization).await?;
     let target_user = find_user_by_username(&state, &body.user).await?;
 
     let membership = find_org_membership(&state, organization.id, target_user.id)
