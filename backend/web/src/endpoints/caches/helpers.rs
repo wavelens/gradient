@@ -189,13 +189,7 @@ impl<'a> CacheOpsHandler<'a> {
         let deriver = cached_path_row.deriver.clone();
         let ca = cached_path_row.ca.clone();
 
-        let sig_url = self
-            .state
-            .cli
-            .serve_url
-            .replace("https://", "")
-            .replace("http://", "")
-            .replace(":", "-");
+        let sig_url = core::sources::cache_key_host(&self.state.cli.serve_url);
 
         let sig = format!("{}-{}:{}", sig_url, cache.name, signature);
 
@@ -266,13 +260,7 @@ impl<'a> CacheOpsHandler<'a> {
             .signature
             .ok_or_else(|| WebError::not_found("Signature not yet computed"))?;
 
-        let sig_url = self
-            .state
-            .cli
-            .serve_url
-            .replace("https://", "")
-            .replace("http://", "")
-            .replace(":", "-");
+        let sig_url = core::sources::cache_key_host(&self.state.cli.serve_url);
         let sig = format!("{}-{}:{}", sig_url, cache.name, signature);
 
         let file_hash = cached_path_row

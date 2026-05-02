@@ -22,6 +22,15 @@ use async_trait::async_trait;
 use std::path::PathBuf;
 use thiserror::Error;
 
+/// Strips the URL scheme and replaces `:` with `-` to form the host portion of
+/// a cache signing key name (`{base_url}-{cache_name}:{sig_or_pubkey}`).
+pub fn cache_key_host(serve_url: &str) -> String {
+    serve_url
+        .replace("https://", "")
+        .replace("http://", "")
+        .replace(":", "-")
+}
+
 #[derive(Debug, Clone, Error)]
 pub enum SourceError {
     #[error("Failed to read file: {reason}")]

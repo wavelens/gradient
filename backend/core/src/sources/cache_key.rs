@@ -54,10 +54,7 @@ pub fn format_cache_public_key(
         cache.public_key.clone()
     };
 
-    let base_url = url
-        .replace("https://", "")
-        .replace("http://", "")
-        .replace(":", "-");
+    let base_url = super::cache_key_host(&url);
 
     Ok(format!("{}-{}:{}", base_url, cache.name, pubkey_b64))
 }
@@ -89,10 +86,7 @@ pub fn format_cache_key(
 ) -> Result<String, SourceError> {
     let decrypted_key = decrypt_signing_key(secret_file, cache.clone())?;
 
-    let base_url = url
-        .replace("https://", "")
-        .replace("http://", "")
-        .replace(":", "-");
+    let base_url = super::cache_key_host(&url);
 
     Ok(format!(
         "{}-{}:{}",
@@ -146,10 +140,7 @@ pub fn sign_narinfo_fingerprint(
     let sig = secret_key.sign(fingerprint.as_bytes(), None);
     let sig_b64 = general_purpose::STANDARD.encode(*sig);
 
-    let base_url = serve_url
-        .replace("https://", "")
-        .replace("http://", "")
-        .replace(":", "-");
+    let base_url = super::cache_key_host(&serve_url);
 
     Ok(format!("{}-{}:{}", base_url, cache.name, sig_b64))
 }
