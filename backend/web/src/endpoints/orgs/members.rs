@@ -73,7 +73,7 @@ pub async fn get_organization_users(
         get_org_readable(&state.0, organization, &maybe_user, "Organization").await?;
 
     let organization_users = EOrganizationUser::find()
-        .join(JoinType::InnerJoin, ROrganizationUser::User.def())
+        .join(JoinType::InnerJoin, entity::organization_user::Relation::User.def())
         .select_also(entity::user::Entity)
         .filter(COrganizationUser::Organization.eq(organization.id))
         .all(&state.web_db)

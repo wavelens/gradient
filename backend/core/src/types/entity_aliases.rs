@@ -4,6 +4,19 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+//! Single-letter prefix aliases for sea-orm entity types.
+//!
+//! Mapping:
+//! - `E*` → `entity::*::Entity` — the type carrying `find()`, `insert()`, etc.
+//! - `M*` → `entity::*::Model` — a fully-loaded row.
+//! - `A*` → `entity::*::ActiveModel` — for inserts/updates.
+//! - `C*` → `entity::*::Column` — column references for filters.
+//!
+//! These aliases are pervasive in older code; new code may prefer the
+//! canonical `entity::api::Entity` form, which is what sea-orm tutorials use
+//! and what ripgrep on `Entity` will surface. Migrating callers is tracked
+//! separately — keeping the aliases here avoids a 1000+ site mass rename.
+
 use entity::*;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -141,33 +154,11 @@ pub type CUser = user::Column;
 pub type CWebhook = webhook::Column;
 pub type CWorkerRegistration = worker_registration::Column;
 
-pub type RApi = api::Relation;
-pub type RBuild = build::Relation;
-pub type RCache = cache::Relation;
-pub type RCacheDerivation = cache_derivation::Relation;
-pub type RCachedPath = cached_path::Relation;
-pub type RCommit = commit::Relation;
-pub type RDerivation = derivation::Relation;
-pub type RDerivationDependency = derivation_dependency::Relation;
-pub type RDerivationFeature = derivation_feature::Relation;
-pub type RDerivationOutput = derivation_output::Relation;
-pub type RCachedPathSignature = cached_path_signature::Relation;
-pub type RDirectBuild = direct_build::Relation;
-pub type REntryPoint = entry_point::Relation;
-pub type REntryPointMessage = entry_point_message::Relation;
-pub type REvaluation = evaluation::Relation;
-pub type REvaluationMessage = evaluation_message::Relation;
+// `R*` (Relation) aliases removed — sea-orm relations are referenced via the
+// `Entity::has_many` / `belongs_to` builder API rather than the `Relation`
+// enum directly. The aliases were unused outside this file. If a future
+// caller needs a relation type, prefer `entity::api::Relation`.
 pub use evaluation_message::MessageLevel;
-pub type RFeature = feature::Relation;
-pub type RIntegration = integration::Relation;
-pub type ROrganization = organization::Relation;
-pub type ROrganizationCache = organization_cache::Relation;
-pub type ROrganizationUser = organization_user::Relation;
-pub type RProject = project::Relation;
-pub type RProjectIntegration = project_integration::Relation;
-pub type RRole = role::Relation;
-pub type RUser = user::Relation;
-pub type RWebhook = webhook::Relation;
 
 /// Convenience bundle for code that needs the attempt fields (`MBuild`) and
 /// the spec fields (`MDerivation`) together. Produced by joining `build` on
