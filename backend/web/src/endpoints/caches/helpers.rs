@@ -20,93 +20,98 @@ use std::sync::Arc;
 use tracing::error;
 use uuid::Uuid;
 
-/// Bundles `&Arc<ServerState>` to avoid threading it through every cache-auth
-/// and NAR-management helper as a free-function parameter.
-struct CacheOpsHandler<'a> {
-    state: &'a Arc<ServerState>,
+/// Extracts HTTP Basic Auth credentials and resolves them to a user.
+/// The password field is treated as a JWT or API key (the username is ignored).
+async fn try_authenticate_basic(state: &Arc<ServerState>, headers: &HeaderMap) -> Option<MUser> {
+    let auth = headers.get(axum::http::header::AUTHORIZATION)?;
+    let val = auth.to_str().ok()?;
+    let encoded = val.strip_prefix("Basic ")?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    let creds = String::from_utf8(decoded).ok()?;
+    let password = creds.split_once(':').map(|(_, p)| p)?.to_string();
+    let token_data = decode_jwt(State(Arc::clone(state)), password)
+        .await
+        .ok()?;
+    EUser::find_by_id(token_data.claims.id)
+        .one(&state.web_db)
+        .await
+        .ok()
+        .flatten()
 }
 
-impl<'a> CacheOpsHandler<'a> {
-    fn new(state: &'a Arc<ServerState>) -> Self {
-        Self { state }
+/// Returns true if `user` is allowed to read `cache`.
+/// Access is granted when the user is the cache owner or belongs to any
+/// organization that subscribes to the cache.
+async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &MUser) -> bool {
+    if cache.created_by == user.id {
+        return true;
     }
 
-    /// Extracts HTTP Basic Auth credentials and resolves them to a user.
-    /// The password field is treated as a JWT or API key (the username is ignored).
-    async fn try_authenticate_basic(&self, headers: &HeaderMap) -> Option<MUser> {
-        let auth = headers.get(axum::http::header::AUTHORIZATION)?;
-        let val = auth.to_str().ok()?;
-        let encoded = val.strip_prefix("Basic ")?;
-        let decoded = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .ok()?;
-        let creds = String::from_utf8(decoded).ok()?;
-        let password = creds.split_once(':').map(|(_, p)| p)?.to_string();
-        let token_data = decode_jwt(State(Arc::clone(self.state)), password)
-            .await
-            .ok()?;
-        EUser::find_by_id(token_data.claims.id)
-            .one(&self.state.web_db)
-            .await
-            .ok()
-            .flatten()
+    let org_ids: Vec<uuid::Uuid> = EOrganizationUser::find()
+        .filter(COrganizationUser::User.eq(user.id))
+        .all(&state.web_db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|ou| ou.organization)
+        .collect();
+
+    if org_ids.is_empty() {
+        return false;
     }
 
-    /// Returns true if `user` is allowed to read `cache`.
-    /// Access is granted when the user is the cache owner or belongs to any
-    /// organization that subscribes to the cache.
-    async fn user_can_access_cache(&self, cache: &MCache, user: &MUser) -> bool {
-        if cache.created_by == user.id {
-            return true;
-        }
+    EOrganizationCache::find()
+        .filter(COrganizationCache::Cache.eq(cache.id))
+        .filter(COrganizationCache::Organization.is_in(org_ids))
+        .one(&state.web_db)
+        .await
+        .unwrap_or(None)
+        .is_some()
+}
 
-        let org_ids: Vec<uuid::Uuid> = EOrganizationUser::find()
-            .filter(COrganizationUser::User.eq(user.id))
-            .all(&self.state.web_db)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|ou| ou.organization)
-            .collect();
-
-        if org_ids.is_empty() {
-            return false;
-        }
-
-        EOrganizationCache::find()
-            .filter(COrganizationCache::Cache.eq(cache.id))
-            .filter(COrganizationCache::Organization.is_in(org_ids))
-            .one(&self.state.web_db)
-            .await
-            .unwrap_or(None)
-            .is_some()
+/// Checks authorization for a private cache request.
+/// Returns `Ok(())` if the cache is public or if valid credentials grant access.
+/// Returns `Err(Unauthorized)` otherwise.
+async fn require_cache_auth(
+    state: &Arc<ServerState>,
+    headers: &HeaderMap,
+    cache: &MCache,
+) -> WebResult<()> {
+    if cache.public {
+        return Ok(());
     }
 
-    /// Checks authorization for a private cache request.
-    /// Returns `Ok(())` if the cache is public or if valid credentials grant access.
-    /// Returns `Err(Unauthorized)` otherwise.
-    async fn require_cache_auth(&self, headers: &HeaderMap, cache: &MCache) -> WebResult<()> {
-        if cache.public {
-            return Ok(());
-        }
-
-        let maybe_user = self.try_authenticate_basic(headers).await;
-        match maybe_user {
-            Some(user) if self.user_can_access_cache(cache, &user).await => Ok(()),
-            _ => Err(WebError::Unauthorized(
-                "Authentication required to access this cache".to_string(),
-            )),
-        }
+    let maybe_user = try_authenticate_basic(state, headers).await;
+    match maybe_user {
+        Some(user) if user_can_access_cache(state, cache, &user).await => Ok(()),
+        _ => Err(WebError::Unauthorized(
+            "Authentication required to access this cache".to_string(),
+        )),
     }
+}
 
-    async fn get_nar_by_hash(&self, cache: MCache, hash: String) -> Result<NixPathInfo, WebError> {
+pub(super) async fn get_nar_by_hash(
+    state: Arc<ServerState>,
+    cache: MCache,
+    hash: String,
+) -> Result<NixPathInfo, WebError> {
+    get_nar_by_hash_inner(&state, cache, hash).await
+}
+
+async fn get_nar_by_hash_inner(
+    state: &Arc<ServerState>,
+    cache: MCache,
+    hash: String,
+) -> Result<NixPathInfo, WebError> {
         let build_output = EDerivationOutput::find()
             .filter(
                 Condition::all()
                     .add(CDerivationOutput::IsCached.eq(true))
                     .add(CDerivationOutput::Hash.eq(hash.clone())),
             )
-            .one(&self.state.web_db)
+            .one(&state.web_db)
             .await
             .map_err(WebError::from)?;
 
@@ -115,12 +120,12 @@ impl<'a> CacheOpsHandler<'a> {
         // `cached_path`. Fall back to that lookup.
         let build_output = match build_output {
             Some(o) => o,
-            None => return self.get_nar_by_cached_path(cache, hash).await,
+            None => return get_nar_by_cached_path(state, cache, hash).await,
         };
 
         // Verify the derivation belongs to an org that subscribes to this cache.
         let derivation = EDerivation::find_by_id(build_output.derivation)
-            .one(&self.state.web_db)
+            .one(&state.web_db)
             .await
             .map_err(WebError::from)?
             .ok_or_else(|| WebError::not_found("Path"))?;
@@ -133,7 +138,7 @@ impl<'a> CacheOpsHandler<'a> {
                     .add(COrganizationCache::Organization.eq(organization_id))
                     .add(COrganizationCache::Cache.eq(cache.id)),
             )
-            .one(&self.state.web_db)
+            .one(&state.web_db)
             .await
             .map_err(WebError::from)?
             .is_some();
@@ -145,7 +150,7 @@ impl<'a> CacheOpsHandler<'a> {
         // Look up signature via cached_path → cached_path_signature for this cache.
         let cached_path_row = ECachedPath::find()
             .filter(CCachedPath::Hash.eq(hash.clone()))
-            .one(&self.state.web_db)
+            .one(&state.web_db)
             .await
             .map_err(WebError::from)?
             .ok_or_else(|| WebError::not_found("CachedPath"))?;
@@ -156,7 +161,7 @@ impl<'a> CacheOpsHandler<'a> {
                     .add(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
                     .add(CCachedPathSignature::Cache.eq(cache.id)),
             )
-            .one(&self.state.web_db)
+            .one(&state.web_db)
             .await
             .map_err(WebError::from)?
             .ok_or_else(|| WebError::not_found("Signature"))?;
@@ -189,7 +194,7 @@ impl<'a> CacheOpsHandler<'a> {
         let deriver = cached_path_row.deriver.clone();
         let ca = cached_path_row.ca.clone();
 
-        let sig_url = core::sources::cache_key_host(&self.state.cli.serve_url);
+        let sig_url = core::sources::cache_key_host(&state.cli.serve_url);
 
         let sig = format!("{}-{}:{}", sig_url, cache.name, signature);
 
@@ -224,19 +229,19 @@ impl<'a> CacheOpsHandler<'a> {
         })
     }
 
-    /// Narinfo lookup for store paths that aren't build outputs — notably
-    /// `.drv` files. Access is gated on the signature row for `cache.id`:
-    /// its existence proves the caller-authorised cache also holds the
-    /// path.  All metadata comes from `cached_path` because the server
-    /// local store may have GC'd the drv already.
-    async fn get_nar_by_cached_path(
-        &self,
-        cache: MCache,
-        hash: String,
-    ) -> Result<NixPathInfo, WebError> {
+/// Narinfo lookup for store paths that aren't build outputs — notably
+/// `.drv` files. Access is gated on the signature row for `cache.id`:
+/// its existence proves the caller-authorised cache also holds the
+/// path.  All metadata comes from `cached_path` because the server
+/// local store may have GC'd the drv already.
+async fn get_nar_by_cached_path(
+    state: &Arc<ServerState>,
+    cache: MCache,
+    hash: String,
+) -> Result<NixPathInfo, WebError> {
         let cached_path_row = ECachedPath::find()
             .filter(CCachedPath::Hash.eq(hash.clone()))
-            .one(&self.state.web_db)
+            .one(&state.web_db)
             .await
             .map_err(WebError::from)?
             .ok_or_else(|| WebError::not_found("Path"))?;
@@ -251,7 +256,7 @@ impl<'a> CacheOpsHandler<'a> {
                     .add(CCachedPathSignature::CachedPath.eq(cached_path_row.id))
                     .add(CCachedPathSignature::Cache.eq(cache.id)),
             )
-            .one(&self.state.web_db)
+            .one(&state.web_db)
             .await
             .map_err(WebError::from)?
             .ok_or_else(|| WebError::not_found("Signature"))?;
@@ -260,7 +265,7 @@ impl<'a> CacheOpsHandler<'a> {
             .signature
             .ok_or_else(|| WebError::not_found("Signature not yet computed"))?;
 
-        let sig_url = core::sources::cache_key_host(&self.state.cli.serve_url);
+        let sig_url = core::sources::cache_key_host(&state.cli.serve_url);
         let sig = format!("{}-{}:{}", sig_url, cache.name, signature);
 
         let file_hash = cached_path_row
@@ -307,11 +312,15 @@ impl<'a> CacheOpsHandler<'a> {
         })
     }
 
-    async fn cleanup_nars_for_orgs(&self, org_ids: Vec<Uuid>) {
+pub(super) async fn cleanup_nars_for_orgs(state: Arc<ServerState>, org_ids: Vec<Uuid>) {
+    cleanup_nars_for_orgs_inner(&state, org_ids).await
+}
+
+async fn cleanup_nars_for_orgs_inner(state: &Arc<ServerState>, org_ids: Vec<Uuid>) {
         for org_id in org_ids {
             let remaining = EOrganizationCache::find()
                 .filter(COrganizationCache::Organization.eq(org_id))
-                .one(&self.state.web_db)
+                .one(&state.web_db)
                 .await
                 .unwrap_or(None);
 
@@ -321,7 +330,7 @@ impl<'a> CacheOpsHandler<'a> {
 
             let derivation_ids: Vec<Uuid> = EDerivation::find()
                 .filter(CDerivation::Organization.eq(org_id))
-                .all(&self.state.web_db)
+                .all(&state.web_db)
                 .await
                 .unwrap_or_default()
                 .into_iter()
@@ -334,44 +343,23 @@ impl<'a> CacheOpsHandler<'a> {
                         .add(CDerivationOutput::Derivation.is_in(derivation_ids))
                         .add(CDerivationOutput::IsCached.eq(true)),
                 )
-                .all(&self.state.web_db)
+                .all(&state.web_db)
                 .await
                 .unwrap_or_default();
 
             for output in outputs {
-                if let Err(e) = self.state.nar_storage.delete(&output.hash).await {
+                if let Err(e) = state.nar_storage.delete(&output.hash).await {
                     error!(error = %e, hash = %output.hash, "Failed to remove NAR from storage");
                 }
 
                 let mut active = output.into_active_model();
                 active.is_cached = Set(false);
-                if let Err(e) = active.update(&self.state.web_db).await {
+                if let Err(e) = active.update(&state.web_db).await {
                     error!(error = %e, "Failed to update derivation_output is_cached flag");
                 }
             }
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Public(super) API — thin wrappers used by sibling modules
-// ---------------------------------------------------------------------------
-
-pub(super) async fn get_nar_by_hash(
-    state: Arc<ServerState>,
-    cache: MCache,
-    hash: String,
-) -> Result<NixPathInfo, WebError> {
-    CacheOpsHandler::new(&state)
-        .get_nar_by_hash(cache, hash)
-        .await
-}
-
-pub(super) async fn cleanup_nars_for_orgs(state: Arc<ServerState>, org_ids: Vec<Uuid>) {
-    CacheOpsHandler::new(&state)
-        .cleanup_nars_for_orgs(org_ids)
-        .await
-}
 
 // ---------------------------------------------------------------------------
 // Resolved context for a Nix cache protocol request
@@ -403,9 +391,7 @@ impl CacheContext {
             return Err(WebError::BadRequest("Cache is disabled".to_string()));
         }
 
-        CacheOpsHandler::new(state)
-            .require_cache_auth(headers, &cache)
-            .await?;
+        require_cache_auth(state, headers, &cache).await?;
 
         Ok(Self { cache })
     }
