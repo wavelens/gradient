@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::load_editable_org;
+use super::load_admin_org;
 use crate::authorization::MaybeUser;
 use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
@@ -363,7 +363,7 @@ pub async fn patch_organization(
     Path(organization): Path<String>,
     Json(body): Json<PatchOrganizationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization = load_editable_org(&state, user.id, organization).await?;
+    let organization = load_admin_org(&state, user.id, organization).await?;
     let mut aorganization: AOrganization = organization.into();
 
     if let Some(name) = body.name {
@@ -410,7 +410,7 @@ pub async fn delete_organization(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization = load_editable_org(&state, user.id, organization).await?;
+    let organization = load_admin_org(&state, user.id, organization).await?;
     let aorganization: AOrganization = organization.into();
     aorganization.delete(&state.web_db).await?;
 

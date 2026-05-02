@@ -20,7 +20,11 @@ pub use self::workers::*;
 
 use crate::error::{WebError, WebResult};
 use core::db::get_organization_by_name;
-use core::types::{MOrganization, ServerState};
+use core::types::consts::BASE_ROLE_ADMIN_ID;
+use core::types::{
+    COrganizationUser, EOrganizationUser, MOrganization, MOrganizationUser, ServerState,
+};
+use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -52,4 +56,161 @@ pub(super) async fn load_editable_org(
         ));
     }
     Ok(org)
+}
+
+/// Load the caller's membership row for `org_id`, or `None` if not a member.
+pub(super) async fn load_org_membership(
+    state: &Arc<ServerState>,
+    user_id: Uuid,
+    org_id: Uuid,
+) -> WebResult<Option<MOrganizationUser>> {
+    Ok(EOrganizationUser::find()
+        .filter(
+            Condition::all()
+                .add(COrganizationUser::Organization.eq(org_id))
+                .add(COrganizationUser::User.eq(user_id)),
+        )
+        .one(&state.web_db)
+        .await?)
+}
+
+/// Load an organization that the user administers.
+///
+/// Requires (1) the org exists, (2) the user is a member, and
+/// (3) the user holds the admin role. Also rejects state-managed orgs.
+pub(super) async fn load_admin_org(
+    state: &Arc<ServerState>,
+    user_id: Uuid,
+    org_name: String,
+) -> WebResult<MOrganization> {
+    let org = load_editable_org(state, user_id, org_name).await?;
+    let membership = load_org_membership(state, user_id, org.id)
+        .await?
+        .ok_or_else(|| WebError::not_found("Organization"))?;
+    if membership.role != BASE_ROLE_ADMIN_ID {
+        return Err(WebError::Forbidden(
+            "Admin role required for this operation".to_string(),
+        ));
+    }
+    Ok(org)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::WebError;
+    use core::ci::WebhookClient;
+    use core::storage::{EmailSender, NarStore};
+    use core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID};
+    use sea_orm::{DatabaseBackend, MockDatabase};
+    use test_support::cli::test_cli;
+    use test_support::fakes::email::InMemoryEmailSender;
+    use test_support::fakes::webhooks::RecordingWebhookClient;
+    use test_support::log_storage::NoopLogStorage;
+    use uuid::uuid;
+
+    fn fixture_date() -> chrono::NaiveDateTime {
+        chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+    }
+
+    fn org_fixture() -> entity::organization::Model {
+        entity::organization::Model {
+            id: uuid!("a0000000-0000-0000-0000-000000000001"),
+            name: "test-org".into(),
+            display_name: "Test".into(),
+            description: String::new(),
+            public_key: "ssh".into(),
+            private_key: "enc".into(),
+            public: false,
+            created_by: uuid!("a0000000-0000-0000-0000-000000000004"),
+            created_at: fixture_date(),
+            managed: false,
+            github_installation_id: None,
+        }
+    }
+
+    fn membership_fixture(role: Uuid) -> entity::organization_user::Model {
+        entity::organization_user::Model {
+            id: uuid!("a0000000-0000-0000-0000-000000000010"),
+            organization: uuid!("a0000000-0000-0000-0000-000000000001"),
+            user: uuid!("a0000000-0000-0000-0000-000000000004"),
+            role,
+        }
+    }
+
+    fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
+        let cli = test_cli();
+        let nar_storage = NarStore::local(&cli.base_path).expect("nar store");
+        Arc::new(ServerState {
+            web_db: db,
+            db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+            cli,
+            log_storage: Arc::new(NoopLogStorage),
+            webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
+            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+            nar_storage,
+            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        })
+    }
+
+    #[test]
+    fn admin_member_passes() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let user_id = uuid!("a0000000-0000-0000-0000-000000000004");
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![org_fixture()]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
+                .into_connection();
+            let state = make_state(db);
+            let result = load_admin_org(&state, user_id, "test-org".into()).await;
+            assert!(result.is_ok(), "admin should pass: {:?}", result.err());
+        });
+    }
+
+    #[test]
+    fn non_admin_member_is_forbidden() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let user_id = uuid!("a0000000-0000-0000-0000-000000000004");
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![org_fixture()]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_admin_org(&state, user_id, "test-org".into())
+                .await
+                .expect_err("view-only role must be rejected");
+            assert!(matches!(err, WebError::Forbidden(_)), "got {:?}", err);
+        });
+    }
+
+    #[test]
+    fn non_member_is_not_found() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let user_id = uuid!("a0000000-0000-0000-0000-000000000099");
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([Vec::<entity::organization::Model>::new()])
+                .into_connection();
+            let state = make_state(db);
+            let err = load_admin_org(&state, user_id, "test-org".into())
+                .await
+                .expect_err("non-member must be rejected");
+            assert!(matches!(err, WebError::NotFound(_)), "got {:?}", err);
+        });
+    }
 }
