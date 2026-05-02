@@ -13,12 +13,19 @@
 //! records `cache_derivation` rows when a derivation's full closure has
 //! become cached for a given cache.
 
+use gradient_core::sources::CacheSigner;
 use gradient_core::types::*;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
-use std::collections::HashSet;
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QuerySelect, Set,
+};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::{debug, warn};
 use uuid::Uuid;
+
+/// Max pending rows processed per sweep pass. Bounds memory + time per
+/// invocation; remaining rows are picked up by the next scheduled pass.
+const SIGN_SWEEP_BATCH: u64 = 1000;
 
 /// One pass: sign every pending `cached_path_signature` row and update
 /// `cache_derivation` where newly-signed paths complete a derivation
@@ -26,6 +33,7 @@ use uuid::Uuid;
 pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<()> {
     let pending = ECachedPathSignature::find()
         .filter(CCachedPathSignature::Signature.is_null())
+        .limit(SIGN_SWEEP_BATCH)
         .all(&state.db)
         .await?;
 
@@ -33,33 +41,69 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         return Ok(());
     }
 
+    let cache_ids: Vec<Uuid> = pending.iter().map(|r| r.cache).collect::<HashSet<_>>().into_iter().collect();
+    let cached_path_ids: Vec<Uuid> = pending
+        .iter()
+        .map(|r| r.cached_path)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let caches: HashMap<Uuid, MCache> = ECache::find()
+        .filter(CCache::Id.is_in(cache_ids))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|c| (c.id, c))
+        .collect();
+
+    let cached_paths: HashMap<Uuid, MCachedPath> = ECachedPath::find()
+        .filter(CCachedPath::Id.is_in(cached_path_ids))
+        .all(&state.db)
+        .await?
+        .into_iter()
+        .map(|c| (c.id, c))
+        .collect();
+
+    // Build a per-cache signer once (one crypt-secret read + one private-key
+    // decryption per cache, not per row). `None` marks caches whose key
+    // failed to decode — we skip their rows for this pass.
+    let mut signers: HashMap<Uuid, Option<CacheSigner>> = HashMap::new();
+    for (cache_id, cache) in &caches {
+        if cache.private_key.is_empty() {
+            signers.insert(*cache_id, None);
+            continue;
+        }
+        let signer = match CacheSigner::from_cache(
+            &state.cli.crypt_secret_file,
+            cache,
+            &state.cli.serve_url,
+        ) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                warn!(cache_name = %cache.name, error = %e, "sign sweep: failed to prepare signer");
+                None
+            }
+        };
+        signers.insert(*cache_id, signer);
+    }
+
     let mut touched_caches: HashSet<Uuid> = HashSet::new();
     let mut signed = 0usize;
 
     for row in pending {
-        let cache = match ECache::find_by_id(row.cache).one(&state.db).await {
-            Ok(Some(c)) if !c.private_key.is_empty() => c,
-            Ok(_) => continue,
-            Err(e) => {
-                warn!(cache = %row.cache, error = %e, "sign sweep: failed to load cache");
-                continue;
-            }
+        let Some(cache) = caches.get(&row.cache) else {
+            continue;
+        };
+        let Some(Some(signer)) = signers.get(&row.cache) else {
+            continue;
         };
 
-        let cp = match ECachedPath::find_by_id(row.cached_path)
-            .one(&state.db)
-            .await
-        {
-            Ok(Some(c)) => c,
-            Ok(None) => continue,
-            Err(e) => {
-                warn!(cached_path = %row.cached_path, error = %e, "sign sweep: failed to load cached_path");
-                continue;
-            }
+        let Some(cp) = cached_paths.get(&row.cached_path) else {
+            continue;
         };
 
         let (Some(nar_hash), Some(nar_size)) = (cp.nar_hash.as_deref(), cp.nar_size) else {
-            // Metadata not yet recorded — try again next pass.
             continue;
         };
 
@@ -73,21 +117,8 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 
         let nar_hash_nix32 = hex_hash_to_nix32(nar_hash);
 
-        let sig_token = match gradient_core::sources::sign_narinfo_fingerprint(
-            &state.cli.crypt_secret_file,
-            cache.clone(),
-            state.cli.serve_url.clone(),
-            &cp.store_path,
-            &nar_hash_nix32,
-            nar_size as u64,
-            &refs,
-        ) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!(cache_name = %cache.name, store_path = %cp.store_path, error = %e, "sign sweep: narinfo signing failed");
-                continue;
-            }
-        };
+        let sig_token =
+            signer.sign_narinfo(&cp.store_path, &nar_hash_nix32, nar_size as u64, &refs);
 
         let sig_b64 = sig_token
             .split_once(':')

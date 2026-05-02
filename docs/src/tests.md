@@ -662,3 +662,37 @@ Backend tests (`cargo test -p proto --lib handler::auth`):
   `password_auth`; lowercase hex routes to constant-time SHA-256.
 - The pre-existing `validate_tokens_*` tests using `sha256_hex` continue
   to cover the legacy-format compatibility path.
+
+## Sign sweep — batched, bounded, single crypt-secret read (#105)
+
+`sign_missing_signatures` (in `backend/cache/src/cacher/sign_sweep.rs`)
+used to issue 2 SELECTs per pending row (cache + cached_path), reload
+the crypt-secret file from disk, and re-decrypt each cache's private
+key on every row, with no `LIMIT` on the initial query — at scale this
+became 50k+ DB calls plus 50k+ crypt-secret reads per minute, and a
+single backlog could pin one DB connection indefinitely.
+
+The sweep is now `LIMIT`-bounded (`SIGN_SWEEP_BATCH = 1000` rows per
+pass) and batches the `cache` / `cached_path` lookups into one
+`is_in(...)` query each. Per-cache decrypted keys are wrapped in a new
+`CacheSigner` (in `backend/core/src/sources/cache_key.rs`) built once
+per pass per cache — the crypt secret is read at most once per cache,
+not once per signature. `sign_narinfo_fingerprint` is now a thin
+one-shot wrapper around `CacheSigner::sign_narinfo` so existing
+callers keep working byte-for-byte.
+
+Unit tests (`cargo test -p core --lib sources::cache_key`):
+
+- `cache_signer_matches_one_shot_signer` — for several
+  `(store_path, nar_hash, nar_size, refs)` tuples, asserts that the
+  signature produced by `CacheSigner::sign_narinfo` is byte-identical
+  to the one produced by `sign_narinfo_fingerprint`. Guards against the
+  batching refactor silently changing the on-wire fingerprint.
+- `cache_signer_rejects_bad_key_at_build_time` — a cache row whose
+  `private_key` cannot be base64-decoded fails at
+  `CacheSigner::from_cache`, so the sweep can mark the cache as
+  unsignable for the rest of the pass instead of repeating the
+  decryption error per row.
+
+The pre-existing `cacher::sign_sweep::tests::hex_hash_to_nix32_*`
+suite continues to cover the hash-format conversion path.

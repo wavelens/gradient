@@ -96,6 +96,69 @@ pub fn format_cache_key(
     ))
 }
 
+/// A pre-decrypted signer for a single cache, reusable across many
+/// signatures without re-reading the crypt-secret file or re-decrypting
+/// the cache's private key.
+pub struct CacheSigner {
+    secret_key: SecretKey,
+    cache_name: String,
+    base_url: String,
+}
+
+impl CacheSigner {
+    /// Build a signer from the encrypted cache row by reading the crypt
+    /// secret from `secret_file` once. Subsequent `sign_*` calls reuse the
+    /// in-memory `SecretKey`.
+    pub fn from_cache(
+        secret_file: &str,
+        cache: &MCache,
+        serve_url: &str,
+    ) -> Result<Self, SourceError> {
+        let key_b64 = decrypt_signing_key(secret_file, cache.clone())?;
+        let key_bytes = general_purpose::STANDARD
+            .decode(key_b64.trim())
+            .map_err(|e| SourceError::CacheKeyDecoding {
+                cache: cache.name.clone(),
+                reason: format!("Failed to base64-decode signing key: {}", e),
+            })?;
+        let secret_key =
+            SecretKey::from_slice(&key_bytes).map_err(|_| SourceError::KeyPairConversion)?;
+        Ok(Self {
+            secret_key,
+            cache_name: cache.name.clone(),
+            base_url: super::cache_key_host(serve_url),
+        })
+    }
+
+    /// Sign a narinfo fingerprint with the pre-decoded key.
+    pub fn sign_narinfo(
+        &self,
+        store_path: &str,
+        nar_hash: &str,
+        nar_size: u64,
+        references: &[String],
+    ) -> String {
+        let mut full_refs: Vec<String> = references
+            .iter()
+            .map(|r| {
+                if r.starts_with("/nix/store/") {
+                    r.clone()
+                } else {
+                    format!("/nix/store/{}", r)
+                }
+            })
+            .collect();
+        full_refs.sort();
+        let refs_str = full_refs.join(",");
+
+        let fingerprint = format!("1;{};{};{};{}", store_path, nar_hash, nar_size, refs_str);
+        let sig = self.secret_key.sign(fingerprint.as_bytes(), None);
+        let sig_b64 = general_purpose::STANDARD.encode(*sig);
+
+        format!("{}-{}:{}", self.base_url, self.cache_name, sig_b64)
+    }
+}
+
 /// Signs a Nix narinfo fingerprint directly with the cache's Ed25519 key.
 ///
 /// Fingerprint format: `1;{store_path};{nar_hash};{nar_size};{refs_sorted_comma}`
@@ -103,6 +166,9 @@ pub fn format_cache_key(
 ///
 /// References should be bare store-path names (without `/nix/store/` prefix);
 /// this function adds the prefix before sorting and joining.
+///
+/// One-shot wrapper around [`CacheSigner`] — prefer [`CacheSigner::from_cache`]
+/// when signing many paths for the same cache.
 pub fn sign_narinfo_fingerprint(
     secret_file: &str,
     cache: MCache,
@@ -112,37 +178,8 @@ pub fn sign_narinfo_fingerprint(
     nar_size: u64,
     references: &[String],
 ) -> Result<String, SourceError> {
-    let key_b64 = decrypt_signing_key(secret_file, cache.clone())?;
-    let key_bytes = general_purpose::STANDARD
-        .decode(key_b64.trim())
-        .map_err(|e| SourceError::CacheKeyDecoding {
-            cache: cache.name.clone(),
-            reason: format!("Failed to base64-decode signing key: {}", e),
-        })?;
-
-    let secret_key =
-        SecretKey::from_slice(&key_bytes).map_err(|_| SourceError::KeyPairConversion)?;
-
-    let mut full_refs: Vec<String> = references
-        .iter()
-        .map(|r| {
-            if r.starts_with("/nix/store/") {
-                r.clone()
-            } else {
-                format!("/nix/store/{}", r)
-            }
-        })
-        .collect();
-    full_refs.sort();
-    let refs_str = full_refs.join(",");
-
-    let fingerprint = format!("1;{};{};{};{}", store_path, nar_hash, nar_size, refs_str);
-    let sig = secret_key.sign(fingerprint.as_bytes(), None);
-    let sig_b64 = general_purpose::STANDARD.encode(*sig);
-
-    let base_url = super::cache_key_host(&serve_url);
-
-    Ok(format!("{}-{}:{}", base_url, cache.name, sig_b64))
+    let signer = CacheSigner::from_cache(secret_file, &cache, &serve_url)?;
+    Ok(signer.sign_narinfo(store_path, nar_hash, nar_size, references))
 }
 
 /// Verifies that `narinfo_body` carries at least one `Sig:` line signed by the
@@ -338,6 +375,60 @@ mod tests {
             result.starts_with("cache.example.com-sigcache:"),
             "unexpected prefix: {result}"
         );
+    }
+
+    #[test]
+    fn cache_signer_matches_one_shot_signer() {
+        // CacheSigner reuses the decrypted key across many signatures.
+        // Each output must byte-match the legacy one-shot fingerprint signer
+        // so the sign-sweep batching change is provably side-effect-free.
+        let (_f, path) = temp_secret_file();
+        let (encrypted_priv, pub_b64) =
+            generate_signing_key(&path).expect("generate failed");
+        let cache = make_cache("sigcache", &pub_b64, &encrypted_priv);
+        let serve_url = "https://cache.example.com".to_string();
+
+        let signer = CacheSigner::from_cache(&path, &cache, &serve_url).expect("signer build");
+
+        let cases: &[(&str, &str, u64, &[&str])] = &[
+            ("/nix/store/aaaa-a", "sha256:AAAA", 1, &[]),
+            ("/nix/store/bbbb-b", "sha256:BBBB", 4242, &["aaaa-a"]),
+            (
+                "/nix/store/cccc-c",
+                "sha256:CCCC",
+                999999,
+                &["zzzz-z", "aaaa-a", "/nix/store/yyyy-y"],
+            ),
+        ];
+
+        for (sp, hash, size, refs) in cases {
+            let refs_owned: Vec<String> = refs.iter().map(|s| (*s).to_string()).collect();
+            let one_shot = sign_narinfo_fingerprint(
+                &path,
+                cache.clone(),
+                serve_url.clone(),
+                sp,
+                hash,
+                *size,
+                &refs_owned,
+            )
+            .expect("one-shot sign");
+            let batched = signer.sign_narinfo(sp, hash, *size, &refs_owned);
+            assert_eq!(
+                one_shot, batched,
+                "CacheSigner output must match sign_narinfo_fingerprint for {sp}"
+            );
+        }
+    }
+
+    #[test]
+    fn cache_signer_rejects_bad_key_at_build_time() {
+        // Construction surfaces decryption errors up front so the sweep can
+        // skip the cache for the rest of the pass instead of failing each row.
+        let (_f, path) = temp_secret_file();
+        let cache = make_cache("badcache", "", "!!!not-base64!!!");
+        let res = CacheSigner::from_cache(&path, &cache, "https://cache.example.com");
+        assert!(res.is_err(), "expected build error for corrupt key");
     }
 
     #[test]
