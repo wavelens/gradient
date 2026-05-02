@@ -84,6 +84,49 @@ impl<'a> InputPrefetcher<'a> {
         }
     }
 
+    /// Stage 0 — ensure the build's own `.drv` file is present locally so
+    /// `enumerate_inputs` can read it.
+    ///
+    /// On a build worker that didn't perform the eval, the target drv is not
+    /// on disk: eval ran on a different worker (or in-process on the server),
+    /// pushed produced drvs to the cache via `push_drvs`, and dispatched a
+    /// `BuildJob` carrying only `drv_path` strings. Without this stage,
+    /// `enumerate_inputs` fails with `read .drv … No such file or directory`.
+    async fn ensure_self_drv_present(&mut self) -> Result<()> {
+        let full_drv_path = nix_store_path(self.drv_path);
+        if tokio::fs::try_exists(&full_drv_path).await.unwrap_or(false) {
+            return Ok(());
+        }
+
+        debug!(
+            build_id = %self.build_id,
+            drv = %self.drv_path,
+            "build target drv absent locally; fetching from server cache"
+        );
+
+        let (by_url, by_request) = self.query_and_split(vec![self.drv_path.to_owned()]).await?;
+        let mut batch = self.fetch_by_request(by_request).await?;
+        batch.extend(self.download_by_url(by_url).await);
+
+        if batch.is_empty() {
+            return Err(anyhow::anyhow!(
+                "build target drv {} reported cached but server delivered no NAR",
+                self.drv_path
+            ));
+        }
+
+        self.import_all(batch).await?;
+
+        if !tokio::fs::try_exists(&full_drv_path).await.unwrap_or(false) {
+            return Err(anyhow::anyhow!(
+                "build target drv {} still missing after fetch+import",
+                full_drv_path
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Stage 1 — collect every input store path declared by this derivation.
     ///
     /// Reads `input_sources` (plain paths) and the output paths of each
@@ -399,6 +442,8 @@ impl<'a> InputPrefetcher<'a> {
     /// misbehaving upstream cannot loop forever.
     async fn run(&mut self) -> Result<()> {
         const MAX_ITERATIONS: usize = 1024;
+
+        self.ensure_self_drv_present().await?;
 
         let wanted = self.enumerate_inputs().await?;
         if wanted.is_empty() {
