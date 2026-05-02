@@ -12,6 +12,7 @@ use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -30,6 +31,33 @@ pub struct DirectBuildInfo {
     pub created_at: String,
     pub evaluation_id: String,
     pub status: String,
+}
+
+/// Reject filenames from multipart uploads that would escape the upload root.
+///
+/// Allows nested relative paths (e.g. `src/main.rs`) but rejects absolute
+/// paths, parent (`..`) / current (`.`) components, Windows path prefixes,
+/// empty names, and embedded null bytes.
+pub(crate) fn validate_upload_filename(filename: &str) -> WebResult<()> {
+    if filename.is_empty() {
+        return Err(WebError::BadRequest("Empty filename".to_string()));
+    }
+    if filename.contains('\0') {
+        return Err(WebError::BadRequest("Invalid filename".to_string()));
+    }
+    let path = Path::new(filename);
+    for component in path.components() {
+        match component {
+            Component::Normal(_) => {}
+            _ => {
+                return Err(WebError::BadRequest(format!(
+                    "Invalid file path: {}",
+                    filename
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub async fn post_direct_build(
@@ -63,6 +91,7 @@ pub async fn post_direct_build(
                 Some(f) => f.to_string(),
                 None => return Err(WebError::BadRequest("Invalid file field name".to_string())),
             };
+            validate_upload_filename(&filename)?;
             let data = field.bytes().await.map_err(|e| {
                 WebError::BadRequest(format!("Failed to read file {}: {}", filename, e))
             })?;
@@ -93,12 +122,19 @@ pub async fn post_direct_build(
         WebError::InternalServerError(format!("Failed to create temp directory: {}", e))
     })?;
 
-    // Write files to temp directory
+    let temp_root = PathBuf::from(&temp_dir);
     for (filename, data) in files {
-        let file_path = format!("{}/{}", temp_dir, filename);
+        validate_upload_filename(&filename)?;
+        let file_path = temp_root.join(&filename);
 
-        // Create parent directories if needed
-        if let Some(parent) = std::path::Path::new(&file_path).parent() {
+        if !file_path.starts_with(&temp_root) {
+            return Err(WebError::BadRequest(format!(
+                "Invalid file path: {}",
+                filename
+            )));
+        }
+
+        if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await.map_err(|e| {
                 WebError::InternalServerError(format!("Failed to create directory: {}", e))
             })?;
@@ -230,4 +266,48 @@ pub async fn get_recent_direct_builds(
     };
 
     Ok(Json(res))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_upload_filename;
+
+    #[test]
+    fn accepts_simple_filenames() {
+        assert!(validate_upload_filename("flake.nix").is_ok());
+        assert!(validate_upload_filename("default.nix").is_ok());
+        assert!(validate_upload_filename("src/main.rs").is_ok());
+        assert!(validate_upload_filename("a/b/c/d.txt").is_ok());
+    }
+
+    #[test]
+    fn rejects_empty() {
+        assert!(validate_upload_filename("").is_err());
+    }
+
+    #[test]
+    fn rejects_parent_traversal() {
+        assert!(validate_upload_filename("..").is_err());
+        assert!(validate_upload_filename("../etc/passwd").is_err());
+        assert!(validate_upload_filename("../../../../../etc/cron.d/owned").is_err());
+        assert!(validate_upload_filename("foo/../../bar").is_err());
+        assert!(validate_upload_filename("foo/..").is_err());
+    }
+
+    #[test]
+    fn rejects_absolute_paths() {
+        assert!(validate_upload_filename("/etc/passwd").is_err());
+        assert!(validate_upload_filename("/").is_err());
+    }
+
+    #[test]
+    fn rejects_current_dir_components() {
+        assert!(validate_upload_filename(".").is_err());
+        assert!(validate_upload_filename("./foo").is_err());
+    }
+
+    #[test]
+    fn rejects_null_bytes() {
+        assert!(validate_upload_filename("foo\0bar").is_err());
+    }
 }
