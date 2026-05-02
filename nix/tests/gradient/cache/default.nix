@@ -442,6 +442,7 @@ in {
           print(server.succeed("""su postgres -c "psql -U postgres -d gradient -c \\"SELECT * FROM organization_cache;\\"" """))
           print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT d.id, d.organization FROM derivation d JOIN derivation_output o ON o.derivation = d.id WHERE o.hash = '{store_hash}';\\"" """))
           print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT id, hash, store_path, nar_hash, nar_size, file_hash, file_size FROM cached_path WHERE hash = '{store_hash}';\\"" """))
+          print(server.succeed(f"""su postgres -c "psql -U postgres -d gradient -c \\"SELECT id, hash, is_cached, file_hash, file_size, nar_size, cached_path FROM derivation_output WHERE hash = '{store_hash}';\\"" """))
       print(client.succeed(f"${lib.getExe pkgs.curl} http://server/cache/main/{store_hash}.narinfo -i --fail"))
 
       client.succeed(f"nix-store --delete {store_path} || true")
