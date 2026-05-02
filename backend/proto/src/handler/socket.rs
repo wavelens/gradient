@@ -247,7 +247,7 @@ async fn send_ssh_key_credential(socket: &mut ProtoSocket, state: &ServerState, 
     match EOrganization::find_by_id(org_id).one(&state.db).await {
         Ok(Some(org)) => {
             match gradient_core::sources::ssh_key::decrypt_ssh_private_key(
-                state.cli.crypt_secret_file.clone(),
+                &state.cli.crypt_secret_file,
                 org,
                 &state.cli.serve_url,
             ) {

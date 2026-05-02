@@ -61,7 +61,7 @@ pub async fn get_cache_key(
     let cache = load_cache_for_owner(&state, user.id, cache).await?;
 
     let cache_key = format_cache_key(
-        state.cli.crypt_secret_file.clone(),
+        &state.cli.crypt_secret_file,
         cache,
         state.cli.serve_url.clone(),
     )
@@ -84,7 +84,7 @@ pub async fn get_cache_public_key(
     let cache = load_cache_readable(&state, &maybe_user, cache).await?;
 
     let public_key = format_cache_public_key(
-        state.cli.crypt_secret_file.clone(),
+        &state.cli.crypt_secret_file,
         cache,
         state.cli.serve_url.clone(),
     )

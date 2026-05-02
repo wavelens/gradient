@@ -46,7 +46,7 @@ impl<'a> ProjectGitContext<'a> {
                     id: project.organization,
                 })?;
             Some(super::ssh_key::decrypt_ssh_private_key(
-                state.cli.crypt_secret_file.clone(),
+                &state.cli.crypt_secret_file,
                 organization,
                 &state.cli.serve_url,
             )?)
@@ -273,7 +273,7 @@ async fn prefetch_flake_inner(
     debug!("SSH repository – cloning via libgit2: {}", repository);
 
     let (private_key, public_key) =
-        super::ssh_key::decrypt_ssh_private_key(crypt_secret_file, organization, &serve_url)?;
+        super::ssh_key::decrypt_ssh_private_key(&crypt_secret_file, organization, &serve_url)?;
 
     let (git_url, rev) = parse_nix_git_url(&repository)?;
 

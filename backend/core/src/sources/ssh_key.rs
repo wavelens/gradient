@@ -13,8 +13,8 @@ use ssh_key::{
     Algorithm, LineEnding, PrivateKey, private::Ed25519Keypair, private::Ed25519PrivateKey,
     private::KeypairData, public::Ed25519PublicKey,
 };
-pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), SourceError> {
-    let secret = crate::types::input::load_secret_bytes(&secret_file);
+pub fn generate_ssh_key(secret_file: &str) -> Result<(String, String), SourceError> {
+    let secret = crate::types::input::load_secret_bytes(secret_file);
 
     let keypair = KeyPair::generate();
 
@@ -66,11 +66,11 @@ pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), SourceE
 }
 
 pub fn decrypt_ssh_private_key(
-    secret_file: String,
+    secret_file: &str,
     organization: MOrganization,
     serve_url: &str,
 ) -> Result<(String, String), SourceError> {
-    let secret = crate::types::input::load_secret_bytes(&secret_file);
+    let secret = crate::types::input::load_secret_bytes(secret_file);
 
     let encrypted_private_key = general_purpose::STANDARD
         .decode(organization.clone().private_key)
@@ -174,7 +174,7 @@ mod tests {
         let path = f.path().to_string_lossy().to_string();
         let mut org = make_org("o", "ssh-ed25519 AAAA");
         org.private_key = "!!!not-base64!!!".to_string();
-        let result = decrypt_ssh_private_key(path, org, "https://example.com");
+        let result = decrypt_ssh_private_key(&path, org, "https://example.com");
         assert!(matches!(
             result,
             Err(SourceError::OrganizationKeyDecoding { .. })
@@ -191,7 +191,7 @@ mod tests {
         let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----";
         let mut org = make_org("o", "ssh-ed25519 AAAA");
         org.private_key = general_purpose::STANDARD.encode(pem);
-        let result = decrypt_ssh_private_key(path, org, "https://example.com");
+        let result = decrypt_ssh_private_key(&path, org, "https://example.com");
         assert!(matches!(result, Err(SourceError::KeyDecryption { .. })));
     }
 
@@ -203,7 +203,7 @@ mod tests {
         let path = f.path().to_string_lossy().to_string();
         let mut org = make_org("o", "ssh-ed25519 AAAA");
         org.private_key = general_purpose::STANDARD.encode(b"random garbage not a key");
-        let result = decrypt_ssh_private_key(path, org, "https://example.com");
+        let result = decrypt_ssh_private_key(&path, org, "https://example.com");
         assert!(matches!(result, Err(SourceError::KeyDecryption { .. })));
     }
 
@@ -214,13 +214,13 @@ mod tests {
         let mut f = tempfile::NamedTempFile::new().unwrap();
         std::io::Write::write_all(&mut f, b"test-secret-key-32-bytes-padding!").unwrap();
         let path = f.path().to_string_lossy().to_string();
-        let (enc_priv, pub_openssh) = generate_ssh_key(path.clone()).expect("generate failed");
+        let (enc_priv, pub_openssh) = generate_ssh_key(&path).expect("generate failed");
         assert!(pub_openssh.starts_with("ssh-ed25519 "));
 
         let mut org = make_org("myorg", &pub_openssh);
         org.private_key = enc_priv;
         let (priv_pem, pub_formatted) =
-            decrypt_ssh_private_key(path, org, "https://example.com").expect("decrypt failed");
+            decrypt_ssh_private_key(&path, org, "https://example.com").expect("decrypt failed");
         assert!(priv_pem.starts_with("-----BEGIN OPENSSH PRIVATE KEY-----"));
         assert!(pub_formatted.starts_with(&pub_openssh));
         assert!(pub_formatted.ends_with(" example.com-myorg"));
