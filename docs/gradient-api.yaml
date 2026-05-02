@@ -751,7 +751,10 @@ paths:
     patch:
       tags: [orgs]
       summary: Update organization
-      description: Updates one or more organization fields. Managed organizations cannot be edited via the API.
+      description: |
+        Updates one or more organization fields. Managed organizations cannot
+        be edited via the API. Requires the caller to hold the **admin** role
+        in the organization.
       operationId: patchOrg
       requestBody:
         required: true
@@ -779,7 +782,9 @@ paths:
     delete:
       tags: [orgs]
       summary: Delete organization
-      description: Permanently deletes the organization and all its resources.
+      description: |
+        Permanently deletes the organization and all its resources. Requires
+        the caller to hold the **admin** role in the organization.
       operationId: deleteOrg
       responses:
         '200':
@@ -823,7 +828,9 @@ paths:
     post:
       tags: [orgs]
       summary: Add member
-      description: Adds a user to the organization by username.
+      description: |
+        Adds a user to the organization by username. Requires the caller to
+        hold the **admin** role in the organization.
       operationId: addOrgUser
       requestBody:
         required: true
@@ -842,6 +849,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -849,7 +858,9 @@ paths:
     patch:
       tags: [orgs]
       summary: Update member role
-      description: Updates the role or permissions of an existing organization member.
+      description: |
+        Updates the role or permissions of an existing organization member.
+        Requires the caller to hold the **admin** role in the organization.
       operationId: patchOrgUser
       requestBody:
         required: true
@@ -866,12 +877,16 @@ paths:
                 $ref: '#/components/schemas/StringResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
       tags: [orgs]
       summary: Remove member
-      description: Removes a user from the organization.
+      description: |
+        Removes a user from the organization. Requires the caller to hold the
+        **admin** role in the organization.
       operationId: removeOrgUser
       requestBody:
         required: true
@@ -888,6 +903,8 @@ paths:
                 $ref: '#/components/schemas/StringResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
