@@ -545,6 +545,40 @@ Unit tests (`cargo test -p core --tests ci::webhook`):
 - `validate_url_accepts_public_ipv4_literal` /
   `validate_url_accepts_public_ipv6_literal` — sanity asserts that
   legitimate public IP literals (`8.8.8.8`, `2001:4860:4860::8888`) pass.
+
+## CI reporter base URL — SSRF + redirect token leak (#113)
+
+`GiteaReporter`, `GithubReporter`, and `GithubAppReporter` (in
+`backend/core/src/ci/reporter.rs`) now validate any user-supplied
+`base_url` / `api_base_url` through the same SSRF gate as outgoing
+webhooks (`validate_webhook_url`), and build their reqwest clients with
+`redirect::Policy::none()` so that an attacker cannot pivot a status
+POST to an internal endpoint and leak the integration token via a
+3xx `Location:` header. `reporter_for_project` continues to fall back
+to `NoopCiReporter` when construction fails, with a `warn!` log.
+
+Unit tests (`cargo test -p core --tests ci::reporter`):
+
+- `gitea_reporter_rejects_aws_metadata_ip` /
+  `github_reporter_rejects_aws_metadata_ip` /
+  `github_app_reporter_rejects_aws_metadata_ip` — the motivating
+  attack (`169.254.169.254`) is rejected by all three constructors.
+- `gitea_reporter_rejects_localhost_hostname` /
+  `github_reporter_rejects_localhost_hostname` — literal `localhost`
+  rejected.
+- `gitea_reporter_rejects_loopback_ipv4` /
+  `github_reporter_rejects_ipv6_loopback` — `127.0.0.1`, `[::1]`
+  rejected.
+- `gitea_reporter_rejects_rfc1918` — `10.x`, `192.168.x` rejected.
+- `gitea_reporter_rejects_non_http_scheme` — `file://`, `ftp://`
+  rejected.
+- `github_app_reporter_empty_url_still_uses_default` — empty string
+  continues to fall back to `https://api.github.com` (the field is
+  optional in `integration_lookup`).
+- `reporter_for_project_unsafe_url_falls_back_to_noop` — an unsafe
+  Gitea base URL plumbed through the factory degrades to
+  `NoopCiReporter` rather than crashing the caller.
+
 ## SSH private key decryption — no plaintext fallback
 
 `decrypt_ssh_private_key` in `backend/core/src/sources/ssh_key.rs`
