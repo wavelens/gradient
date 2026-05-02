@@ -2,6 +2,21 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## Org admin RBAC — `load_admin_org`
+
+Adding/promoting/kicking organization members and renaming/deleting an
+organization all require the caller to hold the org **admin** role. The check
+is centralised in `load_admin_org` (`backend/web/src/endpoints/orgs/mod.rs`).
+
+Unit tests in the same file cover three cases:
+
+- `admin_member_passes` — admin role → `Ok(org)`.
+- `non_admin_member_is_forbidden` — view/write role → `WebError::Forbidden`.
+- `non_member_is_not_found` — caller is not in the org → `WebError::NotFound`
+  (no leak between "org missing" and "not a member").
+
+Run with: `cargo test -p web --lib endpoints::orgs::tests`.
+
 ## Proto handshake — organization peer filtering
 
 Helper `filter_org_peers_without_cache` runs during the `/proto` handshake's
