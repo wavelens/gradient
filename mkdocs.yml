@@ -19,6 +19,7 @@ nav:
     - Overview: usage/overview.md
     - CLI: usage/cli.md
     - API: usage/api.md
+    - State: usage/state.md
     - Pull Deployment: usage/pull-deployment.md
     - Forge Integration: usage/integration.md
   - Development:
