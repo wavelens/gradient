@@ -176,6 +176,8 @@ mod tests {
             state_file: None,
             delete_state: true,
             keep_evaluations: 30,
+            max_request_size: 2 * 1024 * 1024,
+            max_direct_build_size: 1024 * 1024 * 1024,
             keep_orphan_derivations_hours: 24,
             eval_workers: 1,
             max_evaluations_per_worker: 0,

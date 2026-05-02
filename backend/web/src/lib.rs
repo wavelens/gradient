@@ -9,6 +9,7 @@ pub mod endpoints;
 pub mod error;
 
 use axum::body::Body;
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, patch, post, put};
 use axum::{Router, middleware};
 use bytes::Bytes;
@@ -219,7 +220,11 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/builds/{build}/download-token",
             get(builds::get_build_download_token),
         )
-        .route("/builds", post(builds::post_direct_build))
+        .route(
+            "/builds",
+            post(builds::post_direct_build)
+                .layer(DefaultBodyLimit::max(state.cli.max_direct_build_size)),
+        )
         .route(
             "/builds/direct/recent",
             get(builds::get_recent_direct_builds),
@@ -410,6 +415,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
     // Default tier covers everything left under /api/v1 (the bulk authenticated
     // surface) plus the proto WS upgrade.
     let api = api.route_layer(GovernorLayer::new(rl_per_ms(200, 150)));
+    let api = api.layer(DefaultBodyLimit::max(state.cli.max_request_size));
 
     let mut app = Router::new()
         .nest("/api/v1", api)

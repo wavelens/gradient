@@ -564,3 +564,27 @@ Tests (`backend/core/src/sources/ssh_key.rs`):
   also fails with `KeyDecryption`.
 - `generate_ssh_key_decrypts_to_openssh_pem` — properly encrypted keys
   still round-trip through decrypt.
+## Body-size limits — webhook and direct-build (#51)
+
+Without a body-size cap, `field.bytes().await` and the `body: Bytes`
+extractor used by `forge_hooks` and `direct_build` would buffer entire
+request bodies into memory, allowing a single 10 GB payload to OOM the
+server. `create_router` (`backend/web/src/lib.rs`) now applies an
+`axum::extract::DefaultBodyLimit::max(cli.max_request_size)` layer to the
+whole API router (default 2 MiB) and overrides it on `POST /api/v1/builds`
+with `cli.max_direct_build_size` (default 1 GiB) for legitimate
+multi-file repository uploads.
+
+Tests (`cargo test -p web --test body_size_limit`):
+
+- `webhook_body_over_limit_returns_413` — a 4 KiB POST to
+  `/api/v1/hooks/github` with `max_request_size = 1024` is rejected with
+  `413 Payload Too Large` *before* the handler runs (so the OOM-prone
+  `body: Bytes` read never happens).
+- `webhook_body_within_limit_reaches_handler` — a 256 B body under the
+  same 1 KiB cap is *not* short-circuited with 413; the handler runs and
+  returns its normal response.
+- `direct_build_route_uses_higher_limit` — a 16 KiB body to
+  `POST /api/v1/builds` with `max_request_size = 1024` and
+  `max_direct_build_size = 1 MiB` is *not* rejected with 413, proving
+  the per-route override is wired up.
