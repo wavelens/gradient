@@ -108,6 +108,7 @@ in {
       };
 
       proto = {
+        public = lib.mkEnableOption "publicly accessible proto endpoint for federated builds and remote workers";
         federate = lib.mkEnableOption "federate Gradient Proto";
       };
 
@@ -460,7 +461,7 @@ in {
               proxyWebsockets = true;
             };
 
-            "/proto" = lib.mkIf cfg.discoverable {
+            "/proto" = lib.mkIf (cfg.discoverable && cfg.proto.public) {
               proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
               proxyWebsockets = true;
               extraConfig = ''
