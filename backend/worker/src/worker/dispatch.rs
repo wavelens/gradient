@@ -153,10 +153,11 @@ fn on_job_done(
             writer.send(ClientMessage::JobCompleted { job_id })?;
         }
         Err(e) => {
-            error!(%job_id, error = %e, "job failed");
+            let error_chain = format!("{e:#}");
+            error!(%job_id, error = %error_chain, "job failed");
             writer.send(ClientMessage::JobFailed {
                 job_id,
-                error: e.to_string(),
+                error: error_chain,
             })?;
         }
     }
