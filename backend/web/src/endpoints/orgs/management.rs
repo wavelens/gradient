@@ -17,7 +17,7 @@ use core::types::input::{check_index_name, validate_display_name};
 use core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, JoinType, PaginatorTrait, QueryFilter,
+    ActiveModelTrait, ColumnTrait, EntityTrait, JoinType, PaginatorTrait, QueryFilter,
     QueryOrder, QuerySelect,
 };
 use serde::{Deserialize, Serialize};
@@ -127,15 +127,7 @@ async fn count_running_evaluations(
     if !project_ids.is_empty() {
         let running = EEvaluation::find()
             .filter(CEvaluation::Project.is_in(project_ids))
-            .filter(
-                Condition::any()
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Fetching))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingFlake))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingDerivation))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Building))
-                    .add(CEvaluation::Status.eq(EvaluationStatus::Waiting)),
-            )
+            .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
             .all(&state.web_db)
             .await?;
         for eval in running {

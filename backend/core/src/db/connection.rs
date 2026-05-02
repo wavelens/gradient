@@ -90,15 +90,7 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
     }
 
     let evaluations = EEvaluation::find()
-        .filter(
-            Condition::any()
-                .add(CEvaluation::Status.eq(EvaluationStatus::Queued))
-                .add(CEvaluation::Status.eq(EvaluationStatus::Fetching))
-                .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingFlake))
-                .add(CEvaluation::Status.eq(EvaluationStatus::EvaluatingDerivation))
-                .add(CEvaluation::Status.eq(EvaluationStatus::Building))
-                .add(CEvaluation::Status.eq(EvaluationStatus::Waiting)),
-        )
+        .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
         .all(db)
         .await?;
 

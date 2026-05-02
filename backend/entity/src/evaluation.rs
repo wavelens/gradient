@@ -32,6 +32,29 @@ pub enum EvaluationStatus {
     Fetching,
 }
 
+impl EvaluationStatus {
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self,
+            Self::Queued
+                | Self::Fetching
+                | Self::EvaluatingFlake
+                | Self::EvaluatingDerivation
+                | Self::Building
+                | Self::Waiting
+        )
+    }
+
+    pub const ACTIVE: [Self; 6] = [
+        Self::Queued,
+        Self::Fetching,
+        Self::EvaluatingFlake,
+        Self::EvaluatingDerivation,
+        Self::Building,
+        Self::Waiting,
+    ];
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "evaluation")]
 pub struct Model {
