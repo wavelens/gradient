@@ -606,3 +606,25 @@ Tests (`cargo test -p web --lib stats`):
   contains `INSERT INTO cache_metric`, `ON CONFLICT (cache, bucket_time)`,
   the additive `bytes_sent`/`nar_count` updates, and contains no `SELECT`
   (a `SELECT` would reintroduce the read-modify-write race).
+## Worker-peer token verification — argon2 + constant time
+
+Worker registration tokens are now stored as argon2 PHC strings rather
+than bare hex SHA-256, and the handshake comparison runs in constant
+time. `verify_token` in `backend/proto/src/handler/auth.rs` dispatches
+on the stored format: PHC strings (starting with `$`) are verified via
+`password_auth::verify_password`; legacy hex SHA-256 rows from
+pre-existing registrations are accepted via a constant-time
+`subtle::ConstantTimeEq` compare so old workers keep working until they
+are re-registered. New tokens written by `POST /orgs/{org}/workers` and
+by state-file provisioning use `password_auth::generate_hash`.
+
+Backend tests (`cargo test -p proto --lib handler::auth`):
+
+- `validate_tokens_argon2_hash_authorizes` — argon2-hashed registration
+  authorises the matching plaintext token.
+- `validate_tokens_argon2_wrong_token_fails` — argon2 row rejects
+  wrong tokens with `"invalid token"`.
+- `verify_token_dispatches_on_format` — `$argon2…` routes to
+  `password_auth`; lowercase hex routes to constant-time SHA-256.
+- The pre-existing `validate_tokens_*` tests using `sha256_hex` continue
+  to cover the legacy-format compatibility path.

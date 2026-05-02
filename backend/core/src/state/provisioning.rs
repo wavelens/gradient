@@ -621,8 +621,6 @@ impl<'a> StateApplicator<'a> {
         &self,
         state_workers: &HashMap<String, StateWorker>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        use sha2::{Digest, Sha256};
-
         let org_map = self.org_lookup().await?;
         let user_map = self.user_lookup().await?;
 
@@ -638,9 +636,7 @@ impl<'a> StateApplicator<'a> {
                 .map_err(|e| format!("Failed to read worker token file {}: {}", token_path, e))?;
             let token = token.trim();
 
-            let mut hasher = Sha256::new();
-            hasher.update(token.as_bytes());
-            let token_hash = hex::encode(hasher.finalize());
+            let token_hash = password_auth::generate_hash(token);
 
             let peer_id = *org_map
                 .get(&state_worker.organization)

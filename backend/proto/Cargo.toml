@@ -22,6 +22,8 @@ rkyv          = { workspace = true }
 reqwest       = { workspace = true }
 serde         = { workspace = true }
 sha2          = { workspace = true }
+subtle        = "2.6"
+password-auth = "1.0"
 hex           = { workspace = true }
 sea-orm       = { workspace = true }
 tokio         = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
