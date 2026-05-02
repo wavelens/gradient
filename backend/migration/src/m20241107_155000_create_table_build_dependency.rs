@@ -6,8 +6,15 @@
 
 use sea_orm_migration::prelude::*;
 
-#[derive(DeriveMigrationName)]
 pub struct Migration;
+
+// The canonical migration ID stored in `seaql_migrations` matches the original
+// (typo'd) module name so renaming the file does not orphan existing installs.
+impl MigrationName for Migration {
+    fn name(&self) -> &str {
+        "m20241107_155000_create_table_build_depencdency"
+    }
+}
 
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
