@@ -246,4 +246,4 @@ The token must be the 48-byte random secret returned by the registration API (ge
 
 ## Declarative State
 
-Users, organizations, projects, integrations, caches, API keys, and workers can be declared in `services.gradient.state` and reconciled on every startup. See [Declarative State](state.md) for the full options reference.
+Users, organizations, projects, integrations, caches, API keys, and workers can be declared in `services.gradient.state` and reconciled on every startup. See [Declarative State](usage/state.md) for the full options reference.

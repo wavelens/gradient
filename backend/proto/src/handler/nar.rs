@@ -98,21 +98,6 @@ pub(super) async fn mark_nar_stored(
     store_path: &str,
     record: &NarUploadRecord<'_>,
 ) -> anyhow::Result<()> {
-    if let Some(row) = EDerivationOutput::find()
-        .filter(CDerivationOutput::Output.eq(store_path))
-        .one(&state.db)
-        .await?
-    {
-        let mut active = row.into_active_model();
-        active.is_cached = Set(true);
-        active.update(&state.db).await?;
-        info!(
-            store_path,
-            file_size = record.file_size,
-            "derivation_output marked cached after NarPush"
-        );
-    }
-
     let hash_name = store_path.strip_prefix("/nix/store/").unwrap_or(store_path);
     let hash = hash_name.split('-').next().unwrap_or("");
     let package = hash_name
@@ -184,6 +169,31 @@ pub(super) async fn mark_nar_stored(
             }
         }
     };
+
+    // Mark every derivation_output that produces this store path as cached
+    // and link it to the cached_path row. Filtering by `hash` is more robust
+    // than filtering by the full `output` string: it avoids prefix-shape
+    // mismatches and survives "known/pruned" eval results that never wrote
+    // an `output` value. The narinfo read path filters on (is_cached, hash),
+    // so this is the field that has to match.
+    let outputs = EDerivationOutput::find()
+        .filter(CDerivationOutput::Hash.eq(hash))
+        .all(&state.db)
+        .await?;
+    for row in outputs {
+        let mut active = row.into_active_model();
+        active.is_cached = Set(true);
+        active.cached_path = Set(Some(cached_path_row.id));
+        if let Err(e) = active.update(&state.db).await {
+            warn!(store_path, error = %e, "failed to mark derivation_output cached");
+        } else {
+            info!(
+                store_path,
+                file_size = record.file_size,
+                "derivation_output marked cached after NarPush"
+            );
+        }
+    }
 
     // Enqueue signing: insert a placeholder `cached_path_signature` row
     // (signature = NULL) for every cache owned by the job's org. The

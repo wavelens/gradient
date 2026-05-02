@@ -175,4 +175,4 @@ A worker may be authorized for multiple orgs simultaneously — it sees job cand
 
 ## State-Managed Resources
 
-See [Declarative State](../state.md#state-managed-resources).
+See [Declarative State](../usage/state.md#state-managed-resources).

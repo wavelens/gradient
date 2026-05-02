@@ -106,6 +106,38 @@ Backend (`cargo test -p web --tests narinfo`):
   and is persisted in `mark_nar_stored`.
 - `shows a friendly error when credentials are no longer available`
 
+## `mark_nar_stored` filters derivation_output by hash
+
+`proto::handler::nar::mark_nar_stored` previously located the
+`derivation_output` row to mark cached by filtering on the full `output`
+string. That field can drift from the worker's `store_path` argument
+(e.g. when an output's `path` was empty at eval time and the row was
+filtered out, or when a derivation came back as a "known/pruned" subtree
+with no outputs persisted), causing `is_cached` to silently stay `false`
+and every subsequent narinfo lookup for the build output to 404.
+
+The filter now uses `hash` — the same column the read path
+(`get_nar_by_hash`) filters on — and updates **all** matching
+`derivation_output` rows, also linking each row's `cached_path` UUID
+to the freshly-written `cached_path` row.
+
+## Worker NAR upload — store path normalisation
+
+Eval-worker `get_derivation_path` returns drv paths as bare `<hash>-<name>.drv`
+strings (no `/nix/store/` prefix). `nar::push_direct` and `nar::upload_presigned`
+must canonicalise to the absolute path before handing it to harmonia's
+`NarByteStream` (otherwise the NAR is empty → `NarSize: 0`) and before sending
+`NarUploaded.store_path` to the server (otherwise `cached_path.store_path` is
+stored without prefix and the served narinfo `StorePath:` line is malformed).
+
+Backend (`cargo test -p worker --bins proto::nar::tests::ensure_full_store_path`):
+- `ensure_full_store_path_prefixes_bare_hash_name` — bare drv path gets
+  `/nix/store/` prepended.
+- `ensure_full_store_path_preserves_absolute` — `/nix/store/...` paths are
+  passed through unchanged.
+- `ensure_full_store_path_preserves_other_absolute_paths` — unrelated absolute
+  paths (e.g. test tmpdirs) are not touched.
+
 ## Hash column normalization (file_hash / nar_hash)
 
 The `derivation_output.file_hash`, `cached_path.file_hash`, and

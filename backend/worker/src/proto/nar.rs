@@ -31,6 +31,20 @@ use crate::nix::store::{LocalNixStore, is_connection_corrupt, strip_store_prefix
 /// Chunk size for direct NAR streaming (64 KiB).
 const NAR_CHUNK_SIZE: usize = 64 * 1024;
 
+/// Normalise a store path so it always carries the `/nix/store/` prefix.
+///
+/// Some upstream sources (e.g. eval-worker `get_derivation_path`) return drv
+/// paths as bare hash-name strings. NarByteStream needs the absolute filesystem
+/// path, and the server stores `cached_path.store_path` verbatim — both must
+/// see the canonical `/nix/store/<hash>-<name>` form.
+fn ensure_full_store_path(path: &str) -> String {
+    if path.starts_with('/') {
+        path.to_owned()
+    } else {
+        format!("/nix/store/{}", path)
+    }
+}
+
 /// Local path metadata gathered from the nix-daemon prior to a NAR upload.
 #[derive(Default)]
 struct PathMeta {
@@ -112,6 +126,8 @@ pub async fn push_direct(
     writer: &ProtoWriter,
     store: Option<&LocalNixStore>,
 ) -> Result<()> {
+    let store_path = ensure_full_store_path(store_path);
+    let store_path = store_path.as_str();
     debug!(store_path, "NAR direct push");
 
     let mut nar_stream = harmonia_nar::NarByteStream::new(store_path.to_owned().into());
@@ -216,6 +232,8 @@ pub async fn upload_presigned(
     writer: &ProtoWriter,
     store: Option<&LocalNixStore>,
 ) -> Result<()> {
+    let store_path = ensure_full_store_path(store_path);
+    let store_path = store_path.as_str();
     debug!(store_path, method, "presigned NAR upload");
 
     // --- 1. Pack + compress the NAR into memory ---
@@ -299,6 +317,26 @@ pub async fn upload_presigned(
 mod tests {
     use super::*;
     use test_support::prelude::MockProtoServer;
+
+    #[test]
+    fn ensure_full_store_path_prefixes_bare_hash_name() {
+        assert_eq!(
+            ensure_full_store_path("25sx4kmwawf8kixj5a6mvpbjwyh8hm7m-gradient-1.1.1.drv"),
+            "/nix/store/25sx4kmwawf8kixj5a6mvpbjwyh8hm7m-gradient-1.1.1.drv",
+        );
+    }
+
+    #[test]
+    fn ensure_full_store_path_preserves_absolute() {
+        let p = "/nix/store/aaaa-foo";
+        assert_eq!(ensure_full_store_path(p), p);
+    }
+
+    #[test]
+    fn ensure_full_store_path_preserves_other_absolute_paths() {
+        let p = "/tmp/some/test/dir";
+        assert_eq!(ensure_full_store_path(p), p);
+    }
 
     /// Create a temporary directory with a single file and return its path.
     ///
