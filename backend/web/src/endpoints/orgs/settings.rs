@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{load_editable_org, load_org_member};
+use super::{load_unmanaged_org, load_org_member};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -88,7 +88,7 @@ pub async fn post_organization_public(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let org = load_editable_org(&state, user.id, organization).await?;
+    let org = load_unmanaged_org(&state, user.id, organization).await?;
     let mut active: AOrganization = org.into();
     active.public = Set(true);
     active.update(&state.web_db).await?;
@@ -104,7 +104,7 @@ pub async fn delete_organization_public(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let org = load_editable_org(&state, user.id, organization).await?;
+    let org = load_unmanaged_org(&state, user.id, organization).await?;
     let mut active: AOrganization = org.into();
     active.public = Set(false);
     active.update(&state.web_db).await?;

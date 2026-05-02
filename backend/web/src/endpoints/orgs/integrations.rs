@@ -15,7 +15,7 @@
 //! and never returned in responses — responses only expose a boolean
 //! "has_secret" / "has_access_token" flag.
 
-use super::{load_editable_org, load_org_member};
+use super::{load_unmanaged_org, load_org_member};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -175,7 +175,7 @@ pub async fn put_integration(
     Path(organization): Path<String>,
     Json(body): Json<CreateIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
-    let org = load_editable_org(&state, user.id, organization).await?;
+    let org = load_unmanaged_org(&state, user.id, organization).await?;
 
     if check_index_name(&body.name).is_err() {
         return Err(WebError::invalid_name("Integration Name"));
@@ -276,7 +276,7 @@ pub async fn patch_integration(
     Path((organization, integration_id)): Path<(String, Uuid)>,
     Json(body): Json<PatchIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
-    let org = load_editable_org(&state, user.id, organization).await?;
+    let org = load_unmanaged_org(&state, user.id, organization).await?;
     let integration = load_integration(&state, org.id, integration_id).await?;
     let kind = integration.kind;
 
@@ -368,7 +368,7 @@ pub async fn delete_integration(
     Extension(user): Extension<MUser>,
     Path((organization, integration_id)): Path<(String, Uuid)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
-    let org = load_editable_org(&state, user.id, organization).await?;
+    let org = load_unmanaged_org(&state, user.id, organization).await?;
     let integration = load_integration(&state, org.id, integration_id).await?;
     integration.into_active_model().delete(&state.web_db).await?;
     Ok(Json(BaseResponse {

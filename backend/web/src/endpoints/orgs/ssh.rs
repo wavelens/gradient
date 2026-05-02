@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{load_editable_org, load_org_member};
+use super::{load_unmanaged_org, load_org_member};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -32,7 +32,7 @@ pub async fn post_organization_ssh(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization = load_editable_org(&state, user.id, organization).await?;
+    let organization = load_unmanaged_org(&state, user.id, organization).await?;
 
     let (private_key, public_key) =
         generate_ssh_key(&state.cli.crypt_secret_file).map_err(|e| {
