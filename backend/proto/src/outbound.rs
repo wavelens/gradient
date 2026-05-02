@@ -18,12 +18,13 @@ use std::time::Duration;
 
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::connect_async_with_config;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tracing::{debug, error, info, warn};
 
 use entity::worker_registration::{Column, Entity as EWorkerRegistration};
 
-use crate::handler::{ProtoSocket, handle_socket};
+use crate::handler::{MAX_PROTO_MESSAGE_SIZE, ProtoSocket, handle_socket};
 use scheduler::Scheduler;
 
 /// Spawn the outbound connection loop as a detached tokio task.
@@ -90,7 +91,14 @@ async fn connect_to_registered_workers(
         tokio::spawn(async move {
             debug!(%worker_id, %url, "connecting outbound to worker");
 
-            let result = tokio::time::timeout(Duration::from_secs(10), connect_async(&url)).await;
+            let config = WebSocketConfig::default()
+                .max_message_size(Some(MAX_PROTO_MESSAGE_SIZE))
+                .max_frame_size(Some(MAX_PROTO_MESSAGE_SIZE));
+            let result = tokio::time::timeout(
+                Duration::from_secs(10),
+                connect_async_with_config(&url, Some(config), false),
+            )
+            .await;
 
             match result {
                 Ok(Ok((stream, _response))) => {

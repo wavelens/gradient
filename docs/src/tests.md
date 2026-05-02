@@ -706,3 +706,29 @@ Unit tests (`cargo test -p core --lib sources::cache_key`):
 
 The pre-existing `cacher::sign_sweep::tests::hex_hash_to_nix32_*`
 suite continues to cover the hash-format conversion path.
+
+## Proto WebSocket — message-size cap & handshake timeout
+
+The `/proto` WebSocket caps every inbound and outbound frame at
+`MAX_PROTO_MESSAGE_SIZE` (1 MiB) — applied to both the inbound
+`axum::extract::ws::WebSocketUpgrade` and the outbound
+`tokio_tungstenite::connect_async_with_config` call in
+`backend/proto/src/outbound.rs`. The cap comfortably exceeds any legitimate
+frame (`NarPush` chunks are 64 KiB plus rkyv overhead) while preventing a
+peer from forcing a multi-megabyte allocation per message.
+
+`handle_socket` additionally wraps the entire handshake
+(Discoverable check → InitConnection → AuthChallenge → AuthResponse →
+InitAck) in a `HANDSHAKE_TIMEOUT` (15 s) `tokio::time::timeout`, so a peer
+that completes the WebSocket upgrade and then stalls cannot pin a tokio task
+or file descriptor indefinitely.
+
+Tests (`cargo test -p proto`):
+
+- `tests::max_proto_message_size_is_sane` — regression for #110: cap stays
+  at least `2 × NAR_PUSH_CHUNK_SIZE` (room for chunk + framing) and well
+  below 16 MiB so a future refactor cannot silently relax the bound back
+  toward tungstenite's 64 MiB default.
+- `tests::handshake_timeout_is_sane` — regression for #110: deadline stays
+  in `[5 s, 60 s]` so a real auth round-trip still fits but a stalled peer
+  is dropped quickly.

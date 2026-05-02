@@ -22,7 +22,10 @@ use gradient_core::types::*;
 use scheduler::Scheduler;
 
 pub(crate) use session::handle_socket;
-pub(crate) use socket::ProtoSocket;
+pub(crate) use socket::{MAX_PROTO_MESSAGE_SIZE, ProtoSocket};
+
+#[cfg(test)]
+pub(crate) use socket::{HANDSHAKE_TIMEOUT, NAR_PUSH_CHUNK_SIZE};
 
 /// Returns the axum [`Router`] that serves the `/proto` WebSocket endpoint.
 pub fn proto_router() -> Router<Arc<ServerState>> {
@@ -34,7 +37,9 @@ async fn ws_upgrade(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |sock| {
-        session::handle_socket(socket::ProtoSocket::Axum(sock), state, scheduler, false)
-    })
+    ws.max_message_size(MAX_PROTO_MESSAGE_SIZE)
+        .max_frame_size(MAX_PROTO_MESSAGE_SIZE)
+        .on_upgrade(move |sock| {
+            session::handle_socket(socket::ProtoSocket::Axum(sock), state, scheduler, false)
+        })
 }
