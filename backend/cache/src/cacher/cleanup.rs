@@ -47,6 +47,28 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
 /// becomes orphan → NAR kept for `nar_ttl_hours` → evicted". It prevents
 /// evicting NARs of derivations that are still referenced by an active
 /// evaluation just because no one happened to fetch them recently.
+///
+/// Fixed-output derivations (any `derivation_output` with `ca IS NOT NULL`)
+/// are skipped entirely: their NARs come from external sources that may no
+/// longer be reachable (404s, deleted release tarballs), so a transient gap
+/// in build references must not delete the only cached copy. FOD NARs are
+/// reclaimed only by `gc_orphan_derivations`, which fires after the grace
+/// period and zero remaining build references.
+const STALE_CACHED_NARS_SELECT: &str = r#"SELECT cd.id, cd.cache, cd.derivation
+               FROM cache_derivation cd
+               WHERE cd.last_fetched_at IS NOT NULL
+                 AND cd.last_fetched_at < NOW() AT TIME ZONE 'UTC' - ($1 * INTERVAL '1 hour')
+                 AND NOT EXISTS (
+                     SELECT 1 FROM build b
+                     WHERE b.derivation = cd.derivation
+                       AND b.status NOT IN ($2, $3, $4)
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM derivation_output do
+                     WHERE do.derivation = cd.derivation
+                       AND do.ca IS NOT NULL
+                 )"#;
+
 pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
     let ttl_hours = state.cli.nar_ttl_hours;
     if ttl_hours == 0 {
@@ -57,15 +79,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         .db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            r#"SELECT cd.id, cd.cache, cd.derivation
-               FROM cache_derivation cd
-               WHERE cd.last_fetched_at IS NOT NULL
-                 AND cd.last_fetched_at < NOW() AT TIME ZONE 'UTC' - ($1 * INTERVAL '1 hour')
-                 AND NOT EXISTS (
-                     SELECT 1 FROM build b
-                     WHERE b.derivation = cd.derivation
-                       AND b.status NOT IN ($2, $3, $4)
-                 )"#,
+            STALE_CACHED_NARS_SELECT,
             [
                 sea_orm::Value::BigInt(Some(ttl_hours as i64)),
                 sea_orm::Value::Int(Some(BuildStatus::Failed as i32)),
@@ -369,6 +383,19 @@ mod tests {
 
         cleanup_stale_cached_nars(state).await.unwrap();
         assert!(nar_file_exists(tmp.path(), h));
+    }
+
+    /// Regression for #107: the TTL SELECT must exclude any derivation that
+    /// owns a fixed-output `derivation_output` (`ca IS NOT NULL`), because a
+    /// FOD's NAR may not be re-fetchable from upstream and is reclaimed only
+    /// by `gc_orphan_derivations`.
+    #[test]
+    fn ttl_select_skips_fixed_output_derivations() {
+        assert!(
+            STALE_CACHED_NARS_SELECT.contains("derivation_output")
+                && STALE_CACHED_NARS_SELECT.contains("ca IS NOT NULL"),
+            "TTL SELECT lost its FOD guard: {STALE_CACHED_NARS_SELECT}"
+        );
     }
 
     /// Empty keep set ⇒ every on-disk NAR is removed.

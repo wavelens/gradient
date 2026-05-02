@@ -390,10 +390,20 @@ fetched it recently. This implements the design "old evals/builds removed by
 `keep_evaluations` → derivation becomes orphan → kept for `nar_ttl_hours` →
 evicted".
 
+The SELECT additionally excludes derivations that own a fixed-output
+`derivation_output` (`ca IS NOT NULL`). FOD NARs originate from external
+sources (e.g. `fetchurl` tarballs) that may not be re-fetchable, so a
+transient gap in build references must never delete the only cached copy.
+FODs are reclaimed only by `gc_orphan_derivations` after the grace period
+and zero remaining build references.
+
 - `cacher::cleanup::tests::stale_nars_disabled_when_ttl_zero` — pass is a
   no-op when `nar_ttl_hours = 0`.
 - `cacher::cleanup::tests::stale_nars_no_eligible_rows` — empty SELECT
   result leaves on-disk NARs untouched.
+- `cacher::cleanup::tests::ttl_select_skips_fixed_output_derivations` —
+  regression for #107: the TTL SELECT must keep its `derivation_output.ca
+  IS NOT NULL` guard so FOD NARs are never evicted by the TTL pass.
 
 ## Frontend — form primitives & style guide
 
