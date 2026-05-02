@@ -174,3 +174,179 @@ pub(crate) async fn user_can_edit(
         None => false,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::ci::WebhookClient;
+    use core::storage::{EmailSender, NarStore};
+    use core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
+    use sea_orm::{DatabaseBackend, MockDatabase};
+    use test_support::cli::test_cli;
+    use test_support::fakes::email::InMemoryEmailSender;
+    use test_support::fakes::webhooks::RecordingWebhookClient;
+    use test_support::log_storage::NoopLogStorage;
+    use uuid::uuid;
+
+    fn fixture_date() -> chrono::NaiveDateTime {
+        chrono::NaiveDate::from_ymd_opt(2026, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap()
+    }
+
+    fn org_fixture(managed: bool) -> entity::organization::Model {
+        entity::organization::Model {
+            id: uuid!("b0000000-0000-0000-0000-000000000001"),
+            name: "test-org".into(),
+            display_name: "Test".into(),
+            description: String::new(),
+            public_key: "ssh".into(),
+            private_key: "enc".into(),
+            public: false,
+            created_by: uuid!("b0000000-0000-0000-0000-000000000004"),
+            created_at: fixture_date(),
+            managed,
+            github_installation_id: None,
+        }
+    }
+
+    fn project_fixture(managed: bool) -> entity::project::Model {
+        entity::project::Model {
+            id: uuid!("b0000000-0000-0000-0000-000000000002"),
+            organization: uuid!("b0000000-0000-0000-0000-000000000001"),
+            name: "test-project".into(),
+            display_name: "Test".into(),
+            description: String::new(),
+            repository: "git@example.com:test/test.git".into(),
+            evaluation_wildcard: "*".into(),
+            active: true,
+            last_evaluation: None,
+            last_check_at: fixture_date(),
+            force_evaluation: false,
+            created_by: uuid!("b0000000-0000-0000-0000-000000000004"),
+            created_at: fixture_date(),
+            managed,
+            keep_evaluations: 30,
+        }
+    }
+
+    fn membership_fixture(role: Uuid) -> entity::organization_user::Model {
+        entity::organization_user::Model {
+            id: uuid!("b0000000-0000-0000-0000-000000000010"),
+            organization: uuid!("b0000000-0000-0000-0000-000000000001"),
+            user: uuid!("b0000000-0000-0000-0000-000000000004"),
+            role,
+        }
+    }
+
+    fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
+        let cli = test_cli();
+        let nar_storage = NarStore::local(&cli.base_path).expect("nar store");
+        Arc::new(ServerState {
+            web_db: db,
+            db: MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
+            cli,
+            log_storage: Arc::new(NoopLogStorage),
+            webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
+            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+            nar_storage,
+            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        })
+    }
+
+    fn run<F: std::future::Future>(fut: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(fut)
+    }
+
+    #[test]
+    fn editable_project_admin_passes() {
+        run(async {
+            let user_id = uuid!("b0000000-0000-0000-0000-000000000004");
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![org_fixture(false)]])
+                .append_query_results([vec![project_fixture(false)]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
+                .into_connection();
+            let state = make_state(db);
+            let res =
+                load_editable_project(&state, user_id, "test-org".into(), "test-project".into())
+                    .await;
+            assert!(res.is_ok(), "admin should pass: {:?}", res.err());
+        });
+    }
+
+    #[test]
+    fn editable_project_write_passes() {
+        run(async {
+            let user_id = uuid!("b0000000-0000-0000-0000-000000000004");
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![org_fixture(false)]])
+                .append_query_results([vec![project_fixture(false)]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_WRITE_ID)]])
+                .into_connection();
+            let state = make_state(db);
+            let res =
+                load_editable_project(&state, user_id, "test-org".into(), "test-project".into())
+                    .await;
+            assert!(res.is_ok(), "write role should pass: {:?}", res.err());
+        });
+    }
+
+    #[test]
+    fn editable_project_view_is_forbidden() {
+        run(async {
+            let user_id = uuid!("b0000000-0000-0000-0000-000000000004");
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![org_fixture(false)]])
+                .append_query_results([vec![project_fixture(false)]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
+                .into_connection();
+            let state = make_state(db);
+            let err =
+                load_editable_project(&state, user_id, "test-org".into(), "test-project".into())
+                    .await
+                    .expect_err("view-only role must be rejected");
+            assert!(matches!(err, WebError::Forbidden(_)), "got {:?}", err);
+        });
+    }
+
+    #[test]
+    fn editable_project_non_member_is_not_found() {
+        run(async {
+            let user_id = uuid!("b0000000-0000-0000-0000-000000000099");
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([Vec::<entity::organization::Model>::new()])
+                .into_connection();
+            let state = make_state(db);
+            let err =
+                load_editable_project(&state, user_id, "test-org".into(), "test-project".into())
+                    .await
+                    .expect_err("non-member must be rejected");
+            assert!(matches!(err, WebError::NotFound(_)), "got {:?}", err);
+        });
+    }
+
+    #[test]
+    fn editable_project_managed_is_forbidden() {
+        run(async {
+            let user_id = uuid!("b0000000-0000-0000-0000-000000000004");
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![org_fixture(false)]])
+                .append_query_results([vec![project_fixture(true)]])
+                .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
+                .into_connection();
+            let state = make_state(db);
+            let err =
+                load_editable_project(&state, user_id, "test-org".into(), "test-project".into())
+                    .await
+                    .expect_err("state-managed project must be rejected");
+            assert!(matches!(err, WebError::Forbidden(_)), "got {:?}", err);
+        });
+    }
+}
