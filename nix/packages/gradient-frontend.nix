@@ -14,7 +14,7 @@
 
 stdenv.mkDerivation rec {
   pname = "gradient-frontend";
-  version = "1.1.0";
+  version = "1.1.1";
 
   src = lib.cleanSourceWith {
     filter = name: type: !(type == "directory" && builtins.elem (baseNameOf name) [".github" "target" "node_modules" "dist" ".angular"]);
