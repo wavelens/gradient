@@ -6,29 +6,63 @@
 
 use anyhow::{Context, Result, bail};
 use axum::extract::State;
-use chrono::Utc;
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use chrono::{Duration, Utc};
 use core::types::input::load_secret;
 use core::types::*;
+use jsonwebtoken::{
+    Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, decode_header, encode,
+    jwk::JwkSet,
+};
+use rand::RngExt as _;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use url::Url;
 use uuid::Uuid;
 
 use super::middleware::update_last_login;
 
+/// State + nonce returned to the caller of [`oidc_login_create`].
+///
+/// The caller is expected to set `cookie_value` as `oidc_csrf` cookie
+/// (HttpOnly, SameSite=Lax, ~10 min) and redirect the user to `auth_url`.
+pub struct OidcAuthRequest {
+    pub auth_url: Url,
+    pub cookie_value: String,
+}
+
+/// Claims for the short-lived `oidc_csrf` cookie.
 #[derive(Serialize, Deserialize)]
-pub struct OidcUser {
-    pub aud: String,
-    pub email: String,
-    pub exp: i64,
-    pub iat: i64,
-    pub iss: String,
-    pub name: String,
-    pub sub: String,
-    pub preferred_username: Option<String>,
+struct CsrfClaims {
+    exp: i64,
+    iat: i64,
+    state: String,
+    nonce: String,
+}
+
+/// Subset of ID-token claims we trust as identity.
+#[derive(Deserialize)]
+struct IdTokenClaims {
+    iss: String,
+    sub: String,
+    #[serde(default)]
+    nonce: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    preferred_username: Option<String>,
+}
+
+fn random_url_safe(bytes: usize) -> String {
+    let mut buf = vec![0u8; bytes];
+    rand::rng().fill(buf.as_mut_slice());
+    URL_SAFE_NO_PAD.encode(buf)
 }
 
 async fn get_oidc_metadata(discovery_url: &str) -> Result<serde_json::Value> {
@@ -37,17 +71,17 @@ async fn get_oidc_metadata(discovery_url: &str) -> Result<serde_json::Value> {
         .build()
         .context("Failed to create HTTP client")?;
 
-    let metadata = http_client
-        .get(
-            if discovery_url.ends_with("/.well-known/openid-configuration") {
-                discovery_url.to_string()
-            } else {
-                format!(
-                    "{}/.well-known/openid-configuration",
-                    discovery_url.trim_end_matches('/')
-                )
-            },
+    let url = if discovery_url.ends_with("/.well-known/openid-configuration") {
+        discovery_url.to_string()
+    } else {
+        format!(
+            "{}/.well-known/openid-configuration",
+            discovery_url.trim_end_matches('/')
         )
+    };
+
+    let metadata = http_client
+        .get(url)
         .send()
         .await
         .context("Failed to fetch OIDC metadata")?
@@ -58,7 +92,27 @@ async fn get_oidc_metadata(discovery_url: &str) -> Result<serde_json::Value> {
     Ok(metadata)
 }
 
-pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<Url> {
+async fn fetch_jwks(jwks_uri: &str) -> Result<JwkSet> {
+    let http_client = reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .context("Failed to create HTTP client")?;
+
+    let jwks: JwkSet = http_client
+        .get(jwks_uri)
+        .send()
+        .await
+        .context("Failed to fetch JWKS")?
+        .json()
+        .await
+        .context("Failed to parse JWKS")?;
+
+    Ok(jwks)
+}
+
+pub async fn oidc_login_create(
+    state: State<Arc<ServerState>>,
+) -> Result<OidcAuthRequest> {
     let oidc = state
         .cli
         .oidc_config()
@@ -77,37 +131,86 @@ pub async fn oidc_login_create(state: State<Arc<ServerState>>) -> Result<Url> {
         .unwrap_or("openid email profile")
         .to_string();
 
+    let csrf_state = random_url_safe(32);
+    let nonce = random_url_safe(32);
+
+    let now = Utc::now();
+    let claims = CsrfClaims {
+        iat: now.timestamp(),
+        exp: (now + Duration::minutes(10)).timestamp(),
+        state: csrf_state.clone(),
+        nonce: nonce.clone(),
+    };
+    let secret = load_secret(&state.cli.jwt_secret_file);
+    let cookie_value = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.expose().as_bytes()),
+    )
+    .context("Failed to sign OIDC CSRF cookie")?;
+
     let params = vec![
         ("response_type", "code"),
         ("client_id", oidc.client_id.as_str()),
         ("redirect_uri", redirect_uri.as_str()),
         ("scope", scope.as_str()),
+        ("state", csrf_state.as_str()),
+        ("nonce", nonce.as_str()),
     ];
 
     let auth_url = Url::parse_with_params(auth_endpoint, &params)
         .context("Failed to build authorization URL")?;
 
-    Ok(auth_url)
+    Ok(OidcAuthRequest {
+        auth_url,
+        cookie_value,
+    })
 }
 
 pub async fn oidc_login_verify(
     state: State<Arc<ServerState>>,
     authorization_code: String,
+    state_query: String,
+    csrf_cookie: String,
 ) -> Result<MUser> {
     let oidc = state
         .cli
         .oidc_config()
         .context("OIDC is not enabled or not fully configured")?;
 
+    let secret = load_secret(&state.cli.jwt_secret_file);
+    let csrf_data = decode::<CsrfClaims>(
+        &csrf_cookie,
+        &DecodingKey::from_secret(secret.expose().as_bytes()),
+        &Validation::new(Algorithm::HS256),
+    )
+    .context("Invalid or expired OIDC CSRF cookie")?;
+
+    if csrf_data
+        .claims
+        .state
+        .as_bytes()
+        .ct_eq(state_query.as_bytes())
+        .unwrap_u8()
+        == 0
+    {
+        bail!("OIDC state mismatch");
+    }
+
+    let expected_nonce = csrf_data.claims.nonce;
+
     let metadata = get_oidc_metadata(&oidc.discovery_url).await?;
 
+    let issuer = metadata["issuer"]
+        .as_str()
+        .context("No issuer in OIDC metadata")?
+        .to_string();
     let token_endpoint = metadata["token_endpoint"]
         .as_str()
         .context("No token_endpoint in OIDC metadata")?;
-
-    let userinfo_endpoint = metadata["userinfo_endpoint"]
+    let jwks_uri = metadata["jwks_uri"]
         .as_str()
-        .context("No userinfo_endpoint in OIDC metadata")?;
+        .context("No jwks_uri in OIDC metadata")?;
 
     let http_client = reqwest::ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::limited(5))
@@ -117,7 +220,6 @@ pub async fn oidc_login_verify(
     let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.cli.serve_url);
     let client_secret = load_secret(&oidc.client_secret_file);
 
-    // Exchange authorization code for tokens
     let token_response = http_client
         .post(token_endpoint)
         .form(&[
@@ -131,130 +233,233 @@ pub async fn oidc_login_verify(
         .await
         .context("Token exchange request failed")?;
 
+    if !token_response.status().is_success() {
+        bail!("Token exchange failed with status {}", token_response.status());
+    }
+
     let token_data: serde_json::Value = token_response
         .json::<serde_json::Value>()
         .await
         .context("Failed to parse token response")?;
 
-    let access_token = token_data["access_token"]
+    let id_token = token_data["id_token"]
         .as_str()
-        .context("No access token in response")?;
+        .context("No id_token in token response")?;
 
-    // Get user info using access token
-    let userinfo_response = http_client
-        .get(userinfo_endpoint)
-        .bearer_auth(access_token)
-        .send()
-        .await
-        .context("Failed to fetch user info")?;
+    let claims = verify_id_token(id_token, jwks_uri, &issuer, &oidc.client_id).await?;
 
-    let user_data: serde_json::Value = userinfo_response
-        .json::<serde_json::Value>()
-        .await
-        .context("Failed to parse user info")?;
+    match claims.nonce.as_deref() {
+        Some(n) if n.as_bytes().ct_eq(expected_nonce.as_bytes()).unwrap_u8() == 1 => {}
+        _ => bail!("OIDC nonce mismatch"),
+    }
 
-    let user_info = OidcUser {
-        aud: user_data["aud"].as_str().unwrap_or_default().to_string(),
-        email: user_data["email"].as_str().unwrap_or_default().to_string(),
-        exp: user_data["exp"].as_i64().unwrap_or(0),
-        iat: user_data["iat"].as_i64().unwrap_or(0),
-        iss: user_data["iss"].as_str().unwrap_or_default().to_string(),
-        name: user_data["name"].as_str().unwrap_or_default().to_string(),
-        sub: user_data["sub"].as_str().unwrap_or_default().to_string(),
-        preferred_username: user_data["preferred_username"].as_str().map(str::to_string),
-    };
+    create_or_update_user(state, claims).await
+}
 
-    create_or_update_user(state, user_info).await
+async fn verify_id_token(
+    id_token: &str,
+    jwks_uri: &str,
+    expected_iss: &str,
+    expected_aud: &str,
+) -> Result<IdTokenClaims> {
+    let header = decode_header(id_token).context("Failed to decode id_token header")?;
+    let kid = header
+        .kid
+        .clone()
+        .context("id_token header has no kid")?;
+
+    let jwks = fetch_jwks(jwks_uri).await?;
+    let jwk = jwks
+        .find(&kid)
+        .context("No JWK matches id_token kid")?;
+
+    let decoding_key =
+        DecodingKey::from_jwk(jwk).context("Failed to construct decoding key from JWK")?;
+
+    let mut validation = Validation::new(header.alg);
+    validation.set_issuer(&[expected_iss]);
+    validation.set_audience(&[expected_aud]);
+    validation.validate_exp = true;
+
+    let data = decode::<IdTokenClaims>(id_token, &decoding_key, &validation)
+        .context("id_token signature or claims invalid")?;
+
+    Ok(data.claims)
 }
 
 async fn create_or_update_user(
     state: State<Arc<ServerState>>,
-    user_info: OidcUser,
+    claims: IdTokenClaims,
 ) -> Result<MUser> {
-    let login_name = user_info
+    let display_name = claims.name.clone().unwrap_or_else(|| claims.sub.clone());
+    let email = claims.email.clone().unwrap_or_default();
+    let login_name = claims
         .preferred_username
         .clone()
-        .unwrap_or_else(|| user_info.sub.clone());
+        .unwrap_or_else(|| claims.sub.clone());
 
-    let user: Result<MUser> = match EUser::find()
+    let existing = EUser::find()
+        .filter(CUser::OidcIssuer.eq(&claims.iss))
+        .filter(CUser::OidcSubject.eq(&claims.sub))
+        .one(&state.web_db)
+        .await
+        .context("Database error while finding OIDC user")?;
+
+    if let Some(user) = existing {
+        let email_changed = claims
+            .email
+            .as_ref()
+            .is_some_and(|e| e != &user.email);
+        let name_changed = claims.name.as_ref().is_some_and(|n| n != &user.name);
+
+        let user = if email_changed || name_changed {
+            let mut auser: AUser = user.into();
+            if let Some(ref new_email) = claims.email {
+                auser.email = Set(new_email.clone());
+            }
+            if let Some(ref new_name) = claims.name {
+                auser.name = Set(new_name.clone());
+            }
+            auser
+                .update(&state.web_db)
+                .await
+                .context("Failed to update OIDC user")?
+        } else {
+            user
+        };
+
+        return update_last_login(state, user)
+            .await
+            .context("Failed to update last login");
+    }
+
+    let collision = EUser::find()
         .filter(
-            Condition::any()
-                .add(CUser::Email.eq(&user_info.email))
-                .add(CUser::Username.eq(&login_name)),
+            sea_orm::Condition::any()
+                .add(CUser::Username.eq(&login_name))
+                .add(CUser::Email.eq(&email)),
         )
         .one(&state.web_db)
         .await
-        .context("Database error while finding user")?
-    {
-        Some(mut user) => {
-            if user.password.is_some() {
-                bail!("User already exists with password authentication");
-            }
+        .context("Database error while checking for OIDC username/email collision")?;
 
-            let mut updated = false;
+    if collision.is_some() {
+        bail!(
+            "An account already exists with this username or email — \
+             contact an administrator to link it to your OIDC identity"
+        );
+    }
 
-            if user.email != user_info.email {
-                let mut auser: AUser = user.into();
-                auser.email = Set(user_info.email.clone());
-                user = auser
-                    .update(&state.web_db)
-                    .await
-                    .context("Failed to update user email")?;
-                updated = true;
-            }
-
-            if user.username != login_name {
-                let mut auser: AUser = user.into();
-                auser.username = Set(login_name.clone());
-                user = auser
-                    .update(&state.web_db)
-                    .await
-                    .context("Failed to update username")?;
-                updated = true;
-            }
-
-            if user.name != user_info.name {
-                let mut auser: AUser = user.into();
-                auser.name = Set(user_info.name.clone());
-                user = auser
-                    .update(&state.web_db)
-                    .await
-                    .context("Failed to update user name")?;
-                updated = true;
-            }
-
-            if updated {
-                user = update_last_login(state.clone(), user)
-                    .await
-                    .context("Failed to update user")?;
-            }
-
-            Ok(user)
-        }
-        None => {
-            let new_user = AUser {
-                id: Set(Uuid::new_v4()),
-                username: Set(login_name),
-                name: Set(user_info.name.clone()),
-                email: Set(user_info.email.clone()),
-                password: Set(None),
-                last_login_at: Set(Utc::now().naive_utc()),
-                created_at: Set(Utc::now().naive_utc()),
-                email_verified: Set(true), // OIDC users are considered verified
-                email_verification_token: Set(None),
-                email_verification_token_expires: Set(None),
-                managed: Set(false),
-                superuser: Set(false),
-            };
-
-            let user = new_user
-                .insert(&state.web_db)
-                .await
-                .context("Failed to create user")?;
-
-            Ok(user)
-        }
+    let new_user = AUser {
+        id: Set(Uuid::new_v4()),
+        username: Set(login_name),
+        name: Set(display_name),
+        email: Set(email),
+        password: Set(None),
+        last_login_at: Set(Utc::now().naive_utc()),
+        created_at: Set(Utc::now().naive_utc()),
+        email_verified: Set(true),
+        email_verification_token: Set(None),
+        email_verification_token_expires: Set(None),
+        managed: Set(false),
+        superuser: Set(false),
+        oidc_issuer: Set(Some(claims.iss)),
+        oidc_subject: Set(Some(claims.sub)),
     };
 
-    user
+    let user = new_user
+        .insert(&state.web_db)
+        .await
+        .context("Failed to create user")?;
+
+    Ok(user)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jsonwebtoken::{EncodingKey, Header};
+
+    fn jwt_with_secret(claims: &CsrfClaims, secret: &str) -> String {
+        encode(
+            &Header::default(),
+            claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn random_url_safe_is_unique_and_url_safe() {
+        let a = random_url_safe(32);
+        let b = random_url_safe(32);
+        assert_ne!(a, b);
+        for c in a.chars() {
+            assert!(c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        }
+    }
+
+    #[test]
+    fn csrf_cookie_roundtrips() {
+        let now = Utc::now();
+        let claims = CsrfClaims {
+            iat: now.timestamp(),
+            exp: (now + Duration::minutes(5)).timestamp(),
+            state: "abc".into(),
+            nonce: "xyz".into(),
+        };
+        let token = jwt_with_secret(&claims, "shh");
+        let decoded = decode::<CsrfClaims>(
+            &token,
+            &DecodingKey::from_secret(b"shh"),
+            &Validation::new(Algorithm::HS256),
+        )
+        .unwrap();
+        assert_eq!(decoded.claims.state, "abc");
+        assert_eq!(decoded.claims.nonce, "xyz");
+    }
+
+    #[test]
+    fn csrf_cookie_rejects_wrong_secret() {
+        let now = Utc::now();
+        let claims = CsrfClaims {
+            iat: now.timestamp(),
+            exp: (now + Duration::minutes(5)).timestamp(),
+            state: "abc".into(),
+            nonce: "xyz".into(),
+        };
+        let token = jwt_with_secret(&claims, "secret-a");
+        let decoded = decode::<CsrfClaims>(
+            &token,
+            &DecodingKey::from_secret(b"secret-b"),
+            &Validation::new(Algorithm::HS256),
+        );
+        assert!(decoded.is_err());
+    }
+
+    #[test]
+    fn csrf_cookie_rejects_expired() {
+        let past = Utc::now() - Duration::hours(1);
+        let claims = CsrfClaims {
+            iat: past.timestamp() - 60,
+            exp: past.timestamp(),
+            state: "abc".into(),
+            nonce: "xyz".into(),
+        };
+        let token = jwt_with_secret(&claims, "shh");
+        let decoded = decode::<CsrfClaims>(
+            &token,
+            &DecodingKey::from_secret(b"shh"),
+            &Validation::new(Algorithm::HS256),
+        );
+        assert!(decoded.is_err());
+    }
+
+    #[test]
+    fn state_compare_constant_time_rejects_mismatch() {
+        let a = "abc".as_bytes();
+        let b = "abd".as_bytes();
+        assert_eq!(a.ct_eq(b).unwrap_u8(), 0);
+        assert_eq!(a.ct_eq(a).unwrap_u8(), 1);
+    }
 }
