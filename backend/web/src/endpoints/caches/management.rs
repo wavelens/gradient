@@ -170,7 +170,7 @@ pub async fn put(
         return Err(WebError::already_exists("Cache Name"));
     }
 
-    let (private_key, public_key) = generate_signing_key(state.cli.crypt_secret_file.clone())
+    let (private_key, public_key) = generate_signing_key(&state.cli.crypt_secret_file)
         .map_err(|e| {
             tracing::error!("Failed to generate signing key: {}", e);
             WebError::InternalServerError("Failed to generate signing key".to_string())
@@ -244,7 +244,7 @@ pub async fn get_cache(
     }
 
     let public_key = format_cache_public_key(
-        state.cli.crypt_secret_file.clone(),
+        &state.cli.crypt_secret_file,
         cache.clone(),
         state.cli.serve_url.clone(),
     )

@@ -35,7 +35,7 @@ pub async fn post_organization_ssh(
     let organization = load_editable_org(&state, user.id, organization).await?;
 
     let (private_key, public_key) =
-        generate_ssh_key(state.cli.crypt_secret_file.clone()).map_err(|e| {
+        generate_ssh_key(&state.cli.crypt_secret_file).map_err(|e| {
             tracing::error!("Failed to generate SSH key: {}", e);
             WebError::failed_ssh_key_generation()
         })?;

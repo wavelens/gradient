@@ -74,7 +74,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         let nar_hash_nix32 = hex_hash_to_nix32(nar_hash);
 
         let sig_token = match gradient_core::sources::sign_narinfo_fingerprint(
-            state.cli.crypt_secret_file.clone(),
+            &state.cli.crypt_secret_file,
             cache.clone(),
             state.cli.serve_url.clone(),
             &cp.store_path,

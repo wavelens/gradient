@@ -145,7 +145,7 @@ fn generate_ssh_key_produces_valid_ed25519_keypair() {
     secret_file.write_all(encoded.as_bytes()).unwrap();
 
     let (private_key, public_key) =
-        generate_ssh_key(secret_file.path().to_str().unwrap().to_string()).unwrap();
+        generate_ssh_key(secret_file.path().to_str().unwrap()).unwrap();
 
     assert!(!private_key.is_empty());
     assert!(
@@ -165,7 +165,7 @@ fn generate_ssh_key_different_secrets_produce_different_keys() {
         let mut f = NamedTempFile::new().unwrap();
         let enc = base64::engine::general_purpose::STANDARD.encode(secret);
         f.write_all(enc.as_bytes()).unwrap();
-        generate_ssh_key(f.path().to_str().unwrap().to_string()).unwrap()
+        generate_ssh_key(f.path().to_str().unwrap()).unwrap()
     };
 
     let (_, pub1) = make_key(b"secret_key_one__________________");
