@@ -13,37 +13,6 @@ use ssh_key::{
     Algorithm, LineEnding, PrivateKey, private::Ed25519Keypair, private::Ed25519PrivateKey,
     private::KeypairData, public::Ed25519PublicKey,
 };
-use std::fs;
-use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
-use tempfile::NamedTempFile;
-
-pub fn write_key(private_key: String) -> Result<String, SourceError> {
-    let mut temp_file = NamedTempFile::with_suffix(".key").map_err(|e| SourceError::FileRead {
-        reason: e.to_string(),
-    })?;
-
-    let path = temp_file.path().to_string_lossy().to_string();
-
-    fs::set_permissions(temp_file.path(), fs::Permissions::from_mode(0o600))
-        .map_err(|_| SourceError::KeyFilePermissions { path: path.clone() })?;
-
-    temp_file
-        .write_all(private_key.as_bytes())
-        .map_err(|_| SourceError::KeyFileWrite { path: path.clone() })?;
-
-    temp_file
-        .keep()
-        .map_err(|_| SourceError::KeyFileWrite { path: path.clone() })?;
-
-    Ok(path)
-}
-
-pub fn clear_key(path: String) -> Result<(), SourceError> {
-    fs::remove_file(&path).map_err(|_| SourceError::KeyFileRemoval { path })?;
-    Ok(())
-}
-
 pub fn generate_ssh_key(secret_file: String) -> Result<(String, String), SourceError> {
     let secret = crate::types::input::load_secret_bytes(&secret_file);
 
@@ -217,23 +186,6 @@ mod tests {
         let org = make_org("myorg", "ssh-ed25519 AAAA");
         let result = format_public_key(org, "example.com");
         assert_eq!(result, "ssh-ed25519 AAAA example.com-myorg");
-    }
-
-    #[test]
-    fn write_and_clear_key_roundtrip() {
-        let path = write_key("hello-key".to_string()).expect("write_key failed");
-        let contents = std::fs::read_to_string(&path).expect("read failed");
-        assert_eq!(contents, "hello-key");
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "key file must be mode 0600");
-        clear_key(path.clone()).expect("clear_key failed");
-        assert!(!std::path::Path::new(&path).exists());
-    }
-
-    #[test]
-    fn clear_key_nonexistent_fails() {
-        let result = clear_key("/tmp/definitely-does-not-exist-gradient-test".to_string());
-        assert!(matches!(result, Err(SourceError::KeyFileRemoval { .. })));
     }
 
     #[test]
