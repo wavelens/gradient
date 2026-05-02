@@ -43,8 +43,11 @@ pub(super) async fn load_org_member(
 }
 
 /// Load an organization that the user is a member of AND that is not
-/// state-managed (i.e. editable via the API).
-pub(super) async fn load_editable_org(
+/// state-managed.
+///
+/// Membership ≠ edit rights: this only filters state-managed orgs. Mutating
+/// handlers that need admin should additionally call [`load_admin_org`].
+pub(super) async fn load_unmanaged_org(
     state: &Arc<ServerState>,
     user_id: Uuid,
     org_name: String,
@@ -83,7 +86,7 @@ pub(super) async fn load_admin_org(
     user_id: Uuid,
     org_name: String,
 ) -> WebResult<MOrganization> {
-    let org = load_editable_org(state, user_id, org_name).await?;
+    let org = load_unmanaged_org(state, user_id, org_name).await?;
     let membership = load_org_membership(state, user_id, org.id)
         .await?
         .ok_or_else(|| WebError::not_found("Organization"))?;
