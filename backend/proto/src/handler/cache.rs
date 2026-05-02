@@ -12,21 +12,10 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{error, warn};
 use uuid::Uuid;
 
-/// Bundles a `&ServerState` reference to avoid threading `state` through every
-/// cache-query helper as a free-function parameter.
-struct CacheQueryHandler<'a> {
-    state: &'a ServerState,
-}
-
-impl<'a> CacheQueryHandler<'a> {
-    fn new(state: &'a ServerState) -> Self {
-        Self { state }
-    }
-
-    async fn build_local_cache_map(
-        &self,
-        hashes: &[&str],
-    ) -> HashMap<String, (Option<i64>, Option<i64>)> {
+async fn build_local_cache_map(
+    state: &ServerState,
+    hashes: &[&str],
+) -> HashMap<String, (Option<i64>, Option<i64>)> {
         // Source the (file_size, nar_size) pair straight from `cached_path` —
         // the worker writes both columns there during NarUploaded, so it's the
         // single authoritative copy.  We still scope the result to outputs the
@@ -37,7 +26,7 @@ impl<'a> CacheQueryHandler<'a> {
                     .add(CDerivationOutput::IsCached.eq(true))
                     .add(CDerivationOutput::Hash.is_in(hashes.to_vec())),
             )
-            .all(&self.state.db)
+            .all(&state.db)
             .await
         {
             Ok(rows) => rows,
@@ -49,7 +38,7 @@ impl<'a> CacheQueryHandler<'a> {
 
         let cached_paths = match ECachedPath::find()
             .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-            .all(&self.state.db)
+            .all(&state.db)
             .await
         {
             Ok(rows) => rows,
@@ -70,10 +59,10 @@ impl<'a> CacheQueryHandler<'a> {
             .collect()
     }
 
-    async fn load_cached_path_rows(&self, hashes: &[&str]) -> Vec<entity::cached_path::Model> {
+async fn load_cached_path_rows(state: &ServerState, hashes: &[&str]) -> Vec<entity::cached_path::Model> {
         match ECachedPath::find()
             .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-            .all(&self.state.db)
+            .all(&state.db)
             .await
         {
             Ok(rows) => rows,
@@ -87,14 +76,14 @@ impl<'a> CacheQueryHandler<'a> {
     /// For Push mode: ensure a `cached_path_signature` row exists for each
     /// (cached_path, org cache) pair so that the signing job is triggered for
     /// paths that were already cached before this worker connected.
-    async fn ensure_push_signatures(
-        &self,
+async fn ensure_push_signatures(
+    state: &ServerState,
         org_id: Uuid,
         cached_path_rows: &[entity::cached_path::Model],
     ) {
         let org_caches = EOrganizationCache::find()
             .filter(COrganizationCache::Organization.eq(org_id))
-            .all(&self.state.db)
+            .all(&state.db)
             .await
             .unwrap_or_default();
 
@@ -103,7 +92,7 @@ impl<'a> CacheQueryHandler<'a> {
                 let exists = ECachedPathSignature::find()
                     .filter(CCachedPathSignature::CachedPath.eq(cp.id))
                     .filter(CCachedPathSignature::Cache.eq(oc.cache))
-                    .one(&self.state.db)
+                    .one(&state.db)
                     .await
                     .unwrap_or(None)
                     .is_some();
@@ -116,20 +105,20 @@ impl<'a> CacheQueryHandler<'a> {
                         signature: sea_orm::ActiveValue::Set(None),
                         created_at: sea_orm::ActiveValue::Set(chrono::Utc::now().naive_utc()),
                     };
-                    let _ = sig_row.insert(&self.state.db).await;
+                    let _ = sig_row.insert(&state.db).await;
                 }
             }
         }
     }
 
-    async fn load_cached_path_signatures(
-        &self,
+async fn load_cached_path_signatures(
+    state: &ServerState,
         cached_path_id: Uuid,
         hash: &str,
     ) -> Option<Vec<String>> {
         match ECachedPathSignature::find()
             .filter(CCachedPathSignature::CachedPath.eq(cached_path_id))
-            .all(&self.state.db)
+            .all(&state.db)
             .await
         {
             Ok(rows) => {
@@ -147,8 +136,8 @@ impl<'a> CacheQueryHandler<'a> {
     /// and call `add_to_store_nar` on its local nix-daemon.
     ///
     /// Returns `(None, None, None, None, None)` if no `cached_path` row exists.
-    async fn fetch_pull_metadata(
-        &self,
+async fn fetch_pull_metadata(
+    state: &ServerState,
         hash: &str,
     ) -> (
         Option<String>,      // nar_hash
@@ -159,7 +148,7 @@ impl<'a> CacheQueryHandler<'a> {
     ) {
         let cached_row = match ECachedPath::find()
             .filter(CCachedPath::Hash.eq(hash))
-            .one(&self.state.db)
+            .one(&state.db)
             .await
         {
             Ok(Some(row)) => row,
@@ -171,7 +160,7 @@ impl<'a> CacheQueryHandler<'a> {
         };
 
         let references = expand_references(cached_row.references.as_deref());
-        let signatures = self.load_cached_path_signatures(cached_row.id, hash).await;
+        let signatures = load_cached_path_signatures(state, cached_row.id, hash).await;
 
         (
             cached_row.nar_hash,
@@ -182,8 +171,8 @@ impl<'a> CacheQueryHandler<'a> {
         )
     }
 
-    async fn build_cached_entry(
-        &self,
+async fn build_cached_entry(
+    state: &ServerState,
         hash: &str,
         path: &str,
         file_size: &Option<i64>,
@@ -211,14 +200,14 @@ impl<'a> CacheQueryHandler<'a> {
 
         let (url, nar_hash, references, signatures, deriver, ca) = match mode {
             QueryMode::Pull => {
-                let url = match self.state.nar_storage.presigned_get_url(hash, expire).await {
+                let url = match state.nar_storage.presigned_get_url(hash, expire).await {
                     Ok(u) => u,
                     Err(e) => {
                         warn!(%hash, error = %e, "failed to generate presigned GET URL");
                         None
                     }
                 };
-                let meta = self.fetch_pull_metadata(hash).await;
+                let meta = fetch_pull_metadata(state, hash).await;
                 (url, meta.0, meta.1, meta.2, meta.3, meta.4)
             }
             _ => (None, None, None, None, None, None),
@@ -242,15 +231,15 @@ impl<'a> CacheQueryHandler<'a> {
     /// a presigned PUT URL when the NAR store supports one (S3). Local stores
     /// return `url: None` and the worker uploads via `NarPush` over the
     /// WebSocket. No metadata, no upstream lookup.
-    async fn build_uncached_push_entry(
-        &self,
+async fn build_uncached_push_entry(
+    state: &ServerState,
         hash: &str,
         path: &str,
         expire: std::time::Duration,
     ) -> gradient_core::types::proto::CachedPath {
         use gradient_core::types::proto::CachedPath;
 
-        let url = match self.state.nar_storage.presigned_put_url(hash, expire).await {
+        let url = match state.nar_storage.presigned_put_url(hash, expire).await {
             Ok(u) => u,
             Err(e) => {
                 error!(
@@ -283,8 +272,8 @@ impl<'a> CacheQueryHandler<'a> {
     ///
     /// Concurrency-capped at 16 to bound worst-case latency. No-ops if the org
     /// has no upstream URLs configured.
-    async fn extend_with_upstream_results(
-        &self,
+async fn extend_with_upstream_results(
+    state: &ServerState,
         org_id: Uuid,
         uncached_pairs: Vec<(String, String)>,
         result: &mut Vec<gradient_core::types::proto::CachedPath>,
@@ -300,7 +289,7 @@ impl<'a> CacheQueryHandler<'a> {
                     .add(COrganizationCache::Organization.eq(org_id))
                     .add(COrganizationCache::Mode.ne(CacheSubscriptionMode::WriteOnly)),
             )
-            .all(&self.state.db)
+            .all(&state.db)
             .await
         {
             Ok(rows) => rows,
@@ -322,7 +311,7 @@ impl<'a> CacheQueryHandler<'a> {
                     .add(CCacheUpstream::Url.is_not_null())
                     .add(CCacheUpstream::Mode.ne(CacheSubscriptionMode::WriteOnly)),
             )
-            .all(&self.state.db)
+            .all(&state.db)
             .await
         {
             Ok(rows) => rows,
@@ -385,8 +374,8 @@ impl<'a> CacheQueryHandler<'a> {
     /// - `Pull`   — same as Normal but cached paths include a presigned S3 GET URL.
     /// - `Push`   — return **all** queried paths with `cached` set; skip upstream.
     ///   Uncached paths include a presigned S3 PUT URL when S3-backed.
-    async fn query(
-        &self,
+async fn query(
+    state: &ServerState,
         org_id: Option<Uuid>,
         paths: &[String],
         mode: gradient_core::types::proto::QueryMode,
@@ -412,8 +401,8 @@ impl<'a> CacheQueryHandler<'a> {
 
         let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
 
-        let cached_map = self.build_local_cache_map(&hashes).await;
-        let cached_path_rows = self.load_cached_path_rows(&hashes).await;
+        let cached_map = build_local_cache_map(state, &hashes).await;
+        let cached_path_rows = load_cached_path_rows(state, &hashes).await;
 
         // Merge source-path cache hits into the map (keyed by hash string).
         let mut cached_map = cached_map;
@@ -428,7 +417,7 @@ impl<'a> CacheQueryHandler<'a> {
         if matches!(mode, QueryMode::Push)
             && let Some(oid) = org_id
         {
-            self.ensure_push_signatures(oid, &cached_path_rows).await;
+            ensure_push_signatures(state, oid, &cached_path_rows).await;
         }
 
         let expire = std::time::Duration::from_secs(3600);
@@ -437,11 +426,11 @@ impl<'a> CacheQueryHandler<'a> {
         for (hash, path) in &hash_path_pairs {
             if let Some((file_size, nar_size)) = cached_map.get(*hash) {
                 result.push(
-                    self.build_cached_entry(hash, path, file_size, nar_size, mode.clone(), expire)
+                    build_cached_entry(state, hash, path, file_size, nar_size, mode.clone(), expire)
                         .await,
                 );
             } else if matches!(mode, QueryMode::Push) {
-                result.push(self.build_uncached_push_entry(hash, path, expire).await);
+                result.push(build_uncached_push_entry(state, hash, path, expire).await);
             }
         }
 
@@ -460,13 +449,12 @@ impl<'a> CacheQueryHandler<'a> {
         if !uncached_pairs.is_empty()
             && let Some(oid) = org_id
         {
-            self.extend_with_upstream_results(oid, uncached_pairs, &mut result)
+            extend_with_upstream_results(state, oid, uncached_pairs, &mut result)
                 .await;
         }
 
         result
     }
-}
 
 pub(super) async fn handle_cache_query(
     state: &ServerState,
@@ -474,9 +462,7 @@ pub(super) async fn handle_cache_query(
     paths: &[String],
     mode: gradient_core::types::proto::QueryMode,
 ) -> Vec<gradient_core::types::proto::CachedPath> {
-    CacheQueryHandler::new(state)
-        .query(org_id, paths, mode)
-        .await
+    query(state, org_id, paths, mode).await
 }
 
 /// Probe each `upstream_url` for `<hash>.narinfo` until one responds 2xx.
@@ -683,34 +669,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cache_query_empty_paths_returns_empty() {
+async fn cache_query_empty_paths_returns_empty() {
         let state = make_state();
-        let h = CacheQueryHandler::new(&state);
-        assert!(h.query(None, &[], QueryMode::Normal).await.is_empty());
-        assert!(h.query(None, &[], QueryMode::Push).await.is_empty());
-        assert!(h.query(None, &[], QueryMode::Pull).await.is_empty());
+        
+        assert!(query(&state, None, &[], QueryMode::Normal).await.is_empty());
+        assert!(query(&state, None, &[], QueryMode::Push).await.is_empty());
+        assert!(query(&state, None, &[], QueryMode::Pull).await.is_empty());
     }
 
     #[tokio::test]
-    async fn cache_query_invalid_store_paths_skipped() {
+async fn cache_query_invalid_store_paths_skipped() {
         let state = make_state();
-        let h = CacheQueryHandler::new(&state);
+        
         let paths = vec![
             "not-a-store-path".to_string(),
             "/nix/store/short-name".to_string(),
         ];
-        assert!(h.query(None, &paths, QueryMode::Normal).await.is_empty());
-        assert!(h.query(None, &paths, QueryMode::Push).await.is_empty());
-        assert!(h.query(None, &paths, QueryMode::Pull).await.is_empty());
+        assert!(query(&state, None, &paths, QueryMode::Normal).await.is_empty());
+        assert!(query(&state, None, &paths, QueryMode::Push).await.is_empty());
+        assert!(query(&state, None, &paths, QueryMode::Pull).await.is_empty());
     }
 
     #[tokio::test]
-    async fn cache_query_normal_uncached_returns_empty() {
+async fn cache_query_normal_uncached_returns_empty() {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
-        let result = CacheQueryHandler::new(&state)
-            .query(None, &paths, QueryMode::Normal)
-            .await;
+        let result = query(&state, None, &paths, QueryMode::Normal).await;
         assert!(
             result.is_empty(),
             "Normal mode should not return uncached paths"
@@ -718,12 +702,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cache_query_pull_uncached_returns_empty() {
+async fn cache_query_pull_uncached_returns_empty() {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
-        let result = CacheQueryHandler::new(&state)
-            .query(None, &paths, QueryMode::Pull)
-            .await;
+        let result = query(&state, None, &paths, QueryMode::Pull).await;
         assert!(
             result.is_empty(),
             "Pull mode should not return uncached paths"
@@ -731,15 +713,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cache_query_push_uncached_returns_all_with_cached_false() {
+async fn cache_query_push_uncached_returns_all_with_cached_false() {
         let state = make_state();
         let paths = vec![
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
         ];
-        let result = CacheQueryHandler::new(&state)
-            .query(None, &paths, QueryMode::Push)
-            .await;
+        let result = query(&state, None, &paths, QueryMode::Push).await;
         assert_eq!(result.len(), 2, "Push should return all queried paths");
         for cp in &result {
             assert!(!cp.cached, "all should be uncached (empty DB): {}", cp.path);
@@ -761,30 +741,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cache_query_rejects_overlong_hash() {
+async fn cache_query_rejects_overlong_hash() {
         // Hash component of 33 chars must be rejected — nix-base32 hashes are
         // exactly 32 chars. Guards against an `== 32` → `>= 32` length-check
         // relaxation.
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         for mode in [QueryMode::Normal, QueryMode::Pull, QueryMode::Push] {
-            let result = CacheQueryHandler::new(&state)
-                .query(None, &paths, mode)
-                .await;
+            let result = query(&state, None, &paths, mode).await;
             assert!(result.is_empty(), "33-char hash must be filtered out");
         }
     }
 
     #[tokio::test]
-    async fn cache_query_push_deduplicates_by_hash() {
+async fn cache_query_push_deduplicates_by_hash() {
         let state = make_state();
         let paths = vec![
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
         ];
-        let result = CacheQueryHandler::new(&state)
-            .query(None, &paths, QueryMode::Push)
-            .await;
+        let result = query(&state, None, &paths, QueryMode::Push).await;
         for cp in &result {
             assert!(!cp.cached);
         }
