@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#[macro_use]
+pub mod patch;
+
 pub mod authorization;
 pub mod endpoints;
 pub mod error;

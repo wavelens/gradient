@@ -383,9 +383,9 @@ pub async fn patch_organization(
         aorganization.display_name = Set(display_name);
     }
 
-    if let Some(description) = body.description {
-        aorganization.description = Set(description.trim().to_string());
-    }
+    crate::patch_field_with!(aorganization, body, description, |s: String| s
+        .trim()
+        .to_string());
 
     let organization = aorganization.update(&state.web_db).await?;
 
