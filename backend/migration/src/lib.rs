@@ -78,6 +78,7 @@ mod m20260501_000000_drop_github_app_enabled_from_organization;
 mod m20260501_000001_add_repo_check_id;
 mod m20260502_000000_hash_api_keys;
 mod m20260502_000001_drop_file_columns_from_derivation_output;
+mod m20260502_000002_add_oidc_identity_to_user;
 
 pub struct Migrator;
 
@@ -157,6 +158,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260501_000001_add_repo_check_id::Migration),
             Box::new(m20260502_000000_hash_api_keys::Migration),
             Box::new(m20260502_000001_drop_file_columns_from_derivation_output::Migration),
+            Box::new(m20260502_000002_add_oidc_identity_to_user::Migration),
         ]
     }
 }

@@ -105,6 +105,8 @@ pub async fn post_basic_register(
         email_verification_token_expires: Set(verification_expires),
         managed: Set(false),
         superuser: Set(false),
+        oidc_issuer: Set(None),
+        oidc_subject: Set(None),
     };
 
     let user = user.insert(&state.web_db).await?;
@@ -185,15 +187,57 @@ pub async fn post_basic_login(
     Ok(response)
 }
 
+const OIDC_CSRF_COOKIE: &str = "oidc_csrf";
+
+fn oidc_csrf_set_cookie(value: &str, use_tls: bool) -> String {
+    let secure = if use_tls { "; Secure" } else { "" };
+    format!(
+        "{}={}; HttpOnly{}; SameSite=Lax; Path=/; Max-Age=600",
+        OIDC_CSRF_COOKIE, value, secure
+    )
+}
+
+fn oidc_csrf_clear_cookie(use_tls: bool) -> String {
+    let secure = if use_tls { "; Secure" } else { "" };
+    format!(
+        "{}=; HttpOnly{}; SameSite=Lax; Path=/; Max-Age=0",
+        OIDC_CSRF_COOKIE, secure
+    )
+}
+
+fn read_cookie(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
+    let header = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
+    header
+        .split(';')
+        .map(str::trim)
+        .find_map(|p| p.strip_prefix(&format!("{}=", name)).map(str::to_owned))
+}
+
 pub async fn get_oauth_authorize(
     state: State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
     Query(query): Query<HashMap<String, String>>,
-) -> WebResult<Json<BaseResponse<String>>> {
-    let code = query.get("code").ok_or_else(WebError::invalid_oauth_code)?;
+) -> WebResult<Response> {
+    if !state.cli.oidc_enabled {
+        return Err(WebError::oauth_disabled());
+    }
 
-    let user: MUser = oidc_login_verify(state.clone(), code.to_string())
-        .await
-        .map_err(|e| WebError::InternalServerError(e.to_string()))?;
+    let code = query.get("code").ok_or_else(WebError::invalid_oauth_code)?;
+    let state_query = query
+        .get("state")
+        .ok_or_else(|| WebError::Unauthorized("Missing OIDC state".to_string()))?;
+    let csrf = read_cookie(&headers, OIDC_CSRF_COOKIE)
+        .ok_or_else(|| WebError::Unauthorized("Missing OIDC CSRF cookie".to_string()))?;
+
+    let use_tls = state.cli.use_tls;
+    let user: MUser = oidc_login_verify(
+        state.clone(),
+        code.to_string(),
+        state_query.to_string(),
+        csrf,
+    )
+    .await
+    .map_err(|e| WebError::Unauthorized(e.to_string()))?;
 
     let token =
         encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
@@ -203,26 +247,38 @@ pub async fn get_oauth_authorize(
         message: token,
     };
 
-    Ok(Json(res))
+    let mut response = Json(res).into_response();
+    response.headers_mut().append(
+        axum::http::header::SET_COOKIE,
+        HeaderValue::from_str(&oidc_csrf_clear_cookie(use_tls))
+            .map_err(|_| WebError::InternalServerError("Bad cookie".to_string()))?,
+    );
+    Ok(response)
 }
 
 pub async fn post_oauth_authorize(
     state: State<Arc<ServerState>>,
-) -> WebResult<Json<BaseResponse<String>>> {
+) -> WebResult<Response> {
     if !state.cli.oidc_enabled {
         return Err(WebError::oauth_disabled());
     }
 
-    let authorize_url = oidc_login_create(state)
+    let use_tls = state.cli.use_tls;
+    let req = oidc_login_create(state)
         .await
         .map_err(|e| WebError::Unauthorized(e.to_string()))?;
 
     let res = BaseResponse {
         error: false,
-        message: authorize_url.to_string(),
+        message: req.auth_url.to_string(),
     };
-
-    Ok(Json(res))
+    let mut response = Json(res).into_response();
+    response.headers_mut().insert(
+        axum::http::header::SET_COOKIE,
+        HeaderValue::from_str(&oidc_csrf_set_cookie(&req.cookie_value, use_tls))
+            .map_err(|_| WebError::InternalServerError("Bad cookie".to_string()))?,
+    );
+    Ok(response)
 }
 
 pub async fn get_oidc_login(
@@ -233,55 +289,60 @@ pub async fn get_oidc_login(
         return Err(WebError::oauth_disabled());
     }
 
-    let authorize_url = oidc_login_create(state)
+    let use_tls = state.cli.use_tls;
+    let req = oidc_login_create(state)
         .await
         .map_err(|e| WebError::Unauthorized(e.to_string()))?;
 
-    match Response::builder()
+    Response::builder()
         .status(StatusCode::FOUND)
-        .header("Location", authorize_url.to_string())
+        .header("Location", req.auth_url.to_string())
+        .header("Set-Cookie", oidc_csrf_set_cookie(&req.cookie_value, use_tls))
         .body(Body::empty())
-    {
-        Ok(response) => Ok(response),
-        Err(e) => {
+        .map_err(|e| {
             tracing::error!("Failed to build HTTP response: {}", e);
-            Err(WebError::InternalServerError(
-                "Failed to build redirect response".to_string(),
-            ))
-        }
-    }
+            WebError::InternalServerError("Failed to build redirect response".to_string())
+        })
 }
 
 pub async fn get_oidc_callback(
     state: State<Arc<ServerState>>,
+    headers: axum::http::HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
     let code = query.get("code").ok_or_else(WebError::invalid_oauth_code)?;
+    let state_query = query
+        .get("state")
+        .ok_or_else(|| WebError::Unauthorized("Missing OIDC state".to_string()))?;
+    let csrf = read_cookie(&headers, OIDC_CSRF_COOKIE)
+        .ok_or_else(|| WebError::Unauthorized("Missing OIDC CSRF cookie".to_string()))?;
 
     let use_tls = state.cli.use_tls;
-    let user: MUser = oidc_login_verify(state.clone(), code.to_string())
-        .await
-        .map_err(|e| WebError::InternalServerError(e.to_string()))?;
+    let user: MUser = oidc_login_verify(
+        state.clone(),
+        code.to_string(),
+        state_query.to_string(),
+        csrf,
+    )
+    .await
+    .map_err(|e| WebError::Unauthorized(e.to_string()))?;
 
     let token =
         encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
 
-    let cookie = jwt_cookie(&token, false, use_tls);
+    let session_cookie = jwt_cookie(&token, false, use_tls);
+    let clear_csrf = oidc_csrf_clear_cookie(use_tls);
 
-    match Response::builder()
+    Response::builder()
         .status(StatusCode::FOUND)
         .header("Location", "/account/oidc-callback")
-        .header("Set-Cookie", &cookie)
+        .header("Set-Cookie", &session_cookie)
+        .header("Set-Cookie", &clear_csrf)
         .body(Body::empty())
-    {
-        Ok(response) => Ok(response),
-        Err(e) => {
+        .map_err(|e| {
             tracing::error!("Failed to build HTTP response: {}", e);
-            Err(WebError::InternalServerError(
-                "Failed to build redirect response".to_string(),
-            ))
-        }
-    }
+            WebError::InternalServerError("Failed to build redirect response".to_string())
+        })
 }
 
 pub async fn post_logout(state: State<Arc<ServerState>>) -> WebResult<Response> {
