@@ -11,11 +11,7 @@ use axum::{Extension, Json};
 use chrono::{NaiveDateTime, Timelike, Utc};
 use core::db::get_any_cache_by_name;
 use core::types::*;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
-    QueryFilter, Statement,
-};
+use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -71,34 +67,31 @@ pub async fn record_nar_traffic(state: Arc<ServerState>, cache_id: Uuid, bytes: 
         None => now,
     };
 
-    match ECacheMetric::find()
-        .filter(CCacheMetric::Cache.eq(cache_id))
-        .filter(CCacheMetric::BucketTime.eq(bucket))
-        .one(&state.web_db)
-        .await
-    {
-        Ok(Some(metric)) => {
-            let mut am: ACacheMetric = metric.into_active_model();
-            am.bytes_sent = Set(am.bytes_sent.unwrap() + bytes);
-            am.nar_count = Set(am.nar_count.unwrap() + 1);
-            if let Err(e) = am.update(&state.web_db).await {
-                tracing::warn!(error = %e, "Failed to update cache metric");
-            }
-        }
-        Ok(None) => {
-            let am = ACacheMetric {
-                id: Set(Uuid::new_v4()),
-                cache: Set(cache_id),
-                bucket_time: Set(bucket),
-                bytes_sent: Set(bytes),
-                nar_count: Set(1),
-            };
-            if let Err(e) = am.insert(&state.web_db).await {
-                tracing::warn!(error = %e, "Failed to insert cache metric");
-            }
-        }
-        Err(e) => tracing::warn!(error = %e, "Failed to query cache metric"),
+    let stmt = build_record_nar_traffic_stmt(cache_id, bucket, bytes);
+    if let Err(e) = state.web_db.execute(stmt).await {
+        tracing::warn!(error = %e, "Failed to record cache metric");
     }
+}
+
+/// Build the atomic UPSERT statement that records one NAR request into the
+/// `(cache, bucket_time)` row. Concurrent calls into the same bucket are
+/// serialised by Postgres on the unique `(cache, bucket_time)` index, so each
+/// caller's `bytes_sent`/`nar_count` increment is preserved (no lost updates).
+fn build_record_nar_traffic_stmt(cache_id: Uuid, bucket: NaiveDateTime, bytes: i64) -> Statement {
+    Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        r#"INSERT INTO cache_metric (id, cache, bucket_time, bytes_sent, nar_count)
+           VALUES ($1, $2, $3, $4, 1)
+           ON CONFLICT (cache, bucket_time)
+           DO UPDATE SET bytes_sent = cache_metric.bytes_sent + EXCLUDED.bytes_sent,
+                         nar_count  = cache_metric.nar_count  + EXCLUDED.nar_count"#,
+        [
+            sea_orm::Value::Uuid(Some(Box::new(Uuid::new_v4()))),
+            sea_orm::Value::Uuid(Some(Box::new(cache_id))),
+            sea_orm::Value::ChronoDateTime(Some(Box::new(bucket))),
+            sea_orm::Value::BigInt(Some(bytes)),
+        ],
+    )
 }
 
 async fn aggregate_traffic(
@@ -279,4 +272,48 @@ pub async fn get_cache_stats(
             weeks,
         },
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    /// Regression for #50: the bucket-update path must be a single atomic
+    /// UPSERT, not a SELECT-then-UPDATE. The previous implementation lost
+    /// updates whenever two NAR fetches landed in the same minute bucket
+    /// concurrently — both reads saw the same `bytes_sent` and the second
+    /// write clobbered the first.
+    #[test]
+    fn record_nar_traffic_stmt_is_atomic_upsert() {
+        let bucket = NaiveDate::from_ymd_opt(2026, 5, 2)
+            .unwrap()
+            .and_hms_opt(12, 34, 0)
+            .unwrap();
+        let cache_id = Uuid::nil();
+
+        let stmt = build_record_nar_traffic_stmt(cache_id, bucket, 4096);
+        let sql = stmt.to_string();
+
+        assert!(
+            sql.contains("INSERT INTO cache_metric"),
+            "expected INSERT, got: {sql}"
+        );
+        assert!(
+            sql.contains("ON CONFLICT (cache, bucket_time)"),
+            "expected ON CONFLICT clause inferring the unique index, got: {sql}"
+        );
+        assert!(
+            sql.contains("bytes_sent = cache_metric.bytes_sent + EXCLUDED.bytes_sent"),
+            "expected additive update on bytes_sent, got: {sql}"
+        );
+        assert!(
+            sql.contains("nar_count  = cache_metric.nar_count  + EXCLUDED.nar_count"),
+            "expected additive update on nar_count, got: {sql}"
+        );
+        assert!(
+            !sql.to_uppercase().contains("SELECT"),
+            "atomic upsert must not contain a SELECT (would reintroduce the race), got: {sql}"
+        );
+    }
 }
