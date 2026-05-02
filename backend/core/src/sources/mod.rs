@@ -10,7 +10,7 @@ pub mod nar_path;
 pub mod ssh_key;
 
 pub use self::cache_key::*;
-pub use self::git::{Libgit2Prefetcher, check_project_updates, get_commit_info};
+pub use self::git::{Libgit2Prefetcher, accept_cert, check_project_updates, get_commit_info};
 pub use self::nar_path::*;
 pub use self::ssh_key::{
     clear_key, decrypt_ssh_private_key, format_public_key, generate_ssh_key, write_key,

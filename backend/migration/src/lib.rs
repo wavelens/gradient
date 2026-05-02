@@ -76,6 +76,8 @@ mod m20260425_000000_replace_build_server_with_worker;
 mod m20260430_000000_normalize_hash_columns;
 mod m20260501_000000_drop_github_app_enabled_from_organization;
 mod m20260501_000001_add_repo_check_id;
+mod m20260502_000000_hash_api_keys;
+mod m20260502_000001_drop_file_columns_from_derivation_output;
 
 pub struct Migrator;
 
@@ -153,6 +155,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260430_000000_normalize_hash_columns::Migration),
             Box::new(m20260501_000000_drop_github_app_enabled_from_organization::Migration),
             Box::new(m20260501_000001_add_repo_check_id::Migration),
+            Box::new(m20260502_000000_hash_api_keys::Migration),
+            Box::new(m20260502_000001_drop_file_columns_from_derivation_output::Migration),
         ]
     }
 }

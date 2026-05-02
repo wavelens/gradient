@@ -41,9 +41,14 @@ You can also use the standalone `argon2` CLI from `libargon2` if you prefer:
 
 ```sh
 nix shell nixpkgs#libargon2 -c \
-  sh -c 'argon2 "$(openssl rand -hex 16)" -id -e <<< "mypassword"' \
+  sh -c 'printf %s "mypassword" | argon2 "$(openssl rand -hex 16)" -id -e -m 15 -t 2 -p 1' \
   > /run/secrets/alice-password
 ```
+
+> **Do not** feed the password via a bash herestring (`<<< "mypassword"`) —
+> herestrings append a trailing newline, so `argon2` would hash
+> `mypassword\n` and later logins with `mypassword` would fail. Use
+> `printf %s` (no `\n`) or `gradient hash`.
 
 At server startup, the file content is validated to start with `$argon2`
 and stored verbatim — the server never sees the plaintext password.
@@ -264,18 +269,25 @@ services.gradient.state.api_keys = {
 };
 ```
 
-The key file must contain a token with the `GRAD` prefix:
+The key file must contain the **lowercase 64-char SHA-256 hex digest** of the
+token (without the `GRAD` prefix). The server stores keys hashed; only the hash
+ends up in the database. Generate one for an existing token (or a new random
+one) like so:
 
 ```sh
-echo "GRAD$(openssl rand -hex 32)" > /run/secrets/ci-api-key
+TOKEN="$(openssl rand -hex 32)"
+printf %s "$TOKEN" | sha256sum | cut -d' ' -f1 > /run/secrets/ci-api-key
 ```
+
+Hand `GRAD$TOKEN` to the user/CI pipeline; the server will hash it on the way
+in and compare against the digest in `key_file`.
 
 ### API-key options
 
 | Option | Default | Description |
 |---|---|---|
 | `name` | `<attrset key>` | Unique key name |
-| `key_file` | — | Path to the plaintext token file (required) |
+| `key_file` | — | Path to a file containing the lowercase 64-char SHA-256 hex digest of the token (required) |
 | `owned_by` | — | Username that owns the key (required) |
 
 ## Workers

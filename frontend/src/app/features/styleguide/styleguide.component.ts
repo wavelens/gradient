@@ -16,7 +16,9 @@ import { RadioButtonModule } from 'primeng/radiobutton';
 import { TooltipModule } from 'primeng/tooltip';
 import { ConfirmDialogModule } from 'primeng/confirmdialog';
 import { ToastModule } from 'primeng/toast';
-import { ConfirmationService, MessageService } from 'primeng/api';
+import { MenuModule } from 'primeng/menu';
+import { PopoverModule } from 'primeng/popover';
+import { ConfirmationService, MenuItem, MessageService } from 'primeng/api';
 
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
@@ -27,6 +29,8 @@ import {
   PasswordInputComponent,
   MessageBannerComponent,
   FormDialogComponent,
+  CopyFieldComponent,
+  LabelHelpComponent,
   FormFieldsBuilder,
 } from '@shared/components/form';
 import {
@@ -54,6 +58,8 @@ interface DemoCounty {
     TooltipModule,
     ConfirmDialogModule,
     ToastModule,
+    MenuModule,
+    PopoverModule,
     LoadingSpinnerComponent,
     EmptyStateComponent,
     StatCardComponent,
@@ -61,6 +67,8 @@ interface DemoCounty {
     PasswordInputComponent,
     MessageBannerComponent,
     FormDialogComponent,
+    CopyFieldComponent,
+    LabelHelpComponent,
     PageLayoutComponent,
     SettingsSectionComponent,
   ],
@@ -182,6 +190,17 @@ export class StyleguideComponent {
     label: this.ff.text('', { required: true }),
   });
 
+  // ── Sample copy values & menu items ──────────────────────────────────────
+  webhookUrl = 'https://gradient.example.com/api/v1/hooks/gitea/acme/web-app';
+  apiToken = 'GRAD_b3a8f9e1d2c4a6b8e0f1a3c5d7e9b1d3f5a7c9e1';
+
+  rowMenuItems: MenuItem[] = [
+    { label: 'Edit', icon: 'pi pi-pencil' },
+    { label: 'Duplicate', icon: 'pi pi-clone' },
+    { separator: true },
+    { label: 'Delete', icon: 'pi pi-trash' },
+  ];
+
   // ── Sample data ────────────────────────────────────────────────────────────
   sampleRows = [
     { id: 1, name: 'gradient-cache', status: 'Active', updated: '2 min ago' },
@@ -234,5 +253,9 @@ export class StyleguideComponent {
 
   copyHex(hex: string): void {
     navigator.clipboard.writeText(hex).catch(() => {});
+  }
+
+  scrollTo(id: string): void {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }

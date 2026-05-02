@@ -199,22 +199,28 @@ impl<'a> CacheOpsHandler<'a> {
 
         let sig = format!("{}-{}:{}", sig_url, cache.name, signature);
 
-        let file_hash = build_output
+        // file_hash / file_size live on `cached_path` (written by the worker
+        // during NarUploaded). The legacy mirror on `derivation_output` is
+        // not always populated, so don't rely on it here.
+        let file_hash = cached_path_row
             .file_hash
-            .ok_or_else(|| WebError::BadRequest("Missing file hash".to_string()))?;
-        let file_hash_nix32 = normalize_nar_hash(&file_hash)
+            .as_deref()
+            .map(normalize_nar_hash)
+            .ok_or_else(|| WebError::not_found("FileHash not recorded"))?;
+        let file_hash_nix32 = file_hash
             .trim_start_matches("sha256:")
             .to_string();
+        let file_size = cached_path_row
+            .file_size
+            .ok_or_else(|| WebError::not_found("FileSize not recorded"))?
+            as u32;
 
         Ok(NixPathInfo {
             store_path: path,
             url: format!("nar/{}.nar.zst", file_hash_nix32),
             compression: "zstd".to_string(),
             file_hash,
-            file_size: build_output
-                .file_size
-                .ok_or_else(|| WebError::BadRequest("Missing file size".to_string()))?
-                as u32,
+            file_size,
             nar_hash,
             nar_size,
             references,
@@ -362,16 +368,6 @@ impl<'a> CacheOpsHandler<'a> {
 // ---------------------------------------------------------------------------
 // Public(super) API — thin wrappers used by sibling modules
 // ---------------------------------------------------------------------------
-
-pub(super) async fn user_can_access_cache(
-    state: &Arc<ServerState>,
-    cache: &MCache,
-    user: &MUser,
-) -> bool {
-    CacheOpsHandler::new(state)
-        .user_can_access_cache(cache, user)
-        .await
-}
 
 pub(super) async fn get_nar_by_hash(
     state: Arc<ServerState>,

@@ -81,8 +81,6 @@ impl DerivationInsertBatch {
                     hash: Set(hash),
                     package: Set(package),
                     ca: Set(None),
-                    file_hash: Set(None),
-                    file_size: Set(None),
                     nar_size: Set(None),
                     is_cached: Set(false),
                     cached_path: Set(None),

@@ -105,7 +105,6 @@ pub(super) async fn mark_nar_stored(
     {
         let mut active = row.into_active_model();
         active.is_cached = Set(true);
-        active.file_size = Set(Some(record.file_size));
         active.update(&state.db).await?;
         info!(
             store_path,

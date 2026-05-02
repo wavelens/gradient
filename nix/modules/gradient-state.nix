@@ -455,7 +455,15 @@
 
       key_file = mkOption {
         type = types.str;
-        description = "Path to file containing the API key value";
+        description = ''
+          Path to a file containing the lowercase 64-char SHA-256 hex digest
+          of the API token (without the `GRAD` prefix). The server stores API
+          keys hashed; this hash is what's compared against the digest of the
+          incoming bearer token.
+
+          Generate one with:
+          `printf %s "$TOKEN" | sha256sum | cut -d' ' -f1 > /etc/gradient/secrets/<name>`
+        '';
       };
 
       owned_by = mkOption {

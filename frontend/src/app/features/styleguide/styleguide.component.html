@@ -5,7 +5,9 @@
       <nav>
         <ul>
           @for (item of toc; track item.id) {
-            <li><a [href]="'#' + item.id">{{ item.label }}</a></li>
+            <li>
+              <a href="javascript:void(0)" (click)="scrollTo(item.id)">{{ item.label }}</a>
+            </li>
           }
         </ul>
       </nav>
@@ -144,7 +146,6 @@
         <button pButton label="Danger" severity="danger"></button>
         <button pButton label="Warn" severity="warn"></button>
         <button pButton label="Info" severity="info"></button>
-        <button pButton label="Help" severity="help"></button>
       </div>
 
       <h3>Variants</h3>
@@ -270,6 +271,42 @@
       <gr-message-banner type="success">Changes saved successfully.</gr-message-banner>
       <gr-message-banner type="warning">This action is irreversible.</gr-message-banner>
       <gr-message-banner type="info">Heads up: this account is managed declaratively.</gr-message-banner>
+
+      <h3>Copy Field</h3>
+      <p class="text-secondary">
+        Read-only input + copy button. The button switches to a green check on
+        successful copy and reverts after a short delay.
+      </p>
+      <div class="sg-card">
+        <gr-form-field label="Webhook URL" for="sg-cf-url">
+          <gr-copy-field id="sg-cf-url" [value]="webhookUrl" />
+        </gr-form-field>
+        <gr-form-field label="API token (mono)" for="sg-cf-tok">
+          <gr-copy-field id="sg-cf-tok" [value]="apiToken" />
+        </gr-form-field>
+        <gr-form-field label="Plain (no mono)" for="sg-cf-plain">
+          <gr-copy-field id="sg-cf-plain" [value]="'short value'" [mono]="false" />
+        </gr-form-field>
+      </div>
+
+      <h3>Label Help Link</h3>
+      <p class="text-secondary">
+        A small question-mark icon link placed inside a field label. Opens the
+        linked docs page in a new tab. Use it when a field name needs
+        clarification but a hint line would be too verbose.
+      </p>
+      <div class="sg-card">
+        <div class="sg-labelled-field">
+          <label for="sg-lh-wild">
+            Evaluation Wildcard
+            <gr-label-help
+              href="https://wavelens.github.io/gradient/usage/overview/"
+              title="Learn about evaluation wildcards"
+            />
+          </label>
+          <input pInputText id="sg-lh-wild" class="w-full" value="packages.x86_64-linux.*" />
+        </div>
+      </div>
     </section>
 
     <!-- ─── Popups & Overlays ─── -->
@@ -305,6 +342,42 @@
           </gr-form-field>
         </form>
       </gr-form-dialog>
+
+      <h3>Popup Menu</h3>
+      <p class="text-secondary">
+        PrimeNG <code>p-menu</code> with <code>[popup]="true"</code> attached to a
+        trigger button. Use for row-level "more actions" menus.
+      </p>
+      <div class="sg-row">
+        <button
+          pButton
+          icon="pi pi-ellipsis-v"
+          severity="secondary"
+          aria-label="Open actions menu"
+          (click)="rowMenu.toggle($event)"
+        ></button>
+        <button pButton label="Actions" icon="pi pi-chevron-down" iconPos="right"
+          severity="secondary" (click)="rowMenu.toggle($event)"></button>
+      </div>
+      <p-menu #rowMenu [model]="rowMenuItems" [popup]="true" appendTo="body" />
+
+      <h3>Popover</h3>
+      <p class="text-secondary">
+        PrimeNG <code>p-popover</code> for richer overlay content (forms, hints, mini-cards).
+      </p>
+      <div class="sg-row">
+        <button pButton label="Open popover" icon="pi pi-info-circle"
+          severity="secondary" (click)="popover.toggle($event)"></button>
+      </div>
+      <p-popover #popover>
+        <div class="sg-popover-body">
+          <strong>Quick info</strong>
+          <p class="text-secondary">
+            Popovers can hold any content — text, mini-forms, or action lists.
+          </p>
+          <button pButton label="Got it" size="small" (click)="popover.hide()"></button>
+        </div>
+      </p-popover>
 
       <p-confirmDialog />
       <p-toast />

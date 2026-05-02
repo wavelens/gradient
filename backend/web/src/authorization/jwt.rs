@@ -13,6 +13,7 @@ use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation, deco
 use rand::distr::{Alphanumeric, SampleString};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -89,8 +90,10 @@ pub async fn decode_jwt(
     jwt: String,
 ) -> Result<TokenData<Cliams>, StatusCode> {
     let result = if jwt.starts_with("GRAD") {
+        let raw = jwt.strip_prefix("GRAD").ok_or(StatusCode::UNAUTHORIZED)?;
+        let key_hash = hash_api_key(raw);
         let api_key = EApi::find()
-            .filter(CApi::Key.eq(jwt.strip_prefix("GRAD").ok_or(StatusCode::UNAUTHORIZED)?))
+            .filter(CApi::Key.eq(key_hash))
             .one(&state.web_db)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -163,6 +166,21 @@ pub async fn decode_download_token(
 
 pub fn generate_api_key() -> String {
     Alphanumeric.sample_string(&mut rand::rng(), 64)
+}
+
+/// Lowercase hex SHA-256 of the raw token (the part after the `GRAD` prefix).
+/// API keys are stored hashed; this is also what `state.api_keys[*].key_file`
+/// must contain.
+pub fn hash_api_key(raw: &str) -> String {
+    let mut h = Sha256::new();
+    h.update(raw.as_bytes());
+    let bytes = h.finalize();
+    let mut out = String::with_capacity(64);
+    for b in bytes {
+        use std::fmt::Write as _;
+        write!(&mut out, "{:02x}", b).unwrap();
+    }
+    out
 }
 
 #[cfg(test)]

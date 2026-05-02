@@ -99,11 +99,6 @@ async fn narinfo_served_from_db_inner() {
         hash: FIXTURE_HASH.into(),
         package: "hello".into(),
         ca: None,
-        // 64-char hex SHA-256 (all zeros for simplicity).
-        file_hash: Some(
-            "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
-        ),
-        file_size: Some(12345),
         nar_size: Some(67890),
         is_cached: true,
         cached_path: Some(cached_path_id()),

@@ -100,8 +100,6 @@ fn make_drv_output(id: Uuid, drv_id: Uuid, name: &str, path: &str) -> MDerivatio
         hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
         package: name.to_string(),
         ca: None,
-        file_hash: None,
-        file_size: None,
         nar_size: None,
         is_cached: false,
         cached_path: None,
@@ -1010,7 +1008,6 @@ async fn build_output_updates_derivation_output() {
     let drv_out_updated = {
         let mut o = drv_out.clone();
         o.nar_size = Some(12345);
-        o.file_hash = Some("sha256:abc".into());
         o
     };
 
@@ -1099,7 +1096,6 @@ async fn build_output_inserts_build_product_rows() {
     let drv_out_updated = {
         let mut o = drv_out.clone();
         o.nar_size = Some(99);
-        o.file_hash = Some("sha256:abc".into());
         o
     };
 

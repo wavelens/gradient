@@ -216,6 +216,28 @@ user intended for OIDC failed at startup with "missing field
 `web::authorization::oidc` with `User already exists with password
 authentication`.
 
+## Hashed API keys at rest
+
+Backend (`cargo test -p core --lib state::provisioning::api_key_hash_tests`):
+- `accepts_64_char_hex` — a lowercase 64-char hex string round-trips.
+- `trims_trailing_whitespace` — credential files written with a trailing
+  newline still parse.
+- `lowercases_uppercase_hex` — uppercase hex is normalised on the way in.
+- `rejects_plaintext_token` / `rejects_short_hex` / `rejects_non_hex_chars` —
+  malformed values are rejected with a "SHA-256" hint pointing at the right
+  shell incantation.
+
+Backend (`cargo test -p migration --lib m20260502_000000_hash_api_keys`):
+- `sha256_hex_known_vector` — pins the in-place migration's digest helper to
+  `SHA-256("abc")`.
+
+Together these guard the contract that every value in `api.key` is a
+lowercase 64-char SHA-256 hex digest of the bearer token, and that
+`gradient` rejects state credentials that don't match (so an operator who
+accidentally points `key_file` at a plaintext token sees the error at
+provisioning rather than authenticating with a hash that nothing can
+produce).
+
 ## Build → worker attribution
 
 The `build.worker` column (text, nullable) records which worker executed a

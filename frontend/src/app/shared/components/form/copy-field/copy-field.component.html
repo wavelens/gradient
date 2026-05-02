@@ -1,0 +1,18 @@
+<div class="copy-field">
+  <input
+    pInputText
+    [id]="id() ?? null"
+    [value]="value()"
+    [class.copy-field__input--mono]="mono()"
+    class="copy-field__input"
+    readonly
+  />
+  <button
+    pButton
+    type="button"
+    [icon]="copied() ? 'pi pi-check' : 'pi pi-copy'"
+    [severity]="copied() ? 'success' : 'secondary'"
+    [attr.aria-label]="copied() ? 'Copied' : 'Copy to clipboard'"
+    (click)="copy()"
+  ></button>
+</div>

@@ -20,8 +20,6 @@ pub struct Model {
     pub hash: String,
     pub package: String,
     pub ca: Option<String>,
-    pub file_hash: Option<String>,
-    pub file_size: Option<i64>,
     pub nar_size: Option<i64>,
     pub is_cached: bool,
     /// Link to the `cached_path` row when this output is cached.

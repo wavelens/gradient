@@ -12,7 +12,7 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use core::sources::get_hash_from_url;
 use core::types::*;
-use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -97,19 +97,6 @@ pub(crate) async fn resolve_effective_hash_db(
 ) -> WebResult<String> {
     let file_hash_prefixed = format!("sha256:{}", path_hash);
 
-    let by_file = EDerivationOutput::find()
-        .filter(
-            Condition::all()
-                .add(CDerivationOutput::IsCached.eq(true))
-                .add(CDerivationOutput::FileHash.eq(&file_hash_prefixed)),
-        )
-        .one(db)
-        .await?;
-
-    if let Some(output) = by_file {
-        return Ok(output.hash);
-    }
-
     let by_cached_path = ECachedPath::find()
         .filter(CCachedPath::FileHash.eq(&file_hash_prefixed))
         .one(db)
@@ -179,28 +166,6 @@ mod tests {
     const FILE_HASH_NIX32: &str = "0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73";
     const STORE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-    fn empty_output_page() -> Vec<entity::derivation_output::Model> {
-        Vec::new()
-    }
-
-    fn derivation_output_row() -> entity::derivation_output::Model {
-        entity::derivation_output::Model {
-            id: uuid::Uuid::new_v4(),
-            derivation: uuid::Uuid::new_v4(),
-            name: "out".to_string(),
-            output: format!("/nix/store/{STORE_HASH}-hello"),
-            hash: STORE_HASH.to_string(),
-            package: "hello".to_string(),
-            ca: None,
-            file_hash: Some(format!("sha256:{FILE_HASH_NIX32}")),
-            file_size: Some(1234),
-            nar_size: Some(2048),
-            is_cached: true,
-            cached_path: None,
-            created_at: Utc::now().naive_utc(),
-        }
-    }
-
     fn cached_path_row() -> entity::cached_path::Model {
         entity::cached_path::Model {
             id: uuid::Uuid::new_v4(),
@@ -225,13 +190,12 @@ mod tests {
             .expect("runtime")
     }
 
-    /// When no derivation_output matches but a cached_path does, the
-    /// resolver returns the cached_path's store hash — this is the key
-    /// the NAR blob was written under by `pack_store_path`.
+    /// `cached_path.file_hash` is the only authoritative source for the URL
+    /// → store-hash mapping. The resolver returns the cached_path's store
+    /// hash, which is the key the NAR blob was written under.
     #[test]
-    fn resolve_falls_back_to_cached_path_for_drv() {
+    fn resolve_returns_store_hash_from_cached_path() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([empty_output_page()])
             .append_query_results([vec![cached_path_row()]])
             .into_connection();
 
@@ -241,29 +205,11 @@ mod tests {
         assert_eq!(effective, STORE_HASH);
     }
 
-    /// Regression for the narinfo→NAR 404: a `derivation_output` row whose
-    /// `file_hash` column holds the canonical `sha256:<nix32>` form is
-    /// resolved by the same nix32 hash that appears in the narinfo URL.
-    /// Prior to the normalize-on-write fix the column held `sha256:<hex>`
-    /// and the lookup never matched, so the NAR endpoint 404'd.
-    #[test]
-    fn resolve_returns_store_hash_for_normalized_derivation_output() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![derivation_output_row()]])
-            .into_connection();
-
-        let effective = runtime()
-            .block_on(resolve_effective_hash_db(&db, FILE_HASH_NIX32))
-            .expect("resolve should succeed");
-        assert_eq!(effective, STORE_HASH);
-    }
-
-    /// When neither table has a match, the URL hash is returned unchanged
+    /// When no cached_path matches, the URL hash is returned unchanged
     /// (legacy/direct-hash URL behaviour preserved).
     #[test]
     fn resolve_falls_back_to_url_hash_when_no_match() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([empty_output_page()])
             .append_query_results([Vec::<entity::cached_path::Model>::new()])
             .into_connection();
 

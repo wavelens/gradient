@@ -166,8 +166,7 @@ impl<'a> ProjectGitContext<'a> {
 
         tokio::task::spawn_blocking(move || {
             let mut callbacks = RemoteCallbacks::new();
-            callbacks
-                .certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificatePassthrough));
+            callbacks.certificate_check(|cert, _valid| Ok(accept_cert(cert)));
 
             if let Some((private_key, public_key)) = ssh_creds {
                 callbacks.credentials(move |_url, username_from_url, _allowed| {
@@ -346,13 +345,25 @@ async fn prefetch_flake_inner(
 
 // ── Low-level git helpers ─────────────────────────────────────────────────────
 
+/// libgit2 has no built-in SSH host-key verifier; `CertificatePassthrough`
+/// gets treated as a rejection ("invalid or unknown remote ssh hostkey").
+/// Accept SSH host keys unconditionally (TOFU-less, like
+/// `StrictHostKeyChecking=no`); leave HTTPS verification to libgit2's TLS.
+pub fn accept_cert(cert: &git2::cert::Cert<'_>) -> git2::CertificateCheckStatus {
+    if cert.as_hostkey().is_some() {
+        git2::CertificateCheckStatus::CertificateOk
+    } else {
+        git2::CertificateCheckStatus::CertificatePassthrough
+    }
+}
+
 /// Build `FetchOptions` with in-memory SSH credentials.
 /// The key strings are cloned so the closure is `'static`.
 fn make_ssh_fetch_options(private_key: &str, public_key: &str) -> git2::FetchOptions<'static> {
     let priv_key = private_key.to_owned();
     let pub_key = public_key.to_owned();
     let mut callbacks = RemoteCallbacks::new();
-    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificatePassthrough));
+    callbacks.certificate_check(|cert, _valid| Ok(accept_cert(cert)));
     callbacks.credentials(move |_url, username_from_url, _allowed| {
         git2::Cred::ssh_key_from_memory(
             username_from_url.unwrap_or("git"),
@@ -433,7 +444,7 @@ fn ls_remote_head_ssh(
     let priv_key = private_key.to_string();
     let pub_key = public_key.to_string();
     let mut callbacks = RemoteCallbacks::new();
-    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificatePassthrough));
+    callbacks.certificate_check(|cert, _valid| Ok(accept_cert(cert)));
     callbacks.credentials(move |_url, username_from_url, _allowed| {
         git2::Cred::ssh_key_from_memory(
             username_from_url.unwrap_or("git"),
@@ -466,7 +477,7 @@ fn ls_remote_head_no_creds(url: &str) -> Result<Vec<u8>, SourceError> {
         git2::Remote::create_detached(url).map_err(|e| SourceError::GitCommand(e.to_string()))?;
 
     let mut callbacks = RemoteCallbacks::new();
-    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificatePassthrough));
+    callbacks.certificate_check(|cert, _valid| Ok(accept_cert(cert)));
 
     let conn = remote
         .connect_auth(Direction::Fetch, Some(callbacks), None)

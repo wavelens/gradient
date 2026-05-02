@@ -27,7 +27,11 @@ impl<'a> CacheQueryHandler<'a> {
         &self,
         hashes: &[&str],
     ) -> HashMap<String, (Option<i64>, Option<i64>)> {
-        match EDerivationOutput::find()
+        // Source the (file_size, nar_size) pair straight from `cached_path` —
+        // the worker writes both columns there during NarUploaded, so it's the
+        // single authoritative copy.  We still scope the result to outputs the
+        // server marks `is_cached`, so an in-flight upload doesn't leak.
+        let derivation_outputs = match EDerivationOutput::find()
             .filter(
                 sea_orm::Condition::all()
                     .add(CDerivationOutput::IsCached.eq(true))
@@ -36,15 +40,34 @@ impl<'a> CacheQueryHandler<'a> {
             .all(&self.state.db)
             .await
         {
-            Ok(rows) => rows
-                .into_iter()
-                .map(|r| (r.hash, (r.file_size, r.nar_size)))
-                .collect(),
+            Ok(rows) => rows,
             Err(e) => {
                 warn!(error = %e, "CacheQuery local DB lookup failed");
-                HashMap::new()
+                return HashMap::new();
             }
-        }
+        };
+
+        let cached_paths = match ECachedPath::find()
+            .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
+            .all(&self.state.db)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!(error = %e, "CacheQuery cached_path lookup failed");
+                return HashMap::new();
+            }
+        };
+
+        let sizes: HashMap<String, (Option<i64>, Option<i64>)> = cached_paths
+            .into_iter()
+            .map(|cp| (cp.hash, (cp.file_size, cp.nar_size)))
+            .collect();
+
+        derivation_outputs
+            .into_iter()
+            .filter_map(|row| sizes.get(&row.hash).map(|sizes| (row.hash, *sizes)))
+            .collect()
     }
 
     async fn load_cached_path_rows(&self, hashes: &[&str]) -> Vec<entity::cached_path::Model> {

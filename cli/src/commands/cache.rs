@@ -39,17 +39,18 @@ pub enum Commands {
     Show {
         name: String,
     },
-    /// Fetch the netrc credentials for a cache and install them into a netrc file.
-    /// Credentials are passed directly as flags — no config.toml is read or written.
-    /// Intended to be run as root (e.g. sudo) to install into /etc/nix/netrc.
+    /// Build a netrc entry locally for a cache and install it into a netrc file.
+    /// No request is sent to the server — bring your own API key (issued via the
+    /// frontend or `gradient` UI). Intended to be run as root (e.g. sudo) to
+    /// install into /etc/nix/netrc.
     InstallNetrc {
         /// Gradient server URL (e.g. https://gradient.example.com)
         #[arg(short, long)]
         server: String,
-        /// Bearer token (JWT or API key) used to authenticate the request
+        /// Bearer token (`GRAD…` API key or JWT). Prompted on stdin if omitted.
         #[arg(short, long)]
-        token: String,
-        /// Name of the cache whose netrc credentials to install
+        token: Option<String>,
+        /// Name of the cache (used purely as a label in the netrc entry)
         #[arg(short, long)]
         cache: String,
         /// Path to the netrc file to update (default: /etc/nix/netrc)
@@ -221,39 +222,43 @@ pub async fn handle(cmd: Commands) {
             cache,
             netrc_file,
         } => {
-            let config = RequestConfig {
-                server_url: server,
-                token: Some(token),
+            let token = match token {
+                Some(t) if !t.is_empty() => t,
+                _ => {
+                    print!("API key (GRAD…): ");
+                    std::io::Write::flush(&mut std::io::stdout()).ok();
+                    let entered = rpassword::read_password().unwrap_or_else(|e| {
+                        eprintln!("Failed to read token: {}", e);
+                        exit(1);
+                    });
+                    if entered.is_empty() {
+                        eprintln!("Token cannot be empty.");
+                        exit(1);
+                    }
+                    entered
+                }
             };
 
-            let res = caches::get_cache_netrc(config, cache.clone())
-                .await
-                .map_err(|e| {
-                    eprintln!("{}", e);
-                    exit(1);
-                })
-                .unwrap();
-
-            if res.error {
-                eprintln!(
-                    "Failed to fetch netrc for cache '{}': {}",
-                    cache, res.message
-                );
+            let machine_host = server
+                .trim()
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .split('/')
+                .next()
+                .unwrap_or("")
+                .to_string();
+            if machine_host.is_empty() {
+                eprintln!("Invalid server URL: '{}'", server);
                 exit(1);
             }
 
-            let new_entry = res.message;
+            let new_entry = format!(
+                "machine {}\nlogin gradient\npassword {}\n",
+                machine_host, token
+            );
 
-            // Extract the machine hostname from "machine <host>\n..."
-            let machine_host = new_entry
-                .lines()
-                .find(|l| l.starts_with("machine "))
-                .and_then(|l| l.split_whitespace().nth(1))
-                .unwrap_or("");
-
-            // Read existing netrc, removing any stale entry for this machine.
             let existing = fs::read_to_string(&netrc_file).unwrap_or_default();
-            let filtered = remove_netrc_entry(&existing, machine_host);
+            let filtered = remove_netrc_entry(&existing, &machine_host);
 
             let updated = if filtered.ends_with('\n') || filtered.is_empty() {
                 format!("{}{}", filtered, new_entry)
@@ -261,7 +266,6 @@ pub async fn handle(cmd: Commands) {
                 format!("{}\n{}", filtered, new_entry)
             };
 
-            // Ensure parent directory exists.
             if let Some(parent) = std::path::Path::new(&netrc_file).parent()
                 && let Err(e) = fs::create_dir_all(parent)
             {
@@ -275,8 +279,8 @@ pub async fn handle(cmd: Commands) {
             });
 
             println!(
-                "netrc credentials for '{}' installed into '{}'.",
-                cache, netrc_file
+                "netrc credentials for cache '{}' (machine '{}') installed into '{}'.",
+                cache, machine_host, netrc_file
             );
         }
     }

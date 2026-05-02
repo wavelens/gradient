@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::authorization::generate_api_key;
+use crate::authorization::{generate_api_key, hash_api_key};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
@@ -162,21 +162,22 @@ pub async fn post_keys(
         return Err(WebError::already_exists("API-Key Name"));
     }
 
+    let raw_key = generate_api_key();
     let api_key = AApi {
         id: Set(Uuid::new_v4()),
         owned_by: Set(user.id),
         name: Set(body.name.clone()),
-        key: Set(generate_api_key()),
+        key: Set(hash_api_key(&raw_key)),
         last_used_at: Set(*NULL_TIME),
         created_at: Set(Utc::now().naive_utc()),
         managed: Set(false),
     };
 
-    let api_key = api_key.insert(&state.web_db).await?;
+    api_key.insert(&state.web_db).await?;
 
     let res = BaseResponse {
         error: false,
-        message: format!("GRAD{}", api_key.key),
+        message: format!("GRAD{}", raw_key),
     };
 
     Ok(Json(res))

@@ -313,3 +313,28 @@
 .w-full {
   width: 100%;
 }
+
+.sg-labelled-field {
+  display: block;
+
+  label {
+    display: block;
+    margin-bottom: $spacing-sm;
+    font-size: $font-size-sm;
+    font-weight: 500;
+    color: $text-primary;
+  }
+}
+
+.sg-popover-body {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-sm;
+  padding: $spacing-md;
+  min-width: 240px;
+
+  p {
+    margin: 0;
+    font-size: $font-size-sm;
+  }
+}

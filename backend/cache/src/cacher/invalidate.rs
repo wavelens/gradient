@@ -43,8 +43,6 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
 
         let mut active = output.clone().into_active_model();
         active.is_cached = Set(false);
-        active.file_hash = Set(None);
-        active.file_size = Set(None);
         active
             .update(&state.db)
             .await

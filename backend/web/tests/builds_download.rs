@@ -183,8 +183,6 @@ fn drv_output_row() -> entity::derivation_output::Model {
         hash: FIXTURE_HASH.into(),
         package: "pkg".into(),
         ca: None,
-        file_hash: None,
-        file_size: None,
         nar_size: None,
         is_cached: true,
         cached_path: None,

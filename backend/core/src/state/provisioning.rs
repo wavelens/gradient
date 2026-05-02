@@ -581,6 +581,7 @@ impl<'a> StateApplicator<'a> {
             );
             let key_value = fs::read_to_string(&key_path)
                 .map_err(|e| format!("Failed to read API key file {}: {}", key_path, e))?;
+            let key_hash = parse_api_key_hash(&key_value, &key_path)?;
 
             let existing_api_key = api::Entity::find()
                 .filter(api::Column::Name.eq(&state_api_key.name))
@@ -590,7 +591,7 @@ impl<'a> StateApplicator<'a> {
 
             if let Some(api_key_model) = existing_api_key {
                 let mut api_key: api::ActiveModel = api_key_model.into();
-                api_key.key = Set(key_value.trim().to_string());
+                api_key.key = Set(key_hash);
                 api_key.managed = Set(true);
                 api_key.update(self.db).await?;
                 tracing::info!("Updated managed API key: {}", state_api_key.name);
@@ -599,7 +600,7 @@ impl<'a> StateApplicator<'a> {
                     id: Set(Uuid::new_v4()),
                     owned_by: Set(*owned_by_id),
                     name: Set(state_api_key.name.clone()),
-                    key: Set(key_value.trim().to_string()),
+                    key: Set(key_hash),
                     last_used_at: Set(now),
                     created_at: Set(now),
                     managed: Set(true),
@@ -1091,6 +1092,22 @@ fn parse_password_phc(
     Ok(phc)
 }
 
+fn parse_api_key_hash(
+    contents: &str,
+    path: &str,
+) -> std::result::Result<String, Box<dyn std::error::Error>> {
+    let v = contents.trim();
+    if v.len() != 64 || !v.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(format!(
+            "API key file {} must contain a lowercase 64-char hex SHA-256 hash of the token \
+             (e.g. `printf %s \"$TOKEN\" | sha256sum | cut -d' ' -f1`).",
+            path
+        )
+        .into());
+    }
+    Ok(v.to_ascii_lowercase())
+}
+
 fn derive_public_key(private_key: &str) -> Result<String> {
     let private_key =
         PrivateKey::from_openssh(private_key).context("Failed to parse private key")?;
@@ -1140,5 +1157,49 @@ mod password_phc_tests {
         let h = "$pbkdf2-sha256$i=600000$c2FsdA$aGFzaA";
         let err = parse_password_phc(h, "/tmp/p").unwrap_err();
         assert!(err.to_string().contains("argon2"));
+    }
+}
+
+#[cfg(test)]
+mod api_key_hash_tests {
+    use super::parse_api_key_hash;
+
+    const VALID: &str =
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+    #[test]
+    fn accepts_64_char_hex() {
+        assert_eq!(parse_api_key_hash(VALID, "/tmp/k").unwrap(), VALID);
+    }
+
+    #[test]
+    fn trims_trailing_whitespace() {
+        let with_ws = format!("{VALID}\n");
+        assert_eq!(parse_api_key_hash(&with_ws, "/tmp/k").unwrap(), VALID);
+    }
+
+    #[test]
+    fn lowercases_uppercase_hex() {
+        let upper = VALID.to_ascii_uppercase();
+        assert_eq!(parse_api_key_hash(&upper, "/tmp/k").unwrap(), VALID);
+    }
+
+    #[test]
+    fn rejects_plaintext_token() {
+        let err = parse_api_key_hash("notahashbutaverylongstring", "/tmp/k").unwrap_err();
+        assert!(err.to_string().contains("SHA-256"));
+    }
+
+    #[test]
+    fn rejects_short_hex() {
+        let err = parse_api_key_hash("deadbeef", "/tmp/k").unwrap_err();
+        assert!(err.to_string().contains("SHA-256"));
+    }
+
+    #[test]
+    fn rejects_non_hex_chars() {
+        let bad = "z".repeat(64);
+        let err = parse_api_key_hash(&bad, "/tmp/k").unwrap_err();
+        assert!(err.to_string().contains("SHA-256"));
     }
 }

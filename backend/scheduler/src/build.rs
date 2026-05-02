@@ -14,7 +14,6 @@ use chrono::Utc;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use gradient_core::db::{update_build_status, update_evaluation_status};
-use gradient_core::nix_hash::normalize_nar_hash;
 use gradient_core::types::*;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -61,10 +60,9 @@ impl<'a> BuildStateHandler<'a> {
             if let Some(row) = existing {
                 let row_id = row.id;
                 let mut active = row.into_active_model();
-                if let BuildOutputMetadata::Available { nar_size, nar_hash } = output.nar_metadata()
+                if let BuildOutputMetadata::Available { nar_size, nar_hash: _ } = output.nar_metadata()
                 {
                     active.nar_size = Set(Some(nar_size));
-                    active.file_hash = Set(Some(normalize_nar_hash(nar_hash)));
                 }
                 if let Err(e) = active.update(&self.state.db).await {
                     error!(error = %e, %build_id, output_name = %output.name, "failed to update derivation_output");
