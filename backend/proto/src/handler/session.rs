@@ -80,7 +80,7 @@ impl ProtoSession<Opening> {
             return None;
         }
         let (peer_id, client_capabilities) = self.recv_init_connection().await?;
-        let (authorized_peers, failed_peers) = self.perform_auth(&peer_id).await?;
+        let (authorized_peers, failed_peers) = self.perform_auth(&peer_id, server_initiated).await?;
         let enabled_caps = aggregate_enabled_caps(&self.state, &peer_id).await;
         let negotiated = negotiate_capabilities(&self.state, client_capabilities, enabled_caps);
         self.send_init_ack(&negotiated, &authorized_peers, &failed_peers)
@@ -126,7 +126,11 @@ impl ProtoSession<Opening> {
         }
     }
 
-    async fn perform_auth(&mut self, peer_id: &str) -> Option<(Vec<String>, Vec<FailedPeer>)> {
+    async fn perform_auth(
+        &mut self,
+        peer_id: &str,
+        server_initiated: bool,
+    ) -> Option<(Vec<String>, Vec<FailedPeer>)> {
         let registered_peers = lookup_registered_peers(&self.state, peer_id).await;
         send_server_msg(
             &mut self.socket,
@@ -151,20 +155,26 @@ impl ProtoSession<Opening> {
             filter_org_peers_without_cache(&self.state, authorized_peers).await;
         failed_peers.extend(demoted);
 
-        if registered_peers.is_empty() {
-            if has_any_registrations(&self.state, peer_id).await {
-                send_reject(&mut self.socket, 403, "worker is deactivated".into()).await;
+        let has_any = registered_peers.is_empty()
+            && has_any_registrations(&self.state, peer_id).await;
+        match decide_auth(
+            server_initiated,
+            registered_peers.is_empty(),
+            has_any,
+            authorized_peers.is_empty(),
+        ) {
+            AuthDecision::Accept => {
+                if registered_peers.is_empty() {
+                    debug!(
+                        %peer_id,
+                        "server-initiated, no registered peers — open connection accepted"
+                    );
+                }
+            }
+            AuthDecision::Reject { code, reason } => {
+                send_reject(&mut self.socket, code, reason.into()).await;
                 return None;
             }
-            debug!(%peer_id, "no registered peers — open connection accepted");
-        } else if authorized_peers.is_empty() {
-            send_reject(
-                &mut self.socket,
-                401,
-                "no valid peer tokens provided".into(),
-            )
-            .await;
-            return None;
         }
 
         Some((authorized_peers, failed_peers))
@@ -359,4 +369,121 @@ pub(crate) async fn handle_socket(
         return;
     };
     session.run().await;
+}
+
+// ── Auth decision (pure) ──────────────────────────────────────────────────────
+
+#[derive(Debug, PartialEq, Eq)]
+enum AuthDecision {
+    Accept,
+    Reject { code: u16, reason: &'static str },
+}
+
+/// Pure decision function used by `perform_auth` so the authorisation policy
+/// is independently testable.
+///
+/// - `server_initiated`: connection initiated by *us* (we know the worker).
+/// - `registered_peers_empty`: no `peer` row mentions this `worker_id` at all.
+/// - `has_any_registrations`: any cache/org has *ever* registered this worker
+///   (i.e. it once existed but is now deactivated).
+/// - `authorized_peers_empty`: zero of the peers in the challenge produced a
+///   valid token.
+fn decide_auth(
+    server_initiated: bool,
+    registered_peers_empty: bool,
+    has_any_registrations: bool,
+    authorized_peers_empty: bool,
+) -> AuthDecision {
+    if registered_peers_empty {
+        if has_any_registrations {
+            return AuthDecision::Reject {
+                code: 403,
+                reason: "worker is deactivated",
+            };
+        }
+        if !server_initiated {
+            return AuthDecision::Reject {
+                code: 403,
+                reason: "unknown worker",
+            };
+        }
+        AuthDecision::Accept
+    } else if authorized_peers_empty {
+        AuthDecision::Reject {
+            code: 401,
+            reason: "no valid peer tokens provided",
+        }
+    } else {
+        AuthDecision::Accept
+    }
+}
+
+#[cfg(test)]
+mod auth_decision_tests {
+    use super::{AuthDecision, decide_auth};
+
+    /// Inbound connection from a worker nobody has registered must be
+    /// rejected. This is the regression test for the open-mode auth bypass:
+    /// before the fix, `decide_auth` (then inlined) accepted because the
+    /// `server_initiated` branch ran for everyone.
+    #[test]
+    fn inbound_unknown_worker_rejected() {
+        let d = decide_auth(false, true, false, true);
+        assert_eq!(
+            d,
+            AuthDecision::Reject {
+                code: 403,
+                reason: "unknown worker",
+            }
+        );
+    }
+
+    /// Server-initiated outbound connection to an unregistered worker is
+    /// the only legitimate "open mode" path.
+    #[test]
+    fn outbound_unknown_worker_accepted() {
+        assert_eq!(decide_auth(true, true, false, true), AuthDecision::Accept);
+    }
+
+    /// Worker had a registration once but it's been removed → reject as
+    /// deactivated, regardless of inbound vs. outbound.
+    #[test]
+    fn deactivated_worker_rejected_inbound() {
+        assert_eq!(
+            decide_auth(false, true, true, true),
+            AuthDecision::Reject {
+                code: 403,
+                reason: "worker is deactivated",
+            }
+        );
+    }
+
+    #[test]
+    fn deactivated_worker_rejected_outbound() {
+        assert_eq!(
+            decide_auth(true, true, true, true),
+            AuthDecision::Reject {
+                code: 403,
+                reason: "worker is deactivated",
+            }
+        );
+    }
+
+    /// Registered peers exist but no token validated → 401.
+    #[test]
+    fn registered_but_no_valid_token() {
+        assert_eq!(
+            decide_auth(false, false, false, true),
+            AuthDecision::Reject {
+                code: 401,
+                reason: "no valid peer tokens provided",
+            }
+        );
+    }
+
+    /// Registered + at least one valid token → accept.
+    #[test]
+    fn registered_with_valid_token_accepted() {
+        assert_eq!(decide_auth(false, false, false, false), AuthDecision::Accept);
+    }
 }

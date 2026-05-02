@@ -167,7 +167,7 @@ impl<'a> ProjectGitContext<'a> {
         tokio::task::spawn_blocking(move || {
             let mut callbacks = RemoteCallbacks::new();
             callbacks
-                .certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificateOk));
+                .certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificatePassthrough));
 
             if let Some((private_key, public_key)) = ssh_creds {
                 callbacks.credentials(move |_url, username_from_url, _allowed| {
@@ -352,7 +352,7 @@ fn make_ssh_fetch_options(private_key: &str, public_key: &str) -> git2::FetchOpt
     let priv_key = private_key.to_owned();
     let pub_key = public_key.to_owned();
     let mut callbacks = RemoteCallbacks::new();
-    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificateOk));
+    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificatePassthrough));
     callbacks.credentials(move |_url, username_from_url, _allowed| {
         git2::Cred::ssh_key_from_memory(
             username_from_url.unwrap_or("git"),
@@ -433,7 +433,7 @@ fn ls_remote_head_ssh(
     let priv_key = private_key.to_string();
     let pub_key = public_key.to_string();
     let mut callbacks = RemoteCallbacks::new();
-    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificateOk));
+    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificatePassthrough));
     callbacks.credentials(move |_url, username_from_url, _allowed| {
         git2::Cred::ssh_key_from_memory(
             username_from_url.unwrap_or("git"),
@@ -466,7 +466,7 @@ fn ls_remote_head_no_creds(url: &str) -> Result<Vec<u8>, SourceError> {
         git2::Remote::create_detached(url).map_err(|e| SourceError::GitCommand(e.to_string()))?;
 
     let mut callbacks = RemoteCallbacks::new();
-    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificateOk));
+    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificatePassthrough));
 
     let conn = remote
         .connect_auth(Direction::Fetch, Some(callbacks), None)

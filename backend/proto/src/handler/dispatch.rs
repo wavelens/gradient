@@ -480,6 +480,7 @@ impl<'a> DispatchContext<'a> {
             .unwrap_or(&store_path)
             .split('-')
             .next()
+            .filter(|h| h.len() == 32 && h.bytes().all(|b| b.is_ascii_alphanumeric()))
             .map(str::to_owned);
         match hash_opt {
             Some(hash) => {
