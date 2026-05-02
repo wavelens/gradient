@@ -11,8 +11,14 @@ mod nar;
 mod narinfo;
 mod upstreams;
 
-pub use self::keys::*;
-pub use self::management::*;
-pub use self::nar::*;
-pub use self::narinfo::*;
-pub use self::upstreams::*;
+pub use self::keys::{get_cache_key, get_cache_public_key};
+pub use self::management::{
+    delete_cache, delete_cache_active, delete_cache_public, get, get_cache,
+    get_cache_name_available, get_public_caches, patch_cache, post_cache_active, post_cache_public,
+    put,
+};
+pub use self::nar::{nar, upstream_nar};
+pub use self::narinfo::{gradient_cache_info, nix_cache_info, path};
+pub use self::upstreams::{
+    delete_cache_upstream, get_cache_upstreams, patch_cache_upstream, put_cache_upstream,
+};

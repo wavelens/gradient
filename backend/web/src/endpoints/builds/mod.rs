@@ -10,11 +10,17 @@ pub mod graph;
 pub mod log;
 pub mod query;
 
-pub use self::direct::*;
-pub use self::downloads::*;
-pub use self::graph::*;
-pub use self::log::*;
-pub use self::query::*;
+pub use self::direct::{
+    DirectBuildInfo, DirectBuildRequest, get_recent_direct_builds, post_direct_build,
+};
+pub use self::downloads::{
+    BuildProduct, DownloadQuery, get_build_download, get_build_download_token, get_build_downloads,
+};
+pub use self::graph::{
+    BuildGraph, DependencyEdge, DependencyNode, get_build_dependencies, get_build_graph,
+};
+pub use self::log::{get_build_log, post_build_log};
+pub use self::query::{BuildWithOutputs, get_build};
 
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
