@@ -9,10 +9,21 @@ pub mod integrations;
 pub mod management;
 pub mod metrics;
 
-pub use self::evaluations::*;
-pub use self::integrations::*;
-pub use self::management::*;
-pub use self::metrics::*;
+pub use self::evaluations::{
+    EntryPointDownloadQuery, EntryPointsQuery, EvaluateRequest, get_entry_point_download,
+    get_project_details, get_project_entry_points, get_project_evaluations, post_project_evaluate,
+};
+pub use self::integrations::{
+    delete_project_integration, get_project_integration, put_project_integration,
+};
+pub use self::management::{
+    MakeProjectRequest, PatchProjectRequest, TransferOwnershipRequest, delete_project,
+    delete_project_active, get, get_project, get_project_name_available, patch_project,
+    post_project_active, post_project_check_repository, post_project_transfer, put,
+};
+pub use self::metrics::{
+    EntryPointMetricsQuery, get_entry_point_metrics, get_project_metrics,
+};
 
 use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
