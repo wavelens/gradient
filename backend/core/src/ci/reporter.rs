@@ -4,12 +4,22 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::ci::webhook::validate_webhook_url;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::warn;
+
+/// Validate a user-supplied base URL for outbound CI API calls.
+///
+/// Reuses the SSRF guard from the webhook module: rejects non-http(s) schemes
+/// and IP literals / hostnames pointing at loopback, link-local (cloud
+/// metadata), private, or otherwise-unsafe ranges.
+fn validate_safe_outbound_url(url: &str) -> Result<(), String> {
+    validate_webhook_url(url).map(|_| ())
+}
 
 /// The lifecycle state of a CI check.
 ///
@@ -104,12 +114,16 @@ pub struct GiteaReporter {
 
 impl GiteaReporter {
     pub fn new(base_url: impl Into<String>, token: impl Into<String>) -> Result<Self> {
+        let raw = base_url.into();
+        validate_safe_outbound_url(&raw)
+            .map_err(|e| anyhow::anyhow!("Rejected Gitea base_url: {}", e))?;
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .context("Failed to build HTTP client for GiteaReporter")?;
         Ok(Self {
-            base_url: base_url.into().trim_end_matches('/').to_string(),
+            base_url: raw.trim_end_matches('/').to_string(),
             token: token.into(),
             client,
         })
@@ -217,12 +231,14 @@ impl GithubReporter {
         let base_url = if raw.is_empty() {
             Self::DEFAULT_API_URL.to_string()
         } else {
+            validate_safe_outbound_url(&raw)
+                .map_err(|e| anyhow::anyhow!("Rejected GitHub base_url: {}", e))?;
             raw.trim_end_matches('/').to_string()
         };
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
-            // GitHub requires a User-Agent header.
+            .redirect(reqwest::redirect::Policy::none())
             .user_agent("gradient-ci/1.0")
             .build()
             .context("Failed to build HTTP client for GithubReporter")?;
@@ -353,11 +369,14 @@ impl GithubAppReporter {
         let api_base_url = if raw.is_empty() {
             Self::DEFAULT_API_URL.to_string()
         } else {
+            validate_safe_outbound_url(&raw)
+                .map_err(|e| anyhow::anyhow!("Rejected GitHub App api_base_url: {}", e))?;
             raw.trim_end_matches('/').to_string()
         };
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(10))
+            .redirect(reqwest::redirect::Policy::none())
             .user_agent("gradient-ci/1.0")
             .build()
             .context("Failed to build HTTP client for GithubAppReporter")?;
@@ -721,6 +740,75 @@ mod tests {
     fn github_reporter_trims_trailing_slash() {
         let r = GithubReporter::new("https://github.example.com/api/v3/", "tok").unwrap();
         assert_eq!(r.base_url, "https://github.example.com/api/v3");
+    }
+
+    // ── SSRF base_url validation ─────────────────────────────────────────────
+
+    #[test]
+    fn gitea_reporter_rejects_aws_metadata_ip() {
+        let err = GiteaReporter::new("http://169.254.169.254/", "tok").unwrap_err();
+        assert!(format!("{err}").contains("Rejected Gitea base_url"));
+    }
+
+    #[test]
+    fn gitea_reporter_rejects_localhost_hostname() {
+        assert!(GiteaReporter::new("http://localhost:3000/", "tok").is_err());
+    }
+
+    #[test]
+    fn gitea_reporter_rejects_loopback_ipv4() {
+        assert!(GiteaReporter::new("http://127.0.0.1/", "tok").is_err());
+    }
+
+    #[test]
+    fn gitea_reporter_rejects_rfc1918() {
+        assert!(GiteaReporter::new("http://10.0.0.5/", "tok").is_err());
+        assert!(GiteaReporter::new("http://192.168.1.1/", "tok").is_err());
+    }
+
+    #[test]
+    fn gitea_reporter_rejects_non_http_scheme() {
+        assert!(GiteaReporter::new("file:///etc/passwd", "tok").is_err());
+        assert!(GiteaReporter::new("ftp://gitea.example.com/", "tok").is_err());
+    }
+
+    #[test]
+    fn github_reporter_rejects_aws_metadata_ip() {
+        let err = GithubReporter::new("http://169.254.169.254/api/v3", "tok").unwrap_err();
+        assert!(format!("{err}").contains("Rejected GitHub base_url"));
+    }
+
+    #[test]
+    fn github_reporter_rejects_localhost_hostname() {
+        assert!(GithubReporter::new("http://localhost/api/v3", "tok").is_err());
+    }
+
+    #[test]
+    fn github_reporter_rejects_ipv6_loopback() {
+        assert!(GithubReporter::new("http://[::1]/api/v3", "tok").is_err());
+    }
+
+    #[test]
+    fn github_app_reporter_rejects_aws_metadata_ip() {
+        let err = GithubAppReporter::new("http://169.254.169.254/", 1, "pem", 1).unwrap_err();
+        assert!(format!("{err}").contains("Rejected GitHub App api_base_url"));
+    }
+
+    #[test]
+    fn github_app_reporter_empty_url_still_uses_default() {
+        let r = GithubAppReporter::new("", 1, "pem", 1).unwrap();
+        assert_eq!(r.api_base_url, GithubAppReporter::DEFAULT_API_URL);
+    }
+
+    #[test]
+    fn reporter_for_project_unsafe_url_falls_back_to_noop() {
+        // Bad base_url should not crash callers — the factory logs and returns Noop.
+        let r = reporter_for_project(
+            Some("gitea"),
+            Some("http://169.254.169.254/"),
+            Some("tok"),
+        );
+        assert!(is_noop(&r));
     }
 
     // ── reporter_for_project factory ─────────────────────────────────────────
