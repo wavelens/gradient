@@ -2,6 +2,26 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## OIDC — CSRF cookie, ID-token verification, identity binding
+
+Tests in `backend/web/src/authorization/oidc.rs` cover the security
+fixes for issue #38:
+
+- `random_url_safe_is_unique_and_url_safe` — `state`/`nonce` are
+  cryptographically random and URL-safe.
+- `csrf_cookie_roundtrips` / `csrf_cookie_rejects_wrong_secret` /
+  `csrf_cookie_rejects_expired` — the `oidc_csrf` cookie is an
+  HMAC-signed JWT that round-trips, fails verification under a
+  different secret, and is rejected when expired.
+- `state_compare_constant_time_rejects_mismatch` — `state` comparison
+  uses `subtle::ConstantTimeEq`.
+
+The full ID-token verification path (signature against the provider's
+JWKS, `iss`/`aud`/`exp`/`nonce` checks, identity bound to
+`(oidc_issuer, oidc_subject)` rather than email) is enforced in
+`oidc_login_verify` and exercised end-to-end via the
+`/auth/oauth/authorize` and `/auth/oidc/callback` endpoints.
+
 ## Org admin RBAC — `load_admin_org`
 
 Adding/promoting/kicking organization members and renaming/deleting an

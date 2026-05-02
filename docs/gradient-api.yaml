@@ -347,7 +347,11 @@ paths:
     get:
       tags: [auth]
       summary: OAuth2 callback (GET)
-      description: Handles the authorization code returned by the OAuth2/OIDC provider. Exchanges the code for a JWT token.
+      description: |-
+        Handles the authorization code returned by the OAuth2/OIDC provider. Verifies the
+        `state` parameter against the `oidc_csrf` cookie set by `POST /auth/oauth/authorize`,
+        exchanges the code for tokens, verifies the ID token signature against the provider's
+        JWKS, and binds the session to the user identified by `(iss, sub)`.
       security: []
       operationId: oauthAuthorizeGet
       parameters:
@@ -357,6 +361,12 @@ paths:
           schema:
             type: string
           description: Authorization code from the OAuth2 provider
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Opaque CSRF state value previously issued via `POST /auth/oauth/authorize`
       responses:
         '200':
           description: JWT token
@@ -371,12 +381,20 @@ paths:
     post:
       tags: [auth]
       summary: Get OAuth2 authorization URL
-      description: Returns the authorization URL to redirect the user to for OIDC login. Requires OIDC to be enabled.
+      description: |-
+        Returns the authorization URL to redirect the user to for OIDC login and sets a
+        short-lived `oidc_csrf` cookie carrying the signed `state` and `nonce` values that
+        must be presented on the callback. Requires OIDC to be enabled.
       security: []
       operationId: oauthAuthorizePost
       responses:
         '200':
           description: Authorization URL
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: "oidc_csrf=<jwt>; HttpOnly; SameSite=Lax; Path=/; Max-Age=600"
           content:
             application/json:
               schema:
@@ -391,7 +409,10 @@ paths:
     get:
       tags: [auth]
       summary: OIDC login redirect
-      description: Redirects the browser to the OIDC provider's authorization endpoint (HTTP 302).
+      description: |-
+        Redirects the browser to the OIDC provider's authorization endpoint (HTTP 302) and
+        sets a short-lived `oidc_csrf` cookie carrying the signed `state` and `nonce` values
+        that must be returned on the callback.
       security: []
       operationId: oidcLogin
       responses:
@@ -402,14 +423,21 @@ paths:
               schema:
                 type: string
                 format: uri
+            Set-Cookie:
+              schema:
+                type: string
+                example: "oidc_csrf=<jwt>; HttpOnly; SameSite=Lax; Path=/; Max-Age=600"
 
   /auth/oidc/callback:
     get:
       tags: [auth]
       summary: OIDC callback
       description: |-
-        Handles the OIDC provider redirect. Exchanges the authorization code for a JWT
-        and redirects the browser to `/account/oidc-callback?token=<jwt>`.
+        Handles the OIDC provider redirect. Verifies the `state` parameter against the
+        `oidc_csrf` cookie, exchanges the authorization code for tokens, verifies the ID
+        token signature using the provider's JWKS (validating `iss`, `aud`, `exp`, and
+        `nonce`), and binds the session to the user identified by `(iss, sub)`. Sets the
+        `jwt_token` session cookie and clears `oidc_csrf`.
       security: []
       operationId: oidcCallback
       parameters:
@@ -418,14 +446,23 @@ paths:
           required: true
           schema:
             type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
       responses:
         '302':
-          description: Redirect to frontend with token
+          description: Redirect to frontend with session cookie set
           headers:
             Location:
               schema:
                 type: string
-                example: "/account/oidc-callback?token=eyJhbGci..."
+                example: "/account/oidc-callback"
+            Set-Cookie:
+              schema:
+                type: string
+                example: "jwt_token=<jwt>; HttpOnly; SameSite=Strict; Path=/"
 
   /auth/logout:
     post:
