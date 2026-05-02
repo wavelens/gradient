@@ -13,7 +13,7 @@ pub use self::cache_key::*;
 pub use self::git::{Libgit2Prefetcher, accept_cert, check_project_updates, get_commit_info};
 pub use self::nar_path::*;
 pub use self::ssh_key::{
-    clear_key, decrypt_ssh_private_key, format_public_key, generate_ssh_key, write_key,
+    decrypt_ssh_private_key, format_public_key, generate_ssh_key,
 };
 
 use crate::types::*;
@@ -26,12 +26,6 @@ use thiserror::Error;
 pub enum SourceError {
     #[error("Failed to read file: {reason}")]
     FileRead { reason: String },
-    #[error("Failed to write key file: {path}")]
-    KeyFileWrite { path: String },
-    #[error("Failed to set key file permissions: {path}")]
-    KeyFilePermissions { path: String },
-    #[error("Failed to remove key file: {path}")]
-    KeyFileRemoval { path: String },
     #[error("Invalid SSH key format")]
     InvalidSshKey,
     #[error("SSH key generation failed")]
