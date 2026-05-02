@@ -1857,6 +1857,11 @@ paths:
         | `derivation` | text | Nix attribute path or store path to build |
         | `file:<name>` | file | One or more Nix expression files |
 
+        `<name>` is treated as a path relative to a per-upload temp directory.
+        Names containing `..`, `.`, leading `/`, NUL bytes, or any other
+        non-normal path components are rejected with `400 Bad Request`.
+        Nested relative paths (e.g. `src/main.nix`) are allowed.
+
         Returns the evaluation UUID that can be used to track progress.
       operationId: submitDirectBuild
       requestBody:

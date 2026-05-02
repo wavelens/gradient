@@ -456,3 +456,30 @@ Tests (`cargo test -p web --test rate_limit`):
   requests succeed, 6th returns `429`.
 - `cache_tier_does_not_throttle_moderate_burst` — 50 successive GETs to
   `/cache/{cache}/nix-cache-info` never return `429`.
+
+## Direct-build multipart upload — filename validation
+
+`POST /api/v1/builds/direct` accepts arbitrary file uploads via multipart
+fields named `file:<filename>`. Without sanitisation, an authenticated
+org-member could submit `file:../../../../../etc/cron.d/owned` and have
+the server write attacker-controlled bytes anywhere the process can
+reach. `validate_upload_filename` (in
+`backend/web/src/endpoints/builds/direct.rs`) rejects any name whose
+path components are not all `Component::Normal` — i.e. absolute paths,
+parent (`..`) and current (`.`) components, Windows path prefixes, empty
+strings, and embedded NUL bytes. The endpoint also re-checks that the
+joined target stays under the per-upload temp directory as defence in
+depth.
+
+Unit tests (`backend/web/src/endpoints/builds/direct.rs::tests`):
+
+- `accepts_simple_filenames` — `flake.nix`, `src/main.rs`, `a/b/c/d.txt`.
+- `rejects_empty` — empty string is rejected.
+- `rejects_parent_traversal` — `..`, `../etc/passwd`, deep traversal,
+  and traversals embedded inside otherwise-normal paths
+  (`foo/../../bar`, `foo/..`).
+- `rejects_absolute_paths` — `/etc/passwd`, `/`.
+- `rejects_current_dir_components` — `.`, `./foo`.
+- `rejects_null_bytes` — NUL byte inside a filename.
+
+Run with: `cargo test -p web --tests endpoints::builds::direct`
