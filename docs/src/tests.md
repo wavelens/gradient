@@ -383,3 +383,31 @@ Specs (vitest + jsdom):
   validator covers length + character class requirements; cross-field
   `confirm()` validates against the named control.
   (`shared/components/form/form-fields-builder.spec.ts`)
+
+## CI check names — org/project context
+
+CI check names reported to GitHub/Gitea now include the organization
+and project so multiple Gradient instances/projects sharing a forge
+repository remain distinguishable. Helpers live in
+`backend/core/src/ci/reporting.rs` and are reused by the scheduler
+(`backend/scheduler/src/ci.rs`) and the core reporters
+(`backend/core/src/ci/reporting.rs`):
+
+- Evaluation roll-up: `Gradient Evaluation {org}/{project}` (e.g.
+  `Gradient Evaluation wavelens/my-project`).
+- Per-entry-point build: `Gradient Build {org}/{project}: {entry_point}`.
+- When the organization lookup returns `None`, the scope degrades to
+  just `{project}`.
+
+Tests (`cargo test -p core --tests ci::reporting`):
+
+- `check_scope_with_org` — `Some("wavelens"), "my-project"` →
+  `"wavelens/my-project"`.
+- `check_scope_without_org_falls_back_to_project` — `None, "my-project"`
+  → `"my-project"`.
+- `evaluation_context_format` — produces the new
+  `"Gradient Evaluation …"` string.
+- `build_context_format` — produces
+  `"Gradient Build wavelens/my-project: my-package"`.
+- `build_context_falls_back_when_org_missing` — degrades correctly when
+  the organization is unknown.
