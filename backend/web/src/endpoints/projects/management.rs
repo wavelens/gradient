@@ -415,7 +415,8 @@ pub async fn post_project_active(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project) = load_project(&state, user.id, organization, project).await?;
+    let (_organization, project) =
+        load_editable_project(&state, user.id, organization, project).await?;
     let mut aproject: AProject = project.into();
     aproject.active = Set(true);
     aproject.update(&state.web_db).await?;
@@ -433,7 +434,8 @@ pub async fn delete_project_active(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project) = load_project(&state, user.id, organization, project).await?;
+    let (_organization, project) =
+        load_editable_project(&state, user.id, organization, project).await?;
     let mut aproject: AProject = project.into();
     aproject.active = Set(false);
     aproject.update(&state.web_db).await?;
@@ -451,7 +453,8 @@ pub async fn post_project_check_repository(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project) = load_project(&state, user.id, organization, project).await?;
+    let (_organization, project) =
+        load_editable_project(&state, user.id, organization, project).await?;
 
     let (_has_updates, remote_hash) = check_project_updates(Arc::clone(&state), &project)
         .await
