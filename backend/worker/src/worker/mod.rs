@@ -113,7 +113,21 @@ impl Worker<Disconnected> {
     ///
     /// Preserves the executor, scorer, credentials, and job caches from the
     /// previous connection so reconnects are cheap.
-    pub async fn reconnect(self) -> Result<Worker<Connected>> {
+    ///
+    /// On failure, returns the original `Worker<Disconnected>` alongside the
+    /// error so the caller can retry with backoff without losing the cached
+    /// executor/scorer/credentials state.
+    pub async fn reconnect(
+        self,
+    ) -> std::result::Result<Worker<Connected>, (anyhow::Error, Self)> {
+        let mut conn = match ProtoConnection::open(&self.config.server_url).await {
+            Ok(c) => c,
+            Err(e) => return Err((e, self)),
+        };
+        if let Err(e) = Self::do_reconnect_handshake(&mut conn, &self.config).await {
+            return Err((e, self));
+        }
+
         let Worker {
             config,
             executor,
@@ -123,9 +137,6 @@ impl Worker<Disconnected> {
             last_scores,
             ..
         } = self;
-
-        let mut conn = ProtoConnection::open(&config.server_url).await?;
-        Self::do_reconnect_handshake(&mut conn, &config).await?;
 
         Ok(Worker {
             config,

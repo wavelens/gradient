@@ -10,6 +10,7 @@ mod connection_state;
 mod executor;
 mod nix;
 mod proto;
+mod reconnect;
 mod traits;
 mod worker;
 mod worker_pool;
@@ -22,6 +23,7 @@ use tracing::{error, info, warn};
 
 use config::WorkerConfig;
 use connection_state::RunOutcome;
+use reconnect::retry_reconnect;
 use tracing_subscriber::EnvFilter;
 use worker::Worker;
 
@@ -102,20 +104,18 @@ fn main() -> Result<()> {
                 }
             }
 
-            tokio::time::sleep(backoff).await;
-
-            match disconnected.reconnect().await {
-                Ok(w) => {
-                    worker = w;
-                    info!("reconnected successfully");
-                    backoff = INITIAL_BACKOFF;
-                }
-                Err(e) => {
-                    error!(error = %e, "reconnect failed; will retry");
-                    // Loop will break because `worker` has been moved — exit gracefully.
-                    break;
-                }
-            }
+            // Reconnect with exponential backoff. Never give up — a transient
+            // network blip must not kill the worker.
+            worker = retry_reconnect(
+                disconnected,
+                |d| async move { d.reconnect().await },
+                |delay| tokio::time::sleep(delay),
+                backoff,
+                MAX_BACKOFF,
+            )
+            .await;
+            info!("reconnected successfully");
+            backoff = INITIAL_BACKOFF;
         }
 
         Ok(())

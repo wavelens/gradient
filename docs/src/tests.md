@@ -732,3 +732,26 @@ Tests (`cargo test -p proto`):
 - `tests::handshake_timeout_is_sane` — regression for #110: deadline stays
   in `[5 s, 60 s]` so a real auth round-trip still fits but a stalled peer
   is dropped quickly.
+
+## Worker — reconnect retries forever
+
+`Worker<Disconnected>::reconnect` (`backend/worker/src/worker/mod.rs`) now
+returns `Result<Worker<Connected>, (anyhow::Error, Self)>`: on failure, the
+disconnected typestate (and the cached executor / scorer / credentials /
+candidate maps) is handed back so the caller can retry without losing
+state. The reconnect-with-backoff loop in `main.rs` is extracted to
+`backend/worker/src/reconnect.rs::retry_reconnect` so it is unit-testable
+without standing up a real `Worker`. The loop never gives up — a transient
+network blip cannot terminate the worker process anymore (#99).
+
+Tests (`cargo test -p worker --bins reconnect`):
+
+- `reconnect::tests::keeps_retrying_after_failure` — regression for #99:
+  the loop returns `Ok` only after several failed attempts, so a single
+  transient error no longer breaks out and shuts the worker down.
+- `reconnect::tests::backoff_caps_at_max` — delay sequence doubles from the
+  initial backoff and plateaus at `max_backoff`.
+- `reconnect::tests::state_threads_through_retries` — the same state value
+  is threaded through every attempt, proving the typestate-preservation
+  contract that the real `Worker<Disconnected>` relies on for cached
+  resources.
