@@ -43,6 +43,7 @@ http-body-util = "0.1"
 jsonwebtoken  = { version = "10.3", features = ["aws_lc_rs"] }
 password-auth = { version = "1.0", features = ["argon2"] }
 reqwest       = { version = "0.13", features = ["json", "form"] }
+subtle        = "2.6"
 tokio-util    = { version = "0.7", features = ["io"] }
 tower         = "0.5"
 tower-http    = { version = "0.6", features = ["cors", "trace"] }

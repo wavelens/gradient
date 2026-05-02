@@ -32,6 +32,7 @@ use core::types::input::load_secret;
 use core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use tracing::{debug, warn};
 
 use crate::error::{WebError, WebResult};
@@ -209,7 +210,7 @@ fn verify_forge_signature(
                 .get("X-Gitlab-Token")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-            token == secret
+            token.as_bytes().ct_eq(secret.as_bytes()).into()
         }
         ForgeType::GitHub => {
             let sig = headers
