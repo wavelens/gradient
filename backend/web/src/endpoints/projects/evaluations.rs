@@ -22,9 +22,7 @@ use core::types::input::vec_to_hex;
 use core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
-use sea_orm::{
-    ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect,
-};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -38,82 +36,109 @@ pub struct EvaluateRequest {
     pub mode: Option<String>,
 }
 
-/// Build an [`EvaluationSummary`] for a single evaluation row.
-pub(super) async fn evaluation_to_summary(
+/// Builds one [`EvaluationSummary`] per evaluation using a fixed number of DB
+/// round-trips regardless of input size (commits, builds, entry_points,
+/// entry-point builds — 4 queries total).
+pub(super) async fn evaluations_to_summaries(
     state: &Arc<ServerState>,
-    evaluation: MEvaluation,
-) -> Result<EvaluationSummary, WebError> {
-    let commit_hash = ECommit::find_by_id(evaluation.commit)
-        .one(&state.web_db)
-        .await?
-        .map(|c| vec_to_hex(&c.hash))
-        .unwrap_or_default();
+    evaluations: Vec<MEvaluation>,
+) -> Result<Vec<EvaluationSummary>, WebError> {
+    if evaluations.is_empty() {
+        return Ok(Vec::new());
+    }
 
-    let total_builds = EBuild::find()
-        .filter(CBuild::Evaluation.eq(evaluation.id))
-        .count(&state.web_db)
-        .await? as i64;
+    let eval_ids: Vec<Uuid> = evaluations.iter().map(|e| e.id).collect();
+    let prev_ids: Vec<Uuid> = evaluations.iter().filter_map(|e| e.previous).collect();
+    let mut combined_eval_ids: Vec<Uuid> = eval_ids.clone();
+    combined_eval_ids.extend(prev_ids.iter().copied());
+    let commit_ids: Vec<Uuid> = evaluations.iter().map(|e| e.commit).collect();
 
-    let failed_builds = EBuild::find()
-        .filter(
-            Condition::all()
-                .add(CBuild::Evaluation.eq(evaluation.id))
-                .add(CBuild::Status.eq(BuildStatus::Failed)),
-        )
-        .count(&state.web_db)
-        .await? as i64;
-
-    let ep_builds: Vec<Uuid> = EEntryPoint::find()
-        .filter(CEntryPoint::Evaluation.eq(evaluation.id))
+    let commits: HashMap<Uuid, String> = ECommit::find()
+        .filter(CCommit::Id.is_in(commit_ids))
         .all(&state.web_db)
         .await?
         .into_iter()
-        .map(|ep| ep.build)
+        .map(|c| (c.id, vec_to_hex(&c.hash)))
         .collect();
 
-    let (completed_entry_points, failed_entry_points, total_entry_points) = if ep_builds.is_empty()
+    let mut total_per_eval: HashMap<Uuid, i64> = HashMap::new();
+    let mut failed_per_eval: HashMap<Uuid, i64> = HashMap::new();
+    for build in EBuild::find()
+        .filter(CBuild::Evaluation.is_in(eval_ids.clone()))
+        .all(&state.web_db)
+        .await?
     {
-        (0i64, 0i64, 0i64)
+        *total_per_eval.entry(build.evaluation).or_insert(0) += 1;
+        if build.status == BuildStatus::Failed {
+            *failed_per_eval.entry(build.evaluation).or_insert(0) += 1;
+        }
+    }
+
+    let entry_points = EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.is_in(combined_eval_ids))
+        .all(&state.web_db)
+        .await?;
+
+    let ep_build_ids: Vec<Uuid> = entry_points.iter().map(|ep| ep.build).collect();
+    let ep_build_status: HashMap<Uuid, BuildStatus> = if ep_build_ids.is_empty() {
+        HashMap::new()
     } else {
-        let completed = EBuild::find()
-            .filter(CBuild::Id.is_in(ep_builds.clone()))
-            .filter(
-                Condition::any()
-                    .add(CBuild::Status.eq(BuildStatus::Completed))
-                    .add(CBuild::Status.eq(BuildStatus::Substituted)),
-            )
-            .count(&state.web_db)
-            .await? as i64;
-        let failed = EBuild::find()
-            .filter(CBuild::Id.is_in(ep_builds.clone()))
-            .filter(CBuild::Status.eq(BuildStatus::Failed))
-            .count(&state.web_db)
-            .await? as i64;
-        (completed, failed, ep_builds.len() as i64)
+        EBuild::find()
+            .filter(CBuild::Id.is_in(ep_build_ids))
+            .all(&state.web_db)
+            .await?
+            .into_iter()
+            .map(|b| (b.id, b.status))
+            .collect()
     };
 
-    let entry_point_diff = if let Some(prev_id) = evaluation.previous {
-        let prev_count = EEntryPoint::find()
-            .filter(CEntryPoint::Evaluation.eq(prev_id))
-            .count(&state.web_db)
-            .await? as i64;
-        Some(total_entry_points - prev_count)
-    } else {
-        None
-    };
+    let mut eps_per_eval: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    for ep in &entry_points {
+        eps_per_eval.entry(ep.evaluation).or_default().push(ep.build);
+    }
 
-    Ok(EvaluationSummary {
-        id: evaluation.id,
-        commit: commit_hash,
-        status: evaluation.status,
-        total_builds,
-        failed_builds,
-        completed_entry_points,
-        failed_entry_points,
-        entry_point_diff,
-        created_at: evaluation.created_at,
-        updated_at: evaluation.updated_at,
-    })
+    let mut out = Vec::with_capacity(evaluations.len());
+    for evaluation in evaluations {
+        let commit_hash = commits.get(&evaluation.commit).cloned().unwrap_or_default();
+        let total_builds = *total_per_eval.get(&evaluation.id).unwrap_or(&0);
+        let failed_builds = *failed_per_eval.get(&evaluation.id).unwrap_or(&0);
+
+        let ep_builds: &[Uuid] = eps_per_eval
+            .get(&evaluation.id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let total_entry_points = ep_builds.len() as i64;
+        let mut completed_entry_points = 0i64;
+        let mut failed_entry_points = 0i64;
+        for build_id in ep_builds {
+            match ep_build_status.get(build_id) {
+                Some(BuildStatus::Completed) | Some(BuildStatus::Substituted) => {
+                    completed_entry_points += 1;
+                }
+                Some(BuildStatus::Failed) => failed_entry_points += 1,
+                _ => {}
+            }
+        }
+
+        let entry_point_diff = evaluation.previous.map(|prev_id| {
+            let prev_count = eps_per_eval.get(&prev_id).map(|v| v.len()).unwrap_or(0) as i64;
+            total_entry_points - prev_count
+        });
+
+        out.push(EvaluationSummary {
+            id: evaluation.id,
+            commit: commit_hash,
+            status: evaluation.status.clone(),
+            total_builds,
+            failed_builds,
+            completed_entry_points,
+            failed_entry_points,
+            entry_point_diff,
+            created_at: evaluation.created_at,
+            updated_at: evaluation.updated_at,
+        });
+    }
+    Ok(out)
 }
 
 pub async fn post_project_evaluate(
@@ -194,10 +219,7 @@ pub async fn get_project_evaluations(
         .all(&state.web_db)
         .await?;
 
-    let mut summaries = Vec::with_capacity(evaluations.len());
-    for evaluation in evaluations {
-        summaries.push(evaluation_to_summary(&state.0, evaluation).await?);
-    }
+    let summaries = evaluations_to_summaries(&state.0, evaluations).await?;
 
     Ok(Json(BaseResponse {
         error: false,
@@ -221,10 +243,7 @@ pub async fn get_project_details(
         .all(&state.web_db)
         .await?;
 
-    let mut evaluation_summaries = Vec::with_capacity(evaluations.len());
-    for evaluation in evaluations {
-        evaluation_summaries.push(evaluation_to_summary(&state.0, evaluation).await?);
-    }
+    let evaluation_summaries = evaluations_to_summaries(&state.0, evaluations).await?;
 
     let can_edit = match &maybe_user {
         Some(user) => user_can_edit(&state, user.id, organization.id).await?,
