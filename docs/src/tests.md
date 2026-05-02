@@ -21,6 +21,27 @@ JWKS, `iss`/`aud`/`exp`/`nonce` checks, identity bound to
 `(oidc_issuer, oidc_subject)` rather than email) is enforced in
 `oidc_login_verify` and exercised end-to-end via the
 `/auth/oauth/authorize` and `/auth/oidc/callback` endpoints.
+## Project write RBAC — `load_editable_project`
+
+Toggling a project's `active` flag and triggering a repository check are
+write operations and must require the caller to hold an Admin or Write role
+in the organization. The check is centralised in `load_editable_project`
+(`backend/web/src/endpoints/projects/mod.rs`) and now gates
+`post_project_active`, `delete_project_active`, and
+`post_project_check_repository`.
+
+Unit tests in the same file cover the role matrix and the managed-project
+guard:
+
+- `editable_project_admin_passes` — Admin role → `Ok((org, project))`.
+- `editable_project_write_passes` — Write role → `Ok((org, project))`.
+- `editable_project_view_is_forbidden` — view-only role → `WebError::Forbidden`.
+- `editable_project_non_member_is_not_found` — caller is not in the org →
+  `WebError::NotFound` (no leak between "missing" and "not a member").
+- `editable_project_managed_is_forbidden` — state-managed project →
+  `WebError::Forbidden` even for admins.
+
+Run with: `cargo test -p web --lib endpoints::projects::tests`.
 
 ## Org admin RBAC — `load_admin_org`
 

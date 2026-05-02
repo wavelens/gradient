@@ -1300,7 +1300,10 @@ paths:
     post:
       tags: [projects]
       summary: Check repository accessibility
-      description: Tests whether Gradient can clone the project's repository using the organization's SSH key.
+      description: >-
+        Tests whether Gradient can clone the project's repository using the
+        organization's SSH key. Requires Admin or Write role; rejects
+        state-managed projects.
       operationId: checkProjectRepository
       responses:
         '200':
@@ -1313,6 +1316,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -1349,7 +1354,9 @@ paths:
     post:
       tags: [projects]
       summary: Enable project
-      description: Sets the project's active flag to true so it will be evaluated on new commits.
+      description: >-
+        Sets the project's active flag to true so it will be evaluated on new
+        commits. Requires Admin or Write role; rejects state-managed projects.
       operationId: enableProject
       responses:
         '200':
@@ -1367,7 +1374,9 @@ paths:
     delete:
       tags: [projects]
       summary: Disable project
-      description: Sets the project's active flag to false, pausing automatic evaluations.
+      description: >-
+        Sets the project's active flag to false, pausing automatic evaluations.
+        Requires Admin or Write role; rejects state-managed projects.
       operationId: disableProject
       responses:
         '200':
