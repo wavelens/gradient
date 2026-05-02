@@ -33,6 +33,22 @@ info:
     - A valid session (`jwt_token` cookie or `Authorization: Bearer` header) belonging
       to a member of the owning organisation.
 
+    ## Rate limiting
+
+    All HTTP endpoints enforce a per-client-IP token-bucket rate limit. Clients
+    that exceed their bucket receive HTTP `429 Too Many Requests`. The tier
+    depends on the route:
+
+    | Tier | Routes | Refill | Burst |
+    |---|---|---|---|
+    | auth | `/auth/basic/login`, `/auth/basic/register`, `/auth/check-username`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/oauth/*`, `/auth/oidc/*` | 1 req / 6 s | 5 |
+    | webhook | `/hooks/*` | 1 req / s | 30 |
+    | cache | `/cache/{cache}/*` (public NAR surface) | 1 req / 60 ms | 1000 |
+    | default | everything else | 1 req / 200 ms | 150 |
+
+    Client IP is taken from `X-Forwarded-For` / `X-Real-IP` (deployments are
+    expected behind a reverse proxy), falling back to the connection peer IP.
+
     ## Common Response Envelope
 
     Every JSON response is wrapped in a standard envelope:

@@ -411,3 +411,28 @@ Tests (`cargo test -p core --tests ci::reporting`):
   `"Gradient Build wavelens/my-project: my-package"`.
 - `build_context_falls_back_when_org_missing` — degrades correctly when
   the organization is unknown.
+
+## Per-IP HTTP rate limiting
+
+The web layer enforces per-client-IP token-bucket rate limits via
+`tower_governor` (`backend/web/src/lib.rs`). Routes are grouped into four
+fixed tiers (no CLI knobs):
+
+| Tier | Routes | Refill | Burst |
+|---|---|---|---|
+| `auth` | `/api/v1/auth/{basic/login,basic/register,check-username,verify-email,resend-verification,oauth/authorize,oidc/login,oidc/callback}` | 1 req / 6 s | 5 |
+| `webhook` | `/api/v1/hooks/...` | 1 req / s | 30 |
+| `cache` | `/cache/{cache}/...` (public NAR surface) | 1 req / 60 ms | 1000 |
+| `default` | everything else under `/api/v1` and `/proto` | 1 req / 200 ms | 150 |
+
+Client IP is extracted from `X-Forwarded-For` / `X-Real-IP` (deployments
+are expected behind a reverse proxy), falling back to `ConnectInfo`,
+falling back to a single global bucket if no signal is available
+(prevents 500s in tests / direct hits).
+
+Tests (`cargo test -p web --test rate_limit`):
+
+- `auth_tier_throttles_burst` — 5 successive `POST /api/v1/auth/check-username`
+  requests succeed, 6th returns `429`.
+- `cache_tier_does_not_throttle_moderate_burst` — 50 successive GETs to
+  `/cache/{cache}/nix-cache-info` never return `429`.

@@ -47,6 +47,8 @@ subtle        = "2.6"
 tokio-util    = { version = "0.7", features = ["io"] }
 tower         = "0.5"
 tower-http    = { version = "0.6", features = ["cors", "trace"] }
+tower_governor = "0.8"
+governor      = "0.10"
 url           = "2.5"
 
 [dev-dependencies]

@@ -15,6 +15,12 @@ use bytes::Bytes;
 use http::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use http::{HeaderMap, Request, Response};
 use std::time::Duration;
+use governor::middleware::NoOpMiddleware;
+use std::net::{IpAddr, Ipv4Addr};
+use tower_governor::GovernorLayer;
+use tower_governor::errors::GovernorError;
+use tower_governor::governor::{GovernorConfig, GovernorConfigBuilder};
+use tower_governor::key_extractor::{KeyExtractor, SmartIpKeyExtractor};
 use tower_http::classify::ServerErrorsFailureClass;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
@@ -25,6 +31,58 @@ use endpoints::{admin, *};
 use proto::proto_router;
 use scheduler::Scheduler;
 use std::sync::Arc;
+
+/// Wraps `SmartIpKeyExtractor` with a constant fallback so requests that
+/// carry no client-IP signal at all (no `X-Forwarded-For` / `X-Real-IP`,
+/// no `ConnectInfo`) share a single bucket instead of returning 500. This
+/// matters in tests (axum-test has no peer socket) and as a defensive
+/// fallback if `into_make_service_with_connect_info` is ever skipped — a
+/// global bucket is still better than failing requests outright.
+#[derive(Debug, Clone, Copy)]
+struct SmartIpOrFallback;
+
+impl KeyExtractor for SmartIpOrFallback {
+    type Key = IpAddr;
+
+    fn extract<T>(&self, req: &Request<T>) -> Result<Self::Key, GovernorError> {
+        match SmartIpKeyExtractor.extract(req) {
+            Ok(ip) => Ok(ip),
+            Err(_) => Ok(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+        }
+    }
+}
+
+/// Per-IP token-bucket config. Refill period in seconds and burst (bucket
+/// capacity). Uses `SmartIpKeyExtractor` so deployments behind a reverse
+/// proxy honor `X-Forwarded-For` / `X-Real-IP`.
+fn rl_per_second(
+    per_second: u64,
+    burst: u32,
+) -> Arc<GovernorConfig<SmartIpOrFallback, NoOpMiddleware>> {
+    Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(per_second)
+            .burst_size(burst)
+            .key_extractor(SmartIpOrFallback)
+            .finish()
+            .expect("rate-limit config valid"),
+    )
+}
+
+/// Sub-second refill granularity, for tiers needing >1 req/s steady-state.
+fn rl_per_ms(
+    per_millisecond: u64,
+    burst: u32,
+) -> Arc<GovernorConfig<SmartIpOrFallback, NoOpMiddleware>> {
+    Arc::new(
+        GovernorConfigBuilder::default()
+            .per_millisecond(per_millisecond)
+            .burst_size(burst)
+            .key_extractor(SmartIpOrFallback)
+            .finish()
+            .expect("rate-limit config valid"),
+    )
+}
 
 /// Build the Axum router with all routes and middleware layered on.
 ///
@@ -297,12 +355,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             authorization::authorize_optional,
         ));
 
-    let api = Router::new()
-        .merge(auth_api)
-        .merge(optional_api)
-        // ── Fully public (no auth required) ─────────────────────────────────
-        .route("/orgs/public", get(orgs::get_public_organizations))
-        .route("/caches/public", get(caches::get_public_caches))
+    // ── Sensitive auth surface (login/register/verification/oauth) ───────
+    // Tight per-IP rate limit: Argon2 verification and email send are
+    // expensive enough that an unthrottled attacker can DoS the server.
+    let auth_sensitive = Router::new()
         .route("/auth/basic/login", post(auth::post_basic_login))
         .route("/auth/basic/register", post(auth::post_basic_register))
         .route("/auth/check-username", post(auth::post_check_username))
@@ -317,6 +373,25 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route("/auth/oidc/login", get(auth::get_oidc_login))
         .route("/auth/oidc/callback", get(auth::get_oidc_callback))
+        .route_layer(GovernorLayer::new(rl_per_second(6, 5)));
+
+    // ── Incoming forge webhooks (unauthenticated, HMAC-verified) ─────────
+    let webhook_routes = Router::new()
+        .route("/hooks/github", post(forge_hooks::github_app_webhook))
+        .route(
+            "/hooks/{forge}/{org}/{integration_name}",
+            post(forge_hooks::forge_webhook),
+        )
+        .route_layer(GovernorLayer::new(rl_per_second(1, 30)));
+
+    let api = Router::new()
+        .merge(auth_api)
+        .merge(optional_api)
+        .merge(auth_sensitive)
+        .merge(webhook_routes)
+        // ── Fully public (no auth required) ─────────────────────────────────
+        .route("/orgs/public", get(orgs::get_public_organizations))
+        .route("/caches/public", get(caches::get_public_caches))
         .route("/auth/logout", post(auth::post_logout))
         .route("/health", get(get_health))
         .route("/config", get(get_config))
@@ -326,24 +401,24 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route(
             "/admin/github-app/callback",
             get(admin::github_app::callback),
-        )
-        // ── Incoming forge webhooks (unauthenticated, HMAC-verified) ─────────
-        .route("/hooks/github", post(forge_hooks::github_app_webhook))
-        .route(
-            "/hooks/{forge}/{org}/{integration_name}",
-            post(forge_hooks::forge_webhook),
         );
 
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
     scheduler.start();
     proto::outbound::start_outbound_loop(Arc::clone(&scheduler));
 
+    // Default tier covers everything left under /api/v1 (the bulk authenticated
+    // surface) plus the proto WS upgrade.
+    let api = api.route_layer(GovernorLayer::new(rl_per_ms(200, 150)));
+
     let mut app = Router::new()
         .nest("/api/v1", api)
-        .merge(proto_router())
+        .merge(proto_router().route_layer(GovernorLayer::new(rl_per_ms(200, 150))))
         .layer(axum::Extension(scheduler));
 
-    app = app
+    // Public NAR cache surface — substituters issue many requests per build,
+    // so the burst is generous (1000 / 1000).
+    let cache_routes = Router::new()
         .route(
             "/cache/{cache}/gradient-cache-info",
             get(caches::gradient_cache_info),
@@ -354,7 +429,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/cache/{cache}/nar/upstream/{upstream_id}/{*path}",
             get(caches::upstream_nar),
         )
-        .route("/cache/{cache}/nar/{path}", get(caches::nar));
+        .route("/cache/{cache}/nar/{path}", get(caches::nar))
+        .route_layer(GovernorLayer::new(rl_per_ms(60, 1000)));
+
+    app = app.merge(cache_routes);
 
     app.fallback(handle_404)
         .layer(cors)
@@ -372,5 +450,9 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             tracing::error!("Failed to bind to {}: {}", server_url, e);
             e
         })?;
-    axum::serve(listener, app).await
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
 }
