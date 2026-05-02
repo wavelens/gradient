@@ -61,6 +61,8 @@ pub fn user() -> user::Model {
         email_verification_token_expires: None,
         managed: false,
         superuser: false,
+        oidc_issuer: None,
+        oidc_subject: None,
     }
 }
 

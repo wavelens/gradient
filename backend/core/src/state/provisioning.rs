@@ -167,6 +167,8 @@ impl<'a> StateApplicator<'a> {
                     email_verification_token_expires: Set(None),
                     managed: Set(true),
                     superuser: Set(state_user.superuser),
+                    oidc_issuer: Set(None),
+                    oidc_subject: Set(None),
                 };
                 user.insert(self.db).await?;
                 tracing::info!("Created managed user: {}", state_user.username);
