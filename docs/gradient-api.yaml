@@ -4832,7 +4832,15 @@ components:
         url:
           type: string
           format: uri
-          description: URL to send webhook POST requests to
+          description: |-
+            URL to send webhook POST requests to. Must use `http` or `https`.
+            URLs whose host is a loopback / private (RFC1918) / link-local /
+            multicast / CGNAT (`100.64.0.0/10`) / unspecified / reserved IP,
+            an IPv6 unique-local (`fc00::/7`) or link-local (`fe80::/10`)
+            literal, or the literal name `localhost` are rejected with
+            `400 Bad Request`. Cloud-metadata addresses (e.g.
+            `169.254.169.254`) are blocked by the link-local rule. HTTP
+            redirects on outbound delivery are not followed.
           example: https://example.com/hooks/gradient
         secret:
           type: string
@@ -4856,7 +4864,9 @@ components:
         url:
           type: string
           format: uri
-          description: New URL
+          description: |-
+            New URL. Must use `http`/`https`; private/loopback/link-local IP
+            literals and `localhost` are rejected (see `CreateWebhookRequest`).
         secret:
           type: string
           description: New signing secret

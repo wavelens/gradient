@@ -483,3 +483,44 @@ Unit tests (`backend/web/src/endpoints/builds/direct.rs::tests`):
 - `rejects_null_bytes` — NUL byte inside a filename.
 
 Run with: `cargo test -p web --tests endpoints::builds::direct`
+
+## Outgoing webhook URL — SSRF validation
+
+`validate_webhook_url` (in `backend/core/src/ci/webhook.rs`) is the gate
+between user-supplied webhook URLs and the outbound HTTP client. It is
+called at create/update time (in `web::endpoints::webhooks::{put,
+patch_webhook}`) and again at delivery time inside
+`ReqwestWebhookClient::deliver`, which also performs DNS resolution and
+rejects any resolved IP in a disallowed range. Redirects are disabled on
+the production reqwest client.
+
+Unit tests (`cargo test -p core --tests ci::webhook`):
+
+- `validate_url_accepts_public_https` — `https://`/`http://` to public
+  hostnames pass.
+- `validate_url_rejects_invalid_scheme` — `file://`, `ftp://`,
+  `gopher://`, `javascript:` are rejected.
+- `validate_url_rejects_unparseable` — empty / non-URL strings rejected.
+- `validate_url_rejects_localhost_name` — `localhost` (any case) is
+  rejected.
+- `validate_url_rejects_loopback_ipv4` — `127.0.0.0/8` blocked.
+- `validate_url_rejects_aws_metadata_ip` — covers the motivating attack
+  (`169.254.169.254`) plus the wider link-local block.
+- `validate_url_rejects_rfc1918_ranges` — `10.x`, `172.16-31.x`,
+  `192.168.x`.
+- `validate_url_rejects_cgnat_shared_space` — `100.64.0.0/10` blocked,
+  with boundary asserts that adjacent public space (`100.63.255.255`,
+  `100.128.0.1`) is allowed.
+- `validate_url_rejects_unspecified_and_broadcast` — `0.0.0.0`,
+  `255.255.255.255`.
+- `validate_url_rejects_multicast_ipv4` — `224.0.0.0/4`.
+- `validate_url_rejects_reserved_ipv4` — `240.0.0.0/4`.
+- `validate_url_rejects_ipv6_loopback_and_unspecified` — `::1`, `::`.
+- `validate_url_rejects_ipv6_link_and_unique_local` — `fe80::/10`,
+  `fc00::/7`.
+- `validate_url_rejects_ipv6_multicast` — `ff00::/8`.
+- `validate_url_rejects_ipv4_mapped_loopback_in_ipv6` — `::ffff:127.0.0.1`
+  and `::ffff:169.254.169.254` blocked via the embedded-v4 check.
+- `validate_url_accepts_public_ipv4_literal` /
+  `validate_url_accepts_public_ipv6_literal` — sanity asserts that
+  legitimate public IP literals (`8.8.8.8`, `2001:4860:4860::8888`) pass.
