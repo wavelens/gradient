@@ -110,36 +110,15 @@ pub fn decrypt_ssh_private_key(
             reason: format!("{}. The private key in the database appears to be corrupted or not properly base64-encoded.", e)
         })?;
 
-    let decrypted_private_key = if let Some(p) =
-        crypter::decrypt_with_password(secret.expose(), encrypted_private_key.clone())
-    {
-        String::from_utf8(p).map_err(|_| SourceError::KeyUtf8Conversion)?
-    } else {
-        tracing::warn!(
-            "Failed to decrypt private key for organization '{}', attempting to decode as plaintext base64",
-            organization.name
-        );
-        match String::from_utf8(encrypted_private_key) {
-            Ok(plaintext) => {
-                if plaintext.starts_with("-----BEGIN") {
-                    tracing::warn!(
-                        "Organization '{}' private key appears to be stored as plaintext base64",
-                        organization.name
-                    );
-                    plaintext
-                } else {
-                    return Err(SourceError::KeyDecryption {
-                        org: organization.name.clone(),
-                    });
-                }
-            }
-            Err(_) => {
+    let decrypted_private_key =
+        match crypter::decrypt_with_password(secret.expose(), encrypted_private_key) {
+            Some(p) => String::from_utf8(p).map_err(|_| SourceError::KeyUtf8Conversion)?,
+            None => {
                 return Err(SourceError::KeyDecryption {
                     org: organization.name.clone(),
                 });
             }
-        }
-    };
+        };
 
     let formatted_public_key = format_public_key(organization, serve_url);
     let decrypted_private_key = format!("{}\n", decrypted_private_key);
@@ -251,22 +230,17 @@ mod tests {
     }
 
     #[test]
-    fn decrypt_ssh_key_plaintext_fallback_accepts_pem() {
-        // Legacy rows may store the OpenSSH PEM as plaintext base64.
+    fn decrypt_ssh_key_plaintext_pem_rejected() {
+        // Plaintext PEM stored in the column must NOT be accepted —
+        // doing so would let anyone with DB write access bypass encryption.
         let mut f = tempfile::NamedTempFile::new().unwrap();
         std::io::Write::write_all(&mut f, b"test-secret-key-32-bytes-padding!").unwrap();
         let path = f.path().to_string_lossy().to_string();
         let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----";
         let mut org = make_org("o", "ssh-ed25519 AAAA");
         org.private_key = general_purpose::STANDARD.encode(pem);
-        let (priv_out, pub_out) =
-            decrypt_ssh_private_key(path, org, "https://example.com").expect("should succeed");
-        assert!(priv_out.starts_with("-----BEGIN"));
-        assert!(
-            priv_out.ends_with('\n'),
-            "trailing newline must be appended"
-        );
-        assert_eq!(pub_out, "ssh-ed25519 AAAA example.com-o");
+        let result = decrypt_ssh_private_key(path, org, "https://example.com");
+        assert!(matches!(result, Err(SourceError::KeyDecryption { .. })));
     }
 
     #[test]

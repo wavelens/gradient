@@ -524,3 +524,22 @@ Unit tests (`cargo test -p core --tests ci::webhook`):
 - `validate_url_accepts_public_ipv4_literal` /
   `validate_url_accepts_public_ipv6_literal` — sanity asserts that
   legitimate public IP literals (`8.8.8.8`, `2001:4860:4860::8888`) pass.
+## SSH private key decryption — no plaintext fallback
+
+`decrypt_ssh_private_key` in `backend/core/src/sources/ssh_key.rs`
+decrypts the per-organization SSH key from `organization.private_key`.
+Decryption failure must NOT silently fall back to interpreting the
+stored value as a plaintext PEM, otherwise anyone with write access to
+that column could bypass encryption entirely.
+
+Tests (`backend/core/src/sources/ssh_key.rs`):
+
+- `decrypt_ssh_key_corrupt_base64_fails` — non-base64 column rejected
+  with `OrganizationKeyDecoding`.
+- `decrypt_ssh_key_plaintext_pem_rejected` — a base64-encoded plaintext
+  OpenSSH PEM placed directly in the column is rejected with
+  `KeyDecryption`, not accepted.
+- `decrypt_ssh_key_plaintext_non_pem_rejected` — random base64 garbage
+  also fails with `KeyDecryption`.
+- `generate_ssh_key_decrypts_to_openssh_pem` — properly encrypted keys
+  still round-trip through decrypt.
