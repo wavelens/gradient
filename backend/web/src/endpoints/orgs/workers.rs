@@ -19,7 +19,6 @@ use scheduler::{Scheduler, WorkerInfo};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -142,7 +141,7 @@ pub async fn post_org_worker(
         (base64::engine::general_purpose::STANDARD.encode(raw), true)
     };
 
-    let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
+    let token_hash = password_auth::generate_hash(&token);
 
     let row = AWorkerRegistration {
         id: Set(Uuid::new_v4()),
