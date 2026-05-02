@@ -53,6 +53,20 @@ impl EvaluationStatus {
         Self::Building,
         Self::Waiting,
     ];
+
+    pub const fn num_value(&self) -> i32 {
+        match self {
+            Self::Queued => 0,
+            Self::EvaluatingFlake => 1,
+            Self::EvaluatingDerivation => 2,
+            Self::Building => 3,
+            Self::Waiting => 4,
+            Self::Completed => 5,
+            Self::Failed => 6,
+            Self::Aborted => 7,
+            Self::Fetching => 8,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]

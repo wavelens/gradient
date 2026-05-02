@@ -33,6 +33,21 @@ pub enum BuildStatus {
     Substituted,
 }
 
+impl BuildStatus {
+    pub const fn num_value(&self) -> i32 {
+        match self {
+            Self::Created => 0,
+            Self::Queued => 1,
+            Self::Building => 2,
+            Self::Completed => 3,
+            Self::Failed => 4,
+            Self::Aborted => 5,
+            Self::DependencyFailed => 6,
+            Self::Substituted => 7,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "build")]
 pub struct Model {

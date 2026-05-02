@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
+use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use gradient_core::ci::TriggerError;
 use gradient_core::sources::{check_project_updates, get_commit_info};
@@ -75,7 +76,12 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
     // that integration has a `secret` set, the forge pushes events and we only
     // need a slow backup poll. Otherwise we poll at the full evaluation_timeout.
     // LEFT JOIN evaluation so new projects (no last_evaluation) are also included.
-    // Terminal statuses: 5=Completed, 6=Failed, 7=Aborted.
+    let terminal_eval_statuses = format!(
+        "({}, {}, {})",
+        EvaluationStatus::Completed.num_value(),
+        EvaluationStatus::Failed.num_value(),
+        EvaluationStatus::Aborted.num_value(),
+    );
     let sql = sea_orm::Statement::from_string(
         sea_orm::DbBackend::Postgres,
         format!(
@@ -92,7 +98,7 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
                 (i.secret IS NOT NULL AND p.last_check_at <= '{webhook_threshold}')
             )
             AND (
-                e.status IN (5, 6, 7)
+                e.status IN {terminal}
                 OR p.force_evaluation = true
                 OR p.last_evaluation IS NULL
             )
@@ -100,6 +106,7 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
             "#,
             threshold = threshold.format("%Y-%m-%d %H:%M:%S%.f"),
             webhook_threshold = webhook_threshold.format("%Y-%m-%d %H:%M:%S%.f"),
+            terminal = terminal_eval_statuses,
         ),
     );
 
@@ -473,16 +480,17 @@ impl BuildDispatchMaps {
 pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Result<()> {
     let state = &scheduler.state;
 
-    // Ready builds: status = Queued AND every dependency build is Completed (3) or Substituted (7).
+    // Ready builds: status = Queued AND every dependency build is Completed or Substituted.
     // Ordered by dependency count desc (integration builds first), then by age.
     let builds_sql = sea_orm::Statement::from_string(
         sea_orm::DbBackend::Postgres,
-        r#"
+        format!(
+            r#"
             SELECT b.*
             FROM public.build b
             LEFT JOIN public.derivation_dependency dd
                 ON dd.derivation = b.derivation
-            WHERE b.status = 1
+            WHERE b.status = {queued}
             AND NOT EXISTS (
                 SELECT 1
                 FROM public.derivation_dependency dep_edge
@@ -491,11 +499,15 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
                     AND dep_build.evaluation = b.evaluation
                 WHERE dep_edge.derivation = b.derivation
                     AND (dep_build.id IS NULL
-                        OR (dep_build.status != 3 AND dep_build.status != 7))
+                        OR (dep_build.status != {completed} AND dep_build.status != {substituted}))
             )
             GROUP BY b.id
             ORDER BY COUNT(dd.dependency) DESC, b.updated_at ASC
         "#,
+            queued = BuildStatus::Queued.num_value(),
+            completed = BuildStatus::Completed.num_value(),
+            substituted = BuildStatus::Substituted.num_value(),
+        ),
     );
 
     let started = std::time::Instant::now();
