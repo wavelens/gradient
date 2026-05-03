@@ -5,7 +5,7 @@
  */
 
 use anyhow::{Context, Result};
-use chrono::{Duration as ChronoDuration, Utc};
+use chrono::{Duration as ChronoDuration};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
@@ -141,7 +141,7 @@ pub async fn gc_project_evaluations(
 ///   2. Deletes the derivation row — FK cascade cleans up outputs / dep edges / features /
 ///      signatures.
 pub async fn gc_orphan_derivations(state: Arc<ServerState>, grace_hours: i64) -> Result<()> {
-    let cutoff = Utc::now().naive_utc() - ChronoDuration::hours(grace_hours.max(0));
+    let cutoff = crate::types::now() - ChronoDuration::hours(grace_hours.max(0));
 
     // Find candidate derivations: no build rows, created before the cutoff.
     // Use raw SQL: SeaORM doesn't have a clean LEFT JOIN ... IS NULL builder.

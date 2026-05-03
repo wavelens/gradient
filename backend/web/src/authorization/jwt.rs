@@ -105,7 +105,7 @@ pub async fn decode_jwt(
 
         let mut aapi_key: AApi = api_key.clone().into();
 
-        aapi_key.last_used_at = Set(Utc::now().naive_utc());
+        aapi_key.last_used_at = Set(core::types::now());
         aapi_key
             .save(&state.web_db)
             .await

@@ -19,7 +19,7 @@ use super::{load_unmanaged_org, load_org_member};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use chrono::Utc;
+
 use core::ci::{ForgeType, IntegrationKind, encrypt_webhook_secret};
 use core::types::input::check_index_name;
 use core::types::*;
@@ -244,7 +244,7 @@ pub async fn put_integration(
         endpoint_url: Set(endpoint_url),
         access_token: Set(encrypted_token),
         created_by: Set(user.id),
-        created_at: Set(Utc::now().naive_utc()),
+        created_at: Set(core::types::now()),
     };
 
     let integration = integration.insert(&state.web_db).await?;

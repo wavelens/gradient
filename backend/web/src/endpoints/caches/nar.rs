@@ -122,7 +122,7 @@ fn spawn_nar_traffic_metric(state: Arc<ServerState>, cache_id: Uuid, bytes_len: 
 fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: Uuid, hash: String) {
     tokio::spawn(async move {
         use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
-        let now = chrono::Utc::now().naive_utc();
+        let now = core::types::now();
         let _ = state
             .worker_db
             .execute(Statement::from_sql_and_values(
@@ -163,7 +163,6 @@ async fn fetch_upstream_nar(base_url: &str, path: &str) -> WebResult<bytes::Byte
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     // Placeholder file hash (nix32 52-char) as it appears in a narinfo URL.
@@ -183,7 +182,7 @@ mod tests {
             references: Some(String::new()),
             ca: None,
             deriver: None,
-            created_at: Utc::now().naive_utc(),
+            created_at: core::types::now(),
         }
     }
 

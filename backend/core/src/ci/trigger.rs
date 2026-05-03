@@ -9,7 +9,7 @@
 
 use crate::types::consts::NULL_TIME;
 use crate::types::*;
-use chrono::Utc;
+
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
@@ -63,7 +63,7 @@ pub async fn trigger_evaluation<C: ConnectionTrait>(
         return Err(TriggerError::AlreadyInProgress);
     }
 
-    let now = Utc::now().naive_utc();
+    let now = crate::types::now();
 
     let acommit = ACommit {
         id: Set(Uuid::new_v4()),
@@ -150,7 +150,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
         .await?
         .ok_or(TriggerError::NoPreviousEvaluation)?;
 
-    let now = Utc::now().naive_utc();
+    let now = crate::types::now();
 
     // Create a new evaluation that starts directly in `Building` state.
     let new_eval_id = Uuid::new_v4();

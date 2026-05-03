@@ -14,7 +14,7 @@ use crate::types::input::load_secret_bytes;
 use crate::types::*;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
-use chrono::Utc;
+
 use entity::organization_cache::CacheSubscriptionMode;
 use entity::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
@@ -141,7 +141,7 @@ impl<'a> StateApplicator<'a> {
                 .one(self.db)
                 .await?;
 
-            let now = Utc::now().naive_utc();
+            let now = crate::types::now();
 
             if let Some(existing) = existing_user {
                 let mut user: user::ActiveModel = existing.into();
@@ -217,7 +217,7 @@ impl<'a> StateApplicator<'a> {
                 .one(self.db)
                 .await?;
 
-            let now = Utc::now().naive_utc();
+            let now = crate::types::now();
 
             let org_id = if let Some(existing) = existing_org {
                 let org_id = existing.id;
@@ -306,7 +306,7 @@ impl<'a> StateApplicator<'a> {
                 .one(self.db)
                 .await?;
 
-            let now = Utc::now().naive_utc();
+            let now = crate::types::now();
 
             if let Some(existing) = existing_project {
                 let mut proj: project::ActiveModel = existing.into();
@@ -410,7 +410,7 @@ impl<'a> StateApplicator<'a> {
                 .one(self.db)
                 .await?;
 
-            let now = Utc::now().naive_utc();
+            let now = crate::types::now();
 
             let cache_id = if let Some(existing) = existing_cache {
                 let mut cache_model: cache::ActiveModel = existing.clone().into();
@@ -564,7 +564,7 @@ impl<'a> StateApplicator<'a> {
         state_api_keys: &HashMap<String, StateApiKey>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let user_lookup = self.user_lookup().await?;
-        let now = Utc::now().naive_utc();
+        let now = crate::types::now();
 
         for state_api_key in state_api_keys.values() {
             let Some(owned_by_id) = user_lookup.get(&state_api_key.owned_by) else {
@@ -652,7 +652,7 @@ impl<'a> StateApplicator<'a> {
                 .one(self.db)
                 .await?;
 
-            let now = chrono::Utc::now().naive_utc();
+            let now = crate::types::now();
 
             let url = state_worker
                 .url
@@ -839,7 +839,7 @@ impl<'a> StateApplicator<'a> {
                     endpoint_url: Set(endpoint),
                     access_token: Set(encrypted_token),
                     created_by: Set(created_by_id),
-                    created_at: Set(Utc::now().naive_utc()),
+                    created_at: Set(crate::types::now()),
                 };
                 row.insert(self.db).await?;
                 tracing::info!("Created managed integration: {}", state_int.name);

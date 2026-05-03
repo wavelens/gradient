@@ -103,7 +103,7 @@ async fn ensure_push_signatures(
                         cached_path: sea_orm::ActiveValue::Set(cp.id),
                         cache: sea_orm::ActiveValue::Set(oc.cache),
                         signature: sea_orm::ActiveValue::Set(None),
-                        created_at: sea_orm::ActiveValue::Set(chrono::Utc::now().naive_utc()),
+                        created_at: sea_orm::ActiveValue::Set(gradient_core::types::now()),
                     };
                     let _ = sig_row.insert(&state.worker_db).await;
                 }

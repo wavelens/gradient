@@ -10,7 +10,7 @@ use crate::error::{WebError, WebResult};
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use chrono::{NaiveDateTime, Utc};
+use chrono::{NaiveDateTime};
 use core::db::{get_any_cache_by_name, get_cache_by_name};
 use core::sources::{format_cache_public_key, generate_signing_key};
 use core::types::input::{check_index_name, validate_display_name};
@@ -187,7 +187,7 @@ pub async fn put(
         private_key: Set(private_key),
         public: Set(body.public.unwrap_or(false)),
         created_by: Set(user.id),
-        created_at: Set(Utc::now().naive_utc()),
+        created_at: Set(core::types::now()),
         managed: Set(false),
     };
 

@@ -11,7 +11,7 @@ use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use chrono::Utc;
+
 use core::storage::generate_verification_token;
 use core::types::consts::*;
 use core::types::input::{validate_display_name, validate_password, validate_username};
@@ -86,7 +86,7 @@ pub async fn post_basic_register(
     let (email_verified, verification_token, verification_expires) =
         if state.cli.email_enabled && state.cli.email_require_verification {
             let token = generate_verification_token();
-            let expires = Utc::now().naive_utc() + chrono::Duration::hours(24);
+            let expires = core::types::now() + chrono::Duration::hours(24);
             (false, Some(token), Some(expires))
         } else {
             (true, None, None)
@@ -99,7 +99,7 @@ pub async fn post_basic_register(
         email: Set(body.email.clone()),
         password: Set(Some(generate_hash(body.password.clone()))),
         last_login_at: Set(*NULL_TIME),
-        created_at: Set(Utc::now().naive_utc()),
+        created_at: Set(core::types::now()),
         email_verified: Set(email_verified),
         email_verification_token: Set(verification_token.clone()),
         email_verification_token_expires: Set(verification_expires),
@@ -435,7 +435,7 @@ pub async fn get_verify_email(
         .ok_or_else(|| WebError::BadRequest("Invalid verification token".to_string()))?;
 
     if let Some(expires) = user.email_verification_token_expires
-        && Utc::now().naive_utc() > expires
+        && core::types::now() > expires
     {
         return Err(WebError::BadRequest(
             "Verification token has expired".to_string(),
@@ -485,7 +485,7 @@ pub async fn post_resend_verification(
     }
 
     let verification_token = generate_verification_token();
-    let verification_expires = Utc::now().naive_utc() + chrono::Duration::hours(24);
+    let verification_expires = core::types::now() + chrono::Duration::hours(24);
 
     let mut user_active: AUser = user.clone().into();
     user_active.email_verification_token = Set(Some(verification_token.clone()));

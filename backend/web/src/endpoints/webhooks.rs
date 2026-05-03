@@ -7,7 +7,7 @@
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use chrono::Utc;
+
 use core::ci::{decrypt_webhook_secret, encrypt_webhook_secret, validate_webhook_url};
 use core::db::get_any_organization_by_name;
 use core::types::*;
@@ -161,7 +161,7 @@ pub async fn put(
         )),
         active: Set(true),
         created_by: Set(user.id),
-        created_at: Set(Utc::now().naive_utc()),
+        created_at: Set(core::types::now()),
     };
 
     let webhook = webhook.insert(&state.web_db).await?;

@@ -46,7 +46,7 @@ fn eval_job(peer: Uuid) -> PendingEvalJob {
             timeout_secs: None,
         },
         required_paths: vec![],
-        queued_at: chrono::Utc::now().naive_utc(),
+        queued_at: gradient_core::types::now(),
     }
 }
 
@@ -317,7 +317,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
                 architecture: "x86_64-linux".into(),
                 required_features: vec![],
                 dependency_count: 0,
-                queued_at: chrono::Utc::now().naive_utc(),
+                queued_at: gradient_core::types::now(),
             },
         )
         .await;

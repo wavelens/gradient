@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use chrono::Utc;
+
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use gradient_core::db::{update_build_status, update_evaluation_status};
@@ -87,7 +87,7 @@ impl<'a> BuildStateHandler<'a> {
                         name: Set(product.name.clone()),
                         path: Set(product.path.clone()),
                         size: Set(product.size.map(|s| s as i64)),
-                        created_at: Set(Utc::now().naive_utc()),
+                        created_at: Set(gradient_core::types::now()),
                     };
                     if let Err(e) = am.insert(&self.state.worker_db).await {
                         warn!(error = %e, %build_id, output_name = %output.name, "failed to insert build_product");

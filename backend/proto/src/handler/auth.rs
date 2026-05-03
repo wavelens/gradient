@@ -488,7 +488,7 @@ mod tests {
             private_key: String::new(),
             public: false,
             created_by: Uuid::nil(),
-            created_at: chrono::Utc::now().naive_utc(),
+            created_at: gradient_core::types::now(),
             managed: false,
             github_installation_id: None,
         }

@@ -10,7 +10,7 @@ use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
-use chrono::Utc;
+
 use core::db::{get_any_organization_by_name, get_organization_by_name};
 use core::nix::RepositoryUrl;
 use core::sources::check_project_updates;
@@ -211,7 +211,7 @@ pub async fn put(
         last_check_at: Set(*NULL_TIME),
         force_evaluation: Set(false),
         created_by: Set(user.id),
-        created_at: Set(Utc::now().naive_utc()),
+        created_at: Set(core::types::now()),
         managed: Set(false),
         keep_evaluations: Set(30),
     };

@@ -163,7 +163,7 @@ pub async fn post_direct_build(
         .map_err(|e| WebError::InternalServerError(format!("Failed to create commit: {}", e)))?;
 
     // Create evaluation record (without project for direct builds)
-    let now = chrono::Utc::now().naive_utc();
+    let now = core::types::now();
     let evaluation = AEvaluation {
         id: Set(Uuid::new_v4()),
         project: Set(None), // No project for direct builds
@@ -190,7 +190,7 @@ pub async fn post_direct_build(
         derivation: Set(derivation.clone()),
         repository_path: Set(temp_dir.clone()),
         created_by: Set(user.id),
-        created_at: Set(chrono::Utc::now().naive_utc()),
+        created_at: Set(core::types::now()),
     };
     direct_build.insert(&state.web_db).await.map_err(|e| {
         WebError::InternalServerError(format!("Failed to create direct build record: {}", e))

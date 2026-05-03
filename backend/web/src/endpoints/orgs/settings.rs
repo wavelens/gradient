@@ -231,7 +231,7 @@ async fn enqueue_backfill_signatures(state: &ServerState, org_id: Uuid, cache_id
     let cp_ids: std::collections::HashSet<Uuid> =
         outputs.into_iter().filter_map(|o| o.cached_path).collect();
 
-    let now = chrono::Utc::now().naive_utc();
+    let now = core::types::now();
     for cp_id in cp_ids {
         let exists = ECachedPathSignature::find()
             .filter(CCachedPathSignature::CachedPath.eq(cp_id))

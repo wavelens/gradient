@@ -10,7 +10,7 @@
 //! Side effects (webhooks, CI reporting) stay in the service layer.
 
 use anyhow::Result;
-use chrono::Utc;
+
 use entity::evaluation::EvaluationStatus;
 use entity::evaluation_message::MessageLevel;
 use sea_orm::DatabaseConnection;
@@ -36,7 +36,7 @@ impl<'db> EvalRepo<'db> {
     /// Atomically update the evaluation status, guarding against overwriting
     /// a terminal state. Returns the number of rows affected (0 = already terminal).
     pub async fn update_status_guarded(&self, id: Uuid, status: EvaluationStatus) -> Result<u64> {
-        let now = Utc::now().naive_utc();
+        let now = crate::types::now();
         let res = EEvaluation::update_many()
             .col_expr(CEvaluation::Status, sea_orm::sea_query::Expr::value(status))
             .col_expr(CEvaluation::UpdatedAt, sea_orm::sea_query::Expr::value(now))
@@ -66,7 +66,7 @@ impl<'db> EvalRepo<'db> {
             level: Set(level),
             message: Set(message),
             source: Set(source),
-            created_at: Set(Utc::now().naive_utc()),
+            created_at: Set(crate::types::now()),
         };
         EEvaluationMessage::insert(msg).exec(self.db).await?;
         Ok(())
@@ -81,7 +81,7 @@ impl<'db> EvalRepo<'db> {
         if messages.is_empty() {
             return Ok(());
         }
-        let now = Utc::now().naive_utc();
+        let now = crate::types::now();
         let rows: Vec<AEvaluationMessage> = messages
             .into_iter()
             .map(|(level, message, source)| AEvaluationMessage {

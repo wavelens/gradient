@@ -34,9 +34,18 @@ use super::ci::webhook::WebhookClient;
 use super::storage::LogStorage;
 use super::storage::NarStore;
 use super::storage::email::EmailSender;
+use chrono::NaiveDateTime;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+/// Current UTC wall-clock as a naive `NaiveDateTime`, the timestamp shape
+/// every persisted column expects. Single source of truth for code that
+/// would otherwise spell `chrono::Utc::now().naive_utc()`.
+#[inline]
+pub fn now() -> NaiveDateTime {
+    chrono::Utc::now().naive_utc()
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "Gradient", display_name = "Gradient", bin_name = "gradient-server", author = "Wavelens", version, about, long_about = None)]
