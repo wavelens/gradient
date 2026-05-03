@@ -7,33 +7,34 @@
 use clap::Parser;
 use gradient_core::init_state;
 use gradient_core::types::Cli;
+use gradient_core::types::cli::LoggingArgs;
 use std::sync::Arc;
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Build an `EnvFilter` directive string from the global default plus optional
 /// per-crate overrides. Example output: `info,builder=debug,cache=trace,web=warn`.
-fn build_filter_directive(cli: &Cli) -> String {
-    let mut parts = vec![cli.logging.log_level.clone()];
-    if let Some(lvl) = &cli.logging.builder_log_level {
+fn build_filter_directive(logging: &LoggingArgs) -> String {
+    let mut parts = vec![logging.log_level.clone()];
+    if let Some(lvl) = &logging.builder_log_level {
         parts.push(format!("builder={}", lvl));
     }
-    if let Some(lvl) = &cli.logging.cache_log_level {
+    if let Some(lvl) = &logging.cache_log_level {
         parts.push(format!("cache={}", lvl));
     }
-    if let Some(lvl) = &cli.logging.web_log_level {
+    if let Some(lvl) = &logging.web_log_level {
         parts.push(format!("web={}", lvl));
     }
-    if let Some(lvl) = &cli.logging.proto_log_level {
+    if let Some(lvl) = &logging.proto_log_level {
         parts.push(format!("proto={}", lvl));
     }
     parts.join(",")
 }
 
-fn init_logging(cli: &Cli) {
+fn init_logging(logging: &LoggingArgs) {
     // `RUST_LOG` always wins if set, so operators can still override at runtime.
     // Otherwise we synthesize a directive from the per-component CLI options.
-    let directive = build_filter_directive(cli);
+    let directive = build_filter_directive(logging);
     let env_filter = match EnvFilter::try_from_default_env() {
         Ok(filter) => filter,
         Err(e) => {
@@ -62,24 +63,22 @@ pub fn main() -> std::io::Result<()> {
 
 async fn run() -> std::io::Result<()> {
     let cli = Cli::parse();
+    init_logging(&cli.logging);
     let state = init_state(cli).await;
-
-    // Initialize logging with the configured level
-    init_logging(&state.cli);
 
     info!(
         version = env!("CARGO_PKG_VERSION"),
-        ip = %state.cli.server.ip,
-        port = state.cli.server.port,
-        log_level = %state.cli.logging.log_level,
-        builder_log_level = state.cli.logging.builder_log_level.as_deref().unwrap_or("(default)"),
-        cache_log_level = state.cli.logging.cache_log_level.as_deref().unwrap_or("(default)"),
-        web_log_level = state.cli.logging.web_log_level.as_deref().unwrap_or("(default)"),
-        proto_log_level = state.cli.logging.proto_log_level.as_deref().unwrap_or("(default)"),
+        ip = %state.config.server.ip,
+        port = state.config.server.port,
+        log_level = %state.config.logging.log_level,
+        builder_log_level = state.config.logging.builder_log_level.as_deref().unwrap_or("(default)"),
+        cache_log_level = state.config.logging.cache_log_level.as_deref().unwrap_or("(default)"),
+        web_log_level = state.config.logging.web_log_level.as_deref().unwrap_or("(default)"),
+        proto_log_level = state.config.logging.proto_log_level.as_deref().unwrap_or("(default)"),
         "Starting Gradient server"
     );
 
-    let _guard = if state.cli.registration.report_errors {
+    let _guard = if state.config.registration.report_errors {
         info!("Error reporting enabled - initializing Sentry");
         Some(sentry::init(
             "https://5895e5a5d35f4dbebbcc47d5a722c402@reports.wavelens.io/1",

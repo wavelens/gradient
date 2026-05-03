@@ -52,7 +52,7 @@ pub async fn gradient_cache_info(
     let body = format!(
         "GradientVersion: {}\nGradientUrl: {}\n",
         env!("CARGO_PKG_VERSION"),
-        state.cli.server.serve_url,
+        state.config.server.serve_url,
     );
 
     text_response("text/x-gradient-cache-info", body)

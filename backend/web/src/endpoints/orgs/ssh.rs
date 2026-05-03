@@ -22,7 +22,7 @@ pub async fn get_organization_ssh(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization = load_org_member(&state, user.id, organization).await?;
 
-    Ok(ok_json(format_public_key(organization, &state.cli.server.serve_url)))
+    Ok(ok_json(format_public_key(organization, &state.config.server.serve_url)))
 }
 
 pub async fn post_organization_ssh(
@@ -33,7 +33,7 @@ pub async fn post_organization_ssh(
     let organization = load_unmanaged_org(&state, user.id, organization).await?;
 
     let (private_key, public_key) =
-        generate_ssh_key(&state.cli.secrets.crypt_secret_file).map_err(|e| {
+        generate_ssh_key(&state.config.secrets.crypt_secret_file).map_err(|e| {
             tracing::error!("Failed to generate SSH key: {}", e);
             WebError::failed_ssh_key_generation()
         })?;
@@ -46,7 +46,7 @@ pub async fn post_organization_ssh(
 
     let res = BaseResponse {
         error: false,
-        message: format_public_key(organization, &state.cli.server.serve_url),
+        message: format_public_key(organization, &state.config.server.serve_url),
     };
 
     Ok(Json(res))

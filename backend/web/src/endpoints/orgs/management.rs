@@ -233,7 +233,7 @@ pub async fn put(
     }
 
     let (private_key, public_key) =
-        generate_ssh_key(&state.cli.secrets.crypt_secret_file).map_err(|e| {
+        generate_ssh_key(&state.config.secrets.crypt_secret_file).map_err(|e| {
             tracing::error!("Failed to generate SSH key: {}", e);
             WebError::failed_ssh_key_generation()
         })?;
@@ -330,7 +330,7 @@ pub async fn get_organization(
             created_by: org.created_by,
             created_at: org.created_at,
             github_installation_id: org.github_installation_id,
-            github_app_available: state.cli.github_app_config().is_some(),
+            github_app_available: state.config.github_app.clone().is_some(),
             role,
         }))
 }

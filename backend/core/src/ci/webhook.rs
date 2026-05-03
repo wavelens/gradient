@@ -397,7 +397,7 @@ async fn fire_webhooks(
         }
 
         let plaintext_secret = match decrypt_webhook_secret(
-            &state.cli.secrets.crypt_secret_file,
+            &state.config.secrets.crypt_secret_file,
             &webhook.secret,
         ) {
             Ok(s) => s,

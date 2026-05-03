@@ -70,7 +70,7 @@ const STALE_CACHED_NARS_SELECT: &str = r#"SELECT cd.id, cd.cache, cd.derivation
                  )"#;
 
 pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
-    let ttl_hours = state.cli.storage.nar_ttl_hours;
+    let ttl_hours = state.config.storage.nar_ttl_hours;
     if ttl_hours == 0 {
         return Ok(());
     }
@@ -295,7 +295,7 @@ mod tests {
         Arc::new(ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(db),
-            cli: test_cli(),
+            config: Arc::new(RuntimeConfig::from_cli(&test_cli())),
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()),
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
@@ -347,7 +347,7 @@ mod tests {
 
         let mut state = make_state(tmp.path(), vec![]);
         // SAFETY: only this test holds a clone; mutate before any await.
-        Arc::get_mut(&mut state).unwrap().cli.storage.nar_ttl_hours = 0;
+        Arc::make_mut(&mut Arc::get_mut(&mut state).unwrap().config).storage.nar_ttl_hours = 0;
 
         cleanup_stale_cached_nars(state).await.unwrap();
         assert!(nar_file_exists(tmp.path(), h));
@@ -369,10 +369,11 @@ mod tests {
             .into_connection();
         let mut cli = test_cli();
         cli.storage.nar_ttl_hours = 24;
+        let config = Arc::new(RuntimeConfig::from_cli(&cli));
         let state = Arc::new(ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(db),
-            cli,
+            config,
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()),
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,

@@ -114,8 +114,8 @@ pub async fn oidc_login_create(
     state: State<Arc<ServerState>>,
 ) -> Result<OidcAuthRequest> {
     let oidc = state
-        .cli
-        .oidc_config()
+        .config
+        .oidc.clone()
         .context("OIDC is not enabled or not fully configured")?;
 
     let metadata = get_oidc_metadata(&oidc.discovery_url).await?;
@@ -124,7 +124,7 @@ pub async fn oidc_login_create(
         .as_str()
         .context("No authorization_endpoint in OIDC metadata")?;
 
-    let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.cli.server.serve_url);
+    let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.config.server.serve_url);
     let scope = oidc
         .scopes
         .as_deref()
@@ -141,7 +141,7 @@ pub async fn oidc_login_create(
         state: csrf_state.clone(),
         nonce: nonce.clone(),
     };
-    let secret = load_secret(&state.cli.secrets.jwt_secret_file);
+    let secret = load_secret(&state.config.secrets.jwt_secret_file);
     let cookie_value = encode(
         &Header::default(),
         &claims,
@@ -174,11 +174,11 @@ pub async fn oidc_login_verify(
     csrf_cookie: String,
 ) -> Result<MUser> {
     let oidc = state
-        .cli
-        .oidc_config()
+        .config
+        .oidc.clone()
         .context("OIDC is not enabled or not fully configured")?;
 
-    let secret = load_secret(&state.cli.secrets.jwt_secret_file);
+    let secret = load_secret(&state.config.secrets.jwt_secret_file);
     let csrf_data = decode::<CsrfClaims>(
         &csrf_cookie,
         &DecodingKey::from_secret(secret.expose().as_bytes()),
@@ -217,7 +217,7 @@ pub async fn oidc_login_verify(
         .build()
         .context("Failed to create HTTP client")?;
 
-    let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.cli.server.serve_url);
+    let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.config.server.serve_url);
     let client_secret = load_secret(&oidc.client_secret_file);
 
     let token_response = http_client

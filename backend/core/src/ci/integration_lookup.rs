@@ -128,7 +128,7 @@ pub async fn resolve_outbound_reporter_for_project(
 
     // Decrypt access token if present.
     let token = match integration.access_token.as_deref() {
-        Some(enc) => match decrypt_webhook_secret(&state.cli.secrets.crypt_secret_file, enc) {
+        Some(enc) => match decrypt_webhook_secret(&state.config.secrets.crypt_secret_file, enc) {
             Ok(t) => Some(t),
             Err(e) => {
                 warn!(error = %e, integration_id = %integration.id, "Failed to decrypt integration access token");
@@ -192,7 +192,7 @@ async fn build_github_app_reporter_for_project(
     state: &Arc<ServerState>,
     project_id: Uuid,
 ) -> Option<Arc<dyn CiReporter>> {
-    let github_app = state.cli.github_app_config()?;
+    let github_app = state.config.github_app.clone()?;
 
     let project = EProject::find_by_id(project_id)
         .one(&state.worker_db)

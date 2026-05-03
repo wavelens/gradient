@@ -123,7 +123,7 @@ mod tests {
     use gradient_core::ci::WebhookClient;
     use gradient_core::storage::{EmailSender, NarStore};
     use gradient_core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID};
-    use gradient_core::types::{WebDb, WorkerDb};
+    use gradient_core::types::{RuntimeConfig, WebDb, WorkerDb};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use test_support::cli::test_cli;
     use test_support::fakes::email::InMemoryEmailSender;
@@ -165,11 +165,12 @@ mod tests {
 
     fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
         let cli = test_cli();
-        let nar_storage = NarStore::local(&cli.storage.base_path).expect("nar store");
+        let config = Arc::new(RuntimeConfig::from_cli(&cli));
+        let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
         Arc::new(ServerState {
             web_db: WebDb::new(db),
             worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-            cli,
+            config,
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,

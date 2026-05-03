@@ -51,7 +51,7 @@ pub async fn post_basic_register(
     state: State<Arc<ServerState>>,
     Json(body): Json<MakeUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if !state.cli.registration.enable_registration || state.cli.oidc.oidc_required {
+    if !state.config.registration.enable_registration || state.config.oidc.as_ref().is_some_and(|o| o.required) {
         return Err(WebError::registration_disabled());
     }
 
@@ -85,7 +85,7 @@ pub async fn post_basic_register(
     }
 
     let (email_verified, verification_token, verification_expires) =
-        if state.cli.email.email_enabled && state.cli.email.email_require_verification {
+        if state.config.email.as_ref().is_some_and(|e| e.require_verification) {
             let token = generate_verification_token();
             let expires = gradient_core::types::now() + chrono::Duration::hours(24);
             (false, Some(token), Some(expires))
@@ -112,18 +112,17 @@ pub async fn post_basic_register(
 
     let user = user.insert(&state.web_db).await?;
 
-    if state.cli.email.email_enabled
-        && state.cli.email.email_require_verification
+    if state.config.email.as_ref().is_some_and(|e| e.require_verification)
         && let Some(ref token) = verification_token
         && let Err(e) = state
             .email
-            .send_verification_email(&body.email, &body.name, token, &state.cli.server.serve_url)
+            .send_verification_email(&body.email, &body.name, token, &state.config.server.serve_url)
             .await
     {
         tracing::warn!("Failed to send verification email: {}", e);
     }
 
-    let message = if state.cli.email.email_enabled && state.cli.email.email_require_verification {
+    let message = if state.config.email.as_ref().is_some_and(|e| e.require_verification) {
         format!(
             "User {} created. Please check your email to verify your account.",
             user.id
@@ -144,7 +143,7 @@ pub async fn post_basic_login(
     state: State<Arc<ServerState>>,
     Json(body): Json<MakeLoginRequest>,
 ) -> WebResult<Response> {
-    if state.cli.oidc.oidc_required {
+    if state.config.oidc.as_ref().is_some_and(|o| o.required) {
         return Err(WebError::oauth_required());
     }
 
@@ -162,11 +161,11 @@ pub async fn post_basic_login(
 
     verify_password(body.password, &user_password).map_err(|_| WebError::invalid_credentials())?;
 
-    if state.cli.email.email_enabled && state.cli.email.email_require_verification && !user.email_verified {
+    if state.config.email.as_ref().is_some_and(|e| e.require_verification) && !user.email_verified {
         return Err(WebError::bad_request("Email not verified. Please check your email and verify your account before logging in."));
     }
 
-    let use_tls = state.cli.server.use_tls;
+    let use_tls = state.config.server.use_tls;
     let token = encode_jwt(state.clone(), user.id, body.remember_me)
         .map_err(|_| WebError::failed_to_generate_token())?;
 
@@ -219,7 +218,7 @@ pub async fn get_oauth_authorize(
     headers: axum::http::HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
-    if !state.cli.oidc.oidc_enabled {
+    if state.config.oidc.is_none() {
         return Err(WebError::oauth_disabled());
     }
 
@@ -230,7 +229,7 @@ pub async fn get_oauth_authorize(
     let csrf = read_cookie(&headers, OIDC_CSRF_COOKIE)
         .ok_or_else(|| WebError::unauthorized("Missing OIDC CSRF cookie"))?;
 
-    let use_tls = state.cli.server.use_tls;
+    let use_tls = state.config.server.use_tls;
     let user: MUser = oidc_login_verify(
         state.clone(),
         code.to_string(),
@@ -260,11 +259,11 @@ pub async fn get_oauth_authorize(
 pub async fn post_oauth_authorize(
     state: State<Arc<ServerState>>,
 ) -> WebResult<Response> {
-    if !state.cli.oidc.oidc_enabled {
+    if state.config.oidc.is_none() {
         return Err(WebError::oauth_disabled());
     }
 
-    let use_tls = state.cli.server.use_tls;
+    let use_tls = state.config.server.use_tls;
     let req = oidc_login_create(state)
         .await
         .map_err(|e| WebError::Unauthorized(e.to_string()))?;
@@ -286,11 +285,11 @@ pub async fn get_oidc_login(
     state: State<Arc<ServerState>>,
     Query(_query): Query<HashMap<String, String>>,
 ) -> WebResult<Response> {
-    if !state.cli.oidc.oidc_enabled {
+    if state.config.oidc.is_none() {
         return Err(WebError::oauth_disabled());
     }
 
-    let use_tls = state.cli.server.use_tls;
+    let use_tls = state.config.server.use_tls;
     let req = oidc_login_create(state)
         .await
         .map_err(|e| WebError::Unauthorized(e.to_string()))?;
@@ -318,7 +317,7 @@ pub async fn get_oidc_callback(
     let csrf = read_cookie(&headers, OIDC_CSRF_COOKIE)
         .ok_or_else(|| WebError::unauthorized("Missing OIDC CSRF cookie"))?;
 
-    let use_tls = state.cli.server.use_tls;
+    let use_tls = state.config.server.use_tls;
     let user: MUser = oidc_login_verify(
         state.clone(),
         code.to_string(),
@@ -347,7 +346,7 @@ pub async fn get_oidc_callback(
 }
 
 pub async fn post_logout(state: State<Arc<ServerState>>) -> WebResult<Response> {
-    let secure = if state.cli.server.use_tls { "; Secure" } else { "" };
+    let secure = if state.config.server.use_tls { "; Secure" } else { "" };
     let clear_cookie = format!(
         "jwt_token=; HttpOnly{}; SameSite=Strict; Path=/; Max-Age=0",
         secure
@@ -416,7 +415,7 @@ pub async fn get_verify_email(
     state: State<Arc<ServerState>>,
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if !state.cli.email.email_enabled || !state.cli.email.email_require_verification {
+    if !state.config.email.as_ref().is_some_and(|e| e.require_verification) {
         return Err(WebError::BadRequest(
             "Email verification is not enabled".to_string(),
         ));
@@ -458,7 +457,7 @@ pub async fn post_resend_verification(
     state: State<Arc<ServerState>>,
     Json(body): Json<CheckUsernameRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    if !state.cli.email.email_enabled || !state.cli.email.email_require_verification {
+    if !state.config.email.as_ref().is_some_and(|e| e.require_verification) {
         return Err(WebError::BadRequest(
             "Email verification is not enabled".to_string(),
         ));
@@ -491,7 +490,7 @@ pub async fn post_resend_verification(
             &user.email,
             &user.name,
             &verification_token,
-            &state.cli.server.serve_url,
+            &state.config.server.serve_url,
         )
         .await
     {

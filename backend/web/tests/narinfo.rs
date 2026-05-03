@@ -172,7 +172,7 @@ async fn narinfo_served_from_db_inner() {
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        cli,
+        config: std::sync::Arc::new(gradient_core::types::RuntimeConfig::from_cli(&cli)),
         log_storage: Arc::new(NoopLogStorage),
         webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
