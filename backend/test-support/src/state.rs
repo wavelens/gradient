@@ -35,6 +35,7 @@ pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_core::http::build_client().expect("build test HTTP client"),
+        shutdown: gradient_core::shutdown::Shutdown::new(),
     })
 }
 
@@ -59,6 +60,7 @@ pub fn test_state_recorded(
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http: gradient_core::http::build_client().expect("build test HTTP client"),
+        shutdown: gradient_core::shutdown::Shutdown::new(),
     });
     (state, recorder)
 }

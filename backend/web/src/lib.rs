@@ -463,9 +463,51 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             tracing::error!("Failed to bind to {}: {}", server_url, e);
             e
         })?;
-    axum::serve(
+
+    let shutdown = state.shutdown.clone();
+    install_signal_handler(shutdown.clone());
+
+    let drain_token = shutdown.token();
+    let serve_result = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .await
+    .with_graceful_shutdown(async move { drain_token.cancelled().await })
+    .await;
+
+    // Drain background tasks (dispatch loops, outbound, cache GC, webhook
+    // deliveries, metric writes). Bounded so a misbehaving task can't block
+    // shutdown indefinitely.
+    shutdown
+        .cancel_and_drain(std::time::Duration::from_secs(30))
+        .await;
+
+    serve_result
+}
+
+/// Install a SIGINT/SIGTERM handler that triggers graceful shutdown.
+fn install_signal_handler(shutdown: gradient_core::shutdown::Shutdown) {
+    tokio::spawn(async move {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut sigterm = match signal(SignalKind::terminate()) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to install SIGTERM handler");
+                    return;
+                }
+            };
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => tracing::info!("received SIGINT, shutting down"),
+                _ = sigterm.recv() => tracing::info!("received SIGTERM, shutting down"),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+            tracing::info!("received Ctrl-C, shutting down");
+        }
+        shutdown.cancel();
+    });
 }

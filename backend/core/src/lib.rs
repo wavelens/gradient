@@ -12,6 +12,7 @@ pub mod hydra;
 pub mod nix;
 pub mod nix_hash;
 pub mod repo;
+pub mod shutdown;
 pub mod sources;
 pub mod state;
 pub mod state_machine;
@@ -20,6 +21,7 @@ pub mod types;
 
 use ci::ReqwestWebhookClient;
 use db::{connect_db, connect_web_db};
+use shutdown::Shutdown;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
@@ -196,5 +198,6 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http,
+        shutdown: Shutdown::new(),
     })
 }

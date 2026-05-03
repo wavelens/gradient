@@ -349,7 +349,7 @@ impl<'a> EvalResultProcessor<'a> {
             let repo = self.evaluation.repository.clone();
             let commit_id = self.evaluation.commit;
             let evaluation_id = self.evaluation_id;
-            tokio::spawn(async move {
+            self.state.shutdown.spawn(async move {
                 report_ci_for_entry_points(
                     state_clone,
                     project_id,
@@ -367,7 +367,7 @@ impl<'a> EvalResultProcessor<'a> {
         if let Ok(Some(project)) = EProject::find_by_id(project_id).one(&self.state.worker_db).await {
             let gc_state = Arc::clone(self.state);
             let gc_keep = project.keep_evaluations as usize;
-            tokio::spawn(async move {
+            self.state.shutdown.spawn(async move {
                 if let Err(e) =
                     gradient_core::db::gc_project_evaluations(gc_state, project_id, gc_keep).await
                 {

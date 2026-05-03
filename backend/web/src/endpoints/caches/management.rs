@@ -300,9 +300,11 @@ pub async fn delete_cache(
     let acache: ACache = cache.into();
     acache.delete(&state.web_db).await?;
 
-    // Spawn background task to delete now-orphaned NAR files.
+    // Spawn background task to delete now-orphaned NAR files. Tracked via
+    // the shared shutdown registry so SIGTERM drains it instead of leaving
+    // orphaned NAR files only partially removed.
     let state_bg = Arc::clone(&state);
-    tokio::spawn(async move {
+    state.shutdown.spawn(async move {
         cleanup_nars_for_orgs(state_bg, subscribing_orgs).await;
     });
 

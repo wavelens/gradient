@@ -900,3 +900,28 @@ Unit tests in `backend/core/src/http.rs`:
 - `user_agent_is_prefixed` — the user-agent string is namespaced
   `gradient/...` so server logs can identify outbound calls from
   Gradient processes.
+
+## Graceful shutdown (`#72`)
+
+`backend/core/src/shutdown.rs` introduces a `Shutdown` primitive bundling a
+`tokio_util::sync::CancellationToken` with a `tokio_util::task::TaskTracker`.
+It replaces bare `tokio::spawn` for every long-lived background task —
+dispatch loops, the outbound worker connection loop, the cache GC and
+sign-sweep loops, webhook deliveries, CI reporters, and the fire-and-forget
+metric writes from the NAR cache surface. `serve_web` installs a
+SIGINT/SIGTERM handler that calls `shutdown.cancel()`, hands the token to
+`axum::serve(...).with_graceful_shutdown(...)`, then awaits
+`shutdown.cancel_and_drain(30s)` so in-flight cleanups, metric writes, and
+webhook deliveries finish before the process exits.
+
+Unit tests in `backend/core/src/shutdown.rs`:
+
+- `cancel_interrupts_select_loop` — a task that `select!`s on
+  `cancelled()` against a 60-second sleep returns immediately when the
+  token fires.
+- `drain_waits_for_in_flight_work` — `cancel_and_drain` waits for
+  spawned futures to finish (no abandonment of in-flight work).
+- `drain_timeout_returns_false` — a task that ignores the cancel
+  signal is reported as a drain timeout, not silently abandoned.
+- `child_token_cascades_from_parent` — child tokens used for
+  per-connection / per-job scopes cancel transitively.

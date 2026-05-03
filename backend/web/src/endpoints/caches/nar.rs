@@ -111,8 +111,9 @@ pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
 }
 
 fn spawn_nar_traffic_metric(state: Arc<ServerState>, cache_id: Uuid, bytes_len: i64) {
-    tokio::spawn(async move {
-        super::super::stats::record_nar_traffic(state, cache_id, bytes_len).await;
+    let s = Arc::clone(&state);
+    state.shutdown.spawn(async move {
+        super::super::stats::record_nar_traffic(s, cache_id, bytes_len).await;
     });
 }
 
@@ -121,10 +122,11 @@ fn spawn_nar_traffic_metric(state: Arc<ServerState>, cache_id: Uuid, bytes_len: 
 /// fire-and-forget UPDATE would otherwise contend with foreground HTTP
 /// requests on the web pool.
 fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: Uuid, hash: String) {
-    tokio::spawn(async move {
+    let s = Arc::clone(&state);
+    state.shutdown.spawn(async move {
         use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
         let now = gradient_core::types::now();
-        let _ = state
+        let _ = s
             .worker_db
             .execute(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,

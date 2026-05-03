@@ -303,6 +303,7 @@ mod tests {
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
+            shutdown: gradient_core::shutdown::Shutdown::new(),
         })
     }
 
@@ -382,6 +383,7 @@ mod tests {
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
+            shutdown: gradient_core::shutdown::Shutdown::new(),
         });
 
         cleanup_stale_cached_nars(state).await.unwrap();

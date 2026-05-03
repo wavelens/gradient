@@ -254,6 +254,7 @@ fn listing_returns_products_from_db() {
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
+            shutdown: gradient_core::shutdown::Shutdown::new(),
         });
 
         let router = create_router(state);
@@ -326,6 +327,7 @@ fn download_streams_file_from_nar() {
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             http: gradient_core::http::build_client().expect("http client"),
+            shutdown: gradient_core::shutdown::Shutdown::new(),
         });
 
         let router = create_router(state);

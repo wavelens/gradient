@@ -36,6 +36,7 @@ pub use self::secret::{SecretBytes, SecretString};
 pub use self::wildcard::*;
 
 use super::ci::webhook::WebhookClient;
+use super::shutdown::Shutdown;
 use super::storage::LogStorage;
 use super::storage::NarStore;
 use super::storage::email::EmailSender;
@@ -110,6 +111,9 @@ pub struct ServerState {
     pub manifest_state: Arc<crate::ci::manifest_state::ManifestStateStore>,
     /// Manifest results awaiting one-shot pickup by the superuser's browser.
     pub pending_credentials: Arc<crate::ci::manifest_state::PendingCredentialsStore>,
+    /// Graceful-shutdown coordination for all long-lived background tasks
+    /// (dispatch loops, outbound, cache loops, webhook deliveries, etc.).
+    pub shutdown: Shutdown,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
