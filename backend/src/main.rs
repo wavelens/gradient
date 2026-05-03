@@ -14,17 +14,17 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberI
 /// Build an `EnvFilter` directive string from the global default plus optional
 /// per-crate overrides. Example output: `info,builder=debug,cache=trace,web=warn`.
 fn build_filter_directive(cli: &Cli) -> String {
-    let mut parts = vec![cli.log_level.clone()];
-    if let Some(lvl) = &cli.builder_log_level {
+    let mut parts = vec![cli.logging.log_level.clone()];
+    if let Some(lvl) = &cli.logging.builder_log_level {
         parts.push(format!("builder={}", lvl));
     }
-    if let Some(lvl) = &cli.cache_log_level {
+    if let Some(lvl) = &cli.logging.cache_log_level {
         parts.push(format!("cache={}", lvl));
     }
-    if let Some(lvl) = &cli.web_log_level {
+    if let Some(lvl) = &cli.logging.web_log_level {
         parts.push(format!("web={}", lvl));
     }
-    if let Some(lvl) = &cli.proto_log_level {
+    if let Some(lvl) = &cli.logging.proto_log_level {
         parts.push(format!("proto={}", lvl));
     }
     parts.join(",")
@@ -69,17 +69,17 @@ async fn run() -> std::io::Result<()> {
 
     info!(
         version = env!("CARGO_PKG_VERSION"),
-        ip = %state.cli.ip,
-        port = state.cli.port,
-        log_level = %state.cli.log_level,
-        builder_log_level = state.cli.builder_log_level.as_deref().unwrap_or("(default)"),
-        cache_log_level = state.cli.cache_log_level.as_deref().unwrap_or("(default)"),
-        web_log_level = state.cli.web_log_level.as_deref().unwrap_or("(default)"),
-        proto_log_level = state.cli.proto_log_level.as_deref().unwrap_or("(default)"),
+        ip = %state.cli.server.ip,
+        port = state.cli.server.port,
+        log_level = %state.cli.logging.log_level,
+        builder_log_level = state.cli.logging.builder_log_level.as_deref().unwrap_or("(default)"),
+        cache_log_level = state.cli.logging.cache_log_level.as_deref().unwrap_or("(default)"),
+        web_log_level = state.cli.logging.web_log_level.as_deref().unwrap_or("(default)"),
+        proto_log_level = state.cli.logging.proto_log_level.as_deref().unwrap_or("(default)"),
         "Starting Gradient server"
     );
 
-    let _guard = if state.cli.report_errors {
+    let _guard = if state.cli.registration.report_errors {
         info!("Error reporting enabled - initializing Sentry");
         Some(sentry::init(
             "https://5895e5a5d35f4dbebbcc47d5a722c402@reports.wavelens.io/1",

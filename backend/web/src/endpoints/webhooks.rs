@@ -142,7 +142,7 @@ pub async fn put(
         ));
     }
 
-    let encrypted_secret = encrypt_webhook_secret(&state.cli.crypt_secret_file, &body.secret)
+    let encrypted_secret = encrypt_webhook_secret(&state.cli.secrets.crypt_secret_file, &body.secret)
         .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?;
 
     let webhook = AWebhook {
@@ -200,7 +200,7 @@ pub async fn patch_webhook(
     }
     if let Some(secret) = body.secret {
         let encrypted =
-            encrypt_webhook_secret(&state.cli.crypt_secret_file, &secret).map_err(|e| {
+            encrypt_webhook_secret(&state.cli.secrets.crypt_secret_file, &secret).map_err(|e| {
                 WebError::internal(format!("Failed to encrypt secret: {}", e))
             })?;
         active_webhook.secret = Set(encrypted);
@@ -252,7 +252,7 @@ pub async fn post_webhook_test(
     });
 
     let body_str = serde_json::to_string(&payload).unwrap_or_default();
-    let plaintext_secret = decrypt_webhook_secret(&state.cli.crypt_secret_file, &webhook.secret)
+    let plaintext_secret = decrypt_webhook_secret(&state.cli.secrets.crypt_secret_file, &webhook.secret)
         .map_err(|e| {
             WebError::internal(format!("Failed to decrypt webhook secret: {}", e))
         })?;

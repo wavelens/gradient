@@ -100,7 +100,7 @@ pub async fn report_ci_for_entry_points(
     let details_url = org_name.as_ref().map(|org| {
         format!(
             "{}/organization/{}/log/{}",
-            state.cli.frontend_url, org, evaluation_id
+            state.cli.server.frontend_url, org, evaluation_id
         )
     });
 
@@ -221,7 +221,7 @@ pub async fn report_ci_for_evaluation(
     let details_url = org_name.as_ref().map(|org| {
         format!(
             "{}/organization/{}/log/{}",
-            state.cli.frontend_url, org, evaluation_id
+            state.cli.server.frontend_url, org, evaluation_id
         )
     });
 

@@ -71,7 +71,7 @@ impl ProtoSession<Opening> {
         mut self,
         server_initiated: bool,
     ) -> Option<ProtoSession<Authenticated>> {
-        if !server_initiated && !self.state.cli.discoverable {
+        if !server_initiated && !self.state.cli.proto.discoverable {
             send_reject(
                 &mut self.socket,
                 403,

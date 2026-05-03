@@ -240,7 +240,7 @@ fn listing_returns_products_from_db() {
     rt.block_on(async {
         // Set up state — nar_storage is not needed for listing.
         let cli = test_cli();
-        let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
+        let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
 
         let db = mock_db_for_downloads();
         let state = Arc::new(ServerState {
@@ -292,7 +292,7 @@ fn download_streams_file_from_nar() {
 
         // Set up state with nar_storage populated.
         let cli = test_cli();
-        let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
+        let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
         nar_storage
             .put(FIXTURE_HASH, compressed)
             .await

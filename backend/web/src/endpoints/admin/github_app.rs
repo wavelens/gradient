@@ -66,9 +66,9 @@ pub async fn request_manifest(
     let host = body.host.unwrap_or_else(default_host);
     validate_host(&host)?;
 
-    let manifest = gradient_core::ci::github_app_manifest::build_manifest(&state.cli.serve_url);
-    let token = gradient_core::ci::manifest_state::issue_state(&state.manifest_state, user.id);
-    let post_url = gradient_core::ci::github_app_manifest::manifest_post_url(&host, &token);
+    let manifest = core::ci::github_app_manifest::build_manifest(&state.cli.server.serve_url);
+    let token = core::ci::manifest_state::issue_state(&state.manifest_state, user.id);
+    let post_url = core::ci::github_app_manifest::manifest_post_url(&host, &token);
 
     Ok(ok_json(ManifestResponse {
             manifest,

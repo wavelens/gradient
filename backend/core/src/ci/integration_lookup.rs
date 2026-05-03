@@ -128,7 +128,7 @@ pub async fn resolve_outbound_reporter_for_project(
 
     // Decrypt access token if present.
     let token = match integration.access_token.as_deref() {
-        Some(enc) => match decrypt_webhook_secret(&state.cli.crypt_secret_file, enc) {
+        Some(enc) => match decrypt_webhook_secret(&state.cli.secrets.crypt_secret_file, enc) {
             Ok(t) => Some(t),
             Err(e) => {
                 warn!(error = %e, integration_id = %integration.id, "Failed to decrypt integration access token");

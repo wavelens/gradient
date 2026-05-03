@@ -33,9 +33,9 @@ fn make_state_with_limits(
     max_direct_build_size: usize,
 ) -> Arc<ServerState> {
     let mut cli = test_cli();
-    cli.max_request_size = max_request_size;
-    cli.max_direct_build_size = max_direct_build_size;
-    let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
+    cli.limits.max_request_size = max_request_size;
+    cli.limits.max_direct_build_size = max_direct_build_size;
+    let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
