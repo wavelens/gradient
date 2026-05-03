@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::{encode_jwt, oidc_login_create, oidc_login_verify, update_last_login};
 use crate::error::{WebError, WebResult};
 use axum::Json;
@@ -468,7 +468,7 @@ pub async fn post_resend_verification(
         .filter(CUser::Username.eq(body.username.clone()))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("User"))?;
+        .or_not_found("User")?;
 
     if user.email_verified {
         return Err(WebError::BadRequest(

@@ -5,7 +5,7 @@
  */
 
 use super::helpers::cleanup_nars_for_orgs;
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use axum::Extension;
@@ -70,7 +70,7 @@ async fn load_editable_cache(
 ) -> WebResult<MCache> {
     let cache = get_cache_by_name(Arc::clone(state), user_id, cache_name)
         .await?
-        .ok_or_else(|| WebError::not_found("Cache"))?;
+        .or_not_found("Cache")?;
 
     if cache.managed {
         return Err(WebError::Forbidden(
@@ -220,7 +220,7 @@ pub async fn get_cache(
 ) -> WebResult<Json<BaseResponse<CacheResponse>>> {
     let cache: MCache = get_any_cache_by_name(state.0.clone(), cache.clone())
         .await?
-        .ok_or_else(|| WebError::not_found("Cache"))?;
+        .or_not_found("Cache")?;
 
     if !cache.public {
         match &maybe_user {

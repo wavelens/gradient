@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use core::types::*;
@@ -169,7 +169,7 @@ pub async fn get_build_dependencies(
     let build = EBuild::find_by_id(build_id)
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Build"))?;
+        .or_not_found("Build")?;
 
     let dep_edges = EDerivationDependency::find()
         .filter(CDerivationDependency::Derivation.eq(build.derivation))
@@ -219,7 +219,7 @@ pub async fn get_build_graph(
     let root_build = EBuild::find_by_id(build_id)
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Build"))?;
+        .or_not_found("Build")?;
     let evaluation_id = root_build.evaluation;
 
     let mut visited_builds: HashSet<Uuid> = HashSet::new();

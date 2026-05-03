@@ -5,7 +5,7 @@
  */
 
 use super::{load_unmanaged_org, load_org_member};
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -71,7 +71,7 @@ async fn load_subscribable_cache(
 ) -> WebResult<MCache> {
     let cache = get_any_cache_by_name(Arc::clone(state), cache_name)
         .await?
-        .ok_or_else(|| WebError::not_found("Cache"))?;
+        .or_not_found("Cache")?;
 
     if !cache.public && cache.created_by != user_id {
         return Err(WebError::Forbidden(

@@ -35,6 +35,7 @@ pub use self::workers::{
     WorkerLiveInfo, delete_org_worker, get_org_workers, patch_org_worker, post_org_worker,
 };
 
+use crate::helpers::OptionExt;
 use crate::error::{WebError, WebResult};
 use core::db::get_organization_by_name;
 use core::types::consts::BASE_ROLE_ADMIN_ID;
@@ -56,7 +57,7 @@ pub(super) async fn load_org_member(
 ) -> WebResult<MOrganization> {
     get_organization_by_name(Arc::clone(state), user_id, org_name)
         .await?
-        .ok_or_else(|| WebError::not_found("Organization"))
+        .or_not_found("Organization")
 }
 
 /// Load an organization that the user is a member of AND that is not
@@ -106,7 +107,7 @@ pub(super) async fn load_admin_org(
     let org = load_unmanaged_org(state, user_id, org_name).await?;
     let membership = load_org_membership(state, user_id, org.id)
         .await?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
+        .or_not_found("Organization")?;
     if membership.role != BASE_ROLE_ADMIN_ID {
         return Err(WebError::Forbidden(
             "Admin role required for this operation".to_string(),

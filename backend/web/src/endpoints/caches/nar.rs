@@ -5,6 +5,7 @@
  */
 
 use super::helpers::CacheContext;
+use crate::helpers::OptionExt;
 use crate::error::{WebError, WebResult};
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -39,7 +40,7 @@ pub async fn nar(
         .get(&effective_hash)
         .await
         .map_err(|e| WebError::InternalServerError(format!("Failed to read NAR: {}", e)))?
-        .ok_or_else(|| WebError::not_found("Path"))?;
+        .or_not_found("Path")?;
 
     spawn_nar_traffic_metric(Arc::clone(&state), ctx.cache.id, compressed.len() as i64);
     spawn_cache_derivation_fetch_update(Arc::clone(&state), ctx.cache.id, effective_hash);
@@ -64,7 +65,7 @@ pub async fn upstream_nar(
         .filter(CCacheUpstream::Cache.eq(ctx.cache.id))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Upstream"))?;
+        .or_not_found("Upstream")?;
 
     let base_url = upstream
         .url

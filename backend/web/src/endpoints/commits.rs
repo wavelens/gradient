@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::error::{WebError, WebResult};
+use crate::helpers::OptionExt;
+use crate::error::WebResult;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use core::types::*;
@@ -20,7 +21,7 @@ pub async fn get_commit(
     let commit = ECommit::find_by_id(commit_id)
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Commit"))?;
+        .or_not_found("Commit")?;
 
     // TODO: Check if user has access to the commit
 

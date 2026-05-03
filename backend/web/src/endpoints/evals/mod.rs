@@ -14,6 +14,7 @@ pub use self::log::*;
 pub use self::query::*;
 pub use self::types::*;
 
+use crate::helpers::OptionExt;
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use core::types::*;
@@ -44,7 +45,7 @@ impl EvalAccessContext {
         let evaluation = EEvaluation::find_by_id(evaluation_id)
             .one(&state.web_db)
             .await?
-            .ok_or_else(|| WebError::not_found("Evaluation"))?;
+            .or_not_found("Evaluation")?;
 
         let (organization_id, project_name, project_display_name) =
             if let Some(project_id) = evaluation.project {

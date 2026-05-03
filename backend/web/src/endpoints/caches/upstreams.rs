@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::error::{WebError, WebResult};
 use axum::Extension;
 use axum::Json;
@@ -64,7 +64,7 @@ async fn load_cache_for_user(
 ) -> WebResult<MCache> {
     get_cache_by_name(Arc::clone(state), user_id, cache_name)
         .await?
-        .ok_or_else(|| WebError::not_found("Cache"))
+        .or_not_found("Cache")
 }
 
 async fn load_upstream(
@@ -76,7 +76,7 @@ async fn load_upstream(
         .filter(CCacheUpstream::Cache.eq(cache_id))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Upstream cache"))
+        .or_not_found("Upstream cache")
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────

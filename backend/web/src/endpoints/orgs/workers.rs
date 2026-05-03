@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::error::{WebError, WebResult};
 
 fn default_true() -> bool {
@@ -247,7 +247,7 @@ pub async fn patch_org_worker(
         .filter(worker_registration::Column::WorkerId.eq(&worker_id))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("worker registration"))?;
+        .or_not_found("worker registration")?;
 
     let mut active_model: AWorkerRegistration = reg.into();
 

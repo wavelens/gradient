@@ -26,6 +26,7 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Deserialize;
 use std::sync::Arc;
 
+use crate::helpers::OptionExt;
 use crate::authorization::MaybeUser;
 use crate::endpoints::user_is_org_member;
 use crate::error::WebError;
@@ -364,7 +365,7 @@ pub async fn get_project_badge(
 ) -> Result<Response, WebError> {
     let organization = get_any_organization_by_name(state.0.clone(), organization)
         .await?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
+        .or_not_found("Organization")?;
 
     let resolved_user = resolve_badge_user(&state, maybe_user, params.token).await?;
     check_badge_org_access(&state, &organization, &resolved_user).await?;
@@ -374,7 +375,7 @@ pub async fn get_project_badge(
         .filter(CProject::Name.eq(&project))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Project"))?;
+        .or_not_found("Project")?;
 
     let (status, has_failed_builds) = if let Some(ref eval_attr) = params.eval {
         badge_status_for_entry_point(&state, project.id, eval_attr).await?

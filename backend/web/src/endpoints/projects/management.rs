@@ -5,7 +5,7 @@
  */
 
 use super::{ProjectResponse, load_editable_project, load_project, user_can_edit};
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
@@ -63,7 +63,7 @@ pub async fn get_project_name_available(
     }
     let org = get_any_organization_by_name(state.0.clone(), organization)
         .await?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
+        .or_not_found("Organization")?;
     let exists = EProject::find()
         .filter(CProject::Name.eq(name.as_str()))
         .filter(CProject::Organization.eq(org.id))
@@ -168,7 +168,7 @@ pub async fn put(
     let organization: MOrganization =
         get_organization_by_name(state.0.clone(), user.id, organization.clone())
             .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
+            .or_not_found("Organization")?;
 
     let existing_project = EProject::find()
         .filter(
@@ -230,7 +230,7 @@ pub async fn get_project(
         .filter(CProject::Name.eq(project))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Project"))?;
+        .or_not_found("Project")?;
 
     let can_edit = match &maybe_user {
         Some(user) => user_can_edit(&state, user.id, organization.id).await?,
@@ -486,7 +486,7 @@ pub async fn post_project_transfer(
     let new_organization =
         get_organization_by_name(state.0.clone(), user.id, body.organization.clone())
             .await?
-            .ok_or_else(|| WebError::not_found("Organization"))?;
+            .or_not_found("Organization")?;
 
     if new_organization.id == organization.id {
         return Err(WebError::BadRequest(

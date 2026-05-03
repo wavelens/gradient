@@ -25,6 +25,7 @@ pub use self::metrics::{
     EntryPointMetricsQuery, get_entry_point_metrics, get_project_metrics,
 };
 
+use crate::helpers::OptionExt;
 use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
 use core::db::get_project_by_name;
@@ -120,7 +121,7 @@ pub(crate) async fn load_readable_project(
         .filter(CProject::Name.eq(project_name))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Project"))?;
+        .or_not_found("Project")?;
     Ok((organization, project))
 }
 
@@ -136,7 +137,7 @@ pub(crate) async fn load_project(
 ) -> WebResult<(MOrganization, MProject)> {
     get_project_by_name(Arc::clone(state), user_id, org_name, project_name)
         .await?
-        .ok_or_else(|| WebError::not_found("Project"))
+        .or_not_found("Project")
 }
 
 /// Load an editable project: the user must have edit (Admin/Write) permission and

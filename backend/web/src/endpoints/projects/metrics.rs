@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::endpoints::get_org_readable;
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use core::types::*;
@@ -98,7 +98,7 @@ pub async fn get_project_metrics(
         .filter(CProject::Name.eq(project))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Project"))?;
+        .or_not_found("Project")?;
 
     let evaluations = EEvaluation::find()
         .filter(CEvaluation::Project.eq(project.id))
@@ -208,7 +208,7 @@ pub async fn get_entry_point_metrics(
         .filter(CProject::Name.eq(project))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Project"))?;
+        .or_not_found("Project")?;
 
     let entry_points = EEntryPoint::find()
         .filter(CEntryPoint::Project.eq(project.id))

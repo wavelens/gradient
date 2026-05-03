@@ -5,7 +5,7 @@
  */
 
 use super::load_admin_org;
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
@@ -45,7 +45,7 @@ async fn find_user_by_username(state: &Arc<ServerState>, username: &str) -> WebR
         .filter(CUser::Username.eq(username))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("User"))
+        .or_not_found("User")
 }
 
 async fn find_org_membership(
@@ -132,7 +132,7 @@ pub async fn post_organization_users(
         )
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Role"))?;
+        .or_not_found("Role")?;
 
     AOrganizationUser {
         id: Set(Uuid::new_v4()),
@@ -163,7 +163,7 @@ pub async fn patch_organization_users(
         .filter(CRole::Name.eq(body.role.clone()))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Role"))?;
+        .or_not_found("Role")?;
 
     let mut active: AOrganizationUser = membership.into();
     active.role = Set(role.id);
