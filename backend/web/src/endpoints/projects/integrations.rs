@@ -7,7 +7,7 @@
 //! Link a project to named org-level integrations (inbound + outbound).
 
 use super::{load_editable_project, load_project};
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
@@ -54,7 +54,7 @@ async fn validate_integration(
         .filter(CIntegration::Organization.eq(org_id))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Integration"))?;
+        .or_not_found("Integration")?;
 
     if row.kind != expected_kind.as_i16() {
         return Err(WebError::BadRequest(format!(

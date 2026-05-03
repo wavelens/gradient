@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use axum::Extension;
@@ -25,7 +25,7 @@ async fn load_cache_for_owner(
 ) -> WebResult<MCache> {
     let cache = get_any_cache_by_name(Arc::clone(state), cache_name)
         .await?
-        .ok_or_else(|| WebError::not_found("Cache"))?;
+        .or_not_found("Cache")?;
 
     if !cache.public && cache.created_by != user_id {
         return Err(WebError::not_found("Cache"));
@@ -42,7 +42,7 @@ async fn load_cache_readable(
 ) -> WebResult<MCache> {
     let cache = get_any_cache_by_name(Arc::clone(state), cache_name)
         .await?
-        .ok_or_else(|| WebError::not_found("Cache"))?;
+        .or_not_found("Cache")?;
 
     let allowed = cache.public || matches!(maybe_user, Some(u) if u.id == cache.created_by);
     if !allowed {

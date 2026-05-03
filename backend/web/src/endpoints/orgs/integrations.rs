@@ -16,7 +16,7 @@
 //! "has_secret" / "has_access_token" flag.
 
 use super::{load_unmanaged_org, load_org_member};
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -145,7 +145,7 @@ async fn load_integration(
         .filter(CIntegration::Organization.eq(org_id))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Integration"))
+        .or_not_found("Integration")
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────

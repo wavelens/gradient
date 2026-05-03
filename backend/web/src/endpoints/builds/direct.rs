@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::OptionExt;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Multipart, State};
 use axum::{Extension, Json};
@@ -112,7 +113,7 @@ pub async fn post_direct_build(
     // Get organization
     let org = core::db::get_organization_by_name(Arc::clone(&state), user.id, organization.clone())
         .await?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
+        .or_not_found("Organization")?;
 
     // We'll create the DirectBuild record after the evaluation
 

@@ -6,6 +6,7 @@
 
 use crate::authorization::decode_jwt;
 use crate::error::{WebError, WebResult};
+use crate::helpers::OptionExt;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::Engine;
@@ -128,7 +129,7 @@ async fn get_nar_by_hash_inner(
             .one(&state.web_db)
             .await
             .map_err(WebError::from)?
-            .ok_or_else(|| WebError::not_found("Path"))?;
+            .or_not_found("Path")?;
 
         let organization_id = derivation.organization;
 
@@ -153,7 +154,7 @@ async fn get_nar_by_hash_inner(
             .one(&state.web_db)
             .await
             .map_err(WebError::from)?
-            .ok_or_else(|| WebError::not_found("CachedPath"))?;
+            .or_not_found("CachedPath")?;
 
         let cached_path_sig = ECachedPathSignature::find()
             .filter(
@@ -164,11 +165,11 @@ async fn get_nar_by_hash_inner(
             .one(&state.web_db)
             .await
             .map_err(WebError::from)?
-            .ok_or_else(|| WebError::not_found("Signature"))?;
+            .or_not_found("Signature")?;
 
         let signature = cached_path_sig
             .signature
-            .ok_or_else(|| WebError::not_found("Signature not yet computed"))?;
+            .or_not_found("Signature not yet computed")?;
 
         let path = get_path_from_derivation_output(build_output.clone());
 
@@ -178,10 +179,10 @@ async fn get_nar_by_hash_inner(
             .nar_hash
             .as_deref()
             .map(normalize_nar_hash)
-            .ok_or_else(|| WebError::not_found("NarHash not recorded"))?;
+            .or_not_found("NarHash not recorded")?;
         let nar_size = cached_path_row
             .nar_size
-            .ok_or_else(|| WebError::not_found("NarSize not recorded"))?
+            .or_not_found("NarSize not recorded")?
             as u64;
         let references: Vec<String> = cached_path_row
             .references
@@ -205,13 +206,13 @@ async fn get_nar_by_hash_inner(
             .file_hash
             .as_deref()
             .map(normalize_nar_hash)
-            .ok_or_else(|| WebError::not_found("FileHash not recorded"))?;
+            .or_not_found("FileHash not recorded")?;
         let file_hash_nix32 = file_hash
             .trim_start_matches("sha256:")
             .to_string();
         let file_size = cached_path_row
             .file_size
-            .ok_or_else(|| WebError::not_found("FileSize not recorded"))?
+            .or_not_found("FileSize not recorded")?
             as u32;
 
         Ok(NixPathInfo {
@@ -244,7 +245,7 @@ async fn get_nar_by_cached_path(
             .one(&state.web_db)
             .await
             .map_err(WebError::from)?
-            .ok_or_else(|| WebError::not_found("Path"))?;
+            .or_not_found("Path")?;
 
         if !cached_path_row.is_fully_cached() {
             return Err(WebError::not_found("Path"));
@@ -259,11 +260,11 @@ async fn get_nar_by_cached_path(
             .one(&state.web_db)
             .await
             .map_err(WebError::from)?
-            .ok_or_else(|| WebError::not_found("Signature"))?;
+            .or_not_found("Signature")?;
 
         let signature = cached_path_sig
             .signature
-            .ok_or_else(|| WebError::not_found("Signature not yet computed"))?;
+            .or_not_found("Signature not yet computed")?;
 
         let sig_url = core::sources::cache_key_host(&state.cli.serve_url);
         let sig = format!("{}-{}:{}", sig_url, cache.name, signature);
@@ -280,10 +281,10 @@ async fn get_nar_by_cached_path(
             .nar_hash
             .as_deref()
             .map(normalize_nar_hash)
-            .ok_or_else(|| WebError::not_found("NarHash not recorded"))?;
+            .or_not_found("NarHash not recorded")?;
         let nar_size = cached_path_row
             .nar_size
-            .ok_or_else(|| WebError::not_found("NarSize not recorded"))?
+            .or_not_found("NarSize not recorded")?
             as u64;
         let references = cached_path_row
             .references
@@ -385,7 +386,7 @@ impl CacheContext {
             .filter(CCache::Name.eq(cache_name))
             .one(&state.web_db)
             .await?
-            .ok_or_else(|| WebError::not_found("Cache"))?;
+            .or_not_found("Cache")?;
 
         if !cache.active {
             return Err(WebError::BadRequest("Cache is disabled".to_string()));

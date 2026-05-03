@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -30,7 +30,7 @@ async fn load_webhook_org(
 ) -> WebResult<MOrganization> {
     let organization = get_any_organization_by_name(Arc::clone(state), org_name)
         .await?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
+        .or_not_found("Organization")?;
 
     if !user_can_edit(state, user_id, organization.id).await? {
         return Err(WebError::Forbidden(
@@ -52,7 +52,7 @@ async fn load_webhook(
         .filter(CWebhook::Organization.eq(org_id))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Webhook"))
+        .or_not_found("Webhook")
 }
 
 #[derive(Serialize, Deserialize, Debug)]

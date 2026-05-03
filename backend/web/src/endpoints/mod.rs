@@ -19,6 +19,7 @@ pub mod user;
 pub mod webhooks;
 pub mod workers;
 
+use crate::helpers::OptionExt;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Json, State};
 use core::db::get_any_organization_by_name;
@@ -45,7 +46,7 @@ pub async fn get_org_readable(
 ) -> WebResult<MOrganization> {
     let org = get_any_organization_by_name(Arc::clone(state), org_name)
         .await?
-        .ok_or_else(|| WebError::not_found(label))?;
+        .or_not_found(label)?;
 
     if !org.public {
         let is_member = match maybe_user {

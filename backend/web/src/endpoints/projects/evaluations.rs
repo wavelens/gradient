@@ -8,7 +8,7 @@ use super::{
     EntryPointSummary, EvaluationSummary, ProjectDetailsResponse, load_project,
     load_readable_project, user_can_edit,
 };
-use crate::helpers::ok_json;
+use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::endpoints::{content_type_for_filename, user_is_org_member};
 use crate::error::{WebError, WebResult};
@@ -289,7 +289,7 @@ pub async fn get_project_entry_points(
     let evaluation = EEvaluation::find_by_id(eval_id)
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Evaluation"))?;
+        .or_not_found("Evaluation")?;
 
     if evaluation.project != Some(project.id) {
         return Err(WebError::not_found("Evaluation"));
@@ -568,14 +568,14 @@ pub async fn get_entry_point_download(
 ) -> Result<Response, WebError> {
     let organization = get_any_organization_by_name(state.0.clone(), organization)
         .await?
-        .ok_or_else(|| WebError::not_found("Organization"))?;
+        .or_not_found("Organization")?;
 
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
         .filter(CProject::Name.eq(&project))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Project"))?;
+        .or_not_found("Project")?;
 
     // Resolve caller identity from ?token= (API key / JWT) or existing session.
     let resolved_user: Option<MUser> = if let Some(token_str) = params.token {
@@ -607,7 +607,7 @@ pub async fn get_entry_point_download(
         .order_by_desc(CEvaluation::CreatedAt)
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Evaluation"))?;
+        .or_not_found("Evaluation")?;
 
     // Entry point whose `eval` attribute path matches the query param.
     // Axum URL-decodes the value automatically, so %22 → " before this comparison.
@@ -616,12 +616,12 @@ pub async fn get_entry_point_download(
         .filter(CEntryPoint::Eval.eq(&params.eval))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Entry point"))?;
+        .or_not_found("Entry point")?;
 
     let build = EBuild::find_by_id(ep.build)
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::not_found("Build"))?;
+        .or_not_found("Build")?;
 
     if build.status != BuildStatus::Completed && build.status != BuildStatus::Substituted {
         return Err(WebError::not_found("File"));

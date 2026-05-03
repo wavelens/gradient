@@ -22,6 +22,7 @@ pub use self::graph::{
 pub use self::log::{get_build_log, post_build_log};
 pub use self::query::{BuildWithOutputs, get_build};
 
+use crate::helpers::OptionExt;
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use core::types::*;
@@ -50,7 +51,7 @@ impl BuildAccessContext {
         let build = EBuild::find_by_id(build_id)
             .one(&state.web_db)
             .await?
-            .ok_or_else(|| WebError::not_found("Build"))?;
+            .or_not_found("Build")?;
 
         let evaluation = EEvaluation::find_by_id(build.evaluation)
             .one(&state.web_db)
