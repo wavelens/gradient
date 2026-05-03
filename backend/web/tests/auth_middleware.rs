@@ -1,0 +1,99 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+//! Wire-format regression tests for `authorization::authorize` middleware.
+//!
+//! Locks in the `BaseResponse<String>` envelope and HTTP status codes so the
+//! refactor that routes middleware errors through `WebError::IntoResponse`
+//! stays observably equivalent to the prior hand-built responses.
+
+use axum_test::TestServer;
+use core::storage::{EmailSender, NarStore};
+use core::types::{ServerState, WebDb, WorkerDb};
+use sea_orm::{DatabaseBackend, MockDatabase};
+use serde_json::Value;
+use std::sync::Arc;
+use test_support::cli::test_cli;
+use test_support::fakes::email::InMemoryEmailSender;
+use test_support::fakes::webhooks::RecordingWebhookClient;
+use test_support::log_storage::NoopLogStorage;
+use uuid::Uuid;
+use web::create_router;
+
+/// Build a `ServerState` whose `jwt_secret_file` points at a real on-disk
+/// file — required because `load_secret` calls `process::exit(1)` if the
+/// file is missing, which would tear down the test process before assertions
+/// run.
+fn server() -> TestServer {
+    let jwt_path = std::env::temp_dir().join(format!("gradient-test-jwt-{}", Uuid::new_v4()));
+    std::fs::write(&jwt_path, "test-jwt-secret").expect("write jwt secret file");
+
+    let mut cli = test_cli();
+    cli.jwt_secret_file = jwt_path.to_string_lossy().into_owned();
+
+    let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
+    let state = Arc::new(ServerState {
+        web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        cli,
+        log_storage: Arc::new(NoopLogStorage),
+        webhooks: Arc::new(RecordingWebhookClient::new())
+            as Arc<dyn core::ci::WebhookClient>,
+        email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
+        nar_storage,
+        manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+    });
+    TestServer::new(create_router(state))
+}
+
+fn assert_envelope(body: &Value, expected_message: &str) {
+    assert_eq!(body["error"], Value::Bool(true), "error flag must be true");
+    assert_eq!(
+        body["message"],
+        Value::String(expected_message.to_string()),
+        "message must match"
+    );
+}
+
+#[test]
+fn missing_auth_header_returns_403_envelope() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let s = server();
+        let res = s.get("/api/v1/user").await;
+        res.assert_status_forbidden();
+        assert_envelope(&res.json::<Value>(), "Authorization header not found");
+    });
+}
+
+#[test]
+fn malformed_bearer_returns_403_envelope() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let s = server();
+        let res = s
+            .get("/api/v1/user")
+            .add_header("authorization", "NotBearer xyz")
+            .await;
+        res.assert_status_forbidden();
+        assert_envelope(&res.json::<Value>(), "Invalid Authorization header");
+    });
+}
+
+#[test]
+fn undecodable_token_returns_401_envelope() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        let s = server();
+        let res = s
+            .get("/api/v1/user")
+            .add_header("authorization", "Bearer not-a-real-jwt")
+            .await;
+        res.assert_status_unauthorized();
+        assert_envelope(&res.json::<Value>(), "Unable to decode token");
+    });
+}
