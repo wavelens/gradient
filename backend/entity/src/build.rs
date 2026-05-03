@@ -46,6 +46,16 @@ impl BuildStatus {
             Self::Substituted => 7,
         }
     }
+
+    /// Maps internal-only states onto their API-facing equivalents.
+    /// `Created` is a transient pre-queue state the scheduler flips to
+    /// `Queued` almost immediately, so it is collapsed to `Queued` for clients.
+    pub const fn for_api(self) -> Self {
+        match self {
+            Self::Created => Self::Queued,
+            other => other,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
@@ -83,3 +93,28 @@ pub enum Relation {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn for_api_collapses_created_to_queued() {
+        assert_eq!(BuildStatus::Created.for_api(), BuildStatus::Queued);
+    }
+
+    #[test]
+    fn for_api_passes_through_other_states() {
+        for status in [
+            BuildStatus::Queued,
+            BuildStatus::Building,
+            BuildStatus::Completed,
+            BuildStatus::Failed,
+            BuildStatus::Aborted,
+            BuildStatus::DependencyFailed,
+            BuildStatus::Substituted,
+        ] {
+            assert_eq!(status.clone().for_api(), status);
+        }
+    }
+}
