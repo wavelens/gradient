@@ -4,15 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{ProjectResponse, load_editable_project, load_project, user_can_edit};
+use super::ProjectResponse;
+use crate::access::{Caller, OrgAccess, ProjectAccess, has_permission, load_org, load_project};
 use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
-use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
+use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 
-use gradient_core::db::{get_any_organization_by_name, get_organization_by_name};
+use gradient_core::db::get_any_organization_by_name;
 use gradient_core::nix::RepositoryUrl;
 use gradient_core::sources::check_project_updates;
 use gradient_core::types::consts::*;
@@ -79,13 +80,18 @@ pub async fn get(
     Path(organization): Path<String>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<ProjectResponse>>>>> {
-    let organization =
-        get_org_readable(&state.0, organization, &maybe_user, "Organization").await?;
+    let organization = load_org(
+        &state.0,
+        Caller::from_option(&maybe_user),
+        organization,
+        OrgAccess::Readable { label: "Organization" },
+    )
+    .await?;
 
     let page = params.page();
     let per_page = params.per_page();
     let can_edit = match &maybe_user {
-        Some(user) => user_can_edit(&state, user.id, organization.id).await?,
+        Some(user) => has_permission(&state, user.id, organization.id, Permission::EditProject).await?,
         None => false,
     };
 
@@ -165,10 +171,16 @@ pub async fn put(
         .parse::<RepositoryUrl>()
         .map_err(|e| WebError::BadRequest(e.to_string()))?;
 
-    let organization: MOrganization =
-        get_organization_by_name(state.0.clone(), user.id, organization.clone())
-            .await?
-            .or_not_found("Organization")?;
+    let organization = load_org(
+        &state.0,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::CreateProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
 
     let existing_project = EProject::find()
         .filter(
@@ -223,17 +235,17 @@ pub async fn get_project(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectResponse>>> {
-    let organization = get_org_readable(&state.0, organization, &maybe_user, "Project").await?;
-
-    let project: MProject = EProject::find()
-        .filter(CProject::Organization.eq(organization.id))
-        .filter(CProject::Name.eq(project))
-        .one(&state.web_db)
-        .await?
-        .or_not_found("Project")?;
+    let (organization, project) = load_project(
+        &state.0,
+        Caller::from_option(&maybe_user),
+        organization,
+        project,
+        ProjectAccess::Readable,
+    )
+    .await?;
 
     let can_edit = match &maybe_user {
-        Some(user) => user_can_edit(&state, user.id, organization.id).await?,
+        Some(user) => has_permission(&state, user.id, organization.id, Permission::EditProject).await?,
         None => false,
     };
 
@@ -273,7 +285,7 @@ pub async fn patch_project(
     Json(body): Json<PatchProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (organization, project) =
-        load_editable_project(&state, user.id, organization, project).await?;
+        load_project(&state, Caller::User(&user), organization, project, ProjectAccess::Require { permission: Permission::EditProject, reject_managed: true }).await?;
     let mut aproject: AProject = project.into();
     let mut patcher = ProjectPatcher::new(&state, &mut aproject);
 
@@ -384,7 +396,7 @@ pub async fn delete_project(
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (_organization, project) =
-        load_editable_project(&state, user.id, organization, project).await?;
+        load_project(&state, Caller::User(&user), organization, project, ProjectAccess::Require { permission: Permission::EditProject, reject_managed: true }).await?;
     let aproject: AProject = project.into();
     aproject.delete(&state.web_db).await?;
 
@@ -402,7 +414,7 @@ pub async fn post_project_active(
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (_organization, project) =
-        load_editable_project(&state, user.id, organization, project).await?;
+        load_project(&state, Caller::User(&user), organization, project, ProjectAccess::Require { permission: Permission::EditProject, reject_managed: true }).await?;
     let mut aproject: AProject = project.into();
     aproject.active = Set(true);
     aproject.update(&state.web_db).await?;
@@ -421,7 +433,7 @@ pub async fn delete_project_active(
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (_organization, project) =
-        load_editable_project(&state, user.id, organization, project).await?;
+        load_project(&state, Caller::User(&user), organization, project, ProjectAccess::Require { permission: Permission::EditProject, reject_managed: true }).await?;
     let mut aproject: AProject = project.into();
     aproject.active = Set(false);
     aproject.update(&state.web_db).await?;
@@ -440,7 +452,7 @@ pub async fn post_project_check_repository(
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let (_organization, project) =
-        load_editable_project(&state, user.id, organization, project).await?;
+        load_project(&state, Caller::User(&user), organization, project, ProjectAccess::Require { permission: Permission::EditProject, reject_managed: true }).await?;
 
     let (_has_updates, remote_hash) = check_project_updates(Arc::clone(&state), &project)
         .await
@@ -466,10 +478,18 @@ pub async fn post_project_transfer(
     Path((organization, project)): Path<(String, String)>,
     Json(body): Json<TransferOwnershipRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (organization, project) = load_project(&state, user.id, organization, project).await?;
+    let (organization, project) = load_project(
+        &state,
+        Caller::User(&user),
+        organization,
+        project,
+        ProjectAccess::Member,
+    )
+    .await?;
 
-    // Only admins of the org or the current owner may transfer ownership
-    let is_admin = user_can_edit(&state, user.id, organization.id).await?;
+    // Only an org member with EditProject permission, or the current owner,
+    // may transfer ownership.
+    let is_admin = has_permission(&state, user.id, organization.id, Permission::EditProject).await?;
     let is_owner = project.created_by == user.id;
     if !is_admin && !is_owner {
         return Err(WebError::Forbidden(
@@ -483,10 +503,16 @@ pub async fn post_project_transfer(
         ));
     }
 
-    let new_organization =
-        get_organization_by_name(state.0.clone(), user.id, body.organization.clone())
-            .await?
-            .or_not_found("Organization")?;
+    let new_organization = load_org(
+        &state.0,
+        Caller::User(&user),
+        body.organization.clone(),
+        OrgAccess::Require {
+            permission: Permission::CreateProject,
+            reject_managed: true,
+        },
+    )
+    .await?;
 
     if new_organization.id == organization.id {
         return Err(WebError::BadRequest(

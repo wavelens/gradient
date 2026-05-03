@@ -4,9 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{load_unmanaged_org, load_org_member};
+use crate::access::{Caller, OrgAccess, load_org};
 use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
+use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::sources::{format_public_key, generate_ssh_key};
@@ -20,7 +21,13 @@ pub async fn get_organization_ssh(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization = load_org_member(&state, user.id, organization).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Member { reject_managed: false },
+    )
+    .await?;
 
     Ok(ok_json(format_public_key(organization, &state.config.server.serve_url)))
 }
@@ -30,7 +37,16 @@ pub async fn post_organization_ssh(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization = load_unmanaged_org(&state, user.id, organization).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageSshKey,
+            reject_managed: true,
+        },
+    )
+    .await?;
 
     let (private_key, public_key) =
         generate_ssh_key(&state.config.secrets.crypt_secret_file).map_err(|e| {

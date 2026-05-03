@@ -4,13 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{load_unmanaged_org, load_org_member};
+use crate::access::{Caller, OrgAccess, load_org};
 use crate::helpers::{OptionExt, ok_json};
 use crate::error::{WebError, WebResult};
+use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::db::get_any_cache_by_name;
-use gradient_core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_WRITE_ID};
 use gradient_core::types::*;
 use entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::ActiveValue::Set;
@@ -32,36 +32,6 @@ pub struct CacheSubscriptionItem {
 }
 
 // ── Access helpers ────────────────────────────────────────────────────────────
-
-/// Verify that `user_id` has Write or Admin role in `org_id`.
-async fn require_write_permission(
-    state: &Arc<ServerState>,
-    org_id: Uuid,
-    user_id: Uuid,
-) -> WebResult<()> {
-    let org_user = EOrganizationUser::find()
-        .filter(
-            Condition::all()
-                .add(COrganizationUser::Organization.eq(org_id))
-                .add(COrganizationUser::User.eq(user_id)),
-        )
-        .one(&state.web_db)
-        .await?;
-
-    let has_write = matches!(
-        org_user,
-        Some(ref ou) if ou.role == BASE_ROLE_ADMIN_ID || ou.role == BASE_ROLE_WRITE_ID
-    );
-
-    if !has_write {
-        return Err(WebError::Forbidden(
-            "You need Write or Admin permissions in this organization to manage cache subscriptions"
-                .to_string(),
-        ));
-    }
-
-    Ok(())
-}
 
 /// Load a public or owned cache by name; verify the requesting user may subscribe to it.
 async fn load_subscribable_cache(
@@ -89,7 +59,16 @@ pub async fn post_organization_public(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let org = load_unmanaged_org(&state, user.id, organization).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageOrgSettings,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let mut active: AOrganization = org.into();
     active.public = Set(true);
     active.update(&state.web_db).await?;
@@ -102,7 +81,16 @@ pub async fn delete_organization_public(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let org = load_unmanaged_org(&state, user.id, organization).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageOrgSettings,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let mut active: AOrganization = org.into();
     active.public = Set(false);
     active.update(&state.web_db).await?;
@@ -115,7 +103,13 @@ pub async fn get_organization_subscribe(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<CacheSubscriptionItem>>>> {
-    let org = load_org_member(&state, user.id, organization).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Member { reject_managed: false },
+    )
+    .await?;
 
     let org_caches = EOrganizationCache::find()
         .filter(COrganizationCache::Organization.eq(org.id))
@@ -142,8 +136,16 @@ pub async fn post_organization_subscribe_cache(
     Path((organization, cache)): Path<(String, String)>,
     body: Option<Json<SubscribeCacheRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let org = load_org_member(&state, user.id, organization).await?;
-    require_write_permission(&state, org.id, user.id).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageSubscriptions,
+            reject_managed: false,
+        },
+    )
+    .await?;
 
     let cache = load_subscribable_cache(&state, cache, user.id).await?;
 
@@ -250,8 +252,16 @@ pub async fn delete_organization_subscribe_cache(
     Extension(user): Extension<MUser>,
     Path((organization, cache)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let org = load_org_member(&state, user.id, organization).await?;
-    require_write_permission(&state, org.id, user.id).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageSubscriptions,
+            reject_managed: false,
+        },
+    )
+    .await?;
 
     let cache = load_subscribable_cache(&state, cache, user.id).await?;
 

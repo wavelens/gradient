@@ -28,7 +28,7 @@ use std::sync::Arc;
 
 use crate::helpers::OptionExt;
 use crate::authorization::MaybeUser;
-use crate::endpoints::user_is_org_member;
+use crate::access::is_org_member;
 use crate::error::WebError;
 use gradient_core::db::get_any_organization_by_name;
 use gradient_core::types::*;
@@ -257,7 +257,7 @@ async fn check_badge_org_access(
     }
     match resolved_user {
         Some(user) => {
-            if !user_is_org_member(state, user.id, org.id).await? {
+            if !is_org_member(state, user.id, org.id).await? {
                 return Err(WebError::not_found("Organization"));
             }
         }

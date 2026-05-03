@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::load_org_member;
+use crate::access::{Caller, OrgAccess, load_org};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use base64::Engine as _;
@@ -113,7 +113,7 @@ pub async fn post_org_worker(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<RegisterWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<RegisterWorkerResponse>>> {
-    let org = load_org_member(&state, user.id, organization).await?;
+    let org = load_org(&state, Caller::User(&user), organization, OrgAccess::Member { reject_managed: false }).await?;
 
     let worker_uuid = Uuid::parse_str(&body.worker_id)
         .ok()
@@ -177,7 +177,7 @@ pub async fn get_org_workers(
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<Vec<OrgWorkerEntry>>>> {
-    let org = load_org_member(&state, user.id, organization).await?;
+    let org = load_org(&state, Caller::User(&user), organization, OrgAccess::Member { reject_managed: false }).await?;
 
     let registrations = EWorkerRegistration::find()
         .filter(worker_registration::Column::PeerId.eq(org.id))
@@ -240,7 +240,7 @@ pub async fn patch_org_worker(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<PatchWorkerRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let org = load_org_member(&state, user.id, organization).await?;
+    let org = load_org(&state, Caller::User(&user), organization, OrgAccess::Member { reject_managed: false }).await?;
 
     let reg = EWorkerRegistration::find()
         .filter(worker_registration::Column::PeerId.eq(org.id))
@@ -296,7 +296,7 @@ pub async fn delete_org_worker(
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let org = load_org_member(&state, user.id, organization).await?;
+    let org = load_org(&state, Caller::User(&user), organization, OrgAccess::Member { reject_managed: false }).await?;
 
     let result = EWorkerRegistration::delete_many()
         .filter(worker_registration::Column::PeerId.eq(org.id))

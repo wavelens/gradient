@@ -256,8 +256,8 @@ pub async fn get_build_download(
     } else if !ctx.organization.public {
         match maybe_user {
             Some(user) => {
-                use crate::endpoints::user_is_org_member;
-                if !user_is_org_member(&state, user.id, ctx.organization.id).await? {
+                use crate::access::is_org_member;
+                if !is_org_member(&state, user.id, ctx.organization.id).await? {
                     return Err(WebError::not_found("Build"));
                 }
             }

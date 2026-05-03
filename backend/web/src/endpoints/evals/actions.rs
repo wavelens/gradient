@@ -5,7 +5,7 @@
  */
 
 use crate::helpers::ok_json;
-use crate::endpoints::user_is_org_member;
+use crate::access::is_org_member;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -26,7 +26,7 @@ pub async fn post_evaluation(
     let ctx = EvalAccessContext::load(&state, evaluation_id, &Some(user.clone())).await?;
 
     // Mutations require explicit org membership even when the org is public.
-    if !user_is_org_member(&state, user.id, ctx.organization_id).await? {
+    if !is_org_member(&state, user.id, ctx.organization_id).await? {
         return Err(WebError::not_found("Evaluation"));
     }
 

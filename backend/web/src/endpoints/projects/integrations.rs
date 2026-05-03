@@ -6,10 +6,11 @@
 
 //! Link a project to named org-level integrations (inbound + outbound).
 
-use super::{load_editable_project, load_project};
+use crate::access::{Caller, ProjectAccess, load_project};
 use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
+use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ci::IntegrationKind;
@@ -78,7 +79,14 @@ pub async fn get_project_integration(
 ) -> WebResult<Json<BaseResponse<ProjectIntegrationResponse>>> {
     let user =
         maybe_user.ok_or_else(|| WebError::unauthorized("Authentication required."))?;
-    let (_org, proj) = load_project(&state, user.id, organization, project).await?;
+    let (_org, proj) = load_project(
+        &state,
+        Caller::User(&user),
+        organization,
+        project,
+        ProjectAccess::Member,
+    )
+    .await?;
 
     let link = EProjectIntegration::find_by_id(proj.id)
         .one(&state.web_db)
@@ -103,7 +111,7 @@ pub async fn put_project_integration(
     Path((organization, project)): Path<(String, String)>,
     Json(body): Json<PutProjectIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<ProjectIntegrationResponse>>> {
-    let (org, proj) = load_editable_project(&state, user.id, organization, project).await?;
+    let (org, proj) = load_project(&state, Caller::User(&user), organization, project, ProjectAccess::Require { permission: Permission::EditProject, reject_managed: true }).await?;
 
     if let Some(id) = body.inbound_integration {
         validate_integration(&state, org.id, id, IntegrationKind::Inbound).await?;
@@ -143,7 +151,7 @@ pub async fn delete_project_integration(
     Extension(user): Extension<MUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
-    let (_org, proj) = load_editable_project(&state, user.id, organization, project).await?;
+    let (_org, proj) = load_project(&state, Caller::User(&user), organization, project, ProjectAccess::Require { permission: Permission::EditProject, reject_managed: true }).await?;
 
     if let Some(row) = EProjectIntegration::find_by_id(proj.id)
         .one(&state.web_db)

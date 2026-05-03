@@ -23,7 +23,7 @@ pub use self::log::{get_build_log, post_build_log};
 pub use self::query::{BuildWithOutputs, get_build};
 
 use crate::helpers::OptionExt;
-use crate::endpoints::user_is_org_member;
+use crate::access::is_org_member;
 use crate::error::{WebError, WebResult};
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -119,7 +119,7 @@ impl BuildAccessContext {
             true
         } else {
             match maybe_user {
-                Some(user) => user_is_org_member(state, user.id, ctx.organization.id).await?,
+                Some(user) => is_org_member(state, user.id, ctx.organization.id).await?,
                 None => false,
             }
         };

@@ -4,14 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::{
-    EntryPointSummary, EvaluationSummary, ProjectDetailsResponse, load_project,
-    load_readable_project, user_can_edit,
-};
+use super::{EntryPointSummary, EvaluationSummary, ProjectDetailsResponse};
+use crate::access::{Caller, ProjectAccess, has_permission, is_org_member, load_project};
 use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
-use crate::endpoints::{content_type_for_filename, user_is_org_member};
+use crate::endpoints::content_type_for_filename;
 use crate::error::{WebError, WebResult};
+use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -148,7 +147,17 @@ pub async fn post_project_evaluate(
     Path((organization, project)): Path<(String, String)>,
     body: Option<Json<EvaluateRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, project) = load_project(&state, user.id, organization, project).await?;
+    let (_organization, project) = load_project(
+        &state,
+        Caller::User(&user),
+        organization,
+        project,
+        ProjectAccess::Require {
+            permission: Permission::TriggerEvaluation,
+            reject_managed: false,
+        },
+    )
+    .await?;
 
     let mode = body.as_ref().and_then(|b| b.mode.as_deref());
 
@@ -205,7 +214,7 @@ pub async fn get_project_evaluations(
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationSummary>>>> {
     let (_organization, project) =
-        load_readable_project(&state, &maybe_user, organization, project).await?;
+        load_project(&state, Caller::from_option(&maybe_user), organization, project, ProjectAccess::Readable).await?;
 
     let evaluations = EEvaluation::find()
         .filter(CEvaluation::Project.eq(project.id))
@@ -225,7 +234,7 @@ pub async fn get_project_details(
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectDetailsResponse>>> {
     let (organization, project) =
-        load_readable_project(&state, &maybe_user, organization, project).await?;
+        load_project(&state, Caller::from_option(&maybe_user), organization, project, ProjectAccess::Readable).await?;
 
     // Get last 5 evaluations for this project
     let evaluations = EEvaluation::find()
@@ -238,7 +247,7 @@ pub async fn get_project_details(
     let evaluation_summaries = evaluations_to_summaries(&state.0, evaluations).await?;
 
     let can_edit = match &maybe_user {
-        Some(user) => user_can_edit(&state, user.id, organization.id).await?,
+        Some(user) => has_permission(&state, user.id, organization.id, Permission::EditProject).await?,
         None => false,
     };
 
@@ -276,7 +285,7 @@ pub async fn get_project_entry_points(
     Query(params): Query<EntryPointsQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<EntryPointSummary>>>> {
     let (_organization, project) =
-        load_readable_project(&state, &maybe_user, organization, project).await?;
+        load_project(&state, Caller::from_option(&maybe_user), organization, project, ProjectAccess::Readable).await?;
 
     // Use the requested evaluation ID, or fall back to the project's last evaluation.
     let eval_id = match params.evaluation_id.or(project.last_evaluation) {
@@ -592,7 +601,7 @@ pub async fn get_entry_point_download(
     if !organization.public {
         match resolved_user {
             Some(ref user) => {
-                if !user_is_org_member(&state, user.id, organization.id).await? {
+                if !is_org_member(&state, user.id, organization.id).await? {
                     return Err(WebError::not_found("Project"));
                 }
             }
