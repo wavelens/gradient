@@ -8,7 +8,6 @@ import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { SelectModule } from 'primeng/select';
@@ -22,6 +21,14 @@ import {
   Organization,
 } from '@core/models';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
+import {
+  CopyFieldComponent,
+  FormDialogComponent,
+  FormFieldComponent,
+  MessageBannerComponent,
+} from '@shared/components/form';
 
 interface Option<T> {
   label: string;
@@ -35,11 +42,17 @@ interface Option<T> {
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
     ButtonModule,
     InputTextModule,
     SelectModule,
     LoadingSpinnerComponent,
+    EmptyStateComponent,
+    PageLayoutComponent,
+    SettingsSectionComponent,
+    CopyFieldComponent,
+    FormDialogComponent,
+    FormFieldComponent,
+    MessageBannerComponent,
   ],
   templateUrl: './integrations.component.html',
   styleUrl: './integrations.component.scss',
@@ -64,7 +77,6 @@ export class IntegrationsComponent implements OnInit {
   errorMessage = signal<string | null>(null);
 
   selectedForgeByIntegration = signal<Record<string, InboundForge>>({});
-  copiedUrlId = signal<string | null>(null);
 
   kindOptions: Option<IntegrationKind>[] = [
     { label: 'Inbound (webhook)', value: 'inbound' },
@@ -327,16 +339,6 @@ export class IntegrationsComponent implements OnInit {
   inboundUrl(integration: Integration): string {
     const forge = this.inboundForge(integration.id);
     return `${window.location.origin}/api/v1/hooks/${forge}/${this.orgName}/${integration.name}`;
-  }
-
-  copyInboundUrl(integration: Integration): void {
-    const url = this.inboundUrl(integration);
-    navigator.clipboard.writeText(url).then(() => {
-      this.copiedUrlId.set(integration.id);
-      setTimeout(() => {
-        if (this.copiedUrlId() === integration.id) this.copiedUrlId.set(null);
-      }, 2000);
-    });
   }
 
   forgeLabel(forge: ForgeType): string {

@@ -4,59 +4,43 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  @if (loading()) {
-    <app-loading-spinner message="Loading cache..." />
-  } @else if (cache(); as c) {
-    <!-- Cache Header -->
-    <div class="page-header">
-      <div>
-        <div class="breadcrumb">
-          <a routerLink="/caches" class="breadcrumb-link">Caches</a>
-          <span class="breadcrumb-separator">/</span>
-          <span class="breadcrumb-current">{{ c.display_name }}</span>
-        </div>
-        <h1>{{ c.display_name }}</h1>
-        <p class="text-secondary">{{ c.description || 'No description' }}</p>
-        <div class="cache-status">
-          <span class="status-badge" [class.active]="c.active" [class.inactive]="!c.active">
-            <span class="material-symbols-outlined">
-              {{ c.active ? 'check_circle' : 'cancel' }}
-            </span>
-            {{ c.active ? 'Active' : 'Inactive' }}
-          </span>
-          <span class="priority-badge">
-            <span class="material-symbols-outlined">sort</span>
-            Priority: {{ c.priority }}
-          </span>
-        </div>
-      </div>
-      @if (c.can_edit) {
-        <div class="header-actions">
-          <button pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></button>
-        </div>
-      }
+@if (loading()) {
+  <app-loading-spinner message="Loading cache..." />
+} @else if (cache(); as c) {
+  <nav class="breadcrumb">
+    <a routerLink="/caches" class="breadcrumb-link">Caches</a>
+    <span class="text-secondary"> / </span>
+    <span>{{ c.display_name }}</span>
+  </nav>
+
+  <gr-page-layout [title]="c.display_name" [subtitle]="c.description || 'No description'">
+    @if (c.can_edit) {
+      <button
+        slot="actions"
+        pButton
+        label="Settings"
+        icon="pi pi-cog"
+        severity="secondary"
+        [routerLink]="['/caches', cacheName, 'settings']"
+      ></button>
+    }
+
+    <div class="cache-status-row">
+      <span class="status-chip" [class.status-ok]="c.active" [class.status-warn]="!c.active">
+        <span class="material-symbols-outlined">{{ c.active ? 'check_circle' : 'cancel' }}</span>
+        {{ c.active ? 'Active' : 'Inactive' }}
+      </span>
+      <span class="badge badge-inbound">Priority {{ c.priority }}</span>
     </div>
 
-    <!-- Stats -->
-    <div class="section">
-      <h2>Storage</h2>
+    <gr-settings-section title="Storage" [card]="false">
       @if (statsLoading()) {
         <app-loading-spinner message="Loading stats..." />
       } @else {
-        <div class="stat-cards">
-          <div class="stat-card">
-            <span class="stat-label">Packages stored</span>
-            <span class="stat-value">{{ stats()?.total_packages ?? 0 }}</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">Uncompressed size</span>
-            <span class="stat-value">{{ formatBytes(stats()?.total_nar_bytes ?? 0) }}</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">Compressed stored</span>
-            <span class="stat-value">{{ formatBytes(stats()?.total_bytes ?? 0) }}</span>
-          </div>
+        <div class="gr-grid-stats">
+          <app-stat-card icon="inventory_2" [value]="stats()?.total_packages ?? 0" label="Packages stored" />
+          <app-stat-card icon="database" [value]="formatBytes(stats()?.total_nar_bytes ?? 0)" label="Uncompressed size" />
+          <app-stat-card icon="compress" [value]="formatBytes(stats()?.total_bytes ?? 0)" label="Compressed stored" />
         </div>
 
         <div class="chart-card">
@@ -83,23 +67,15 @@
           />
         </div>
       }
-    </div>
+    </gr-settings-section>
 
-    <!-- Traffic -->
-    <div class="section">
-      <h2>Traffic</h2>
+    <gr-settings-section title="Traffic" [card]="false">
       @if (statsLoading()) {
         <app-loading-spinner message="Loading stats..." />
       } @else {
-        <div class="stat-cards">
-          <div class="stat-card">
-            <span class="stat-label">Requests (last hour)</span>
-            <span class="stat-value">{{ $any(stats()?.hours | slice:-1)[0]?.requests ?? 0 }}</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">Traffic (last hour)</span>
-            <span class="stat-value">{{ formatBytes($any(stats()?.hours | slice:-1)[0]?.bytes ?? 0) }}</span>
-          </div>
+        <div class="gr-grid-stats">
+          <app-stat-card icon="bolt" [value]="$any(stats()?.hours | slice:-1)[0]?.requests ?? 0" label="Requests (last hour)" />
+          <app-stat-card icon="download" [value]="formatBytes($any(stats()?.hours | slice:-1)[0]?.bytes ?? 0)" label="Traffic (last hour)" />
         </div>
 
         <div class="chart-card">
@@ -126,71 +102,46 @@
           />
         </div>
       }
-    </div>
+    </gr-settings-section>
 
-    <!-- Usage Information -->
-    <div class="section">
-      <h2>How to Use This Cache</h2>
-      <div class="info-card">
-        <p>Add the following to your <code>/etc/nix/nix.conf</code> or NixOS configuration:</p>
+    <gr-settings-section
+      title="How to Use This Cache"
+      description="Add the following to your /etc/nix/nix.conf or NixOS configuration."
+    >
+      <gr-form-field label="Substituter URL" for="cache-url">
+        <gr-copy-field id="cache-url" [value]="cacheUrl" />
+      </gr-form-field>
 
-        <div class="usage-row">
-          <span class="usage-label">Substituter URL</span>
-          <div class="code-block">
-            <code>{{ cacheUrl }}</code>
-            <button class="copy-btn" (click)="copy(cacheUrl, 'url')" [title]="copied() === 'url' ? 'Copied!' : 'Copy'">
-              <span class="material-symbols-outlined">{{ copied() === 'url' ? 'check' : 'content_copy' }}</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="usage-row">
-          <span class="usage-label">Trusted Public Keys</span>
-          <div class="code-block">
-            @if (allPublicKeys().length > 0) {
-              <code>{{ allPublicKeys().join(' ') }}</code>
-              <button class="copy-btn" (click)="copy(allPublicKeys().join(' '), 'key')" [title]="copied() === 'key' ? 'Copied!' : 'Copy'">
-                <span class="material-symbols-outlined">{{ copied() === 'key' ? 'check' : 'content_copy' }}</span>
-              </button>
-            } @else {
-              <code class="text-secondary">Not available</code>
-            }
-          </div>
-        </div>
-
-        <div class="usage-row">
-          <span class="usage-label">nix.conf snippet</span>
-          <div class="code-block multiline">
-            @if (allPublicKeys().length > 0) {
-              <pre>substituters = {{ cacheUrl }}
-trusted-public-keys = {{ allPublicKeys().join(' ') }}</pre>
-              <button class="copy-btn" (click)="copy('substituters = ' + cacheUrl + '\ntrusted-public-keys = ' + allPublicKeys().join(' '), 'conf')" [title]="copied() === 'conf' ? 'Copied!' : 'Copy'">
-                <span class="material-symbols-outlined">{{ copied() === 'conf' ? 'check' : 'content_copy' }}</span>
-              </button>
-            } @else {
-              <pre class="text-secondary">substituters = {{ cacheUrl }}
-trusted-public-keys = &lt;unavailable&gt;</pre>
-            }
-          </div>
-        </div>
-
-        @if (!c.public) {
-          <div class="usage-divider"></div>
-          <h3 class="usage-section-title">Authentication</h3>
-          <p class="text-secondary">This cache is private. Run the following command as root to install the credentials Nix needs to access it:</p>
-          <div class="usage-row">
-            <span class="usage-label">Install netrc</span>
-            <div class="code-block multiline">
-              <pre>{{ installNetrcCommand }}</pre>
-              <button class="copy-btn" (click)="copy(installNetrcCommand, 'netrc')" [title]="copied() === 'netrc' ? 'Copied!' : 'Copy'">
-                <span class="material-symbols-outlined">{{ copied() === 'netrc' ? 'check' : 'content_copy' }}</span>
-              </button>
-            </div>
-          </div>
-          <p class="text-secondary usage-hint">Replace <code>&lt;YOUR_TOKEN&gt;</code> with your API key or login token. The command writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon can authenticate against this cache.</p>
+      <gr-form-field label="Trusted Public Keys" for="cache-keys">
+        @if (allPublicKeys().length > 0) {
+          <gr-copy-field id="cache-keys" [value]="allPublicKeys().join(' ')" />
+        } @else {
+          <input pInputText id="cache-keys" class="w-full" value="Not available" disabled />
         }
-      </div>
-    </div>
+      </gr-form-field>
 
-  }
-</div>
+      <gr-form-field label="nix.conf snippet" for="cache-conf">
+        @if (allPublicKeys().length > 0) {
+          <gr-copy-field id="cache-conf" [value]="nixConfSnippet" />
+        } @else {
+          <textarea pTextarea id="cache-conf" class="w-full" rows="2" disabled>substituters = {{ cacheUrl }}
+trusted-public-keys = &lt;unavailable&gt;</textarea>
+        }
+      </gr-form-field>
+
+      @if (!c.public) {
+        <h3 class="usage-section-title">Authentication</h3>
+        <p class="text-secondary">
+          This cache is private. Run the following command as root to install the credentials Nix needs to access it:
+        </p>
+        <gr-form-field
+          label="Install netrc"
+          for="cache-netrc"
+          hint="Replace <YOUR_TOKEN> with your API key or login token. The command writes credentials to /etc/nix/netrc."
+        >
+          <gr-copy-field id="cache-netrc" [value]="installNetrcCommand" />
+        </gr-form-field>
+      }
+    </gr-settings-section>
+  </gr-page-layout>
+}

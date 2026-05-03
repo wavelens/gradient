@@ -4,46 +4,35 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/organization', orgName, 'project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">Entry Point Metrics</span>
-      </div>
-      <h1>{{ evalAttr() }}</h1>
-      <p class="text-secondary">Build history over the last {{ keepEvaluations() }} completed evaluations.</p>
-    </div>
-  </div>
+<nav class="breadcrumb">
+  <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
+  <span class="text-secondary"> / </span>
+  <a [routerLink]="['/organization', orgName, 'project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
+  <span class="text-secondary"> / </span>
+  <span>Entry Point Metrics</span>
+</nav>
 
+<gr-page-layout
+  [title]="evalAttr()"
+  [subtitle]="'Build history over the last ' + keepEvaluations() + ' completed evaluations.'"
+>
   @if (loading()) {
     <app-loading-spinner message="Loading metrics..." />
   } @else if (points().length === 0) {
-    <div class="empty-state">
-      <span class="material-symbols-outlined">monitoring</span>
-      <p>No completed evaluations found for this entry point.</p>
-    </div>
+    <app-empty-state
+      icon="monitoring"
+      title="No completed evaluations"
+      message="No completed evaluations found for this entry point."
+    />
   } @else {
-    <div class="summary-row">
-      <div class="summary-card">
-        <span class="summary-value success">{{ completedCount() }}</span>
-        <span class="summary-label">Completed</span>
-      </div>
-      <div class="summary-card">
-        <span class="summary-value error">{{ failedCount() }}</span>
-        <span class="summary-label">Failed</span>
-      </div>
-      <div class="summary-card">
-        <span class="summary-value">{{ points().length }}</span>
-        <span class="summary-label">Total evaluations</span>
-      </div>
+    <div class="gr-grid-stats">
+      <app-stat-card icon="check_circle" [value]="completedCount()" label="Completed" />
+      <app-stat-card icon="error" [value]="failedCount()" label="Failed" />
+      <app-stat-card icon="event_repeat" [value]="points().length" label="Total evaluations" />
     </div>
 
-    <div class="charts-grid">
-      <div class="chart-card chart-card--full">
+    <div class="gr-grid-cards charts-grid">
+      <div class="chart-tile chart-tile--full">
         <div class="chart-header">
           <span class="chart-title">Build Time</span>
           <span class="chart-sub">Time to build this package per evaluation</span>
@@ -64,7 +53,7 @@
         />
       </div>
 
-      <div class="chart-card chart-card--full">
+      <div class="chart-tile chart-tile--full">
         <div class="chart-header">
           <span class="chart-title">Output Size</span>
           <span class="chart-sub">Size of this package's build output per evaluation</span>
@@ -85,7 +74,7 @@
         />
       </div>
 
-      <div class="chart-card chart-card--full">
+      <div class="chart-tile chart-tile--full">
         <div class="chart-header">
           <span class="chart-title">Closure Size</span>
           <span class="chart-sub">Size including all transitive dependencies</span>
@@ -106,7 +95,7 @@
         />
       </div>
 
-      <div class="chart-card chart-card--full">
+      <div class="chart-tile chart-tile--full">
         <div class="chart-header">
           <span class="chart-title">Dependencies Count</span>
           <span class="chart-sub">Number of transitive dependency builds</span>
@@ -128,4 +117,4 @@
       </div>
     </div>
   }
-</div>
+</gr-page-layout>

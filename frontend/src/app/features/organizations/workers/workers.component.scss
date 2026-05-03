@@ -6,101 +6,17 @@
 
 @use '../../../styles/variables' as *;
 
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: $spacing-xxl;
-
-  h1 { font-size: $font-size-xxl; margin: 0 0 $spacing-sm 0; }
-}
-
-.breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: $spacing-xs;
-  margin-bottom: $spacing-sm;
+.worker-id-line {
   font-size: $font-size-sm;
-  color: $text-secondary;
-
-  .breadcrumb-link { color: $text-secondary; &:hover { color: $text-primary; } }
-  .breadcrumb-separator { color: $text-light; }
-  .breadcrumb-current { color: $text-primary; }
+  margin: 0 0 $spacing-md 0;
+  font-family: $font-family-mono;
 }
 
-.peer-id-banner {
+.worker-caps {
   display: flex;
-  align-items: center;
-  gap: $spacing-md;
-  padding: $spacing-md $spacing-lg;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
-  border-radius: $border-radius-md;
-  margin-bottom: $spacing-xl;
-
-  .material-symbols-outlined { font-size: 24px; color: $text-secondary; flex-shrink: 0; }
-
-  & > div { flex: 1; }
-
-  .peer-id-label { font-size: $font-size-sm; font-weight: 600; margin-bottom: $spacing-xs; }
-  .peer-id-value { font-family: $font-family-mono; font-size: $font-size-sm; margin-bottom: $spacing-xs; }
-  .peer-id-hint { font-size: $font-size-xs; }
-}
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: $spacing-xxl;
-  text-align: center;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
-  border-radius: $border-radius-md;
-
-  .material-symbols-outlined { font-size: 48px; color: $text-secondary; margin-bottom: $spacing-md; }
-  h3 { margin: 0 0 $spacing-sm 0; }
-  p { margin: 0 0 $spacing-lg 0; }
-}
-
-.workers-list {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-sm;
-}
-
-.worker-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: $spacing-md $spacing-lg;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
-  border-radius: $border-radius-md;
-}
-
-.worker-info {
-  display: flex;
-  align-items: center;
-  gap: $spacing-md;
-
-  .material-symbols-outlined { font-size: 20px; color: $text-secondary; }
-  .worker-id { font-weight: 500; font-family: $font-family-mono; }
-  .worker-caps { display: flex; gap: $spacing-xs; flex-wrap: wrap; margin-top: $spacing-xs; }
-  .worker-archs { font-size: $font-size-sm; font-family: $font-family-mono; margin-top: $spacing-xs; }
-  .worker-features { color: $text-light; }
-  .worker-stats { font-size: $font-size-sm; margin-top: $spacing-xs; }
-}
-
-.worker-meta {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-}
-
-.worker-action-btn {
-  min-width: 110px;
-  justify-content: center;
+  gap: $spacing-xs;
+  flex-wrap: wrap;
+  margin-top: $spacing-xs;
 }
 
 .cap-badge {
@@ -113,208 +29,29 @@
   &.cap-off { background: rgba($text-secondary, 0.08); color: $text-light; opacity: 0.5; }
 }
 
-.badge {
-  padding: $spacing-xs $spacing-sm;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-xs;
-  font-weight: 500;
+.worker-features { color: $text-light; }
 
-  &.badge-connected { background: rgba($color-success, 0.15); color: $color-success; }
-  &.badge-offline { background: rgba($text-secondary, 0.15); color: $text-secondary; }
-  &.badge-managed { background: rgba($color-info, 0.15); color: $color-info; }
-  &.badge-draining { background: rgba($color-warning, 0.15); color: $color-warning; }
-  &.badge-inactive { background: rgba($color-danger, 0.12); color: $color-danger; }
-}
-
-.dialog-error {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  background: rgba($color-danger, 0.1);
-  border: 1px solid rgba($color-danger, 0.5);
-  border-radius: $border-radius-md;
-  padding: $spacing-md;
-  color: $color-danger;
-  margin-bottom: $spacing-md;
-
-  .material-symbols-outlined { font-size: 20px; }
-}
-
-.dialog-info {
-  display: flex;
-  align-items: flex-start;
-  gap: $spacing-sm;
-  background: rgba($color-info, 0.08);
-  border: 1px solid rgba($color-info, 0.3);
-  border-radius: $border-radius-md;
-  padding: $spacing-md;
-  margin-bottom: $spacing-md;
-
-  .material-symbols-outlined { font-size: 20px; color: $color-info; flex-shrink: 0; }
-
-  .dialog-info-label { font-size: $font-size-xs; font-weight: 600; color: $color-info; margin-bottom: $spacing-xs; }
-  .dialog-info-value { display: block; font-family: $font-family-mono; font-size: $font-size-sm; word-break: break-all; }
-  .dialog-info-hint { display: block; font-size: $font-size-xs; margin-top: $spacing-xs; }
-}
-
-.dialog-warning {
-  display: flex;
-  align-items: flex-start;
-  gap: $spacing-sm;
-  background: rgba($color-warning, 0.08);
-  border: 1px solid rgba($color-warning, 0.4);
-  border-radius: $border-radius-md;
-  padding: $spacing-md;
-  color: $text-primary;
-  margin-bottom: $spacing-md;
-
-  .material-symbols-outlined { font-size: 22px; color: $color-warning; flex-shrink: 0; margin-top: 2px; }
-  p { margin: 0; font-size: $font-size-sm; }
-}
-
-.token-warning {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  background: rgba($color-warning, 0.1);
-  border: 1px solid rgba($color-warning, 0.5);
-  border-radius: $border-radius-md;
-  padding: $spacing-md;
-  color: $color-warning;
-  margin-bottom: $spacing-lg;
-
-  .material-symbols-outlined { font-size: 20px; flex-shrink: 0; }
-}
-
-.form-group {
-  margin-bottom: $spacing-md;
-  label { display: block; margin-bottom: $spacing-sm; font-size: $font-size-sm; font-weight: 500; }
-}
-
-.copy-row {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  margin-bottom: $spacing-xs;
-}
-
-.copy-value {
-  display: block;
-  font-family: $font-family-mono;
-  font-size: $font-size-sm;
-  word-break: break-all;
-  background: $color-secondary;
-  border: 1px solid $color-border;
-  border-radius: $border-radius-sm;
-  padding: $spacing-xs $spacing-sm;
-  width: 100%;
-}
-
-.token-value {
-  font-size: $font-size-xs;
-  letter-spacing: 0.02em;
-}
-
-.copy-btn {
-  margin-top: $spacing-xs;
-}
-
-.peers-file-example {
-  font-family: $font-family-mono;
-  font-size: $font-size-xs;
-  background: $color-secondary;
-  border: 1px solid $color-border;
-  border-radius: $border-radius-sm;
-  padding: $spacing-sm $spacing-md;
-  margin: 0 0 $spacing-xs;
-  word-break: break-all;
-  white-space: pre-wrap;
-}
-
-.w-full { width: 100%; }
-
-.no-cache-banner {
-  display: flex;
-  gap: 0.75rem;
-  align-items: flex-start;
-  padding: 0.875rem 1rem;
-  margin: 0 0 1rem 0;
-  border: 1px solid var(--p-yellow-300, #fde68a);
-  background: var(--p-yellow-50, #fffbeb);
-  color: var(--p-yellow-900, #78350f);
-  border-radius: 0.5rem;
-
-  .material-symbols-outlined {
-    font-size: 1.5rem;
-    line-height: 1;
-  }
-
-  .no-cache-title {
-    font-weight: 600;
-    margin-bottom: 0.125rem;
-  }
-
-  .no-cache-body a {
-    margin-left: 0.25rem;
-    color: inherit;
-    text-decoration: underline;
-  }
-}
-
-.cap-toggles {
-  display: flex;
-  gap: $spacing-md;
-  flex-wrap: wrap;
-}
-
-.cap-toggle {
+.worker-gate-summary {
   display: inline-flex;
   align-items: center;
   gap: $spacing-xs;
-  font-size: $font-size-sm;
-  cursor: pointer;
-  user-select: none;
-
-  input { cursor: pointer; }
-}
-
-.worker-cap-gates {
-  display: flex;
-  gap: $spacing-xs;
-  flex-wrap: wrap;
+  font-size: $font-size-xs;
   margin-top: $spacing-xs;
 }
 
-.cap-gate {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px $spacing-sm;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-xs;
+.gate-pill {
+  padding: 1px $spacing-sm;
+  border-radius: 999px;
   font-weight: 500;
-  cursor: pointer;
-  user-select: none;
-  border: 1px solid $color-border;
-  background: $color-quaternary;
 
-  input { cursor: pointer; margin: 0; }
-
-  &.cap-gate-on {
-    border-color: rgba($color-success, 0.5);
-    color: $color-success;
-  }
-  &.cap-gate-off {
-    color: $text-secondary;
-    opacity: 0.7;
-  }
+  &.gate-on  { background: rgba($color-success, 0.15); color: $color-success; }
+  &.gate-off { background: rgba($color-danger, 0.1);   color: $color-danger; text-decoration: line-through; }
 }
 
 .cap-tag-group {
   display: flex;
   gap: $spacing-sm;
   flex-wrap: wrap;
-  margin-bottom: $spacing-xs;
 }
 
 .cap-tag {
@@ -347,29 +84,5 @@
     color: $text-secondary;
     text-decoration: line-through;
     text-decoration-color: rgba($color-danger, 0.5);
-  }
-}
-
-.worker-gate-summary {
-  display: inline-flex;
-  align-items: center;
-  gap: $spacing-xs;
-  font-size: $font-size-xs;
-  margin-top: $spacing-xs;
-}
-
-.gate-pill {
-  padding: 1px $spacing-sm;
-  border-radius: 999px;
-  font-weight: 500;
-
-  &.gate-on {
-    background: rgba($color-success, 0.15);
-    color: $color-success;
-  }
-  &.gate-off {
-    background: rgba($color-danger, 0.1);
-    color: $color-danger;
-    text-decoration: line-through;
   }
 }

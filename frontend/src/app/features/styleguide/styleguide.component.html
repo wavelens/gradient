@@ -479,20 +479,20 @@
         Used on the Manage Workers page. Larger card row, icon, primary +
         secondary text, a stack of status badges, and an action button.
       </p>
-      <div class="sg-list">
+      <div class="gr-list">
         @for (w of sampleWorkers; track w.id) {
-          <div class="sg-list-row">
-            <div class="sg-list-row__info">
+          <div class="gr-list-row">
+            <div class="gr-list-row__info">
               <span class="material-symbols-outlined">construction</span>
               <div>
-                <div class="sg-list-row__title">{{ w.name }}</div>
-                <div class="sg-list-row__id text-secondary">{{ w.id }}</div>
-                <div class="sg-list-row__meta text-secondary">
+                <div class="gr-list-row__title">{{ w.name }}</div>
+                <div class="gr-list-row__id text-secondary">{{ w.id }}</div>
+                <div class="gr-list-row__meta text-secondary">
                   {{ w.arch }} · caps: {{ w.caps.join(', ') }}
                 </div>
               </div>
             </div>
-            <div class="sg-list-row__actions">
+            <div class="gr-list-row__actions">
               @if (w.managed) {
                 <span class="badge">Managed</span>
               }
@@ -514,13 +514,13 @@
         Used on the Build Artefacts page. Tighter row, file-type badge, name
         (mono, truncates), size, and a download link button on the right.
       </p>
-      <div class="sg-compact-list">
+      <div class="gr-compact-list">
         @for (a of sampleArtefacts; track a.name) {
-          <div class="sg-compact-row">
-            <span class="sg-file-type">{{ a.type }}</span>
-            <span class="sg-compact-row__name">{{ a.name }}</span>
-            <span class="sg-compact-row__size text-secondary">{{ a.size }}</span>
-            <a class="sg-download-btn" href="javascript:void(0)" [title]="'Download ' + a.name">
+          <div class="gr-compact-row">
+            <span class="gr-file-type">{{ a.type }}</span>
+            <span class="gr-compact-row__name">{{ a.name }}</span>
+            <span class="gr-compact-row__size text-secondary">{{ a.size }}</span>
+            <a class="gr-download-btn" href="javascript:void(0)" [title]="'Download ' + a.name">
               <span class="material-symbols-outlined">download</span>
               <span>Download</span>
             </a>
@@ -632,7 +632,7 @@
         <code>p-divider</code> between them.
       </p>
       <div class="sg-card">
-        <div class="sg-nav-row">
+        <div class="gr-nav-row">
           <div>
             <h4>Workers</h4>
             <p class="text-secondary">Manage build workers for this organization</p>
@@ -640,7 +640,7 @@
           <button pButton label="Manage Workers" icon="pi pi-cog" severity="secondary"></button>
         </div>
         <p-divider />
-        <div class="sg-nav-row">
+        <div class="gr-nav-row">
           <div>
             <h4>Cache Subscriptions</h4>
             <p class="text-secondary">Nix binary caches this organization pushes builds to</p>
@@ -648,7 +648,7 @@
           <button pButton label="Manage Caches" icon="pi pi-database" severity="secondary"></button>
         </div>
         <p-divider />
-        <div class="sg-nav-row">
+        <div class="gr-nav-row">
           <div>
             <h4>Integrations</h4>
             <p class="text-secondary">Forge integrations for inbound webhooks and CI status</p>

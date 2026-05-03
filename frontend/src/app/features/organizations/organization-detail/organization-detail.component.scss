@@ -6,44 +6,6 @@
 
 @use '../../../styles/variables' as *;
 
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: $spacing-xxl;
-
-  h1 {
-    font-size: $font-size-xxl;
-    color: $text-primary;
-    margin: 0 0 $spacing-sm 0;
-  }
-
-  p {
-    margin: 0;
-    font-size: $font-size-md;
-  }
-
-  .header-actions {
-    display: flex;
-    gap: $spacing-md;
-    flex-shrink: 0;
-
-    button {
-      white-space: nowrap;
-    }
-  }
-}
-
-.section {
-  margin-bottom: $spacing-xxl;
-
-  h2 {
-    font-size: $font-size-xl;
-    color: $text-primary;
-    margin: 0 0 $spacing-lg 0;
-  }
-}
-
 .project-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
@@ -68,17 +30,7 @@
     transform: translateY(-2px);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
 
-    .project-arrow {
-      transform: translateX(4px);
-    }
-  }
-
-  &.inactive {
-    opacity: 0.6;
-
-    .project-icon {
-      background-color: rgba($color-border, 0.3);
-    }
+    .project-arrow { transform: translateX(4px); }
   }
 }
 
@@ -92,10 +44,7 @@
   justify-content: center;
   flex-shrink: 0;
 
-  .material-symbols-outlined {
-    font-size: 28px;
-    color: $text-primary;
-  }
+  .material-symbols-outlined { font-size: 28px; color: $text-primary; }
 }
 
 .project-content {
@@ -125,19 +74,6 @@
     gap: $spacing-md;
     font-size: $font-size-xs;
     color: $text-light;
-
-    .meta-item {
-      display: flex;
-      align-items: center;
-      gap: $spacing-xs;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-
-      .material-symbols-outlined {
-        font-size: 14px;
-      }
-    }
   }
 }
 
@@ -146,9 +82,7 @@
   color: $text-secondary;
   transition: $transition-base;
 
-  .material-symbols-outlined {
-    font-size: 20px;
-  }
+  .material-symbols-outlined { font-size: 20px; }
 }
 
 .eval-status-badge {
@@ -178,48 +112,13 @@
 }
 .pulsing { display: inline-block; animation: pulsing-kf 1.6s ease-in-out infinite; }
 
-.dialog-error {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  background: rgba($color-danger, 0.1);
-  border: 1px solid rgba($color-danger, 0.5);
-  border-radius: $border-radius-md;
-  padding: $spacing-md;
-  color: $color-danger;
-  margin-bottom: $spacing-md;
+.input-invalid { border-color: $color-danger !important; }
 
-  .material-symbols-outlined { font-size: 20px; }
-}
-
-.form-group {
-  margin-bottom: $spacing-lg;
-
-  label {
-    display: block;
-    margin-bottom: $spacing-sm;
-    color: $text-primary;
-    font-size: $font-size-sm;
-    font-weight: 500;
-  }
-
-  small {
-    display: block;
-    margin-top: $spacing-xs;
-    font-size: $font-size-xs;
-  }
-
-  &:last-child {
-    margin-bottom: 0;
-  }
-}
-
-.w-full { width: 100%; }
-
-.text-danger { color: $color-danger; }
-
-.input-invalid {
-  border-color: $color-danger !important;
+.wildcard-label {
+  display: block;
+  margin-bottom: $spacing-sm;
+  font-weight: 500;
+  font-size: $font-size-sm;
 }
 
 .name-input-wrapper {
@@ -240,6 +139,6 @@
   .material-symbols-outlined { font-size: 18px; }
   i { font-size: 14px; }
 
-  &.available { color: $color-success; }
-  &.taken { color: $color-danger; }
+  &--ok { color: $color-success; }
+  &--bad { color: $color-danger; }
 }

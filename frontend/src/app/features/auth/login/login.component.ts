@@ -8,15 +8,33 @@ import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
+import { ButtonModule } from 'primeng/button';
+import { CheckboxModule } from 'primeng/checkbox';
+import { InputTextModule } from 'primeng/inputtext';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
+import {
+  FormFieldComponent,
+  MessageBannerComponent,
+  PasswordInputComponent,
+} from '@shared/components/form';
 import { take } from 'rxjs';
 import { environment } from '@environments/environment';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterModule],
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    RouterModule,
+    ButtonModule,
+    CheckboxModule,
+    InputTextModule,
+    FormFieldComponent,
+    MessageBannerComponent,
+    PasswordInputComponent,
+  ],
   templateUrl: './login.component.html',
   styleUrl: './login.component.scss',
 })
@@ -29,7 +47,6 @@ export class LoginComponent {
   loginForm: FormGroup;
   errorMessage = signal<string | null>(null);
   loading = signal(false);
-  showPassword = signal(false);
   get oidcEnabled() { return this.config.oidcEnabled; }
   get oidcRequired() { return this.config.oidcRequired; }
   get registrationDisabled() { return this.config.registrationDisabled; }

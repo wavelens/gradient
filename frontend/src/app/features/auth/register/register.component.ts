@@ -15,8 +15,15 @@ import {
   ValidationErrors,
 } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
+import { ButtonModule } from 'primeng/button';
+import { InputTextModule } from 'primeng/inputtext';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
+import {
+  FormFieldComponent,
+  MessageBannerComponent,
+  PasswordInputComponent,
+} from '@shared/components/form';
 import { environment } from '@environments/environment';
 import { debounceTime, switchMap, map } from 'rxjs/operators';
 import { of } from 'rxjs';
@@ -24,7 +31,16 @@ import { of } from 'rxjs';
 @Component({
   selector: 'app-register',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterModule],
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    RouterModule,
+    ButtonModule,
+    InputTextModule,
+    FormFieldComponent,
+    MessageBannerComponent,
+    PasswordInputComponent,
+  ],
   templateUrl: './register.component.html',
   styleUrl: './register.component.scss',
 })
@@ -38,8 +54,6 @@ export class RegisterComponent {
   errorMessage = signal<string | null>(null);
   successMessage = signal<string | null>(null);
   loading = signal(false);
-  showPassword = signal(false);
-  showConfirmPassword = signal(false);
 
   constructor() {
     this.registerForm = this.fb.group(

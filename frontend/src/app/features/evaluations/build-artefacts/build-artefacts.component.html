@@ -4,37 +4,35 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="page-header">
-  <button class="icon-btn" (click)="goBack()" title="Back">
-    <span class="material-symbols-outlined">arrow_back</span>
-  </button>
-  <div class="header-info">
-    <span class="header-title">Build Artefacts</span>
-    <span class="header-id">{{ buildShortId() }}</span>
-  </div>
-</div>
-
-<div class="page">
+<gr-page-layout title="Build Artefacts" [subtitle]="buildShortId()">
+  <button
+    slot="actions"
+    pButton
+    icon="pi pi-arrow-left"
+    label="Back"
+    severity="secondary"
+    (click)="goBack()"
+  ></button>
 
   @if (loading()) {
     <app-loading-spinner message="Loading artefacts..." />
   } @else if (artefacts().length === 0) {
-    <div class="empty-state">
-      <span class="material-symbols-outlined">inventory_2</span>
-      <p>No artefacts available for this build.</p>
-      <span class="empty-hint">Artefacts are produced via <code>hydra-build-products</code> in the build output.</span>
-    </div>
+    <app-empty-state
+      icon="inventory_2"
+      title="No artefacts available"
+      message="This build did not produce any artefacts via hydra-build-products."
+    />
   } @else {
-    <div class="artefacts-list">
+    <div class="gr-compact-list">
       @for (artefact of artefacts(); track artefact.name) {
-        <div class="artefact-row">
-          <span class="file-type-badge">{{ fileTypeLabel(artefact.file_type) }}</span>
-          <span class="artefact-name">{{ artefact.name }}</span>
+        <div class="gr-compact-row">
+          <span class="gr-file-type">{{ fileTypeLabel(artefact.file_type) }}</span>
+          <span class="gr-compact-row__name">{{ artefact.name }}</span>
           @if (artefact.size !== undefined) {
-            <span class="artefact-size">{{ formatSize(artefact.size) }}</span>
+            <span class="gr-compact-row__size text-secondary">{{ formatSize(artefact.size) }}</span>
           }
           <a
-            class="download-btn"
+            class="gr-download-btn"
             [href]="downloadUrl(artefact)"
             [title]="'Download ' + artefact.name"
           >
@@ -45,4 +43,4 @@
       }
     </div>
   }
-</div>
+</gr-page-layout>

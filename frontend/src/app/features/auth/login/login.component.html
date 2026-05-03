@@ -13,80 +13,70 @@
     </div>
 
     @if (errorMessage()) {
-      <div class="error-message">
-        <span class="material-symbols-outlined">error</span>
-        {{ errorMessage() }}
-      </div>
+      <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
     }
 
     @if (!oidcRequired) {
       <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="auth-form">
-        <div class="form-group">
-          <label for="username">Username or Email</label>
+        <gr-form-field
+          label="Username or Email"
+          for="username"
+          [required]="true"
+          [control]="loginForm.controls['username']"
+        >
           <input
-            type="text"
+            pInputText
             id="username"
             formControlName="username"
-            class="form-input"
+            class="w-full"
             placeholder="Enter your username or email"
             autocomplete="username"
           />
-          @if (loginForm.get('username')?.touched && loginForm.get('username')?.errors) {
-            <span class="field-error">Username or email is required</span>
-          }
-        </div>
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="password">Password</label>
-          <div class="password-wrapper">
-            <input
-              [type]="showPassword() ? 'text' : 'password'"
-              id="password"
-              formControlName="password"
-              class="form-input"
-              placeholder="Enter your password"
-              autocomplete="current-password"
-            />
-            <button type="button" class="eye-btn" (click)="showPassword.set(!showPassword())" tabindex="-1">
-              <span class="material-symbols-outlined">{{ showPassword() ? 'visibility_off' : 'visibility' }}</span>
-            </button>
-          </div>
-          @if (loginForm.get('password')?.touched && loginForm.get('password')?.errors) {
-            <span class="field-error">Password is required</span>
-          }
-        </div>
+        <gr-form-field
+          label="Password"
+          for="password"
+          [required]="true"
+          [control]="loginForm.controls['password']"
+        >
+          <gr-password-input
+            id="password"
+            [control]="$any(loginForm.controls['password'])"
+            placeholder="Enter your password"
+            autocomplete="current-password"
+          />
+        </gr-form-field>
 
-        <div class="form-group-checkbox">
-          <label>
-            <input type="checkbox" formControlName="rememberMe" />
-            <span>Remember me</span>
-          </label>
+        <div class="auth-checkbox">
+          <p-checkbox formControlName="rememberMe" [binary]="true" inputId="remember-me" />
+          <label for="remember-me">Remember me</label>
         </div>
 
         <button
+          pButton
           type="submit"
-          class="btn-primary"
+          class="auth-action"
+          [label]="loading() ? 'Signing in...' : 'Sign In'"
           [disabled]="!loginForm.valid || loading()"
-        >
-          @if (loading()) {
-            <span>Signing in...</span>
-          } @else {
-            <span>Sign In</span>
-          }
-        </button>
+          [loading]="loading()"
+        ></button>
       </form>
     }
 
     @if (oidcEnabled) {
       @if (!oidcRequired) {
-        <div class="auth-divider">
-          <span>OR</span>
-        </div>
+        <div class="auth-divider"><span>OR</span></div>
       }
-      <button type="button" class="btn-secondary" (click)="loginWithOIDC()">
-        <span class="material-symbols-outlined">login</span>
-        Sign in with SSO
-      </button>
+      <button
+        pButton
+        type="button"
+        class="auth-action"
+        severity="secondary"
+        icon="pi pi-sign-in"
+        label="Sign in with SSO"
+        (click)="loginWithOIDC()"
+      ></button>
     }
 
     @if (!registrationDisabled) {

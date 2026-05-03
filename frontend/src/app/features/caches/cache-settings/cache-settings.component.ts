@@ -8,13 +8,19 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
 import { DividerModule } from 'primeng/divider';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
+import { SelectModule } from 'primeng/select';
 import { CachesService } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import {
+  FormFieldComponent,
+  FormDialogComponent,
+  MessageBannerComponent,
+} from '@shared/components/form';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
 import { Cache } from '@core/models';
 
 @Component({
@@ -24,12 +30,17 @@ import { Cache } from '@core/models';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
     DividerModule,
     ButtonModule,
     InputTextModule,
     TextareaModule,
+    SelectModule,
     LoadingSpinnerComponent,
+    FormFieldComponent,
+    FormDialogComponent,
+    MessageBannerComponent,
+    PageLayoutComponent,
+    SettingsSectionComponent,
   ],
   templateUrl: './cache-settings.component.html',
   styleUrl: './cache-settings.component.scss',
@@ -57,6 +68,11 @@ export class CacheSettingsComponent implements OnInit {
     priority: 50,
     public: false,
   };
+
+  readonly visibilityOptions = [
+    { label: 'Private', value: false },
+    { label: 'Public', value: true },
+  ];
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
@@ -158,5 +174,4 @@ export class CacheSettingsComponent implements OnInit {
       },
     });
   }
-
 }

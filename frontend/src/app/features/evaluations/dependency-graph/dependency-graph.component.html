@@ -11,9 +11,13 @@
     </div>
   } @else if (errorMsg()) {
     <div class="error-state">
-      <span class="material-symbols-outlined">error</span>
-      <p>{{ errorMsg() }}</p>
-      <button pButton label="Go Back" severity="secondary" (click)="goBack()"></button>
+      <app-empty-state
+        icon="error"
+        title="Failed to load graph"
+        [message]="errorMsg() ?? ''"
+        actionLabel="Go Back"
+        (actionClick)="goBack()"
+      />
     </div>
   } @else {
 

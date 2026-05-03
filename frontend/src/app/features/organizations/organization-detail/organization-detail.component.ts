@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject, forkJoin, EMPTY } from 'rxjs';
 import { debounceTime, switchMap } from 'rxjs/operators';
-import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
@@ -19,6 +18,13 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
+import {
+  FormDialogComponent,
+  FormFieldComponent,
+  LabelHelpComponent,
+  MessageBannerComponent,
+} from '@shared/components/form';
 import { Organization, Project, EvaluationStatus } from '@core/models';
 
 @Component({
@@ -28,12 +34,17 @@ import { Organization, Project, EvaluationStatus } from '@core/models';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
     ButtonModule,
     InputTextModule,
     TextareaModule,
     LoadingSpinnerComponent,
     EmptyStateComponent,
+    PageLayoutComponent,
+    SettingsSectionComponent,
+    FormDialogComponent,
+    FormFieldComponent,
+    LabelHelpComponent,
+    MessageBannerComponent,
   ],
   templateUrl: './organization-detail.component.html',
   styleUrl: './organization-detail.component.scss',
@@ -66,6 +77,20 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
   };
 
   protected projectNameEditedByUser = false;
+
+  readonly nameCheckHint = computed(() => {
+    switch (this.nameCheckState()) {
+      case 'taken': return 'This name is already taken.';
+      case 'invalid': return 'Only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.';
+      default: return 'Lowercase letters, numbers, and hyphens only.';
+    }
+  });
+
+  wildcardHint(): string {
+    return this.wildcardInvalid
+      ? 'Each pattern must be non-empty, not start with a period, and contain no spaces.'
+      : 'Pattern for selecting which outputs to evaluate (default: packages.x86_64-linux.*).';
+  }
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
@@ -134,7 +159,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
     if (!name) { this.nameCheckState.set('idle'); this.nameCheck$.next(''); return; }
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
       this.nameCheckState.set('invalid');
-      this.nameCheck$.next(''); // cancel any pending debounce without making an API call
+      this.nameCheck$.next('');
       return;
     }
     this.nameCheckState.set('checking');
@@ -174,7 +199,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
 
   get wildcardInvalid(): boolean {
     const w = this.newProject.evaluation_wildcard.trim();
-    if (!w) return false; // empty means use default — not invalid
+    if (!w) return false;
     const parts = w.split(',').map((p) => p.trim());
     return parts.some((p) => !p || p.startsWith('.') || /\s/.test(p));
   }
@@ -200,5 +225,4 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
         },
       });
   }
-
 }

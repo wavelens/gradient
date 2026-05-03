@@ -4,80 +4,75 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  @if (loading()) {
-    <app-loading-spinner message="Loading project..." />
-  } @else if (project(); as proj) {
-    <!-- Project Header -->
-    <div class="page-header">
-      <div>
-        <div class="breadcrumb">
-          <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
-          <span class="breadcrumb-separator">/</span>
-          <span class="breadcrumb-current">{{ proj.display_name }}</span>
-        </div>
-        <h1>{{ proj.display_name }}</h1>
-        <p class="text-secondary">{{ proj.description || 'No description' }}</p>
-      </div>
-      <div class="header-actions">
-        @if (authService.isAuthenticated()) {
-          @if (proj.can_edit) {
-            <button
-              pButton
-              label="Start Evaluation"
-              icon="pi pi-play"
-              (click)="startEvaluation()"
-              [loading]="starting()"
-              [disabled]="starting()"
-            ></button>
-            <button
-              pButton
-              label="Restart Failed Builds"
-              icon="pi pi-refresh"
-              severity="secondary"
-              (click)="restartFailedBuilds()"
-              [disabled]="starting()"
-            ></button>
-            <button
-              pButton
-              label="Settings"
-              icon="pi pi-cog"
-              severity="secondary"
-              [routerLink]="['/organization', orgName, 'project', projectName, 'settings']"
-            ></button>
-          }
-        }
+@if (loading()) {
+  <app-loading-spinner message="Loading project..." />
+} @else if (project(); as proj) {
+  <nav class="breadcrumb">
+    <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
+    <span class="text-secondary"> / </span>
+    <span>{{ proj.display_name }}</span>
+  </nav>
+
+  <gr-page-layout
+    [title]="proj.display_name"
+    [subtitle]="proj.description || 'No description'"
+  >
+    @if (authService.isAuthenticated() && proj.can_edit) {
+      <ng-container slot="actions">
         <button
           pButton
-          label="Metrics"
-          icon="pi pi-chart-line"
-          severity="secondary"
-          [routerLink]="['/organization', orgName, 'project', projectName, 'metrics']"
+          label="Start Evaluation"
+          icon="pi pi-play"
+          (click)="startEvaluation()"
+          [loading]="starting()"
+          [disabled]="starting()"
         ></button>
-      </div>
-      <div class="project-meta">
-        <span class="meta-item">
-          <span class="material-symbols-outlined">link</span>
-          @if (proj.repository.startsWith('http://') || proj.repository.startsWith('https://')) {
-            <a [href]="proj.repository" target="_blank" rel="noopener noreferrer">{{ proj.repository }}</a>
-          } @else {
-            {{ proj.repository }}
-          }
-        </span>
-        <span class="meta-item">
-          <span class="material-symbols-outlined">category</span>
-          <span class="meta-truncate" [title]="proj.evaluation_wildcard">{{ proj.evaluation_wildcard }}</span>
-        </span>
-        <span class="status-badge" [class.active]="proj.active" [class.inactive]="!proj.active">
-          {{ proj.active ? 'Active' : 'Inactive' }}
-        </span>
-      </div>
+        <button
+          pButton
+          label="Restart Failed Builds"
+          icon="pi pi-refresh"
+          severity="secondary"
+          (click)="restartFailedBuilds()"
+          [disabled]="starting()"
+        ></button>
+        <button
+          pButton
+          label="Settings"
+          icon="pi pi-cog"
+          severity="secondary"
+          [routerLink]="['/organization', orgName, 'project', projectName, 'settings']"
+        ></button>
+      </ng-container>
+    }
+    <button
+      slot="actions"
+      pButton
+      label="Metrics"
+      icon="pi pi-chart-line"
+      severity="secondary"
+      [routerLink]="['/organization', orgName, 'project', projectName, 'metrics']"
+    ></button>
+
+    <div class="project-meta">
+      <span class="meta-item">
+        <span class="material-symbols-outlined">link</span>
+        @if (proj.repository.startsWith('http://') || proj.repository.startsWith('https://')) {
+          <a [href]="proj.repository" target="_blank" rel="noopener noreferrer">{{ proj.repository }}</a>
+        } @else {
+          {{ proj.repository }}
+        }
+      </span>
+      <span class="meta-item">
+        <span class="material-symbols-outlined">category</span>
+        <span class="meta-truncate" [title]="proj.evaluation_wildcard">{{ proj.evaluation_wildcard }}</span>
+      </span>
+      <span class="status-chip" [class.status-ok]="proj.active" [class.status-warn]="!proj.active">
+        {{ proj.active ? 'Active' : 'Inactive' }}
+      </span>
     </div>
 
-    <!-- Current Builds -->
     @if (entryPoints().length > 0) {
-      <div class="section">
-        <h2>Current Builds</h2>
+      <gr-settings-section title="Current Builds" [card]="false">
         <div class="evaluations-list">
           @for (ep of entryPoints(); track ep.id) {
             <div class="evaluation-card">
@@ -146,12 +141,10 @@
             </div>
           }
         </div>
-      </div>
+      </gr-settings-section>
     }
 
-    <!-- Recent Evaluations -->
-    <div class="section">
-      <h2>Recent Evaluations</h2>
+    <gr-settings-section title="Recent Evaluations" [card]="false">
       @if (proj.last_evaluations && proj.last_evaluations.length > 0) {
         <div class="evaluations-list">
           @for (evaluation of proj.last_evaluations; track evaluation.id) {
@@ -235,6 +228,6 @@
           (actionClick)="proj.can_edit && startEvaluation()"
         />
       }
-    </div>
-  }
-</div>
+    </gr-settings-section>
+  </gr-page-layout>
+}

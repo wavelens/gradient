@@ -8,11 +8,18 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
+import { SelectModule } from 'primeng/select';
 import { CachesService, UpstreamCache, CacheSubscriptionMode } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import {
+  FormFieldComponent,
+  FormDialogComponent,
+  MessageBannerComponent,
+} from '@shared/components/form';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
 
 @Component({
   selector: 'app-cache-upstreams',
@@ -21,10 +28,16 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
     ButtonModule,
     InputTextModule,
+    SelectModule,
     LoadingSpinnerComponent,
+    EmptyStateComponent,
+    FormFieldComponent,
+    FormDialogComponent,
+    MessageBannerComponent,
+    PageLayoutComponent,
+    SettingsSectionComponent,
   ],
   templateUrl: './cache-upstreams.component.html',
   styleUrl: './cache-upstreams.component.scss',
@@ -214,5 +227,16 @@ export class CacheUpstreamsComponent implements OnInit {
 
   modeLabel(mode: CacheSubscriptionMode): string {
     return this.modes.find((m) => m.value === mode)?.label ?? mode;
+  }
+
+  modeBadgeClass(mode: CacheSubscriptionMode): string {
+    switch (mode) {
+      case 'ReadWrite':
+        return 'badge-inbound';
+      case 'WriteOnly':
+        return 'badge-outbound';
+      default:
+        return '';
+    }
   }
 }

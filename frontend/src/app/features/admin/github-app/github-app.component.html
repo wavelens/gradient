@@ -4,90 +4,85 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <h1>GitHub App</h1>
-  <p class="text-secondary">
-    Register a new GitHub App for this Gradient instance using GitHub's manifest flow.
-  </p>
-
+<gr-page-layout
+  title="GitHub App"
+  subtitle="Register a new GitHub App for this Gradient instance using GitHub's manifest flow."
+>
   @if (!showResult()) {
-    <div class="setup-panel">
-      <label for="github-host">GitHub Enterprise host (optional)</label>
-      <input
-        id="github-host"
-        pInputText
-        type="text"
-        placeholder="github.com"
-        [ngModel]="host()"
-        (ngModelChange)="host.set($event)"
-      />
+    <gr-settings-section>
+      <gr-form-field label="GitHub Enterprise host (optional)" for="github-host">
+        <input
+          id="github-host"
+          pInputText
+          type="text"
+          class="w-full"
+          placeholder="github.com"
+          [ngModel]="host()"
+          (ngModelChange)="host.set($event)"
+        />
+      </gr-form-field>
 
-      <button
-        pButton
-        type="button"
-        label="Create on GitHub"
-        data-testid="github-app-create-button"
-        [disabled]="loading()"
-        (click)="create()"
-      ></button>
+      <div class="gr-form-actions">
+        <button
+          pButton
+          type="button"
+          label="Create on GitHub"
+          data-testid="github-app-create-button"
+          [disabled]="loading()"
+          (click)="create()"
+        ></button>
+      </div>
 
       @if (errorMessage()) {
-        <div class="error">{{ errorMessage() }}</div>
+        <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
       }
-    </div>
+    </gr-settings-section>
   } @else {
     @if (credentialsMissing()) {
-      <div class="error" data-testid="github-app-credentials-missing">
+      <gr-message-banner type="error" data-testid="github-app-credentials-missing">
         Credentials are no longer available — re-run the manifest flow.
-      </div>
+      </gr-message-banner>
     } @else if (credentials(); as c) {
-      <div class="result-panel">
-        <h2>App created — {{ c.slug }}</h2>
-        <p><a [href]="c.html_url" target="_blank" rel="noopener">{{ c.html_url }}</a></p>
+      <gr-settings-section
+        [title]="'App created — ' + c.slug"
+        [description]="c.html_url"
+      >
+        <p>
+          <a [href]="c.html_url" target="_blank" rel="noopener">{{ c.html_url }}</a>
+        </p>
 
-        <div class="credential">
-          <div class="label">App ID</div>
-          <code>{{ c.id }}</code>
-          <button pButton type="button" icon="pi pi-copy" (click)="copy(c.id.toString())"></button>
-        </div>
+        <gr-form-field label="App ID" for="gh-app-id">
+          <gr-copy-field id="gh-app-id" [value]="c.id.toString()" />
+        </gr-form-field>
 
-        <div class="credential">
-          <div class="label">Webhook secret</div>
-          <code>{{ c.webhook_secret }}</code>
-          <button pButton type="button" icon="pi pi-copy" (click)="copy(c.webhook_secret)"></button>
-        </div>
+        <gr-form-field label="Webhook secret" for="gh-webhook-secret">
+          <gr-copy-field id="gh-webhook-secret" [value]="c.webhook_secret" />
+        </gr-form-field>
 
-        <div class="credential">
-          <div class="label">Private key (PEM)</div>
-          <pre><code>{{ c.pem }}</code></pre>
-          <button pButton type="button" icon="pi pi-copy" (click)="copy(c.pem)"></button>
-        </div>
+        <gr-form-field label="Private key (PEM)" for="gh-pem">
+          <gr-copy-field id="gh-pem" [value]="c.pem" />
+        </gr-form-field>
 
-        <div class="credential">
-          <div class="label">Client ID</div>
-          <code>{{ c.client_id }}</code>
-          <button pButton type="button" icon="pi pi-copy" (click)="copy(c.client_id)"></button>
-        </div>
+        <gr-form-field label="Client ID" for="gh-client-id">
+          <gr-copy-field id="gh-client-id" [value]="c.client_id" />
+        </gr-form-field>
 
-        <div class="credential">
-          <div class="label">Client secret</div>
-          <code>{{ c.client_secret }}</code>
-          <button pButton type="button" icon="pi pi-copy" (click)="copy(c.client_secret)"></button>
-        </div>
+        <gr-form-field label="Client secret" for="gh-client-secret">
+          <gr-copy-field id="gh-client-secret" [value]="c.client_secret" />
+        </gr-form-field>
+      </gr-settings-section>
 
-        <h3>Server configuration</h3>
-        <pre><code>services.gradient.githubApp = {{ '{' }}
+      <gr-settings-section
+        title="Server configuration"
+        description="Write the PEM and webhook secret to those paths, set the NixOS module options below, then rebuild and restart the server."
+      >
+        <pre class="server-config"><code>services.gradient.githubApp = {{ '{' }}
   enable = true;
   appId = {{ c.id }};
   privateKeyFile = "/run/secrets/gradient-github-app.pem";
   webhookSecretFile = "/run/secrets/gradient-github-app-webhook";
 {{ '}' }};</code></pre>
-
-        <p class="text-secondary">
-          Write the PEM and webhook secret to those paths, set the NixOS
-          module options above, then rebuild and restart the server.
-        </p>
-      </div>
+      </gr-settings-section>
     }
   }
-</div>
+</gr-page-layout>

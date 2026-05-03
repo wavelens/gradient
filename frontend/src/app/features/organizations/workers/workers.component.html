@@ -4,74 +4,60 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/organization', orgName, 'settings']" class="breadcrumb-link">Settings</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">Workers</span>
-      </div>
-      <h1>Workers</h1>
-      <p class="text-secondary">Registered build workers for this organization</p>
-    </div>
-    <button pButton label="Register Worker" icon="pi pi-plus" (click)="openRegisterDialog()"></button>
-  </div>
+<nav class="breadcrumb">
+  <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
+  <span class="text-secondary"> / </span>
+  <a [routerLink]="['/organization', orgName, 'settings']" class="breadcrumb-link">Settings</a>
+  <span class="text-secondary"> / </span>
+  <span>Workers</span>
+</nav>
+
+<gr-page-layout title="Workers" subtitle="Registered build workers for this organization">
+  <button slot="actions" pButton label="Register Worker" icon="pi pi-plus" (click)="openRegisterDialog()"></button>
 
   @if (hasNoCacheSubscribed()) {
-    <div class="no-cache-banner" data-testid="no-cache-banner" role="alert">
-      <span class="material-symbols-outlined">warning</span>
-      <div>
-        <div class="no-cache-title">No cache subscribed</div>
-        <div class="no-cache-body">
-          Workers cannot connect to this organization until you subscribe a cache.
-          <a [routerLink]="['/organization', orgName, 'caches']">Manage cache subscriptions →</a>
-        </div>
+    <gr-message-banner slot="banner" type="warning">
+      <div data-testid="no-cache-banner">
+        <strong>No cache subscribed.</strong>
+        Workers cannot connect to this organization until you subscribe a cache.
+        <a [routerLink]="['/organization', orgName, 'caches']">Manage cache subscriptions →</a>
       </div>
-    </div>
+    </gr-message-banner>
   }
 
   @if (orgId()) {
-    <div class="peer-id-banner">
-      <span class="material-symbols-outlined">vpn_key</span>
-      <div>
-        <div class="peer-id-label">Organization Peer ID</div>
-        <div class="peer-id-value">{{ orgId() }}</div>
-        <div class="peer-id-hint text-secondary">Use this as <code>peer_id</code> in your worker's peers file alongside the token issued during registration.</div>
-      </div>
-      <button
-        pButton
-        [label]="peerIdCopied() ? 'Copied!' : 'Copy'"
-        [icon]="peerIdCopied() ? 'pi pi-check' : 'pi pi-copy'"
-        severity="secondary"
-        (click)="copyPeerId()"
-      ></button>
-    </div>
+    <gr-settings-section [card]="true">
+      <gr-form-field
+        label="Organization Peer ID"
+        hint="Use this as peer_id in your worker's peers file alongside the token issued during registration."
+      >
+        <gr-copy-field [value]="orgId()" />
+      </gr-form-field>
+    </gr-settings-section>
   }
 
   @if (loading()) {
     <app-loading-spinner message="Loading workers..." />
+  } @else if (workers().length === 0) {
+    <app-empty-state
+      icon="construction"
+      title="No workers registered"
+      message="Register a gradient-worker to run builds for this organization."
+      actionLabel="Register Worker"
+      (actionClick)="openRegisterDialog()"
+    />
   } @else {
-    @if (workers().length === 0) {
-      <div class="empty-state">
-        <span class="material-symbols-outlined">construction</span>
-        <h3>No workers registered</h3>
-        <p class="text-secondary">Register a <code>gradient-worker</code> to run builds for this organization.</p>
-        <button pButton label="Register Worker" icon="pi pi-plus" (click)="openRegisterDialog()"></button>
-      </div>
-    } @else {
-      <div class="workers-list">
+    <gr-settings-section [card]="false">
+      <div class="gr-list">
         @for (worker of workers(); track worker.worker_id) {
-          <div class="worker-row">
-            <div class="worker-info">
+          <div class="gr-list-row">
+            <div class="gr-list-row__info">
               <span class="material-symbols-outlined">construction</span>
               <div>
-                <div class="worker-name">{{ worker.display_name }}</div>
-                <div class="worker-id text-secondary">{{ worker.worker_id }}</div>
+                <div class="gr-list-row__title">{{ worker.display_name }}</div>
+                <div class="gr-list-row__id text-secondary">{{ worker.worker_id }}</div>
                 @if (worker.url) {
-                  <div class="worker-url text-secondary">{{ worker.url }}</div>
+                  <div class="gr-list-row__meta text-secondary">{{ worker.url }}</div>
                 }
                 <div class="worker-gate-summary text-secondary">
                   Gates:
@@ -86,7 +72,7 @@
                     }
                   </div>
                   @if (worker.live.architectures.length > 0) {
-                    <div class="worker-archs text-secondary">
+                    <div class="gr-list-row__meta text-secondary">
                       {{ worker.live.architectures.join(', ') }}
                       @if (worker.live.system_features.length > 0) {
                         <span class="worker-features"> · {{ worker.live.system_features.join(', ') }}</span>
@@ -94,22 +80,22 @@
                     </div>
                   }
                   @if (worker.live.assigned_job_count > 0) {
-                    <div class="worker-stats text-secondary">{{ worker.live.assigned_job_count }} active job{{ worker.live.assigned_job_count === 1 ? '' : 's' }}</div>
+                    <div class="gr-list-row__meta text-secondary">{{ worker.live.assigned_job_count }} active job{{ worker.live.assigned_job_count === 1 ? '' : 's' }}</div>
                   }
                 }
               </div>
             </div>
-            <div class="worker-meta">
+            <div class="gr-list-row__actions">
               @if (worker.managed) {
-                <span class="badge badge-managed">Managed</span>
+                <span class="badge">Managed</span>
               }
               @if (worker.live?.draining) {
-                <span class="badge badge-draining">Draining</span>
+                <span class="badge badge-outbound">Draining</span>
               }
               @if (!worker.active) {
-                <span class="badge badge-inactive">Inactive</span>
+                <span class="badge">Inactive</span>
               }
-              <span class="badge" [class.badge-connected]="worker.live" [class.badge-offline]="!worker.live">
+              <span class="badge" [class.badge-inbound]="worker.live" [class.badge-outbound]="!worker.live">
                 {{ worker.live ? 'Connected' : 'Offline' }}
               </span>
               <button
@@ -118,7 +104,6 @@
                 icon="pi pi-pencil"
                 severity="secondary"
                 size="small"
-                class="worker-action-btn"
                 [disabled]="worker.managed || deletingId() !== null || togglingId() !== null || renaming()"
                 (click)="openRenameDialog(worker)"
               ></button>
@@ -128,7 +113,6 @@
                 [icon]="worker.active ? 'pi pi-pause' : 'pi pi-play'"
                 [severity]="worker.active ? 'warn' : 'success'"
                 size="small"
-                class="worker-action-btn"
                 [disabled]="worker.managed || togglingId() !== null || deletingId() !== null"
                 [loading]="togglingId() === worker.worker_id"
                 (click)="requestToggleWorker(worker)"
@@ -139,7 +123,6 @@
                 icon="pi pi-trash"
                 severity="danger"
                 size="small"
-                class="worker-action-btn"
                 [disabled]="worker.managed || deletingId() !== null || togglingId() !== null"
                 [loading]="deletingId() === worker.worker_id"
                 (click)="deleteWorker(worker)"
@@ -148,37 +131,32 @@
           </div>
         }
       </div>
-    }
+    </gr-settings-section>
   }
-</div>
+</gr-page-layout>
 
-<!-- Register Worker Dialog -->
-<p-dialog
-  header="Register Worker"
+<gr-form-dialog
   [(visible)]="showRegisterDialog"
-  [modal]="true"
-  [style]="{ width: '480px' }"
-  [draggable]="false"
-  [resizable]="false"
+  title="Register Worker"
+  submitLabel="Register"
+  submitIcon="pi pi-plus"
+  width="480px"
+  [loading]="registering()"
+  [disabled]="!newWorkerId.trim() || !newWorkerName.trim()"
+  (submit)="registerWorker()"
 >
   @if (orgId()) {
-    <div class="dialog-info">
-      <span class="material-symbols-outlined">vpn_key</span>
-      <div>
-        <div class="dialog-info-label">Peer ID (this organization)</div>
-        <code class="dialog-info-value">{{ orgId() }}</code>
-        <div class="dialog-info-hint text-secondary">Write this alongside the token into your worker's peers file.</div>
-      </div>
-    </div>
+    <gr-message-banner type="info">
+      <strong>Peer ID (this organization):</strong>
+      <code>{{ orgId() }}</code>
+      Write this alongside the token into your worker's peers file.
+    </gr-message-banner>
   }
   @if (errorMessage()) {
-    <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
-      {{ errorMessage() }}
-    </div>
+    <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
   }
-  <div class="form-group">
-    <label for="worker-name">Name</label>
+
+  <gr-form-field label="Name" for="worker-name" [required]="true" hint="Human-readable label shown in the workers list.">
     <input
       pInputText
       id="worker-name"
@@ -187,10 +165,14 @@
       class="w-full"
       (keyup.enter)="registerWorker()"
     />
-    <small class="text-secondary">Human-readable label shown in the workers list.</small>
-  </div>
-  <div class="form-group">
-    <label for="worker-id">Worker ID</label>
+  </gr-form-field>
+
+  <gr-form-field
+    label="Worker ID"
+    for="worker-id"
+    [required]="true"
+    hint="Must be a UUID v4 — run uuidgen or use the worker's auto-generated ID from /var/lib/gradient-worker/worker-id."
+  >
     <input
       pInputText
       id="worker-id"
@@ -199,10 +181,13 @@
       class="w-full"
       (keyup.enter)="registerWorker()"
     />
-    <small class="text-secondary">Must be a UUID v4 — run <code>uuidgen</code> or use the worker's auto-generated ID from <code>/var/lib/gradient-worker/worker-id</code>.</small>
-  </div>
-  <div class="form-group">
-    <label for="worker-url">Worker URL <span class="text-secondary">(optional)</span></label>
+  </gr-form-field>
+
+  <gr-form-field
+    label="Worker URL"
+    for="worker-url"
+    hint="Optional. If set, the server connects outbound to this URL instead of waiting for the worker to connect."
+  >
     <input
       pInputText
       id="worker-url"
@@ -210,10 +195,13 @@
       placeholder="e.g. wss://worker.example.com/proto"
       class="w-full"
     />
-    <small class="text-secondary">If set, the server connects outbound to this URL instead of waiting for the worker to connect.</small>
-  </div>
-  <div class="form-group">
-    <label for="worker-token">Token <span class="text-secondary">(optional)</span></label>
+  </gr-form-field>
+
+  <gr-form-field
+    label="Token"
+    for="worker-token"
+    hint="Optional. Pre-generated token. Leave blank to have the server generate one (it will be shown once after registration)."
+  >
     <input
       pInputText
       id="worker-token"
@@ -221,149 +209,93 @@
       placeholder="Output of: openssl rand -base64 48"
       class="w-full"
     />
-    <small class="text-secondary">Pre-generated token. Leave blank to have the server generate one (it will be shown once after registration).</small>
-  </div>
-  <div class="form-group">
-    <label>Server-side capability gates</label>
+  </gr-form-field>
+
+  <gr-form-field
+    label="Server-side capability gates"
+    hint="Click a tag to toggle. Disabling a capability prevents the server from negotiating it with this worker, even if the worker advertises it."
+  >
     <div class="cap-tag-group">
-      <button
-        type="button"
-        class="cap-tag"
-        [class.cap-tag-on]="newEnableFetch"
-        [class.cap-tag-off]="!newEnableFetch"
-        (click)="newEnableFetch = !newEnableFetch"
-      >
-        <span class="material-symbols-outlined">{{ newEnableFetch ? 'check' : 'close' }}</span>
-        fetch
+      <button type="button" class="cap-tag" [class.cap-tag-on]="newEnableFetch" [class.cap-tag-off]="!newEnableFetch" (click)="newEnableFetch = !newEnableFetch">
+        <span class="material-symbols-outlined">{{ newEnableFetch ? 'check' : 'close' }}</span> fetch
       </button>
-      <button
-        type="button"
-        class="cap-tag"
-        [class.cap-tag-on]="newEnableEval"
-        [class.cap-tag-off]="!newEnableEval"
-        (click)="newEnableEval = !newEnableEval"
-      >
-        <span class="material-symbols-outlined">{{ newEnableEval ? 'check' : 'close' }}</span>
-        eval
+      <button type="button" class="cap-tag" [class.cap-tag-on]="newEnableEval" [class.cap-tag-off]="!newEnableEval" (click)="newEnableEval = !newEnableEval">
+        <span class="material-symbols-outlined">{{ newEnableEval ? 'check' : 'close' }}</span> eval
       </button>
-      <button
-        type="button"
-        class="cap-tag"
-        [class.cap-tag-on]="newEnableBuild"
-        [class.cap-tag-off]="!newEnableBuild"
-        (click)="newEnableBuild = !newEnableBuild"
-      >
-        <span class="material-symbols-outlined">{{ newEnableBuild ? 'check' : 'close' }}</span>
-        build
+      <button type="button" class="cap-tag" [class.cap-tag-on]="newEnableBuild" [class.cap-tag-off]="!newEnableBuild" (click)="newEnableBuild = !newEnableBuild">
+        <span class="material-symbols-outlined">{{ newEnableBuild ? 'check' : 'close' }}</span> build
       </button>
     </div>
-    <small class="text-secondary">Click a tag to toggle. Disabling a capability prevents the server from negotiating it with this worker, even if the worker advertises it.</small>
-  </div>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showRegisterDialog.set(false)" [disabled]="registering()"></button>
-    <button
-      pButton
-      label="Register"
-      icon="pi pi-plus"
-      (click)="registerWorker()"
-      [loading]="registering()"
-      [disabled]="registering() || !newWorkerId.trim() || !newWorkerName.trim()"
-    ></button>
-  </ng-template>
-</p-dialog>
+  </gr-form-field>
+</gr-form-dialog>
 
-<!-- Deactivate Warning Dialog -->
-<p-dialog
-  header="Deactivate Connected Worker"
+<gr-form-dialog
   [(visible)]="showToggleWarningDialog"
-  [modal]="true"
-  [style]="{ width: '440px' }"
-  [draggable]="false"
-  [resizable]="false"
+  title="Deactivate Connected Worker"
+  submitLabel="Deactivate"
+  submitIcon="pi pi-pause"
+  submitSeverity="warn"
+  width="440px"
+  (submit)="confirmToggleWorker()"
+  (cancel)="cancelToggleWorker()"
 >
-  <div class="dialog-warning">
-    <span class="material-symbols-outlined">warning</span>
-    <p>
-      This worker is currently <strong>connected</strong>. Deactivating it will immediately disconnect it and
-      <strong>abort all active jobs</strong> assigned to this organization. Are you sure?
-    </p>
-  </div>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="cancelToggleWorker()"></button>
-    <button pButton label="Deactivate" icon="pi pi-pause" severity="warn" (click)="confirmToggleWorker()"></button>
-  </ng-template>
-</p-dialog>
+  <gr-message-banner type="warning">
+    This worker is currently <strong>connected</strong>. Deactivating it will immediately disconnect it and
+    <strong>abort all active jobs</strong> assigned to this organization. Are you sure?
+  </gr-message-banner>
+</gr-form-dialog>
 
-<!-- Token Dialog (shown once after registration) -->
-<p-dialog
-  header="Worker Registered"
+<gr-form-dialog
   [(visible)]="showTokenDialog"
-  [modal]="true"
-  [style]="{ width: '520px' }"
-  [draggable]="false"
-  [resizable]="false"
-  [closable]="false"
+  title="Worker Registered"
+  submitLabel="I've saved the token"
+  submitIcon="pi pi-check"
+  width="520px"
+  (submit)="closeTokenDialog()"
 >
   @if (lastRegistration(); as reg) {
     @if (reg.token) {
-      <div class="token-warning">
-        <span class="material-symbols-outlined">warning</span>
+      <gr-message-banner type="warning">
         <strong>Save this token now.</strong> It will not be shown again.
-      </div>
+      </gr-message-banner>
     }
 
-    <div class="form-group">
-      <label>Peer ID</label>
-      <div class="copy-row">
-        <code class="copy-value">{{ reg.peer_id }}</code>
-      </div>
-    </div>
+    <gr-form-field label="Peer ID">
+      <gr-copy-field [value]="reg.peer_id" />
+    </gr-form-field>
 
     @if (reg.token) {
-      <div class="form-group">
-        <label>Token</label>
-        <div class="copy-row">
-          <code class="copy-value token-value">{{ reg.token }}</code>
-        </div>
-        <button
-          pButton
-          [label]="tokenCopied() ? 'Copied!' : 'Copy Token'"
-          [icon]="tokenCopied() ? 'pi pi-check' : 'pi pi-copy'"
-          severity="secondary"
-          class="copy-btn"
-          (click)="copyToken()"
-        ></button>
-      </div>
+      <gr-form-field label="Token">
+        <gr-copy-field [value]="reg.token" />
+      </gr-form-field>
 
-      <div class="form-group">
-        <label>Peers file entry</label>
-        <pre class="peers-file-example">{{ reg.peer_id }}:{{ reg.token }}</pre>
-        <small class="text-secondary">Add this line to <code>/run/secrets/gradient-worker-peers</code> on your worker host, then set <code>peersFile</code> in your NixOS config.</small>
-      </div>
+      <gr-form-field
+        label="Peers file entry"
+        hint="Add this line to /run/secrets/gradient-worker-peers on your worker host, then set peersFile in your NixOS config."
+      >
+        <gr-copy-field [value]="reg.peer_id + ':' + reg.token" />
+      </gr-form-field>
     } @else {
       <p class="text-secondary">Worker registered successfully. The token was pre-supplied and will not be echoed back.</p>
     }
   }
-  <ng-template pTemplate="footer">
-    <button pButton label="I've saved the token" icon="pi pi-check" (click)="closeTokenDialog()"></button>
-  </ng-template>
-</p-dialog>
+</gr-form-dialog>
 
-<!-- Edit Worker Dialog -->
-<p-dialog
-  header="Edit Worker"
+<gr-form-dialog
   [(visible)]="showRenameDialog"
-  [modal]="true"
-  [style]="{ width: '480px' }"
-  [draggable]="false"
-  [resizable]="false"
+  title="Edit Worker"
+  submitLabel="Save"
+  submitIcon="pi pi-check"
+  width="480px"
+  [loading]="renaming()"
+  [disabled]="!newName.trim()"
+  (submit)="confirmRename()"
+  (cancel)="cancelRename()"
 >
   @if (renamingWorker(); as worker) {
-    <div class="form-group">
-      <div class="text-secondary" style="font-size: 0.875rem; margin-bottom: 0.5rem;">{{ worker.worker_id }}</div>
-    </div>
-    <div class="form-group">
-      <label for="rename-name">Name</label>
+    <p class="text-secondary worker-id-line">{{ worker.worker_id }}</p>
+
+    <gr-form-field label="Name" for="rename-name">
       <input
         pInputText
         id="rename-name"
@@ -372,53 +304,23 @@
         class="w-full"
         (keyup.enter)="confirmRename()"
       />
-    </div>
-    <div class="form-group">
-      <label>Server-side capability gates</label>
+    </gr-form-field>
+
+    <gr-form-field
+      label="Server-side capability gates"
+      hint="Changes take effect on the worker's next reconnect (a re-auth is triggered automatically)."
+    >
       <div class="cap-tag-group">
-        <button
-          type="button"
-          class="cap-tag"
-          [class.cap-tag-on]="editEnableFetch"
-          [class.cap-tag-off]="!editEnableFetch"
-          (click)="editEnableFetch = !editEnableFetch"
-        >
-          <span class="material-symbols-outlined">{{ editEnableFetch ? 'check' : 'close' }}</span>
-          fetch
+        <button type="button" class="cap-tag" [class.cap-tag-on]="editEnableFetch" [class.cap-tag-off]="!editEnableFetch" (click)="editEnableFetch = !editEnableFetch">
+          <span class="material-symbols-outlined">{{ editEnableFetch ? 'check' : 'close' }}</span> fetch
         </button>
-        <button
-          type="button"
-          class="cap-tag"
-          [class.cap-tag-on]="editEnableEval"
-          [class.cap-tag-off]="!editEnableEval"
-          (click)="editEnableEval = !editEnableEval"
-        >
-          <span class="material-symbols-outlined">{{ editEnableEval ? 'check' : 'close' }}</span>
-          eval
+        <button type="button" class="cap-tag" [class.cap-tag-on]="editEnableEval" [class.cap-tag-off]="!editEnableEval" (click)="editEnableEval = !editEnableEval">
+          <span class="material-symbols-outlined">{{ editEnableEval ? 'check' : 'close' }}</span> eval
         </button>
-        <button
-          type="button"
-          class="cap-tag"
-          [class.cap-tag-on]="editEnableBuild"
-          [class.cap-tag-off]="!editEnableBuild"
-          (click)="editEnableBuild = !editEnableBuild"
-        >
-          <span class="material-symbols-outlined">{{ editEnableBuild ? 'check' : 'close' }}</span>
-          build
+        <button type="button" class="cap-tag" [class.cap-tag-on]="editEnableBuild" [class.cap-tag-off]="!editEnableBuild" (click)="editEnableBuild = !editEnableBuild">
+          <span class="material-symbols-outlined">{{ editEnableBuild ? 'check' : 'close' }}</span> build
         </button>
       </div>
-      <small class="text-secondary">Changes take effect on the worker's next reconnect (a re-auth is triggered automatically).</small>
-    </div>
+    </gr-form-field>
   }
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="cancelRename()" [disabled]="renaming()"></button>
-    <button
-      pButton
-      label="Save"
-      icon="pi pi-check"
-      (click)="confirmRename()"
-      [loading]="renaming()"
-      [disabled]="renaming() || !newName.trim()"
-    ></button>
-  </ng-template>
-</p-dialog>
+</gr-form-dialog>

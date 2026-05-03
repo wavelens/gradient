@@ -8,7 +8,6 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { AutoCompleteModule } from 'primeng/autocomplete';
@@ -17,6 +16,13 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
+import {
+  FormDialogComponent,
+  FormFieldComponent,
+  MessageBannerComponent,
+} from '@shared/components/form';
 
 @Component({
   selector: 'app-cache-subscriptions',
@@ -25,12 +31,17 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
     ButtonModule,
     InputTextModule,
     AutoCompleteModule,
     TooltipModule,
     LoadingSpinnerComponent,
+    EmptyStateComponent,
+    PageLayoutComponent,
+    SettingsSectionComponent,
+    FormDialogComponent,
+    FormFieldComponent,
+    MessageBannerComponent,
   ],
   templateUrl: './cache-subscriptions.component.html',
   styleUrl: './cache-subscriptions.component.scss',

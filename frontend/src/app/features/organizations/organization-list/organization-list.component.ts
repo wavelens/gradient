@@ -4,20 +4,26 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject, EMPTY } from 'rxjs';
 import { debounceTime, switchMap } from 'rxjs/operators';
-import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
+import { SelectModule } from 'primeng/select';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
+import {
+  FormDialogComponent,
+  FormFieldComponent,
+  MessageBannerComponent,
+} from '@shared/components/form';
 import { Organization } from '@core/models';
 
 @Component({
@@ -27,12 +33,17 @@ import { Organization } from '@core/models';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
     ButtonModule,
     InputTextModule,
     TextareaModule,
+    SelectModule,
     LoadingSpinnerComponent,
     EmptyStateComponent,
+    PageLayoutComponent,
+    SettingsSectionComponent,
+    FormDialogComponent,
+    FormFieldComponent,
+    MessageBannerComponent,
   ],
   templateUrl: './organization-list.component.html',
   styleUrl: './organization-list.component.scss',
@@ -50,6 +61,19 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
   creating = signal(false);
   createError = signal<string | null>(null);
   nameCheckState = signal<'idle' | 'invalid' | 'checking' | 'available' | 'taken'>('idle');
+
+  readonly visibilityOptions = [
+    { label: 'Private', value: false },
+    { label: 'Public', value: true },
+  ];
+
+  readonly nameCheckHint = computed(() => {
+    switch (this.nameCheckState()) {
+      case 'taken': return 'This name is already taken.';
+      case 'invalid': return 'Only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.';
+      default: return 'Lowercase letters, numbers, and hyphens only.';
+    }
+  });
 
   newOrg = {
     name: '',
@@ -144,7 +168,7 @@ export class OrganizationListComponent implements OnInit, OnDestroy {
     if (!name) { this.nameCheckState.set('idle'); this.nameCheck$.next(''); return; }
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
       this.nameCheckState.set('invalid');
-      this.nameCheck$.next(''); // cancel any pending debounce without making an API call
+      this.nameCheck$.next('');
       return;
     }
     this.nameCheckState.set('checking');

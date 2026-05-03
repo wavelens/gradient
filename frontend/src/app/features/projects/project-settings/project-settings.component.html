@@ -4,264 +4,214 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  @if (loading()) {
-    <app-loading-spinner message="Loading project settings..." />
-  } @else if (project(); as proj) {
-    <div class="page-header">
-      <div>
-        <div class="breadcrumb">
-          <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
-          <span class="breadcrumb-separator">/</span>
-          <a [routerLink]="['/organization', orgName, 'project', projectName]" class="breadcrumb-link">{{ proj.display_name }}</a>
-          <span class="breadcrumb-separator">/</span>
-          <span class="breadcrumb-current">Settings</span>
-        </div>
-        <h1>Project Settings</h1>
-      </div>
-      <button pButton label="Organization Settings" icon="pi pi-building" severity="secondary" [routerLink]="['/organization', orgName, 'settings']"></button>
-    </div>
+@if (loading()) {
+  <app-loading-spinner message="Loading project settings..." />
+} @else if (project(); as proj) {
+  <nav class="breadcrumb">
+    <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
+    <span class="text-secondary"> / </span>
+    <a [routerLink]="['/organization', orgName, 'project', projectName]" class="breadcrumb-link">{{ proj.display_name }}</a>
+    <span class="text-secondary"> / </span>
+    <span>Settings</span>
+  </nav>
+
+  <gr-page-layout title="Project Settings" [subtitle]="proj.display_name">
+    <button
+      slot="actions"
+      pButton
+      label="Organization Settings"
+      icon="pi pi-building"
+      severity="secondary"
+      [routerLink]="['/organization', orgName, 'settings']"
+    ></button>
 
     @if (errorMessage()) {
-      <div class="message-banner error">
-        <span class="material-symbols-outlined">error</span>
-        {{ errorMessage() }}
-      </div>
+      <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
     }
     @if (saveSuccess()) {
-      <div class="message-banner success">
-        <span class="material-symbols-outlined">check_circle</span>
-        Changes saved.
-      </div>
+      <gr-message-banner type="success">Changes saved.</gr-message-banner>
     }
 
-    <!-- General Settings -->
-    <div class="settings-section">
-      <h2>General</h2>
+    <gr-settings-section title="General">
       @if (proj.managed) {
-        <div class="message-banner info">
-          <span class="material-symbols-outlined">info</span>
+        <gr-message-banner type="info">
           This project is managed declaratively and cannot be edited here.
-        </div>
+        </gr-message-banner>
       } @else if (!proj.can_edit) {
-        <div class="message-banner info">
-          <span class="material-symbols-outlined">info</span>
+        <gr-message-banner type="info">
           You have read-only access to this project.
+        </gr-message-banner>
+      }
+
+      <gr-form-field label="Name" for="proj-name" hint="Project name cannot be changed">
+        <input pInputText id="proj-name" [value]="proj.name" disabled class="w-full" />
+      </gr-form-field>
+
+      <gr-form-field label="Display Name" for="proj-display">
+        <input pInputText id="proj-display" [(ngModel)]="formData.display_name" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
+      </gr-form-field>
+
+      <gr-form-field label="Description" for="proj-desc">
+        <textarea pTextarea id="proj-desc" [(ngModel)]="formData.description" rows="3" class="w-full" [disabled]="proj.managed || !proj.can_edit"></textarea>
+      </gr-form-field>
+
+      <gr-form-field label="Repository URL" for="proj-repo">
+        <input pInputText id="proj-repo" [(ngModel)]="formData.repository" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
+      </gr-form-field>
+
+      <gr-form-field for="proj-wildcard" hint="Pattern for selecting which outputs to evaluate">
+        <label class="wildcard-label" for="proj-wildcard">
+          Evaluation Wildcard
+          <gr-label-help
+            href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard"
+            title="Learn about evaluation wildcards"
+          />
+        </label>
+        <input pInputText id="proj-wildcard" [(ngModel)]="formData.evaluation_wildcard" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
+      </gr-form-field>
+
+      <gr-form-field label="Keep Evaluations" for="proj-keep" hint="Number of completed evaluations to retain for metrics and history">
+        <input pInputText id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
+      </gr-form-field>
+
+      @if (!proj.managed && proj.can_edit) {
+        <div class="gr-form-actions">
+          <button pButton label="Save Changes" icon="pi pi-check" (click)="saveSettings()" [loading]="saving()" [disabled]="saving()"></button>
         </div>
       }
-      <div class="settings-card">
-        <div class="form-group">
-          <label for="proj-name">Name</label>
-          <input pInputText id="proj-name" [value]="proj.name" disabled class="w-full" />
-          <small class="text-secondary">Project name cannot be changed</small>
-        </div>
+    </gr-settings-section>
 
-        <div class="form-group">
-          <label for="proj-display">Display Name</label>
-          <input pInputText id="proj-display" [(ngModel)]="formData.display_name" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
-        </div>
-
-        <div class="form-group">
-          <label for="proj-desc">Description</label>
-          <textarea pInputTextarea id="proj-desc" [(ngModel)]="formData.description" rows="3" class="w-full" [disabled]="proj.managed || !proj.can_edit"></textarea>
-        </div>
-
-        <div class="form-group">
-          <label for="proj-repo">Repository URL</label>
-          <input pInputText id="proj-repo" [(ngModel)]="formData.repository" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
-        </div>
-
-        <div class="form-group">
-          <label for="proj-wildcard">
-            Evaluation Wildcard
-            <a href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" target="_blank" rel="noopener noreferrer" class="label-help" title="Learn about evaluation wildcards">
-              <span class="material-symbols-outlined">help</span>
-            </a>
-          </label>
-          <input pInputText id="proj-wildcard" [(ngModel)]="formData.evaluation_wildcard" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
-          <small class="text-secondary">Pattern for selecting which outputs to evaluate</small>
-        </div>
-
-        <div class="form-group">
-          <label for="proj-keep">Keep Evaluations</label>
-          <input pInputText id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" class="w-full" [disabled]="proj.managed || !proj.can_edit" />
-          <small class="text-secondary">Number of completed evaluations to retain for metrics and history</small>
-        </div>
-
-        @if (!proj.managed && proj.can_edit) {
-          <div class="form-actions">
-            <button pButton label="Save Changes" icon="pi pi-check" (click)="saveSettings()" [loading]="saving()" [disabled]="saving()"></button>
-          </div>
-        }
-      </div>
-    </div>
-
-    <!-- Integrations -->
-    <div class="settings-section">
-      <h2>Integrations</h2>
+    <gr-settings-section title="Integrations">
       @if (integrationSaveSuccess()) {
-        <div class="message-banner success">
-          <span class="material-symbols-outlined">check_circle</span>
-          Integration link saved.
-        </div>
+        <gr-message-banner type="success">Integration link saved.</gr-message-banner>
       }
       @if (integrationErrorMessage()) {
-        <div class="message-banner error">
-          <span class="material-symbols-outlined">error</span>
-          {{ integrationErrorMessage() }}
-        </div>
+        <gr-message-banner type="error">{{ integrationErrorMessage() }}</gr-message-banner>
       }
-      <div class="settings-card">
-        @if (integrationsLoading()) {
-          <app-loading-spinner message="Loading integrations..." />
-        } @else {
-          <div class="form-group">
-            <label for="inbound-integration">Inbound Integration</label>
-            <p-select
-              inputId="inbound-integration"
-              [(ngModel)]="inboundSelection"
-              [options]="inboundIntegrationOptions()"
-              optionLabel="label"
-              optionValue="value"
-              styleClass="w-full"
-              [disabled]="proj.managed || !proj.can_edit"
-            />
-            <small class="text-secondary">Forge webhook source that will trigger evaluations for this project.</small>
-          </div>
-          <div class="form-group">
-            <label for="outbound-integration">Outbound Integration</label>
-            <p-select
-              inputId="outbound-integration"
-              [(ngModel)]="outboundSelection"
-              [options]="outboundIntegrationOptions()"
-              optionLabel="label"
-              optionValue="value"
-              styleClass="w-full"
-              [disabled]="proj.managed || !proj.can_edit"
-            />
-            <small class="text-secondary">Status reporter used to report build results per entry point.</small>
-          </div>
 
-          @if (!proj.managed && proj.can_edit) {
-            <div class="form-actions">
-              <button pButton label="Save Integrations" icon="pi pi-check" (click)="saveIntegrationLink()" [loading]="savingIntegration()" [disabled]="savingIntegration()"></button>
-              <a pButton label="Manage Integrations" icon="pi pi-external-link" severity="secondary" [routerLink]="['/organization', orgName, 'integrations']"></a>
-            </div>
-          }
+      @if (integrationsLoading()) {
+        <app-loading-spinner message="Loading integrations..." />
+      } @else {
+        <gr-form-field label="Inbound Integration" for="inbound-integration" hint="Forge webhook source that will trigger evaluations for this project.">
+          <p-select
+            inputId="inbound-integration"
+            [(ngModel)]="inboundSelection"
+            [options]="inboundIntegrationOptions()"
+            optionLabel="label"
+            optionValue="value"
+            styleClass="w-full"
+            [disabled]="proj.managed || !proj.can_edit"
+          />
+        </gr-form-field>
+
+        <gr-form-field label="Outbound Integration" for="outbound-integration" hint="Status reporter used to report build results per entry point.">
+          <p-select
+            inputId="outbound-integration"
+            [(ngModel)]="outboundSelection"
+            [options]="outboundIntegrationOptions()"
+            optionLabel="label"
+            optionValue="value"
+            styleClass="w-full"
+            [disabled]="proj.managed || !proj.can_edit"
+          />
+        </gr-form-field>
+
+        @if (!proj.managed && proj.can_edit) {
+          <div class="gr-form-actions">
+            <button pButton label="Save Integrations" icon="pi pi-check" (click)="saveIntegrationLink()" [loading]="savingIntegration()" [disabled]="savingIntegration()"></button>
+            <a pButton label="Manage Integrations" icon="pi pi-external-link" severity="secondary" [routerLink]="['/organization', orgName, 'integrations']"></a>
+          </div>
         }
-      </div>
-    </div>
+      }
+    </gr-settings-section>
 
-    <!-- Status -->
-    <div class="settings-section">
-      <h2>Status</h2>
-      <div class="settings-card">
-        <div class="status-row">
+    <gr-settings-section title="Status">
+      <div class="gr-nav-row">
+        <div>
+          <h4>{{ proj.active ? 'Project is Active' : 'Project is Inactive' }}</h4>
+          <p class="text-secondary">{{ proj.active ? 'The project is currently evaluating and building.' : 'The project is paused and not evaluating.' }}</p>
+        </div>
+        <button
+          pButton
+          [label]="proj.active ? 'Deactivate' : 'Activate'"
+          [icon]="proj.active ? 'pi pi-pause' : 'pi pi-play'"
+          [severity]="proj.active ? 'warn' : 'success'"
+          (click)="toggleActive()"
+          [loading]="toggling()"
+          [disabled]="toggling() || proj.managed || !proj.can_edit"
+        ></button>
+      </div>
+    </gr-settings-section>
+
+    @if (!proj.managed && proj.can_edit) {
+      <gr-settings-section title="Danger Zone">
+        <div class="gr-nav-row">
           <div>
-            <h3>{{ proj.active ? 'Project is Active' : 'Project is Inactive' }}</h3>
-            <p class="text-secondary">{{ proj.active ? 'The project is currently evaluating and building.' : 'The project is paused and not evaluating.' }}</p>
+            <h4>Transfer Ownership</h4>
+            <p class="text-secondary">Transfer this project to another organization.</p>
           </div>
           <button
             pButton
-            [label]="proj.active ? 'Deactivate' : 'Activate'"
-            [icon]="proj.active ? 'pi pi-pause' : 'pi pi-play'"
-            [severity]="proj.active ? 'warn' : 'success'"
-            (click)="toggleActive()"
-            [loading]="toggling()"
-            [disabled]="toggling() || proj.managed || !proj.can_edit"
+            label="Transfer Ownership"
+            icon="pi pi-send"
+            severity="warn"
+            (click)="showTransferDialog.set(true)"
           ></button>
         </div>
-      </div>
-    </div>
-
-    @if (!proj.managed && proj.can_edit) {
-      <!-- Danger Zone -->
-      <div class="settings-section danger-section">
-        <h2>Danger Zone</h2>
-        <div class="settings-card danger-card">
-            <div class="danger-row">
-            <div>
-              <h3>Transfer Ownership</h3>
-              <p class="text-secondary">Transfer this project to another organization.</p>
-            </div>
-            <button
-              pButton
-              label="Transfer Ownership"
-              icon="pi pi-send"
-              severity="warn"
-              (click)="showTransferDialog.set(true)"
-            ></button>
+        <p-divider />
+        <div class="gr-nav-row">
+          <div>
+            <h4>Delete Project</h4>
+            <p class="text-secondary">Permanently delete this project and all its evaluations.</p>
           </div>
-          <div class="danger-divider"></div>
-          <div class="danger-row">
-            <div>
-              <h3>Delete Project</h3>
-              <p class="text-secondary">Permanently delete this project and all its evaluations.</p>
-            </div>
-            <button pButton label="Delete Project" icon="pi pi-trash" severity="danger" (click)="showDeleteDialog.set(true)"></button>
-          </div>
+          <button pButton label="Delete Project" icon="pi pi-trash" severity="danger" (click)="showDeleteDialog.set(true)"></button>
         </div>
-      </div>
+      </gr-settings-section>
     }
-  }
-</div>
+  </gr-page-layout>
+}
 
-<!-- Transfer Ownership Dialog -->
-<p-dialog
-  header="Transfer Ownership"
+<gr-form-dialog
   [(visible)]="showTransferDialog"
-  [modal]="true"
-  [style]="{ width: '420px' }"
-  [draggable]="false"
-  [resizable]="false"
-  (onHide)="onTransferDialogHide()"
+  title="Transfer Ownership"
+  submitLabel="Transfer"
+  submitIcon="pi pi-send"
+  submitSeverity="warn"
+  [loading]="transferring()"
+  [disabled]="transferring() || !transferOrgName.trim()"
+  (submit)="transferOwnership()"
+  (cancel)="onTransferDialogHide()"
 >
-  <div class="dialog-content">
-    <p>Transfer <strong>{{ project()?.display_name }}</strong> to another organization. This action cannot be undone.</p>
-    @if (transferError()) {
-      <div class="dialog-error">
-        <span class="material-symbols-outlined">error</span>
-        {{ transferError() }}
-      </div>
-    }
-    @if (transferSuccess()) {
-      <div class="dialog-success">
-        <span class="material-symbols-outlined">check_circle</span>
-        Ownership transferred successfully.
-      </div>
-    }
-    <div class="form-group">
-      <label>Target Organization</label>
-      <p-autoComplete
-        [(ngModel)]="transferOrgName"
-        [suggestions]="transferOrgSuggestions()"
-        (completeMethod)="onTransferOrgSearch($event)"
-        placeholder="Organization name"
-        styleClass="w-full"
-        [forceSelection]="false"
-        [disabled]="transferring()"
-        appendTo="body"
-      />
-    </div>
-  </div>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showTransferDialog.set(false)" [disabled]="transferring()"></button>
-    <button pButton label="Transfer" icon="pi pi-send" severity="warn" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferOrgName.trim()"></button>
-  </ng-template>
-</p-dialog>
+  <p>Transfer <strong>{{ project()?.display_name }}</strong> to another organization. This action cannot be undone.</p>
+  @if (transferError()) {
+    <gr-message-banner type="error">{{ transferError() }}</gr-message-banner>
+  }
+  @if (transferSuccess()) {
+    <gr-message-banner type="success">Ownership transferred successfully.</gr-message-banner>
+  }
+  <gr-form-field label="Target Organization" for="transfer-org">
+    <p-autoComplete
+      inputId="transfer-org"
+      [(ngModel)]="transferOrgName"
+      [suggestions]="transferOrgSuggestions()"
+      (completeMethod)="onTransferOrgSearch($event)"
+      placeholder="Organization name"
+      styleClass="w-full"
+      [forceSelection]="false"
+      [disabled]="transferring()"
+      appendTo="body"
+    />
+  </gr-form-field>
+</gr-form-dialog>
 
-<!-- Delete Confirmation Dialog -->
-<p-dialog
-  header="Delete Project"
+<gr-form-dialog
   [(visible)]="showDeleteDialog"
-  [modal]="true"
-  [style]="{ width: '400px' }"
-  [draggable]="false"
-  [resizable]="false"
+  title="Delete Project"
+  submitLabel="Delete"
+  submitSeverity="danger"
+  [loading]="deleting()"
+  [disabled]="deleting()"
+  (submit)="deleteProject()"
 >
   <p>Are you sure you want to delete <strong>{{ project()?.display_name }}</strong>? This action cannot be undone.</p>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
-    <button pButton label="Delete" severity="danger" (click)="deleteProject()" [loading]="deleting()" [disabled]="deleting()"></button>
-  </ng-template>
-</p-dialog>
+</gr-form-dialog>

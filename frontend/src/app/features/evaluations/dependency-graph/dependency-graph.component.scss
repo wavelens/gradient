@@ -35,17 +35,9 @@
 
 .error-state {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   height: 100%;
-  gap: $spacing-md;
-  color: $text-secondary;
-
-  .material-symbols-outlined {
-    font-size: 3rem;
-    color: $color-danger;
-  }
 }
 
 // ── Header ────────────────────────────────────────────────────────────────────

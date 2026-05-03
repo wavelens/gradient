@@ -13,6 +13,7 @@ import { CachesService } from '@core/services/caches.service';
 import { StatCardComponent } from '@shared/components/stat-card/stat-card.component';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
 import { Organization, Cache } from '@core/models';
 
 @Component({
@@ -24,6 +25,8 @@ import { Organization, Cache } from '@core/models';
     StatCardComponent,
     LoadingSpinnerComponent,
     EmptyStateComponent,
+    PageLayoutComponent,
+    SettingsSectionComponent,
   ],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss',
