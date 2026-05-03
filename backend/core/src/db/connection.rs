@@ -22,9 +22,9 @@ use crate::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRIT
 use crate::types::*;
 
 fn db_url(cli: &Cli) -> Result<String> {
-    if let Some(file) = &cli.database_url_file {
+    if let Some(file) = &cli.database.database_url_file {
         Ok(std::fs::read_to_string(file).context("Failed to read database url from file")?)
-    } else if let Some(url) = &cli.database_url {
+    } else if let Some(url) = &cli.database.database_url {
         Ok(url.clone())
     } else {
         anyhow::bail!("No database url provided")
@@ -35,7 +35,7 @@ fn make_connect_options(cli: &Cli, max_connections: u32, min_connections: u32) -
     let mut opt = ConnectOptions::new(db_url(cli)?);
 
     // Only enable SQL logging at trace level
-    if cli.log_level == "trace" {
+    if cli.logging.log_level == "trace" {
         opt.sqlx_logging(true)
             .sqlx_logging_level(LevelFilter::Trace);
     } else {

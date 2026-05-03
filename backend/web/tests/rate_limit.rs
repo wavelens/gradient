@@ -25,7 +25,7 @@ use web::create_router;
 
 fn make_state() -> Arc<ServerState> {
     let cli = test_cli();
-    let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),

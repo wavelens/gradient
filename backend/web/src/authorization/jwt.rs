@@ -75,7 +75,7 @@ pub fn encode_jwt(
     let iat: usize = now.timestamp() as usize;
 
     let claim = Cliams { iat, exp, id };
-    let secret = load_secret(&state.cli.jwt_secret_file);
+    let secret = load_secret(&state.cli.secrets.jwt_secret_file);
 
     encode(
         &Header::default(),
@@ -120,7 +120,7 @@ pub async fn decode_jwt(
             header: Default::default(),
         }
     } else {
-        let secret = load_secret(&state.cli.jwt_secret_file);
+        let secret = load_secret(&state.cli.secrets.jwt_secret_file);
 
         decode(
             &jwt,
@@ -141,7 +141,7 @@ pub fn encode_download_token(
     let exp = (now + Duration::hours(1)).timestamp() as usize;
     let iat = now.timestamp() as usize;
     let claim = DownloadClaims { iat, exp, build_id };
-    let secret = load_secret(&state.cli.jwt_secret_file);
+    let secret = load_secret(&state.cli.secrets.jwt_secret_file);
     encode(
         &Header::default(),
         &claim,
@@ -154,7 +154,7 @@ pub async fn decode_download_token(
     state: State<Arc<ServerState>>,
     token: String,
 ) -> Result<DownloadClaims, StatusCode> {
-    let secret = load_secret(&state.cli.jwt_secret_file);
+    let secret = load_secret(&state.cli.secrets.jwt_secret_file);
     decode::<DownloadClaims>(
         &token,
         &DecodingKey::from_secret(secret.expose().as_bytes()),

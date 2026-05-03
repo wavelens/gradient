@@ -155,7 +155,7 @@ pub async fn forge_webhook(
     })?;
 
     let plaintext_secret =
-        decrypt_webhook_secret(&state.cli.crypt_secret_file, encrypted_secret).map_err(|e| {
+        decrypt_webhook_secret(&state.cli.secrets.crypt_secret_file, encrypted_secret).map_err(|e| {
             warn!(error = %e, integration_id = %integration.id, "Failed to decrypt integration secret");
             WebError::InternalServerError("internal error".into())
         })?;

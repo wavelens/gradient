@@ -70,11 +70,11 @@ fn make_state(
     };
     if let Some(ref p) = gh_secret_path {
         // All three fields must be present for `github_app_config()` to return Some.
-        cli.github_app_id = Some(1234);
-        cli.github_app_private_key_file = Some("/dev/null".into());
-        cli.github_app_webhook_secret_file = Some(p.clone());
+        cli.github_app.github_app_id = Some(1234);
+        cli.github_app.github_app_private_key_file = Some("/dev/null".into());
+        cli.github_app.github_app_webhook_secret_file = Some(p.clone());
     }
-    let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(db),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),

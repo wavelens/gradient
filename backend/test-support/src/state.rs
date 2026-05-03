@@ -22,7 +22,7 @@ use std::sync::Arc;
 /// directly so they can supply their own mock query results.
 pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
     let cli = test_cli();
-    let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         worker_db: WorkerDb::new(db),
@@ -43,7 +43,7 @@ pub fn test_state_recorded(
     crypt_secret_file: String,
 ) -> (Arc<ServerState>, Arc<RecordingWebhookClient>) {
     let cli = test_cli_with_crypt(crypt_secret_file);
-    let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
+    let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     let recorder = Arc::new(RecordingWebhookClient::new());
     let state = Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),

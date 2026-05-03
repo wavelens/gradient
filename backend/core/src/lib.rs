@@ -31,8 +31,8 @@ use storage::{FileLogStorage, S3LogStorage};
 use types::*;
 
 pub async fn init_state(cli: Cli) -> Arc<ServerState> {
-    println!("Starting Gradient Server on {}:{}", cli.ip, cli.port);
-    println!("State file configured: {:?}", cli.state_file);
+    println!("Starting Gradient Server on {}:{}", cli.server.ip, cli.server.port);
+    println!("State file configured: {:?}", cli.storage.state_file);
 
     let db = match connect_db(&cli).await {
         Ok(db) => db,
@@ -53,9 +53,9 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     // Load and apply state configuration if provided
     if let Err(e) = load_and_apply_state(
         &db,
-        cli.state_file.as_deref(),
-        &cli.crypt_secret_file,
-        cli.delete_state,
+        cli.storage.state_file.as_deref(),
+        &cli.secrets.crypt_secret_file,
+        cli.storage.delete_state,
     )
     .await
     {
@@ -64,8 +64,8 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     }
 
     // Cap keep_evaluations on all projects that exceed the configured maximum.
-    if cli.keep_evaluations > 0 {
-        let max = cli.keep_evaluations as i32;
+    if cli.storage.keep_evaluations > 0 {
+        let max = cli.storage.keep_evaluations as i32;
         let over_limit = EProject::find()
             .filter(CProject::KeepEvaluations.gt(max))
             .all(&db)
@@ -89,7 +89,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         }
     }
 
-    let local_log_storage = match FileLogStorage::new(Path::new(&cli.base_path)).await {
+    let local_log_storage = match FileLogStorage::new(Path::new(&cli.storage.base_path)).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Failed to initialize log storage: {}", e);
@@ -157,9 +157,9 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         );
         store
     } else {
-        match NarStore::local(&cli.base_path) {
+        match NarStore::local(&cli.storage.base_path) {
             Ok(store) => {
-                println!("NAR storage: local ({})", cli.base_path);
+                println!("NAR storage: local ({})", cli.storage.base_path);
                 store
             }
             Err(e) => {

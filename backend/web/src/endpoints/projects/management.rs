@@ -366,7 +366,7 @@ impl<'a> ProjectPatcher<'a> {
                 "keep_evaluations must be at least 1".to_string(),
             ));
         }
-        let global_max = self.state.cli.keep_evaluations as i32;
+        let global_max = self.state.cli.storage.keep_evaluations as i32;
         if global_max > 0 && keep > global_max {
             return Err(WebError::bad_request(format!(
                 "keep_evaluations cannot exceed the server maximum of {}",

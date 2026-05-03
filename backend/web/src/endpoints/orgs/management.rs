@@ -233,7 +233,7 @@ pub async fn put(
     }
 
     let (private_key, public_key) =
-        generate_ssh_key(&state.cli.crypt_secret_file).map_err(|e| {
+        generate_ssh_key(&state.cli.secrets.crypt_secret_file).map_err(|e| {
             tracing::error!("Failed to generate SSH key: {}", e);
             WebError::failed_ssh_key_generation()
         })?;

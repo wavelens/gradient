@@ -254,7 +254,7 @@ mod tests {
 
     fn make_state(db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
         let cli = test_cli();
-        let nar_storage = NarStore::local(&cli.base_path).expect("nar store");
+        let nar_storage = NarStore::local(&cli.storage.base_path).expect("nar store");
         Arc::new(ServerState {
             web_db: WebDb::new(db),
             worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
