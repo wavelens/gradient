@@ -5,13 +5,13 @@
  */
 
 use anyhow::{Context, Result};
+use gradient_core::db::collect_transitive_dependents;
 use gradient_core::sources::get_hash_from_path;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
 };
-use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -91,30 +91,13 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
     Ok(())
 }
 
-/// Walks reverse `derivation_dependency` edges starting at `derivation_id` and removes
-/// all `cache_derivation` rows touching the visited derivations across every cache.
+/// Removes all `cache_derivation` rows touching `derivation_id` and any of its
+/// transitive dependents across every cache.
 async fn revoke_cache_derivation_closure(
     state: &Arc<ServerState>,
     derivation_id: Uuid,
 ) -> Result<()> {
-    let mut visited: HashSet<Uuid> = HashSet::new();
-    let mut frontier = vec![derivation_id];
-    visited.insert(derivation_id);
-
-    while !frontier.is_empty() {
-        let edges = EDerivationDependency::find()
-            .filter(CDerivationDependency::Dependency.is_in(frontier.clone()))
-            .all(&state.worker_db)
-            .await
-            .context("Failed to walk reverse derivation_dependency")?;
-        frontier.clear();
-        for edge in edges {
-            if visited.insert(edge.derivation) {
-                frontier.push(edge.derivation);
-            }
-        }
-    }
-
+    let visited = collect_transitive_dependents(&state.worker_db, derivation_id).await?;
     let drv_ids: Vec<Uuid> = visited.into_iter().collect();
     let cache_rows = ECacheDerivation::find()
         .filter(CCacheDerivation::Derivation.is_in(drv_ids))

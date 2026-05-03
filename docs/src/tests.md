@@ -925,3 +925,24 @@ Unit tests in `backend/core/src/shutdown.rs`:
   signal is reported as a drain timeout, not silently abandoned.
 - `child_token_cascades_from_parent` — child tokens used for
   per-connection / per-job scopes cancel transitively.
+
+## Shared transitive-dependents walk (`#108`)
+
+`backend/core/src/db/dependency_graph.rs` exposes
+`collect_transitive_dependents`, the single canonical reverse-edge BFS over
+the `derivation_dependency` table. Both the cache-invalidation closure
+revocation in `cache::cacher::invalidate::revoke_cache_derivation_closure`
+and the build-failure cascade in
+`scheduler::build::BuildStateHandler::cascade_dependency_failed` now route
+through it instead of carrying their own copy. The cascade also collapses
+to a single batched `derivation IS IN (...)` builds query, replacing the
+prior per-iteration full re-scan + per-build edge probe.
+
+Unit tests in `backend/core/src/db/dependency_graph.rs`:
+
+- `no_dependents_returns_only_start` — a leaf derivation yields a set
+  containing exactly the starting id.
+- `walks_multiple_layers_breadth_first` — a 3-layer graph is fully
+  visited, including a sibling that depends directly on the start.
+- `cycles_terminate` — a pathological reverse cycle is deduped via the
+  visited set so the BFS terminates.

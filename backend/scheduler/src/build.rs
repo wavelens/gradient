@@ -13,7 +13,9 @@ use anyhow::{Context, Result};
 
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
-use gradient_core::db::{update_build_status, update_evaluation_status};
+use gradient_core::db::{
+    collect_transitive_dependents, update_build_status, update_evaluation_status,
+};
 use gradient_core::types::*;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -136,35 +138,26 @@ impl<'a> BuildStateHandler<'a> {
         evaluation_id: Uuid,
         failed_derivation_id: Uuid,
     ) -> Result<()> {
-        // BFS: walk the derivation_dependency graph and mark all transitive
-        // dependents as DependencyFailed.
-        let mut queue = vec![failed_derivation_id];
+        let mut closure =
+            collect_transitive_dependents(&self.state.worker_db, failed_derivation_id).await?;
+        // The failed derivation itself was already marked Failed by the caller;
+        // only its dependents need DependencyFailed.
+        closure.remove(&failed_derivation_id);
+        if closure.is_empty() {
+            return Ok(());
+        }
 
-        while let Some(failed_drv) = queue.pop() {
-            let dependents = EBuild::find()
-                .filter(CBuild::Evaluation.eq(evaluation_id))
-                .filter(CBuild::Status.is_in(vec![BuildStatus::Created, BuildStatus::Queued]))
-                .all(&self.state.worker_db)
-                .await
-                .context("fetch builds for cascade")?;
+        let cascaded_builds = EBuild::find()
+            .filter(CBuild::Evaluation.eq(evaluation_id))
+            .filter(CBuild::Status.is_in(vec![BuildStatus::Created, BuildStatus::Queued]))
+            .filter(CBuild::Derivation.is_in(closure.into_iter().collect::<Vec<_>>()))
+            .all(&self.state.worker_db)
+            .await
+            .context("fetch builds for cascade")?;
 
-            for build in dependents {
-                let dep_edge = EDerivationDependency::find()
-                    .filter(CDerivationDependency::Derivation.eq(build.derivation))
-                    .filter(CDerivationDependency::Dependency.eq(failed_drv))
-                    .one(&self.state.worker_db)
-                    .await?;
-                if dep_edge.is_some() {
-                    let cascaded_drv = build.derivation;
-                    update_build_status(
-                        Arc::clone(self.state),
-                        build,
-                        BuildStatus::DependencyFailed,
-                    )
-                    .await;
-                    queue.push(cascaded_drv);
-                }
-            }
+        for build in cascaded_builds {
+            update_build_status(Arc::clone(self.state), build, BuildStatus::DependencyFailed)
+                .await;
         }
         Ok(())
     }

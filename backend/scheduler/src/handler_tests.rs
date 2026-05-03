@@ -812,18 +812,17 @@ async fn build_failed_cascades_to_direct_dependent() {
         .append_query_results([vec![build_a]])
         // 2. update buildA → Failed (UPDATE...RETURNING)
         .append_query_results([vec![build_a_failed]])
-        // ── BFS iteration 1: failed_drv = A ──
-        // 3. cascade: find Created/Queued builds → [buildB]
-        .append_query_results([vec![build_b]])
-        // 4. cascade: find dep edge for buildB → found
+        // ── collect_transitive_dependents ──
+        // 3. BFS layer 1: dep edges where Dependency=A → [B→A]
         .append_query_results([vec![dep_edge]])
-        // 5. update buildB → DependencyFailed
+        // 4. BFS layer 2: dep edges where Dependency=B → empty
+        .append_query_results([Vec::<MDerivationDependency>::new()])
+        // 5. cascade: find Created/Queued builds with derivation in {B} → [buildB]
+        .append_query_results([vec![build_b]])
+        // 6. update buildB → DependencyFailed
         .append_query_results([vec![build_b_dep_failed]])
-        // ── BFS iteration 2: failed_drv = B (transitive) ──
-        // 6. find Created/Queued builds → empty (B already DependencyFailed)
-        .append_query_results([Vec::<MBuild>::new()])
-        // ── BFS done ──
-        // 7. check_evaluation_done: find active builds → empty
+        // ── check_evaluation_done ──
+        // 7. find active builds → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 8. find_by_id(eval) → Building
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
@@ -908,28 +907,25 @@ async fn build_failed_cascade_only_direct_dependents() {
     let build_c = make_build(build_c_id, eval_id, drv_c_id, BuildStatus::Queued);
     // B depends on A; C does NOT depend on A
     let dep_edge_b_a = make_dep_edge(Uuid::new_v4(), drv_b_id, drv_a_id);
+    let _ = drv_c_id; // referenced only for documentation
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find_by_id(buildA)
         .append_query_results([vec![build_a]])
         // 2. update → Failed
         .append_query_results([vec![build_a_failed]])
-        // ── BFS iteration 1: failed_drv = A ──
-        // 3. cascade: find Created/Queued → [buildB, buildC]
-        .append_query_results([vec![build_b, build_c.clone()]])
-        // 4. cascade for buildB: dep edge B→A found
+        // ── collect_transitive_dependents ──
+        // 3. BFS layer 1: dep edges where Dependency=A → [B→A] (C has no edge to A)
         .append_query_results([vec![dep_edge_b_a]])
-        // 5. update buildB → DependencyFailed
+        // 4. BFS layer 2: dep edges where Dependency=B → empty
+        .append_query_results([Vec::<MDerivationDependency>::new()])
+        // 5. cascade: find Created/Queued with derivation in {B} → [buildB]
+        // (C is excluded by the derivation filter, not by a per-row dep check)
+        .append_query_results([vec![build_b]])
+        // 6. update buildB → DependencyFailed
         .append_query_results([vec![build_b_dep_failed]])
-        // 6. cascade for buildC: NO dep edge C→A
-        .append_query_results([Vec::<MDerivationDependency>::new()])
-        // ── BFS iteration 2: failed_drv = B (transitively cascaded) ──
-        // 7. find Created/Queued → [buildC] (B already DependencyFailed)
-        .append_query_results([vec![build_c.clone()]])
-        // 8. does C depend on B? → no
-        .append_query_results([Vec::<MDerivationDependency>::new()])
-        // ── BFS done ──
-        // 9. check active → buildC is still Queued
+        // ── check_evaluation_done ──
+        // 7. check active → buildC is still Queued
         .append_query_results([vec![build_c]])
         // active not empty → check_evaluation_done returns early
         .into_connection();
@@ -1903,16 +1899,16 @@ async fn webhook_not_fired_for_dep_failed() {
         .append_query_results([vec![build_a]])
         // 2. update buildA → Failed
         .append_query_results([vec![build_a_failed.clone()]])
-        // 3. cascade: find Created/Queued → [buildB]
-        .append_query_results([vec![build_b]])
-        // 4. cascade: dep edge for buildB → found
+        // ── collect_transitive_dependents ──
+        // 3. BFS layer 1: dep edges where Dependency=A → [B→A]
         .append_query_results([vec![dep_edge]])
-        // 5. update buildB → DependencyFailed
+        // 4. BFS layer 2: dep edges where Dependency=B → empty
+        .append_query_results([Vec::<MDerivationDependency>::new()])
+        // 5. cascade: find Created/Queued with derivation in {B} → [buildB]
+        .append_query_results([vec![build_b]])
+        // 6. update buildB → DependencyFailed
         .append_query_results([vec![build_b_dep_failed.clone()]])
-        // ── BFS iteration 2: failed_drv = B ──
-        // 6. find Created/Queued → empty (B already DependencyFailed)
-        .append_query_results([Vec::<MBuild>::new()])
-        // ── BFS done ──
+        // ── check_evaluation_done ──
         // 7. check active → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 8. find_by_id(eval) → Building
@@ -2367,61 +2363,50 @@ async fn build_failed_cascades_transitively_through_graph() {
             drv_c,
             BuildStatus::Failed,
         )]])
-        // ── cascade iteration 1: failed_drv = C ──
-        // 3. find Created/Queued builds
+        // ── collect_transitive_dependents ──
+        // 3. BFS layer 1: dep edges where Dependency=C → [B→C]
+        .append_query_results([vec![make_dep_edge(Uuid::new_v4(), drv_b, drv_c)]])
+        // 4. BFS layer 2: dep edges where Dependency=B → [A→B]
+        .append_query_results([vec![make_dep_edge(Uuid::new_v4(), drv_a, drv_b)]])
+        // 5. BFS layer 3: dep edges where Dependency=A → empty
+        .append_query_results([Vec::<MDerivationDependency>::new()])
+        // 6. cascade: find Created/Queued with derivation in {A, B} → [build_a, build_b]
         .append_query_results([vec![
             make_build(build_a, eval_id, drv_a, BuildStatus::Queued),
             make_build(build_b, eval_id, drv_b, BuildStatus::Queued),
         ]])
-        // 4. does A depend on C? → no
-        .append_query_results([Vec::<MDerivationDependency>::new()])
-        // 5. does B depend on C? → yes
-        .append_query_results([vec![make_dep_edge(Uuid::new_v4(), drv_b, drv_c)]])
-        // 6. update B → DependencyFailed
+        // 7. update first cascaded build → DependencyFailed
+        .append_query_results([vec![make_build(
+            build_a,
+            eval_id,
+            drv_a,
+            BuildStatus::DependencyFailed,
+        )]])
+        // 8. update second cascaded build → DependencyFailed
         .append_query_results([vec![make_build(
             build_b,
             eval_id,
             drv_b,
             BuildStatus::DependencyFailed,
         )]])
-        // ── cascade iteration 2: failed_drv = B (transitively cascaded) ──
-        // 7. find Created/Queued builds (A still Queued, B already DependencyFailed)
-        .append_query_results([vec![make_build(
-            build_a,
-            eval_id,
-            drv_a,
-            BuildStatus::Queued,
-        )]])
-        // 8. does A depend on B? → yes
-        .append_query_results([vec![make_dep_edge(Uuid::new_v4(), drv_a, drv_b)]])
-        // 9. update A → DependencyFailed
-        .append_query_results([vec![make_build(
-            build_a,
-            eval_id,
-            drv_a,
-            BuildStatus::DependencyFailed,
-        )]])
-        // ── cascade iteration 3: failed_drv = A ──
-        // 10. find Created/Queued builds → empty (all cascaded)
-        .append_query_results([Vec::<MBuild>::new()])
         // ── check_evaluation_done ──
-        // 11. find active builds → empty
+        // 9. find active builds → empty
         .append_query_results([Vec::<MBuild>::new()])
-        // 12. find eval
+        // 10. find eval
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
-        // 13. find failed builds → B and A
+        // 11. find failed builds → B and A
         .append_query_results([vec![
             make_build(build_b, eval_id, drv_b, BuildStatus::DependencyFailed),
             make_build(build_a, eval_id, drv_a, BuildStatus::DependencyFailed),
         ]])
-        // 14. find eval error messages → empty
+        // 12. find eval error messages → empty
         .append_query_results([Vec::<MEvaluationMessage>::new()])
-        // 15. update eval → Failed
+        // 13. update eval → Failed
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // 16. find eval → Failed
+        // 14. find eval → Failed
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Failed)]])
         .into_connection();
 
