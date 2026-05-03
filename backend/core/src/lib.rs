@@ -7,6 +7,7 @@
 pub mod ci;
 pub mod db;
 pub mod executer;
+pub mod http;
 pub mod hydra;
 pub mod nix;
 pub mod nix_hash;
@@ -99,14 +100,16 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         }
     };
 
-    let webhook_client = match ReqwestWebhookClient::new() {
+    let http = match http::build_client() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("Failed to build webhook HTTP client: {}", e);
+            eprintln!("Failed to build shared HTTP client: {}", e);
             std::process::exit(1);
         }
     };
-    let webhooks: Arc<dyn ci::WebhookClient> = Arc::new(webhook_client);
+
+    let webhooks: Arc<dyn ci::WebhookClient> =
+        Arc::new(ReqwestWebhookClient::with_client(http.clone()));
 
     let email_service = match EmailService::new(cli.email_config()).await {
         Ok(s) => s,
@@ -192,5 +195,6 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        http,
     })
 }

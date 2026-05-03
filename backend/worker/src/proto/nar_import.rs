@@ -275,25 +275,16 @@ impl<'a> InputPrefetcher<'a> {
             return vec![];
         }
 
-        let http = match reqwest::Client::builder()
-            .timeout(HTTP_DOWNLOAD_TIMEOUT)
-            .build()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                warn!(error = %e, "failed to build reqwest client for presigned downloads");
-                return vec![];
-            }
-        };
+        let http = crate::http::client();
 
         let mut futs = by_url
             .into_iter()
             .map(|cp| {
-                let http = http.clone();
                 async move {
                     let url = cp.url.clone().expect("by_url entries have a URL");
                     let resp = http
                         .get(&url)
+                        .timeout(HTTP_DOWNLOAD_TIMEOUT)
                         .send()
                         .await
                         .with_context(|| format!("HTTP GET {} (path {})", url, cp.path))?

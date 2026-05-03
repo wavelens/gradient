@@ -151,7 +151,7 @@ pub async fn resolve_outbound_reporter_for_project(
             let Some(token) = token else {
                 return Arc::new(NoopCiReporter);
             };
-            match GiteaReporter::new(base_url.to_string(), token.expose().to_string()) {
+            match GiteaReporter::new(state.http.clone(), base_url.to_string(), token.expose().to_string()) {
                 Ok(r) => Arc::new(r),
                 Err(e) => {
                     warn!(error = %e, "Failed to build GiteaReporter");
@@ -227,7 +227,7 @@ async fn build_github_app_reporter_for_project(
     // GitHub Enterprise support deferred — no production user yet. When
     // adding it, derive `api_base_url` from the installation account host or
     // from a server-config field instead of hardcoding the empty default.
-    match GithubAppReporter::new("", github_app.app_id, pem, installation_id) {
+    match GithubAppReporter::new(state.http.clone(), "", github_app.app_id, pem, installation_id) {
         Ok(r) => Some(Arc::new(r)),
         Err(e) => {
             warn!(error = %e, "Failed to build GithubAppReporter");

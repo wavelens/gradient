@@ -95,16 +95,12 @@ struct InstallationTokenResponse {
 /// installation. The token is valid for ~1 hour and can be used as a Bearer
 /// token against the GitHub REST API.
 pub async fn get_installation_token(
+    client: &reqwest::Client,
     app_id: u64,
     private_key_pem: &str,
     installation_id: i64,
 ) -> Result<String> {
     let jwt = generate_jwt(app_id, private_key_pem)?;
-
-    let client = reqwest::Client::builder()
-        .user_agent("gradient-ci/1.0")
-        .build()
-        .context("failed to build reqwest client")?;
 
     let url = format!("https://api.github.com/app/installations/{installation_id}/access_tokens");
     debug!(installation_id, "requesting GitHub App installation token");

@@ -263,7 +263,7 @@ pub async fn upload_presigned(
     );
 
     // --- 2. HTTP request to the presigned URL ---
-    let client = reqwest::Client::new();
+    let client = crate::http::client();
     let http_method = reqwest::Method::from_bytes(method.as_bytes())
         .with_context(|| format!("invalid HTTP method: {method}"))?;
 

@@ -16,7 +16,6 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use sha2::Sha256;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
-use std::time::Duration;
 use tracing::{error, warn};
 use uuid::Uuid;
 
@@ -164,11 +163,11 @@ pub struct ReqwestWebhookClient {
 
 impl ReqwestWebhookClient {
     pub fn new() -> Result<Self> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()?;
-        Ok(Self { client })
+        Ok(Self::with_client(crate::http::build_client()?))
+    }
+
+    pub fn with_client(client: reqwest::Client) -> Self {
+        Self { client }
     }
 }
 

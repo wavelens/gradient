@@ -71,7 +71,7 @@ pub async fn upstream_nar(
         .url
         .ok_or_else(|| WebError::bad_request("Not an external upstream"))?;
 
-    let bytes = fetch_upstream_nar(&base_url, &path).await?;
+    let bytes = fetch_upstream_nar(&state.http, &base_url, &path).await?;
 
     Response::builder()
         .header(
@@ -144,9 +144,13 @@ fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: Uuid, 
     });
 }
 
-async fn fetch_upstream_nar(base_url: &str, path: &str) -> WebResult<bytes::Bytes> {
+async fn fetch_upstream_nar(
+    http: &reqwest::Client,
+    base_url: &str,
+    path: &str,
+) -> WebResult<bytes::Bytes> {
     let nar_url = format!("{}/{}", base_url.trim_end_matches('/'), path);
-    let resp = reqwest::Client::new()
+    let resp = http
         .get(&nar_url)
         .send()
         .await

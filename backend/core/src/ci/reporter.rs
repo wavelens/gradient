@@ -9,7 +9,6 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::time::Duration;
 use tracing::warn;
 
 /// Validate a user-supplied base URL for outbound CI API calls.
@@ -113,15 +112,14 @@ pub struct GiteaReporter {
 }
 
 impl GiteaReporter {
-    pub fn new(base_url: impl Into<String>, token: impl Into<String>) -> Result<Self> {
+    pub fn new(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+        token: impl Into<String>,
+    ) -> Result<Self> {
         let raw = base_url.into();
         validate_safe_outbound_url(&raw)
             .map_err(|e| anyhow::anyhow!("Rejected Gitea base_url: {}", e))?;
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .context("Failed to build HTTP client for GiteaReporter")?;
         Ok(Self {
             base_url: raw.trim_end_matches('/').to_string(),
             token: token.into(),
@@ -226,7 +224,11 @@ pub struct GithubReporter {
 impl GithubReporter {
     const DEFAULT_API_URL: &'static str = "https://api.github.com";
 
-    pub fn new(base_url: impl Into<String>, token: impl Into<String>) -> Result<Self> {
+    pub fn new(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+        token: impl Into<String>,
+    ) -> Result<Self> {
         let raw = base_url.into();
         let base_url = if raw.is_empty() {
             Self::DEFAULT_API_URL.to_string()
@@ -235,13 +237,6 @@ impl GithubReporter {
                 .map_err(|e| anyhow::anyhow!("Rejected GitHub base_url: {}", e))?;
             raw.trim_end_matches('/').to_string()
         };
-
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent("gradient-ci/1.0")
-            .build()
-            .context("Failed to build HTTP client for GithubReporter")?;
 
         Ok(Self {
             base_url,
@@ -360,6 +355,7 @@ impl GithubAppReporter {
     const DEFAULT_API_URL: &'static str = "https://api.github.com";
 
     pub fn new(
+        client: reqwest::Client,
         api_base_url: impl Into<String>,
         app_id: u64,
         private_key_pem: impl Into<String>,
@@ -373,13 +369,6 @@ impl GithubAppReporter {
                 .map_err(|e| anyhow::anyhow!("Rejected GitHub App api_base_url: {}", e))?;
             raw.trim_end_matches('/').to_string()
         };
-
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::none())
-            .user_agent("gradient-ci/1.0")
-            .build()
-            .context("Failed to build HTTP client for GithubAppReporter")?;
 
         Ok(Self {
             api_base_url,
@@ -461,6 +450,7 @@ struct CheckRunCreateResponse {
 impl CiReporter for GithubAppReporter {
     async fn report(&self, report: &CiReport) -> Result<Option<i64>> {
         let token = crate::ci::github_app::get_installation_token(
+            &self.client,
             self.app_id,
             &self.private_key_pem,
             self.installation_id,
@@ -559,6 +549,7 @@ impl CiReporter for GithubAppReporter {
 /// Returns `NoopCiReporter` when CI reporting is not configured or the
 /// reporter type is unrecognised.
 pub fn reporter_for_project(
+    http: reqwest::Client,
     ci_type: Option<&str>,
     ci_url: Option<&str>,
     ci_token: Option<&str>,
@@ -571,14 +562,14 @@ pub fn reporter_for_project(
     let url = ci_url.unwrap_or("");
 
     match ci_type {
-        Some("gitea") => match GiteaReporter::new(url, token) {
+        Some("gitea") => match GiteaReporter::new(http, url, token) {
             Ok(r) => Arc::new(r),
             Err(e) => {
                 warn!(error = %e, "Failed to build GiteaReporter, falling back to noop");
                 Arc::new(NoopCiReporter)
             }
         },
-        Some("github") => match GithubReporter::new(url, token) {
+        Some("github") => match GithubReporter::new(http, url, token) {
             Ok(r) => Arc::new(r),
             Err(e) => {
                 warn!(error = %e, "Failed to build GithubReporter, falling back to noop");
@@ -627,6 +618,10 @@ pub fn parse_owner_repo(repository_url: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_client() -> reqwest::Client {
+        crate::http::build_client().expect("build test http client")
+    }
 
     // ── State conversions ─────────────────────────────────────────────────────
 
@@ -714,31 +709,31 @@ mod tests {
 
     #[test]
     fn gitea_reporter_trims_trailing_slash() {
-        let r = GiteaReporter::new("https://gitea.example.com/", "tok").unwrap();
+        let r = GiteaReporter::new(test_client(), "https://gitea.example.com/", "tok").unwrap();
         assert_eq!(r.base_url, "https://gitea.example.com");
     }
 
     #[test]
     fn gitea_reporter_preserves_no_trailing_slash() {
-        let r = GiteaReporter::new("https://gitea.example.com", "tok").unwrap();
+        let r = GiteaReporter::new(test_client(), "https://gitea.example.com", "tok").unwrap();
         assert_eq!(r.base_url, "https://gitea.example.com");
     }
 
     #[test]
     fn github_reporter_empty_url_uses_default() {
-        let r = GithubReporter::new("", "tok").unwrap();
+        let r = GithubReporter::new(test_client(), "", "tok").unwrap();
         assert_eq!(r.base_url, GithubReporter::DEFAULT_API_URL);
     }
 
     #[test]
     fn github_reporter_custom_url_kept() {
-        let r = GithubReporter::new("https://github.example.com/api/v3", "tok").unwrap();
+        let r = GithubReporter::new(test_client(), "https://github.example.com/api/v3", "tok").unwrap();
         assert_eq!(r.base_url, "https://github.example.com/api/v3");
     }
 
     #[test]
     fn github_reporter_trims_trailing_slash() {
-        let r = GithubReporter::new("https://github.example.com/api/v3/", "tok").unwrap();
+        let r = GithubReporter::new(test_client(), "https://github.example.com/api/v3/", "tok").unwrap();
         assert_eq!(r.base_url, "https://github.example.com/api/v3");
     }
 
@@ -746,57 +741,57 @@ mod tests {
 
     #[test]
     fn gitea_reporter_rejects_aws_metadata_ip() {
-        let err = GiteaReporter::new("http://169.254.169.254/", "tok").unwrap_err();
+        let err = GiteaReporter::new(test_client(), "http://169.254.169.254/", "tok").unwrap_err();
         assert!(format!("{err}").contains("Rejected Gitea base_url"));
     }
 
     #[test]
     fn gitea_reporter_rejects_localhost_hostname() {
-        assert!(GiteaReporter::new("http://localhost:3000/", "tok").is_err());
+        assert!(GiteaReporter::new(test_client(), "http://localhost:3000/", "tok").is_err());
     }
 
     #[test]
     fn gitea_reporter_rejects_loopback_ipv4() {
-        assert!(GiteaReporter::new("http://127.0.0.1/", "tok").is_err());
+        assert!(GiteaReporter::new(test_client(), "http://127.0.0.1/", "tok").is_err());
     }
 
     #[test]
     fn gitea_reporter_rejects_rfc1918() {
-        assert!(GiteaReporter::new("http://10.0.0.5/", "tok").is_err());
-        assert!(GiteaReporter::new("http://192.168.1.1/", "tok").is_err());
+        assert!(GiteaReporter::new(test_client(), "http://10.0.0.5/", "tok").is_err());
+        assert!(GiteaReporter::new(test_client(), "http://192.168.1.1/", "tok").is_err());
     }
 
     #[test]
     fn gitea_reporter_rejects_non_http_scheme() {
-        assert!(GiteaReporter::new("file:///etc/passwd", "tok").is_err());
-        assert!(GiteaReporter::new("ftp://gitea.example.com/", "tok").is_err());
+        assert!(GiteaReporter::new(test_client(), "file:///etc/passwd", "tok").is_err());
+        assert!(GiteaReporter::new(test_client(), "ftp://gitea.example.com/", "tok").is_err());
     }
 
     #[test]
     fn github_reporter_rejects_aws_metadata_ip() {
-        let err = GithubReporter::new("http://169.254.169.254/api/v3", "tok").unwrap_err();
+        let err = GithubReporter::new(test_client(), "http://169.254.169.254/api/v3", "tok").unwrap_err();
         assert!(format!("{err}").contains("Rejected GitHub base_url"));
     }
 
     #[test]
     fn github_reporter_rejects_localhost_hostname() {
-        assert!(GithubReporter::new("http://localhost/api/v3", "tok").is_err());
+        assert!(GithubReporter::new(test_client(), "http://localhost/api/v3", "tok").is_err());
     }
 
     #[test]
     fn github_reporter_rejects_ipv6_loopback() {
-        assert!(GithubReporter::new("http://[::1]/api/v3", "tok").is_err());
+        assert!(GithubReporter::new(test_client(), "http://[::1]/api/v3", "tok").is_err());
     }
 
     #[test]
     fn github_app_reporter_rejects_aws_metadata_ip() {
-        let err = GithubAppReporter::new("http://169.254.169.254/", 1, "pem", 1).unwrap_err();
+        let err = GithubAppReporter::new(test_client(), "http://169.254.169.254/", 1, "pem", 1).unwrap_err();
         assert!(format!("{err}").contains("Rejected GitHub App api_base_url"));
     }
 
     #[test]
     fn github_app_reporter_empty_url_still_uses_default() {
-        let r = GithubAppReporter::new("", 1, "pem", 1).unwrap();
+        let r = GithubAppReporter::new(test_client(), "", 1, "pem", 1).unwrap();
         assert_eq!(r.api_base_url, GithubAppReporter::DEFAULT_API_URL);
     }
 
@@ -804,6 +799,7 @@ mod tests {
     fn reporter_for_project_unsafe_url_falls_back_to_noop() {
         // Bad base_url should not crash callers — the factory logs and returns Noop.
         let r = reporter_for_project(
+            test_client(),
             Some("gitea"),
             Some("http://169.254.169.254/"),
             Some("tok"),
@@ -819,25 +815,26 @@ mod tests {
 
     #[test]
     fn reporter_for_project_no_token_is_noop() {
-        let r = reporter_for_project(Some("github"), Some("https://x"), None);
+        let r = reporter_for_project(test_client(), Some("github"), Some("https://x"), None);
         assert!(is_noop(&r));
     }
 
     #[test]
     fn reporter_for_project_no_type_is_noop() {
-        let r = reporter_for_project(None, None, Some("tok"));
+        let r = reporter_for_project(test_client(), None, None, Some("tok"));
         assert!(is_noop(&r));
     }
 
     #[test]
     fn reporter_for_project_unknown_type_is_noop() {
-        let r = reporter_for_project(Some("bitbucket"), None, Some("tok"));
+        let r = reporter_for_project(test_client(), Some("bitbucket"), None, Some("tok"));
         assert!(is_noop(&r));
     }
 
     #[test]
     fn reporter_for_project_gitea_builds_gitea() {
         let r = reporter_for_project(
+            test_client(),
             Some("gitea"),
             Some("https://gitea.example.com"),
             Some("tok"),
@@ -847,7 +844,7 @@ mod tests {
 
     #[test]
     fn reporter_for_project_github_builds_github() {
-        let r = reporter_for_project(Some("github"), None, Some("tok"));
+        let r = reporter_for_project(test_client(), Some("github"), None, Some("tok"));
         assert!(format!("{:?}", r).contains("GithubReporter"));
     }
 
