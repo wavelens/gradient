@@ -60,7 +60,7 @@ pub async fn post_basic_register(
     }
 
     if let Err(e) = validate_display_name(&body.name) {
-        return Err(WebError::BadRequest(format!("Invalid name: {}", e)));
+        return Err(WebError::bad_request(format!("Invalid name: {}", e)));
     }
 
     if !EmailAddress::is_valid(body.email.clone().as_str()) {
@@ -163,7 +163,7 @@ pub async fn post_basic_login(
     verify_password(body.password, &user_password).map_err(|_| WebError::invalid_credentials())?;
 
     if state.cli.email_enabled && state.cli.email_require_verification && !user.email_verified {
-        return Err(WebError::BadRequest("Email not verified. Please check your email and verify your account before logging in.".to_string()));
+        return Err(WebError::bad_request("Email not verified. Please check your email and verify your account before logging in."));
     }
 
     let use_tls = state.cli.use_tls;
@@ -183,7 +183,7 @@ pub async fn post_basic_login(
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
         HeaderValue::from_str(&cookie)
-            .map_err(|_| WebError::InternalServerError("Bad cookie".to_string()))?,
+            .map_err(|_| WebError::internal("Bad cookie"))?,
     );
     Ok(response)
 }
@@ -226,9 +226,9 @@ pub async fn get_oauth_authorize(
     let code = query.get("code").ok_or_else(WebError::invalid_oauth_code)?;
     let state_query = query
         .get("state")
-        .ok_or_else(|| WebError::Unauthorized("Missing OIDC state".to_string()))?;
+        .ok_or_else(|| WebError::unauthorized("Missing OIDC state"))?;
     let csrf = read_cookie(&headers, OIDC_CSRF_COOKIE)
-        .ok_or_else(|| WebError::Unauthorized("Missing OIDC CSRF cookie".to_string()))?;
+        .ok_or_else(|| WebError::unauthorized("Missing OIDC CSRF cookie"))?;
 
     let use_tls = state.cli.use_tls;
     let user: MUser = oidc_login_verify(
@@ -252,7 +252,7 @@ pub async fn get_oauth_authorize(
     response.headers_mut().append(
         axum::http::header::SET_COOKIE,
         HeaderValue::from_str(&oidc_csrf_clear_cookie(use_tls))
-            .map_err(|_| WebError::InternalServerError("Bad cookie".to_string()))?,
+            .map_err(|_| WebError::internal("Bad cookie"))?,
     );
     Ok(response)
 }
@@ -277,7 +277,7 @@ pub async fn post_oauth_authorize(
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
         HeaderValue::from_str(&oidc_csrf_set_cookie(&req.cookie_value, use_tls))
-            .map_err(|_| WebError::InternalServerError("Bad cookie".to_string()))?,
+            .map_err(|_| WebError::internal("Bad cookie"))?,
     );
     Ok(response)
 }
@@ -302,7 +302,7 @@ pub async fn get_oidc_login(
         .body(Body::empty())
         .map_err(|e| {
             tracing::error!("Failed to build HTTP response: {}", e);
-            WebError::InternalServerError("Failed to build redirect response".to_string())
+            WebError::internal("Failed to build redirect response")
         })
 }
 
@@ -314,9 +314,9 @@ pub async fn get_oidc_callback(
     let code = query.get("code").ok_or_else(WebError::invalid_oauth_code)?;
     let state_query = query
         .get("state")
-        .ok_or_else(|| WebError::Unauthorized("Missing OIDC state".to_string()))?;
+        .ok_or_else(|| WebError::unauthorized("Missing OIDC state"))?;
     let csrf = read_cookie(&headers, OIDC_CSRF_COOKIE)
-        .ok_or_else(|| WebError::Unauthorized("Missing OIDC CSRF cookie".to_string()))?;
+        .ok_or_else(|| WebError::unauthorized("Missing OIDC CSRF cookie"))?;
 
     let use_tls = state.cli.use_tls;
     let user: MUser = oidc_login_verify(
@@ -342,7 +342,7 @@ pub async fn get_oidc_callback(
         .body(Body::empty())
         .map_err(|e| {
             tracing::error!("Failed to build HTTP response: {}", e);
-            WebError::InternalServerError("Failed to build redirect response".to_string())
+            WebError::internal("Failed to build redirect response")
         })
 }
 
@@ -360,7 +360,7 @@ pub async fn post_logout(state: State<Arc<ServerState>>) -> WebResult<Response> 
     response.headers_mut().insert(
         axum::http::header::SET_COOKIE,
         HeaderValue::from_str(&clear_cookie)
-            .map_err(|_| WebError::InternalServerError("Bad cookie".to_string()))?,
+            .map_err(|_| WebError::internal("Bad cookie"))?,
     );
     Ok(response)
 }
@@ -424,13 +424,13 @@ pub async fn get_verify_email(
 
     let token = query
         .get("token")
-        .ok_or_else(|| WebError::BadRequest("Missing verification token".to_string()))?;
+        .ok_or_else(|| WebError::bad_request("Missing verification token"))?;
 
     let user = EUser::find()
         .filter(CUser::EmailVerificationToken.eq(token.clone()))
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::BadRequest("Invalid verification token".to_string()))?;
+        .ok_or_else(|| WebError::bad_request("Invalid verification token"))?;
 
     if let Some(expires) = user.email_verification_token_expires
         && core::types::now() > expires
@@ -495,7 +495,7 @@ pub async fn post_resend_verification(
         )
         .await
     {
-        return Err(WebError::InternalServerError(format!(
+        return Err(WebError::internal(format!(
             "Failed to send verification email: {}",
             e
         )));

@@ -158,7 +158,7 @@ pub async fn put(
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
+        return Err(WebError::bad_request(format!("Invalid display name: {}", e)));
     }
 
     body.repository
@@ -336,7 +336,7 @@ impl<'a> ProjectPatcher<'a> {
     fn apply_display_name(&mut self, display_name: String) -> WebResult<()> {
         let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
-            return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
+            return Err(WebError::bad_request(format!("Invalid display name: {}", e)));
         }
         self.aproject.display_name = Set(display_name);
         Ok(())
@@ -368,7 +368,7 @@ impl<'a> ProjectPatcher<'a> {
         }
         let global_max = self.state.cli.keep_evaluations as i32;
         if global_max > 0 && keep > global_max {
-            return Err(WebError::BadRequest(format!(
+            return Err(WebError::bad_request(format!(
                 "keep_evaluations cannot exceed the server maximum of {}",
                 global_max
             )));

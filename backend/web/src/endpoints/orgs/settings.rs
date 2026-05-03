@@ -263,7 +263,7 @@ pub async fn delete_organization_subscribe_cache(
         )
         .one(&state.web_db)
         .await?
-        .ok_or_else(|| WebError::BadRequest("Organization not subscribed to Cache".to_string()))?;
+        .ok_or_else(|| WebError::bad_request("Organization not subscribed to Cache"))?;
 
     let active: AOrganizationCache = record.into();
     active.delete(&state.web_db).await?;

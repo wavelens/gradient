@@ -105,7 +105,7 @@ pub async fn callback(
         .await
         .map_err(|e| {
             warn!(error = %e, "github manifest exchange failed");
-            WebError::InternalServerError(format!("github exchange failed: {e}"))
+            WebError::internal(format!("github exchange failed: {e}"))
         })?;
 
     core::ci::manifest_state::store_credentials(&state.pending_credentials, user_id, creds);

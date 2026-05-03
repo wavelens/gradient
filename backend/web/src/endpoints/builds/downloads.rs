@@ -249,7 +249,7 @@ pub async fn get_build_download(
     if let Some(token_str) = query.token {
         let claims = decode_download_token(State(Arc::clone(&state)), token_str)
             .await
-            .map_err(|_| WebError::Unauthorized("Invalid download token".to_string()))?;
+            .map_err(|_| WebError::unauthorized("Invalid download token"))?;
         if claims.build_id != build_id {
             return Err(WebError::not_found("Build"));
         }
@@ -261,7 +261,7 @@ pub async fn get_build_download(
                     return Err(WebError::not_found("Build"));
                 }
             }
-            None => return Err(WebError::Unauthorized("Authorization required".to_string())),
+            None => return Err(WebError::unauthorized("Authorization required")),
         }
     }
 

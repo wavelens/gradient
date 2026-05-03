@@ -68,7 +68,7 @@ pub async fn get_cache_key(
     )
     .map_err(|e| {
         tracing::error!("Failed to generate cache key: {}", e);
-        WebError::InternalServerError("Failed to generate cache key".to_string())
+        WebError::internal("Failed to generate cache key")
     })?;
 
     Ok(ok_json(cache_key))
@@ -88,7 +88,7 @@ pub async fn get_cache_public_key(
     )
     .map_err(|e| {
         tracing::error!("Failed to derive public key: {}", e);
-        WebError::InternalServerError("Failed to derive public key".to_string())
+        WebError::internal("Failed to derive public key")
     })?;
 
     Ok(ok_json(public_key))

@@ -101,7 +101,7 @@ fn parse_kind(s: &str) -> Result<IntegrationKind, WebError> {
     match s {
         "inbound" => Ok(IntegrationKind::Inbound),
         "outbound" => Ok(IntegrationKind::Outbound),
-        other => Err(WebError::BadRequest(format!(
+        other => Err(WebError::bad_request(format!(
             "Invalid integration kind '{}': expected 'inbound' or 'outbound'.",
             other
         ))),
@@ -110,7 +110,7 @@ fn parse_kind(s: &str) -> Result<IntegrationKind, WebError> {
 
 fn parse_forge(s: &str) -> Result<ForgeType, WebError> {
     ForgeType::from_path_segment(s).ok_or_else(|| {
-        WebError::BadRequest(format!(
+        WebError::bad_request(format!(
             "Invalid forge type '{}': expected 'gitea', 'forgejo', 'gitlab', or 'github'.",
             s
         ))
@@ -203,7 +203,7 @@ pub async fn put_integration(
     let encrypted_secret = match body.secret.as_deref() {
         Some(s) if !s.is_empty() => Some(
             encrypt_webhook_secret(&state.cli.crypt_secret_file, s).map_err(|e| {
-                WebError::InternalServerError(format!("Failed to encrypt secret: {}", e))
+                WebError::internal(format!("Failed to encrypt secret: {}", e))
             })?,
         ),
         _ => None,
@@ -212,7 +212,7 @@ pub async fn put_integration(
     let encrypted_token = match body.access_token.as_deref() {
         Some(t) if !t.is_empty() => Some(
             encrypt_webhook_secret(&state.cli.crypt_secret_file, t).map_err(|e| {
-                WebError::InternalServerError(format!("Failed to encrypt token: {}", e))
+                WebError::internal(format!("Failed to encrypt token: {}", e))
             })?,
         ),
         _ => None,
@@ -328,7 +328,7 @@ pub async fn patch_integration(
         } else {
             Some(
                 encrypt_webhook_secret(&state.cli.crypt_secret_file, &secret).map_err(|e| {
-                    WebError::InternalServerError(format!("Failed to encrypt secret: {}", e))
+                    WebError::internal(format!("Failed to encrypt secret: {}", e))
                 })?,
             )
         });
@@ -340,7 +340,7 @@ pub async fn patch_integration(
         } else {
             Some(
                 encrypt_webhook_secret(&state.cli.crypt_secret_file, &token).map_err(|e| {
-                    WebError::InternalServerError(format!("Failed to encrypt token: {}", e))
+                    WebError::internal(format!("Failed to encrypt token: {}", e))
                 })?,
             )
         });

@@ -57,7 +57,7 @@ async fn validate_integration(
         .or_not_found("Integration")?;
 
     if row.kind != expected_kind.as_i16() {
-        return Err(WebError::BadRequest(format!(
+        return Err(WebError::bad_request(format!(
             "Integration {} is not {}.",
             integration_id,
             match expected_kind {
@@ -77,7 +77,7 @@ pub async fn get_project_integration(
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectIntegrationResponse>>> {
     let user =
-        maybe_user.ok_or_else(|| WebError::Unauthorized("Authentication required.".to_string()))?;
+        maybe_user.ok_or_else(|| WebError::unauthorized("Authentication required."))?;
     let (_org, proj) = load_project(&state, user.id, organization, project).await?;
 
     let link = EProjectIntegration::find_by_id(proj.id)

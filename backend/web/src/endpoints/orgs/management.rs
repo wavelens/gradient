@@ -220,7 +220,7 @@ pub async fn put(
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
+        return Err(WebError::bad_request(format!("Invalid display name: {}", e)));
     }
 
     let existing_organization = EOrganization::find()
@@ -364,7 +364,7 @@ pub async fn patch_organization(
     if let Some(display_name) = body.display_name {
         let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
-            return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
+            return Err(WebError::bad_request(format!("Invalid display name: {}", e)));
         }
         aorganization.display_name = Set(display_name);
     }

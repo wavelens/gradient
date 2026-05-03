@@ -21,7 +21,7 @@ fn text_response(content_type: &'static str, body: String) -> WebResult<Response
     Response::builder()
         .header(header::CONTENT_TYPE, HeaderValue::from_static(content_type))
         .body(body)
-        .map_err(|e| WebError::InternalServerError(format!("Failed to build response: {}", e)))
+        .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────

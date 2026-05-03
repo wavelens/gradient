@@ -50,7 +50,7 @@ pub async fn get_build(
                 build.derivation,
                 build_id
             );
-            WebError::InternalServerError("Build data inconsistency".to_string())
+            WebError::data_inconsistency("Build")
         })?;
 
     let derivation_outputs = EDerivationOutput::find()

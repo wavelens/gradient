@@ -39,7 +39,7 @@ pub async fn nar(
         .nar_storage
         .get(&effective_hash)
         .await
-        .map_err(|e| WebError::InternalServerError(format!("Failed to read NAR: {}", e)))?
+        .map_err(|e| WebError::internal(format!("Failed to read NAR: {}", e)))?
         .or_not_found("Path")?;
 
     spawn_nar_traffic_metric(Arc::clone(&state), ctx.cache.id, compressed.len() as i64);
@@ -51,7 +51,7 @@ pub async fn nar(
             HeaderValue::from_static("application/x-nix-nar"),
         )
         .body(Body::from(compressed))
-        .map_err(|e| WebError::InternalServerError(format!("Failed to build response: {}", e)))
+        .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
 }
 
 pub async fn upstream_nar(
@@ -69,7 +69,7 @@ pub async fn upstream_nar(
 
     let base_url = upstream
         .url
-        .ok_or_else(|| WebError::BadRequest("Not an external upstream".to_string()))?;
+        .ok_or_else(|| WebError::bad_request("Not an external upstream"))?;
 
     let bytes = fetch_upstream_nar(&base_url, &path).await?;
 
@@ -79,7 +79,7 @@ pub async fn upstream_nar(
             HeaderValue::from_static("application/x-nix-nar"),
         )
         .body(Body::from(bytes))
-        .map_err(|e| WebError::InternalServerError(format!("Failed to build response: {}", e)))
+        .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -150,14 +150,14 @@ async fn fetch_upstream_nar(base_url: &str, path: &str) -> WebResult<bytes::Byte
         .get(&nar_url)
         .send()
         .await
-        .map_err(|e| WebError::InternalServerError(format!("Upstream request failed: {}", e)))?;
+        .map_err(|e| WebError::internal(format!("Upstream request failed: {}", e)))?;
 
     if !resp.status().is_success() {
         return Err(WebError::not_found("NAR in upstream"));
     }
 
     resp.bytes().await.map_err(|e| {
-        WebError::InternalServerError(format!("Failed to read upstream response: {}", e))
+        WebError::internal(format!("Failed to read upstream response: {}", e))
     })
 }
 

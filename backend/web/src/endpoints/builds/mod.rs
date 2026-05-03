@@ -62,7 +62,7 @@ impl BuildAccessContext {
                     build.evaluation,
                     build_id
                 );
-                WebError::InternalServerError("Build data inconsistency".to_string())
+                WebError::data_inconsistency("Build")
             })?;
 
         let organization_id = if let Some(project_id) = evaluation.project {
@@ -75,7 +75,7 @@ impl BuildAccessContext {
                         project_id,
                         evaluation.id
                     );
-                    WebError::InternalServerError("Evaluation data inconsistency".to_string())
+                    WebError::data_inconsistency("Evaluation")
                 })?
                 .organization
         } else {
@@ -85,7 +85,7 @@ impl BuildAccessContext {
                 .await?
                 .ok_or_else(|| {
                     tracing::error!("DirectBuild not found for evaluation {}", evaluation.id);
-                    WebError::InternalServerError("Direct build data inconsistency".to_string())
+                    WebError::data_inconsistency("Direct build")
                 })?
                 .organization
         };
@@ -95,7 +95,7 @@ impl BuildAccessContext {
             .await?
             .ok_or_else(|| {
                 tracing::error!("Organization {} not found", organization_id);
-                WebError::InternalServerError("Organization data inconsistency".to_string())
+                WebError::data_inconsistency("Organization")
             })?;
 
         Ok(Self {

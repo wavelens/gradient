@@ -157,10 +157,10 @@ pub async fn post_project_evaluate(
             .await
             .map_err(|e| match e {
                 core::ci::TriggerError::AlreadyInProgress => {
-                    WebError::BadRequest("Evaluation already in progress".to_string())
+                    WebError::bad_request("Evaluation already in progress")
                 }
                 core::ci::TriggerError::NoPreviousEvaluation => {
-                    WebError::BadRequest("No previous evaluation to restart from".to_string())
+                    WebError::bad_request("No previous evaluation to restart from")
                 }
                 core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
             })?;
@@ -184,10 +184,10 @@ pub async fn post_project_evaluate(
         .await
         .map_err(|e| match e {
             core::ci::TriggerError::AlreadyInProgress => {
-                WebError::BadRequest("Evaluation already in progress".to_string())
+                WebError::bad_request("Evaluation already in progress")
             }
             core::ci::TriggerError::NoPreviousEvaluation => {
-                WebError::InternalServerError("Unexpected error".to_string())
+                WebError::internal("Unexpected error")
             }
             core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
         })?;
@@ -581,7 +581,7 @@ pub async fn get_entry_point_download(
     let resolved_user: Option<MUser> = if let Some(token_str) = params.token {
         let token_data = crate::authorization::decode_jwt(State(Arc::clone(&state)), token_str)
             .await
-            .map_err(|_| WebError::Unauthorized("Invalid token".to_string()))?;
+            .map_err(|_| WebError::unauthorized("Invalid token"))?;
         EUser::find_by_id(token_data.claims.id)
             .one(&state.web_db)
             .await?
@@ -596,7 +596,7 @@ pub async fn get_entry_point_download(
                     return Err(WebError::not_found("Project"));
                 }
             }
-            None => return Err(WebError::Unauthorized("Authorization required".to_string())),
+            None => return Err(WebError::unauthorized("Authorization required")),
         }
     }
 
