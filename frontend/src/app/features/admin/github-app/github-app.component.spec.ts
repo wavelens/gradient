@@ -10,17 +10,18 @@ import { provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of, throwError } from 'rxjs';
+import { vi } from 'vitest';
 import { GithubAppComponent } from './github-app.component';
 import { AdminService } from '@core/services/admin.service';
 
 describe('GithubAppComponent', () => {
-  let admin: jasmine.SpyObj<AdminService>;
+  let admin: { requestGithubAppManifest: ReturnType<typeof vi.fn>; fetchGithubAppCredentials: ReturnType<typeof vi.fn> };
 
   function setup(queryParams: Record<string, string> = {}) {
-    admin = jasmine.createSpyObj<AdminService>('AdminService', [
-      'requestGithubAppManifest',
-      'fetchGithubAppCredentials',
-    ]);
+    admin = {
+      requestGithubAppManifest: vi.fn(),
+      fetchGithubAppCredentials: vi.fn(),
+    };
     TestBed.configureTestingModule({
       imports: [GithubAppComponent],
       providers: [
@@ -51,7 +52,7 @@ describe('GithubAppComponent', () => {
 
   it('clicking create-button calls requestGithubAppManifest with host', () => {
     setup({});
-    admin.requestGithubAppManifest.and.returnValue(
+    admin.requestGithubAppManifest.mockReturnValue(
       of({ manifest: {}, post_url: 'https://github.com/x', state: 's' }),
     );
     const fixture = TestBed.createComponent(GithubAppComponent);
@@ -62,7 +63,7 @@ describe('GithubAppComponent', () => {
 
   it('renders credentials when ready=1 and the API returns them', async () => {
     setup({ ready: '1' });
-    admin.fetchGithubAppCredentials.and.returnValue(
+    admin.fetchGithubAppCredentials.mockReturnValue(
       of({
         id: 7,
         slug: 'gradient',
@@ -77,15 +78,18 @@ describe('GithubAppComponent', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
-    const html: string = fixture.nativeElement.textContent;
-    expect(html).toContain('PEM');
-    expect(html).toContain('whsec');
-    expect(html).toContain('cid');
+    const inputs = Array.from(
+      fixture.nativeElement.querySelectorAll('input'),
+    ) as HTMLInputElement[];
+    const values = inputs.map((i) => i.value);
+    expect(values).toContain('PEM');
+    expect(values).toContain('whsec');
+    expect(values).toContain('cid');
   });
 
   it('shows a friendly error when credentials are no longer available', async () => {
     setup({ ready: '1' });
-    admin.fetchGithubAppCredentials.and.returnValue(
+    admin.fetchGithubAppCredentials.mockReturnValue(
       throwError(() => ({ status: 404 })),
     );
     const fixture = TestBed.createComponent(GithubAppComponent);
