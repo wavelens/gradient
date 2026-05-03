@@ -14,25 +14,27 @@
 
 use std::time::Duration;
 
-/// Default request timeout applied to the shared client.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// User-agent string sent with every outbound request.
 pub fn user_agent() -> String {
     format!("gradient/{}", env!("CARGO_PKG_VERSION"))
 }
 
-/// Build a `reqwest::Client` with the project-wide defaults: a 30-second
-/// timeout, no redirect following, and a `gradient/<version>` user-agent.
-///
-/// Callers that need a different per-request timeout should override it on
-/// the `RequestBuilder` (`.timeout(...)`) rather than constructing another
-/// client.
+fn rustls_config() -> rustls::ClientConfig {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth()
+}
+
 pub fn build_client() -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(DEFAULT_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .user_agent(user_agent())
+        .use_preconfigured_tls(rustls_config())
         .build()
 }
 
