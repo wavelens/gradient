@@ -16,6 +16,26 @@ pub mod workers;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
+use std::time::Duration;
+
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+/// Process-wide shared `reqwest::Client` for the CLI.
+///
+/// `reqwest::Client` is internally `Arc`'d and is meant to be cloned/reused;
+/// constructing one per request leaks connection pools and produces no
+/// timeout/redirect policy. Always go through this accessor.
+pub(crate) fn http_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+            .user_agent(concat!("gradient-cli/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .expect("failed to build CLI HTTP client")
+    })
+}
 
 #[derive(Debug, Clone)]
 pub struct RequestConfig {
@@ -78,8 +98,7 @@ fn get_client(
     request_type: RequestType,
     login: bool,
 ) -> Result<reqwest::RequestBuilder, String> {
-    let client = reqwest::Client::new();
-    let mut client = client.request(
+    let mut client = http_client().request(
         request_type,
         format!("{}/api/v1/{}", config.server_url, endpoint),
     );

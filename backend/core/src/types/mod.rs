@@ -102,6 +102,10 @@ pub struct ServerState {
     pub webhooks: Arc<dyn WebhookClient>,
     pub email: Arc<dyn EmailSender>,
     pub nar_storage: NarStore,
+    /// Shared outbound HTTP client. Reuse this for any outbound request
+    /// made from a handler or background task — never construct a fresh
+    /// `reqwest::Client` per call.
+    pub http: reqwest::Client,
     /// Issued-but-unconsumed manifest CSRF state tokens with their issuance time.
     pub manifest_state: Arc<crate::ci::manifest_state::ManifestStateStore>,
     /// Manifest results awaiting one-shot pickup by the superuser's browser.

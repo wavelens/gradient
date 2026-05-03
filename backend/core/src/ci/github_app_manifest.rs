@@ -87,21 +87,24 @@ use tracing::debug;
 /// `host` is the GitHub host (`github.com` for github.com, `ghe.example.com`
 /// for an Enterprise instance); the API base URL is derived via
 /// [`api_base_url`].
-pub async fn exchange_code(host: &str, code: &str) -> Result<ManifestResult> {
+pub async fn exchange_code(
+    client: &reqwest::Client,
+    host: &str,
+    code: &str,
+) -> Result<ManifestResult> {
     let base = api_base_url(host);
-    exchange_code_with_base(&base, code).await
+    exchange_code_with_base(client, &base, code).await
 }
 
 /// Lower-level exchange entry point that accepts an explicit API base URL.
 /// Used by tests against `wiremock`.
-pub async fn exchange_code_with_base(api_base_url: &str, code: &str) -> Result<ManifestResult> {
+pub async fn exchange_code_with_base(
+    client: &reqwest::Client,
+    api_base_url: &str,
+    code: &str,
+) -> Result<ManifestResult> {
     let url = format!("{api_base_url}/app-manifests/{code}/conversions");
     debug!(%url, "exchanging github app manifest code");
-
-    let client = reqwest::Client::builder()
-        .user_agent("gradient-ci/1.0")
-        .build()
-        .context("failed to build reqwest client")?;
 
     let resp = client
         .post(&url)
@@ -216,7 +219,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let result = exchange_code_with_base(&server.uri(), "abc")
+        let client = crate::http::build_client().unwrap();
+        let result = exchange_code_with_base(&client, &server.uri(), "abc")
             .await
             .expect("happy path");
         assert_eq!(result.id, 42);
@@ -234,7 +238,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let err = exchange_code_with_base(&server.uri(), "bad")
+        let client = crate::http::build_client().unwrap();
+        let err = exchange_code_with_base(&client, &server.uri(), "bad")
             .await
             .expect_err("404 should error");
         let msg = format!("{err}");

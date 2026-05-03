@@ -861,3 +861,29 @@ Unit tests in `backend/web/src/helpers.rs`:
   unchanged.
 - `or_not_found_maps_none_to_not_found` — produces the expected
   `WebError::NotFound("Thing not found")`.
+
+## Shared HTTP client (`#79`)
+
+Eliminates the prior 18 ad-hoc `reqwest::Client::new()` /
+`reqwest::Client::builder()` constructions across the workspace, which
+each created a fresh TCP/TLS connection pool with inconsistent (or
+absent) timeout and redirect policy.
+
+`backend/core/src/http.rs` builds the project-wide client with sane
+defaults (30 s timeout, `redirect::none`, `gradient/<version>`
+user-agent). The server stores it once on `ServerState::http`; the
+worker exposes it through a `OnceLock` (`worker::http::client()`); the
+CLI exposes it through `connector::http_client()`.
+
+CI reporters (`GiteaReporter`, `GithubReporter`, `GithubAppReporter`)
+and the GitHub-App helpers (`get_installation_token`, `exchange_code`)
+now take the shared `reqwest::Client` as a parameter instead of building
+their own.
+
+Unit tests in `backend/core/src/http.rs`:
+
+- `build_client_succeeds` — the default builder yields a usable
+  `reqwest::Client`.
+- `user_agent_is_prefixed` — the user-agent string is namespaced
+  `gradient/...` so server logs can identify outbound calls from
+  Gradient processes.

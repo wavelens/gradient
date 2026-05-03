@@ -101,7 +101,7 @@ pub async fn callback(
         ));
     };
 
-    let creds = gradient_core::ci::github_app_manifest::exchange_code(&host, &q.code)
+    let creds = gradient_core::ci::github_app_manifest::exchange_code(&state.http, &host, &q.code)
         .await
         .map_err(|e| {
             warn!(error = %e, "github manifest exchange failed");

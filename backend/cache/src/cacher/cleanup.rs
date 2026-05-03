@@ -302,6 +302,7 @@ mod tests {
             nar_storage,
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            http: gradient_core::http::build_client().expect("http client"),
         })
     }
 
@@ -380,6 +381,7 @@ mod tests {
             nar_storage,
             manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            http: gradient_core::http::build_client().expect("http client"),
         });
 
         cleanup_stale_cached_nars(state).await.unwrap();

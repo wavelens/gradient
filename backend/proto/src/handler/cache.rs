@@ -326,17 +326,7 @@ async fn extend_with_upstream_results(
             return;
         }
 
-        let http = match reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .connect_timeout(std::time::Duration::from_secs(3))
-            .build()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                warn!(error = %e, "failed to build upstream HTTP client; skipping upstream lookup");
-                return;
-            }
-        };
+        let http = state.http.clone();
 
         let upstream_urls = Arc::new(upstream_urls);
         let mut futs = FuturesUnordered::new();
@@ -482,7 +472,12 @@ async fn lookup_upstream_narinfo(
 ) -> Option<crate::messages::CachedPath> {
     for base_url in upstream_urls.iter() {
         let narinfo_url = format!("{}/{}.narinfo", base_url.trim_end_matches('/'), &hash);
-        let body = match http.get(&narinfo_url).send().await {
+        let body = match http
+            .get(&narinfo_url)
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+        {
             Ok(r) if r.status().is_success() => match r.text().await {
                 Ok(b) => b,
                 Err(_) => continue,

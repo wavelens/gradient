@@ -65,12 +65,10 @@ fn random_url_safe(bytes: usize) -> String {
     URL_SAFE_NO_PAD.encode(buf)
 }
 
-async fn get_oidc_metadata(discovery_url: &str) -> Result<serde_json::Value> {
-    let http_client = reqwest::ClientBuilder::new()
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-        .context("Failed to create HTTP client")?;
-
+async fn get_oidc_metadata(
+    http_client: &reqwest::Client,
+    discovery_url: &str,
+) -> Result<serde_json::Value> {
     let url = if discovery_url.ends_with("/.well-known/openid-configuration") {
         discovery_url.to_string()
     } else {
@@ -92,12 +90,7 @@ async fn get_oidc_metadata(discovery_url: &str) -> Result<serde_json::Value> {
     Ok(metadata)
 }
 
-async fn fetch_jwks(jwks_uri: &str) -> Result<JwkSet> {
-    let http_client = reqwest::ClientBuilder::new()
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-        .context("Failed to create HTTP client")?;
-
+async fn fetch_jwks(http_client: &reqwest::Client, jwks_uri: &str) -> Result<JwkSet> {
     let jwks: JwkSet = http_client
         .get(jwks_uri)
         .send()
@@ -118,7 +111,7 @@ pub async fn oidc_login_create(
         .oidc.clone()
         .context("OIDC is not enabled or not fully configured")?;
 
-    let metadata = get_oidc_metadata(&oidc.discovery_url).await?;
+    let metadata = get_oidc_metadata(&state.http, &oidc.discovery_url).await?;
 
     let auth_endpoint = metadata["authorization_endpoint"]
         .as_str()
@@ -199,7 +192,7 @@ pub async fn oidc_login_verify(
 
     let expected_nonce = csrf_data.claims.nonce;
 
-    let metadata = get_oidc_metadata(&oidc.discovery_url).await?;
+    let metadata = get_oidc_metadata(&state.http, &oidc.discovery_url).await?;
 
     let issuer = metadata["issuer"]
         .as_str()
@@ -212,10 +205,7 @@ pub async fn oidc_login_verify(
         .as_str()
         .context("No jwks_uri in OIDC metadata")?;
 
-    let http_client = reqwest::ClientBuilder::new()
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-        .context("Failed to create HTTP client")?;
+    let http_client = &state.http;
 
     let redirect_uri = format!("{}/api/v1/auth/oidc/callback", state.config.server.serve_url);
     let client_secret = load_secret(&oidc.client_secret_file);
@@ -246,7 +236,7 @@ pub async fn oidc_login_verify(
         .as_str()
         .context("No id_token in token response")?;
 
-    let claims = verify_id_token(id_token, jwks_uri, &issuer, &oidc.client_id).await?;
+    let claims = verify_id_token(&state.http, id_token, jwks_uri, &issuer, &oidc.client_id).await?;
 
     match claims.nonce.as_deref() {
         Some(n) if n.as_bytes().ct_eq(expected_nonce.as_bytes()).unwrap_u8() == 1 => {}
@@ -257,6 +247,7 @@ pub async fn oidc_login_verify(
 }
 
 async fn verify_id_token(
+    http: &reqwest::Client,
     id_token: &str,
     jwks_uri: &str,
     expected_iss: &str,
@@ -268,7 +259,7 @@ async fn verify_id_token(
         .clone()
         .context("id_token header has no kid")?;
 
-    let jwks = fetch_jwks(jwks_uri).await?;
+    let jwks = fetch_jwks(http, jwks_uri).await?;
     let jwk = jwks
         .find(&kid)
         .context("No JWK matches id_token kid")?;

@@ -96,10 +96,9 @@ pub async fn post_direct_build(
         form = form.part("files", part);
     }
 
-    let client = reqwest::Client::new();
     let url = format!("{}/api/v1/builds", config.server_url);
 
-    let res = client
+    let res = crate::http_client()
         .post(&url)
         .header(
             "Authorization",
@@ -136,13 +135,12 @@ pub async fn download_build_file(
     build_id: String,
     filename: String,
 ) -> Result<Vec<u8>, String> {
-    let client = reqwest::Client::new();
     let url = format!(
         "{}/api/v1/builds/{}/download/{}",
         config.server_url, build_id, filename
     );
 
-    let res = client
+    let res = crate::http_client()
         .get(&url)
         .header(
             "Authorization",

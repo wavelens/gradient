@@ -98,7 +98,7 @@ async fn fetch_from_upstream(
         .await
         .unwrap_or_default();
 
-    let http_client = reqwest::Client::new();
+    let http_client = &state.http;
     for upstream in upstreams {
         let Some(base_url) = upstream.url.as_deref() else {
             continue;

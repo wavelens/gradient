@@ -8,6 +8,7 @@ mod config;
 mod connection;
 mod connection_state;
 mod executor;
+mod http;
 mod nix;
 mod proto;
 mod reconnect;
