@@ -801,3 +801,33 @@ Unit tests in `backend/entity/src/build.rs`:
 - `for_api_collapses_created_to_queued` — `Created.for_api() == Queued`.
 - `for_api_passes_through_other_states` — every other variant is
   returned unchanged.
+
+## Shared web/core helpers (`#78`)
+
+To collapse the boilerplate measured in issue #78, the following helpers
+were introduced and applied repo-wide:
+
+- `core::types::now()` — single source for `chrono::Utc::now().naive_utc()`,
+  the timestamp shape every persisted column expects.
+- `web::helpers::ok_json(message)` — wraps a value in the standard
+  successful `BaseResponse` envelope, replacing the boilerplate
+  `Json(BaseResponse { error: false, message })`.
+- `web::helpers::OptionExt::or_not_found(resource)` — converts the
+  result of a SeaORM `.one(db).await?` lookup into a `WebResult<T>`
+  with a `<resource> not found` 404, replacing the
+  `.ok_or_else(|| WebError::not_found(...))` chain.
+- `WebError::{bad_request, unauthorized, forbidden, conflict,
+  unprocessable_entity, internal, service_unavailable}` — accept
+  `impl Into<String>` so callers can drop `.to_string()` on string
+  literals and `format!(...)` payloads.
+- `WebError::data_inconsistency(resource)` — for the recurring
+  `"<resource> data inconsistency"` referential-integrity 500.
+
+Unit tests in `backend/web/src/helpers.rs`:
+
+- `ok_json_wraps_with_error_false` — the envelope is constructed with
+  `error: false` and the supplied message.
+- `or_not_found_returns_value_for_some` — passes the inner value through
+  unchanged.
+- `or_not_found_maps_none_to_not_found` — produces the expected
+  `WebError::NotFound("Thing not found")`.
