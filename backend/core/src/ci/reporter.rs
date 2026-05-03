@@ -74,6 +74,7 @@ pub struct CiReport {
 ///   is configured).
 /// - `RecordingCiReporter` (test-support) — records every call for assertions.
 /// - `GiteaReporter` — Gitea Commit Status API.
+/// - `GitlabReporter` — GitLab Commit Status API.
 /// - `GithubReporter` — GitHub Commit Status API (also works with GitHub Enterprise Server).
 #[async_trait]
 pub trait CiReporter: Send + Sync + std::fmt::Debug + 'static {
@@ -196,6 +197,125 @@ impl CiReporter for GiteaReporter {
                 "Gitea CI status report failed"
             );
             anyhow::bail!("Gitea returned {}: {}", status, body);
+        }
+
+        Ok(None)
+    }
+}
+
+// ── GitlabReporter ────────────────────────────────────────────────────────────
+
+/// CI reporter that posts commit statuses to a GitLab instance.
+///
+/// Uses the GitLab Commit Status API:
+/// `POST {base_url}/api/v4/projects/{owner}%2F{repo}/statuses/{sha}`
+///
+/// The project identifier is the URL-encoded `owner/repo` path, which also
+/// supports nested groups (`group/subgroup/repo` → `group%2Fsubgroup%2Frepo`).
+/// Authenticates via `PRIVATE-TOKEN`, which accepts personal, project, and
+/// group access tokens.
+#[derive(Debug)]
+pub struct GitlabReporter {
+    base_url: String,
+    token: String,
+    client: reqwest::Client,
+}
+
+impl GitlabReporter {
+    pub fn new(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+        token: impl Into<String>,
+    ) -> Result<Self> {
+        let raw = base_url.into();
+        validate_safe_outbound_url(&raw)
+            .map_err(|e| anyhow::anyhow!("Rejected GitLab base_url: {}", e))?;
+        Ok(Self {
+            base_url: raw.trim_end_matches('/').to_string(),
+            token: token.into(),
+            client,
+        })
+    }
+}
+
+/// GitLab commit status state strings.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum GitlabState {
+    Pending,
+    Running,
+    Success,
+    Failed,
+    #[allow(dead_code)]
+    Canceled,
+}
+
+impl From<&CiStatus> for GitlabState {
+    fn from(s: &CiStatus) -> Self {
+        match s {
+            CiStatus::Pending => GitlabState::Pending,
+            CiStatus::Running => GitlabState::Running,
+            CiStatus::Success => GitlabState::Success,
+            CiStatus::Failure => GitlabState::Failed,
+            CiStatus::Error => GitlabState::Failed,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct GitlabStatusPayload<'a> {
+    state: GitlabState,
+    name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_url: Option<&'a str>,
+}
+
+/// Percent-encodes the path segments of `owner/repo` (including nested groups)
+/// for use as GitLab's `:id` URL component. Only `/` is encoded; everything
+/// else is passed through, since GitLab project paths are restricted to a
+/// safe character set already.
+fn gitlab_project_id(owner: &str, repo: &str) -> String {
+    format!("{}/{}", owner, repo).replace('/', "%2F")
+}
+
+#[async_trait]
+impl CiReporter for GitlabReporter {
+    async fn report(&self, report: &CiReport) -> Result<Option<i64>> {
+        let project_id = gitlab_project_id(&report.owner, &report.repo);
+        let url = format!(
+            "{}/api/v4/projects/{}/statuses/{}",
+            self.base_url, project_id, report.sha
+        );
+
+        let payload = GitlabStatusPayload {
+            state: GitlabState::from(&report.status),
+            name: &report.context,
+            description: report.description.as_deref(),
+            target_url: report.details_url.as_deref(),
+        };
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await
+            .context("Failed to send GitLab status request")?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            warn!(
+                gitlab_url = %url,
+                http_status = %status,
+                body = %body,
+                "GitLab CI status report failed"
+            );
+            anyhow::bail!("GitLab returned {}: {}", status, body);
         }
 
         Ok(None)
@@ -569,6 +689,13 @@ pub fn reporter_for_project(
                 Arc::new(NoopCiReporter)
             }
         },
+        Some("gitlab") => match GitlabReporter::new(http, url, token) {
+            Ok(r) => Arc::new(r),
+            Err(e) => {
+                warn!(error = %e, "Failed to build GitlabReporter, falling back to noop");
+                Arc::new(NoopCiReporter)
+            }
+        },
         Some("github") => match GithubReporter::new(http, url, token) {
             Ok(r) => Arc::new(r),
             Err(e) => {
@@ -650,6 +777,63 @@ mod tests {
     }
 
     #[test]
+    fn gitlab_state_from_ci_status_all_variants() {
+        assert!(matches!(
+            GitlabState::from(&CiStatus::Pending),
+            GitlabState::Pending
+        ));
+        assert!(matches!(
+            GitlabState::from(&CiStatus::Running),
+            GitlabState::Running
+        ));
+        assert!(matches!(
+            GitlabState::from(&CiStatus::Success),
+            GitlabState::Success
+        ));
+        assert!(matches!(
+            GitlabState::from(&CiStatus::Failure),
+            GitlabState::Failed
+        ));
+        assert!(matches!(
+            GitlabState::from(&CiStatus::Error),
+            GitlabState::Failed
+        ));
+    }
+
+    #[test]
+    fn gitlab_state_serializes_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&GitlabState::Pending).unwrap(),
+            "\"pending\""
+        );
+        assert_eq!(
+            serde_json::to_string(&GitlabState::Running).unwrap(),
+            "\"running\""
+        );
+        assert_eq!(
+            serde_json::to_string(&GitlabState::Success).unwrap(),
+            "\"success\""
+        );
+        assert_eq!(
+            serde_json::to_string(&GitlabState::Failed).unwrap(),
+            "\"failed\""
+        );
+    }
+
+    #[test]
+    fn gitlab_project_id_flat_path() {
+        assert_eq!(gitlab_project_id("acme", "widgets"), "acme%2Fwidgets");
+    }
+
+    #[test]
+    fn gitlab_project_id_nested_groups() {
+        assert_eq!(
+            gitlab_project_id("group", "sub/repo"),
+            "group%2Fsub%2Frepo"
+        );
+    }
+
+    #[test]
     fn github_state_from_ci_status_all_variants() {
         assert!(matches!(
             GithubState::from(&CiStatus::Pending),
@@ -717,6 +901,28 @@ mod tests {
     fn gitea_reporter_preserves_no_trailing_slash() {
         let r = GiteaReporter::new(test_client(), "https://gitea.example.com", "tok").unwrap();
         assert_eq!(r.base_url, "https://gitea.example.com");
+    }
+
+    #[test]
+    fn gitlab_reporter_trims_trailing_slash() {
+        let r = GitlabReporter::new(test_client(), "https://gitlab.example.com/", "tok").unwrap();
+        assert_eq!(r.base_url, "https://gitlab.example.com");
+    }
+
+    #[test]
+    fn gitlab_reporter_rejects_aws_metadata_ip() {
+        let err = GitlabReporter::new(test_client(), "http://169.254.169.254/", "tok").unwrap_err();
+        assert!(format!("{err}").contains("Rejected GitLab base_url"));
+    }
+
+    #[test]
+    fn gitlab_reporter_rejects_localhost_hostname() {
+        assert!(GitlabReporter::new(test_client(), "http://localhost/", "tok").is_err());
+    }
+
+    #[test]
+    fn gitlab_reporter_rejects_non_http_scheme() {
+        assert!(GitlabReporter::new(test_client(), "file:///etc/passwd", "tok").is_err());
     }
 
     #[test]
@@ -840,6 +1046,17 @@ mod tests {
             Some("tok"),
         );
         assert!(format!("{:?}", r).contains("GiteaReporter"));
+    }
+
+    #[test]
+    fn reporter_for_project_gitlab_builds_gitlab() {
+        let r = reporter_for_project(
+            test_client(),
+            Some("gitlab"),
+            Some("https://gitlab.example.com"),
+            Some("tok"),
+        );
+        assert!(format!("{:?}", r).contains("GitlabReporter"));
     }
 
     #[test]
