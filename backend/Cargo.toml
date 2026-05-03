@@ -80,7 +80,7 @@ sea-orm-migration = { version = "1.1", default-features = false, features = ["cl
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "stream", "charset", "http2", "multipart"] }
 
 # Object store / git
-git2         = { version = "0.20", default-features = false }
+git2         = { version = "0.20", default-features = false, features = ["https", "ssh"] }
 libc         = { version = "0.2", default-features = false }
 object_store = { version = "0.13", default-features = false, features = ["aws", "fs"] }
 
