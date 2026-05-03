@@ -5,6 +5,7 @@
  */
 
 use super::load_admin_org;
+use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
@@ -102,10 +103,7 @@ pub async fn get_organization_users(
         })
         .collect();
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: items,
-    }))
+    Ok(ok_json(items))
 }
 
 pub async fn post_organization_users(
@@ -145,10 +143,7 @@ pub async fn post_organization_users(
     .insert(&state.web_db)
     .await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "User invited".to_string(),
-    }))
+    Ok(ok_json("User invited".to_string()))
 }
 
 pub async fn patch_organization_users(
@@ -174,10 +169,7 @@ pub async fn patch_organization_users(
     active.role = Set(role.id);
     active.update(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "User role updated".to_string(),
-    }))
+    Ok(ok_json("User role updated".to_string()))
 }
 
 pub async fn delete_organization_users(
@@ -196,8 +188,5 @@ pub async fn delete_organization_users(
     let active: AOrganizationUser = membership.into();
     active.delete(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "User kicked".to_string(),
-    }))
+    Ok(ok_json("User kicked".to_string()))
 }

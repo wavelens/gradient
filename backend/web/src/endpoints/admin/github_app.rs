@@ -7,6 +7,7 @@
 //! `POST /admin/github-app/manifest`, `GET /admin/github-app/callback`,
 //! `GET /admin/github-app/credentials`.
 
+use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult, require_superuser};
 use axum::extract::{Query, State};
 use axum::response::Redirect;
@@ -69,14 +70,11 @@ pub async fn request_manifest(
     let token = core::ci::manifest_state::issue_state(&state.manifest_state, user.id);
     let post_url = core::ci::github_app_manifest::manifest_post_url(&host, &token);
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: ManifestResponse {
+    Ok(ok_json(ManifestResponse {
             manifest,
             post_url,
             state: token,
-        },
-    }))
+        }))
 }
 
 /// Unauthenticated callback target for GitHub's manifest redirect.
@@ -124,10 +122,7 @@ pub async fn credentials(
     let creds = core::ci::manifest_state::take_credentials(&state.pending_credentials, user.id)
         .ok_or_else(|| WebError::NotFound("Pending credentials".into()))?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: creds,
-    }))
+    Ok(ok_json(creds))
 }
 
 #[cfg(test)]

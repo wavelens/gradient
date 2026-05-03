@@ -35,6 +35,7 @@ use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use tracing::{debug, warn};
 
+use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
 
 use events::ParsedPushEvent;
@@ -100,10 +101,7 @@ pub async fn github_app_webhook(
         other => WebhookResponse::empty(other),
     };
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: response,
-    }))
+    Ok(ok_json(response))
 }
 
 // ── Generic forge webhook ──────────────────────────────────────────────────
@@ -179,16 +177,13 @@ pub async fn forge_webhook(
     let urls = parsed.repository_urls.clone();
     let outcome = parsed.trigger(&state).await;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: WebhookResponse {
+    Ok(ok_json(WebhookResponse {
             event: "push".to_string(),
             repository_urls: urls,
             projects_scanned: outcome.projects_scanned,
             queued: outcome.queued,
             skipped: outcome.skipped,
-        },
-    }))
+        }))
 }
 
 fn verify_forge_signature(

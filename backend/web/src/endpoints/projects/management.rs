@@ -5,6 +5,7 @@
  */
 
 use super::{ProjectResponse, load_editable_project, load_project, user_can_edit};
+use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
@@ -58,10 +59,7 @@ pub async fn get_project_name_available(
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
     if check_index_name(&name).is_err() {
-        return Ok(Json(BaseResponse {
-            error: false,
-            message: false,
-        }));
+        return Ok(ok_json(false));
     }
     let org = get_any_organization_by_name(state.0.clone(), organization)
         .await?
@@ -72,10 +70,7 @@ pub async fn get_project_name_available(
         .one(&state.web_db)
         .await?
         .is_some();
-    Ok(Json(BaseResponse {
-        error: false,
-        message: !exists,
-    }))
+    Ok(ok_json(!exists))
 }
 
 pub async fn get(
@@ -144,15 +139,12 @@ pub async fn get(
         })
         .collect();
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: Paginated {
+    Ok(ok_json(Paginated {
             items,
             total,
             page,
             per_page,
-        },
-    }))
+        }))
 }
 
 pub async fn put(
@@ -254,9 +246,7 @@ pub async fn get_project(
         None
     };
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: ProjectResponse {
+    Ok(ok_json(ProjectResponse {
             id: project.id,
             organization: project.organization,
             name: project.name,
@@ -273,8 +263,7 @@ pub async fn get_project(
             managed: project.managed,
             keep_evaluations: project.keep_evaluations,
             can_edit,
-        },
-    }))
+        }))
 }
 
 pub async fn patch_project(
@@ -310,10 +299,7 @@ pub async fn patch_project(
     aproject.force_evaluation = Set(true);
     aproject.update(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Project updated".to_string(),
-    }))
+    Ok(ok_json("Project updated".to_string()))
 }
 
 /// Holds shared context for the project-patch field validators so that

@@ -7,6 +7,7 @@
 //! Link a project to named org-level integrations (inbound + outbound).
 
 use super::{load_editable_project, load_project};
+use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
@@ -92,10 +93,7 @@ pub async fn get_project_integration(
         },
     };
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message,
-    }))
+    Ok(ok_json(message))
 }
 
 /// `PUT /projects/{organization}/{project}/integration` — upsert the link row.
@@ -136,10 +134,7 @@ pub async fn put_project_integration(
         }
     };
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: ProjectIntegrationResponse::from(updated),
-    }))
+    Ok(ok_json(ProjectIntegrationResponse::from(updated)))
 }
 
 /// `DELETE /projects/{organization}/{project}/integration` — remove link row.
@@ -157,8 +152,5 @@ pub async fn delete_project_integration(
         row.into_active_model().delete(&state.web_db).await?;
     }
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: true,
-    }))
+    Ok(ok_json(true))
 }

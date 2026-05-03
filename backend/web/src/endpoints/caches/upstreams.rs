@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
 use axum::Extension;
 use axum::Json;
@@ -102,10 +103,7 @@ pub async fn get_cache_upstreams(
         })
         .collect();
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: upstreams,
-    }))
+    Ok(ok_json(upstreams))
 }
 
 pub async fn put_cache_upstream(
@@ -155,10 +153,7 @@ pub async fn put_cache_upstream(
     };
 
     let inserted = record.insert(&state.web_db).await?;
-    Ok(Json(BaseResponse {
-        error: false,
-        message: inserted.id,
-    }))
+    Ok(ok_json(inserted.id))
 }
 
 pub async fn patch_cache_upstream(
@@ -194,10 +189,7 @@ pub async fn patch_cache_upstream(
 
     active.update(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Upstream updated".to_string(),
-    }))
+    Ok(ok_json("Upstream updated".to_string()))
 }
 
 pub async fn delete_cache_upstream(
@@ -211,8 +203,5 @@ pub async fn delete_cache_upstream(
     let active: ACacheUpstream = record.into();
     active.delete(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Upstream removed".to_string(),
-    }))
+    Ok(ok_json("Upstream removed".to_string()))
 }

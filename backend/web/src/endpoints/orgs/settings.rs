@@ -5,6 +5,7 @@
  */
 
 use super::{load_unmanaged_org, load_org_member};
+use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -93,10 +94,7 @@ pub async fn post_organization_public(
     active.public = Set(true);
     active.update(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Organization is now public".to_string(),
-    }))
+    Ok(ok_json("Organization is now public".to_string()))
 }
 
 pub async fn delete_organization_public(
@@ -109,10 +107,7 @@ pub async fn delete_organization_public(
     active.public = Set(false);
     active.update(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Organization is now private".to_string(),
-    }))
+    Ok(ok_json("Organization is now private".to_string()))
 }
 
 pub async fn get_organization_subscribe(
@@ -138,10 +133,7 @@ pub async fn get_organization_subscribe(
         }
     }
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: subscribed,
-    }))
+    Ok(ok_json(subscribed))
 }
 
 pub async fn post_organization_subscribe_cache(
@@ -188,10 +180,7 @@ pub async fn post_organization_subscribe_cache(
     // `signature = NULL`; the periodic sign sweep will fill them in.
     enqueue_backfill_signatures(&state, org.id, cache.id).await;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Cache subscribed".to_string(),
-    }))
+    Ok(ok_json("Cache subscribed".to_string()))
 }
 
 /// Insert null-signature placeholders for every `cached_path` reachable
@@ -279,8 +268,5 @@ pub async fn delete_organization_subscribe_cache(
     let active: AOrganizationCache = record.into();
     active.delete(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Cache unsubscribed".to_string(),
-    }))
+    Ok(ok_json("Cache unsubscribed".to_string()))
 }

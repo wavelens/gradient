@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
@@ -204,10 +205,7 @@ pub async fn get_build_dependencies(
         }
     }
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: nodes,
-    }))
+    Ok(ok_json(nodes))
 }
 
 /// GET /builds/{build}/graph — full transitive dependency graph rooted at a build
@@ -244,12 +242,9 @@ pub async fn get_build_graph(
         }
     }
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: BuildGraph {
+    Ok(ok_json(BuildGraph {
             root: build_id,
             nodes,
             edges,
-        },
-    }))
+        }))
 }

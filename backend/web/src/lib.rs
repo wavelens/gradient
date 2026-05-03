@@ -10,6 +10,7 @@ pub mod patch;
 pub mod authorization;
 pub mod endpoints;
 pub mod error;
+pub mod helpers;
 
 use axum::body::Body;
 use axum::extract::DefaultBodyLimit;

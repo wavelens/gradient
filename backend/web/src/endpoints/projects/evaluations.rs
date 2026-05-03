@@ -8,6 +8,7 @@ use super::{
     EntryPointSummary, EvaluationSummary, ProjectDetailsResponse, load_project,
     load_readable_project, user_can_edit,
 };
+use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::endpoints::{content_type_for_filename, user_is_org_member};
 use crate::error::{WebError, WebResult};
@@ -164,10 +165,7 @@ pub async fn post_project_evaluate(
                 core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
             })?;
 
-        return Ok(Json(BaseResponse {
-            error: false,
-            message: "Restarting failed builds".to_string(),
-        }));
+        return Ok(ok_json("Restarting failed builds".to_string()));
     }
 
     let mut project_for_check = project.clone();
@@ -194,10 +192,7 @@ pub async fn post_project_evaluate(
             core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
         })?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Evaluation started".to_string(),
-    }))
+    Ok(ok_json("Evaluation started".to_string()))
 }
 
 /// `GET /projects/{organization}/{project}/evaluations`
@@ -221,10 +216,7 @@ pub async fn get_project_evaluations(
 
     let summaries = evaluations_to_summaries(&state.0, evaluations).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: summaries,
-    }))
+    Ok(ok_json(summaries))
 }
 
 pub async fn get_project_details(
@@ -290,10 +282,7 @@ pub async fn get_project_entry_points(
     let eval_id = match params.evaluation_id.or(project.last_evaluation) {
         Some(id) => id,
         None => {
-            return Ok(Json(BaseResponse {
-                error: false,
-                message: vec![],
-            }));
+            return Ok(ok_json(vec![]));
         }
     };
 
@@ -312,19 +301,13 @@ pub async fn get_project_entry_points(
         .await?;
 
     if entry_points.is_empty() {
-        return Ok(Json(BaseResponse {
-            error: false,
-            message: vec![],
-        }));
+        return Ok(ok_json(vec![]));
     }
 
     let data = EntryPointRelatedData::load(&state, &entry_points).await?;
     let summaries = data.build_summaries(&entry_points, &evaluation);
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: summaries,
-    }))
+    Ok(ok_json(summaries))
 }
 
 // ── Entry-point bulk data loader ─────────────────────────────────────────────

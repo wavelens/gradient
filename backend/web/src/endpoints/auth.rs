@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::ok_json;
 use crate::authorization::{encode_jwt, oidc_login_create, oidc_login_verify, update_last_login};
 use crate::error::{WebError, WebResult};
 use axum::Json;
@@ -403,10 +404,7 @@ pub async fn post_check_username(
     }
 
     // Username is available
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Username is available".to_string(),
-    }))
+    Ok(ok_json("Username is available".to_string()))
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -443,10 +441,7 @@ pub async fn get_verify_email(
     }
 
     if user.email_verified {
-        return Ok(Json(BaseResponse {
-            error: false,
-            message: "Email already verified".to_string(),
-        }));
+        return Ok(ok_json("Email already verified".to_string()));
     }
 
     let mut user_active: AUser = user.into();
@@ -456,10 +451,7 @@ pub async fn get_verify_email(
 
     user_active.update(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Email verified successfully".to_string(),
-    }))
+    Ok(ok_json("Email verified successfully".to_string()))
 }
 
 pub async fn post_resend_verification(
@@ -509,10 +501,7 @@ pub async fn post_resend_verification(
         )));
     }
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Verification email sent successfully".to_string(),
-    }))
+    Ok(ok_json("Verification email sent successfully".to_string()))
 }
 
 #[cfg(test)]

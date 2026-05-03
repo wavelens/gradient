@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
@@ -256,9 +257,7 @@ pub async fn get_cache_stats(
             aggregate_traffic(&state.web_db, cache.id, "week", "11 weeks"),
         )?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: CacheStatsResponse {
+    Ok(ok_json(CacheStatsResponse {
             total_bytes,
             total_nar_bytes,
             total_packages,
@@ -270,8 +269,7 @@ pub async fn get_cache_stats(
             hours,
             days,
             weeks,
-        },
-    }))
+        }))
 }
 
 #[cfg(test)]

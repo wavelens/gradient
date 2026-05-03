@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::ok_json;
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
@@ -33,8 +34,5 @@ pub async fn post_evaluation(
         scheduler.abort_evaluation(ctx.evaluation).await;
     }
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Success".to_string(),
-    }))
+    Ok(ok_json("Success".to_string()))
 }

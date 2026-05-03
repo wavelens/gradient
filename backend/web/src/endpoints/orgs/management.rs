@@ -5,6 +5,7 @@
  */
 
 use super::load_admin_org;
+use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
@@ -82,20 +83,14 @@ pub async fn get_org_name_available(
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
     if check_index_name(&name).is_err() {
-        return Ok(Json(BaseResponse {
-            error: false,
-            message: false,
-        }));
+        return Ok(ok_json(false));
     }
     let exists = EOrganization::find()
         .filter(COrganization::Name.eq(name.as_str()))
         .one(&state.web_db)
         .await?
         .is_some();
-    Ok(Json(BaseResponse {
-        error: false,
-        message: !exists,
-    }))
+    Ok(ok_json(!exists))
 }
 
 /// Count in-progress evaluations per organization for `org_ids`.
@@ -207,15 +202,12 @@ pub async fn get(
         })
         .collect();
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: Paginated {
+    Ok(ok_json(Paginated {
             items,
             total,
             page,
             per_page,
-        },
-    }))
+        }))
 }
 
 pub async fn put(
@@ -294,15 +286,12 @@ pub async fn get_public_organizations(
     let total = paginator.num_items().await?;
     let items = paginator.fetch_page(page - 1).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: Paginated {
+    Ok(ok_json(Paginated {
             items,
             total,
             page,
             per_page,
-        },
-    }))
+        }))
 }
 
 pub async fn get_organization(
@@ -330,9 +319,7 @@ pub async fn get_organization(
         None
     };
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: OrgResponse {
+    Ok(ok_json(OrgResponse {
             id: org.id,
             name: org.name,
             display_name: org.display_name,
@@ -345,8 +332,7 @@ pub async fn get_organization(
             github_installation_id: org.github_installation_id,
             github_app_available: state.cli.github_app_config().is_some(),
             role,
-        },
-    }))
+        }))
 }
 
 pub async fn patch_organization(

@@ -10,6 +10,7 @@ use core::types::{BaseResponse, MUser, ServerState};
 use scheduler::{Scheduler, WorkerInfo};
 use std::sync::Arc;
 
+use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
 
 pub async fn get_workers(
@@ -23,8 +24,5 @@ pub async fn get_workers(
         ));
     }
     let workers = scheduler.workers_info().await;
-    Ok(Json(BaseResponse {
-        error: false,
-        message: workers,
-    }))
+    Ok(ok_json(workers))
 }

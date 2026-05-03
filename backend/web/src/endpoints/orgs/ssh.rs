@@ -5,6 +5,7 @@
  */
 
 use super::{load_unmanaged_org, load_org_member};
+use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -21,10 +22,7 @@ pub async fn get_organization_ssh(
 ) -> WebResult<Json<BaseResponse<String>>> {
     let organization = load_org_member(&state, user.id, organization).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: format_public_key(organization, &state.cli.serve_url),
-    }))
+    Ok(ok_json(format_public_key(organization, &state.cli.serve_url)))
 }
 
 pub async fn post_organization_ssh(
