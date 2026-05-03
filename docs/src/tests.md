@@ -632,6 +632,40 @@ Unit tests (`cargo test -p core --tests ci::reporter`):
   Gitea base URL plumbed through the factory degrades to
   `NoopCiReporter` rather than crashing the caller.
 
+## GitLab outbound CI reporter (#90)
+
+`GitlabReporter` (in `backend/core/src/ci/reporter.rs`) posts commit
+statuses to GitLab via `POST {base_url}/api/v4/projects/{id}/statuses/{sha}`,
+where `id` is the URL-encoded `owner/repo` path (also covers nested
+groups such as `group/sub/repo`). Authenticates with `PRIVATE-TOKEN`,
+which accepts personal, project, and group access tokens.
+
+`resolve_outbound_reporter_for_project` (in
+`backend/core/src/ci/integration_lookup.rs`) now constructs a
+`GitlabReporter` for `ForgeType::GitLab` integrations instead of
+returning a silent `NoopCiReporter`. Missing `endpoint_url` or access
+token still falls back to `NoopCiReporter`, but with a `warn!` log so
+operators can tell something is misconfigured.
+
+Unit tests (`cargo test -p core --tests ci::reporter`):
+
+- `gitlab_state_from_ci_status_all_variants` — every `CiStatus` maps
+  to the documented GitLab state (`pending`, `running`, `success`,
+  `failed`, with `Error` collapsed to `failed`).
+- `gitlab_state_serializes_lowercase` — wire format matches the
+  GitLab API enum.
+- `gitlab_project_id_flat_path` /
+  `gitlab_project_id_nested_groups` — `owner/repo` is URL-encoded as
+  `acme%2Fwidgets`, and nested groups (`group/sub/repo`) become
+  `group%2Fsub%2Frepo`.
+- `gitlab_reporter_trims_trailing_slash` — base URL normalised.
+- `gitlab_reporter_rejects_aws_metadata_ip` /
+  `gitlab_reporter_rejects_localhost_hostname` /
+  `gitlab_reporter_rejects_non_http_scheme` — same SSRF gate as the
+  other reporters (`169.254.169.254`, `localhost`, `file://`).
+- `reporter_for_project_gitlab_builds_gitlab` — the public factory
+  builds a `GitlabReporter` for `ci_type="gitlab"`.
+
 ## SSH private key decryption — no plaintext fallback
 
 `decrypt_ssh_private_key` in `backend/core/src/sources/ssh_key.rs`

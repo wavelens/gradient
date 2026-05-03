@@ -10,7 +10,7 @@
 //! Each project can reference a single inbound and a single outbound
 //! integration via the `project_integration` link table.
 
-use super::reporter::{CiReporter, GiteaReporter, GithubAppReporter, NoopCiReporter};
+use super::reporter::{CiReporter, GiteaReporter, GithubAppReporter, GitlabReporter, NoopCiReporter};
 use super::webhook::decrypt_webhook_secret;
 use crate::types::*;
 use sea_orm::EntityTrait;
@@ -75,7 +75,7 @@ impl ForgeType {
 /// - the project has no `project_integration` row,
 /// - the row has no `outbound_integration`,
 /// - the integration is unreachable or its token cannot be decrypted,
-/// - the forge type does not support outbound reporting yet (GitLab, GitHub App).
+/// - the integration is missing required fields (endpoint URL or access token).
 pub async fn resolve_outbound_reporter_for_project(
     state: &Arc<ServerState>,
     project_id: Uuid,
@@ -171,8 +171,25 @@ pub async fn resolve_outbound_reporter_for_project(
                 .unwrap_or_else(|| Arc::new(NoopCiReporter))
         }
         ForgeType::GitLab => {
-            // TODO: implement GitLabReporter.
-            Arc::new(NoopCiReporter)
+            let Some(base_url) = integration
+                .endpoint_url
+                .as_deref()
+                .filter(|s| !s.is_empty())
+            else {
+                warn!(integration_id = %integration.id, "GitLab outbound integration missing endpoint_url");
+                return Arc::new(NoopCiReporter);
+            };
+            let Some(token) = token else {
+                warn!(integration_id = %integration.id, "GitLab outbound integration missing access token");
+                return Arc::new(NoopCiReporter);
+            };
+            match GitlabReporter::new(state.http.clone(), base_url.to_string(), token.expose().to_string()) {
+                Ok(r) => Arc::new(r),
+                Err(e) => {
+                    warn!(error = %e, "Failed to build GitlabReporter");
+                    Arc::new(NoopCiReporter)
+                }
+            }
         }
     }
 }
