@@ -83,6 +83,21 @@ a banner instructing the admin to subscribe to a cache before workers can run.
 - `WorkersComponent — no-cache banner` — banner show/hide specs at
   `frontend/src/app/features/organizations/workers/workers.component.spec.ts`
 
+## Auth middleware response envelope
+
+Integration tests in `backend/web/tests/auth_middleware.rs` lock in the
+HTTP-status + `BaseResponse<String>` body returned by the `authorize`
+middleware after it was rewritten to return `WebError` instead of building
+the envelope by hand (issue #55).
+
+Run with: `cargo test -p web --test auth_middleware`
+
+| Test | Scenario | Expected |
+|------|----------|----------|
+| `missing_auth_header_returns_403_envelope` | request to a protected route with no `Authorization` header and no cookie | 403, `error=true`, `message="Authorization header not found"` |
+| `malformed_bearer_returns_403_envelope` | `Authorization` header present but not `Bearer <token>` | 403, `message="Invalid Authorization header"` |
+| `undecodable_token_returns_401_envelope` | `Bearer` token that JWT can't decode | 401, `message="Unable to decode token"` |
+
 ## Inbound forge webhook response-body (BaseResponse envelope)
 
 Integration tests in `backend/web/tests/forge_hooks.rs` verify that both
