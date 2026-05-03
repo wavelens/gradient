@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use axum::Extension;
@@ -70,10 +71,7 @@ pub async fn get_cache_key(
         WebError::InternalServerError("Failed to generate cache key".to_string())
     })?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: cache_key,
-    }))
+    Ok(ok_json(cache_key))
 }
 
 pub async fn get_cache_public_key(
@@ -93,9 +91,6 @@ pub async fn get_cache_public_key(
         WebError::InternalServerError("Failed to derive public key".to_string())
     })?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: public_key,
-    }))
+    Ok(ok_json(public_key))
 }
 

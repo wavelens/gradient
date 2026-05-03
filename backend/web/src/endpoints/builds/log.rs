@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use async_stream::stream;
@@ -29,10 +30,7 @@ pub async fn get_build_log(
     let log_key = ctx.build.log_id.unwrap_or(build_id);
     let log = state.log_storage.read(log_key).await.unwrap_or_default();
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: log,
-    }))
+    Ok(ok_json(log))
 }
 
 pub async fn post_build_log(

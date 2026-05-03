@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::error::WebResult;
 use axum::extract::{Path, Query, State};
@@ -270,8 +271,5 @@ pub async fn get_evaluation_messages(
         })
         .collect();
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: result,
-    }))
+    Ok(ok_json(result))
 }

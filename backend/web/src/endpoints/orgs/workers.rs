@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
 
 fn default_true() -> bool {
@@ -164,13 +165,10 @@ pub async fn post_org_worker(
     // the new peer registration without requiring a reconnect.
     scheduler.request_reauth(&worker_id_str).await;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: RegisterWorkerResponse {
+    Ok(ok_json(RegisterWorkerResponse {
             peer_id: org.id,
             token: if return_token { Some(token) } else { None },
-        },
-    }))
+        }))
 }
 
 pub async fn get_org_workers(
@@ -232,10 +230,7 @@ pub async fn get_org_workers(
         })
         .collect();
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: entries,
-    }))
+    Ok(ok_json(entries))
 }
 
 pub async fn patch_org_worker(
@@ -292,10 +287,7 @@ pub async fn patch_org_worker(
         scheduler.request_reauth(&worker_id).await;
     }
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: format!("worker '{}' updated", worker_id),
-    }))
+    Ok(ok_json(format!("worker '{}' updated", worker_id)))
 }
 
 pub async fn delete_org_worker(
@@ -325,8 +317,5 @@ pub async fn delete_org_worker(
     // Trigger re-auth so the worker loses authorization for the removed peer.
     scheduler.request_reauth(&worker_id).await;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: format!("worker '{}' unregistered", worker_id),
-    }))
+    Ok(ok_json(format!("worker '{}' unregistered", worker_id)))
 }

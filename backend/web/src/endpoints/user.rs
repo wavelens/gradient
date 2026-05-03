@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::ok_json;
 use crate::authorization::{generate_api_key, hash_api_key};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Query, State};
@@ -77,10 +78,7 @@ pub async fn get_search(
         })
         .collect();
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: results,
-    }))
+    Ok(ok_json(results))
 }
 
 pub async fn get(

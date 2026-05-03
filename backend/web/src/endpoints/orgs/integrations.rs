@@ -16,6 +16,7 @@
 //! "has_secret" / "has_access_token" flag.
 
 use super::{load_unmanaged_org, load_org_member};
+use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -162,10 +163,7 @@ pub async fn get_integrations(
         .all(&state.web_db)
         .await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: rows.into_iter().map(IntegrationResponse::from).collect(),
-    }))
+    Ok(ok_json(rows.into_iter().map(IntegrationResponse::from).collect()))
 }
 
 /// `PUT /orgs/{organization}/integrations` — create a new integration.
@@ -249,10 +247,7 @@ pub async fn put_integration(
 
     let integration = integration.insert(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: IntegrationResponse::from(integration),
-    }))
+    Ok(ok_json(IntegrationResponse::from(integration)))
 }
 
 /// `GET /orgs/{organization}/integrations/{id}` — fetch a single integration.
@@ -263,10 +258,7 @@ pub async fn get_integration(
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
     let org = load_org_member(&state, user.id, organization).await?;
     let integration = load_integration(&state, org.id, integration_id).await?;
-    Ok(Json(BaseResponse {
-        error: false,
-        message: IntegrationResponse::from(integration),
-    }))
+    Ok(ok_json(IntegrationResponse::from(integration)))
 }
 
 /// `PATCH /orgs/{organization}/integrations/{id}` — update an integration.
@@ -356,10 +348,7 @@ pub async fn patch_integration(
 
     let updated = active.update(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: IntegrationResponse::from(updated),
-    }))
+    Ok(ok_json(IntegrationResponse::from(updated)))
 }
 
 /// `DELETE /orgs/{organization}/integrations/{id}` — remove an integration.
@@ -371,9 +360,6 @@ pub async fn delete_integration(
     let org = load_unmanaged_org(&state, user.id, organization).await?;
     let integration = load_integration(&state, org.id, integration_id).await?;
     integration.into_active_model().delete(&state.web_db).await?;
-    Ok(Json(BaseResponse {
-        error: false,
-        message: true,
-    }))
+    Ok(ok_json(true))
 }
 

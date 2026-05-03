@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
@@ -161,13 +162,10 @@ pub async fn get_project_metrics(
     // Return in chronological order (oldest first for chart x-axis)
     points.reverse();
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: ProjectMetricsResponse {
+    Ok(ok_json(ProjectMetricsResponse {
             keep_evaluations: project.keep_evaluations,
             points,
-        },
-    }))
+        }))
 }
 
 // ── Per-entry-point metrics ──────────────────────────────────────────────────
@@ -257,12 +255,9 @@ pub async fn get_entry_point_metrics(
 
     points.reverse();
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: EntryPointMetricsResponse {
+    Ok(ok_json(EntryPointMetricsResponse {
             eval: params.eval,
             keep_evaluations: project.keep_evaluations,
             points,
-        },
-    }))
+        }))
 }

@@ -5,6 +5,7 @@
  */
 
 use super::helpers::cleanup_nars_for_orgs;
+use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use axum::Extension;
@@ -88,20 +89,14 @@ pub async fn get_cache_name_available(
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
     if check_index_name(&name).is_err() {
-        return Ok(Json(BaseResponse {
-            error: false,
-            message: false,
-        }));
+        return Ok(ok_json(false));
     }
     let exists = ECache::find()
         .filter(CCache::Name.eq(name.as_str()))
         .one(&state.web_db)
         .await?
         .is_some();
-    Ok(Json(BaseResponse {
-        error: false,
-        message: !exists,
-    }))
+    Ok(ok_json(!exists))
 }
 
 pub async fn get(
@@ -142,10 +137,7 @@ pub async fn get(
         .all(&state.web_db)
         .await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: caches,
-    }))
+    Ok(ok_json(caches))
 }
 
 pub async fn put(
@@ -207,10 +199,7 @@ pub async fn put(
     .insert(&state.web_db)
     .await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: cache.id.to_string(),
-    }))
+    Ok(ok_json(cache.id.to_string()))
 }
 
 pub async fn get_public_caches(
@@ -221,10 +210,7 @@ pub async fn get_public_caches(
         .all(&state.web_db)
         .await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: caches,
-    }))
+    Ok(ok_json(caches))
 }
 
 pub async fn get_cache(
@@ -255,9 +241,7 @@ pub async fn get_cache(
 
     let can_edit = matches!(&maybe_user, Some(u) if u.id == cache.created_by);
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: CacheResponse {
+    Ok(ok_json(CacheResponse {
             id: cache.id,
             name: cache.name,
             display_name: cache.display_name,
@@ -270,8 +254,7 @@ pub async fn get_cache(
             created_at: cache.created_at,
             managed: cache.managed,
             can_edit,
-        },
-    }))
+        }))
 }
 
 pub async fn patch_cache(
@@ -316,10 +299,7 @@ pub async fn patch_cache(
 
     acache.update(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Cache updated".to_string(),
-    }))
+    Ok(ok_json("Cache updated".to_string()))
 }
 
 pub async fn delete_cache(
@@ -349,10 +329,7 @@ pub async fn delete_cache(
         cleanup_nars_for_orgs(state_bg, subscribing_orgs).await;
     });
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Cache deleted".to_string(),
-    }))
+    Ok(ok_json("Cache deleted".to_string()))
 }
 
 pub async fn post_cache_active(
@@ -365,10 +342,7 @@ pub async fn post_cache_active(
     acache.active = Set(true);
     acache.update(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Cache enabled".to_string(),
-    }))
+    Ok(ok_json("Cache enabled".to_string()))
 }
 
 pub async fn delete_cache_active(
@@ -381,10 +355,7 @@ pub async fn delete_cache_active(
     acache.active = Set(false);
     acache.update(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Cache disabled".to_string(),
-    }))
+    Ok(ok_json("Cache disabled".to_string()))
 }
 
 pub async fn post_cache_public(
@@ -397,10 +368,7 @@ pub async fn post_cache_public(
     acache.public = Set(true);
     acache.update(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Cache is now public".to_string(),
-    }))
+    Ok(ok_json("Cache is now public".to_string()))
 }
 
 pub async fn delete_cache_public(
@@ -413,8 +381,5 @@ pub async fn delete_cache_public(
     acache.public = Set(false);
     acache.update(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: "Cache is now private".to_string(),
-    }))
+    Ok(ok_json("Cache is now private".to_string()))
 }

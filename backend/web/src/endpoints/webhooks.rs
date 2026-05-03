@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -112,10 +113,7 @@ pub async fn get(
         .all(&state.web_db)
         .await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: webhooks.into_iter().map(WebhookResponse::from).collect(),
-    }))
+    Ok(ok_json(webhooks.into_iter().map(WebhookResponse::from).collect()))
 }
 
 /// `PUT /webhook/{organization}` — create a new webhook.
@@ -166,10 +164,7 @@ pub async fn put(
 
     let webhook = webhook.insert(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: WebhookResponse::from(webhook),
-    }))
+    Ok(ok_json(WebhookResponse::from(webhook)))
 }
 
 /// `GET /webhook/{organization}/{webhook}` — get a single webhook.
@@ -181,10 +176,7 @@ pub async fn get_webhook(
     let organization = load_webhook_org(&state, user.id, organization).await?;
     let webhook = load_webhook(&state, organization.id, webhook_id).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: WebhookResponse::from(webhook),
-    }))
+    Ok(ok_json(WebhookResponse::from(webhook)))
 }
 
 /// `PATCH /webhook/{organization}/{webhook}` — update a webhook.
@@ -224,10 +216,7 @@ pub async fn patch_webhook(
 
     let updated = active_webhook.update(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: WebhookResponse::from(updated),
-    }))
+    Ok(ok_json(WebhookResponse::from(updated)))
 }
 
 /// `DELETE /webhook/{organization}/{webhook}` — delete a webhook.
@@ -241,10 +230,7 @@ pub async fn delete_webhook(
 
     webhook.into_active_model().delete(&state.web_db).await?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: true,
-    }))
+    Ok(ok_json(true))
 }
 
 /// `POST /webhook/{organization}/{webhook}/test` — send a test event.
@@ -285,8 +271,5 @@ pub async fn post_webhook_test(
         )));
     }
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: true,
-    }))
+    Ok(ok_json(true))
 }

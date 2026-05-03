@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
@@ -74,8 +75,5 @@ pub async fn get_build(
         updated_at: build.updated_at,
     };
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: build_with_outputs,
-    }))
+    Ok(ok_json(build_with_outputs))
 }

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::helpers::ok_json;
 use crate::authorization::{MaybeUser, decode_download_token, encode_download_token};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
@@ -221,10 +222,7 @@ pub async fn get_build_downloads(
 
     let products = collect_build_products(&state, build_id, build_outputs).await;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: products,
-    }))
+    Ok(ok_json(products))
 }
 
 pub async fn get_build_download_token(
@@ -237,10 +235,7 @@ pub async fn get_build_download_token(
     let token = encode_download_token(State(Arc::clone(&state)), build_id)
         .map_err(|_| WebError::failed_to_generate_token())?;
 
-    Ok(Json(BaseResponse {
-        error: false,
-        message: token,
-    }))
+    Ok(ok_json(token))
 }
 
 pub async fn get_build_download(
