@@ -14,7 +14,6 @@ use crate::types::input::load_secret_bytes;
 use crate::types::*;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
-
 use entity::organization_cache::CacheSubscriptionMode;
 use entity::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
@@ -23,6 +22,8 @@ use std::collections::HashMap;
 use std::fs;
 use uuid::Uuid;
 
+type DynError = Box<dyn std::error::Error>;
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 pub(super) async fn apply_state_to_database(
@@ -30,7 +31,7 @@ pub(super) async fn apply_state_to_database(
     config: &StateConfiguration,
     crypt_secret_file: &str,
     delete_state: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), DynError> {
     tracing::info!("Applying state to database");
 
     let app = StateApplicator {
@@ -54,15 +55,32 @@ pub(super) async fn apply_state_to_database(
     Ok(())
 }
 
-// ── StateApplicator ───────────────────────────────────────────────────────────
+// ── Credential / lookup helpers ───────────────────────────────────────────────
 
-/// Applies a [`StateConfiguration`] to the database.
-///
-/// Captures the database connection and crypt secret so each `apply_*` method
-/// does not repeat those parameters.
-struct StateApplicator<'a> {
-    db: &'a DatabaseConnection,
-    crypt_secret_file: &'a str,
+fn credentials_dir() -> String {
+    std::env::var("GRADIENT_CREDENTIALS_DIR")
+        .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string())
+}
+
+/// Reads `${GRADIENT_CREDENTIALS_DIR}/gradient_${kind}_${name}_${suffix}` and
+/// returns `(contents, path)`. The path is returned alongside so callers can
+/// embed it in downstream validation errors.
+fn read_credential(
+    kind: &str,
+    name: &str,
+    suffix: &str,
+    label: &str,
+) -> Result<(String, String), DynError> {
+    let path = format!("{}/gradient_{}_{}_{}", credentials_dir(), kind, name, suffix);
+    let contents = fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read {} {}: {}", label, path, e))?;
+    Ok((contents, path))
+}
+
+fn lookup_id(map: &HashMap<String, Uuid>, name: &str, kind: &str) -> Result<Uuid, DynError> {
+    map.get(name)
+        .copied()
+        .ok_or_else(|| format!("{} '{}' not found", kind, name).into())
 }
 
 async fn resolve_integration_id(
@@ -72,7 +90,7 @@ async fn resolve_integration_id(
     kind: IntegrationKind,
     state_integrations: &HashMap<String, StateIntegration>,
     project_name: &str,
-) -> Result<Uuid, Box<dyn std::error::Error>> {
+) -> Result<Uuid, DynError> {
     if !state_integrations.contains_key(name) {
         return Err(format!(
             "Project '{}' references unknown integration '{}'",
@@ -95,25 +113,72 @@ async fn resolve_integration_id(
     Ok(row.id)
 }
 
+// ── unmark_managed! macro ─────────────────────────────────────────────────────
+
+/// For each managed row not present in the state set, either delete it (if
+/// `delete_state`) or flip `managed` to `false`. `name_field` names the column
+/// used to compare against the state set and to log; `label` is the
+/// human-readable noun for log lines.
+macro_rules! unmark_managed {
+    ($db:expr, $entity:ident, $state_set:expr, $name_field:ident, $delete_state:expr, $label:literal) => {{
+        let managed = $entity::Entity::find()
+            .filter($entity::Column::Managed.eq(true))
+            .all($db)
+            .await?;
+        for model in managed {
+            if $state_set.contains(&model.$name_field) {
+                continue;
+            }
+            let label_value = model.$name_field.clone();
+            if $delete_state {
+                $entity::Entity::delete_by_id(model.id).exec($db).await?;
+                tracing::info!(concat!("Deleted ", $label, ": {}"), label_value);
+            } else {
+                let mut active: $entity::ActiveModel = model.into();
+                active.managed = Set(false);
+                active.update($db).await?;
+                tracing::info!(concat!("Unmanaged ", $label, ": {}"), label_value);
+            }
+        }
+    }};
+}
+
+// ── StateApplicator ───────────────────────────────────────────────────────────
+
+/// Applies a [`StateConfiguration`] to the database.
+///
+/// Captures the database connection and crypt secret so each `apply_*` method
+/// does not repeat those parameters.
+struct StateApplicator<'a> {
+    db: &'a DatabaseConnection,
+    crypt_secret_file: &'a str,
+}
+
 impl<'a> StateApplicator<'a> {
     // ── Lookup helpers ────────────────────────────────────────────────────────
 
-    async fn user_lookup(&self) -> Result<HashMap<String, Uuid>, Box<dyn std::error::Error>> {
+    async fn user_lookup(&self) -> Result<HashMap<String, Uuid>, DynError> {
         let users = user::Entity::find().all(self.db).await?;
         Ok(users.into_iter().map(|u| (u.username, u.id)).collect())
     }
 
-    async fn org_lookup(&self) -> Result<HashMap<String, Uuid>, Box<dyn std::error::Error>> {
+    async fn org_lookup(&self) -> Result<HashMap<String, Uuid>, DynError> {
         let orgs = organization::Entity::find().all(self.db).await?;
         Ok(orgs.into_iter().map(|o| (o.name, o.id)).collect())
     }
 
+    /// Encrypt `plain` with the configured crypt secret and return its
+    /// base64-encoded form. `what` describes the secret for error messages.
+    fn encrypt_to_b64(&self, plain: &str, what: &str) -> Result<String, DynError> {
+        let secret = load_secret_bytes(self.crypt_secret_file);
+        let bytes = crypter::encrypt_with_password(secret.expose(), plain)
+            .ok_or_else(|| format!("Failed to encrypt {}", what))?;
+        Ok(general_purpose::STANDARD.encode(&bytes))
+    }
+
     // ── apply_users ───────────────────────────────────────────────────────────
 
-    async fn apply_users(
-        &self,
-        state_users: &HashMap<String, StateUser>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn apply_users(&self, state_users: &HashMap<String, StateUser>) -> Result<(), DynError> {
         for state_user in state_users.values() {
             // When password_file is set in the state config, a matching
             // systemd credential is loaded under GRADIENT_CREDENTIALS_DIR.
@@ -122,16 +187,9 @@ impl<'a> StateApplicator<'a> {
             // account instead of rejecting with "already exists with
             // password authentication".
             let password_hash = if state_user.password_file.is_some() {
-                let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
-                    .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
-                let password_path = format!(
-                    "{}/gradient_user_{}_password",
-                    credentials_dir, state_user.username
-                );
-                let contents = fs::read_to_string(&password_path).map_err(|e| {
-                    format!("Failed to read password file {}: {}", password_path, e)
-                })?;
-                Some(parse_password_phc(&contents, &password_path)?)
+                let (contents, path) =
+                    read_credential("user", &state_user.username, "password", "password file")?;
+                Some(parse_password_phc(&contents, &path)?)
             } else {
                 None
             };
@@ -141,7 +199,7 @@ impl<'a> StateApplicator<'a> {
                 .one(self.db)
                 .await?;
 
-            let now = crate::types::now();
+            let now = now();
 
             if let Some(existing) = existing_user {
                 let mut user: user::ActiveModel = existing.into();
@@ -183,41 +241,25 @@ impl<'a> StateApplicator<'a> {
     async fn apply_organizations(
         &self,
         state_orgs: &HashMap<String, StateOrganization>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), DynError> {
         let user_map = self.user_lookup().await?;
 
         for state_org in state_orgs.values() {
-            let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
-                .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
-            let private_key_path = format!(
-                "{}/gradient_org_{}_private_key",
-                credentials_dir, state_org.name
-            );
-            let private_key = fs::read_to_string(&private_key_path).map_err(|e| {
-                format!(
-                    "Failed to read private key file {}: {}",
-                    private_key_path, e
-                )
-            })?;
+            let (private_key, _) =
+                read_credential("org", &state_org.name, "private_key", "private key file")?;
+            let private_key = private_key.trim();
 
-            let public_key = derive_public_key(private_key.trim())?;
-            let secret = load_secret_bytes(self.crypt_secret_file);
+            let public_key = derive_public_key(private_key)?;
+            let encrypted_private_key = self.encrypt_to_b64(private_key, "SSH private key")?;
 
-            let encrypted_bytes =
-                crypter::encrypt_with_password(secret.expose(), private_key.trim())
-                    .ok_or_else(|| "Failed to encrypt SSH private key".to_string())?;
-            let encrypted_private_key = general_purpose::STANDARD.encode(&encrypted_bytes);
-
-            let created_by_id = user_map
-                .get(&state_org.created_by)
-                .ok_or_else(|| format!("User '{}' not found", state_org.created_by))?;
+            let created_by_id = lookup_id(&user_map, &state_org.created_by, "User")?;
 
             let existing_org = organization::Entity::find()
                 .filter(organization::Column::Name.eq(&state_org.name))
                 .one(self.db)
                 .await?;
 
-            let now = crate::types::now();
+            let now = now();
 
             let org_id = if let Some(existing) = existing_org {
                 let org_id = existing.id;
@@ -226,7 +268,7 @@ impl<'a> StateApplicator<'a> {
                 org.description = Set(state_org.description.clone().unwrap_or_default());
                 org.public_key = Set(public_key);
                 org.private_key = Set(encrypted_private_key.clone());
-                org.created_by = Set(*created_by_id);
+                org.created_by = Set(created_by_id);
                 org.public = Set(state_org.public);
                 // Only overwrite github_installation_id when state declares
                 // it; otherwise leave the existing value (likely set by the
@@ -248,7 +290,7 @@ impl<'a> StateApplicator<'a> {
                     public_key: Set(public_key),
                     private_key: Set(encrypted_private_key),
                     public: Set(state_org.public),
-                    created_by: Set(*created_by_id),
+                    created_by: Set(created_by_id),
                     created_at: Set(now),
                     managed: Set(true),
                     github_installation_id: Set(state_org.github_installation_id),
@@ -260,7 +302,7 @@ impl<'a> StateApplicator<'a> {
 
             let existing_membership = organization_user::Entity::find()
                 .filter(organization_user::Column::Organization.eq(org_id))
-                .filter(organization_user::Column::User.eq(*created_by_id))
+                .filter(organization_user::Column::User.eq(created_by_id))
                 .one(self.db)
                 .await?;
 
@@ -268,7 +310,7 @@ impl<'a> StateApplicator<'a> {
                 let membership = organization_user::ActiveModel {
                     id: Set(Uuid::new_v4()),
                     organization: Set(org_id),
-                    user: Set(*created_by_id),
+                    user: Set(created_by_id),
                     role: Set(BASE_ROLE_ADMIN_ID),
                 };
                 membership.insert(self.db).await?;
@@ -288,43 +330,38 @@ impl<'a> StateApplicator<'a> {
     async fn apply_projects(
         &self,
         state_projects: &HashMap<String, StateProject>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), DynError> {
         let user_map = self.user_lookup().await?;
         let org_map = self.org_lookup().await?;
 
         for state_project in state_projects.values() {
-            let created_by_id = user_map
-                .get(&state_project.created_by)
-                .ok_or_else(|| format!("User '{}' not found", state_project.created_by))?;
-
-            let org_id = org_map.get(&state_project.organization).ok_or_else(|| {
-                format!("Organization '{}' not found", state_project.organization)
-            })?;
+            let created_by_id = lookup_id(&user_map, &state_project.created_by, "User")?;
+            let org_id = lookup_id(&org_map, &state_project.organization, "Organization")?;
 
             let existing_project = project::Entity::find()
                 .filter(project::Column::Name.eq(&state_project.name))
                 .one(self.db)
                 .await?;
 
-            let now = crate::types::now();
+            let now = now();
 
             if let Some(existing) = existing_project {
                 let mut proj: project::ActiveModel = existing.into();
-                proj.organization = Set(*org_id);
+                proj.organization = Set(org_id);
                 proj.active = Set(state_project.active);
                 proj.display_name = Set(state_project.display_name.clone());
                 proj.description = Set(state_project.description.clone().unwrap_or_default());
                 proj.repository = Set(state_project.repository.clone());
                 proj.evaluation_wildcard = Set(state_project.evaluation_wildcard.clone());
                 proj.force_evaluation = Set(state_project.force_evaluation);
-                proj.created_by = Set(*created_by_id);
+                proj.created_by = Set(created_by_id);
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
                 tracing::info!("Updated managed project: {}", state_project.name);
             } else {
                 let proj = project::ActiveModel {
                     id: Set(Uuid::new_v4()),
-                    organization: Set(*org_id),
+                    organization: Set(org_id),
                     name: Set(state_project.name.clone()),
                     active: Set(state_project.active),
                     display_name: Set(state_project.display_name.clone()),
@@ -332,7 +369,7 @@ impl<'a> StateApplicator<'a> {
                     repository: Set(state_project.repository.clone()),
                     evaluation_wildcard: Set(state_project.evaluation_wildcard.clone()),
                     force_evaluation: Set(state_project.force_evaluation),
-                    created_by: Set(*created_by_id),
+                    created_by: Set(created_by_id),
                     last_evaluation: Set(None),
                     last_check_at: Set(now),
                     created_at: Set(now),
@@ -352,32 +389,21 @@ impl<'a> StateApplicator<'a> {
     async fn apply_caches(
         &self,
         state_caches: &HashMap<String, StateCache>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), DynError> {
         let user_map = self.user_lookup().await?;
         let org_map = self.org_lookup().await?;
 
         for state_cache in state_caches.values() {
-            let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
-                .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
-            let signing_key_path = format!(
-                "{}/gradient_cache_{}_signing_key",
-                credentials_dir, state_cache.name
-            );
-            let signing_key = fs::read_to_string(&signing_key_path).map_err(|e| {
+            let (signing_key, _) =
+                read_credential("cache", &state_cache.name, "signing_key", "signing key file")?;
+            let signing_key = signing_key.trim();
+
+            let key_bytes = general_purpose::STANDARD.decode(signing_key).map_err(|e| {
                 format!(
-                    "Failed to read signing key file {}: {}",
-                    signing_key_path, e
+                    "Signing key for cache '{}' is not a valid base64 encoded string: {}",
+                    state_cache.name, e
                 )
             })?;
-
-            let key_bytes = general_purpose::STANDARD
-                .decode(signing_key.trim())
-                .map_err(|e| {
-                    format!(
-                        "Signing key for cache '{}' is not a valid base64 encoded string: {}",
-                        state_cache.name, e
-                    )
-                })?;
 
             if key_bytes.len() < 32 {
                 return Err(format!(
@@ -389,28 +415,19 @@ impl<'a> StateApplicator<'a> {
 
             let public_key = general_purpose::STANDARD.encode(&key_bytes[key_bytes.len() - 32..]);
 
-            let secret = load_secret_bytes(self.crypt_secret_file);
-            let encrypted_bytes =
-                crypter::encrypt_with_password(secret.expose(), signing_key.trim()).ok_or_else(
-                    || {
-                        format!(
-                            "Failed to encrypt signing key for cache '{}'",
-                            state_cache.name
-                        )
-                    },
-                )?;
-            let encrypted_signing_key = general_purpose::STANDARD.encode(&encrypted_bytes);
+            let encrypted_signing_key = self.encrypt_to_b64(
+                signing_key,
+                &format!("signing key for cache '{}'", state_cache.name),
+            )?;
 
-            let created_by_id = user_map
-                .get(&state_cache.created_by)
-                .ok_or_else(|| format!("User '{}' not found", state_cache.created_by))?;
+            let created_by_id = lookup_id(&user_map, &state_cache.created_by, "User")?;
 
             let existing_cache = cache::Entity::find()
                 .filter(cache::Column::Name.eq(&state_cache.name))
                 .one(self.db)
                 .await?;
 
-            let now = crate::types::now();
+            let now = now();
 
             let cache_id = if let Some(existing) = existing_cache {
                 let mut cache_model: cache::ActiveModel = existing.clone().into();
@@ -420,7 +437,7 @@ impl<'a> StateApplicator<'a> {
                 cache_model.priority = Set(state_cache.priority);
                 cache_model.public_key = Set(public_key.clone());
                 cache_model.private_key = Set(encrypted_signing_key.clone());
-                cache_model.created_by = Set(*created_by_id);
+                cache_model.created_by = Set(created_by_id);
                 cache_model.public = Set(state_cache.public);
                 cache_model.managed = Set(true);
                 cache_model.update(self.db).await?;
@@ -438,7 +455,7 @@ impl<'a> StateApplicator<'a> {
                     public_key: Set(public_key),
                     private_key: Set(encrypted_signing_key),
                     public: Set(state_cache.public),
-                    created_by: Set(*created_by_id),
+                    created_by: Set(created_by_id),
                     created_at: Set(now),
                     managed: Set(true),
                 };
@@ -451,7 +468,7 @@ impl<'a> StateApplicator<'a> {
                 .await?;
 
             for org_name in &state_cache.organizations {
-                let org_id = org_map.get(org_name).ok_or_else(|| {
+                let org_id = org_map.get(org_name).copied().ok_or_else(|| {
                     format!(
                         "Organization '{}' not found for cache '{}'",
                         org_name, state_cache.name
@@ -459,7 +476,7 @@ impl<'a> StateApplicator<'a> {
                 })?;
 
                 let existing_association = organization_cache::Entity::find()
-                    .filter(organization_cache::Column::Organization.eq(*org_id))
+                    .filter(organization_cache::Column::Organization.eq(org_id))
                     .filter(organization_cache::Column::Cache.eq(cache_id))
                     .one(self.db)
                     .await?;
@@ -467,7 +484,7 @@ impl<'a> StateApplicator<'a> {
                 if existing_association.is_none() {
                     let org_cache_model = organization_cache::ActiveModel {
                         id: Set(Uuid::new_v4()),
-                        organization: Set(*org_id),
+                        organization: Set(org_id),
                         cache: Set(cache_id),
                         mode: Set(organization_cache::CacheSubscriptionMode::ReadWrite),
                     };
@@ -489,7 +506,7 @@ impl<'a> StateApplicator<'a> {
         cache_id: Uuid,
         cache_name: &str,
         upstreams: &[StateUpstream],
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), DynError> {
         ECacheUpstream::delete_many()
             .filter(CCacheUpstream::Cache.eq(cache_id))
             .exec(self.db)
@@ -562,32 +579,25 @@ impl<'a> StateApplicator<'a> {
     async fn apply_api_keys(
         &self,
         state_api_keys: &HashMap<String, StateApiKey>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), DynError> {
         let user_lookup = self.user_lookup().await?;
-        let now = crate::types::now();
+        let now = now();
 
         for state_api_key in state_api_keys.values() {
-            let Some(owned_by_id) = user_lookup.get(&state_api_key.owned_by) else {
-                return Err(format!(
+            let owned_by_id = user_lookup.get(&state_api_key.owned_by).copied().ok_or_else(|| {
+                format!(
                     "User '{}' not found for API key '{}'",
                     state_api_key.owned_by, state_api_key.name
                 )
-                .into());
-            };
+            })?;
 
-            let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
-                .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
-            let key_path = format!(
-                "{}/gradient_api_{}_key",
-                credentials_dir, state_api_key.name
-            );
-            let key_value = fs::read_to_string(&key_path)
-                .map_err(|e| format!("Failed to read API key file {}: {}", key_path, e))?;
+            let (key_value, key_path) =
+                read_credential("api", &state_api_key.name, "key", "API key file")?;
             let key_hash = parse_api_key_hash(&key_value, &key_path)?;
 
             let existing_api_key = api::Entity::find()
                 .filter(api::Column::Name.eq(&state_api_key.name))
-                .filter(api::Column::OwnedBy.eq(*owned_by_id))
+                .filter(api::Column::OwnedBy.eq(owned_by_id))
                 .one(self.db)
                 .await?;
 
@@ -600,7 +610,7 @@ impl<'a> StateApplicator<'a> {
             } else {
                 let api_key_model = api::ActiveModel {
                     id: Set(Uuid::new_v4()),
-                    owned_by: Set(*owned_by_id),
+                    owned_by: Set(owned_by_id),
                     name: Set(state_api_key.name.clone()),
                     key: Set(key_hash),
                     last_used_at: Set(now),
@@ -620,39 +630,27 @@ impl<'a> StateApplicator<'a> {
     async fn apply_workers(
         &self,
         state_workers: &HashMap<String, StateWorker>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), DynError> {
         let org_map = self.org_lookup().await?;
         let user_map = self.user_lookup().await?;
 
-        let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
-            .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
-
         for state_worker in state_workers.values() {
-            let token_path = format!(
-                "{}/gradient_worker_{}_token",
-                credentials_dir, state_worker.worker_id
-            );
-            let token = fs::read_to_string(&token_path)
-                .map_err(|e| format!("Failed to read worker token file {}: {}", token_path, e))?;
-            let token = token.trim();
+            let (token, _) = read_credential(
+                "worker",
+                &state_worker.worker_id,
+                "token",
+                "worker token file",
+            )?;
+            let token_hash = password_auth::generate_hash(token.trim());
 
-            let token_hash = password_auth::generate_hash(token);
-
-            let peer_id = *org_map
-                .get(&state_worker.organization)
-                .ok_or_else(|| format!("Organization '{}' not found", state_worker.organization))?;
-
-            let created_by_id = *user_map
-                .get(&state_worker.created_by)
-                .ok_or_else(|| format!("User '{}' not found", state_worker.created_by))?;
+            let peer_id = lookup_id(&org_map, &state_worker.organization, "Organization")?;
+            let created_by_id = lookup_id(&user_map, &state_worker.created_by, "User")?;
 
             let existing = worker_registration::Entity::find()
                 .filter(worker_registration::Column::PeerId.eq(peer_id))
                 .filter(worker_registration::Column::WorkerId.eq(&state_worker.worker_id))
                 .one(self.db)
                 .await?;
-
-            let now = crate::types::now();
 
             let url = state_worker
                 .url
@@ -687,7 +685,7 @@ impl<'a> StateApplicator<'a> {
                     enable_eval: Set(state_worker.enable_eval),
                     enable_build: Set(state_worker.enable_build),
                     created_by: Set(Some(created_by_id)),
-                    created_at: Set(now),
+                    created_at: Set(now()),
                 };
                 reg.insert(self.db).await?;
                 tracing::info!("Created worker registration: {}", state_worker.worker_id);
@@ -702,7 +700,7 @@ impl<'a> StateApplicator<'a> {
     async fn apply_integrations(
         &self,
         state_integrations: &HashMap<String, StateIntegration>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), DynError> {
         if state_integrations.is_empty() {
             return Ok(());
         }
@@ -710,20 +708,15 @@ impl<'a> StateApplicator<'a> {
         let org_map = self.org_lookup().await?;
         let user_map = self.user_lookup().await?;
 
-        let credentials_dir = std::env::var("GRADIENT_CREDENTIALS_DIR")
-            .unwrap_or_else(|_| "/run/credentials/gradient-server".to_string());
-
         for state_int in state_integrations.values() {
-            let org_id = *org_map.get(&state_int.organization).ok_or_else(|| {
+            let org_id = org_map.get(&state_int.organization).copied().ok_or_else(|| {
                 format!(
                     "Integration '{}' references unknown organization '{}'",
                     state_int.name, state_int.organization
                 )
             })?;
 
-            let created_by_id = *user_map
-                .get(&state_int.created_by)
-                .ok_or_else(|| format!("User '{}' not found", state_int.created_by))?;
+            let created_by_id = lookup_id(&user_map, &state_int.created_by, "User")?;
 
             let kind = match state_int.kind.as_str() {
                 "inbound" => IntegrationKind::Inbound,
@@ -753,51 +746,16 @@ impl<'a> StateApplicator<'a> {
                 .into());
             }
 
-            let encrypted_secret = match state_int.secret_file.as_deref() {
-                Some(_) => {
-                    let path = format!(
-                        "{}/gradient_integration_{}_secret",
-                        credentials_dir, state_int.name
-                    );
-                    let plain = fs::read_to_string(&path).map_err(|e| {
-                        format!("Failed to read integration secret file {}: {}", path, e)
-                    })?;
-                    Some(
-                        encrypt_webhook_secret(self.crypt_secret_file, plain.trim()).map_err(
-                            |e| {
-                                format!(
-                                    "Failed to encrypt secret for integration '{}': {}",
-                                    state_int.name, e
-                                )
-                            },
-                        )?,
-                    )
-                }
-                None => None,
-            };
-
-            let encrypted_token = match state_int.access_token_file.as_deref() {
-                Some(_) => {
-                    let path = format!(
-                        "{}/gradient_integration_{}_token",
-                        credentials_dir, state_int.name
-                    );
-                    let plain = fs::read_to_string(&path).map_err(|e| {
-                        format!("Failed to read integration token file {}: {}", path, e)
-                    })?;
-                    Some(
-                        encrypt_webhook_secret(self.crypt_secret_file, plain.trim()).map_err(
-                            |e| {
-                                format!(
-                                    "Failed to encrypt token for integration '{}': {}",
-                                    state_int.name, e
-                                )
-                            },
-                        )?,
-                    )
-                }
-                None => None,
-            };
+            let encrypted_secret = self.read_and_encrypt_integration_field(
+                state_int.secret_file.as_deref(),
+                &state_int.name,
+                "secret",
+            )?;
+            let encrypted_token = self.read_and_encrypt_integration_field(
+                state_int.access_token_file.as_deref(),
+                &state_int.name,
+                "token",
+            )?;
 
             let endpoint = state_int
                 .endpoint_url
@@ -839,7 +797,7 @@ impl<'a> StateApplicator<'a> {
                     endpoint_url: Set(endpoint),
                     access_token: Set(encrypted_token),
                     created_by: Set(created_by_id),
-                    created_at: Set(crate::types::now()),
+                    created_at: Set(now()),
                 };
                 row.insert(self.db).await?;
                 tracing::info!("Created managed integration: {}", state_int.name);
@@ -849,13 +807,33 @@ impl<'a> StateApplicator<'a> {
         Ok(())
     }
 
+    /// Read `${creds}/gradient_integration_${name}_${suffix}` and encrypt its
+    /// trimmed contents with the webhook secret. Returns `Ok(None)` when the
+    /// state config did not declare a credential file (`field_set` is `None`).
+    fn read_and_encrypt_integration_field(
+        &self,
+        field_set: Option<&str>,
+        int_name: &str,
+        suffix: &str,
+    ) -> Result<Option<String>, DynError> {
+        if field_set.is_none() {
+            return Ok(None);
+        }
+        let label = format!("integration {} file", suffix);
+        let (plain, _) = read_credential("integration", int_name, suffix, &label)?;
+        let encrypted = encrypt_webhook_secret(self.crypt_secret_file, plain.trim()).map_err(
+            |e| format!("Failed to encrypt {} for integration '{}': {}", suffix, int_name, e),
+        )?;
+        Ok(Some(encrypted))
+    }
+
     // ── apply_project_integration_links ───────────────────────────────────────
 
     async fn apply_project_integration_links(
         &self,
         state_projects: &HashMap<String, StateProject>,
         state_integrations: &HashMap<String, StateIntegration>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), DynError> {
         let org_map = self.org_lookup().await?;
 
         for state_project in state_projects.values() {
@@ -865,9 +843,7 @@ impl<'a> StateApplicator<'a> {
                 continue;
             }
 
-            let org_id = *org_map.get(&state_project.organization).ok_or_else(|| {
-                format!("Organization '{}' not found", state_project.organization)
-            })?;
+            let org_id = lookup_id(&org_map, &state_project.organization, "Organization")?;
 
             let project_row = project::Entity::find()
                 .filter(project::Column::Name.eq(&state_project.name))
@@ -937,125 +913,30 @@ impl<'a> StateApplicator<'a> {
         &self,
         config: &StateConfiguration,
         delete_state: bool,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let state_usernames: std::collections::HashSet<&String> = config.users.keys().collect();
-        let state_org_names: std::collections::HashSet<&String> =
-            config.organizations.keys().collect();
-        let state_project_names: std::collections::HashSet<&String> =
-            config.projects.keys().collect();
-        let state_cache_names: std::collections::HashSet<&String> = config.caches.keys().collect();
-        let state_api_key_names: std::collections::HashSet<&String> =
-            config.api_keys.keys().collect();
-        let state_worker_ids: std::collections::HashSet<&String> =
-            config.workers.values().map(|w| &w.worker_id).collect();
+    ) -> Result<(), DynError> {
+        use std::collections::HashSet;
+
+        let usernames: HashSet<&String> = config.users.keys().collect();
+        let org_names: HashSet<&String> = config.organizations.keys().collect();
+        let project_names: HashSet<&String> = config.projects.keys().collect();
+        let cache_names: HashSet<&String> = config.caches.keys().collect();
+        let api_key_names: HashSet<&String> = config.api_keys.keys().collect();
+        let worker_ids: HashSet<&String> = config.workers.values().map(|w| &w.worker_id).collect();
 
         let db = self.db;
 
-        let managed_users = user::Entity::find()
-            .filter(user::Column::Managed.eq(true))
-            .all(db)
-            .await?;
-        for user_model in managed_users {
-            if !state_usernames.contains(&user_model.username) {
-                let username = user_model.username.clone();
-                if delete_state {
-                    user::Entity::delete_by_id(user_model.id).exec(db).await?;
-                    tracing::info!("Deleted user: {}", username);
-                } else {
-                    let mut user: user::ActiveModel = user_model.into();
-                    user.managed = Set(false);
-                    user.update(db).await?;
-                    tracing::info!("Unmanaged user: {}", username);
-                }
-            }
-        }
-
-        let managed_orgs = organization::Entity::find()
-            .filter(organization::Column::Managed.eq(true))
-            .all(db)
-            .await?;
-        for org_model in managed_orgs {
-            if !state_org_names.contains(&org_model.name) {
-                let org_name = org_model.name.clone();
-                if delete_state {
-                    organization::Entity::delete_by_id(org_model.id)
-                        .exec(db)
-                        .await?;
-                    tracing::info!("Deleted organization: {}", org_name);
-                } else {
-                    let mut org: organization::ActiveModel = org_model.into();
-                    org.managed = Set(false);
-                    org.update(db).await?;
-                    tracing::info!("Unmanaged organization: {}", org_name);
-                }
-            }
-        }
-
-        let managed_projects = project::Entity::find()
-            .filter(project::Column::Managed.eq(true))
-            .all(db)
-            .await?;
-        for project_model in managed_projects {
-            if !state_project_names.contains(&project_model.name) {
-                let project_name = project_model.name.clone();
-                if delete_state {
-                    project::Entity::delete_by_id(project_model.id)
-                        .exec(db)
-                        .await?;
-                    tracing::info!("Deleted project: {}", project_name);
-                } else {
-                    let mut project: project::ActiveModel = project_model.into();
-                    project.managed = Set(false);
-                    project.update(db).await?;
-                    tracing::info!("Unmanaged project: {}", project_name);
-                }
-            }
-        }
-
-        let managed_caches = cache::Entity::find()
-            .filter(cache::Column::Managed.eq(true))
-            .all(db)
-            .await?;
-        for cache_model in managed_caches {
-            if !state_cache_names.contains(&cache_model.name) {
-                let cache_name = cache_model.name.clone();
-                if delete_state {
-                    cache::Entity::delete_by_id(cache_model.id).exec(db).await?;
-                    tracing::info!("Deleted cache: {}", cache_name);
-                } else {
-                    let mut cache: cache::ActiveModel = cache_model.into();
-                    cache.managed = Set(false);
-                    cache.update(db).await?;
-                    tracing::info!("Unmanaged cache: {}", cache_name);
-                }
-            }
-        }
-
-        let managed_api_keys = api::Entity::find()
-            .filter(api::Column::Managed.eq(true))
-            .all(db)
-            .await?;
-        for api_key_model in managed_api_keys {
-            if !state_api_key_names.contains(&api_key_model.name) {
-                let api_key_name = api_key_model.name.clone();
-                if delete_state {
-                    api::Entity::delete_by_id(api_key_model.id).exec(db).await?;
-                    tracing::info!("Deleted API key: {}", api_key_name);
-                } else {
-                    let mut api_key: api::ActiveModel = api_key_model.into();
-                    api_key.managed = Set(false);
-                    api_key.update(db).await?;
-                    tracing::info!("Unmanaged API key: {}", api_key_name);
-                }
-            }
-        }
+        unmark_managed!(db, user, usernames, username, delete_state, "user");
+        unmark_managed!(db, organization, org_names, name, delete_state, "organization");
+        unmark_managed!(db, project, project_names, name, delete_state, "project");
+        unmark_managed!(db, cache, cache_names, name, delete_state, "cache");
+        unmark_managed!(db, api, api_key_names, name, delete_state, "API key");
 
         let managed_workers = worker_registration::Entity::find()
             .filter(worker_registration::Column::Managed.eq(true))
             .all(db)
             .await?;
         for reg in managed_workers {
-            if !state_worker_ids.contains(&reg.worker_id) {
+            if !worker_ids.contains(&reg.worker_id) {
                 let worker_id = reg.worker_id.clone();
                 worker_registration::Entity::delete_by_id(reg.id)
                     .exec(db)
@@ -1074,10 +955,7 @@ impl<'a> StateApplicator<'a> {
 /// contain an argon2 PHC hash (e.g. produced by `gradient-server hash` or the
 /// `argon2 -id -e` CLI). The plaintext password is never stored — the server
 /// only accepts the pre-hashed PHC string and passes it through to the DB.
-fn parse_password_phc(
-    contents: &str,
-    path: &str,
-) -> std::result::Result<String, Box<dyn std::error::Error>> {
+fn parse_password_phc(contents: &str, path: &str) -> Result<String, DynError> {
     let phc = contents.trim().to_string();
     if !phc.starts_with("$argon2") {
         return Err(format!(
@@ -1090,10 +968,7 @@ fn parse_password_phc(
     Ok(phc)
 }
 
-fn parse_api_key_hash(
-    contents: &str,
-    path: &str,
-) -> std::result::Result<String, Box<dyn std::error::Error>> {
+fn parse_api_key_hash(contents: &str, path: &str) -> Result<String, DynError> {
     let v = contents.trim();
     if v.len() != 64 || !v.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(format!(
@@ -1199,5 +1074,49 @@ mod api_key_hash_tests {
         let bad = "z".repeat(64);
         let err = parse_api_key_hash(&bad, "/tmp/k").unwrap_err();
         assert!(err.to_string().contains("SHA-256"));
+    }
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::{credentials_dir, lookup_id, read_credential};
+    use std::collections::HashMap;
+    use uuid::Uuid;
+
+    #[test]
+    fn lookup_id_returns_id_when_present() {
+        let id = Uuid::new_v4();
+        let mut m = HashMap::new();
+        m.insert("alice".to_string(), id);
+        assert_eq!(lookup_id(&m, "alice", "User").unwrap(), id);
+    }
+
+    #[test]
+    fn lookup_id_errors_with_kind_and_name() {
+        let m: HashMap<String, Uuid> = HashMap::new();
+        let err = lookup_id(&m, "ghost", "User").unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("User"));
+        assert!(s.contains("ghost"));
+    }
+
+    #[test]
+    fn read_credential_default_dir_when_env_unset() {
+        // Without GRADIENT_CREDENTIALS_DIR set, credentials_dir() returns the
+        // built-in systemd-credentials path. The read fails (no such file),
+        // so we just verify the error embeds the expected suffix and label.
+        // We don't assert on the env var (other tests run in parallel and
+        // may set it concurrently).
+        let err = read_credential("user", "alice", "password", "password file").unwrap_err();
+        let s = err.to_string();
+        assert!(s.contains("password file"));
+        assert!(s.contains("gradient_user_alice_password"));
+    }
+
+    #[test]
+    fn credentials_dir_returns_nonempty() {
+        // We can't assert the exact value without racing on env state, but it
+        // must always be a non-empty path so format!() composes a valid path.
+        assert!(!credentials_dir().is_empty());
     }
 }

@@ -315,6 +315,16 @@ Backend (`cargo test -p core --lib state::provisioning::api_key_hash_tests`):
   malformed values are rejected with a "SHA-256" hint pointing at the right
   shell incantation.
 
+Backend (`cargo test -p core --lib state::provisioning::helper_tests`):
+- `lookup_id_returns_id_when_present` / `lookup_id_errors_with_kind_and_name` —
+  pin the shared `lookup_id` helper used by every `apply_*` provisioning step
+  so missing user/org references produce a uniform `"<Kind> '<name>' not
+  found"` error.
+- `read_credential_default_dir_when_env_unset` /
+  `credentials_dir_returns_nonempty` — pin the shared credential-file
+  resolver: the error always names the file it tried to read and the file
+  label, so an operator who misnames a systemd credential sees which one.
+
 Backend (`cargo test -p migration --lib m20260502_000000_hash_api_keys`):
 - `sha256_hex_known_vector` — pins the in-place migration's digest helper to
   `SHA-256("abc")`.
