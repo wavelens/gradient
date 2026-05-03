@@ -33,14 +33,13 @@ chrono           = "0.4"
 clap             = "4.6"
 futures              = "0.3"
 tokio-tungstenite    = { version = "0.29", features = ["native-tls"] }
-# { git = "https://github.com/nix-community/harmonia.git", tag = "harmonia-v3.0.0" }
-harmonia-nar           = { git = "https://github.com/DerDennisOP/harmonia.git" }
-harmonia-protocol      = { git = "https://github.com/DerDennisOP/harmonia.git" }
-harmonia-store-core    = { git = "https://github.com/DerDennisOP/harmonia.git" }
-harmonia-store-remote  = { git = "https://github.com/DerDennisOP/harmonia.git" }
-harmonia-utils-base-encoding = { git = "https://github.com/DerDennisOP/harmonia.git" }
-harmonia-utils-hash    = { git = "https://github.com/DerDennisOP/harmonia.git" }
-harmonia-utils-io      = { git = "https://github.com/DerDennisOP/harmonia.git" }
+harmonia-nar           = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-protocol      = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-store-core    = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-store-remote  = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-utils-base-encoding = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-utils-hash    = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-utils-io      = { git = "https://github.com/nix-community/harmonia.git" }
 git2             = "0.20"
 libc             = "0.2"
 hex              = "0.4"
@@ -80,10 +79,10 @@ tracing-subscriber = { workspace = true }
 web              = { workspace = true }
 
 [patch.crates-io]
-harmonia-nar             = { git = "https://github.com/DerDennisOP/harmonia.git" }
-harmonia-protocol        = { git = "https://github.com/DerDennisOP/harmonia.git" }
-harmonia-protocol-derive = { git = "https://github.com/DerDennisOP/harmonia.git" }
-harmonia-store-core      = { git = "https://github.com/DerDennisOP/harmonia.git" }
-harmonia-utils-base-encoding = { git = "https://github.com/DerDennisOP/harmonia.git" }
-harmonia-utils-hash      = { git = "https://github.com/DerDennisOP/harmonia.git" }
-harmonia-utils-io        = { git = "https://github.com/DerDennisOP/harmonia.git" }
+harmonia-nar             = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-protocol        = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-protocol-derive = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-store-core      = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-utils-base-encoding = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-utils-hash      = { git = "https://github.com/nix-community/harmonia.git" }
+harmonia-utils-io        = { git = "https://github.com/nix-community/harmonia.git" }
