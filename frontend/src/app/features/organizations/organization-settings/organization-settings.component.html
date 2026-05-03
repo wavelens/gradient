@@ -4,331 +4,259 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  @if (loading()) {
-    <app-loading-spinner message="Loading organization settings..." />
-  } @else if (organization(); as org) {
-    <div class="page-header">
-      <div>
-        <div class="breadcrumb">
-          <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ org.display_name }}</a>
-          <span class="breadcrumb-separator">/</span>
-          <span class="breadcrumb-current">Settings</span>
-        </div>
-        <h1>Organization Settings</h1>
-      </div>
-    </div>
+@if (loading()) {
+  <app-loading-spinner message="Loading organization settings..." />
+} @else if (organization(); as org) {
+  <nav class="breadcrumb">
+    <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ org.display_name }}</a>
+    <span class="text-secondary"> / </span>
+    <span>Settings</span>
+  </nav>
 
-    <!-- General Settings -->
-    <div class="settings-section">
-      <h2>General</h2>
-      @if (org.managed) {
-        <div class="message-banner info">
-          <span class="material-symbols-outlined">info</span>
-          This organization is managed declaratively and cannot be edited here.
+  <gr-page-layout title="Organization Settings">
+    @if (org.managed) {
+      <gr-message-banner slot="banner" type="info">
+        This organization is managed declaratively and cannot be edited here.
+      </gr-message-banner>
+    }
+
+    <gr-settings-section title="General">
+      <gr-form-field label="Name" for="org-name" hint="Organization name cannot be changed">
+        <input pInputText id="org-name" [value]="org.name" disabled class="w-full" />
+      </gr-form-field>
+
+      <gr-form-field label="Display Name" for="display-name">
+        <input pInputText id="display-name" [(ngModel)]="formData.display_name" class="w-full" [disabled]="org.managed" />
+      </gr-form-field>
+
+      <gr-form-field label="Description" for="description">
+        <textarea
+          pTextarea
+          id="description"
+          [(ngModel)]="formData.description"
+          rows="3"
+          class="w-full"
+          [disabled]="org.managed"
+        ></textarea>
+      </gr-form-field>
+
+      <gr-form-field label="Visibility" for="visibility" hint="Public organizations are visible and readable by all users">
+        <p-select
+          inputId="visibility"
+          [(ngModel)]="formData.public"
+          [options]="visibilityOptions"
+          optionLabel="label"
+          optionValue="value"
+          [disabled]="org.managed"
+          styleClass="w-full"
+        />
+      </gr-form-field>
+
+      @if (!org.managed) {
+        @if (saveError()) {
+          <gr-message-banner type="error">{{ saveError() }}</gr-message-banner>
+        }
+        @if (saveSuccess()) {
+          <gr-message-banner type="success">Changes saved.</gr-message-banner>
+        }
+        <div class="gr-form-actions">
+          <button
+            pButton
+            label="Save Changes"
+            icon="pi pi-check"
+            (click)="saveSettings()"
+            [loading]="saving()"
+            [disabled]="saving()"
+          ></button>
         </div>
       }
-      <div class="settings-card">
-        <div class="form-group">
-          <label for="org-name">Name</label>
-          <input
-            pInputText
-            id="org-name"
-            [value]="org.name"
-            disabled
-            class="w-full"
-          />
-          <small class="text-secondary">Organization name cannot be changed</small>
-        </div>
+    </gr-settings-section>
 
-        <div class="form-group">
-          <label for="display-name">Display Name</label>
-          <input
-            pInputText
-            id="display-name"
-            [(ngModel)]="formData.display_name"
-            class="w-full"
-            [disabled]="org.managed"
-          />
-        </div>
-
-        <div class="form-group">
-          <label for="description">Description</label>
-          <textarea
-            pInputTextarea
-            id="description"
-            [(ngModel)]="formData.description"
-            rows="3"
-            class="w-full"
-            [disabled]="org.managed"
-          ></textarea>
-        </div>
-
-        <div class="form-group">
-          <label for="visibility">Visibility</label>
-          <select id="visibility" [(ngModel)]="formData.public" class="role-select" [disabled]="org.managed">
-            <option [ngValue]="false">Private</option>
-            <option [ngValue]="true">Public</option>
-          </select>
-          <small class="text-secondary">Public organizations are visible and readable by all users</small>
-        </div>
-
-        @if (!org.managed) {
-          @if (saveError()) {
-            <div class="message-banner error">
-              <span class="material-symbols-outlined">error</span>
-              {{ saveError() }}
-            </div>
-          }
-          @if (saveSuccess()) {
-            <div class="message-banner success">
-              <span class="material-symbols-outlined">check_circle</span>
-              Changes saved.
-            </div>
-          }
-          <div class="form-actions">
-            <button
-              pButton
-              label="Save Changes"
-              icon="pi pi-check"
-              (click)="saveSettings()"
-              [loading]="saving()"
-              [disabled]="saving()"
-            ></button>
-          </div>
-        }
-      </div>
-    </div>
-
-    <!-- Members -->
-    <div class="settings-section">
-      <div class="section-header">
-        <h2>Members</h2>
-        <button pButton label="Add Member" icon="pi pi-plus" severity="secondary" (click)="openAddMemberDialog()"></button>
-      </div>
+    <gr-settings-section title="Members">
       @if (membersLoading()) {
         <app-loading-spinner message="Loading members..." />
-      } @else {
-        <div class="settings-card">
-          @if (members().length > 0) {
-            <div class="members-list">
-              @for (member of members(); track member.id) {
-                <div class="member-row">
-                  <div class="member-info">
-                    <span class="material-symbols-outlined">person</span>
-                    <div class="member-username">{{ member.id }}</div>
-                  </div>
-                  <div class="member-actions">
-                    <select
-                      class="role-select"
-                      [ngModel]="member.name"
-                      [disabled]="updatingRole() === member.id || removingMember() !== null"
-                      (ngModelChange)="updateMemberRole(member.id, $event)"
-                    >
-                      @for (role of roles; track role) {
-                        <option [value]="role">{{ role }}</option>
-                      }
-                    </select>
-                    <button
-                      pButton
-                      icon="pi pi-times"
-                      severity="danger"
-                      size="small"
-                      [loading]="removingMember() === member.id"
-                      [disabled]="removingMember() !== null || updatingRole() !== null"
-                      (click)="removeMember(member.id)"
-                    ></button>
-                  </div>
+      } @else if (members().length > 0) {
+        <div class="gr-list">
+          @for (member of members(); track member.id) {
+            <div class="gr-list-row">
+              <div class="gr-list-row__info">
+                <span class="material-symbols-outlined">person</span>
+                <div>
+                  <div class="gr-list-row__title">{{ member.id }}</div>
                 </div>
-              }
+              </div>
+              <div class="gr-list-row__actions">
+                <p-select
+                  [options]="roleOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                  [ngModel]="member.name"
+                  [disabled]="updatingRole() === member.id || removingMember() !== null"
+                  (ngModelChange)="updateMemberRole(member.id, $event)"
+                />
+                <button
+                  pButton
+                  icon="pi pi-times"
+                  severity="danger"
+                  size="small"
+                  [loading]="removingMember() === member.id"
+                  [disabled]="removingMember() !== null || updatingRole() !== null"
+                  (click)="removeMember(member.id)"
+                ></button>
+              </div>
             </div>
-          } @else {
-            <p class="text-secondary">No members found.</p>
           }
         </div>
+        <div class="gr-form-actions">
+          <button pButton label="Add Member" icon="pi pi-plus" severity="secondary" (click)="openAddMemberDialog()"></button>
+        </div>
+      } @else {
+        <p class="text-secondary">No members found.</p>
+        <div class="gr-form-actions">
+          <button pButton label="Add Member" icon="pi pi-plus" severity="secondary" (click)="openAddMemberDialog()"></button>
+        </div>
       }
-    </div>
+    </gr-settings-section>
 
-    <!-- Infrastructure -->
-    <div class="settings-section">
-      <h2>Infrastructure</h2>
-      <div class="settings-card">
-        <div class="nav-row">
-          <div>
-            <h3>Workers</h3>
-            <p class="text-secondary">Manage build workers for this organization</p>
-          </div>
-          <button pButton label="Manage Workers" icon="pi pi-cog" severity="secondary" [routerLink]="['/organization', orgName, 'workers']"></button>
+    <gr-settings-section title="Infrastructure">
+      <div class="gr-nav-row">
+        <div>
+          <h4>Workers</h4>
+          <p class="text-secondary">Manage build workers for this organization</p>
         </div>
-        <p-divider />
-        <div class="nav-row">
-          <div>
-            <h3>Cache Subscriptions</h3>
-            <p class="text-secondary">Nix binary caches this organization pushes builds to</p>
-          </div>
-          <button pButton label="Manage Caches" icon="pi pi-database" severity="secondary" [routerLink]="['/organization', orgName, 'caches']"></button>
-        </div>
-        <p-divider />
-        <div class="nav-row">
-          <div>
-            <h3>Integrations</h3>
-            <p class="text-secondary">Inbound forge webhooks and outbound status reporters</p>
-          </div>
-          <a pButton label="Manage Integrations" icon="pi pi-sitemap" severity="secondary" [routerLink]="['/organization', orgName, 'integrations']"></a>
-        </div>
+        <button pButton label="Manage Workers" icon="pi pi-cog" severity="secondary" [routerLink]="['/organization', orgName, 'workers']"></button>
       </div>
-    </div>
+      <p-divider />
+      <div class="gr-nav-row">
+        <div>
+          <h4>Cache Subscriptions</h4>
+          <p class="text-secondary">Nix binary caches this organization pushes builds to</p>
+        </div>
+        <button pButton label="Manage Caches" icon="pi pi-database" severity="secondary" [routerLink]="['/organization', orgName, 'caches']"></button>
+      </div>
+      <p-divider />
+      <div class="gr-nav-row">
+        <div>
+          <h4>Integrations</h4>
+          <p class="text-secondary">Inbound forge webhooks and outbound status reporters</p>
+        </div>
+        <a pButton label="Manage Integrations" icon="pi pi-sitemap" severity="secondary" [routerLink]="['/organization', orgName, 'integrations']"></a>
+      </div>
+    </gr-settings-section>
 
-    <!-- SSH Key -->
-    <div class="settings-section">
-      <h2>SSH Key</h2>
+    <gr-settings-section title="SSH Key" description="OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).">
       @if (sshLoading()) {
         <app-loading-spinner message="Loading SSH key..." />
+      } @else if (sshKey()) {
+        <gr-form-field label="Public Key">
+          <gr-copy-field [value]="sshKey()" />
+        </gr-form-field>
       } @else {
-        <div class="settings-card">
-          <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).</p>
-          @if (sshKey()) {
-            <div class="form-group">
-              <label>Public Key</label>
-              <textarea
-                pInputTextarea
-                [value]="sshKey()"
-                readonly
-                rows="4"
-                class="w-full ssh-key-area"
-              ></textarea>
-            </div>
-            <div class="form-actions">
-              <button pButton label="Copy Key" icon="pi pi-copy" severity="secondary" (click)="copySSHKey()"></button>
-            </div>
-          } @else {
-            <p class="text-secondary">No SSH key generated yet.</p>
-            <button
-              pButton
-              label="Generate SSH Key"
-              icon="pi pi-key"
-              (click)="generateSSHKey()"
-              [loading]="generatingSSH()"
-              [disabled]="generatingSSH()"
-            ></button>
-          }
+        <p class="text-secondary">No SSH key generated yet.</p>
+        <div class="gr-form-actions">
+          <button
+            pButton
+            label="Generate SSH Key"
+            icon="pi pi-key"
+            (click)="generateSSHKey()"
+            [loading]="generatingSSH()"
+            [disabled]="generatingSSH()"
+          ></button>
         </div>
       }
-    </div>
+    </gr-settings-section>
 
-    <!-- Danger Zone -->
-    <div class="settings-section danger-section">
-      <h2>Danger Zone</h2>
-      <div class="settings-card danger-card">
-        @if (sshKey()) {
-          <div class="danger-row">
-            <div>
-              <h3>Regenerate SSH Key</h3>
-              <p class="text-secondary">Generate a new SSH key. The existing key will stop working immediately.</p>
-            </div>
-            <button
-              pButton
-              label="Regenerate Key"
-              icon="pi pi-refresh"
-              severity="danger"
-              (click)="showRegenerateKeyDialog.set(true)"
-              [disabled]="generatingSSH() || org.managed"
-            ></button>
-          </div>
-          <p-divider />
-        }
-        <div class="danger-row">
+    <gr-settings-section title="Danger Zone">
+      @if (sshKey()) {
+        <div class="gr-nav-row">
           <div>
-            <h3>Delete Organization</h3>
-            <p class="text-secondary">Permanently delete this organization and all its projects.</p>
+            <h4>Regenerate SSH Key</h4>
+            <p class="text-secondary">Generate a new SSH key. The existing key will stop working immediately.</p>
           </div>
           <button
             pButton
-            label="Delete Organization"
-            icon="pi pi-trash"
+            label="Regenerate Key"
+            icon="pi pi-refresh"
             severity="danger"
-            (click)="showDeleteDialog.set(true)"
-            [disabled]="org.managed"
+            (click)="showRegenerateKeyDialog.set(true)"
+            [disabled]="generatingSSH() || org.managed"
           ></button>
         </div>
+        <p-divider />
+      }
+      <div class="gr-nav-row">
+        <div>
+          <h4>Delete Organization</h4>
+          <p class="text-secondary">Permanently delete this organization and all its projects.</p>
+        </div>
+        <button
+          pButton
+          label="Delete Organization"
+          icon="pi pi-trash"
+          severity="danger"
+          (click)="showDeleteDialog.set(true)"
+          [disabled]="org.managed"
+        ></button>
       </div>
-    </div>
-  }
-</div>
+    </gr-settings-section>
+  </gr-page-layout>
+}
 
-<!-- Add Member Dialog -->
-<p-dialog
-  header="Add Member"
+<gr-form-dialog
   [(visible)]="showAddMemberDialog"
-  [modal]="true"
-  [style]="{ width: '400px' }"
-  [draggable]="false"
-  [resizable]="false"
+  title="Add Member"
+  submitLabel="Add"
+  [loading]="addingMember()"
+  [disabled]="!newMember.user"
+  (submit)="addMember()"
 >
-  <div class="dialog-content">
-    @if (memberError()) {
-      <div class="dialog-error">
-        <span class="material-symbols-outlined">error</span>
-        {{ memberError() }}
-      </div>
-    }
-    <div class="form-group">
-      <label for="member-name">Username</label>
-      <p-autoComplete
-        id="member-name"
-        [(ngModel)]="newMember.user"
-        [suggestions]="userSuggestions()"
-        (completeMethod)="onUserSearch($event)"
-        placeholder="Enter username"
-        styleClass="w-full"
-        [forceSelection]="false"
-        appendTo="body"
-        (keyup.enter)="addMember()"
-      />
-    </div>
-    <div class="form-group">
-      <label for="member-role">Role</label>
-      <select id="member-role" [(ngModel)]="newMember.role" class="role-select">
-        @for (role of roles; track role) {
-          <option [value]="role">{{ role }}</option>
-        }
-      </select>
-    </div>
-  </div>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showAddMemberDialog.set(false)" [disabled]="addingMember()"></button>
-    <button pButton label="Add" (click)="addMember()" [disabled]="!newMember.user || addingMember()" [loading]="addingMember()"></button>
-  </ng-template>
-</p-dialog>
+  @if (memberError()) {
+    <gr-message-banner type="error">{{ memberError() }}</gr-message-banner>
+  }
+  <gr-form-field label="Username" for="member-name">
+    <p-autoComplete
+      id="member-name"
+      [(ngModel)]="newMember.user"
+      [suggestions]="userSuggestions()"
+      (completeMethod)="onUserSearch($event)"
+      placeholder="Enter username"
+      styleClass="w-full"
+      [forceSelection]="false"
+      appendTo="body"
+      (keyup.enter)="addMember()"
+    />
+  </gr-form-field>
+  <gr-form-field label="Role" for="member-role">
+    <p-select
+      inputId="member-role"
+      [(ngModel)]="newMember.role"
+      [options]="roleOptions"
+      optionLabel="label"
+      optionValue="value"
+      styleClass="w-full"
+    />
+  </gr-form-field>
+</gr-form-dialog>
 
-<!-- Regenerate SSH Key Confirmation Dialog -->
-<p-dialog
-  header="Regenerate SSH Key"
+<gr-form-dialog
   [(visible)]="showRegenerateKeyDialog"
-  [modal]="true"
-  [style]="{ width: '400px' }"
-  [draggable]="false"
-  [resizable]="false"
+  title="Regenerate SSH Key"
+  submitLabel="Regenerate"
+  submitIcon="pi pi-refresh"
+  submitSeverity="danger"
+  [loading]="generatingSSH()"
+  (submit)="confirmRegenerateSSHKey()"
 >
   <p>Are you sure you want to regenerate the SSH key? The existing key will stop working immediately and any repositories using it will lose access.</p>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showRegenerateKeyDialog.set(false)" [disabled]="generatingSSH()"></button>
-    <button pButton label="Regenerate" severity="danger" icon="pi pi-refresh" (click)="confirmRegenerateSSHKey()" [loading]="generatingSSH()" [disabled]="generatingSSH()"></button>
-  </ng-template>
-</p-dialog>
+</gr-form-dialog>
 
-<!-- Delete Confirmation Dialog -->
-<p-dialog
-  header="Delete Organization"
+<gr-form-dialog
   [(visible)]="showDeleteDialog"
-  [modal]="true"
-  [style]="{ width: '400px' }"
-  [draggable]="false"
-  [resizable]="false"
+  title="Delete Organization"
+  submitLabel="Delete"
+  submitSeverity="danger"
+  [loading]="deleting()"
+  (submit)="deleteOrganization()"
 >
   <p>Are you sure you want to delete <strong>{{ organization()?.display_name }}</strong>? This action cannot be undone.</p>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
-    <button pButton label="Delete" severity="danger" (click)="deleteOrganization()" [loading]="deleting()" [disabled]="deleting()"></button>
-  </ng-template>
-</p-dialog>
+</gr-form-dialog>

@@ -6,6 +6,7 @@
 
 import { Component, computed, inject } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { ButtonModule } from 'primeng/button';
 
 interface ErrorMeta {
   title: string;
@@ -57,7 +58,7 @@ const FALLBACK_META: ErrorMeta = {
 @Component({
   selector: 'app-error-page',
   standalone: true,
-  imports: [RouterModule],
+  imports: [RouterModule, ButtonModule],
   templateUrl: './error-page.component.html',
   styleUrl: './error-page.component.scss',
 })

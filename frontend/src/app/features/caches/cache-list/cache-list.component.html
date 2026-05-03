@@ -4,87 +4,62 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <h1>Caches</h1>
-      <p class="text-secondary">Manage your build caches</p>
-    </div>
-    @if (authService.isAuthenticated()) {
-      <button pButton label="Create Cache" icon="pi pi-plus" (click)="openCreateDialog()"></button>
-    }
-  </div>
+<gr-page-layout title="Caches" subtitle="Manage your build caches">
+  @if (authService.isAuthenticated()) {
+    <button slot="actions" pButton label="Create Cache" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+  }
 
   @if (loading()) {
     <app-loading-spinner message="Loading caches..." />
   } @else {
-    <!-- Active Caches -->
     @if (activeCaches.length > 0) {
-      <div class="section">
-        <h2>Active Caches</h2>
-        <div class="cache-grid">
+      <gr-settings-section title="Active Caches" [card]="false">
+        <div class="gr-grid-cards">
           @for (cache of activeCaches; track cache.id) {
-            <a [routerLink]="['/caches', cache.name]" class="cache-card">
-              <div class="cache-icon">
-                <span class="material-symbols-outlined">storage</span>
-              </div>
-              <div class="cache-content">
+            <a [routerLink]="['/caches', cache.name]" class="cache-tile">
+              <span class="cache-tile__icon material-symbols-outlined">storage</span>
+              <div class="cache-tile__body">
                 <h3>{{ cache.display_name }}</h3>
                 <p class="text-secondary">{{ cache.description || 'No description' }}</p>
-                <div class="cache-meta">
-                  <span class="meta-item">
-                    <span class="material-symbols-outlined">sort</span>
-                    Priority: {{ cache.priority }}
-                  </span>
-                  <span class="status-badge active">Active</span>
+                <div class="cache-tile__meta">
+                  <span class="text-secondary">Priority: {{ cache.priority }}</span>
+                  <span class="status-chip status-ok">Active</span>
                   @if (cache.public) {
-                    <span class="status-badge public-badge">Public</span>
+                    <span class="badge badge-inbound">Public</span>
                   }
                 </div>
               </div>
-              <div class="cache-arrow">
-                <span class="material-symbols-outlined">arrow_forward</span>
-              </div>
+              <span class="cache-tile__arrow material-symbols-outlined">arrow_forward</span>
             </a>
           }
         </div>
-      </div>
+      </gr-settings-section>
     }
 
-    <!-- Inactive Caches -->
     @if (inactiveCaches.length > 0) {
-      <div class="section">
-        <h2>Inactive Caches</h2>
-        <div class="cache-grid">
+      <gr-settings-section title="Inactive Caches" [card]="false">
+        <div class="gr-grid-cards">
           @for (cache of inactiveCaches; track cache.id) {
-            <a [routerLink]="['/caches', cache.name]" class="cache-card inactive">
-              <div class="cache-icon">
-                <span class="material-symbols-outlined">cloud_off</span>
-              </div>
-              <div class="cache-content">
+            <a [routerLink]="['/caches', cache.name]" class="cache-tile cache-tile--inactive">
+              <span class="cache-tile__icon material-symbols-outlined">cloud_off</span>
+              <div class="cache-tile__body">
                 <h3>{{ cache.display_name }}</h3>
                 <p class="text-secondary">{{ cache.description || 'No description' }}</p>
-                <div class="cache-meta">
-                  <span class="meta-item">
-                    <span class="material-symbols-outlined">sort</span>
-                    Priority: {{ cache.priority }}
-                  </span>
-                  <span class="status-badge inactive">Inactive</span>
+                <div class="cache-tile__meta">
+                  <span class="text-secondary">Priority: {{ cache.priority }}</span>
+                  <span class="status-chip status-warn">Inactive</span>
                   @if (cache.public) {
-                    <span class="status-badge public-badge">Public</span>
+                    <span class="badge badge-inbound">Public</span>
                   }
                 </div>
               </div>
-              <div class="cache-arrow">
-                <span class="material-symbols-outlined">arrow_forward</span>
-              </div>
+              <span class="cache-tile__arrow material-symbols-outlined">arrow_forward</span>
             </a>
           }
         </div>
-      </div>
+      </gr-settings-section>
     }
 
-    <!-- Empty State -->
     @if (caches().length === 0) {
       <app-empty-state
         icon="storage"
@@ -96,150 +71,118 @@
     }
   }
 
-  <!-- Public Caches -->
   @if (publicLoading()) {
     <app-loading-spinner message="Loading public caches..." />
   } @else if (filteredPublicCaches.length > 0) {
-    <div class="discover-header">
-      <h2>Discover Public Caches</h2>
-    </div>
-    <div class="cache-grid">
-      @for (cache of filteredPublicCaches; track cache.id) {
-        <a [routerLink]="['/caches', cache.name]" class="cache-card">
-          <div class="cache-icon">
-            <span class="material-symbols-outlined">public</span>
-          </div>
-          <div class="cache-content">
-            <h3>{{ cache.display_name }}</h3>
-            <p class="text-secondary">{{ cache.description || 'No description' }}</p>
-            <div class="cache-meta">
-              <span class="meta-item">
-                <span class="material-symbols-outlined">sort</span>
-                Priority: {{ cache.priority }}
-              </span>
-              <span class="status-badge public-badge">Public</span>
+    <gr-settings-section title="Discover Public Caches" [card]="false">
+      <div class="gr-grid-cards">
+        @for (cache of filteredPublicCaches; track cache.id) {
+          <a [routerLink]="['/caches', cache.name]" class="cache-tile">
+            <span class="cache-tile__icon material-symbols-outlined">public</span>
+            <div class="cache-tile__body">
+              <h3>{{ cache.display_name }}</h3>
+              <p class="text-secondary">{{ cache.description || 'No description' }}</p>
+              <div class="cache-tile__meta">
+                <span class="text-secondary">Priority: {{ cache.priority }}</span>
+                <span class="badge badge-inbound">Public</span>
+              </div>
             </div>
-          </div>
-          <div class="cache-arrow">
-            <span class="material-symbols-outlined">arrow_forward</span>
-          </div>
-        </a>
-      }
-    </div>
-  }
-</div>
-
-<!-- Create Cache Dialog -->
-<p-dialog
-  header="Create Cache"
-  [(visible)]="showCreateDialog"
-  [modal]="true"
-  [style]="{ width: '500px' }"
-  [draggable]="false"
-  [resizable]="false"
->
-  @if (createError()) {
-    <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
-      {{ createError() }}
-    </div>
-  }
-  <div class="dialog-content">
-    <div class="form-group">
-      <label for="cache-display">Display Name *</label>
-      <input
-        pInputText
-        id="cache-display"
-        [(ngModel)]="newCache.display_name"
-        placeholder="My Cache"
-        class="w-full"
-        (ngModelChange)="onCacheDisplayNameChange($event)"
-      />
-    </div>
-
-    <div class="form-group">
-      <label for="cache-name">Name *</label>
-      <div class="name-input-wrapper">
-        <input
-          pInputText
-          id="cache-name"
-          [(ngModel)]="newCache.name"
-          placeholder="cache-name"
-          class="w-full"
-          (ngModelChange)="onCacheNameChange($event)"
-          (input)="onCacheNameUserInput()"
-        />
-        @if (nameCheckState() === 'checking') {
-          <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
-        } @else if (nameCheckState() === 'available') {
-          <span class="name-check-icon available"><span class="material-symbols-outlined">check</span></span>
-        } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
-          <span class="name-check-icon taken"><span class="material-symbols-outlined">close</span></span>
+            <span class="cache-tile__arrow material-symbols-outlined">arrow_forward</span>
+          </a>
         }
       </div>
-      @if (nameCheckState() === 'taken') {
-        <small class="text-danger">This name is already taken.</small>
-      } @else if (nameCheckState() === 'invalid') {
-        <small class="text-danger">Only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.</small>
-      } @else {
-        <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
-      }
-    </div>
+    </gr-settings-section>
+  }
+</gr-page-layout>
 
-    <div class="form-group">
-      <label for="cache-desc">Description</label>
-      <textarea
-        pInputTextarea
-        id="cache-desc"
-        [(ngModel)]="newCache.description"
-        placeholder="Describe your cache..."
-        rows="3"
-        class="w-full"
-      ></textarea>
-    </div>
+<gr-form-dialog
+  [(visible)]="showCreateDialog"
+  title="Create Cache"
+  submitLabel="Create"
+  [loading]="creating()"
+  [disabled]="!newCache.name || !newCache.display_name || priorityInvalid || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking'"
+  (submit)="createCache()"
+>
+  @if (createError()) {
+    <gr-message-banner type="error">{{ createError() }}</gr-message-banner>
+  }
 
-    <div class="form-group">
-      <label for="cache-priority">Priority</label>
+  <gr-form-field label="Display Name" for="cache-display" [required]="true">
+    <input
+      pInputText
+      id="cache-display"
+      [(ngModel)]="newCache.display_name"
+      placeholder="My Cache"
+      class="w-full"
+      (ngModelChange)="onCacheDisplayNameChange($event)"
+    />
+  </gr-form-field>
+
+  <gr-form-field
+    label="Name"
+    for="cache-name"
+    [required]="true"
+    [hint]="nameHint()"
+  >
+    <div class="name-input-wrapper">
       <input
-        type="number"
-        id="cache-priority"
-        [(ngModel)]="newCache.priority"
-        [class.input-invalid]="priorityInvalid"
+        pInputText
+        id="cache-name"
+        [(ngModel)]="newCache.name"
+        placeholder="cache-name"
         class="w-full"
-        min="0"
-        max="255"
+        (ngModelChange)="onCacheNameChange($event)"
+        (input)="onCacheNameUserInput()"
       />
-      @if (priorityInvalid) {
-        <small class="text-danger">Priority must be between 0 and 255</small>
-      } @else {
-        <small class="text-secondary">Higher priority caches are used first (0-255)</small>
+      @if (nameCheckState() === 'checking') {
+        <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
+      } @else if (nameCheckState() === 'available') {
+        <span class="name-check-icon name-check-icon--ok"><span class="material-symbols-outlined">check</span></span>
+      } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
+        <span class="name-check-icon name-check-icon--err"><span class="material-symbols-outlined">close</span></span>
       }
     </div>
+  </gr-form-field>
 
-    <div class="form-group">
-      <label for="cache-visibility">Visibility</label>
-      <select id="cache-visibility" [(ngModel)]="newCache.public" class="visibility-select w-full">
-        <option [ngValue]="false">Private</option>
-        <option [ngValue]="true">Public</option>
-      </select>
-      <small class="text-secondary">Public caches are visible and readable by all users</small>
-    </div>
-  </div>
+  <gr-form-field label="Description" for="cache-desc">
+    <textarea
+      pTextarea
+      id="cache-desc"
+      [(ngModel)]="newCache.description"
+      placeholder="Describe your cache..."
+      rows="3"
+      class="w-full"
+    ></textarea>
+  </gr-form-field>
 
-  <ng-template pTemplate="footer">
-    <button
-      pButton
-      label="Cancel"
-      severity="secondary"
-      (click)="showCreateDialog.set(false)"
-      [disabled]="creating()"
-    ></button>
-    <button
-      pButton
-      label="Create"
-      (click)="createCache()"
-      [disabled]="!newCache.name || !newCache.display_name || priorityInvalid || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking' || creating()"
-      [loading]="creating()"
-    ></button>
-  </ng-template>
-</p-dialog>
+  <gr-form-field
+    label="Priority"
+    for="cache-priority"
+    [hint]="priorityInvalid ? 'Priority must be between 0 and 255' : 'Higher priority caches are used first (0-255)'"
+  >
+    <input
+      pInputText
+      type="number"
+      id="cache-priority"
+      [(ngModel)]="newCache.priority"
+      class="w-full"
+      min="0"
+      max="255"
+    />
+  </gr-form-field>
+
+  <gr-form-field
+    label="Visibility"
+    for="cache-visibility"
+    hint="Public caches are visible and readable by all users"
+  >
+    <p-select
+      inputId="cache-visibility"
+      [options]="visibilityOptions"
+      optionLabel="label"
+      optionValue="value"
+      [(ngModel)]="newCache.public"
+      styleClass="w-full"
+    />
+  </gr-form-field>
+</gr-form-dialog>

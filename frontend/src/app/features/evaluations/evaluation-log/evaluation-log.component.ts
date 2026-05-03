@@ -26,13 +26,14 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { Evaluation, EvaluationMessage } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
 import { ButtonModule } from 'primeng/button';
 import { environment } from '@environments/environment';
 
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonModule, ScrollingModule],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, EmptyStateComponent, ButtonModule, ScrollingModule],
   templateUrl: './evaluation-log.component.html',
   styleUrl: './evaluation-log.component.scss',
 })

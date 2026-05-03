@@ -9,9 +9,8 @@
     <app-loading-spinner message="Loading evaluation..." />
   </div>
 } @else if (!evaluation()) {
-  <div class="error-state">
-    <span class="material-symbols-outlined">error</span>
-    <h2>Evaluation not found</h2>
+  <div class="full-loading">
+    <app-empty-state icon="error" title="Evaluation not found" />
   </div>
 } @else if (evaluation(); as ev) {
   <div class="eval-layout">
@@ -19,15 +18,15 @@
     <!-- ── Sidebar ──────────────────────────────────────────────── -->
     <aside class="builds-sidebar">
 
-      <div class="sidebar-breadcrumb">
+      <nav class="breadcrumb sidebar-breadcrumb">
         <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
         @if (ev.project_name) {
-          <span class="breadcrumb-sep">/</span>
+          <span class="text-secondary"> / </span>
           <a [routerLink]="['/organization', orgName, 'project', ev.project_name]" class="breadcrumb-link">{{ ev.project_display_name || ev.project_name }}</a>
         }
-        <span class="breadcrumb-sep">/</span>
-        <span class="breadcrumb-cur">Evaluation</span>
-      </div>
+        <span class="text-secondary"> / </span>
+        <span>Evaluation</span>
+      </nav>
 
       <div class="overview-block">
         <div class="eval-status-row">

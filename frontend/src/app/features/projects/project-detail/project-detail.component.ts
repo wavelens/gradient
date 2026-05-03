@@ -14,6 +14,7 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
 import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus } from '@core/models';
 
 @Component({
@@ -25,6 +26,8 @@ import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, 
     ButtonModule,
     LoadingSpinnerComponent,
     EmptyStateComponent,
+    PageLayoutComponent,
+    SettingsSectionComponent,
   ],
   templateUrl: './project-detail.component.html',
   styleUrl: './project-detail.component.scss',

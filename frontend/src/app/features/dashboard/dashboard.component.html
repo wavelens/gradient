@@ -4,17 +4,14 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <h1>Dashboard</h1>
-    <p class="text-secondary">Welcome back! Here's an overview of your Gradient workspace.</p>
-  </div>
-
+<gr-page-layout
+  title="Dashboard"
+  subtitle="Welcome back! Here's an overview of your Gradient workspace."
+>
   @if (loading()) {
     <app-loading-spinner message="Loading dashboard..." />
   } @else {
-    <!-- Stats Overview -->
-    <div class="dashboard-stats">
+    <div class="gr-grid-stats">
       <app-stat-card
         icon="corporate_fare"
         [value]="organizations().length"
@@ -27,28 +24,28 @@
       />
     </div>
 
-    <!-- Recent Organizations -->
-    <div class="dashboard-section">
-      <div class="section-header">
-        <h2>Organizations</h2>
+    <gr-settings-section title="Organizations">
+      <div class="dashboard-section-header">
         <a routerLink="/organizations" class="view-all">View all →</a>
       </div>
 
       @if (organizations().length > 0) {
-        <div class="card-list">
+        <div class="gr-list">
           @for (org of recentOrganizations; track org.id) {
-            <a [routerLink]="['/organization', org.name]" class="card">
-              <div class="card-icon">
+            <a [routerLink]="['/organization', org.name]" class="gr-list-row">
+              <div class="gr-list-row__info">
                 <span class="material-symbols-outlined">corporate_fare</span>
+                <div>
+                  <div class="gr-list-row__title">{{ org.display_name || org.name }}</div>
+                  <div class="gr-list-row__meta text-secondary">
+                    {{ org.description || 'No description' }}
+                  </div>
+                </div>
               </div>
-              <div class="card-content">
-                <h3>{{ org.display_name || org.name }}</h3>
-                <p class="text-secondary">{{ org.description || 'No description' }}</p>
+              <div class="gr-list-row__actions">
                 @if (org.role) {
                   <span class="badge">{{ org.role }}</span>
                 }
-              </div>
-              <div class="card-arrow">
                 <span class="material-symbols-outlined">arrow_forward</span>
               </div>
             </a>
@@ -63,33 +60,31 @@
           (actionClick)="$any(null)"
         />
       }
-    </div>
+    </gr-settings-section>
 
-    <!-- Recent Caches -->
-    <div class="dashboard-section">
-      <div class="section-header">
-        <h2>Caches</h2>
+    <gr-settings-section title="Caches">
+      <div class="dashboard-section-header">
         <a routerLink="/caches" class="view-all">View all →</a>
       </div>
 
       @if (caches().length > 0) {
-        <div class="card-list">
+        <div class="gr-list">
           @for (cache of recentCaches; track cache.id) {
-            <a [routerLink]="['/caches', cache.name]" class="card">
-              <div class="card-icon">
+            <a [routerLink]="['/caches', cache.name]" class="gr-list-row">
+              <div class="gr-list-row__info">
                 <span class="material-symbols-outlined">inventory_2</span>
-              </div>
-              <div class="card-content">
-                <h3>{{ cache.display_name || cache.name }}</h3>
-                <p class="text-secondary">{{ cache.description || 'No description' }}</p>
-                <div class="cache-status">
-                  <span class="status-badge" [class.active]="cache.active">
-                    {{ cache.active ? 'Active' : 'Inactive' }}
-                  </span>
-                  <span class="text-light">Priority: {{ cache.priority }}</span>
+                <div>
+                  <div class="gr-list-row__title">{{ cache.display_name || cache.name }}</div>
+                  <div class="gr-list-row__meta text-secondary">
+                    {{ cache.description || 'No description' }}
+                  </div>
                 </div>
               </div>
-              <div class="card-arrow">
+              <div class="gr-list-row__actions">
+                <span class="status-chip" [class.status-ok]="cache.active" [class.status-warn]="!cache.active">
+                  {{ cache.active ? 'Active' : 'Inactive' }}
+                </span>
+                <span class="text-light">Priority: {{ cache.priority }}</span>
                 <span class="material-symbols-outlined">arrow_forward</span>
               </div>
             </a>
@@ -102,6 +97,6 @@
           message="Create a cache to store and share your Nix builds"
         />
       }
-    </div>
+    </gr-settings-section>
   }
-</div>
+</gr-page-layout>

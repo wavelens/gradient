@@ -4,196 +4,175 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  @if (loading()) {
-    <app-loading-spinner message="Loading cache settings..." />
-  } @else if (cache(); as c) {
-    <div class="page-header">
-      <div>
-        <div class="breadcrumb">
-          <a routerLink="/caches" class="breadcrumb-link">Caches</a>
-          <span class="breadcrumb-separator">/</span>
-          <a [routerLink]="['/caches', cacheName]" class="breadcrumb-link">{{ c.display_name }}</a>
-          <span class="breadcrumb-separator">/</span>
-          <span class="breadcrumb-current">Settings</span>
-        </div>
-        <h1>Cache Settings</h1>
-      </div>
-    </div>
+@if (loading()) {
+  <app-loading-spinner message="Loading cache settings..." />
+} @else if (cache(); as c) {
+  <nav class="breadcrumb">
+    <a routerLink="/caches" class="breadcrumb-link">Caches</a>
+    <span class="text-secondary"> / </span>
+    <a [routerLink]="['/caches', cacheName]" class="breadcrumb-link">{{ c.display_name }}</a>
+    <span class="text-secondary"> / </span>
+    <span>Settings</span>
+  </nav>
 
-    <!-- General -->
-    <div class="settings-section">
-      <h2>General</h2>
+  <gr-page-layout title="Cache Settings" [subtitle]="c.display_name">
+    <gr-settings-section title="General">
       @if (c.managed) {
-        <div class="message-banner info">
-          <span class="material-symbols-outlined">info</span>
+        <gr-message-banner type="info">
           This cache is managed declaratively and cannot be edited here.
-        </div>
+        </gr-message-banner>
       } @else if (!c.can_edit) {
-        <div class="message-banner info">
-          <span class="material-symbols-outlined">info</span>
+        <gr-message-banner type="info">
           You have read-only access to this cache.
+        </gr-message-banner>
+      }
+
+      <gr-form-field label="Name" for="cache-name" hint="Cache name cannot be changed">
+        <input pInputText id="cache-name" [value]="c.name" disabled class="w-full" />
+      </gr-form-field>
+
+      <gr-form-field label="Display Name" for="display-name">
+        <input
+          pInputText
+          id="display-name"
+          [(ngModel)]="formData.display_name"
+          class="w-full"
+          [disabled]="c.managed || !c.can_edit"
+        />
+      </gr-form-field>
+
+      <gr-form-field label="Description" for="description">
+        <textarea
+          pTextarea
+          id="description"
+          [(ngModel)]="formData.description"
+          rows="3"
+          class="w-full"
+          [disabled]="c.managed || !c.can_edit"
+        ></textarea>
+      </gr-form-field>
+
+      <gr-form-field
+        label="Priority"
+        for="priority"
+        [hint]="priorityInvalid ? 'Priority must be between 0 and 255' : 'Higher priority caches are used first (0–255)'"
+      >
+        <input
+          pInputText
+          type="number"
+          id="priority"
+          [(ngModel)]="formData.priority"
+          class="w-full"
+          min="0"
+          max="255"
+          [disabled]="c.managed || !c.can_edit"
+        />
+      </gr-form-field>
+
+      <gr-form-field
+        label="Visibility"
+        for="visibility"
+        hint="Public caches are visible and readable by all users"
+      >
+        <p-select
+          inputId="visibility"
+          [options]="visibilityOptions"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="formData.public"
+          styleClass="w-full"
+          [disabled]="c.managed || !c.can_edit"
+        />
+      </gr-form-field>
+
+      @if (saveError()) {
+        <gr-message-banner type="error">{{ saveError() }}</gr-message-banner>
+      }
+      @if (saveSuccess()) {
+        <gr-message-banner type="success">Changes saved.</gr-message-banner>
+      }
+
+      @if (!c.managed && c.can_edit) {
+        <div class="gr-form-actions">
+          <button
+            pButton
+            label="Save Changes"
+            icon="pi pi-check"
+            (click)="saveSettings()"
+            [loading]="saving()"
+            [disabled]="saving() || priorityInvalid"
+          ></button>
         </div>
       }
-      <div class="settings-card">
-        <div class="form-group">
-          <label for="cache-name">Name</label>
-          <input
-            pInputText
-            id="cache-name"
-            [value]="c.name"
-            disabled
-            class="w-full"
-          />
-          <small class="text-secondary">Cache name cannot be changed</small>
-        </div>
+    </gr-settings-section>
 
-        <div class="form-group">
-          <label for="display-name">Display Name</label>
-          <input
-            pInputText
-            id="display-name"
-            [(ngModel)]="formData.display_name"
-            class="w-full"
-            [disabled]="c.managed || !c.can_edit"
-          />
+    <gr-settings-section title="Upstream Caches">
+      <div class="gr-nav-row">
+        <div>
+          <h4>Upstream Caches</h4>
+          <p class="text-secondary">External and internal caches this cache pulls through from</p>
         </div>
-
-        <div class="form-group">
-          <label for="description">Description</label>
-          <textarea
-            pInputTextarea
-            id="description"
-            [(ngModel)]="formData.description"
-            rows="3"
-            class="w-full"
-            [disabled]="c.managed || !c.can_edit"
-          ></textarea>
-        </div>
-
-        <div class="form-group">
-          <label for="priority">Priority</label>
-          <input
-            type="number"
-            id="priority"
-            [(ngModel)]="formData.priority"
-            [class.input-invalid]="priorityInvalid"
-            class="w-full"
-            min="0"
-            max="255"
-            [disabled]="c.managed || !c.can_edit"
-          />
-          @if (priorityInvalid) {
-            <small class="text-danger">Priority must be between 0 and 255</small>
-          } @else {
-            <small class="text-secondary">Higher priority caches are used first (0–255)</small>
-          }
-        </div>
-
-        <div class="form-group">
-          <label for="visibility">Visibility</label>
-          <select id="visibility" [(ngModel)]="formData.public" class="role-select w-full" [disabled]="c.managed || !c.can_edit">
-            <option [ngValue]="false">Private</option>
-            <option [ngValue]="true">Public</option>
-          </select>
-          <small class="text-secondary">Public caches are visible and readable by all users</small>
-        </div>
-
-        @if (saveError()) {
-          <div class="message-banner error">
-            <span class="material-symbols-outlined">error</span>
-            {{ saveError() }}
-          </div>
-        }
-        @if (saveSuccess()) {
-          <div class="message-banner success">
-            <span class="material-symbols-outlined">check_circle</span>
-            Changes saved.
-          </div>
-        }
         @if (!c.managed && c.can_edit) {
-          <div class="form-actions">
-            <button
-              pButton
-              label="Save Changes"
-              icon="pi pi-check"
-              (click)="saveSettings()"
-              [loading]="saving()"
-              [disabled]="saving() || priorityInvalid"
-            ></button>
-          </div>
+          <button
+            pButton
+            label="Manage Upstreams"
+            icon="pi pi-cloud-download"
+            severity="secondary"
+            [routerLink]="['/caches', cacheName, 'upstreams']"
+          ></button>
         }
       </div>
-    </div>
-
-    <!-- Upstream Caches -->
-    <div class="settings-section">
-      <h2>Upstream Caches</h2>
-      <div class="settings-card">
-        <div class="nav-row">
-          <div>
-            <h3>Upstream Caches</h3>
-            <p class="text-secondary">External and internal caches this cache pulls through from</p>
-          </div>
-          @if (!c.managed && c.can_edit) {
-            <button pButton label="Manage Upstreams" icon="pi pi-cloud-download" severity="secondary" [routerLink]="['/caches', cacheName, 'upstreams']"></button>
-          }
-        </div>
-      </div>
-    </div>
+    </gr-settings-section>
 
     @if (!c.managed && c.can_edit) {
-      <!-- Danger Zone -->
-      <div class="settings-section danger-section">
-        <h2>Danger Zone</h2>
-        <div class="settings-card danger-card">
-          <div class="danger-row">
-            <div>
-              <h3>{{ c.active ? 'Deactivate Cache' : 'Activate Cache' }}</h3>
-              <p class="text-secondary">{{ c.active ? 'Stop serving this cache to Nix clients.' : 'Start serving this cache to Nix clients.' }}</p>
-            </div>
-            <button
-              pButton
-              [label]="c.active ? 'Deactivate' : 'Activate'"
-              [icon]="c.active ? 'pi pi-times' : 'pi pi-check'"
-              [severity]="c.active ? 'danger' : 'success'"
-              (click)="toggleActive()"
-              [loading]="toggling()"
-              [disabled]="toggling()"
-            ></button>
+      <gr-settings-section
+        title="Danger Zone"
+        description="Destructive operations that cannot be undone."
+      >
+        <div class="gr-nav-row">
+          <div>
+            <h4>{{ c.active ? 'Deactivate Cache' : 'Activate Cache' }}</h4>
+            <p class="text-secondary">
+              {{ c.active ? 'Stop serving this cache to Nix clients.' : 'Start serving this cache to Nix clients.' }}
+            </p>
           </div>
-          <p-divider />
-          <div class="danger-row">
-            <div>
-              <h3>Delete Cache</h3>
-              <p class="text-secondary">Permanently delete this cache and all its stored artifacts.</p>
-            </div>
-            <button
-              pButton
-              label="Delete Cache"
-              icon="pi pi-trash"
-              severity="danger"
-              (click)="showDeleteDialog.set(true)"
-            ></button>
-          </div>
+          <button
+            pButton
+            [label]="c.active ? 'Deactivate' : 'Activate'"
+            [icon]="c.active ? 'pi pi-times' : 'pi pi-check'"
+            [severity]="c.active ? 'danger' : 'success'"
+            (click)="toggleActive()"
+            [loading]="toggling()"
+            [disabled]="toggling()"
+          ></button>
         </div>
-      </div>
+        <p-divider />
+        <div class="gr-nav-row">
+          <div>
+            <h4>Delete Cache</h4>
+            <p class="text-secondary">Permanently delete this cache and all its stored artifacts.</p>
+          </div>
+          <button
+            pButton
+            label="Delete Cache"
+            icon="pi pi-trash"
+            severity="danger"
+            (click)="showDeleteDialog.set(true)"
+          ></button>
+        </div>
+      </gr-settings-section>
     }
-  }
-</div>
+  </gr-page-layout>
+}
 
-<!-- Delete Confirmation Dialog -->
-<p-dialog
-  header="Delete Cache"
+<gr-form-dialog
   [(visible)]="showDeleteDialog"
-  [modal]="true"
-  [style]="{ width: '400px' }"
-  [draggable]="false"
-  [resizable]="false"
+  title="Delete Cache"
+  submitLabel="Delete"
+  submitSeverity="danger"
+  [loading]="deleting()"
+  [disabled]="deleting()"
+  (submit)="deleteCache()"
 >
   <p>Are you sure you want to delete <strong>{{ cache()?.display_name }}</strong>? This action cannot be undone.</p>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
-    <button pButton label="Delete" severity="danger" (click)="deleteCache()" [loading]="deleting()" [disabled]="deleting()"></button>
-  </ng-template>
-</p-dialog>
+</gr-form-dialog>

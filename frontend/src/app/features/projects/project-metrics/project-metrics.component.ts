@@ -22,6 +22,8 @@ import {
 import { ProjectsService, ProjectMetricPoint, ProjectMetricsResponse } from '@core/services/projects.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { PageLayoutComponent } from '@shared/components/layout';
 
 const CHART_COLORS = {
   buildTime: '#17a2b8',
@@ -53,7 +55,14 @@ type ChartOptions = {
 @Component({
   selector: 'app-project-metrics',
   standalone: true,
-  imports: [CommonModule, RouterModule, NgApexchartsModule, LoadingSpinnerComponent],
+  imports: [
+    CommonModule,
+    RouterModule,
+    NgApexchartsModule,
+    LoadingSpinnerComponent,
+    EmptyStateComponent,
+    PageLayoutComponent,
+  ],
   templateUrl: './project-metrics.component.html',
   styleUrl: './project-metrics.component.scss',
 })

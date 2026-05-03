@@ -4,109 +4,63 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <h1>Profile Settings</h1>
-    <p class="text-secondary">Manage your personal information</p>
-  </div>
-
+<gr-page-layout title="Profile Settings" subtitle="Manage your personal information">
   @if (loading()) {
     <app-loading-spinner message="Loading profile..." />
   } @else {
     @if (errorMessage()) {
-      <div class="message-banner error">
-        <span class="material-symbols-outlined">error</span>
-        {{ errorMessage() }}
-      </div>
+      <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
     }
-
     @if (successMessage()) {
-      <div class="message-banner success">
-        <span class="material-symbols-outlined">check_circle</span>
-        {{ successMessage() }}
-      </div>
+      <gr-message-banner type="success">{{ successMessage() }}</gr-message-banner>
     }
 
-    <!-- Profile Form -->
-    <div class="settings-section">
-      <h2>Personal Information</h2>
+    <gr-settings-section title="Personal Information">
       @if (isManaged()) {
-        <div class="message-banner info">
-          <span class="material-symbols-outlined">info</span>
+        <gr-message-banner type="info">
           This account is managed declaratively and cannot be edited here.
-        </div>
+        </gr-message-banner>
       } @else if (isOidc()) {
-        <div class="message-banner info">
-          <span class="material-symbols-outlined">info</span>
+        <gr-message-banner type="info">
           Your profile is managed by your identity provider and cannot be edited here.
+        </gr-message-banner>
+      }
+
+      <gr-form-field label="Username" for="username">
+        <input pInputText id="username" [(ngModel)]="formData.username" class="w-full" [disabled]="isOidc() || isManaged()" />
+      </gr-form-field>
+
+      <gr-form-field label="Full Name" for="name">
+        <input pInputText id="name" [(ngModel)]="formData.name" class="w-full" [disabled]="isOidc() || isManaged()" />
+      </gr-form-field>
+
+      <gr-form-field label="Email" for="email">
+        <input pInputText id="email" type="email" [(ngModel)]="formData.email" class="w-full" [disabled]="isOidc() || isManaged()" />
+      </gr-form-field>
+
+      @if (!isOidc() && !isManaged()) {
+        <div class="gr-form-actions">
+          <button pButton label="Save Changes" icon="pi pi-check" (click)="saveSettings()" [loading]="saving()" [disabled]="saving()"></button>
         </div>
       }
-      <div class="settings-card">
-        <div class="form-group">
-          <label for="username">Username</label>
-          <input pInputText id="username" [(ngModel)]="formData.username" class="w-full" [disabled]="isOidc() || isManaged()" />
-        </div>
+    </gr-settings-section>
 
-        <div class="form-group">
-          <label for="name">Full Name</label>
-          <input pInputText id="name" [(ngModel)]="formData.name" class="w-full" [disabled]="isOidc() || isManaged()" />
+    <gr-settings-section title="Security">
+      <div class="gr-nav-row">
+        <div>
+          <h4>API Keys</h4>
+          <p class="text-secondary">Manage API keys for programmatic access</p>
         </div>
-
-        <div class="form-group">
-          <label for="email">Email</label>
-          <input pInputText id="email" type="email" [(ngModel)]="formData.email" class="w-full" [disabled]="isOidc() || isManaged()" />
-        </div>
-
-        @if (!isOidc() && !isManaged()) {
-          <div class="form-actions">
-            <button pButton label="Save Changes" icon="pi pi-check" (click)="saveSettings()" [loading]="saving()" [disabled]="saving()"></button>
-          </div>
-        }
+        <button pButton label="Manage API Keys" icon="pi pi-key" severity="secondary" routerLink="/settings/keys"></button>
       </div>
-    </div>
+    </gr-settings-section>
 
-    <!-- Settings Navigation -->
-    <div class="settings-section">
-      <h2>Security</h2>
-      <div class="settings-card">
-        <div class="nav-row">
-          <div>
-            <h3>API Keys</h3>
-            <p class="text-secondary">Manage API keys for programmatic access</p>
-          </div>
-          <button pButton label="Manage API Keys" icon="pi pi-key" severity="secondary" routerLink="/settings/keys"></button>
-        </div>
+    <gr-settings-section title="Danger Zone" description="Permanently delete your account and all associated data.">
+      <div class="gr-form-actions">
+        <button pButton label="Delete Account" icon="pi pi-trash" severity="danger" (click)="confirmDelete()" [disabled]="isManaged() || deleting()" [loading]="deleting()"></button>
       </div>
-    </div>
-
-    <!-- Danger Zone -->
-    <div class="settings-section danger-section">
-      <h2>Danger Zone</h2>
-      <div class="settings-card danger-card">
-        <div class="danger-row">
-          <div>
-            <h3>Delete Account</h3>
-            <p class="text-secondary">Permanently delete your account and all associated data.</p>
-          </div>
-          <button pButton label="Delete Account" icon="pi pi-trash" severity="danger" (click)="showDeleteDialog.set(true)" [disabled]="isManaged()"></button>
-        </div>
-      </div>
-    </div>
+    </gr-settings-section>
   }
-</div>
+</gr-page-layout>
 
-<!-- Delete Confirmation Dialog -->
-<p-dialog
-  header="Delete Account"
-  [(visible)]="showDeleteDialog"
-  [modal]="true"
-  [style]="{ width: '400px' }"
-  [draggable]="false"
-  [resizable]="false"
->
-  <p>Are you sure you want to permanently delete your account? This action cannot be undone.</p>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
-    <button pButton label="Delete Account" severity="danger" (click)="deleteAccount()" [loading]="deleting()" [disabled]="deleting()"></button>
-  </ng-template>
-</p-dialog>
+<p-confirmDialog />

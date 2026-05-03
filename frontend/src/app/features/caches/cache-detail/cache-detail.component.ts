@@ -8,9 +8,13 @@ import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
-import { CardModule } from 'primeng/card';
+import { InputTextModule } from 'primeng/inputtext';
+import { TextareaModule } from 'primeng/textarea';
 import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint, UpstreamCache } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { StatCardComponent } from '@shared/components/stat-card/stat-card.component';
+import { FormFieldComponent, CopyFieldComponent } from '@shared/components/form';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
 import { Cache } from '@core/models';
 import {
   NgApexchartsModule,
@@ -45,9 +49,15 @@ const CHART_COLORS = {
     CommonModule,
     RouterModule,
     ButtonModule,
-    CardModule,
+    InputTextModule,
+    TextareaModule,
     LoadingSpinnerComponent,
     NgApexchartsModule,
+    StatCardComponent,
+    FormFieldComponent,
+    CopyFieldComponent,
+    PageLayoutComponent,
+    SettingsSectionComponent,
   ],
   templateUrl: './cache-detail.component.html',
   styleUrl: './cache-detail.component.scss',
@@ -61,7 +71,6 @@ export class CacheDetailComponent implements OnInit {
   cache = signal<Cache | null>(null);
   upstreams = signal<UpstreamCache[]>([]);
   stats = signal<CacheStats | null>(null);
-  copied = signal<string | null>(null);
   activeWindow = signal<Window>('hours');
 
   externalUpstreamKeys = computed(() =>
@@ -81,6 +90,10 @@ export class CacheDetailComponent implements OnInit {
 
   get installNetrcCommand(): string {
     return `nix run wavelens/gradient#gradient-cli -- cache install-netrc --server ${this.serverUrl} --token <YOUR_TOKEN> --cache ${this.cacheName}`;
+  }
+
+  get nixConfSnippet(): string {
+    return `substituters = ${this.cacheUrl}\ntrusted-public-keys = ${this.allPublicKeys().join(' ')}`;
   }
 
   readonly windows: { key: Window; label: string }[] = [
@@ -301,13 +314,6 @@ export class CacheDetailComponent implements OnInit {
         this.statsLoading.set(false);
       },
       error: () => this.statsLoading.set(false),
-    });
-  }
-
-  copy(text: string, label: string): void {
-    navigator.clipboard.writeText(text).then(() => {
-      this.copied.set(label);
-      setTimeout(() => this.copied.set(null), 2000);
     });
   }
 

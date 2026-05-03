@@ -8,15 +8,22 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
 import { DividerModule } from 'primeng/divider';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
+import { SelectModule } from 'primeng/select';
 import { AutoCompleteModule } from 'primeng/autocomplete';
 import { OrganizationsService, OrgMember } from '@core/services/organizations.service';
 import { UserService } from '@core/services/user.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
+import {
+  CopyFieldComponent,
+  FormDialogComponent,
+  FormFieldComponent,
+  MessageBannerComponent,
+} from '@shared/components/form';
 import { Organization } from '@core/models';
 
 @Component({
@@ -26,13 +33,19 @@ import { Organization } from '@core/models';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
     DividerModule,
     ButtonModule,
     InputTextModule,
     TextareaModule,
+    SelectModule,
     AutoCompleteModule,
     LoadingSpinnerComponent,
+    PageLayoutComponent,
+    SettingsSectionComponent,
+    CopyFieldComponent,
+    FormDialogComponent,
+    FormFieldComponent,
+    MessageBannerComponent,
   ],
   templateUrl: './organization-settings.component.html',
   styleUrl: './organization-settings.component.scss',
@@ -78,7 +91,12 @@ export class OrganizationSettingsComponent implements OnInit {
     role: 'Admin',
   };
 
-  roles = ['Admin', 'Write', 'View'];
+  readonly roles = ['Admin', 'Write', 'View'];
+  readonly roleOptions = this.roles.map((r) => ({ label: r, value: r }));
+  readonly visibilityOptions = [
+    { label: 'Private', value: false },
+    { label: 'Public', value: true },
+  ];
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
@@ -261,9 +279,5 @@ export class OrganizationSettingsComponent implements OnInit {
         this.generatingSSH.set(false);
       },
     });
-  }
-
-  copySSHKey(): void {
-    navigator.clipboard.writeText(this.sshKey());
   }
 }

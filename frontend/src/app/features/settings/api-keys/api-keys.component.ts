@@ -7,13 +7,21 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
+import { FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { UserService } from '@core/services/user.service';
 import { ApiKey } from '@core/models';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import {
+  FormFieldComponent,
+  FormDialogComponent,
+  MessageBannerComponent,
+  CopyFieldComponent,
+  FormFieldsBuilder,
+} from '@shared/components/form';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
 
 @Component({
   selector: 'app-api-keys',
@@ -21,17 +29,24 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
   imports: [
     CommonModule,
     RouterModule,
-    FormsModule,
-    DialogModule,
+    ReactiveFormsModule,
     ButtonModule,
     InputTextModule,
     LoadingSpinnerComponent,
+    EmptyStateComponent,
+    FormFieldComponent,
+    FormDialogComponent,
+    MessageBannerComponent,
+    CopyFieldComponent,
+    PageLayoutComponent,
+    SettingsSectionComponent,
   ],
   templateUrl: './api-keys.component.html',
   styleUrl: './api-keys.component.scss',
 })
 export class ApiKeysComponent implements OnInit {
   private userService = inject(UserService);
+  private ff = inject(FormFieldsBuilder);
 
   loading = signal(true);
   creating = signal(false);
@@ -40,9 +55,12 @@ export class ApiKeysComponent implements OnInit {
   keys = signal<ApiKey[]>([]);
   showCreateDialog = signal(false);
   showKeyDialog = signal(false);
-  newKeyName = '';
   createdKeyValue = signal('');
   errorMessage = signal<string | null>(null);
+
+  createForm: FormGroup = new FormGroup({
+    name: this.ff.text('', { required: true, minLength: 1 }),
+  });
 
   ngOnInit(): void {
     this.loadKeys();
@@ -63,13 +81,17 @@ export class ApiKeysComponent implements OnInit {
   }
 
   openCreateDialog(): void {
-    this.newKeyName = '';
+    this.createForm.reset({ name: '' });
     this.errorMessage.set(null);
     this.showCreateDialog.set(true);
   }
 
   createKey(): void {
-    const name = this.newKeyName.trim();
+    if (this.createForm.invalid) {
+      this.createForm.markAllAsTouched();
+      return;
+    }
+    const name = (this.createForm.value.name as string).trim();
     if (!name) return;
 
     this.creating.set(true);
@@ -101,9 +123,5 @@ export class ApiKeysComponent implements OnInit {
         this.deletingId.set(null);
       },
     });
-  }
-
-  copyKey(): void {
-    navigator.clipboard.writeText(this.createdKeyValue());
   }
 }

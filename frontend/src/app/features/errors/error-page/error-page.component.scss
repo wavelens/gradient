@@ -53,37 +53,3 @@
   line-height: 1.6;
   margin: 0 0 $spacing-xxl;
 }
-
-.error-actions {
-  display: flex;
-  gap: $spacing-md;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: $spacing-sm $spacing-xl;
-  border-radius: $border-radius-md;
-  font-size: $font-size-md;
-  font-weight: 500;
-  text-decoration: none;
-  border: none;
-  cursor: pointer;
-  transition: opacity $transition-fast;
-
-  &:hover { opacity: 0.85; }
-
-  &.btn-primary {
-    background: $color-info;
-    color: $text-primary;
-  }
-
-  &.btn-secondary {
-    background: $color-tertiary;
-    color: $text-primary;
-    border: 1px solid $color-border;
-  }
-}

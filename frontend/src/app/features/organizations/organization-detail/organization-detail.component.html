@@ -4,27 +4,19 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  @if (loading()) {
-    <app-loading-spinner message="Loading organization..." />
-  } @else if (organization(); as org) {
-    <div class="page-header">
-      <div>
-        <h1>{{ org.display_name }}</h1>
-        <p class="text-secondary">{{ org.description || 'No description' }}</p>
-      </div>
-      @if (org.role) {
-        <div class="header-actions">
-          <button pButton label="Create Project" icon="pi pi-plus" (click)="openCreateDialog()"></button>
-          <button pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/organization', orgName, 'settings']"></button>
-        </div>
-      }
-    </div>
+@if (loading()) {
+  <app-loading-spinner message="Loading organization..." />
+} @else if (organization(); as org) {
+  <gr-page-layout [title]="org.display_name" [subtitle]="org.description || 'No description'">
+    @if (org.role) {
+      <ng-container slot="actions">
+        <button pButton label="Create Project" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+        <button pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/organization', orgName, 'settings']"></button>
+      </ng-container>
+    }
 
-    <!-- Projects -->
     @if (projects().length > 0) {
-      <div class="section">
-        <h2>Projects</h2>
+      <gr-settings-section title="Projects" [card]="false">
         <div class="project-grid">
           @for (project of projects(); track project.id) {
             <a [routerLink]="['/organization', orgName, 'project', project.name]" class="project-card">
@@ -37,7 +29,9 @@
                 <div class="project-meta">
                   @if (project.last_evaluation_status) {
                     <span class="eval-status-badge" [class]="getEvalStatusClass(project.last_evaluation_status)">
-                      <span class="material-symbols-outlined" [class.pulsing]="project.last_evaluation_status === 'Queued' || project.last_evaluation_status === 'Waiting'" [class.spinning]="isRunningStatus(project.last_evaluation_status) && project.last_evaluation_status !== 'Waiting' && project.last_evaluation_status !== 'Queued'">
+                      <span class="material-symbols-outlined"
+                        [class.pulsing]="project.last_evaluation_status === 'Queued' || project.last_evaluation_status === 'Waiting'"
+                        [class.spinning]="isRunningStatus(project.last_evaluation_status) && project.last_evaluation_status !== 'Waiting' && project.last_evaluation_status !== 'Queued'">
                         {{ getEvalStatusIcon(project.last_evaluation_status) }}
                       </span>
                       {{ getEvalStatusLabel(project.last_evaluation_status) }}
@@ -51,11 +45,8 @@
             </a>
           }
         </div>
-      </div>
-    }
-
-    <!-- Empty State -->
-    @if (projects().length === 0) {
+      </gr-settings-section>
+    } @else {
       <app-empty-state
         icon="folder"
         title="No projects yet"
@@ -64,131 +55,99 @@
         (actionClick)="org.role && openCreateDialog()"
       />
     }
-  }
-</div>
+  </gr-page-layout>
+}
 
-<!-- Create Project Dialog -->
-<p-dialog
-  header="Create Project"
+<gr-form-dialog
   [(visible)]="showCreateDialog"
-  [modal]="true"
-  [style]="{ width: '550px' }"
-  [draggable]="false"
-  [resizable]="false"
+  title="Create Project"
+  submitLabel="Create"
+  width="550px"
+  [loading]="creating()"
+  [disabled]="!newProject.name || !newProject.display_name || !newProject.repository || wildcardInvalid || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking'"
+  (submit)="createProject()"
 >
   @if (createError()) {
-    <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
-      {{ createError() }}
-    </div>
+    <gr-message-banner type="error">{{ createError() }}</gr-message-banner>
   }
-  <div class="dialog-content">
-    <div class="form-group">
-      <label for="proj-display">Display Name *</label>
+
+  <gr-form-field label="Display Name" for="proj-display" [required]="true">
+    <input
+      pInputText
+      id="proj-display"
+      [(ngModel)]="newProject.display_name"
+      placeholder="My Project"
+      class="w-full"
+      (ngModelChange)="onProjectDisplayNameChange($event)"
+      (keyup.enter)="createProject()"
+    />
+  </gr-form-field>
+
+  <gr-form-field
+    label="Name"
+    for="proj-name"
+    [required]="true"
+    [hint]="nameCheckHint()"
+  >
+    <div class="name-input-wrapper">
       <input
         pInputText
-        id="proj-display"
-        [(ngModel)]="newProject.display_name"
-        placeholder="My Project"
+        id="proj-name"
+        [(ngModel)]="newProject.name"
+        placeholder="project-name"
         class="w-full"
-        (ngModelChange)="onProjectDisplayNameChange($event)"
+        (ngModelChange)="onProjectNameChange($event)"
+        (input)="onProjectNameUserInput()"
         (keyup.enter)="createProject()"
       />
-    </div>
-
-    <div class="form-group">
-      <label for="proj-name">Name *</label>
-      <div class="name-input-wrapper">
-        <input
-          pInputText
-          id="proj-name"
-          [(ngModel)]="newProject.name"
-          placeholder="project-name"
-          class="w-full"
-          (ngModelChange)="onProjectNameChange($event)"
-          (input)="onProjectNameUserInput()"
-          (keyup.enter)="createProject()"
-        />
-        @if (nameCheckState() === 'checking') {
-          <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
-        } @else if (nameCheckState() === 'available') {
-          <span class="name-check-icon available"><span class="material-symbols-outlined">check</span></span>
-        } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
-          <span class="name-check-icon taken"><span class="material-symbols-outlined">close</span></span>
-        }
-      </div>
-      @if (nameCheckState() === 'taken') {
-        <small class="text-danger">This name is already taken.</small>
-      } @else if (nameCheckState() === 'invalid') {
-        <small class="text-danger">Only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.</small>
-      } @else {
-        <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
+      @if (nameCheckState() === 'checking') {
+        <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
+      } @else if (nameCheckState() === 'available') {
+        <span class="name-check-icon name-check-icon--ok"><span class="material-symbols-outlined">check</span></span>
+      } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
+        <span class="name-check-icon name-check-icon--bad"><span class="material-symbols-outlined">close</span></span>
       }
     </div>
+  </gr-form-field>
 
-    <div class="form-group">
-      <label for="proj-desc">Description</label>
-      <textarea
-        pInputTextarea
-        id="proj-desc"
-        [(ngModel)]="newProject.description"
-        placeholder="Describe your project..."
-        rows="2"
-        class="w-full"
-      ></textarea>
-    </div>
+  <gr-form-field label="Description" for="proj-desc">
+    <textarea
+      pTextarea
+      id="proj-desc"
+      [(ngModel)]="newProject.description"
+      placeholder="Describe your project..."
+      rows="2"
+      class="w-full"
+    ></textarea>
+  </gr-form-field>
 
-    <div class="form-group">
-      <label for="proj-repo">Repository URL *</label>
-      <input
-        pInputText
-        id="proj-repo"
-        [(ngModel)]="newProject.repository"
-        placeholder="https://github.com/user/repo"
-        class="w-full"
-        (keyup.enter)="createProject()"
+  <gr-form-field label="Repository URL" for="proj-repo" [required]="true" hint="Git repository URL to evaluate">
+    <input
+      pInputText
+      id="proj-repo"
+      [(ngModel)]="newProject.repository"
+      placeholder="https://github.com/user/repo"
+      class="w-full"
+      (keyup.enter)="createProject()"
+    />
+  </gr-form-field>
+
+  <gr-form-field for="proj-wildcard" [hint]="wildcardHint()">
+    <label class="wildcard-label" for="proj-wildcard">
+      Evaluation Wildcard
+      <gr-label-help
+        href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard"
+        title="Learn about evaluation wildcards"
       />
-      <small class="text-secondary">Git repository URL to evaluate</small>
-    </div>
-
-    <div class="form-group">
-      <label for="proj-wildcard">
-        Evaluation Wildcard
-        <a href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" target="_blank" rel="noopener noreferrer" class="label-help" title="Learn about evaluation wildcards">
-          <span class="material-symbols-outlined">help</span>
-        </a>
-      </label>
-      <input
-        pInputText
-        id="proj-wildcard"
-        [(ngModel)]="newProject.evaluation_wildcard"
-        placeholder="**"
-        class="w-full"
-        [class.input-invalid]="wildcardInvalid"
-        (keyup.enter)="createProject()"
-      />
-      @if (wildcardInvalid) {
-        <small class="text-danger">Each pattern must be non-empty, not start with a period, and contain no spaces.</small>
-      } @else {
-        <small class="text-secondary">Pattern for selecting which outputs to evaluate (default: packages.x86_64-linux.*)</small>
-      }
-    </div>
-  </div>
-
-  <ng-template pTemplate="footer">
-    <button
-      pButton
-      label="Cancel"
-      severity="secondary"
-      (click)="showCreateDialog.set(false)"
-      [disabled]="creating()"
-    ></button>
-    <button
-      pButton
-      label="Create"
-      (click)="createProject()"
-      [disabled]="!newProject.name || !newProject.display_name || !newProject.repository || wildcardInvalid || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking' || creating()"
-      [loading]="creating()"
-    ></button>
-  </ng-template>
-</p-dialog>
+    </label>
+    <input
+      pInputText
+      id="proj-wildcard"
+      [(ngModel)]="newProject.evaluation_wildcard"
+      placeholder="**"
+      class="w-full"
+      [class.input-invalid]="wildcardInvalid"
+      (keyup.enter)="createProject()"
+    />
+  </gr-form-field>
+</gr-form-dialog>

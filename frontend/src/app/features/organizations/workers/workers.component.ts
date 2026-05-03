@@ -8,13 +8,20 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { WorkersService } from '@core/services/workers.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { GradientCapabilities, Worker, WorkerRegistration } from '@core/models';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
+import {
+  CopyFieldComponent,
+  FormDialogComponent,
+  FormFieldComponent,
+  MessageBannerComponent,
+} from '@shared/components/form';
 
 @Component({
   selector: 'app-workers',
@@ -23,10 +30,16 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
     ButtonModule,
     InputTextModule,
     LoadingSpinnerComponent,
+    EmptyStateComponent,
+    PageLayoutComponent,
+    SettingsSectionComponent,
+    CopyFieldComponent,
+    FormDialogComponent,
+    FormFieldComponent,
+    MessageBannerComponent,
   ],
   templateUrl: './workers.component.html',
   styleUrl: './workers.component.scss',
@@ -75,8 +88,6 @@ export class WorkersComponent implements OnInit {
   editEnableBuild = true;
   capUpdating = signal<string | null>(null);
   lastRegistration = signal<WorkerRegistration | null>(null);
-  tokenCopied = signal(false);
-  peerIdCopied = signal(false);
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
@@ -142,10 +153,8 @@ export class WorkersComponent implements OnInit {
       next: (reg) => {
         this.registering.set(false);
         this.showRegisterDialog.set(false);
-        // Only show the token dialog when there is something to display.
         if (reg.token || this.newWorkerToken.trim()) {
           this.lastRegistration.set(reg);
-          this.tokenCopied.set(false);
           this.showTokenDialog.set(true);
         }
         this.loadWorkers();
@@ -174,7 +183,6 @@ export class WorkersComponent implements OnInit {
   requestToggleWorker(worker: Worker): void {
     this.pendingToggleWorker.set(worker);
     if (worker.live && worker.active) {
-      // Worker is connected and being deactivated — warn user
       this.showToggleWarningDialog.set(true);
     } else {
       this.confirmToggleWorker();
@@ -254,26 +262,6 @@ export class WorkersComponent implements OnInit {
         this.capUpdating.set(null);
       },
     });
-  }
-
-  copyToken(): void {
-    const token = this.lastRegistration()?.token;
-    if (token) {
-      navigator.clipboard.writeText(token).then(() => {
-        this.tokenCopied.set(true);
-        setTimeout(() => this.tokenCopied.set(false), 2000);
-      });
-    }
-  }
-
-  copyPeerId(): void {
-    const peerId = this.orgId();
-    if (peerId) {
-      navigator.clipboard.writeText(peerId).then(() => {
-        this.peerIdCopied.set(true);
-        setTimeout(() => this.peerIdCopied.set(false), 2000);
-      });
-    }
   }
 
   closeTokenDialog(): void {

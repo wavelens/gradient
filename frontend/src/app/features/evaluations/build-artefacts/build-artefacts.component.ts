@@ -10,12 +10,15 @@ import { EvaluationsService, BuildProduct } from '@core/services/evaluations.ser
 import { AuthService } from '@core/services/auth.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { PageLayoutComponent } from '@shared/components/layout';
+import { ButtonModule } from 'primeng/button';
 import { environment } from '@environments/environment';
 
 @Component({
   selector: 'app-build-artefacts',
   standalone: true,
-  imports: [RouterModule, LoadingSpinnerComponent],
+  imports: [RouterModule, LoadingSpinnerComponent, EmptyStateComponent, PageLayoutComponent, ButtonModule],
   templateUrl: './build-artefacts.component.html',
   styleUrl: './build-artefacts.component.scss',
 })

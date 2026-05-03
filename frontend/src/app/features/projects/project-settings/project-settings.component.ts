@@ -10,16 +10,23 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
-import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
+import { AutoCompleteModule } from 'primeng/autocomplete';
+import { SelectModule } from 'primeng/select';
+import { DividerModule } from 'primeng/divider';
 import { ProjectsService } from '@core/services/projects.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 import { IntegrationsService } from '@core/services/integrations.service';
-import { AutoCompleteModule } from 'primeng/autocomplete';
-import { SelectModule } from 'primeng/select';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import {
+  FormFieldComponent,
+  FormDialogComponent,
+  MessageBannerComponent,
+  LabelHelpComponent,
+} from '@shared/components/form';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
 import { Integration, Project, ProjectIntegrationLink } from '@core/models';
 
 @Component({
@@ -29,13 +36,19 @@ import { Integration, Project, ProjectIntegrationLink } from '@core/models';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
     ButtonModule,
     InputTextModule,
     TextareaModule,
     AutoCompleteModule,
     SelectModule,
+    DividerModule,
     LoadingSpinnerComponent,
+    FormFieldComponent,
+    FormDialogComponent,
+    MessageBannerComponent,
+    LabelHelpComponent,
+    PageLayoutComponent,
+    SettingsSectionComponent,
   ],
   templateUrl: './project-settings.component.html',
   styleUrl: './project-settings.component.scss',

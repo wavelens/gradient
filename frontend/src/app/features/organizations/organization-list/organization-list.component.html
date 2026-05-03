@@ -4,80 +4,39 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <h1>Organizations</h1>
-      <p class="text-secondary">Manage your organizations</p>
-    </div>
-    @if (authService.isAuthenticated()) {
-      <button pButton label="Create Organization" icon="pi pi-plus" (click)="openCreateDialog()"></button>
-    }
-  </div>
+<gr-page-layout title="Organizations" subtitle="Manage your organizations">
+  @if (authService.isAuthenticated()) {
+    <button slot="actions" pButton label="Create Organization" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+  }
 
   @if (loading()) {
     <app-loading-spinner message="Loading organizations..." />
-  } @else {
-    @if (organizations().length > 0) {
-      <div class="org-grid">
-        @for (org of organizations(); track org.id) {
-          <a [routerLink]="['/organization', org.name]" class="org-card">
-            <div class="org-icon">
-              <span class="material-symbols-outlined">corporate_fare</span>
-            </div>
-            <div class="org-content">
-              <h3>{{ org.display_name || org.name }}</h3>
-              <p class="text-secondary">{{ org.description || 'No description' }}</p>
-              <div class="org-badges">
-                @if (org.role) {
-                  <span class="role-badge" [class.owner]="org.role === 'Admin'">
-                    {{ org.role }}
-                  </span>
-                }
-                @if (org.public) {
-                  <span class="role-badge public-badge">Public</span>
-                }
-                @if (org.running_evaluations && org.running_evaluations > 0) {
-                  <span class="activity-badge">
-                    <span class="material-symbols-outlined spinning">sync</span>
-                    {{ org.running_evaluations }} running
-                  </span>
-                }
-              </div>
-            </div>
-            <div class="org-arrow">
-              <span class="material-symbols-outlined">arrow_forward</span>
-            </div>
-          </a>
-        }
-      </div>
-    } @else {
-      <app-empty-state
-        icon="corporate_fare"
-        title="No organizations yet"
-        [message]="authService.isAuthenticated() ? 'Create your first organization to get started with Gradient' : 'No organizations have been created yet'"
-        [actionLabel]="authService.isAuthenticated() ? 'Create Organization' : ''"
-        (actionClick)="authService.isAuthenticated() && openCreateDialog()"
-      />
-    }
-  }
-
-  @if (publicLoading()) {
-    <app-loading-spinner message="Loading public organizations..." />
-  } @else if (filteredPublicOrgs.length > 0) {
-    <div class="section-header discover-header">
-      <h2>Discover Public Organizations</h2>
-    </div>
+  } @else if (organizations().length > 0) {
     <div class="org-grid">
-      @for (org of filteredPublicOrgs; track org.id) {
+      @for (org of organizations(); track org.id) {
         <a [routerLink]="['/organization', org.name]" class="org-card">
           <div class="org-icon">
-            <span class="material-symbols-outlined">public</span>
+            <span class="material-symbols-outlined">corporate_fare</span>
           </div>
           <div class="org-content">
             <h3>{{ org.display_name || org.name }}</h3>
             <p class="text-secondary">{{ org.description || 'No description' }}</p>
-            <span class="role-badge public-badge">Public</span>
+            <div class="org-badges">
+              @if (org.role) {
+                <span class="badge" [class.badge-outbound]="org.role === 'Admin'" [class.badge-inbound]="org.role !== 'Admin'">
+                  {{ org.role }}
+                </span>
+              }
+              @if (org.public) {
+                <span class="badge badge-inbound">Public</span>
+              }
+              @if (org.running_evaluations && org.running_evaluations > 0) {
+                <span class="badge badge-inbound">
+                  <span class="material-symbols-outlined spinning">sync</span>
+                  {{ org.running_evaluations }} running
+                </span>
+              }
+            </div>
           </div>
           <div class="org-arrow">
             <span class="material-symbols-outlined">arrow_forward</span>
@@ -85,104 +44,111 @@
         </a>
       }
     </div>
+  } @else {
+    <app-empty-state
+      icon="corporate_fare"
+      title="No organizations yet"
+      [message]="authService.isAuthenticated() ? 'Create your first organization to get started with Gradient' : 'No organizations have been created yet'"
+      [actionLabel]="authService.isAuthenticated() ? 'Create Organization' : ''"
+      (actionClick)="authService.isAuthenticated() && openCreateDialog()"
+    />
   }
-</div>
 
-<!-- Create Organization Dialog -->
-<p-dialog
-  header="Create Organization"
-  [(visible)]="showCreateDialog"
-  [modal]="true"
-  [style]="{ width: '500px' }"
-  [draggable]="false"
-  [resizable]="false"
->
-  @if (createError()) {
-    <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
-      {{ createError() }}
-    </div>
-  }
-  <div class="dialog-content">
-    <div class="form-group">
-      <label for="display_name">Display Name *</label>
-      <input
-        pInputText
-        id="display_name"
-        [(ngModel)]="newOrg.display_name"
-        placeholder="My Organization"
-        class="w-full"
-        (ngModelChange)="onOrgDisplayNameChange($event)"
-        (keyup.enter)="createOrganization()"
-      />
-    </div>
-
-    <div class="form-group">
-      <label for="name">Name *</label>
-      <div class="name-input-wrapper">
-        <input
-          pInputText
-          id="name"
-          [(ngModel)]="newOrg.name"
-          placeholder="organization-name"
-          class="w-full"
-          (ngModelChange)="onOrgNameChange($event)"
-          (input)="onOrgNameUserInput()"
-          (keyup.enter)="createOrganization()"
-        />
-        @if (nameCheckState() === 'checking') {
-          <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
-        } @else if (nameCheckState() === 'available') {
-          <span class="name-check-icon available"><span class="material-symbols-outlined">check</span></span>
-        } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
-          <span class="name-check-icon taken"><span class="material-symbols-outlined">close</span></span>
+  @if (publicLoading()) {
+    <app-loading-spinner message="Loading public organizations..." />
+  } @else if (filteredPublicOrgs.length > 0) {
+    <gr-settings-section title="Discover Public Organizations" [card]="false">
+      <div class="org-grid">
+        @for (org of filteredPublicOrgs; track org.id) {
+          <a [routerLink]="['/organization', org.name]" class="org-card">
+            <div class="org-icon">
+              <span class="material-symbols-outlined">public</span>
+            </div>
+            <div class="org-content">
+              <h3>{{ org.display_name || org.name }}</h3>
+              <p class="text-secondary">{{ org.description || 'No description' }}</p>
+              <span class="badge badge-inbound">Public</span>
+            </div>
+            <div class="org-arrow">
+              <span class="material-symbols-outlined">arrow_forward</span>
+            </div>
+          </a>
         }
       </div>
-      @if (nameCheckState() === 'taken') {
-        <small class="text-danger">This name is already taken.</small>
-      } @else if (nameCheckState() === 'invalid') {
-        <small class="text-danger">Only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.</small>
-      } @else {
-        <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
+    </gr-settings-section>
+  }
+</gr-page-layout>
+
+<gr-form-dialog
+  [(visible)]="showCreateDialog"
+  title="Create Organization"
+  submitLabel="Create"
+  [loading]="creating()"
+  [disabled]="!newOrg.name || !newOrg.display_name || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking'"
+  (submit)="createOrganization()"
+>
+  @if (createError()) {
+    <gr-message-banner type="error">{{ createError() }}</gr-message-banner>
+  }
+
+  <gr-form-field label="Display Name" for="display_name" [required]="true">
+    <input
+      pInputText
+      id="display_name"
+      [(ngModel)]="newOrg.display_name"
+      placeholder="My Organization"
+      class="w-full"
+      (ngModelChange)="onOrgDisplayNameChange($event)"
+      (keyup.enter)="createOrganization()"
+    />
+  </gr-form-field>
+
+  <gr-form-field
+    label="Name"
+    for="name"
+    [required]="true"
+    [hint]="nameCheckHint()"
+  >
+    <div class="name-input-wrapper">
+      <input
+        pInputText
+        id="name"
+        [(ngModel)]="newOrg.name"
+        placeholder="organization-name"
+        class="w-full"
+        (ngModelChange)="onOrgNameChange($event)"
+        (input)="onOrgNameUserInput()"
+        (keyup.enter)="createOrganization()"
+      />
+      @if (nameCheckState() === 'checking') {
+        <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
+      } @else if (nameCheckState() === 'available') {
+        <span class="name-check-icon name-check-icon--ok"><span class="material-symbols-outlined">check</span></span>
+      } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
+        <span class="name-check-icon name-check-icon--bad"><span class="material-symbols-outlined">close</span></span>
       }
     </div>
+  </gr-form-field>
 
-    <div class="form-group">
-      <label for="description">Description</label>
-      <textarea
-        pInputTextarea
-        id="description"
-        [(ngModel)]="newOrg.description"
-        placeholder="Describe your organization..."
-        rows="3"
-        class="w-full"
-      ></textarea>
-    </div>
+  <gr-form-field label="Description" for="description">
+    <textarea
+      pTextarea
+      id="description"
+      [(ngModel)]="newOrg.description"
+      placeholder="Describe your organization..."
+      rows="3"
+      class="w-full"
+    ></textarea>
+  </gr-form-field>
 
-    <div class="form-group">
-      <label for="visibility">Visibility</label>
-      <select id="visibility" [(ngModel)]="newOrg.public" class="role-select w-full">
-        <option [ngValue]="false">Private</option>
-        <option [ngValue]="true">Public</option>
-      </select>
-      <small class="text-secondary">Public organizations are visible to all users</small>
-    </div>
-  </div>
-
-  <ng-template pTemplate="footer">
-    <button
-      pButton
-      label="Cancel"
-      severity="secondary"
-      (click)="showCreateDialog.set(false)"
-      [disabled]="creating()"
-    ></button>
-    <button
-      pButton
-      label="Create"
-      (click)="createOrganization()"
-      [disabled]="!newOrg.name || !newOrg.display_name || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking' || creating()"
-      [loading]="creating()"
-    ></button>
-  </ng-template>
-</p-dialog>
+  <gr-form-field label="Visibility" for="visibility" hint="Public organizations are visible to all users">
+    <p-select
+      inputId="visibility"
+      [(ngModel)]="newOrg.public"
+      [options]="visibilityOptions"
+      optionLabel="label"
+      optionValue="value"
+      styleClass="w-full"
+    />
+  </gr-form-field>
+</gr-form-dialog>

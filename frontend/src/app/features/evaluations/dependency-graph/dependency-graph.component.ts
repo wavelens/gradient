@@ -21,6 +21,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
 import { EvaluationsService, BuildGraph } from '@core/services/evaluations.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
 import { ButtonModule } from 'primeng/button';
 
 const CARD_W = 200;
@@ -47,7 +48,7 @@ interface LayoutEdge {
 @Component({
   selector: 'app-dependency-graph',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonModule],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, EmptyStateComponent, ButtonModule],
   templateUrl: './dependency-graph.component.html',
   styleUrl: './dependency-graph.component.scss',
 })

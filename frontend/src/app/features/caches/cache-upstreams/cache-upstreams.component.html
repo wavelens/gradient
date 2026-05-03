@@ -4,54 +4,54 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a routerLink="/caches" class="breadcrumb-link">Caches</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/caches', cacheName]" class="breadcrumb-link">{{ cacheDisplayName || cacheName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/caches', cacheName, 'settings']" class="breadcrumb-link">Settings</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">Upstream Caches</span>
-      </div>
-      <h1>Upstream Caches</h1>
-      <p class="text-secondary">External and internal caches this cache pulls through from</p>
-    </div>
-    <button pButton label="Add Upstream" icon="pi pi-plus" (click)="openAddDialog()"></button>
-  </div>
+<nav class="breadcrumb">
+  <a routerLink="/caches" class="breadcrumb-link">Caches</a>
+  <span class="text-secondary"> / </span>
+  <a [routerLink]="['/caches', cacheName]" class="breadcrumb-link">{{ cacheDisplayName || cacheName }}</a>
+  <span class="text-secondary"> / </span>
+  <a [routerLink]="['/caches', cacheName, 'settings']" class="breadcrumb-link">Settings</a>
+  <span class="text-secondary"> / </span>
+  <span>Upstream Caches</span>
+</nav>
+
+<gr-page-layout
+  title="Upstream Caches"
+  subtitle="External and internal caches this cache pulls through from"
+>
+  <button slot="actions" pButton label="Add Upstream" icon="pi pi-plus" (click)="openAddDialog()"></button>
 
   @if (loading()) {
     <app-loading-spinner message="Loading upstream caches..." />
+  } @else if (upstreams().length === 0) {
+    <app-empty-state
+      icon="cloud_download"
+      title="No upstream caches"
+      message="Add an upstream to enable pull-through caching from another cache."
+      actionLabel="Add Upstream"
+      (actionClick)="openAddDialog()"
+    />
   } @else {
-    @if (upstreams().length === 0) {
-      <div class="empty-state">
-        <span class="material-symbols-outlined">cloud_download</span>
-        <h3>No upstream caches</h3>
-        <p class="text-secondary">Add an upstream to enable pull-through caching from another cache.</p>
-        <button pButton label="Add Upstream" icon="pi pi-plus" (click)="openAddDialog()"></button>
-      </div>
-    } @else {
-      <div class="upstreams-list">
+    <gr-settings-section [card]="false">
+      <div class="gr-list">
         @for (u of upstreams(); track u.id) {
-          <div class="upstream-row">
-            <div class="upstream-info">
+          <div class="gr-list-row">
+            <div class="gr-list-row__info">
               <span class="material-symbols-outlined">cloud_download</span>
-              <div class="upstream-details">
-                <span class="upstream-name">{{ u.display_name }}</span>
-                <span class="upstream-target text-secondary">{{ u.url ?? u.upstream_cache_id }}</span>
+              <div>
+                <div class="gr-list-row__title">{{ u.display_name }}</div>
+                <div class="gr-list-row__id text-secondary">{{ u.url ?? u.upstream_cache_id }}</div>
               </div>
-              <span class="upstream-type-badge" [class.internal]="u.upstream_cache_id" [class.external]="!u.upstream_cache_id">
+            </div>
+            <div class="gr-list-row__actions">
+              <span class="badge" [class.badge-inbound]="u.upstream_cache_id" [class.badge-outbound]="!u.upstream_cache_id">
                 {{ u.upstream_cache_id ? 'Internal' : 'External' }}
               </span>
-              <span class="upstream-mode-badge mode-{{ u.mode.toLowerCase() }}">{{ modeLabel(u.mode) }}</span>
-            </div>
-            <div class="upstream-actions">
+              <span class="badge" [class]="modeBadgeClass(u.mode)">{{ modeLabel(u.mode) }}</span>
               <button
                 pButton
                 icon="pi pi-pencil"
                 severity="secondary"
+                size="small"
                 [disabled]="removingUpstreamId() !== null"
                 (click)="openEditDialog(u)"
               ></button>
@@ -59,6 +59,7 @@
                 pButton
                 icon="pi pi-trash"
                 severity="danger"
+                size="small"
                 [loading]="removingUpstreamId() === u.id"
                 [disabled]="removingUpstreamId() !== null"
                 (click)="removeUpstream(u.id)"
@@ -67,125 +68,111 @@
           </div>
         }
       </div>
-    }
+    </gr-settings-section>
   }
-</div>
+</gr-page-layout>
 
-<!-- Edit Upstream Dialog -->
-<p-dialog
-  header="Edit Upstream Cache"
+<gr-form-dialog
   [(visible)]="showEditDialog"
-  [modal]="true"
-  [style]="{ width: '480px' }"
-  [draggable]="false"
-  [resizable]="false"
+  title="Edit Upstream Cache"
+  submitLabel="Save"
+  [loading]="savingUpstream()"
+  [disabled]="savingUpstream() || !isEditFormValid()"
+  (submit)="saveUpstream()"
 >
   @if (editError()) {
-    <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
-      {{ editError() }}
-    </div>
+    <gr-message-banner type="error">{{ editError() }}</gr-message-banner>
   }
   @if (editingUpstream(); as u) {
-    <div class="upstream-form">
-      <div class="form-group">
-        <label for="edit-display-name">Display Name</label>
-        <input pInputText id="edit-display-name" [(ngModel)]="editForm.display_name" class="w-full" />
-      </div>
-      @if (!u.upstream_cache_id) {
-        <div class="form-group">
-          <label for="edit-url">Substituter URL</label>
-          <input pInputText id="edit-url" [(ngModel)]="editForm.url" class="w-full" />
-        </div>
-        <div class="form-group">
-          <label for="edit-pubkey">Public Key</label>
-          <input pInputText id="edit-pubkey" [(ngModel)]="editForm.public_key" class="w-full" />
-        </div>
-        <small class="text-secondary">External caches are always Read Only.</small>
-      } @else {
-        <div class="form-group">
-          <label for="edit-mode">Mode</label>
-          <select id="edit-mode" [(ngModel)]="editForm.mode" class="role-select w-full">
-            @for (m of modes; track m.value) {
-              <option [value]="m.value">{{ m.label }}</option>
-            }
-          </select>
-        </div>
-      }
-    </div>
-  }
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="savingUpstream()"></button>
-    <button pButton label="Save" icon="pi pi-check" (click)="saveUpstream()" [loading]="savingUpstream()" [disabled]="savingUpstream() || !isEditFormValid()"></button>
-  </ng-template>
-</p-dialog>
+    <gr-form-field label="Display Name" for="edit-display-name">
+      <input pInputText id="edit-display-name" [(ngModel)]="editForm.display_name" class="w-full" />
+    </gr-form-field>
 
-<!-- Add Upstream Dialog -->
-<p-dialog
-  header="Add Upstream Cache"
+    @if (!u.upstream_cache_id) {
+      <gr-form-field label="Substituter URL" for="edit-url">
+        <input pInputText id="edit-url" [(ngModel)]="editForm.url" class="w-full" />
+      </gr-form-field>
+      <gr-form-field
+        label="Public Key"
+        for="edit-pubkey"
+        hint="External caches are always Read Only."
+      >
+        <input pInputText id="edit-pubkey" [(ngModel)]="editForm.public_key" class="w-full" />
+      </gr-form-field>
+    } @else {
+      <gr-form-field label="Mode" for="edit-mode">
+        <p-select
+          inputId="edit-mode"
+          [options]="modes"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="editForm.mode"
+          styleClass="w-full"
+        />
+      </gr-form-field>
+    }
+  }
+</gr-form-dialog>
+
+<gr-form-dialog
   [(visible)]="showAddDialog"
-  [modal]="true"
-  [style]="{ width: '480px' }"
-  [draggable]="false"
-  [resizable]="false"
+  title="Add Upstream Cache"
+  submitLabel="Add"
+  submitIcon="pi pi-plus"
+  [loading]="addingUpstream()"
+  [disabled]="addingUpstream() || !isAddFormValid()"
+  (submit)="addUpstream()"
 >
   @if (addError()) {
-    <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
-      {{ addError() }}
-    </div>
+    <gr-message-banner type="error">{{ addError() }}</gr-message-banner>
   }
-  <div class="upstream-form">
-    <div class="form-group">
-      <label>Type</label>
-      <div class="type-toggle">
-        <button class="type-btn" [class.active]="upstreamType === 'internal'" (click)="upstreamType = 'internal'">Internal</button>
-        <button class="type-btn" [class.active]="upstreamType === 'external'" (click)="upstreamType = 'external'">External</button>
-      </div>
+
+  <gr-form-field label="Type">
+    <div class="type-toggle">
+      <button type="button" class="type-btn" [class.active]="upstreamType === 'internal'" (click)="upstreamType = 'internal'">Internal</button>
+      <button type="button" class="type-btn" [class.active]="upstreamType === 'external'" (click)="upstreamType = 'external'">External</button>
     </div>
+  </gr-form-field>
 
-    @if (upstreamType === 'internal') {
-      <div class="form-group">
-        <label for="up-cache-name">Cache Name</label>
-        <input pInputText id="up-cache-name" [(ngModel)]="upstreamForm.cache_name" placeholder="my-cache" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="up-display-name-int">Display Name <span class="text-secondary">(optional)</span></label>
-        <input pInputText id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Defaults to the cache's display name" class="w-full" />
-      </div>
-    } @else {
-      <div class="form-group">
-        <label for="up-display-name">Display Name</label>
-        <input pInputText id="up-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="cache.nixos.org" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="up-url">Substituter URL</label>
-        <input pInputText id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="up-pubkey">Public Key</label>
-        <input pInputText id="up-pubkey" [(ngModel)]="upstreamForm.public_key" placeholder="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" class="w-full" />
-      </div>
-    }
-
-    @if (upstreamType === 'internal') {
-      <div class="form-group">
-        <label for="up-mode">Mode</label>
-        <select id="up-mode" [(ngModel)]="upstreamForm.mode" class="role-select w-full">
-          @for (m of modes; track m.value) {
-            <option [value]="m.value">{{ m.label }}</option>
-          }
-        </select>
-        <small class="text-secondary">
-          Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only.
-        </small>
-      </div>
-    } @else {
-      <small class="text-secondary">External caches are always Read Only.</small>
-    }
-  </div>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showAddDialog.set(false)" [disabled]="addingUpstream()"></button>
-    <button pButton label="Add" icon="pi pi-plus" (click)="addUpstream()" [loading]="addingUpstream()" [disabled]="addingUpstream() || !isAddFormValid()"></button>
-  </ng-template>
-</p-dialog>
+  @if (upstreamType === 'internal') {
+    <gr-form-field label="Cache Name" for="up-cache-name" [required]="true">
+      <input pInputText id="up-cache-name" [(ngModel)]="upstreamForm.cache_name" placeholder="my-cache" class="w-full" />
+    </gr-form-field>
+    <gr-form-field
+      label="Display Name"
+      for="up-display-name-int"
+      hint="Defaults to the cache's display name."
+    >
+      <input pInputText id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Optional" class="w-full" />
+    </gr-form-field>
+    <gr-form-field
+      label="Mode"
+      for="up-mode"
+      hint="Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only."
+    >
+      <p-select
+        inputId="up-mode"
+        [options]="modes"
+        optionLabel="label"
+        optionValue="value"
+        [(ngModel)]="upstreamForm.mode"
+        styleClass="w-full"
+      />
+    </gr-form-field>
+  } @else {
+    <gr-form-field label="Display Name" for="up-display-name" [required]="true">
+      <input pInputText id="up-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="cache.nixos.org" class="w-full" />
+    </gr-form-field>
+    <gr-form-field label="Substituter URL" for="up-url" [required]="true">
+      <input pInputText id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" class="w-full" />
+    </gr-form-field>
+    <gr-form-field
+      label="Public Key"
+      for="up-pubkey"
+      [required]="true"
+      hint="External caches are always Read Only."
+    >
+      <input pInputText id="up-pubkey" [(ngModel)]="upstreamForm.public_key" placeholder="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" class="w-full" />
+    </gr-form-field>
+  }
+</gr-form-dialog>

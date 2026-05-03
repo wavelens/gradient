@@ -11,11 +11,28 @@ import { FormsModule } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { AdminService, GithubAppCredentials } from '@core/services/admin.service';
+import { PageLayoutComponent, SettingsSectionComponent } from '@shared/components/layout';
+import {
+  FormFieldComponent,
+  MessageBannerComponent,
+  CopyFieldComponent,
+} from '@shared/components/form';
 
 @Component({
   selector: 'app-admin-github-app',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ButtonModule, InputTextModule],
+  imports: [
+    CommonModule,
+    RouterModule,
+    FormsModule,
+    ButtonModule,
+    InputTextModule,
+    PageLayoutComponent,
+    SettingsSectionComponent,
+    FormFieldComponent,
+    MessageBannerComponent,
+    CopyFieldComponent,
+  ],
   templateUrl: './github-app.component.html',
   styleUrl: './github-app.component.scss',
 })
@@ -82,7 +99,4 @@ export class GithubAppComponent implements OnInit {
     });
   }
 
-  copy(value: string): void {
-    navigator.clipboard.writeText(value).catch(() => {});
-  }
 }

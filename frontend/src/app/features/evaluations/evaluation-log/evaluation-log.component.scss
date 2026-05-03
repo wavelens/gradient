@@ -14,16 +14,13 @@
   overflow: hidden;
 }
 
-.full-loading,
-.error-state {
+.full-loading {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   height: 100%;
   text-align: center;
-
-  .material-symbols-outlined { font-size: 48px; color: $color-danger; margin-bottom: $spacing-md; }
 }
 
 .eval-layout {
@@ -44,21 +41,9 @@
   overflow: hidden;
 }
 
-// Breadcrumb
 .sidebar-breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: $spacing-xs;
   padding: $spacing-sm $spacing-md;
   font-size: $font-size-xs;
-  color: $text-light;
-
-  .breadcrumb-link {
-    color: $text-secondary;
-    &:hover { color: $text-primary; }
-  }
-  .breadcrumb-sep { color: $text-light; }
-  .breadcrumb-cur { color: $text-primary; font-weight: 500; }
 }
 
 // Overview / status block
@@ -324,33 +309,6 @@ cdk-virtual-scroll-viewport.builds-list {
   &.status-completed, &.status-substituted { background: rgba($color-success, 0.15); color: $color-success; }
   &.status-failed  { background: rgba($color-danger, 0.15); color: $color-danger; }
   &.status-aborted, &.status-dependencyfailed { background: rgba($color-secondary, 0.15); color: $color-secondary; }
-}
-
-// ── Error banner ──────────────────────────────────────────────────────────────
-
-.message-banner {
-  display: flex;
-  gap: $spacing-sm;
-  flex-shrink: 0;
-  font-size: $font-size-sm;
-
-  .material-symbols-outlined { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
-
-  &.error {
-    align-items: flex-start;
-    background: rgba($color-danger, 0.08);
-    border-bottom: 1px solid rgba($color-danger, 0.4);
-    padding: $spacing-sm $spacing-lg;
-    color: $color-danger;
-  }
-}
-
-.error-text {
-  margin: $spacing-xs 0 0;
-  font-family: $font-family-mono;
-  font-size: $font-size-xs;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 // ── Log area ──────────────────────────────────────────────────────────────────
