@@ -247,7 +247,7 @@ pub async fn get_entry_point_metrics(
         points.push(EntryPointMetricPoint {
             evaluation_id: evaluation.id,
             created_at: evaluation.created_at,
-            build_status: build.status,
+            build_status: build.status.for_api(),
             build_time_ms,
             output_size_bytes,
             closure_size_bytes,

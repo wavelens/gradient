@@ -65,7 +65,7 @@ pub async fn get_build(
     let build_with_outputs = BuildWithOutputs {
         id: build.id,
         evaluation: build.evaluation,
-        status: build.status,
+        status: build.status.for_api(),
         derivation_path: derivation.derivation_path,
         architecture: derivation.architecture,
         worker: build.worker,

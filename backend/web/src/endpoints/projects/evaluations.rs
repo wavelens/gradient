@@ -421,7 +421,7 @@ impl EntryPointRelatedData {
                 build_id: build.id,
                 derivation_path: drv.derivation_path.clone(),
                 eval: ep.eval.clone(),
-                build_status: build.status.clone(),
+                build_status: build.status.clone().for_api(),
                 has_artefacts: *self.has_products.get(&build.derivation).unwrap_or(&false),
                 architecture: drv.architecture.clone(),
                 evaluation_id: evaluation.id,

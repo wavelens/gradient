@@ -70,7 +70,8 @@ pub async fn get_evaluation(
                 let build_status = builds
                     .get(&ep.build)
                     .cloned()
-                    .unwrap_or(entity::build::BuildStatus::Created);
+                    .unwrap_or(entity::build::BuildStatus::Queued)
+                    .for_api();
                 EntryPointBrief {
                     id: ep.id,
                     eval: ep.eval,
@@ -165,7 +166,7 @@ pub async fn get_evaluation_builds(
             Some(BuildItem {
                 id: b.id,
                 name: drv.derivation_path.clone(),
-                status: format!("{:?}", b.status),
+                status: format!("{:?}", b.status.clone().for_api()),
                 has_artefacts: *has_artefacts_map.get(&b.derivation).unwrap_or(&false),
                 updated_at: b.updated_at,
                 build_time_ms: b.build_time_ms,
