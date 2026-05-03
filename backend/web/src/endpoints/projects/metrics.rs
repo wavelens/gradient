@@ -10,7 +10,7 @@ use crate::endpoints::get_org_readable;
 use crate::error::WebResult;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
-use core::types::*;
+use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

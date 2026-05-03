@@ -24,12 +24,12 @@ use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use core::ci::{
+use gradient_core::ci::{
     ForgeType, IntegrationKind, decrypt_webhook_secret, verify_gitea_signature,
     verify_github_signature,
 };
-use core::types::input::load_secret;
-use core::types::*;
+use gradient_core::types::input::load_secret;
+use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use subtle::ConstantTimeEq;

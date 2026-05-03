@@ -9,7 +9,7 @@ use crate::authorization::MaybeUser;
 use crate::error::WebResult;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use core::types::*;
+use gradient_core::types::*;
 use sea_orm::EntityTrait;
 use sea_orm::{ColumnTrait, QueryFilter};
 use serde::{Deserialize, Serialize};

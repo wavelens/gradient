@@ -11,13 +11,13 @@
 //!   invalid signature, integration not found.
 //! - GitHub App: push matching project queues, ping, installation, not configured.
 //!
-//! Uses manual Tokio runtimes because `#[tokio::test]` expands to `::core::…`
+//! Uses manual Tokio runtimes because `#[tokio::test]` expands to `::gradient_core::…`
 //! which clashes with the local `core` crate name in this workspace.
 
 use axum_test::TestServer;
-use core::ci::{WebhookClient, encrypt_webhook_secret};
-use core::storage::{EmailSender, NarStore};
-use core::types::{ServerState, WebDb, WorkerDb};
+use gradient_core::ci::{WebhookClient, encrypt_webhook_secret};
+use gradient_core::storage::{EmailSender, NarStore};
+use gradient_core::types::{ServerState, WebDb, WorkerDb};
 use entity::evaluation::EvaluationStatus;
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};

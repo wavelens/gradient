@@ -9,8 +9,8 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use base64::Engine as _;
 use chrono::{NaiveDateTime};
-use core::types::proto::GradientCapabilities;
-use core::types::{BaseResponse, MUser, ServerState};
+use gradient_core::types::proto::GradientCapabilities;
+use gradient_core::types::{BaseResponse, MUser, ServerState};
 use entity::worker_registration::{
     self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
 };
@@ -157,7 +157,7 @@ pub async fn post_org_worker(
         enable_eval: Set(body.enable_eval),
         enable_build: Set(body.enable_build),
         created_by: Set(Some(user.id)),
-        created_at: Set(core::types::now()),
+        created_at: Set(gradient_core::types::now()),
     };
     row.insert(&state.web_db).await?;
 

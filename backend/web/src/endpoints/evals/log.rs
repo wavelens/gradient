@@ -10,7 +10,7 @@ use async_stream::stream;
 use axum::Extension;
 use axum::extract::{Path, State};
 use axum_streams::StreamBodyAs;
-use core::types::*;
+use gradient_core::types::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 use std::sync::Arc;

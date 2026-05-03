@@ -10,9 +10,9 @@ use crate::helpers::OptionExt;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::Engine;
-use core::nix_hash::normalize_nar_hash;
-use core::sources::get_path_from_derivation_output;
-use core::types::*;
+use gradient_core::nix_hash::normalize_nar_hash;
+use gradient_core::sources::get_path_from_derivation_output;
+use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
@@ -195,7 +195,7 @@ async fn get_nar_by_hash_inner(
         let deriver = cached_path_row.deriver.clone();
         let ca = cached_path_row.ca.clone();
 
-        let sig_url = core::sources::cache_key_host(&state.cli.serve_url);
+        let sig_url = gradient_core::sources::cache_key_host(&state.cli.serve_url);
 
         let sig = format!("{}-{}:{}", sig_url, cache.name, signature);
 
@@ -266,7 +266,7 @@ async fn get_nar_by_cached_path(
             .signature
             .or_not_found("Signature not yet computed")?;
 
-        let sig_url = core::sources::cache_key_host(&state.cli.serve_url);
+        let sig_url = gradient_core::sources::cache_key_host(&state.cli.serve_url);
         let sig = format!("{}-{}:{}", sig_url, cache.name, signature);
 
         let file_hash = cached_path_row

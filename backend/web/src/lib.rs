@@ -31,7 +31,7 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::Span;
 
-use core::types::ServerState;
+use gradient_core::types::ServerState;
 use endpoints::{admin, *};
 use proto::proto_router;
 use scheduler::Scheduler;

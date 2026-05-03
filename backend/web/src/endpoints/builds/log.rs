@@ -13,7 +13,7 @@ use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
-use core::types::*;
+use gradient_core::types::*;
 use sea_orm::EntityTrait;
 use std::sync::Arc;
 use tokio::time::Duration;

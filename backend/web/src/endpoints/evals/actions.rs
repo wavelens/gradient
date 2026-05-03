@@ -9,7 +9,7 @@ use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use core::types::*;
+use gradient_core::types::*;
 use std::sync::Arc;
 use uuid::Uuid;
 

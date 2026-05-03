@@ -25,7 +25,7 @@ pub use self::query::{BuildWithOutputs, get_build};
 use crate::helpers::OptionExt;
 use crate::endpoints::user_is_org_member;
 use crate::error::{WebError, WebResult};
-use core::types::*;
+use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uuid::Uuid;

@@ -7,8 +7,8 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use chrono::{Duration, Utc};
-use core::types::input::load_secret;
-use core::types::*;
+use gradient_core::types::input::load_secret;
+use gradient_core::types::*;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, TokenData, Validation, decode, encode};
 use rand::distr::{Alphanumeric, SampleString};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter};
@@ -105,7 +105,7 @@ pub async fn decode_jwt(
 
         let mut aapi_key: AApi = api_key.clone().into();
 
-        aapi_key.last_used_at = Set(core::types::now());
+        aapi_key.last_used_at = Set(gradient_core::types::now());
         aapi_key
             .save(&state.web_db)
             .await

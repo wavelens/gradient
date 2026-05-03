@@ -16,7 +16,7 @@ anyhow       = { workspace = true }
 base64       = { workspace = true }
 async-stream = { workspace = true }
 chrono       = { workspace = true }
-core         = { workspace = true }
+gradient-core = { path = "../core", package = "core" }
 proto        = { workspace = true }
 scheduler    = { path = "../scheduler" }
 entity       = { workspace = true }
@@ -33,6 +33,8 @@ zstd         = { workspace = true }
 
 # Crate-specific dependencies
 axum          = { version = "0.8", features = ["multipart"] }
+axum_typed_multipart = "0.16"
+tempfile      = "3.27"
 hex           = "0.4"
 axum-streams  = { version = "0.25", features = ["json"] }
 bytes         = "1.11"

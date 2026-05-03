@@ -11,8 +11,8 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
-use core::sources::get_hash_from_url;
-use core::types::*;
+use gradient_core::sources::get_hash_from_url;
+use gradient_core::types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -123,7 +123,7 @@ fn spawn_nar_traffic_metric(state: Arc<ServerState>, cache_id: Uuid, bytes_len: 
 fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: Uuid, hash: String) {
     tokio::spawn(async move {
         use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
-        let now = core::types::now();
+        let now = gradient_core::types::now();
         let _ = state
             .worker_db
             .execute(Statement::from_sql_and_values(
@@ -183,7 +183,7 @@ mod tests {
             references: Some(String::new()),
             ca: None,
             deriver: None,
-            created_at: core::types::now(),
+            created_at: gradient_core::types::now(),
         }
     }
 

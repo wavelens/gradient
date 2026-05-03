@@ -11,14 +11,14 @@
 //! must serve the product listing and file bytes without touching the Nix
 //! daemon or local filesystem.
 //!
-//! Uses manual Tokio runtime because `#[tokio::test]` expands to `::core::…`
+//! Uses manual Tokio runtime because `#[tokio::test]` expands to `::gradient_core::…`
 //! references that clash with the local `core` crate name in the workspace.
 
 use axum_test::TestServer;
 use bytes::Bytes;
-use core::ci::WebhookClient;
-use core::storage::{EmailSender, NarStore};
-use core::types::{ServerState, WebDb, WorkerDb};
+use gradient_core::ci::WebhookClient;
+use gradient_core::storage::{EmailSender, NarStore};
+use gradient_core::types::{ServerState, WebDb, WorkerDb};
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use harmonia_nar::archive::test_data::{TestNarEvent, TestNarEvents};

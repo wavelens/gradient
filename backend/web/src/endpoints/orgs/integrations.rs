@@ -21,9 +21,9 @@ use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 
-use core::ci::{ForgeType, IntegrationKind, encrypt_webhook_secret};
-use core::types::input::check_index_name;
-use core::types::*;
+use gradient_core::ci::{ForgeType, IntegrationKind, encrypt_webhook_secret};
+use gradient_core::types::input::check_index_name;
+use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -242,7 +242,7 @@ pub async fn put_integration(
         endpoint_url: Set(endpoint_url),
         access_token: Set(encrypted_token),
         created_by: Set(user.id),
-        created_at: Set(core::types::now()),
+        created_at: Set(gradient_core::types::now()),
     };
 
     let integration = integration.insert(&state.web_db).await?;
