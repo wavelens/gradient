@@ -1,14 +1,18 @@
 [package]
-name = "entity"
-version = "1.1.1"
-edition = "2024"
-publish = false
-license = "AGPL-3.0"
-authors = ["Wavelens GmbH <info@wavelens.io>"]
+name        = "entity"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish     = false
 
 [lib]
 name = "entity"
 path = "src/lib.rs"
+
+[lints]
+workspace = true
 
 [dependencies]
 chrono     = { workspace = true }

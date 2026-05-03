@@ -2,52 +2,56 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 [package]
-name = "worker"
-version = "1.1.1"
-edition = "2024"
-publish = false
-license = "AGPL-3.0"
-authors = ["Wavelens GmbH <info@wavelens.io>"]
+name        = "worker"
 description = "Gradient build worker — connects to a Gradient server via /proto and executes jobs locally"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish     = false
 
 [[bin]]
 name = "gradient-worker"
 path = "src/main.rs"
 
-[dependencies]
-gradient-core     = { path = "../core", package = "core" }
-entity            = { workspace = true }
-proto             = { workspace = true }
+[lints]
+workspace = true
 
-anyhow            = { workspace = true }
-clap              = { workspace = true }
-git2              = { workspace = true }
-async-trait       = { workspace = true }
-base64            = { workspace = true }
-bytes             = { workspace = true }
-futures           = { workspace = true }
-harmonia-nar           = { workspace = true }
-hex               = { workspace = true }
-harmonia-protocol      = { workspace = true }
-harmonia-store-core    = { workspace = true }
-harmonia-store-remote  = { workspace = true }
-harmonia-utils-hash    = { workspace = true }
-libc              = { workspace = true }
-nix-bindings      = { workspace = true }
-reqwest           = { workspace = true }
-sha2              = { workspace = true }
-rkyv              = { workspace = true }
-serde             = { workspace = true }
-serde_json        = { workspace = true }
-tokio             = { workspace = true, features = ["macros", "rt-multi-thread", "process"] }
-tokio-tungstenite = { workspace = true }
-tracing           = { workspace = true }
-tracing-subscriber = { workspace = true }
-uuid              = { workspace = true }
-tempfile          = "3"
-zstd              = { workspace = true }
-xz2               = { workspace = true }
-bzip2             = { workspace = true }
+[dependencies]
+gradient-core = { workspace = true }
+entity        = { workspace = true }
+proto         = { workspace = true }
+
+anyhow                = { workspace = true }
+async-trait           = { workspace = true }
+base64                = { workspace = true }
+bytes                 = { workspace = true }
+bzip2                 = { workspace = true }
+clap                  = { workspace = true }
+futures               = { workspace = true }
+git2                  = { workspace = true }
+harmonia-nar          = { workspace = true }
+harmonia-protocol     = { workspace = true }
+harmonia-store-core   = { workspace = true }
+harmonia-store-remote = { workspace = true }
+harmonia-utils-hash   = { workspace = true }
+hex                   = { workspace = true }
+libc                  = { workspace = true }
+nix-bindings          = { workspace = true }
+reqwest               = { workspace = true }
+rkyv                  = { workspace = true }
+serde                 = { workspace = true }
+serde_json            = { workspace = true }
+sha2                  = { workspace = true }
+tempfile              = { workspace = true }
+tokio                 = { workspace = true, features = ["macros", "process", "fs", "io-util"] }
+tokio-tungstenite     = { workspace = true }
+tracing               = { workspace = true }
+tracing-subscriber    = { workspace = true }
+uuid                  = { workspace = true }
+xz2                   = { workspace = true }
+zstd                  = { workspace = true }
 
 [dev-dependencies]
-test-support = { path = "../test-support" }
+test-support = { workspace = true }

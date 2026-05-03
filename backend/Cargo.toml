@@ -1,82 +1,110 @@
-[package]
-name = "gradient-server"
-version = "1.1.1"
-edition = "2024"
-license = "AGPL-3.0"
-authors = ["Wavelens GmbH <info@wavelens.io>"]
-description = "Nix-based Continuous Integration System"
-repository = "https://github.com/wavelens/gradient"
-
 [workspace]
-members = [".", "core", "web", "cache", "entity", "migration", "proto", "scheduler", "test-support", "worker"]
+members      = [".", "cache", "core", "entity", "migration", "proto", "scheduler", "test-support", "web", "worker"]
 default-members = [".", "cache", "core", "entity", "migration", "proto", "scheduler", "test-support", "web", "worker"]
-resolver = "2"
+resolver     = "2"
+
+[workspace.package]
+version     = "1.1.1"
+edition     = "2024"
+license     = "AGPL-3.0"
+authors     = ["Wavelens GmbH <info@wavelens.io>"]
+repository  = "https://github.com/wavelens/gradient"
+publish     = false
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo      = "warn"
 
 [workspace.dependencies]
 # Internal crates
-cache        = { path = "cache" }
-core         = { path = "core", package = "core" }
-entity       = { path = "entity" }
-migration    = { path = "migration" }
-proto        = { path = "proto" }
-test-support = { path = "test-support" }
-worker       = { path = "worker" }
-web          = { path = "web" }
+cache         = { path = "cache" }
+core          = { path = "core", package = "core" }
+gradient-core = { path = "core", package = "core" }
+entity        = { path = "entity" }
+migration     = { path = "migration" }
+proto         = { path = "proto" }
+scheduler     = { path = "scheduler" }
+test-support  = { path = "test-support" }
+web           = { path = "web" }
+worker        = { path = "worker" }
 
-# External
-anyhow           = "1.0"
-async-stream     = "0.3"
-async-trait      = "0.1"
-base64           = "0.22"
-bytes            = "1.11"
-chrono           = "0.4"
-clap             = "4.6"
-futures              = "0.3"
-tokio-tungstenite    = { version = "0.29", features = ["native-tls"] }
-harmonia-nar           = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-protocol      = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-store-core    = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-store-remote  = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-utils-base-encoding = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-utils-hash    = { git = "https://github.com/nix-community/harmonia.git" }
-harmonia-utils-io      = { git = "https://github.com/nix-community/harmonia.git" }
-git2             = "0.20"
-libc             = "0.2"
-hex              = "0.4"
-hmac             = "0.13"
-nix-bindings     = { git = "https://github.com/NotAShelf/nix-bindings" }
-mockall          = "0.14"
-object_store     = { version = "0.13", features = ["aws"] }
-rand             = "0.10"
-reqwest          = { version = "0.13", features = ["json"] }
-ring             = "0.17"
-rkyv             = "0.8"
-sea-orm          = { version = "1.1", features = ["json-array", "mock", "postgres-array", "runtime-tokio", "sqlx-postgres", "with-json", "with-uuid"] }
-sea-orm-migration = { version = "1.1", features = ["with-uuid", "with-chrono", "with-json", "sqlx-postgres", "runtime-tokio"] }
-sentry           = "0.47"
-serde            = { version = "1", features = ["derive"] }
-serde_json       = "1.0"
-sha2             = "0.11"
-thiserror        = "2.0"
-tokio            = { version = "1.50", features = ["rt-multi-thread"] }
-tokio-test       = "0.4"
-tokio-util       = "0.7"
-tracing          = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-uuid             = { version = "1.23", features = ["fast-rng", "macro-diagnostics", "v4"] }
-zstd             = "0.13"
-xz2              = "0.1"
-bzip2            = "0.6"
+# Async / runtime
+async-stream = { version = "0.3", default-features = false }
+async-trait  = { version = "0.1", default-features = false }
+futures      = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+tokio        = { version = "1.50", default-features = false, features = ["rt-multi-thread"] }
+tokio-test   = { version = "0.4", default-features = false }
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
+tokio-util   = { version = "0.7", default-features = false }
 
-[dependencies]
-cache            = { workspace = true }
-clap             = { workspace = true }
-gradient-core    = { path = "core", package = "core" }
-sentry           = { workspace = true }
-tokio            = { workspace = true, features = ["process"] }
-tracing          = { workspace = true }
-tracing-subscriber = { workspace = true }
-web              = { workspace = true }
+# Error handling
+anyhow    = { version = "1.0", default-features = false, features = ["std"] }
+thiserror = { version = "2.0", default-features = false }
+
+# Time / random / ids
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+rand   = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
+uuid   = { version = "1.23", default-features = false, features = ["std", "v4", "fast-rng", "serde", "macro-diagnostics"] }
+
+# Serialization
+rkyv       = { version = "0.8", default-features = false, features = ["alloc", "bytecheck"] }
+serde      = { version = "1", default-features = false, features = ["std", "derive"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+
+# Crypto / encoding
+base64 = { version = "0.22", default-features = false, features = ["std"] }
+hex    = { version = "0.4", default-features = false, features = ["std"] }
+hmac   = { version = "0.13", default-features = false }
+ring   = { version = "0.17", default-features = false }
+sha2   = { version = "0.11", default-features = false }
+
+# Compression / archive
+bzip2 = { version = "0.6" }
+xz2   = { version = "0.1", default-features = false }
+zstd  = { version = "0.13" }
+
+# Bytes / buffers
+bytes = { version = "1.11", default-features = false, features = ["std"] }
+
+# CLI / logging / observability
+clap               = { version = "4.6", default-features = false, features = ["std", "derive", "env", "help", "usage", "error-context"] }
+sentry             = { version = "0.47", default-features = false, features = ["backtrace", "contexts", "debug-images", "panic", "reqwest", "rustls"] }
+tracing            = { version = "0.1", default-features = false, features = ["std", "attributes"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "ansi", "smallvec", "tracing-log", "env-filter", "json"] }
+
+# Database (sea-orm)
+sea-orm           = { version = "1.1", default-features = false, features = ["macros", "json-array", "mock", "postgres-array", "runtime-tokio-rustls", "sqlx-postgres", "with-chrono", "with-json", "with-uuid"] }
+sea-orm-migration = { version = "1.1", default-features = false, features = ["cli", "runtime-tokio-rustls", "sqlx-postgres", "with-chrono", "with-json", "with-uuid"] }
+
+# HTTP / networking
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "stream", "charset", "http2", "multipart"] }
+
+# Object store / git
+git2         = { version = "0.20", default-features = false }
+libc         = { version = "0.2", default-features = false }
+object_store = { version = "0.13", default-features = false, features = ["aws", "fs"] }
+
+# Harmonia (git deps)
+harmonia-nar           = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-protocol      = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-store-core    = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-store-remote  = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-utils-base-encoding = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-utils-hash    = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+harmonia-utils-io      = { git = "https://github.com/nix-community/harmonia.git", default-features = false }
+
+# Nix bindings
+nix-bindings = { git = "https://github.com/NotAShelf/nix-bindings", default-features = false }
+
+# Shared utilities promoted from member crates
+git-url-parse = { version = "0.6" }
+password-auth = { version = "1.0", default-features = false, features = ["argon2"] }
+subtle        = { version = "2.6", default-features = false }
+tempfile      = { version = "3.27", default-features = false }
+url           = { version = "2.5", default-features = false }
+
+# Test utilities
+mockall = { version = "0.14", default-features = false }
 
 [patch.crates-io]
 harmonia-nar             = { git = "https://github.com/nix-community/harmonia.git" }
@@ -86,3 +114,25 @@ harmonia-store-core      = { git = "https://github.com/nix-community/harmonia.gi
 harmonia-utils-base-encoding = { git = "https://github.com/nix-community/harmonia.git" }
 harmonia-utils-hash      = { git = "https://github.com/nix-community/harmonia.git" }
 harmonia-utils-io        = { git = "https://github.com/nix-community/harmonia.git" }
+
+[package]
+name        = "gradient-server"
+description = "Nix-based Continuous Integration System"
+version.workspace     = true
+edition.workspace     = true
+license.workspace     = true
+authors.workspace     = true
+repository.workspace  = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cache              = { workspace = true }
+clap               = { workspace = true }
+gradient-core      = { workspace = true }
+sentry             = { workspace = true }
+tokio              = { workspace = true, features = ["process", "signal", "macros"] }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+web                = { workspace = true }

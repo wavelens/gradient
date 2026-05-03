@@ -1,38 +1,43 @@
 [package]
-name = "cache"
-version = "1.1.1"
-edition = "2024"
-publish = false
-license = "AGPL-3.0"
-authors = ["Wavelens GmbH <info@wavelens.io>"]
+name        = "cache"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish     = false
 
 [lib]
 name = "cache"
 path = "src/lib.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
-anyhow     = { workspace = true }
-async-trait = { workspace = true }
-base64     = { workspace = true }
-chrono     = { workspace = true }
-gradient-core = { path = "../core", package = "core" }
-entity     = { workspace = true }
-futures    = { workspace = true }
-harmonia-nar = { workspace = true }
+gradient-core       = { workspace = true }
+entity              = { workspace = true }
+
+anyhow              = { workspace = true }
+async-trait         = { workspace = true }
+base64              = { workspace = true }
+chrono              = { workspace = true }
+futures             = { workspace = true }
+harmonia-nar        = { workspace = true }
 harmonia-store-core = { workspace = true }
-ring       = { workspace = true }
-sea-orm    = { workspace = true }
-sentry     = { workspace = true }
-serde_json = { workspace = true }
-thiserror  = { workspace = true }
-tokio      = { workspace = true, features = ["process"] }
-tracing    = { workspace = true }
-uuid       = { workspace = true }
-zstd       = { workspace = true }
+ring                = { workspace = true }
+sea-orm             = { workspace = true }
+sentry              = { workspace = true }
+serde_json          = { workspace = true }
+thiserror           = { workspace = true }
+tokio               = { workspace = true, features = ["process", "macros"] }
+tracing             = { workspace = true }
+uuid                = { workspace = true }
+zstd                = { workspace = true }
 
 [dev-dependencies]
 mockall      = { workspace = true }
-tempfile     = "3.27"
+tempfile     = { workspace = true }
 test-support = { workspace = true }
 tokio        = { workspace = true, features = ["macros"] }
 tokio-test   = { workspace = true }

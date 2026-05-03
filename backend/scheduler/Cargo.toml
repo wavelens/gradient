@@ -1,27 +1,32 @@
 [package]
-name = "scheduler"
-version = "1.1.1"
-edition = "2024"
-publish = false
-license = "AGPL-3.0"
-authors = ["Wavelens GmbH <info@wavelens.io>"]
+name        = "scheduler"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish     = false
 
 [lib]
 name = "scheduler"
 path = "src/lib.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
-gradient-core = { path = "../core", package = "core" }
+gradient-core = { workspace = true }
 entity        = { workspace = true }
-anyhow        = { workspace = true }
-chrono        = { workspace = true }
-sea-orm       = { workspace = true }
-tokio         = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
-serde         = { workspace = true }
-tracing       = { workspace = true }
-uuid          = { workspace = true }
+
+anyhow  = { workspace = true }
+chrono  = { workspace = true }
+sea-orm = { workspace = true }
+serde   = { workspace = true }
+tokio   = { workspace = true, features = ["macros", "sync", "time"] }
+tracing = { workspace = true }
+uuid    = { workspace = true }
 
 [dev-dependencies]
 serde_json   = { workspace = true }
-tempfile     = "3.27"
-test-support = { path = "../test-support" }
+tempfile     = { workspace = true }
+test-support = { workspace = true }

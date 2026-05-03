@@ -1,27 +1,32 @@
 [package]
-name = "test-support"
-version = "1.1.1"
-edition = "2024"
-publish = false
-license = "AGPL-3.0"
-authors = ["Wavelens GmbH <info@wavelens.io>"]
+name        = "test-support"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish     = false
 
 [lib]
 name = "test_support"
 path = "src/lib.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
-anyhow           = { workspace = true }
-async-trait      = { workspace = true }
-chrono           = { workspace = true }
+gradient-core       = { workspace = true }
+entity              = { workspace = true }
+proto               = { workspace = true }
+
+anyhow              = { workspace = true }
+async-trait         = { workspace = true }
+chrono              = { workspace = true }
+futures             = { workspace = true }
 harmonia-store-core = { workspace = true }
-gradient-core    = { path = "../core", package = "core" }
-entity           = { workspace = true }
-proto            = { workspace = true }
-futures          = { workspace = true }
-sea-orm          = { workspace = true }
-tokio            = { workspace = true }
-tokio-tungstenite = { workspace = true }
-rkyv             = { workspace = true }
-uuid             = { workspace = true }
-password-auth    = "1.0"
+password-auth       = { workspace = true }
+rkyv                = { workspace = true }
+sea-orm             = { workspace = true }
+tokio               = { workspace = true, features = ["macros", "sync"] }
+tokio-tungstenite   = { workspace = true }
+uuid                = { workspace = true }

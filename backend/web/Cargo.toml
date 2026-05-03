@@ -1,63 +1,66 @@
 [package]
-name = "web"
-version = "1.1.1"
-edition = "2024"
-publish = false
-license = "AGPL-3.0"
-authors = ["Wavelens GmbH <info@wavelens.io>"]
+name        = "web"
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+authors.workspace    = true
+repository.workspace = true
+publish     = false
 
 [lib]
 name = "web"
 path = "src/lib.rs"
 
-[dependencies]
-# Workspace dependencies
-anyhow       = { workspace = true }
-base64       = { workspace = true }
-async-stream = { workspace = true }
-chrono       = { workspace = true }
-gradient-core = { path = "../core", package = "core" }
-proto        = { workspace = true }
-scheduler    = { path = "../scheduler" }
-entity       = { workspace = true }
-rand         = { workspace = true }
-sea-orm      = { workspace = true }
-serde        = { workspace = true }
-serde_json   = { workspace = true }
-thiserror    = { workspace = true }
-tokio        = { workspace = true, features = ["process", "signal"] }
-tracing      = { workspace = true }
-uuid         = { workspace = true }
-sha2         = { workspace = true }
-zstd         = { workspace = true }
+[lints]
+workspace = true
 
-# Crate-specific dependencies
-axum          = { version = "0.8", features = ["multipart"] }
-axum_typed_multipart = "0.16"
-tempfile      = "3.27"
-hex           = "0.4"
-axum-streams  = { version = "0.25", features = ["json"] }
-bytes         = "1.11"
-email_address = "0.2"
-git-url-parse = "0.6"
-http          = "1.4"
-http-body-util = "0.1"
-jsonwebtoken  = { version = "10.3", features = ["aws_lc_rs"] }
-password-auth = { version = "1.0", features = ["argon2"] }
-reqwest       = { version = "0.13", features = ["json", "form"] }
-subtle        = "2.6"
-tokio-util    = { version = "0.7", features = ["io"] }
-tower         = "0.5"
-tower-http    = { version = "0.6", features = ["cors", "trace"] }
-tower_governor = "0.8"
-governor      = "0.10"
-url           = "2.5"
+[dependencies]
+gradient-core = { workspace = true }
+proto         = { workspace = true }
+scheduler     = { workspace = true }
+entity        = { workspace = true }
+
+anyhow        = { workspace = true }
+async-stream  = { workspace = true }
+base64        = { workspace = true }
+bytes         = { workspace = true }
+chrono        = { workspace = true }
+git-url-parse = { workspace = true }
+hex           = { workspace = true }
+password-auth = { workspace = true }
+rand          = { workspace = true }
+reqwest       = { workspace = true, features = ["multipart"] }
+sea-orm       = { workspace = true }
+serde         = { workspace = true }
+serde_json    = { workspace = true }
+sha2          = { workspace = true }
+subtle        = { workspace = true }
+tempfile      = { workspace = true }
+thiserror     = { workspace = true }
+tokio         = { workspace = true, features = ["process", "signal", "macros"] }
+tokio-util    = { workspace = true, features = ["io"] }
+tracing       = { workspace = true }
+url           = { workspace = true }
+uuid          = { workspace = true }
+zstd          = { workspace = true }
+
+axum                 = { version = "0.8", default-features = false, features = ["multipart", "http1", "json", "tokio", "matched-path", "query", "form", "original-uri"] }
+axum_typed_multipart = { version = "0.16", default-features = false, features = ["tempfile_3"] }
+axum-streams         = { version = "0.25", default-features = false, features = ["json"] }
+email_address        = { version = "0.2", default-features = false }
+governor             = { version = "0.10", default-features = false, features = ["std"] }
+http                 = { version = "1.4", default-features = false }
+http-body-util       = { version = "0.1", default-features = false }
+jsonwebtoken         = { version = "10.3", default-features = false, features = ["aws_lc_rs"] }
+tower                = { version = "0.5", default-features = false }
+tower-http           = { version = "0.6", default-features = false, features = ["cors", "trace"] }
+tower_governor       = { version = "0.8", default-features = false, features = ["axum"] }
 
 [dev-dependencies]
-axum-test    = "19.1"
+axum-test    = { version = "20.0", default-features = false }
 harmonia-nar = { workspace = true, features = ["test"] }
 hmac         = { workspace = true }
 test-support = { workspace = true }
 tokio-test   = { workspace = true }
-tower        = "0.5"
+tower        = { version = "0.5", default-features = false }
 zstd         = { workspace = true }
