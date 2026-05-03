@@ -785,3 +785,19 @@ Tests (`cargo test -p core --lib types::db`):
 - `types::db::tests::forwards_connection_trait` — `&WebDb` / `&WorkerDb`
   satisfy `&impl ConnectionTrait`, so existing SeaORM call sites keep
   working without `.inner()` boilerplate.
+
+## Build status — `Created` collapsed to `Queued` for API responses
+
+Issue #120: the frontend renders a coloured dot via
+`status-{{ build.status.toLowerCase() }}`, but no `status-created` style
+exists. `Created` is an internal-only transient state — the scheduler
+flips builds to `Queued` almost immediately — so the API now collapses
+it via `BuildStatus::for_api()` (`backend/entity/src/build.rs`) at every
+response boundary (`evals::query`, `projects::evaluations`,
+`projects::metrics`, `builds::query`).
+
+Unit tests in `backend/entity/src/build.rs`:
+
+- `for_api_collapses_created_to_queued` — `Created.for_api() == Queued`.
+- `for_api_passes_through_other_states` — every other variant is
+  returned unchanged.
