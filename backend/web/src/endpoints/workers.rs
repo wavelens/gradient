@@ -18,7 +18,7 @@ pub async fn get_workers(
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
 ) -> WebResult<Json<BaseResponse<Vec<WorkerInfo>>>> {
-    if !state.cli.proto.global_stats_public && !user.superuser {
+    if !state.config.proto.global_stats_public && !user.superuser {
         return Err(WebError::Forbidden(
             "workers endpoint requires superuser".into(),
         ));

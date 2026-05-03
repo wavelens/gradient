@@ -91,7 +91,7 @@ pub async fn post_direct_build(
     // We'll create the DirectBuild record after the evaluation
 
     // Create temporary directory for files
-    let temp_dir = format!("{}/uploads/{}", state.cli.storage.base_path, Uuid::new_v4());
+    let temp_dir = format!("{}/uploads/{}", state.config.storage.base_path, Uuid::new_v4());
     fs::create_dir_all(&temp_dir).await.map_err(|e| {
         WebError::internal(format!("Failed to create temp directory: {}", e))
     })?;

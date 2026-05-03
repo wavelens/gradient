@@ -95,13 +95,13 @@ fn rl_per_ms(
 /// `axum_test::TestServer` without binding a real TCP port.
 pub fn create_router(state: Arc<ServerState>) -> Router {
     let serve_url: http::HeaderValue = state
-        .cli
+        .config
         .server
         .serve_url
         .clone()
         .try_into()
         .expect("invalid serve_url");
-    let debug_url: http::HeaderValue = format!("http://{}:8000", state.cli.server.ip.clone())
+    let debug_url: http::HeaderValue = format!("http://{}:8000", state.config.server.ip.clone())
         .try_into()
         .expect("invalid debug_url");
 
@@ -228,7 +228,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route(
             "/builds",
             post(builds::post_direct_build)
-                .layer(DefaultBodyLimit::max(state.cli.limits.max_direct_build_size)),
+                .layer(DefaultBodyLimit::max(state.config.limits.max_direct_build_size)),
         )
         .route(
             "/builds/direct/recent",
@@ -420,7 +420,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
     // Default tier covers everything left under /api/v1 (the bulk authenticated
     // surface) plus the proto WS upgrade.
     let api = api.route_layer(GovernorLayer::new(rl_per_ms(200, 150)));
-    let api = api.layer(DefaultBodyLimit::max(state.cli.limits.max_request_size));
+    let api = api.layer(DefaultBodyLimit::max(state.config.limits.max_request_size));
 
     let mut app = Router::new()
         .nest("/api/v1", api)
@@ -452,7 +452,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
 }
 
 pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
-    let server_url = format!("{}:{}", state.cli.server.ip.clone(), state.cli.server.port.clone());
+    let server_url = format!("{}:{}", state.config.server.ip.clone(), state.config.server.port.clone());
     let app = create_router(Arc::clone(&state));
 
     let listener = tokio::net::TcpListener::bind(&server_url)

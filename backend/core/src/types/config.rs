@@ -13,6 +13,10 @@
 //! field is present and the feature can be used.
 
 use super::Cli;
+use super::cli::{
+    DatabaseArgs, EvalArgs, LimitsArgs, LoggingArgs, ProtoArgs, RegistrationArgs, SecretsArgs,
+    ServerArgs, StorageArgs,
+};
 
 /// OIDC configuration — only present when `oidc_enabled` is true and all
 /// required fields are configured.
@@ -23,6 +27,8 @@ pub struct OidcConfig {
     /// Optional space-separated scope list; defaults to `"openid email profile"`.
     pub scopes: Option<String>,
     pub discovery_url: String,
+    /// Whether OIDC is the only allowed login method.
+    pub required: bool,
 }
 
 /// Email/SMTP configuration — only present when `email_enabled` is true and
@@ -36,6 +42,8 @@ pub struct EmailConfig {
     pub from_address: String,
     pub from_name: String,
     pub enable_tls: bool,
+    /// Whether new users must verify their email before logging in.
+    pub require_verification: bool,
 }
 
 /// GitHub App configuration — only present when all three fields are set.
@@ -78,6 +86,7 @@ impl Cli {
             client_secret_file: self.oidc.oidc_client_secret_file.clone()?,
             scopes: self.oidc.oidc_scopes.clone(),
             discovery_url: self.oidc.oidc_discovery_url.clone()?,
+            required: self.oidc.oidc_required,
         })
     }
 
@@ -94,6 +103,7 @@ impl Cli {
             from_address: self.email.email_from_address.clone()?,
             from_name: self.email.email_from_name.clone(),
             enable_tls: self.email.email_enable_tls,
+            require_verification: self.email.email_require_verification,
         })
     }
 
@@ -117,6 +127,54 @@ impl Cli {
             secret_access_key_file: self.s3.s3_secret_access_key_file.clone(),
             prefix: self.s3.s3_prefix.clone(),
         })
+    }
+}
+
+/// Resolved runtime configuration carried by `ServerState`.
+///
+/// Built once at startup from a parsed [`Cli`]. Handlers depend on the slice
+/// they need (`state.config.<group>.<field>`) instead of the full 65-field
+/// parser DTO.
+///
+/// Optional features (`oidc`, `email`, `s3`, `github_app`) are `None` when
+/// disabled or incompletely configured — the `Some` variant guarantees the
+/// feature is fully usable.
+#[derive(Debug, Clone)]
+pub struct RuntimeConfig {
+    pub logging: LoggingArgs,
+    pub server: ServerArgs,
+    pub database: DatabaseArgs,
+    pub eval: EvalArgs,
+    pub storage: StorageArgs,
+    pub secrets: SecretsArgs,
+    pub limits: LimitsArgs,
+    pub registration: RegistrationArgs,
+    pub proto: ProtoArgs,
+    pub oidc: Option<OidcConfig>,
+    pub email: Option<EmailConfig>,
+    pub s3: Option<S3Config>,
+    pub github_app: Option<GitHubAppConfig>,
+}
+
+impl RuntimeConfig {
+    /// Resolve a parsed [`Cli`] into a runtime configuration. Optional
+    /// features collapse to `None` exactly when their accessor methods do.
+    pub fn from_cli(cli: &Cli) -> Self {
+        Self {
+            logging: cli.logging.clone(),
+            server: cli.server.clone(),
+            database: cli.database.clone(),
+            eval: cli.eval.clone(),
+            storage: cli.storage.clone(),
+            secrets: cli.secrets.clone(),
+            limits: cli.limits.clone(),
+            registration: cli.registration.clone(),
+            proto: cli.proto.clone(),
+            oidc: cli.oidc_config(),
+            email: cli.email_config(),
+            s3: cli.s3_config(),
+            github_app: cli.github_app_config(),
+        }
     }
 }
 
@@ -267,5 +325,43 @@ mod tests {
         assert_eq!(config.bucket, "my-bucket");
         assert_eq!(config.region, "us-east-1");
         assert!(config.endpoint.is_none());
+    }
+
+    #[test]
+    fn runtime_config_from_default_cli_has_no_optional_features() {
+        let runtime = RuntimeConfig::from_cli(&base_cli());
+        assert!(runtime.oidc.is_none());
+        assert!(runtime.email.is_none());
+        assert!(runtime.s3.is_none());
+        assert!(runtime.github_app.is_none());
+        assert_eq!(runtime.storage.base_path, "/tmp/gradient-test");
+    }
+
+    #[test]
+    fn runtime_config_populates_optional_features_when_configured() {
+        let mut cli = base_cli();
+        cli.oidc.oidc_enabled = true;
+        cli.oidc.oidc_required = true;
+        cli.oidc.oidc_client_id = Some("cid".into());
+        cli.oidc.oidc_client_secret_file = Some("/run/secrets/oidc".into());
+        cli.oidc.oidc_discovery_url = Some("https://idp.example.com".into());
+        cli.email.email_enabled = true;
+        cli.email.email_require_verification = true;
+        cli.email.email_smtp_host = Some("smtp.example.com".into());
+        cli.email.email_smtp_username = Some("u".into());
+        cli.email.email_smtp_password_file = Some("/run/secrets/smtp".into());
+        cli.email.email_from_address = Some("g@example.com".into());
+        cli.s3.s3_bucket = Some("bkt".into());
+        cli.github_app.github_app_id = Some(1);
+        cli.github_app.github_app_private_key_file = Some("/k".into());
+        cli.github_app.github_app_webhook_secret_file = Some("/w".into());
+
+        let runtime = RuntimeConfig::from_cli(&cli);
+        let oidc = runtime.oidc.expect("oidc populated");
+        assert!(oidc.required);
+        let email = runtime.email.expect("email populated");
+        assert!(email.require_verification);
+        assert!(runtime.s3.is_some());
+        assert!(runtime.github_app.is_some());
     }
 }

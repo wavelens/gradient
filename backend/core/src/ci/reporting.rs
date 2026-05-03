@@ -159,7 +159,7 @@ pub async fn report_build_ci(state: Arc<ServerState>, build: MBuild, status: CiS
     let details_url = org_name.as_ref().map(|org| {
         format!(
             "{}/organization/{}/log/{}",
-            state.cli.server.frontend_url, org, evaluation.id
+            state.config.server.frontend_url, org, evaluation.id
         )
     });
 
@@ -259,7 +259,7 @@ pub async fn report_evaluation_ci(
     let details_url = org_name.as_ref().map(|org| {
         format!(
             "{}/organization/{}/log/{}",
-            state.cli.server.frontend_url, org, evaluation.id
+            state.config.server.frontend_url, org, evaluation.id
         )
     });
 

@@ -46,9 +46,9 @@ impl<'a> ProjectGitContext<'a> {
                     id: project.organization,
                 })?;
             Some(super::ssh_key::decrypt_ssh_private_key(
-                &state.cli.secrets.crypt_secret_file,
+                &state.config.secrets.crypt_secret_file,
                 organization,
-                &state.cli.server.serve_url,
+                &state.config.server.serve_url,
             )?)
         } else {
             None

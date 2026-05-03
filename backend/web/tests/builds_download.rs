@@ -246,7 +246,7 @@ fn listing_returns_products_from_db() {
         let state = Arc::new(ServerState {
             web_db: WebDb::new(db),
             worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-            cli,
+            config: std::sync::Arc::new(gradient_core::types::RuntimeConfig::from_cli(&cli)),
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
@@ -317,7 +317,7 @@ fn download_streams_file_from_nar() {
         let state = Arc::new(ServerState {
             web_db: WebDb::new(db),
             worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-            cli,
+            config: std::sync::Arc::new(gradient_core::types::RuntimeConfig::from_cli(&cli)),
             log_storage: Arc::new(NoopLogStorage),
             webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,

@@ -12,7 +12,7 @@
 
 use axum_test::TestServer;
 use gradient_core::storage::{EmailSender, NarStore};
-use gradient_core::types::{ServerState, WebDb, WorkerDb};
+use gradient_core::types::{RuntimeConfig, ServerState, WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::Value;
 use std::sync::Arc;
@@ -32,13 +32,14 @@ fn server() -> TestServer {
     std::fs::write(&jwt_path, "test-jwt-secret").expect("write jwt secret file");
 
     let mut cli = test_cli();
-    cli.jwt_secret_file = jwt_path.to_string_lossy().into_owned();
+    cli.secrets.jwt_secret_file = jwt_path.to_string_lossy().into_owned();
 
-    let nar_storage = NarStore::local(&cli.base_path).expect("create test NarStore");
+    let config = Arc::new(RuntimeConfig::from_cli(&cli));
+    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        cli,
+        config,
         log_storage: Arc::new(NoopLogStorage),
         webhooks: Arc::new(RecordingWebhookClient::new())
             as Arc<dyn gradient_core::ci::WebhookClient>,

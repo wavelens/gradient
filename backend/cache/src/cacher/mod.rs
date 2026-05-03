@@ -28,7 +28,7 @@ use tokio::time;
 use tracing::{error, info};
 
 pub async fn cache_loop(state: Arc<ServerState>) {
-    let _guard = if state.cli.registration.report_errors {
+    let _guard = if state.config.registration.report_errors {
         Some(sentry::init(
             "https://5895e5a5d35f4dbebbcc47d5a722c402@reports.wavelens.io/1",
         ))
@@ -55,7 +55,7 @@ pub async fn cache_loop(state: Arc<ServerState>) {
         }
         if let Err(e) = gradient_core::db::gc_orphan_derivations(
             Arc::clone(&state),
-            state.cli.storage.keep_orphan_derivations_hours,
+            state.config.storage.keep_orphan_derivations_hours,
         )
         .await
         {
@@ -63,7 +63,7 @@ pub async fn cache_loop(state: Arc<ServerState>) {
         } else {
             info!("Derivation GC completed successfully");
         }
-        if state.cli.storage.nar_ttl_hours > 0
+        if state.config.storage.nar_ttl_hours > 0
             && let Err(e) = cleanup_stale_cached_nars(Arc::clone(&state)).await
         {
             error!(error = %e, "NAR TTL GC failed");
@@ -74,7 +74,7 @@ pub async fn cache_loop(state: Arc<ServerState>) {
 /// Periodic sweep that fills in `cached_path_signature` rows whose
 /// `signature` column is still NULL. Ticks every 60 seconds.
 pub async fn sign_sweep_loop(state: Arc<ServerState>) {
-    let _guard = if state.cli.registration.report_errors {
+    let _guard = if state.config.registration.report_errors {
         Some(sentry::init(
             "https://5895e5a5d35f4dbebbcc47d5a722c402@reports.wavelens.io/1",
         ))

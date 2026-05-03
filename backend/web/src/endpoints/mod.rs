@@ -125,12 +125,12 @@ pub async fn get_config(
         error: false,
         message: ServerConfig {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            oidc_enabled: state.cli.oidc.oidc_enabled,
-            oidc_required: state.cli.oidc.oidc_required,
-            registration_enabled: state.cli.registration.enable_registration && !state.cli.oidc.oidc_required,
-            email_verification_enabled: state.cli.email.email_enabled
-                && state.cli.email.email_require_verification,
-            quic: state.cli.proto.quic,
+            oidc_enabled: state.config.oidc.is_some(),
+            oidc_required: state.config.oidc.as_ref().is_some_and(|o| o.required),
+            registration_enabled: state.config.registration.enable_registration && !state.config.oidc.as_ref().is_some_and(|o| o.required),
+            email_verification_enabled: state.config.email.is_some()
+                && state.config.email.as_ref().is_some_and(|e| e.require_verification),
+            quic: state.config.proto.quic,
         },
     };
 

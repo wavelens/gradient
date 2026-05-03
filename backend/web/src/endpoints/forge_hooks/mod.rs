@@ -49,7 +49,7 @@ pub async fn github_app_webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
-    let Some(github_app) = state.cli.github_app_config() else {
+    let Some(github_app) = state.config.github_app.clone() else {
         warn!(
             "GitHub App webhook received but GitHub App is not fully configured \
              (requires GRADIENT_GITHUB_APP_ID, GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE, \
@@ -155,7 +155,7 @@ pub async fn forge_webhook(
     })?;
 
     let plaintext_secret =
-        decrypt_webhook_secret(&state.cli.secrets.crypt_secret_file, encrypted_secret).map_err(|e| {
+        decrypt_webhook_secret(&state.config.secrets.crypt_secret_file, encrypted_secret).map_err(|e| {
             warn!(error = %e, integration_id = %integration.id, "Failed to decrypt integration secret");
             WebError::InternalServerError("internal error".into())
         })?;

@@ -34,6 +34,8 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     println!("Starting Gradient Server on {}:{}", cli.server.ip, cli.server.port);
     println!("State file configured: {:?}", cli.storage.state_file);
 
+    let config = Arc::new(RuntimeConfig::from_cli(&cli));
+
     let db = match connect_db(&cli).await {
         Ok(db) => db,
         Err(e) => {
@@ -183,7 +185,7 @@ pub async fn init_state(cli: Cli) -> Arc<ServerState> {
     Arc::new(ServerState {
         worker_db: WorkerDb::new(db),
         web_db: WebDb::new(web_db),
-        cli,
+        config,
         log_storage,
         webhooks,
         email,

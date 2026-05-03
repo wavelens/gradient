@@ -25,7 +25,7 @@ pub use self::cli::{
     DatabaseArgs, EmailArgs, EvalArgs, GitHubAppArgs, LimitsArgs, LoggingArgs, OidcArgs,
     ProtoArgs, RegistrationArgs, S3Args, SecretsArgs, ServerArgs, StorageArgs,
 };
-pub use self::config::{EmailConfig, GitHubAppConfig, OidcConfig, S3Config};
+pub use self::config::{EmailConfig, GitHubAppConfig, OidcConfig, RuntimeConfig, S3Config};
 pub use self::consts::*;
 pub use self::db::{WebDb, WorkerDb};
 pub use self::entity_aliases::*;
@@ -93,7 +93,11 @@ pub struct ServerState {
     /// Dedicated DB pool used by the axum/web layer so HTTP requests are
     /// not starved by the busy proto/scheduler pool under heavy NarPush load.
     pub web_db: WebDb,
-    pub cli: Cli,
+    /// Resolved runtime configuration. Built once at startup from the parsed
+    /// [`Cli`]. Replaces the prior `cli: Cli` field so handlers depend on the
+    /// slice they need (`state.config.<group>.<field>`) instead of the full
+    /// 65-field parser DTO.
+    pub config: Arc<RuntimeConfig>,
     pub log_storage: Arc<dyn LogStorage>,
     pub webhooks: Arc<dyn WebhookClient>,
     pub email: Arc<dyn EmailSender>,

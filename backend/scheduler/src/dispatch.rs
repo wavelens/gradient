@@ -69,7 +69,7 @@ async fn project_poll_loop(scheduler: Arc<Scheduler>) {
 pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyhow::Result<()> {
     let state = &scheduler.state;
     let now = gradient_core::types::now();
-    let threshold = now - chrono::Duration::seconds(state.cli.eval.evaluation_timeout);
+    let threshold = now - chrono::Duration::seconds(state.config.eval.evaluation_timeout);
     let webhook_threshold = now - chrono::Duration::seconds(WEBHOOK_BACKUP_POLL_SECS);
 
     // Webhook delivery is configured via the project's inbound integration: when

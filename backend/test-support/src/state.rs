@@ -11,7 +11,7 @@ use crate::log_storage::NoopLogStorage;
 use gradient_core::ci::WebhookClient;
 use gradient_core::storage::EmailSender;
 use gradient_core::storage::NarStore;
-use gradient_core::types::{ServerState, WebDb, WorkerDb};
+use gradient_core::types::{RuntimeConfig, ServerState, WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 use std::sync::Arc;
 
@@ -22,11 +22,12 @@ use std::sync::Arc;
 /// directly so they can supply their own mock query results.
 pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
     let cli = test_cli();
-    let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
+    let config = Arc::new(RuntimeConfig::from_cli(&cli));
+    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         worker_db: WorkerDb::new(db),
-        cli,
+        config,
         log_storage: Arc::new(NoopLogStorage),
         webhooks: Arc::new(RecordingWebhookClient::new()) as Arc<dyn WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
@@ -43,12 +44,13 @@ pub fn test_state_recorded(
     crypt_secret_file: String,
 ) -> (Arc<ServerState>, Arc<RecordingWebhookClient>) {
     let cli = test_cli_with_crypt(crypt_secret_file);
-    let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
+    let config = Arc::new(RuntimeConfig::from_cli(&cli));
+    let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
     let recorder = Arc::new(RecordingWebhookClient::new());
     let state = Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         worker_db: WorkerDb::new(db),
-        cli,
+        config,
         log_storage: Arc::new(NoopLogStorage),
         webhooks: Arc::clone(&recorder) as Arc<dyn WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
