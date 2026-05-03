@@ -10,21 +10,21 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
+import { vi } from 'vitest';
 import { WorkersComponent } from './workers.component';
 import { WorkersService } from '@core/services/workers.service';
 import { OrganizationsService } from '@core/services/organizations.service';
 
 describe('WorkersComponent — no-cache banner', () => {
   let fixture: ComponentFixture<WorkersComponent>;
-  let orgsService: jasmine.SpyObj<OrganizationsService>;
+  let orgsService: { getOrganization: ReturnType<typeof vi.fn>; getSubscribedCaches: ReturnType<typeof vi.fn> };
 
   beforeEach(async () => {
-    const workers = jasmine.createSpyObj<WorkersService>('WorkersService', ['getWorkers']);
-    workers.getWorkers.and.returnValue(of([]));
-    orgsService = jasmine.createSpyObj<OrganizationsService>('OrganizationsService', [
-      'getOrganization', 'getSubscribedCaches',
-    ]);
-    orgsService.getOrganization.and.returnValue(of({ id: 'org-uuid', display_name: 'Org' } as any));
+    const workers = { getWorkers: vi.fn().mockReturnValue(of([])) };
+    orgsService = {
+      getOrganization: vi.fn().mockReturnValue(of({ id: 'org-uuid', display_name: 'Org' } as any)),
+      getSubscribedCaches: vi.fn(),
+    };
 
     await TestBed.configureTestingModule({
       imports: [WorkersComponent],
@@ -43,18 +43,18 @@ describe('WorkersComponent — no-cache banner', () => {
   });
 
   it('shows the banner when the org has no subscribed caches', () => {
-    orgsService.getSubscribedCaches.and.returnValue(of([]));
+    orgsService.getSubscribedCaches.mockReturnValue(of([]));
     fixture = TestBed.createComponent(WorkersComponent);
     fixture.detectChanges();
     const banner = fixture.nativeElement.querySelector('[data-testid="no-cache-banner"]');
-    expect(banner).withContext('banner element').toBeTruthy();
+    expect(banner).toBeTruthy();
   });
 
   it('hides the banner when the org has at least one subscribed cache', () => {
-    orgsService.getSubscribedCaches.and.returnValue(of([{ id: 'c', name: 'cache-1' }]));
+    orgsService.getSubscribedCaches.mockReturnValue(of([{ id: 'c', name: 'cache-1' }]));
     fixture = TestBed.createComponent(WorkersComponent);
     fixture.detectChanges();
     const banner = fixture.nativeElement.querySelector('[data-testid="no-cache-banner"]');
-    expect(banner).withContext('banner element').toBeNull();
+    expect(banner).toBeNull();
   });
 });
