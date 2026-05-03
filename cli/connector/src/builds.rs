@@ -91,10 +91,9 @@ pub async fn post_direct_build(
         .text("organization", organization)
         .text("derivation", derivation);
 
-    // Add files to form
     for (filename, data) in files {
-        let part = Part::bytes(data).file_name(filename.clone());
-        form = form.part(format!("file:{}", filename), part);
+        let part = Part::bytes(data).file_name(filename);
+        form = form.part("files", part);
     }
 
     let client = reqwest::Client::new();
