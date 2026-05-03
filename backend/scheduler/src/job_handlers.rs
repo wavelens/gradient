@@ -202,7 +202,7 @@ impl Scheduler {
                     let state = Arc::clone(&self.state);
                     let repo = eval.repository.clone();
                     let commit_id = eval.commit;
-                    tokio::spawn(async move {
+                    self.state.shutdown.spawn(async move {
                         ci::report_ci_for_evaluation(
                             state,
                             pid,

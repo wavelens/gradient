@@ -27,14 +27,23 @@ use entity::worker_registration::{Column, Entity as EWorkerRegistration};
 use crate::handler::{MAX_PROTO_MESSAGE_SIZE, ProtoSocket, handle_socket};
 use scheduler::Scheduler;
 
-/// Spawn the outbound connection loop as a detached tokio task.
+/// Spawn the outbound connection loop on the shared shutdown tracker so it
+/// drains cleanly on SIGTERM.
 pub fn start_outbound_loop(scheduler: Arc<Scheduler>) {
-    tokio::spawn(async move {
+    let shutdown = scheduler.state.shutdown.clone();
+    let cancel = shutdown.token();
+    shutdown.spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(15));
         let connecting: Arc<Mutex<HashSet<String>>> = Arc::default();
         info!("outbound worker connection loop started");
         loop {
-            interval.tick().await;
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    info!("outbound worker connection loop shutting down");
+                    return;
+                }
+                _ = interval.tick() => {}
+            }
             connect_to_registered_workers(&scheduler, &connecting).await;
         }
     });
@@ -87,8 +96,9 @@ async fn connect_to_registered_workers(
         let worker_id = reg.worker_id.clone();
         let scheduler = Arc::clone(scheduler);
         let connecting = Arc::clone(connecting);
+        let shutdown = scheduler.state.shutdown.clone();
 
-        tokio::spawn(async move {
+        shutdown.spawn(async move {
             debug!(%worker_id, %url, "connecting outbound to worker");
 
             let config = WebSocketConfig::default()

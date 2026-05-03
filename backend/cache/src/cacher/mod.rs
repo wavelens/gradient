@@ -39,9 +39,16 @@ pub async fn cache_loop(state: Arc<ServerState>) {
     // No per-output work anymore — the worker uploads+signs. This loop only
     // runs maintenance. Tick every hour; nothing is latency-sensitive.
     let mut interval = time::interval(Duration::from_secs(3600));
+    let cancel = state.shutdown.token();
 
     loop {
-        interval.tick().await;
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                info!("cache loop shutting down");
+                return;
+            }
+            _ = interval.tick() => {}
+        }
 
         if let Err(e) = cleanup_orphaned_cache_files(Arc::clone(&state)).await {
             error!(error = %e, "Cache cleanup failed");
@@ -83,8 +90,15 @@ pub async fn sign_sweep_loop(state: Arc<ServerState>) {
     };
 
     let mut interval = time::interval(Duration::from_secs(60));
+    let cancel = state.shutdown.token();
     loop {
-        interval.tick().await;
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                info!("sign sweep loop shutting down");
+                return;
+            }
+            _ = interval.tick() => {}
+        }
         if let Err(e) = sign_missing_signatures(Arc::clone(&state)).await {
             error!(error = %e, "Signature sweep failed");
         }

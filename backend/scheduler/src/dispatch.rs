@@ -38,23 +38,31 @@ use super::Scheduler;
 use super::jobs::{PendingBuildJob, PendingEvalJob};
 use gradient_core::types::proto::{BuildJob, BuildTask, FlakeJob, FlakeTask};
 
-/// Spawns all dispatch loops as detached tokio tasks.
+/// Spawns all dispatch loops on the shared shutdown tracker so they drain on SIGTERM.
 pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
+    let shutdown = scheduler.state.shutdown.clone();
     let s1 = Arc::clone(&scheduler);
     let s2 = Arc::clone(&scheduler);
     let s3 = Arc::clone(&scheduler);
-    tokio::spawn(async move { project_poll_loop(s3).await });
-    tokio::spawn(async move { eval_dispatch_loop(s1).await });
-    tokio::spawn(async move { build_dispatch_loop(s2).await });
+    shutdown.spawn(async move { project_poll_loop(s3).await });
+    shutdown.spawn(async move { eval_dispatch_loop(s1).await });
+    shutdown.spawn(async move { build_dispatch_loop(s2).await });
 }
 
 // ── Project polling ──────────────────────────────────────────────────────────
 
 async fn project_poll_loop(scheduler: Arc<Scheduler>) {
     let mut interval = tokio::time::interval(Duration::from_secs(30));
+    let cancel = scheduler.state.shutdown.token();
     info!("project poll loop started");
     loop {
-        interval.tick().await;
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                info!("project poll loop shutting down");
+                return;
+            }
+            _ = interval.tick() => {}
+        }
         if let Err(e) = poll_projects_for_evaluations(&scheduler).await {
             error!(error = %e, "project poll error");
         }
@@ -178,9 +186,16 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
 
 async fn eval_dispatch_loop(scheduler: Arc<Scheduler>) {
     let mut interval = tokio::time::interval(Duration::from_secs(5));
+    let cancel = scheduler.state.shutdown.token();
     info!("eval dispatch loop started");
     loop {
-        interval.tick().await;
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                info!("eval dispatch loop shutting down");
+                return;
+            }
+            _ = interval.tick() => {}
+        }
         if let Err(e) = dispatch_queued_evals(&scheduler).await {
             error!(error = %e, "eval dispatch error");
         }
@@ -262,9 +277,16 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
 
 async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
     let mut interval = tokio::time::interval(Duration::from_secs(5));
+    let cancel = scheduler.state.shutdown.token();
     info!("build dispatch loop started");
     loop {
-        interval.tick().await;
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                info!("build dispatch loop shutting down");
+                return;
+            }
+            _ = interval.tick() => {}
+        }
         if let Err(e) = dispatch_ready_builds(&scheduler).await {
             error!(error = %e, "build dispatch error");
         }

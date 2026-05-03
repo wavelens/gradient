@@ -77,7 +77,7 @@ pub async fn update_build_status(
         Ok(updated_build) => {
             let webhook_state = Arc::clone(&state);
             let webhook_build = updated_build.clone();
-            tokio::spawn(async move {
+            state.shutdown.spawn(async move {
                 crate::ci::fire_build_webhook(webhook_state, webhook_build, webhook_status).await;
             });
 
@@ -92,7 +92,7 @@ pub async fn update_build_status(
             ) {
                 let log_state = Arc::clone(&state);
                 let log_id = updated_build.log_id.unwrap_or(updated_build.id);
-                tokio::spawn(async move {
+                state.shutdown.spawn(async move {
                     if let Err(e) = log_state.log_storage.finalize(log_id).await {
                         error!(error = %e, build_id = %log_id, "Failed to finalize build log");
                     }
@@ -102,7 +102,7 @@ pub async fn update_build_status(
             if let Some(ci_status) = crate::ci::ci_status_for_build(&updated_build.status) {
                 let ci_state = Arc::clone(&state);
                 let ci_build = updated_build.clone();
-                tokio::spawn(async move {
+                state.shutdown.spawn(async move {
                     crate::ci::report_build_ci(ci_state, ci_build, ci_status).await;
                 });
             }
@@ -185,14 +185,14 @@ pub async fn update_evaluation_status(
 
     let webhook_state = Arc::clone(&state);
     let webhook_eval = updated_eval.clone();
-    tokio::spawn(async move {
+    state.shutdown.spawn(async move {
         crate::ci::fire_evaluation_webhook(webhook_state, webhook_eval, webhook_status).await;
     });
 
     if let Some(ci_status) = crate::ci::ci_status_for_evaluation(&updated_eval.status) {
         let ci_state = Arc::clone(&state);
         let ci_eval = updated_eval.clone();
-        tokio::spawn(async move {
+        state.shutdown.spawn(async move {
             crate::ci::report_evaluation_ci(ci_state, ci_eval, ci_status).await;
         });
     }
