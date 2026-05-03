@@ -6,7 +6,7 @@
 
 //! Forge-agnostic push event parsing and triggering.
 
-use core::types::*;
+use gradient_core::types::*;
 use serde::Deserialize;
 use std::sync::Arc;
 use tracing::warn;

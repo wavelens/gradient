@@ -6,8 +6,8 @@
 
 //! Evaluation triggering from forge webhooks.
 
-use core::ci::{TriggerError, trigger_evaluation};
-use core::types::*;
+use gradient_core::ci::{TriggerError, trigger_evaluation};
+use gradient_core::types::*;
 use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};

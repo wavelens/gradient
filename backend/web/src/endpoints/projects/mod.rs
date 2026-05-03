@@ -28,8 +28,8 @@ pub use self::metrics::{
 use crate::helpers::OptionExt;
 use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
-use core::db::get_project_by_name;
-use core::types::*;
+use gradient_core::db::get_project_by_name;
+use gradient_core::types::*;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -171,7 +171,7 @@ pub(crate) async fn user_can_edit(
     user_id: Uuid,
     organization_id: Uuid,
 ) -> Result<bool, WebError> {
-    use core::types::consts::*;
+    use gradient_core::types::consts::*;
     let org_user = EOrganizationUser::find()
         .filter(
             Condition::all()
@@ -190,9 +190,9 @@ pub(crate) async fn user_can_edit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::ci::WebhookClient;
-    use core::storage::{EmailSender, NarStore};
-    use core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
+    use gradient_core::ci::WebhookClient;
+    use gradient_core::storage::{EmailSender, NarStore};
+    use gradient_core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use test_support::cli::test_cli;
     use test_support::fakes::email::InMemoryEmailSender;

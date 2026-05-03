@@ -1864,10 +1864,9 @@ paths:
         |---|---|---|
         | `organization` | text | Organization slug |
         | `derivation` | text | Nix attribute path or store path to build |
-        | `file:<name>` | file | One or more Nix expression files |
+        | `files` | file (repeated) | One or more Nix expression files; the per-part `Content-Disposition: filename="..."` is treated as the path relative to a per-upload temp directory |
 
-        `<name>` is treated as a path relative to a per-upload temp directory.
-        Names containing `..`, `.`, leading `/`, NUL bytes, or any other
+        Filenames containing `..`, `.`, leading `/`, NUL bytes, or any other
         non-normal path components are rejected with `400 Bad Request`.
         Nested relative paths (e.g. `src/main.nix`) are allowed.
 
@@ -1879,7 +1878,7 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [organization, derivation]
+              required: [organization, derivation, files]
               properties:
                 organization:
                   type: string
@@ -1887,10 +1886,12 @@ paths:
                 derivation:
                   type: string
                   description: Nix derivation attribute path
-              additionalProperties:
-                type: string
-                format: binary
-                description: Nix expression file (field name must start with `file:`)
+                files:
+                  type: array
+                  description: Nix expression files; each part's `Content-Disposition` filename is the relative path under the per-upload temp directory
+                  items:
+                    type: string
+                    format: binary
       responses:
         '200':
           description: Direct build started

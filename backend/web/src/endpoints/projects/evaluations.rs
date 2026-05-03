@@ -16,11 +16,11 @@ use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
-use core::db::get_any_organization_by_name;
-use core::sources::check_project_updates;
-use core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
-use core::types::input::vec_to_hex;
-use core::types::*;
+use gradient_core::db::get_any_organization_by_name;
+use gradient_core::sources::check_project_updates;
+use gradient_core::storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
+use gradient_core::types::input::vec_to_hex;
+use gradient_core::types::*;
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
@@ -153,16 +153,16 @@ pub async fn post_project_evaluate(
     let mode = body.as_ref().and_then(|b| b.mode.as_deref());
 
     if mode == Some("restart_failed") {
-        core::ci::trigger_restart_builds(&state.web_db, &project)
+        gradient_core::ci::trigger_restart_builds(&state.web_db, &project)
             .await
             .map_err(|e| match e {
-                core::ci::TriggerError::AlreadyInProgress => {
+                gradient_core::ci::TriggerError::AlreadyInProgress => {
                     WebError::bad_request("Evaluation already in progress")
                 }
-                core::ci::TriggerError::NoPreviousEvaluation => {
+                gradient_core::ci::TriggerError::NoPreviousEvaluation => {
                     WebError::bad_request("No previous evaluation to restart from")
                 }
-                core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
+                gradient_core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
             })?;
 
         return Ok(ok_json("Restarting failed builds".to_string()));
@@ -180,16 +180,16 @@ pub async fn post_project_evaluate(
         ));
     }
 
-    core::ci::trigger_evaluation(&state.web_db, &project, commit_hash, None, None)
+    gradient_core::ci::trigger_evaluation(&state.web_db, &project, commit_hash, None, None)
         .await
         .map_err(|e| match e {
-            core::ci::TriggerError::AlreadyInProgress => {
+            gradient_core::ci::TriggerError::AlreadyInProgress => {
                 WebError::bad_request("Evaluation already in progress")
             }
-            core::ci::TriggerError::NoPreviousEvaluation => {
+            gradient_core::ci::TriggerError::NoPreviousEvaluation => {
                 WebError::internal("Unexpected error")
             }
-            core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
+            gradient_core::ci::TriggerError::Db(db_err) => WebError::from(db_err),
         })?;
 
     Ok(ok_json("Evaluation started".to_string()))

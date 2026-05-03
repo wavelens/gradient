@@ -6,17 +6,17 @@
 
 use crate::helpers::OptionExt;
 use crate::error::{WebError, WebResult};
-use axum::extract::{Multipart, State};
+use axum::extract::State;
 use axum::{Extension, Json};
-use core::types::*;
+use axum_typed_multipart::{FieldData, TryFromMultipart, TypedMultipart};
+use gradient_core::types::*;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use tempfile::NamedTempFile;
 use tokio::fs;
-use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -61,70 +61,44 @@ pub(crate) fn validate_upload_filename(filename: &str) -> WebResult<()> {
     Ok(())
 }
 
+#[derive(TryFromMultipart)]
+pub struct DirectBuildForm {
+    pub organization: String,
+    pub derivation: String,
+    #[form_data(limit = "unlimited")]
+    pub files: Vec<FieldData<NamedTempFile>>,
+}
+
 pub async fn post_direct_build(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-    mut multipart: Multipart,
+    TypedMultipart(form): TypedMultipart<DirectBuildForm>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let mut organization = None;
-    let mut derivation = None;
-    let mut files: HashMap<String, Vec<u8>> = HashMap::new();
-
-    // Parse multipart form
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|e| WebError::bad_request(format!("Failed to parse multipart: {}", e)))?
-    {
-        let name = field.name().unwrap_or("").to_string();
-
-        if name == "organization" {
-            organization = Some(field.text().await.map_err(|e| {
-                WebError::bad_request(format!("Failed to read organization: {}", e))
-            })?);
-        } else if name == "derivation" {
-            derivation =
-                Some(field.text().await.map_err(|e| {
-                    WebError::bad_request(format!("Failed to read derivation: {}", e))
-                })?);
-        } else if name.starts_with("file:") {
-            let filename = match name.strip_prefix("file:") {
-                Some(f) => f.to_string(),
-                None => return Err(WebError::bad_request("Invalid file field name")),
-            };
-            validate_upload_filename(&filename)?;
-            let data = field.bytes().await.map_err(|e| {
-                WebError::bad_request(format!("Failed to read file {}: {}", filename, e))
-            })?;
-            files.insert(filename, data.to_vec());
-        }
-    }
-
-    let organization = organization
-        .ok_or_else(|| WebError::bad_request("Missing organization parameter"))?;
-
-    let derivation = derivation
-        .ok_or_else(|| WebError::bad_request("Missing derivation parameter"))?;
+    let DirectBuildForm {
+        organization,
+        derivation,
+        files,
+    } = form;
 
     if files.is_empty() {
         return Err(WebError::bad_request("No files uploaded"));
     }
 
-    // Get organization
-    let org = core::db::get_organization_by_name(Arc::clone(&state), user.id, organization.clone())
+    let org = gradient_core::db::get_organization_by_name(Arc::clone(&state), user.id, organization.clone())
         .await?
         .or_not_found("Organization")?;
 
-    // We'll create the DirectBuild record after the evaluation
-
-    // Create temporary directory for files
     let temp_dir = format!("{}/uploads/{}", state.cli.base_path, Uuid::new_v4());
     fs::create_dir_all(&temp_dir).await.map_err(|e| {
         WebError::internal(format!("Failed to create temp directory: {}", e))
     })?;
 
     let temp_root = PathBuf::from(&temp_dir);
-    for (filename, data) in files {
+    for field in files {
+        let filename = field
+            .metadata
+            .file_name
+            .ok_or_else(|| WebError::bad_request("File field is missing a filename"))?;
         validate_upload_filename(&filename)?;
         let file_path = temp_root.join(&filename);
 
@@ -141,11 +115,8 @@ pub async fn post_direct_build(
             })?;
         }
 
-        let mut file = fs::File::create(&file_path).await.map_err(|e| {
-            WebError::internal(format!("Failed to create file {}: {}", filename, e))
-        })?;
-
-        file.write_all(&data).await.map_err(|e| {
+        let temp_path = field.contents.into_temp_path();
+        fs::copy(&temp_path, &file_path).await.map_err(|e| {
             WebError::internal(format!("Failed to write file {}: {}", filename, e))
         })?;
     }
@@ -164,7 +135,7 @@ pub async fn post_direct_build(
         .map_err(|e| WebError::internal(format!("Failed to create commit: {}", e)))?;
 
     // Create evaluation record (without project for direct builds)
-    let now = core::types::now();
+    let now = gradient_core::types::now();
     let evaluation = AEvaluation {
         id: Set(Uuid::new_v4()),
         project: Set(None), // No project for direct builds
@@ -191,7 +162,7 @@ pub async fn post_direct_build(
         derivation: Set(derivation.clone()),
         repository_path: Set(temp_dir.clone()),
         created_by: Set(user.id),
-        created_at: Set(core::types::now()),
+        created_at: Set(gradient_core::types::now()),
     };
     direct_build.insert(&state.web_db).await.map_err(|e| {
         WebError::internal(format!("Failed to create direct build record: {}", e))

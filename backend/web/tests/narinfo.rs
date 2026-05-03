@@ -7,9 +7,9 @@
 //! Integration test: `.narinfo` handler serves metadata from DB rows only.
 
 use axum_test::TestServer;
-use core::ci::WebhookClient;
-use core::storage::{EmailSender, NarStore};
-use core::types::{ServerState, WebDb, WorkerDb};
+use gradient_core::ci::WebhookClient;
+use gradient_core::storage::{EmailSender, NarStore};
+use gradient_core::types::{ServerState, WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
 use test_support::fakes::email::InMemoryEmailSender;
@@ -58,7 +58,7 @@ const FIXTURE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 /// Verify that the narinfo handler returns a well-formed response that includes
 /// `NarHash:`, `NarSize:`, and `Sig:` fields served entirely from the DB rows.
 ///
-/// Uses a manual Tokio runtime because `#[tokio::test]` expands to `::core::…`
+/// Uses a manual Tokio runtime because `#[tokio::test]` expands to `::gradient_core::…`
 /// references that clash with the local `core` crate name in the workspace.
 #[test]
 fn narinfo_served_from_db_without_daemon_probe() {

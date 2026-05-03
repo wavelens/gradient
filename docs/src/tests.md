@@ -515,11 +515,16 @@ Tests (`cargo test -p web --test rate_limit`):
 
 ## Direct-build multipart upload — filename validation
 
-`POST /api/v1/builds/direct` accepts arbitrary file uploads via multipart
-fields named `file:<filename>`. Without sanitisation, an authenticated
-org-member could submit `file:../../../../../etc/cron.d/owned` and have
-the server write attacker-controlled bytes anywhere the process can
-reach. `validate_upload_filename` (in
+`POST /api/v1/builds` accepts file uploads via standard multipart parts
+with field name `files`; the upload's relative path comes from each
+part's `Content-Disposition: filename="..."`. The endpoint is parsed via
+`axum_typed_multipart::TypedMultipart<DirectBuildForm>`, which streams
+each part into a `tempfile::NamedTempFile` (RAII cleanup on early
+return) instead of buffering the full payload in memory. Without
+sanitisation, an authenticated org-member could submit
+`filename="../../../../../etc/cron.d/owned"` and have the server write
+attacker-controlled bytes anywhere the process can reach.
+`validate_upload_filename` (in
 `backend/web/src/endpoints/builds/direct.rs`) rejects any name whose
 path components are not all `Component::Normal` — i.e. absolute paths,
 parent (`..`) and current (`.`) components, Windows path prefixes, empty

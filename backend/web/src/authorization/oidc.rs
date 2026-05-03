@@ -8,8 +8,8 @@ use anyhow::{Context, Result, bail};
 use axum::extract::State;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
-use core::types::input::load_secret;
-use core::types::*;
+use gradient_core::types::input::load_secret;
+use gradient_core::types::*;
 use jsonwebtoken::{
     Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, decode_header, encode,
     jwk::JwkSet,
@@ -356,8 +356,8 @@ async fn create_or_update_user(
         name: Set(display_name),
         email: Set(email),
         password: Set(None),
-        last_login_at: Set(core::types::now()),
-        created_at: Set(core::types::now()),
+        last_login_at: Set(gradient_core::types::now()),
+        created_at: Set(gradient_core::types::now()),
         email_verified: Set(true),
         email_verification_token: Set(None),
         email_verification_token_expires: Set(None),

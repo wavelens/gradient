@@ -30,8 +30,8 @@ use crate::helpers::OptionExt;
 use crate::authorization::MaybeUser;
 use crate::endpoints::user_is_org_member;
 use crate::error::WebError;
-use core::db::get_any_organization_by_name;
-use core::types::*;
+use gradient_core::db::get_any_organization_by_name;
+use gradient_core::types::*;
 
 // ── Query parameters ─────────────────────────────────────────────────────────
 

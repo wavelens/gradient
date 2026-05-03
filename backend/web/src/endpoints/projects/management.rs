@@ -12,13 +12,13 @@ use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 
-use core::db::{get_any_organization_by_name, get_organization_by_name};
-use core::nix::RepositoryUrl;
-use core::sources::check_project_updates;
-use core::types::consts::*;
-use core::types::input::{check_index_name, validate_display_name, vec_to_hex};
-use core::types::wildcard::Wildcard;
-use core::types::*;
+use gradient_core::db::{get_any_organization_by_name, get_organization_by_name};
+use gradient_core::nix::RepositoryUrl;
+use gradient_core::sources::check_project_updates;
+use gradient_core::types::consts::*;
+use gradient_core::types::input::{check_index_name, validate_display_name, vec_to_hex};
+use gradient_core::types::wildcard::Wildcard;
+use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
@@ -203,7 +203,7 @@ pub async fn put(
         last_check_at: Set(*NULL_TIME),
         force_evaluation: Set(false),
         created_by: Set(user.id),
-        created_at: Set(core::types::now()),
+        created_at: Set(gradient_core::types::now()),
         managed: Set(false),
         keep_evaluations: Set(30),
     };

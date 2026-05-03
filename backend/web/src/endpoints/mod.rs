@@ -22,9 +22,9 @@ pub mod workers;
 use crate::helpers::OptionExt;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Json, State};
-use core::db::get_any_organization_by_name;
-use core::types::{BaseResponse, MOrganization, MUser, ServerState};
-use core::types::{COrganizationUser, EOrganizationUser};
+use gradient_core::db::get_any_organization_by_name;
+use gradient_core::types::{BaseResponse, MOrganization, MUser, ServerState};
+use gradient_core::types::{COrganizationUser, EOrganizationUser};
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use serde::Serialize;
 use std::sync::Arc;
@@ -140,7 +140,7 @@ pub async fn get_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::hydra::parse_hydra_product_line;
+    use gradient_core::hydra::parse_hydra_product_line;
 
     #[test]
     fn parse_hydra_product_line_typical() {

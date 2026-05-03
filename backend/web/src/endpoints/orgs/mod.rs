@@ -37,9 +37,9 @@ pub use self::workers::{
 
 use crate::helpers::OptionExt;
 use crate::error::{WebError, WebResult};
-use core::db::get_organization_by_name;
-use core::types::consts::BASE_ROLE_ADMIN_ID;
-use core::types::{
+use gradient_core::db::get_organization_by_name;
+use gradient_core::types::consts::BASE_ROLE_ADMIN_ID;
+use gradient_core::types::{
     COrganizationUser, EOrganizationUser, MOrganization, MOrganizationUser, ServerState,
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
@@ -120,10 +120,10 @@ pub(super) async fn load_admin_org(
 mod tests {
     use super::*;
     use crate::error::WebError;
-    use core::ci::WebhookClient;
-    use core::storage::{EmailSender, NarStore};
-    use core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID};
-    use core::types::{WebDb, WorkerDb};
+    use gradient_core::ci::WebhookClient;
+    use gradient_core::storage::{EmailSender, NarStore};
+    use gradient_core::types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID};
+    use gradient_core::types::{WebDb, WorkerDb};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use test_support::cli::test_cli;
     use test_support::fakes::email::InMemoryEmailSender;

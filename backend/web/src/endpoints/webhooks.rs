@@ -9,9 +9,9 @@ use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 
-use core::ci::{decrypt_webhook_secret, encrypt_webhook_secret, validate_webhook_url};
-use core::db::get_any_organization_by_name;
-use core::types::*;
+use gradient_core::ci::{decrypt_webhook_secret, encrypt_webhook_secret, validate_webhook_url};
+use gradient_core::db::get_any_organization_by_name;
+use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -159,7 +159,7 @@ pub async fn put(
         )),
         active: Set(true),
         created_by: Set(user.id),
-        created_at: Set(core::types::now()),
+        created_at: Set(gradient_core::types::now()),
     };
 
     let webhook = webhook.insert(&state.web_db).await?;
@@ -256,7 +256,7 @@ pub async fn post_webhook_test(
         .map_err(|e| {
             WebError::internal(format!("Failed to decrypt webhook secret: {}", e))
         })?;
-    let signature = core::ci::sign_webhook_payload(plaintext_secret.expose(), &body_str);
+    let signature = gradient_core::ci::sign_webhook_payload(plaintext_secret.expose(), &body_str);
 
     let status = state
         .webhooks

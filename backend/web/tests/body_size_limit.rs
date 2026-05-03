@@ -13,12 +13,12 @@
 //! direct-build multipart uploads.
 //!
 //! Uses manual Tokio runtimes because `#[tokio::test]` expands to
-//! `::core::…` which clashes with the local `core` crate name.
+//! `::gradient_core::…` which clashes with the local `core` crate name.
 
 use axum_test::TestServer;
-use core::ci::WebhookClient;
-use core::storage::{EmailSender, NarStore};
-use core::types::{ServerState, WebDb, WorkerDb};
+use gradient_core::ci::WebhookClient;
+use gradient_core::storage::{EmailSender, NarStore};
+use gradient_core::types::{ServerState, WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
 use test_support::fakes::email::InMemoryEmailSender;

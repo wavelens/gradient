@@ -8,7 +8,7 @@ use crate::helpers::OptionExt;
 use crate::error::WebResult;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use core::types::*;
+use gradient_core::types::*;
 use sea_orm::EntityTrait;
 use std::sync::Arc;
 use uuid::Uuid;

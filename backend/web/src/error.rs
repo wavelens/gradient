@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use core::types::BaseResponse;
+use gradient_core::types::BaseResponse;
 use sea_orm::DbErr;
 use std::fmt;
 
@@ -26,7 +26,7 @@ pub enum WebError {
     Database(DbErr),
     Validation(String),
     Authentication(String),
-    InputValidation(core::types::input::InputError),
+    InputValidation(gradient_core::types::input::InputError),
     JsonParsing(JsonRejection),
     Internal(AnyhowError),
 }
@@ -71,8 +71,8 @@ impl From<DbErr> for WebError {
     }
 }
 
-impl From<core::types::input::InputError> for WebError {
-    fn from(err: core::types::input::InputError) -> Self {
+impl From<gradient_core::types::input::InputError> for WebError {
+    fn from(err: gradient_core::types::input::InputError) -> Self {
         WebError::InputValidation(err)
     }
 }
@@ -233,7 +233,7 @@ impl WebError {
 
 /// Returns `Forbidden` when the user is not a superuser. Use at the top of
 /// admin handlers.
-pub fn require_superuser(user: &core::types::MUser) -> Result<(), WebError> {
+pub fn require_superuser(user: &gradient_core::types::MUser) -> Result<(), WebError> {
     if user.superuser {
         Ok(())
     } else {

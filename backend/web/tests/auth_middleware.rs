@@ -11,8 +11,8 @@
 //! stays observably equivalent to the prior hand-built responses.
 
 use axum_test::TestServer;
-use core::storage::{EmailSender, NarStore};
-use core::types::{ServerState, WebDb, WorkerDb};
+use gradient_core::storage::{EmailSender, NarStore};
+use gradient_core::types::{ServerState, WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::Value;
 use std::sync::Arc;
@@ -41,7 +41,7 @@ fn server() -> TestServer {
         cli,
         log_storage: Arc::new(NoopLogStorage),
         webhooks: Arc::new(RecordingWebhookClient::new())
-            as Arc<dyn core::ci::WebhookClient>,
+            as Arc<dyn gradient_core::ci::WebhookClient>,
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
