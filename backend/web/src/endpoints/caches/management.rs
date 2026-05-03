@@ -150,7 +150,7 @@ pub async fn put(
     }
 
     if let Err(e) = validate_display_name(&body.display_name) {
-        return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
+        return Err(WebError::bad_request(format!("Invalid display name: {}", e)));
     }
 
     let existing_cache = ECache::find()
@@ -165,7 +165,7 @@ pub async fn put(
     let (private_key, public_key) = generate_signing_key(&state.cli.crypt_secret_file)
         .map_err(|e| {
             tracing::error!("Failed to generate signing key: {}", e);
-            WebError::InternalServerError("Failed to generate signing key".to_string())
+            WebError::internal("Failed to generate signing key")
         })?;
 
     let cache = ACache {
@@ -236,7 +236,7 @@ pub async fn get_cache(
     )
     .map_err(|e| {
         tracing::error!("Failed to derive public key: {}", e);
-        WebError::InternalServerError("Failed to derive public key".to_string())
+        WebError::internal("Failed to derive public key")
     })?;
 
     let can_edit = matches!(&maybe_user, Some(u) if u.id == cache.created_by);
@@ -284,7 +284,7 @@ pub async fn patch_cache(
     if let Some(display_name) = body.display_name {
         let display_name = display_name.trim().to_string();
         if let Err(e) = validate_display_name(&display_name) {
-            return Err(WebError::BadRequest(format!("Invalid display name: {}", e)));
+            return Err(WebError::bad_request(format!("Invalid display name: {}", e)));
         }
         acache.display_name = Set(display_name);
     }

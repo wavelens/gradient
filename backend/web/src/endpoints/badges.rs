@@ -237,7 +237,7 @@ async fn resolve_badge_user(
         Some(tok) => {
             let token_data = crate::authorization::decode_jwt(State(Arc::clone(state)), tok)
                 .await
-                .map_err(|_| WebError::Unauthorized("Invalid token".to_string()))?;
+                .map_err(|_| WebError::unauthorized("Invalid token"))?;
             Ok(EUser::find_by_id(token_data.claims.id)
                 .one(&state.web_db)
                 .await?)
@@ -261,7 +261,7 @@ async fn check_badge_org_access(
                 return Err(WebError::not_found("Organization"));
             }
         }
-        None => return Err(WebError::Unauthorized("Authorization required".to_string())),
+        None => return Err(WebError::unauthorized("Authorization required")),
     }
     Ok(())
 }

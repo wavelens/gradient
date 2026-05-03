@@ -157,7 +157,7 @@ pub async fn patch_organization_users(
 
     let membership = find_org_membership(&state, organization.id, target_user.id)
         .await?
-        .ok_or_else(|| WebError::BadRequest("User not in Organization".to_string()))?;
+        .ok_or_else(|| WebError::bad_request("User not in Organization"))?;
 
     let role = ERole::find()
         .filter(CRole::Name.eq(body.role.clone()))
@@ -183,7 +183,7 @@ pub async fn delete_organization_users(
 
     let membership = find_org_membership(&state, organization.id, target_user.id)
         .await?
-        .ok_or_else(|| WebError::BadRequest("User not in Organization".to_string()))?;
+        .ok_or_else(|| WebError::bad_request("User not in Organization"))?;
 
     let active: AOrganizationUser = membership.into();
     active.delete(&state.web_db).await?;

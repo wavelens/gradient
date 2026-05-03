@@ -58,7 +58,7 @@ impl EvalAccessContext {
                             project_id,
                             evaluation_id
                         );
-                        WebError::InternalServerError("Evaluation data inconsistency".to_string())
+                        WebError::data_inconsistency("Evaluation")
                     })?;
                 (
                     project.organization,
@@ -72,7 +72,7 @@ impl EvalAccessContext {
                     .await?
                     .ok_or_else(|| {
                         tracing::error!("DirectBuild not found for evaluation {}", evaluation_id);
-                        WebError::InternalServerError("Direct build data inconsistency".to_string())
+                        WebError::data_inconsistency("Direct build")
                     })?
                     .organization;
                 (org_id, None, None)
@@ -83,7 +83,7 @@ impl EvalAccessContext {
             .await?
             .ok_or_else(|| {
                 tracing::error!("Organization {} not found", organization_id);
-                WebError::InternalServerError("Organization data inconsistency".to_string())
+                WebError::data_inconsistency("Organization")
             })?;
 
         let can_access = if organization.public {

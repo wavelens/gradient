@@ -135,6 +135,38 @@ pub type WebResult<T> = Result<T, WebError>;
 
 // Helper functions for common error scenarios
 impl WebError {
+    // ── Generic Into<String> constructors so callers can drop `.to_string()` ──
+
+    pub fn bad_request(msg: impl Into<String>) -> Self {
+        WebError::BadRequest(msg.into())
+    }
+
+    pub fn unauthorized(msg: impl Into<String>) -> Self {
+        WebError::Unauthorized(msg.into())
+    }
+
+    pub fn forbidden(msg: impl Into<String>) -> Self {
+        WebError::Forbidden(msg.into())
+    }
+
+    pub fn conflict(msg: impl Into<String>) -> Self {
+        WebError::Conflict(msg.into())
+    }
+
+    pub fn unprocessable_entity(msg: impl Into<String>) -> Self {
+        WebError::UnprocessableEntity(msg.into())
+    }
+
+    pub fn internal(msg: impl Into<String>) -> Self {
+        WebError::InternalServerError(msg.into())
+    }
+
+    pub fn service_unavailable(msg: impl Into<String>) -> Self {
+        WebError::ServiceUnavailable(msg.into())
+    }
+
+    // ── Domain-specific constructors ────────────────────────────────────────
+
     pub fn invalid_name(name: &str) -> Self {
         WebError::BadRequest(format!("Invalid {}", name))
     }
@@ -145,6 +177,13 @@ impl WebError {
 
     pub fn not_found(resource: &str) -> Self {
         WebError::NotFound(format!("{} not found", resource))
+    }
+
+    /// Internal-server-error for "<resource> data inconsistency" — a
+    /// referential-integrity violation discovered at request time
+    /// (e.g. a build row with no derivation row).
+    pub fn data_inconsistency(resource: &str) -> Self {
+        WebError::InternalServerError(format!("{} data inconsistency", resource))
     }
 
     pub fn invalid_credentials() -> Self {

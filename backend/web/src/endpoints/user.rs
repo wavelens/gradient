@@ -237,12 +237,12 @@ pub async fn patch_settings(
 ) -> WebResult<Json<BaseResponse<String>>> {
     // Prevent modification of state-managed users
     if user.managed {
-        return Err(WebError::Forbidden("Cannot modify state-managed user. This user is managed by configuration and cannot be edited through the API.".to_string()));
+        return Err(WebError::forbidden("Cannot modify state-managed user. This user is managed by configuration and cannot be edited through the API."));
     }
 
     // OIDC users cannot edit their profile — identity is managed by the provider
     if user.password.is_none() {
-        return Err(WebError::Forbidden("Cannot modify profile of an OIDC user. Your profile is managed by your identity provider.".to_string()));
+        return Err(WebError::forbidden("Cannot modify profile of an OIDC user. Your profile is managed by your identity provider."));
     }
 
     let mut auser: AUser = user.into();
@@ -266,7 +266,7 @@ pub async fn patch_settings(
 
     if let Some(name) = body.name {
         if let Err(e) = validate_display_name(&name) {
-            return Err(WebError::BadRequest(format!("Invalid name: {}", e)));
+            return Err(WebError::bad_request(format!("Invalid name: {}", e)));
         }
         auser.name = Set(name);
     }

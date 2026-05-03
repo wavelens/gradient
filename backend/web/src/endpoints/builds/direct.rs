@@ -41,17 +41,17 @@ pub struct DirectBuildInfo {
 /// empty names, and embedded null bytes.
 pub(crate) fn validate_upload_filename(filename: &str) -> WebResult<()> {
     if filename.is_empty() {
-        return Err(WebError::BadRequest("Empty filename".to_string()));
+        return Err(WebError::bad_request("Empty filename"));
     }
     if filename.contains('\0') {
-        return Err(WebError::BadRequest("Invalid filename".to_string()));
+        return Err(WebError::bad_request("Invalid filename"));
     }
     let path = Path::new(filename);
     for component in path.components() {
         match component {
             Component::Normal(_) => {}
             _ => {
-                return Err(WebError::BadRequest(format!(
+                return Err(WebError::bad_request(format!(
                     "Invalid file path: {}",
                     filename
                 )));
@@ -74,40 +74,40 @@ pub async fn post_direct_build(
     while let Some(field) = multipart
         .next_field()
         .await
-        .map_err(|e| WebError::BadRequest(format!("Failed to parse multipart: {}", e)))?
+        .map_err(|e| WebError::bad_request(format!("Failed to parse multipart: {}", e)))?
     {
         let name = field.name().unwrap_or("").to_string();
 
         if name == "organization" {
             organization = Some(field.text().await.map_err(|e| {
-                WebError::BadRequest(format!("Failed to read organization: {}", e))
+                WebError::bad_request(format!("Failed to read organization: {}", e))
             })?);
         } else if name == "derivation" {
             derivation =
                 Some(field.text().await.map_err(|e| {
-                    WebError::BadRequest(format!("Failed to read derivation: {}", e))
+                    WebError::bad_request(format!("Failed to read derivation: {}", e))
                 })?);
         } else if name.starts_with("file:") {
             let filename = match name.strip_prefix("file:") {
                 Some(f) => f.to_string(),
-                None => return Err(WebError::BadRequest("Invalid file field name".to_string())),
+                None => return Err(WebError::bad_request("Invalid file field name")),
             };
             validate_upload_filename(&filename)?;
             let data = field.bytes().await.map_err(|e| {
-                WebError::BadRequest(format!("Failed to read file {}: {}", filename, e))
+                WebError::bad_request(format!("Failed to read file {}: {}", filename, e))
             })?;
             files.insert(filename, data.to_vec());
         }
     }
 
     let organization = organization
-        .ok_or_else(|| WebError::BadRequest("Missing organization parameter".to_string()))?;
+        .ok_or_else(|| WebError::bad_request("Missing organization parameter"))?;
 
     let derivation = derivation
-        .ok_or_else(|| WebError::BadRequest("Missing derivation parameter".to_string()))?;
+        .ok_or_else(|| WebError::bad_request("Missing derivation parameter"))?;
 
     if files.is_empty() {
-        return Err(WebError::BadRequest("No files uploaded".to_string()));
+        return Err(WebError::bad_request("No files uploaded"));
     }
 
     // Get organization
@@ -120,7 +120,7 @@ pub async fn post_direct_build(
     // Create temporary directory for files
     let temp_dir = format!("{}/uploads/{}", state.cli.base_path, Uuid::new_v4());
     fs::create_dir_all(&temp_dir).await.map_err(|e| {
-        WebError::InternalServerError(format!("Failed to create temp directory: {}", e))
+        WebError::internal(format!("Failed to create temp directory: {}", e))
     })?;
 
     let temp_root = PathBuf::from(&temp_dir);
@@ -129,7 +129,7 @@ pub async fn post_direct_build(
         let file_path = temp_root.join(&filename);
 
         if !file_path.starts_with(&temp_root) {
-            return Err(WebError::BadRequest(format!(
+            return Err(WebError::bad_request(format!(
                 "Invalid file path: {}",
                 filename
             )));
@@ -137,16 +137,16 @@ pub async fn post_direct_build(
 
         if let Some(parent) = file_path.parent() {
             fs::create_dir_all(parent).await.map_err(|e| {
-                WebError::InternalServerError(format!("Failed to create directory: {}", e))
+                WebError::internal(format!("Failed to create directory: {}", e))
             })?;
         }
 
         let mut file = fs::File::create(&file_path).await.map_err(|e| {
-            WebError::InternalServerError(format!("Failed to create file {}: {}", filename, e))
+            WebError::internal(format!("Failed to create file {}: {}", filename, e))
         })?;
 
         file.write_all(&data).await.map_err(|e| {
-            WebError::InternalServerError(format!("Failed to write file {}: {}", filename, e))
+            WebError::internal(format!("Failed to write file {}: {}", filename, e))
         })?;
     }
 
@@ -161,7 +161,7 @@ pub async fn post_direct_build(
     let commit = commit
         .insert(&state.web_db)
         .await
-        .map_err(|e| WebError::InternalServerError(format!("Failed to create commit: {}", e)))?;
+        .map_err(|e| WebError::internal(format!("Failed to create commit: {}", e)))?;
 
     // Create evaluation record (without project for direct builds)
     let now = core::types::now();
@@ -180,7 +180,7 @@ pub async fn post_direct_build(
         repo_check_id: Set(None),
     };
     let evaluation = evaluation.insert(&state.web_db).await.map_err(|e| {
-        WebError::InternalServerError(format!("Failed to create evaluation: {}", e))
+        WebError::internal(format!("Failed to create evaluation: {}", e))
     })?;
 
     // Create DirectBuild record
@@ -194,7 +194,7 @@ pub async fn post_direct_build(
         created_at: Set(core::types::now()),
     };
     direct_build.insert(&state.web_db).await.map_err(|e| {
-        WebError::InternalServerError(format!("Failed to create direct build record: {}", e))
+        WebError::internal(format!("Failed to create direct build record: {}", e))
     })?;
 
     // The evaluation is now Queued; the proto scheduler's dispatch loop

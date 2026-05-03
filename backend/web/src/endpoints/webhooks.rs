@@ -143,7 +143,7 @@ pub async fn put(
     }
 
     let encrypted_secret = encrypt_webhook_secret(&state.cli.crypt_secret_file, &body.secret)
-        .map_err(|e| WebError::InternalServerError(format!("Failed to encrypt secret: {}", e)))?;
+        .map_err(|e| WebError::internal(format!("Failed to encrypt secret: {}", e)))?;
 
     let webhook = AWebhook {
         id: Set(Uuid::new_v4()),
@@ -201,7 +201,7 @@ pub async fn patch_webhook(
     if let Some(secret) = body.secret {
         let encrypted =
             encrypt_webhook_secret(&state.cli.crypt_secret_file, &secret).map_err(|e| {
-                WebError::InternalServerError(format!("Failed to encrypt secret: {}", e))
+                WebError::internal(format!("Failed to encrypt secret: {}", e))
             })?;
         active_webhook.secret = Set(encrypted);
     }
@@ -254,7 +254,7 @@ pub async fn post_webhook_test(
     let body_str = serde_json::to_string(&payload).unwrap_or_default();
     let plaintext_secret = decrypt_webhook_secret(&state.cli.crypt_secret_file, &webhook.secret)
         .map_err(|e| {
-            WebError::InternalServerError(format!("Failed to decrypt webhook secret: {}", e))
+            WebError::internal(format!("Failed to decrypt webhook secret: {}", e))
         })?;
     let signature = core::ci::sign_webhook_payload(plaintext_secret.expose(), &body_str);
 
@@ -262,10 +262,10 @@ pub async fn post_webhook_test(
         .webhooks
         .deliver(&webhook.url, &signature, "ping", body_str)
         .await
-        .map_err(|e| WebError::InternalServerError(format!("Webhook delivery failed: {}", e)))?;
+        .map_err(|e| WebError::internal(format!("Webhook delivery failed: {}", e)))?;
 
     if !(200..300).contains(&status) {
-        return Err(WebError::InternalServerError(format!(
+        return Err(WebError::internal(format!(
             "Webhook endpoint returned status {}",
             status
         )));

@@ -272,10 +272,10 @@ async fn get_nar_by_cached_path(
         let file_hash = cached_path_row
             .file_hash
             .clone()
-            .ok_or_else(|| WebError::BadRequest("Missing file hash".to_string()))?;
+            .ok_or_else(|| WebError::bad_request("Missing file hash"))?;
         let file_size = cached_path_row
             .file_size
-            .ok_or_else(|| WebError::BadRequest("Missing file size".to_string()))?
+            .ok_or_else(|| WebError::bad_request("Missing file size"))?
             as u32;
         let nar_hash = cached_path_row
             .nar_hash
@@ -389,7 +389,7 @@ impl CacheContext {
             .or_not_found("Cache")?;
 
         if !cache.active {
-            return Err(WebError::BadRequest("Cache is disabled".to_string()));
+            return Err(WebError::bad_request("Cache is disabled"));
         }
 
         require_cache_auth(state, headers, &cache).await?;
