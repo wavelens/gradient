@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::load_admin_org;
+use crate::access::{Caller, OrgAccess, load_org};
 use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
-use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
+use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::types::*;
@@ -70,8 +70,13 @@ pub async fn get_organization_users(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<StringListItem>>>> {
-    let organization =
-        get_org_readable(&state.0, organization, &maybe_user, "Organization").await?;
+    let organization = load_org(
+        &state.0,
+        Caller::from_option(&maybe_user),
+        organization,
+        OrgAccess::Readable { label: "Organization" },
+    )
+    .await?;
 
     let organization_users = EOrganizationUser::find()
         .join(JoinType::InnerJoin, entity::organization_user::Relation::User.def())
@@ -112,7 +117,16 @@ pub async fn post_organization_users(
     Path(organization): Path<String>,
     Json(body): Json<AddUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization = load_admin_org(&state, user.id, organization).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageMembers,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let target_user = find_user_by_username(&state, &body.user).await?;
 
     if find_org_membership(&state, organization.id, target_user.id)
@@ -152,7 +166,16 @@ pub async fn patch_organization_users(
     Path(organization): Path<String>,
     Json(body): Json<AddUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization = load_admin_org(&state, user.id, organization).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageMembers,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let target_user = find_user_by_username(&state, &body.user).await?;
 
     let membership = find_org_membership(&state, organization.id, target_user.id)
@@ -178,7 +201,16 @@ pub async fn delete_organization_users(
     Path(organization): Path<String>,
     Json(body): Json<RemoveUserRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization = load_admin_org(&state, user.id, organization).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageMembers,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let target_user = find_user_by_username(&state, &body.user).await?;
 
     let membership = find_org_membership(&state, organization.id, target_user.id)

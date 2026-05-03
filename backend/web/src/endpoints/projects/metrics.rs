@@ -6,7 +6,7 @@
 
 use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
-use crate::endpoints::get_org_readable;
+use crate::access::{Caller, OrgAccess, load_org};
 use crate::error::WebResult;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
@@ -91,7 +91,7 @@ pub async fn get_project_metrics(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path((organization, project)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<ProjectMetricsResponse>>> {
-    let organization = get_org_readable(&state.0, organization, &maybe_user, "Project").await?;
+    let organization = load_org(&state.0, Caller::from_option(&maybe_user), organization, OrgAccess::Readable { label: "Project" }).await?;
 
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))
@@ -201,7 +201,7 @@ pub async fn get_entry_point_metrics(
     Path((organization, project)): Path<(String, String)>,
     Query(params): Query<EntryPointMetricsQuery>,
 ) -> WebResult<Json<BaseResponse<EntryPointMetricsResponse>>> {
-    let organization = get_org_readable(&state.0, organization, &maybe_user, "Project").await?;
+    let organization = load_org(&state.0, Caller::from_option(&maybe_user), organization, OrgAccess::Readable { label: "Project" }).await?;
 
     let project = EProject::find()
         .filter(CProject::Organization.eq(organization.id))

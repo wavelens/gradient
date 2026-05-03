@@ -15,9 +15,10 @@
 //! and never returned in responses — responses only expose a boolean
 //! "has_secret" / "has_access_token" flag.
 
-use super::{load_unmanaged_org, load_org_member};
-use crate::helpers::{OptionExt, ok_json};
+use crate::access::{Caller, OrgAccess, load_integration_in_org, load_org};
+use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
+use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 
@@ -135,19 +136,6 @@ fn forge_to_str(f: i16) -> &'static str {
     }
 }
 
-async fn load_integration(
-    state: &Arc<ServerState>,
-    org_id: Uuid,
-    integration_id: Uuid,
-) -> WebResult<MIntegration> {
-    EIntegration::find()
-        .filter(CIntegration::Id.eq(integration_id))
-        .filter(CIntegration::Organization.eq(org_id))
-        .one(&state.web_db)
-        .await?
-        .or_not_found("Integration")
-}
-
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 /// `GET /orgs/{organization}/integrations` — list integrations for an org.
@@ -156,7 +144,16 @@ pub async fn get_integrations(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<IntegrationResponse>>>> {
-    let org = load_org_member(&state, user.id, organization).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageIntegrations,
+            reject_managed: false,
+        },
+    )
+    .await?;
 
     let rows = EIntegration::find()
         .filter(CIntegration::Organization.eq(org.id))
@@ -173,7 +170,16 @@ pub async fn put_integration(
     Path(organization): Path<String>,
     Json(body): Json<CreateIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
-    let org = load_unmanaged_org(&state, user.id, organization).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageIntegrations,
+            reject_managed: true,
+        },
+    )
+    .await?;
 
     if check_index_name(&body.name).is_err() {
         return Err(WebError::invalid_name("Integration Name"));
@@ -256,8 +262,17 @@ pub async fn get_integration(
     Extension(user): Extension<MUser>,
     Path((organization, integration_id)): Path<(String, Uuid)>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
-    let org = load_org_member(&state, user.id, organization).await?;
-    let integration = load_integration(&state, org.id, integration_id).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageIntegrations,
+            reject_managed: false,
+        },
+    )
+    .await?;
+    let integration = load_integration_in_org(&state, org.id, integration_id).await?;
     Ok(ok_json(IntegrationResponse::from(integration)))
 }
 
@@ -268,8 +283,17 @@ pub async fn patch_integration(
     Path((organization, integration_id)): Path<(String, Uuid)>,
     Json(body): Json<PatchIntegrationRequest>,
 ) -> WebResult<Json<BaseResponse<IntegrationResponse>>> {
-    let org = load_unmanaged_org(&state, user.id, organization).await?;
-    let integration = load_integration(&state, org.id, integration_id).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageIntegrations,
+            reject_managed: true,
+        },
+    )
+    .await?;
+    let integration = load_integration_in_org(&state, org.id, integration_id).await?;
     let kind = integration.kind;
 
     let mut active: AIntegration = integration.into_active_model();
@@ -357,8 +381,17 @@ pub async fn delete_integration(
     Extension(user): Extension<MUser>,
     Path((organization, integration_id)): Path<(String, Uuid)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
-    let org = load_unmanaged_org(&state, user.id, organization).await?;
-    let integration = load_integration(&state, org.id, integration_id).await?;
+    let org = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageIntegrations,
+            reject_managed: true,
+        },
+    )
+    .await?;
+    let integration = load_integration_in_org(&state, org.id, integration_id).await?;
     integration.into_active_model().delete(&state.web_db).await?;
     Ok(ok_json(true))
 }

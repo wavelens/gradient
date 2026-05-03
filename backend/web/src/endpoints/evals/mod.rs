@@ -15,7 +15,7 @@ pub use self::query::*;
 pub use self::types::*;
 
 use crate::helpers::OptionExt;
-use crate::endpoints::user_is_org_member;
+use crate::access::is_org_member;
 use crate::error::{WebError, WebResult};
 use gradient_core::types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -90,7 +90,7 @@ impl EvalAccessContext {
             true
         } else {
             match maybe_user {
-                Some(user) => user_is_org_member(state, user.id, organization.id).await?,
+                Some(user) => is_org_member(state, user.id, organization.id).await?,
                 None => false,
             }
         };

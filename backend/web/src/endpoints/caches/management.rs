@@ -5,6 +5,7 @@
  */
 
 use super::helpers::cleanup_nars_for_orgs;
+use crate::access::{CacheAccess, load_cache};
 use crate::helpers::{OptionExt, ok_json};
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
@@ -12,7 +13,7 @@ use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use chrono::{NaiveDateTime};
-use gradient_core::db::{get_any_cache_by_name, get_cache_by_name};
+use gradient_core::db::get_any_cache_by_name;
 use gradient_core::sources::{format_cache_public_key, generate_signing_key};
 use gradient_core::types::input::{check_index_name, validate_display_name};
 use gradient_core::types::*;
@@ -55,30 +56,6 @@ pub struct PatchCacheRequest {
     pub display_name: Option<String>,
     pub description: Option<String>,
     pub priority: Option<i32>,
-}
-
-// ── Access context ────────────────────────────────────────────────────────────
-
-/// Load an owned (editable) cache for mutation handlers.
-///
-/// Returns `not_found("Cache")` if the cache doesn't exist or isn't owned by
-/// `user_id`, and `Forbidden` if it is state-managed.
-async fn load_editable_cache(
-    state: &Arc<ServerState>,
-    user_id: Uuid,
-    cache_name: String,
-) -> WebResult<MCache> {
-    let cache = get_cache_by_name(Arc::clone(state), user_id, cache_name)
-        .await?
-        .or_not_found("Cache")?;
-
-    if cache.managed {
-        return Err(WebError::Forbidden(
-            "Cannot modify state-managed cache. This cache is managed by configuration and cannot be edited through the API.".to_string(),
-        ));
-    }
-
-    Ok(cache)
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -263,7 +240,7 @@ pub async fn patch_cache(
     Path(cache): Path<String>,
     Json(body): Json<PatchCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_editable_cache(&state, user.id, cache).await?;
+    let cache = load_cache(&state, user.id, cache, CacheAccess::Editable).await?;
     let mut acache: ACache = cache.into();
 
     if let Some(name) = body.name {
@@ -307,7 +284,7 @@ pub async fn delete_cache(
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_editable_cache(&state, user.id, cache).await?;
+    let cache = load_cache(&state, user.id, cache, CacheAccess::Editable).await?;
 
     // Collect orgs that subscribe to this cache before deleting it, so we can
     // clean up orphaned NAR files in the background afterwards.
@@ -337,7 +314,7 @@ pub async fn post_cache_active(
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_editable_cache(&state, user.id, cache).await?;
+    let cache = load_cache(&state, user.id, cache, CacheAccess::Editable).await?;
     let mut acache: ACache = cache.into();
     acache.active = Set(true);
     acache.update(&state.web_db).await?;
@@ -350,7 +327,7 @@ pub async fn delete_cache_active(
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_editable_cache(&state, user.id, cache).await?;
+    let cache = load_cache(&state, user.id, cache, CacheAccess::Editable).await?;
     let mut acache: ACache = cache.into();
     acache.active = Set(false);
     acache.update(&state.web_db).await?;
@@ -363,7 +340,7 @@ pub async fn post_cache_public(
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_editable_cache(&state, user.id, cache).await?;
+    let cache = load_cache(&state, user.id, cache, CacheAccess::Editable).await?;
     let mut acache: ACache = cache.into();
     acache.public = Set(true);
     acache.update(&state.web_db).await?;
@@ -376,7 +353,7 @@ pub async fn delete_cache_public(
     Extension(user): Extension<MUser>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let cache = load_editable_cache(&state, user.id, cache).await?;
+    let cache = load_cache(&state, user.id, cache, CacheAccess::Editable).await?;
     let mut acache: ACache = cache.into();
     acache.public = Set(false);
     acache.update(&state.web_db).await?;

@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::load_admin_org;
+use crate::access::{Caller, OrgAccess, load_org};
 use crate::helpers::ok_json;
 use crate::authorization::MaybeUser;
-use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
+use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 
@@ -299,7 +299,13 @@ pub async fn get_organization(
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<OrgResponse>>> {
-    let org = get_org_readable(&state.0, organization, &maybe_user, "Organization").await?;
+    let org = load_org(
+        &state.0,
+        Caller::from_option(&maybe_user),
+        organization,
+        OrgAccess::Readable { label: "Organization" },
+    )
+    .await?;
 
     let role = if let Some(ref user) = maybe_user {
         let org_user = EOrganizationUser::find()
@@ -341,7 +347,16 @@ pub async fn patch_organization(
     Path(organization): Path<String>,
     Json(body): Json<PatchOrganizationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization = load_admin_org(&state, user.id, organization).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::ManageOrgSettings,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let mut aorganization: AOrganization = organization.into();
 
     if let Some(name) = body.name {
@@ -388,7 +403,16 @@ pub async fn delete_organization(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let organization = load_admin_org(&state, user.id, organization).await?;
+    let organization = load_org(
+        &state,
+        Caller::User(&user),
+        organization,
+        OrgAccess::Require {
+            permission: Permission::DeleteOrg,
+            reject_managed: true,
+        },
+    )
+    .await?;
     let aorganization: AOrganization = organization.into();
     aorganization.delete(&state.web_db).await?;
 

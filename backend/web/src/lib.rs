@@ -7,10 +7,12 @@
 #[macro_use]
 pub mod patch;
 
+pub mod access;
 pub mod authorization;
 pub mod endpoints;
 pub mod error;
 pub mod helpers;
+pub mod permissions;
 
 use axum::body::Body;
 use axum::extract::DefaultBodyLimit;

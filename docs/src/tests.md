@@ -21,42 +21,55 @@ JWKS, `iss`/`aud`/`exp`/`nonce` checks, identity bound to
 `(oidc_issuer, oidc_subject)` rather than email) is enforced in
 `oidc_login_verify` and exercised end-to-end via the
 `/auth/oauth/authorize` and `/auth/oidc/callback` endpoints.
-## Project write RBAC — `load_editable_project`
+## Unified resource access — `crate::access` and `crate::permissions`
 
-Toggling a project's `active` flag and triggering a repository check are
-write operations and must require the caller to hold an Admin or Write role
-in the organization. The check is centralised in `load_editable_project`
-(`backend/web/src/endpoints/projects/mod.rs`) and now gates
-`post_project_active`, `delete_project_active`, and
-`post_project_check_repository`.
+All "load resource by name and check the caller may use it" logic lives in
+two modules:
 
-Unit tests in the same file cover the role matrix and the managed-project
+- `backend/web/src/permissions.rs` — declares the [`Permission`] capability
+  enum (e.g. `EditProject`, `ManageMembers`, `ManageWebhooks`) and the
+  `role_grants(role_id, permission)` lookup. Today the role → permission
+  mapping is hardcoded for the three built-in roles; replacing this single
+  function with a DB-driven lookup is what enables custom roles configurable
+  in the frontend.
+- `backend/web/src/access.rs` — exposes `load_org`, `load_project`,
+  `load_cache`, `load_webhook_in_org`, `load_integration_in_org`, plus the
+  predicates `is_org_member` / `has_permission`. Each loader takes an access
+  policy enum (`OrgAccess`, `ProjectAccess`, `CacheAccess`) so handlers
+  declare *what level of access they need* rather than stitching together
+  ad-hoc lookup + permission + state-managed checks.
+
+Unit tests in `access.rs` cover the role matrix and the managed-resource
 guard:
 
-- `editable_project_admin_passes` — Admin role → `Ok((org, project))`.
-- `editable_project_write_passes` — Write role → `Ok((org, project))`.
-- `editable_project_view_is_forbidden` — view-only role → `WebError::Forbidden`.
-- `editable_project_non_member_is_not_found` — caller is not in the org →
-  `WebError::NotFound` (no leak between "missing" and "not a member").
-- `editable_project_managed_is_forbidden` — state-managed project →
-  `WebError::Forbidden` even for admins.
+- `org_admin_passes` — admin role + permission grants the resource.
+- `org_admin_view_role_forbidden` — view role + admin-required permission →
+  `WebError::Forbidden`.
+- `org_admin_managed_forbidden` — state-managed org rejected for mutating
+  permissions.
+- `org_admin_non_member_not_found` — non-member → `WebError::NotFound`
+  (no leak between "missing" and "not a member").
+- `org_writable_write_role_passes` / `org_writable_view_role_forbidden` —
+  write-tier permission honors Admin+Write but rejects View.
+- `org_member_view_role_passes` — `OrgAccess::Member` accepts any role.
+- `org_readable_public_visible_to_anon` /
+  `org_readable_private_invisible_to_anon` — visibility rule for anonymous
+  callers.
+- `project_editable_admin_passes` / `project_editable_view_forbidden` /
+  `project_editable_managed_forbidden` / `project_missing_returns_project_label` —
+  same matrix at the project level, including the project-existence label
+  guarantee.
 
-Run with: `cargo test -p web --lib endpoints::projects::tests`.
+Unit tests in `permissions.rs` lock the role → permission mapping itself:
 
-## Org admin RBAC — `load_admin_org`
+- `admin_grants_everything`
+- `write_excludes_admin_only`
+- `view_cannot_edit_projects_or_webhooks`
+- `unknown_role_grants_nothing`
+- `view_org_is_not_mutating`
 
-Adding/promoting/kicking organization members and renaming/deleting an
-organization all require the caller to hold the org **admin** role. The check
-is centralised in `load_admin_org` (`backend/web/src/endpoints/orgs/mod.rs`).
-
-Unit tests in the same file cover three cases:
-
-- `admin_member_passes` — admin role → `Ok(org)`.
-- `non_admin_member_is_forbidden` — view/write role → `WebError::Forbidden`.
-- `non_member_is_not_found` — caller is not in the org → `WebError::NotFound`
-  (no leak between "org missing" and "not a member").
-
-Run with: `cargo test -p web --lib endpoints::orgs::tests`.
+Run with: `cargo test -p web --lib access::tests`
+and `cargo test -p web --lib permissions::tests`.
 
 ## Proto handshake — organization peer filtering
 

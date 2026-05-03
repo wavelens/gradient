@@ -19,63 +19,11 @@ pub mod user;
 pub mod webhooks;
 pub mod workers;
 
-use crate::helpers::OptionExt;
-use crate::error::{WebError, WebResult};
+use crate::error::WebResult;
 use axum::extract::{Json, State};
-use gradient_core::db::get_any_organization_by_name;
-use gradient_core::types::{BaseResponse, MOrganization, MUser, ServerState};
-use gradient_core::types::{COrganizationUser, EOrganizationUser};
-use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
+use gradient_core::types::{BaseResponse, ServerState};
 use serde::Serialize;
 use std::sync::Arc;
-use uuid::Uuid;
-
-/// Load an organization by name and verify the caller may read it.
-///
-/// Returns `not_found(label)` when the org doesn't exist *or* when it is
-/// private and `maybe_user` is not a member — the caller cannot distinguish
-/// the two cases, which prevents org-existence enumeration.
-///
-/// `label` is the resource name in the error message; project endpoints pass
-/// `"Project"` so the response doesn't leak org existence.
-pub async fn get_org_readable(
-    state: &Arc<ServerState>,
-    org_name: String,
-    maybe_user: &Option<MUser>,
-    label: &str,
-) -> WebResult<MOrganization> {
-    let org = get_any_organization_by_name(Arc::clone(state), org_name)
-        .await?
-        .or_not_found(label)?;
-
-    if !org.public {
-        let is_member = match maybe_user {
-            Some(user) => user_is_org_member(state, user.id, org.id).await?,
-            None => false,
-        };
-        if !is_member {
-            return Err(WebError::not_found(label));
-        }
-    }
-
-    Ok(org)
-}
-
-pub async fn user_is_org_member(
-    state: &Arc<ServerState>,
-    user_id: Uuid,
-    organization_id: Uuid,
-) -> Result<bool, WebError> {
-    Ok(EOrganizationUser::find()
-        .filter(
-            Condition::all()
-                .add(COrganizationUser::Organization.eq(organization_id))
-                .add(COrganizationUser::User.eq(user_id)),
-        )
-        .one(&state.web_db)
-        .await?
-        .is_some())
-}
 
 pub fn content_type_for_filename(filename: &str) -> &'static str {
     match std::path::Path::new(filename)
@@ -92,8 +40,8 @@ pub fn content_type_for_filename(filename: &str) -> &'static str {
     }
 }
 
-pub async fn handle_404() -> WebError {
-    WebError::NotFound("Not Found".to_string())
+pub async fn handle_404() -> crate::error::WebError {
+    crate::error::WebError::NotFound("Not Found".to_string())
 }
 
 pub async fn get_health() -> WebResult<Json<BaseResponse<String>>> {

@@ -4,13 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::helpers::{OptionExt, ok_json};
+use crate::access::{Caller, OrgAccess, load_org, load_webhook_in_org};
+use crate::helpers::ok_json;
 use crate::error::{WebError, WebResult};
+use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 
 use gradient_core::ci::{decrypt_webhook_secret, encrypt_webhook_secret, validate_webhook_url};
-use gradient_core::db::get_any_organization_by_name;
 use gradient_core::types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
@@ -18,41 +19,11 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use super::projects::user_can_edit;
-
-// ── Access helpers ────────────────────────────────────────────────────────────
-
-/// Load an organization by name and verify the user has Admin/Write permission.
-async fn load_webhook_org(
-    state: &Arc<ServerState>,
-    user_id: Uuid,
-    org_name: String,
-) -> WebResult<MOrganization> {
-    let organization = get_any_organization_by_name(Arc::clone(state), org_name)
-        .await?
-        .or_not_found("Organization")?;
-
-    if !user_can_edit(state, user_id, organization.id).await? {
-        return Err(WebError::Forbidden(
-            "You do not have permission to manage webhooks for this organization.".to_string(),
-        ));
+fn webhook_org_access() -> OrgAccess {
+    OrgAccess::Require {
+        permission: Permission::ManageWebhooks,
+        reject_managed: false,
     }
-
-    Ok(organization)
-}
-
-/// Load a webhook by UUID, scoped to the given organization.
-async fn load_webhook(
-    state: &Arc<ServerState>,
-    org_id: Uuid,
-    webhook_id: Uuid,
-) -> WebResult<MWebhook> {
-    EWebhook::find()
-        .filter(CWebhook::Id.eq(webhook_id))
-        .filter(CWebhook::Organization.eq(org_id))
-        .one(&state.web_db)
-        .await?
-        .or_not_found("Webhook")
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -106,7 +77,7 @@ pub async fn get(
     Extension(user): Extension<MUser>,
     Path(organization): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<WebhookResponse>>>> {
-    let organization = load_webhook_org(&state, user.id, organization).await?;
+    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
 
     let webhooks = EWebhook::find()
         .filter(CWebhook::Organization.eq(organization.id))
@@ -123,7 +94,7 @@ pub async fn put(
     Path(organization): Path<String>,
     Json(body): Json<CreateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
-    let organization = load_webhook_org(&state, user.id, organization).await?;
+    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
 
     if body.name.is_empty() {
         return Err(WebError::BadRequest(
@@ -173,8 +144,8 @@ pub async fn get_webhook(
     Extension(user): Extension<MUser>,
     Path((organization, webhook_id)): Path<(String, Uuid)>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
-    let organization = load_webhook_org(&state, user.id, organization).await?;
-    let webhook = load_webhook(&state, organization.id, webhook_id).await?;
+    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
+    let webhook = load_webhook_in_org(&state, organization.id, webhook_id).await?;
 
     Ok(ok_json(WebhookResponse::from(webhook)))
 }
@@ -186,8 +157,8 @@ pub async fn patch_webhook(
     Path((organization, webhook_id)): Path<(String, Uuid)>,
     Json(body): Json<UpdateWebhookRequest>,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
-    let organization = load_webhook_org(&state, user.id, organization).await?;
-    let webhook = load_webhook(&state, organization.id, webhook_id).await?;
+    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
+    let webhook = load_webhook_in_org(&state, organization.id, webhook_id).await?;
 
     let mut active_webhook: AWebhook = webhook.into_active_model();
 
@@ -225,8 +196,8 @@ pub async fn delete_webhook(
     Extension(user): Extension<MUser>,
     Path((organization, webhook_id)): Path<(String, Uuid)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
-    let organization = load_webhook_org(&state, user.id, organization).await?;
-    let webhook = load_webhook(&state, organization.id, webhook_id).await?;
+    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
+    let webhook = load_webhook_in_org(&state, organization.id, webhook_id).await?;
 
     webhook.into_active_model().delete(&state.web_db).await?;
 
@@ -239,8 +210,8 @@ pub async fn post_webhook_test(
     Extension(user): Extension<MUser>,
     Path((organization, webhook_id)): Path<(String, Uuid)>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
-    let organization = load_webhook_org(&state, user.id, organization).await?;
-    let webhook = load_webhook(&state, organization.id, webhook_id).await?;
+    let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
+    let webhook = load_webhook_in_org(&state, organization.id, webhook_id).await?;
 
     let payload = serde_json::json!({
         "event": "ping",
