@@ -53,7 +53,7 @@ impl DerivationInsertBatch {
             .map(|d| (d.derivation_path.clone(), d.id))
             .collect();
 
-        let now = chrono::Utc::now().naive_utc();
+        let now = gradient_core::types::now();
         let mut new_derivations: Vec<ADerivation> = Vec::new();
         let mut new_outputs: Vec<ADerivationOutput> = Vec::new();
 
@@ -189,7 +189,7 @@ impl<'a> EvalResultProcessor<'a> {
         derivations: &[DiscoveredDerivation],
         drv_path_to_id: &HashMap<String, Uuid>,
     ) -> Result<()> {
-        let now = chrono::Utc::now().naive_utc();
+        let now = gradient_core::types::now();
         let mut builds: Vec<ABuild> = Vec::new();
 
         for d in derivations {
@@ -297,7 +297,7 @@ impl<'a> EvalResultProcessor<'a> {
         derivations: &[DiscoveredDerivation],
         drv_path_to_id: &HashMap<String, Uuid>,
     ) {
-        let now = chrono::Utc::now().naive_utc();
+        let now = gradient_core::types::now();
 
         // Build a lookup: derivation_uuid → build_uuid for this evaluation.
         let eval_builds = EBuild::find()
@@ -428,7 +428,7 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uui
         return Ok(());
     }
 
-    let now = chrono::Utc::now().naive_utc();
+    let now = gradient_core::types::now();
     let builds: Vec<ABuild> = rows
         .iter()
         .filter_map(|row| {

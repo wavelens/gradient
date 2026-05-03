@@ -45,7 +45,7 @@ pub(super) async fn record_nar_push_metric(
         .ok_or_else(|| anyhow::anyhow!("no cache for org {}", org_id))?;
 
     let cache_id = org_cache.cache;
-    let now = chrono::Utc::now().naive_utc();
+    let now = gradient_core::types::now();
     let bucket = now
         .with_second(0)
         .and_then(|t: chrono::NaiveDateTime| t.with_nanosecond(0))
@@ -109,7 +109,7 @@ pub(super) async fn mark_nar_stored(
         return Ok(());
     }
 
-    let now = chrono::Utc::now().naive_utc();
+    let now = gradient_core::types::now();
 
     // Find or create the cached_path row.
     let references_str = if record.references.is_empty() {

@@ -216,7 +216,7 @@ impl Default for WaitTimeRule {
 
 impl Rule for WaitTimeRule {
     fn score(&self, job: &JobContext<'_>, _worker: &WorkerContext<'_>) -> f64 {
-        let now = chrono::Utc::now().naive_utc();
+        let now = gradient_core::types::now();
         let waited = (now - job.queued_at).num_seconds().max(0) as f64;
         waited.min(self.max_wait_secs) * self.bonus_per_second
     }
@@ -303,7 +303,7 @@ mod tests {
             architecture: arch.into(),
             required_features: vec![],
             dependency_count: 0,
-            queued_at: chrono::Utc::now().naive_utc(),
+            queued_at: gradient_core::types::now(),
         });
         (
             job,
@@ -319,7 +319,7 @@ mod tests {
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
 
-        let now = chrono::Utc::now().naive_utc();
+        let now = gradient_core::types::now();
         let (job, ..) = build_job_ctx("x86_64-linux", Some(0), None);
         let ctx_scored = JobContext {
             job: &job,
@@ -348,7 +348,7 @@ mod tests {
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
 
-        let now = chrono::Utc::now().naive_utc();
+        let now = gradient_core::types::now();
         let (j1, ..) = build_job_ctx("x86_64-linux", Some(2), None);
         let (j2, ..) = build_job_ctx("x86_64-linux", Some(10), None);
         let c1 = JobContext {
@@ -376,7 +376,7 @@ mod tests {
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
 
-        let now = chrono::Utc::now().naive_utc();
+        let now = gradient_core::types::now();
         let (j1, ..) = build_job_ctx("x86_64-linux", None, None);
         let (j2, ..) = build_job_ctx("x86_64-linux", None, None);
         let c1 = JobContext {
@@ -404,7 +404,7 @@ mod tests {
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
 
-        let now = chrono::Utc::now().naive_utc();
+        let now = gradient_core::types::now();
         let (j_real, ..) = build_job_ctx("x86_64-linux", None, None);
         let (j_builtin, ..) = build_job_ctx("builtin", None, None);
         let c_real = JobContext {
@@ -440,7 +440,7 @@ mod tests {
             architecture: "x86_64-linux".into(),
             required_features: vec![],
             dependency_count: dep_count,
-            queued_at: chrono::Utc::now().naive_utc(),
+            queued_at: gradient_core::types::now(),
         })
     }
 
@@ -452,7 +452,7 @@ mod tests {
         let archs = vec!["x86_64-linux".into()];
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
-        let now = chrono::Utc::now().naive_utc();
+        let now = gradient_core::types::now();
 
         let j_few = build_job_with_deps(1);
         let j_many = build_job_with_deps(20);
@@ -481,7 +481,7 @@ mod tests {
         let archs = vec!["x86_64-linux".into()];
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
-        let now = chrono::Utc::now().naive_utc();
+        let now = gradient_core::types::now();
 
         let j = build_job_with_deps(0);
         let ctx = JobContext {
@@ -505,7 +505,7 @@ mod tests {
         let archs = vec!["x86_64-linux".into()];
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
-        let now = chrono::Utc::now().naive_utc();
+        let now = gradient_core::types::now();
 
         let (j, ..) = build_job_ctx("x86_64-linux", None, None);
 
@@ -554,7 +554,7 @@ mod tests {
         let feats: Vec<String> = vec![];
         let w = worker_ctx(&archs, &feats);
 
-        let now = chrono::Utc::now().naive_utc();
+        let now = gradient_core::types::now();
         // Job A: worker has everything, real arch
         let (ja, ..) = build_job_ctx("x86_64-linux", Some(0), Some(0));
         let ca = JobContext {

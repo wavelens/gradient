@@ -8,7 +8,7 @@ use crate::authorization::{generate_api_key, hash_api_key};
 use crate::error::{WebError, WebResult};
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
-use chrono::Utc;
+
 use core::types::consts::*;
 use core::types::input::{validate_display_name, validate_username};
 use core::types::*;
@@ -169,7 +169,7 @@ pub async fn post_keys(
         name: Set(body.name.clone()),
         key: Set(hash_api_key(&raw_key)),
         last_used_at: Set(*NULL_TIME),
-        created_at: Set(Utc::now().naive_utc()),
+        created_at: Set(core::types::now()),
         managed: Set(false),
     };
 

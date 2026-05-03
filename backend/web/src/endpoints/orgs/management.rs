@@ -10,7 +10,7 @@ use crate::endpoints::get_org_readable;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
-use chrono::Utc;
+
 use core::sources::generate_ssh_key;
 use core::types::consts::BASE_ROLE_ADMIN_ID;
 use core::types::input::{check_index_name, validate_display_name};
@@ -255,7 +255,7 @@ pub async fn put(
         private_key: Set(private_key),
         public: Set(body.public.unwrap_or(false)),
         created_by: Set(user.id),
-        created_at: Set(Utc::now().naive_utc()),
+        created_at: Set(core::types::now()),
         managed: Set(false),
         github_installation_id: Set(None),
     };

@@ -9,7 +9,7 @@
 //! Extracted here so both the `evaluator` and `builder` crates can call them
 //! without introducing a dependency between the two.
 
-use chrono::Utc;
+
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
@@ -53,7 +53,7 @@ pub async fn update_build_status(
     let mut active_build: ABuild = build.clone().into_active_model();
 
     let webhook_status = status.clone();
-    let now = Utc::now().naive_utc();
+    let now = crate::types::now();
     // When transitioning out of `Building` into a terminal state, record the
     // elapsed wall-clock time. `build.updated_at` is the timestamp of the
     // previous transition (into `Building` by `Scheduler::handle_build_status_update`).
@@ -135,7 +135,7 @@ pub async fn update_evaluation_status(
     debug!(evaluation_id = %evaluation.id, status = ?status, "Updating evaluation status");
 
     let webhook_status = status.clone();
-    let now = Utc::now().naive_utc();
+    let now = crate::types::now();
 
     let update_result = EEvaluation::update_many()
         .col_expr(
@@ -229,7 +229,7 @@ pub async fn update_evaluation_status_with_error(
         level: Set(MessageLevel::Error),
         message: Set(error_message),
         source: Set(source),
-        created_at: Set(Utc::now().naive_utc()),
+        created_at: Set(crate::types::now()),
     };
     if let Err(e) = EEvaluationMessage::insert(msg).exec(&state.worker_db).await {
         error!(error = %e, evaluation_id = %evaluation.id, "Failed to insert evaluation_message");
@@ -255,7 +255,7 @@ pub async fn record_evaluation_message(
         level: Set(level),
         message: Set(message),
         source: Set(source),
-        created_at: Set(Utc::now().naive_utc()),
+        created_at: Set(crate::types::now()),
     };
     if let Err(e) = EEvaluationMessage::insert(msg).exec(&state.worker_db).await {
         error!(error = %e, %evaluation_id, "Failed to insert evaluation_message");

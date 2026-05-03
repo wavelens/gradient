@@ -413,7 +413,7 @@ mod tests {
                 timeout_secs: None,
             },
             required_paths: vec![],
-            queued_at: chrono::Utc::now().naive_utc(),
+            queued_at: gradient_core::types::now(),
         })
     }
 
@@ -441,7 +441,7 @@ mod tests {
             architecture: architecture.into(),
             required_features,
             dependency_count: 0,
-            queued_at: chrono::Utc::now().naive_utc(),
+            queued_at: gradient_core::types::now(),
         })
     }
 

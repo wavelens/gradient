@@ -177,7 +177,7 @@ async fn record_newly_completed_derivations(
         .all(&state.worker_db)
         .await?;
 
-    let now = chrono::Utc::now().naive_utc();
+    let now = gradient_core::types::now();
     for drv in drvs {
         if let Err(e) = try_record_cache_derivation(state, cache_id, drv.id, now).await {
             warn!(cache = %cache_id, drv = %drv.id, error = %e, "try_record_cache_derivation failed");

@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
+
 use entity::build::BuildStatus;
 use entity::evaluation::EvaluationStatus;
 use gradient_core::ci::TriggerError;
@@ -68,7 +68,7 @@ async fn project_poll_loop(scheduler: Arc<Scheduler>) {
 /// fails. Projects without a webhook use the CLI `evaluation_timeout`.
 pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyhow::Result<()> {
     let state = &scheduler.state;
-    let now = Utc::now().naive_utc();
+    let now = gradient_core::types::now();
     let threshold = now - chrono::Duration::seconds(state.cli.evaluation_timeout);
     let webhook_threshold = now - chrono::Duration::seconds(WEBHOOK_BACKUP_POLL_SECS);
 
@@ -126,7 +126,7 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
         if !has_update {
             // Update last_check_at so we don't re-check immediately.
             let mut ap: AProject = project.clone().into();
-            ap.last_check_at = sea_orm::ActiveValue::Set(Utc::now().naive_utc());
+            ap.last_check_at = sea_orm::ActiveValue::Set(gradient_core::types::now());
             if let Err(e) = ap.update(&state.worker_db).await {
                 warn!(project = %project.name, error = %e, "failed to update last_check_at");
             }
@@ -157,7 +157,7 @@ pub(crate) async fn poll_projects_for_evaluations(scheduler: &Scheduler) -> anyh
                 // subsequent poll cycle.
                 let mut ap: AProject = project.clone().into();
                 ap.force_evaluation = sea_orm::ActiveValue::Set(false);
-                ap.last_check_at = sea_orm::ActiveValue::Set(Utc::now().naive_utc());
+                ap.last_check_at = sea_orm::ActiveValue::Set(gradient_core::types::now());
                 if let Err(e) = ap.update(&state.worker_db).await {
                     warn!(project = %project.name, error = %e, "failed to clear force_evaluation");
                 }

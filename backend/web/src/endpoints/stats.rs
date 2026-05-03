@@ -8,7 +8,7 @@ use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use chrono::{NaiveDateTime, Timelike, Utc};
+use chrono::{NaiveDateTime, Timelike};
 use core::db::get_any_cache_by_name;
 use core::types::*;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
@@ -61,7 +61,7 @@ pub struct CacheStatsResponse {
 /// Record bytes served for a NAR request into the current minute bucket.
 /// Called fire-and-forget from the NAR serving handler.
 pub async fn record_nar_traffic(state: Arc<ServerState>, cache_id: Uuid, bytes: i64) {
-    let now = Utc::now().naive_utc();
+    let now = core::types::now();
     let bucket = match now.with_second(0).and_then(|t| t.with_nanosecond(0)) {
         Some(t) => t,
         None => now,

@@ -8,7 +8,7 @@ use super::load_org_member;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use base64::Engine as _;
-use chrono::{NaiveDateTime, Utc};
+use chrono::{NaiveDateTime};
 use core::types::proto::GradientCapabilities;
 use core::types::{BaseResponse, MUser, ServerState};
 use entity::worker_registration::{
@@ -156,7 +156,7 @@ pub async fn post_org_worker(
         enable_eval: Set(body.enable_eval),
         enable_build: Set(body.enable_build),
         created_by: Set(Some(user.id)),
-        created_at: Set(Utc::now().naive_utc()),
+        created_at: Set(core::types::now()),
     };
     row.insert(&state.web_db).await?;
 

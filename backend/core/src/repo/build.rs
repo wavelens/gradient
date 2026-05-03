@@ -10,7 +10,7 @@
 //! Side effects (webhooks, log finalization) stay in the service layer.
 
 use anyhow::Result;
-use chrono::Utc;
+
 use entity::build::BuildStatus;
 use sea_orm::DatabaseConnection;
 use sea_orm::{
@@ -40,7 +40,7 @@ impl<'db> BuildRepo<'db> {
     pub async fn update_status(&self, build: MBuild, status: BuildStatus) -> Result<MBuild> {
         let mut active: ABuild = build.clone().into_active_model();
         active.status = Set(status);
-        active.updated_at = Set(Utc::now().naive_utc());
+        active.updated_at = Set(crate::types::now());
         let updated = active.update(self.db).await?;
         Ok(updated)
     }
