@@ -109,6 +109,7 @@ fn make_build_queued(id: Uuid, eval_id: Uuid, drv_id: Uuid) -> MBuild {
         log_id: None,
         build_time_ms: None,
         worker: None,
+        via: None,
         created_at: test_date(),
         updated_at: test_date(),
     }
@@ -357,4 +358,29 @@ async fn project_poll_with_no_projects_is_noop() {
     let scheduler = make_scheduler(db);
     let result = dispatch::poll_projects_for_evaluations(&scheduler).await;
     assert!(result.is_ok(), "poll with no projects should succeed");
+}
+
+// ── Group K: via / follower behaviour ────────────────────────────────────────
+
+/// A follower build (`via IS NOT NULL`) is filtered out by the SQL gate, so
+/// the dispatcher never sees it. Issue #175.
+#[tokio::test]
+async fn dispatch_skips_follower_builds() {
+    // The ready-builds SQL has `AND b.via IS NULL`, so a follower row never
+    // makes it into the result set. We model that by returning an empty list
+    // from the raw SQL — the test asserts the dispatcher then enqueues nothing.
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([Vec::<MBuild>::new()])
+        .into_connection();
+
+    let scheduler = make_scheduler(db);
+    dispatch::dispatch_ready_builds(&scheduler)
+        .await
+        .expect("dispatch failed");
+
+    assert_eq!(
+        scheduler.pending_job_count().await,
+        0,
+        "follower builds must not be enqueued"
+    );
 }

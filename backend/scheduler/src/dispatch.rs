@@ -595,6 +595,7 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
             LEFT JOIN public.derivation_dependency dd
                 ON dd.derivation = b.derivation
             WHERE b.status = {queued}
+            AND b.via IS NULL
             AND NOT EXISTS (
                 SELECT 1
                 FROM public.derivation_dependency dep_edge

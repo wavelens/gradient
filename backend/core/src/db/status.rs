@@ -286,8 +286,93 @@ pub async fn abort_evaluation(state: Arc<ServerState>, evaluation: MEvaluation) 
     };
 
     for build in builds {
+        if build.via.is_some() {
+            // Follower: aborting it does not interrupt the leader's work in
+            // another evaluation. Clear `via` so the eventual leader-completion
+            // sweep skips it, then mark Aborted.
+            abort_follower(&state, build).await;
+            continue;
+        }
+
+        // Leader (or plain build).
+        let has_followers = match EBuild::find()
+            .filter(CBuild::Via.eq(build.id))
+            .one(&state.worker_db)
+            .await
+        {
+            Ok(opt) => opt.is_some(),
+            Err(e) => {
+                error!(error = %e, build_id = %build.id, "Failed to query followers for abort");
+                false
+            }
+        };
+
+        if has_followers && build.status == BuildStatus::Building {
+            // Already running on a worker — let it finish so followers in
+            // other (non-aborted) evaluations get the result.
+            continue;
+        }
+
+        if has_followers && matches!(build.status, BuildStatus::Queued | BuildStatus::Created) {
+            // Hand off leadership before aborting.
+            if let Err(e) = reelect_leader(&state, &build).await {
+                error!(error = %e, build_id = %build.id, "Failed to re-elect leader on abort");
+            }
+        }
+
         update_build_status(Arc::clone(&state), build, BuildStatus::Aborted).await;
     }
 
     update_evaluation_status(state, evaluation, EvaluationStatus::Aborted).await;
+}
+
+async fn abort_follower(state: &Arc<ServerState>, build: MBuild) {
+    let mut active: ABuild = build.clone().into_active_model();
+    active.via = Set(None);
+    if let Err(e) = active.update(&state.worker_db).await {
+        error!(error = %e, build_id = %build.id, "Failed to clear via on follower abort");
+        return;
+    }
+    let reloaded = match EBuild::find_by_id(build.id).one(&state.worker_db).await {
+        Ok(Some(b)) => b,
+        Ok(None) => return,
+        Err(e) => {
+            error!(error = %e, build_id = %build.id, "Failed to reload follower for abort");
+            return;
+        }
+    };
+    update_build_status(Arc::clone(state), reloaded, BuildStatus::Aborted).await;
+}
+
+/// Promote one follower of `leader` to be the new leader, then re-point any
+/// remaining followers at the new leader's id. Picks the oldest follower by
+/// `created_at` for stability. No-op if no followers exist.
+async fn reelect_leader(state: &Arc<ServerState>, leader: &MBuild) -> Result<(), sea_orm::DbErr> {
+    use sea_orm::QueryOrder;
+
+    let new_leader = EBuild::find()
+        .filter(CBuild::Via.eq(leader.id))
+        .order_by_asc(CBuild::CreatedAt)
+        .one(&state.worker_db)
+        .await?;
+    let Some(new_leader) = new_leader else {
+        return Ok(());
+    };
+
+    let mut active: ABuild = new_leader.clone().into_active_model();
+    active.via = Set(None);
+    active.update(&state.worker_db).await?;
+
+    EBuild::update_many()
+        .col_expr(CBuild::Via, sea_orm::sea_query::Expr::value(new_leader.id))
+        .filter(CBuild::Via.eq(leader.id))
+        .exec(&state.worker_db)
+        .await?;
+
+    debug!(
+        old_leader = %leader.id,
+        new_leader = %new_leader.id,
+        "re-elected build leader"
+    );
+    Ok(())
 }

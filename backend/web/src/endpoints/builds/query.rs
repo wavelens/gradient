@@ -28,6 +28,10 @@ pub struct BuildWithOutputs {
     /// Worker identity (the `worker_id` string from `InitConnection`) that
     /// executed this build. `None` if the build never reached a worker.
     pub worker: Option<String>,
+    /// When set, this build is a follower of another build (same derivation,
+    /// different evaluation) whose terminal status will be copied here. The
+    /// scheduler does not dispatch builds with `via` set.
+    pub via: Option<Uuid>,
     pub output: HashMap<String, String>,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
@@ -70,6 +74,7 @@ pub async fn get_build(
         derivation_path: derivation.derivation_path,
         architecture: derivation.architecture,
         worker: build.worker,
+        via: build.via,
         output: outputs,
         created_at: build.created_at,
         updated_at: build.updated_at,

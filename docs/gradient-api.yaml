@@ -4461,6 +4461,17 @@ components:
             `InitConnection`) that executed this build. `null` if the
             build has not yet reached a worker (still queued, aborted
             before dispatch, or a pre-migration row).
+        via:
+          type: string
+          format: uuid
+          nullable: true
+          description: |-
+            When set, this build is a *follower* of another build (same
+            derivation, different evaluation) whose terminal status will be
+            copied here. The scheduler does not dispatch builds with `via`
+            set; this avoids two workers racing for the Nix store lock on the
+            same output path when multiple projects build the same package.
+            See issue #175.
         output:
           type: object
           additionalProperties:
