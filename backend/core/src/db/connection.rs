@@ -86,6 +86,7 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
     for build in builds {
         let mut abuild: ABuild = build.into();
         abuild.status = Set(BuildStatus::Aborted);
+        abuild.via = Set(None);
         abuild.update(db).await?;
     }
 

@@ -192,6 +192,20 @@ impl<'a> EvalResultProcessor<'a> {
         let now = gradient_core::types::now();
         let mut builds: Vec<ABuild> = Vec::new();
 
+        let drv_ids: Vec<Uuid> = derivations
+            .iter()
+            .filter(|d| !d.substituted)
+            .filter_map(|d| drv_path_to_id.get(&d.drv_path).copied())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        let leader_for_drv = if drv_ids.is_empty() {
+            HashMap::new()
+        } else {
+            find_active_leaders(self.state, &drv_ids).await
+        };
+
         for d in derivations {
             let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
                 continue;
@@ -201,6 +215,11 @@ impl<'a> EvalResultProcessor<'a> {
             } else {
                 BuildStatus::Created
             };
+            let via = if matches!(status, BuildStatus::Substituted) {
+                None
+            } else {
+                leader_for_drv.get(&drv_id).copied()
+            };
             builds.push(ABuild {
                 id: Set(Uuid::new_v4()),
                 evaluation: Set(self.evaluation_id),
@@ -209,6 +228,7 @@ impl<'a> EvalResultProcessor<'a> {
                 log_id: Set(None),
                 build_time_ms: Set(None),
                 worker: Set(None),
+                via: Set(via),
                 created_at: Set(now),
                 updated_at: Set(now),
             });
@@ -440,6 +460,7 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uui
                 log_id: Set(None),
                 build_time_ms: Set(None),
                 worker: Set(None),
+                via: Set(None),
                 created_at: Set(now),
                 updated_at: Set(now),
             })
@@ -682,4 +703,46 @@ pub async fn handle_eval_job_failed(
         .await;
     }
     Ok(())
+}
+
+/// Find the in-flight leader build for each derivation in `drv_ids`.
+///
+/// A build is a leader if its `via` is NULL and its status is non-terminal
+/// (Created/Queued/Building). Returns the head of the via chain — i.e. an
+/// existing follower's `via` value, or the leader's own id. New builds for
+/// the same derivation should set `via` to this id, producing a flat fan-out
+/// (no chains).
+async fn find_active_leaders(
+    state: &Arc<ServerState>,
+    drv_ids: &[Uuid],
+) -> HashMap<Uuid, Uuid> {
+    let rows = match EBuild::find()
+        .filter(CBuild::Derivation.is_in(drv_ids.to_vec()))
+        .filter(CBuild::Status.is_in(vec![
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+        ]))
+        .all(&state.worker_db)
+        .await
+    {
+        Ok(rs) => rs,
+        Err(e) => {
+            error!(error = %e, "failed to query active leaders");
+            return HashMap::new();
+        }
+    };
+
+    let mut out: HashMap<Uuid, Uuid> = HashMap::new();
+    for b in rows {
+        let head = b.via.unwrap_or(b.id);
+        out.entry(b.derivation)
+            .and_modify(|cur| {
+                if b.via.is_none() {
+                    *cur = b.id;
+                }
+            })
+            .or_insert(head);
+    }
+    out
 }

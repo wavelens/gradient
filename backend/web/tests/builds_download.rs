@@ -169,6 +169,7 @@ fn build_row() -> entity::build::Model {
         log_id: None,
         build_time_ms: None,
         worker: None,
+        via: None,
         created_at: test_date(),
         updated_at: test_date(),
     }

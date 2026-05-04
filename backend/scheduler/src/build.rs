@@ -113,7 +113,9 @@ impl<'a> BuildStateHandler<'a> {
             }
         };
         let evaluation_id = build.evaluation;
-        update_build_status(Arc::clone(self.state), build, BuildStatus::Completed).await;
+        let leader =
+            update_build_status(Arc::clone(self.state), build, BuildStatus::Completed).await;
+        self.propagate_to_followers(&leader).await?;
         self.check_evaluation_done(evaluation_id).await
     }
 
@@ -127,10 +129,76 @@ impl<'a> BuildStateHandler<'a> {
         };
         let evaluation_id = build.evaluation;
         let derivation_id = build.derivation;
-        update_build_status(Arc::clone(self.state), build, BuildStatus::Failed).await;
+        let leader = update_build_status(Arc::clone(self.state), build, BuildStatus::Failed).await;
+        self.propagate_to_followers(&leader).await?;
         self.cascade_dependency_failed(evaluation_id, derivation_id)
             .await?;
         self.check_evaluation_done(evaluation_id).await
+    }
+
+    /// Copy a leader's terminal status (and `log_id`, `build_time_ms`,
+    /// `worker`) onto every build with `via = leader.id`, then run the
+    /// per-evaluation finalisation each follower needs (`DependencyFailed`
+    /// cascade on failure, `check_evaluation_done` to flip the eval).
+    ///
+    /// Followers always share a `derivation` row with their leader, so
+    /// `derivation_output` and `build_product` rows are already visible to
+    /// the follower's evaluation without any copy.
+    ///
+    /// `Aborted` is not propagated — when a leader is aborted (its eval was
+    /// cancelled), callers re-elect a new leader from the followers instead.
+    async fn propagate_to_followers(&self, leader: &MBuild) -> Result<()> {
+        let propagate = matches!(
+            leader.status,
+            BuildStatus::Completed
+                | BuildStatus::Substituted
+                | BuildStatus::Failed
+                | BuildStatus::DependencyFailed
+        );
+        if !propagate {
+            return Ok(());
+        }
+
+        let followers = EBuild::find()
+            .filter(CBuild::Via.eq(leader.id))
+            .all(&self.state.worker_db)
+            .await
+            .context("fetch followers")?;
+        if followers.is_empty() {
+            return Ok(());
+        }
+
+        for follower in followers {
+            let evaluation_id = follower.evaluation;
+            let derivation_id = follower.derivation;
+            let mut active: ABuild = follower.clone().into_active_model();
+            active.log_id = Set(leader.log_id);
+            active.build_time_ms = Set(leader.build_time_ms);
+            active.worker = Set(leader.worker.clone());
+            active.via = Set(None);
+            if let Err(e) = active.update(&self.state.worker_db).await {
+                error!(error = %e, follower_id = %follower.id, "failed to copy leader fields to follower");
+                continue;
+            }
+
+            let Some(reloaded) =
+                EBuild::find_by_id(follower.id).one(&self.state.worker_db).await?
+            else {
+                continue;
+            };
+            update_build_status(Arc::clone(self.state), reloaded, leader.status.clone()).await;
+
+            if matches!(
+                leader.status,
+                BuildStatus::Failed | BuildStatus::DependencyFailed
+            ) {
+                self.cascade_dependency_failed(evaluation_id, derivation_id)
+                    .await?;
+            }
+            self.check_evaluation_done(evaluation_id).await?;
+        }
+
+        Ok(())
     }
 
     async fn cascade_dependency_failed(

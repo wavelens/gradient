@@ -76,6 +76,7 @@ fn make_build(id: Uuid, eval_id: Uuid, drv_id: Uuid, status: BuildStatus) -> MBu
         log_id: None,
         build_time_ms: None,
         worker: None,
+        via: None,
         created_at: test_date(),
         updated_at: test_date(),
     }
@@ -615,6 +616,8 @@ async fn build_completed_last_build_completes_eval() {
         .append_query_results([vec![build]])
         // 2. update_build_status → Completed (UPDATE...RETURNING)
         .append_query_results([vec![build_completed]])
+        // 2a. propagate_to_followers: find via=leader.id → empty
+        .append_query_results([Vec::<MBuild>::new()])
         // 3. find active builds → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 4. find_by_id(eval) → Building
@@ -657,6 +660,8 @@ async fn build_completed_with_remaining_active() {
         .append_query_results([vec![build]])
         // 2. update build → Completed
         .append_query_results([vec![build_completed]])
+        // 2a. propagate_to_followers: empty
+        .append_query_results([Vec::<MBuild>::new()])
         // 3. find active builds → still has other_build
         .append_query_results([vec![other_build]])
         // check_evaluation_done returns early — no further queries
@@ -685,6 +690,8 @@ async fn build_completed_with_failed_sibling() {
         .append_query_results([vec![build]])
         // 2. update → Completed
         .append_query_results([vec![build_completed]])
+        // 2a. propagate_to_followers: empty
+        .append_query_results([Vec::<MBuild>::new()])
         // 3. active builds → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 4. find eval → Building
@@ -721,6 +728,8 @@ async fn build_completed_eval_not_building_noop() {
         .append_query_results([vec![build]])
         // 2. update → Completed
         .append_query_results([vec![build_completed]])
+        // 2a. propagate_to_followers: empty
+        .append_query_results([Vec::<MBuild>::new()])
         // 3. active builds → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 4. find eval → already Completed (not Building)
@@ -770,6 +779,7 @@ async fn build_completed_dep_failed_siblings_cause_eval_failed() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![build]])
         .append_query_results([vec![build_completed]])
+        .append_query_results([Vec::<MBuild>::new()]) // propagate_to_followers: empty
         .append_query_results([Vec::<MBuild>::new()]) // no active
         .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Building)]])
         .append_query_results([vec![dep_failed]]) // DependencyFailed counts
@@ -812,6 +822,8 @@ async fn build_failed_cascades_to_direct_dependent() {
         .append_query_results([vec![build_a]])
         // 2. update buildA → Failed (UPDATE...RETURNING)
         .append_query_results([vec![build_a_failed]])
+        // 2a. propagate_to_followers: empty
+        .append_query_results([Vec::<MBuild>::new()])
         // ── collect_transitive_dependents ──
         // 3. BFS layer 1: dep edges where Dependency=A → [B→A]
         .append_query_results([vec![dep_edge]])
@@ -863,6 +875,8 @@ async fn build_failed_no_dependents() {
         .append_query_results([vec![build]])
         // 2. update → Failed
         .append_query_results([vec![build_failed.clone()]])
+        // 2a. propagate_to_followers: empty
+        .append_query_results([Vec::<MBuild>::new()])
         // 3. cascade: find Created/Queued → empty (no candidates)
         .append_query_results([Vec::<MBuild>::new()])
         // 4. check active → empty
@@ -914,6 +928,8 @@ async fn build_failed_cascade_only_direct_dependents() {
         .append_query_results([vec![build_a]])
         // 2. update → Failed
         .append_query_results([vec![build_a_failed]])
+        // 2a. propagate_to_followers: empty
+        .append_query_results([Vec::<MBuild>::new()])
         // ── collect_transitive_dependents ──
         // 3. BFS layer 1: dep edges where Dependency=A → [B→A] (C has no edge to A)
         .append_query_results([vec![dep_edge_b_a]])
@@ -970,6 +986,8 @@ async fn build_failed_cascade_skips_building_status() {
         .append_query_results([vec![build_a]])
         // 2. update → Failed
         .append_query_results([vec![build_a_failed]])
+        // 2a. propagate_to_followers: empty
+        .append_query_results([Vec::<MBuild>::new()])
         // 3. cascade: find Created/Queued → empty (buildB is Building, excluded)
         .append_query_results([Vec::<MBuild>::new()])
         // 4. check active: buildB is Building → still active
@@ -1578,6 +1596,8 @@ async fn eval_result_build_insert_fails_transitions_eval_failed() {
             "out",
             out_path,
         )]])
+        // 4a. find_active_leaders: empty
+        .append_query_results([Vec::<MBuild>::new()])
         // 5. insert_many builds → empty result → RecordNotInserted error
         .append_query_results([Vec::<MBuild>::new()])
         // 6. update_evaluation_status_with_error: insert evaluation_message
@@ -1774,6 +1794,8 @@ async fn webhook_fired_on_build_completed() {
         .append_query_results([vec![build_building]])
         // 2. update build → Completed
         .append_query_results([vec![build_completed]])
+        // 2a. propagate_to_followers: empty
+        .append_query_results([Vec::<MBuild>::new()])
         // 3. find active builds → empty
         .append_query_results([Vec::<MBuild>::new()])
         // 4. find_by_id(eval) → Building
@@ -1899,6 +1921,8 @@ async fn webhook_not_fired_for_dep_failed() {
         .append_query_results([vec![build_a]])
         // 2. update buildA → Failed
         .append_query_results([vec![build_a_failed.clone()]])
+        // 2a. propagate_to_followers: empty
+        .append_query_results([Vec::<MBuild>::new()])
         // ── collect_transitive_dependents ──
         // 3. BFS layer 1: dep edges where Dependency=A → [B→A]
         .append_query_results([vec![dep_edge]])
@@ -2363,6 +2387,8 @@ async fn build_failed_cascades_transitively_through_graph() {
             drv_c,
             BuildStatus::Failed,
         )]])
+        // 2a. propagate_to_followers: empty
+        .append_query_results([Vec::<MBuild>::new()])
         // ── collect_transitive_dependents ──
         // 3. BFS layer 1: dep edges where Dependency=C → [B→C]
         .append_query_results([vec![make_dep_edge(Uuid::new_v4(), drv_b, drv_c)]])

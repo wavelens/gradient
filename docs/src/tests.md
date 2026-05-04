@@ -980,3 +980,28 @@ Unit tests in `backend/core/src/db/dependency_graph.rs`:
   visited, including a sibling that depends directly on the start.
 - `cycles_terminate` — a pathological reverse cycle is deduped via the
   visited set so the BFS terminates.
+
+## Build deduplication via `via` field (`#175`)
+
+When two evaluations (in the same organisation) discover the same
+derivation, the second build is inserted as a *follower* of the first by
+storing the leader's id in the new `build.via` column. Followers are
+filtered out of `dispatch_ready_builds` SQL (`AND b.via IS NULL`), so two
+workers never race for the Nix store lock on the same output path. When a
+leader transitions to `Completed`, `Substituted`, `Failed`, or
+`DependencyFailed`, `propagate_to_followers` copies the terminal status,
+`log_id`, `build_time_ms`, and `worker` onto every follower, runs the
+per-evaluation cascade for failure cases, and finalises each follower's
+evaluation. `Aborted` is never propagated — when a leader is aborted (its
+own evaluation cancelled) `abort_evaluation` re-elects a new leader from
+the surviving followers instead of dragging unrelated evaluations down.
+
+Tests:
+
+- `dispatch_tests::dispatch_skips_follower_builds` — the SQL gate keeps
+  followers out of the dispatcher result set, so no follower job is ever
+  enqueued.
+- The full pre-existing `handle_build_job_completed` /
+  `handle_build_job_failed` mock-DB suite was extended to mock the
+  `propagate_to_followers` followers query, exercising the new code path
+  on every terminal transition.

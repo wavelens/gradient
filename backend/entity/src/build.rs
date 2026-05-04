@@ -72,6 +72,13 @@ pub struct Model {
     /// executed this build. `None` for builds that never reached a worker
     /// (still queued, aborted before dispatch, or pre-migration rows).
     pub worker: Option<String>,
+    /// Points at another build sharing the same derivation whose result this
+    /// build follows. `None` for leaders (and plain builds). Followers are
+    /// skipped by the dispatcher; the leader's terminal status, log_id,
+    /// build_time_ms, and worker are copied to followers when the leader
+    /// finishes. Same-organization only — followers always share a `derivation`
+    /// row with their leader.
+    pub via: Option<Uuid>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
