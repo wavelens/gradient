@@ -75,7 +75,7 @@ evaluation:  Queued → Fetching → EvaluatingFlake → EvaluatingDerivation �
 
 The proto scheduler's dispatch loop (`proto::scheduler::dispatch`) polls for eligible builds and pushes `JobOffer` messages to connected workers with the `build` capability.
 
-**Eligibility:** a build is eligible only when every dependent derivation already has a `build` row in the same evaluation with status `Completed` (3) or `Substituted` (7) — enforced via a `NOT EXISTS` subquery against `derivation_dependency`.
+**Eligibility:** a build is eligible only when every dependent derivation already has a `build` row in the same evaluation with status `Completed` (3) or `Substituted` (7) — enforced via a double `NOT EXISTS` antijoin against `derivation_dependency` and `build`. Two indexes back the hot path: `idx-build-ready-queue` (partial, `status = 1 AND via IS NULL`) drives the outer queue scan in `updated_at` order, and `idx-build-evaluation-derivation` (composite on `evaluation, derivation`) lets the dependency lookup be index-only instead of seq-scanning `build` once per candidate.
 
 **Worker matching:** `JobOffer` is sent to workers whose `WorkerCapabilities` include the build's target architecture and all required features from `derivation_feature`. Workers score each candidate against their local store (missing required paths) and stream scores back via `RequestJobChunk`. The server assigns to the worker with the lowest `missing` count; ties broken by fewest assigned jobs.
 

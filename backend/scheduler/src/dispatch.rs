@@ -587,28 +587,35 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
     // Ready builds: status = Queued AND every dependency build is Completed or Substituted.
     // Ordered by dependency count desc (integration builds first), then by age.
+    // Driven off the `idx-build-ready-queue` partial index for the outer
+    // filter, and the `idx-build-evaluation-derivation` composite for the
+    // double-`NOT EXISTS` antijoin (`for every dep edge, a Completed or
+    // Substituted build exists in the same evaluation`).
     let builds_sql = sea_orm::Statement::from_string(
         sea_orm::DbBackend::Postgres,
         format!(
             r#"
             SELECT b.*
             FROM public.build b
-            LEFT JOIN public.derivation_dependency dd
-                ON dd.derivation = b.derivation
             WHERE b.status = {queued}
-            AND b.via IS NULL
-            AND NOT EXISTS (
-                SELECT 1
-                FROM public.derivation_dependency dep_edge
-                LEFT JOIN public.build dep_build
-                    ON dep_build.derivation = dep_edge.dependency
-                    AND dep_build.evaluation = b.evaluation
-                WHERE dep_edge.derivation = b.derivation
-                    AND (dep_build.id IS NULL
-                        OR (dep_build.status != {completed} AND dep_build.status != {substituted}))
-            )
-            GROUP BY b.id
-            ORDER BY COUNT(dd.dependency) DESC, b.updated_at ASC
+              AND b.via IS NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM public.derivation_dependency dep_edge
+                  WHERE dep_edge.derivation = b.derivation
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM public.build dep_build
+                        WHERE dep_build.evaluation = b.evaluation
+                          AND dep_build.derivation = dep_edge.dependency
+                          AND dep_build.status IN ({completed}, {substituted})
+                    )
+              )
+            ORDER BY
+                (SELECT count(*)
+                   FROM public.derivation_dependency dd
+                  WHERE dd.derivation = b.derivation) DESC,
+                b.updated_at ASC
         "#,
             queued = BuildStatus::Queued.num_value(),
             completed = BuildStatus::Completed.num_value(),
