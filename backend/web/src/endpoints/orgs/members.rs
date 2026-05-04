@@ -149,7 +149,7 @@ pub async fn post_organization_users(
         .or_not_found("Role")?;
 
     AOrganizationUser {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         organization: Set(organization.id),
         user: Set(target_user.id),
         role: Set(role.id),

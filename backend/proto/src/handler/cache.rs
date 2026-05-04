@@ -104,7 +104,7 @@ async fn ensure_push_signatures(
 
                 if !exists {
                     let sig_row = ACachedPathSignature {
-                        id: sea_orm::ActiveValue::Set(Uuid::new_v4()),
+                        id: sea_orm::ActiveValue::Set(Uuid::now_v7()),
                         cached_path: sea_orm::ActiveValue::Set(cp.id),
                         cache: sea_orm::ActiveValue::Set(oc.cache),
                         signature: sea_orm::ActiveValue::Set(None),

@@ -134,10 +134,10 @@ fn make_scheduler(db: sea_orm::DatabaseConnection) -> Arc<Scheduler> {
 /// A single Queued evaluation with a valid commit and project → one job enqueued.
 #[tokio::test]
 async fn dispatch_queued_eval_enqueues_job() {
-    let eval_id = Uuid::new_v4();
-    let commit_id = Uuid::new_v4();
-    let project_id = Uuid::new_v4();
-    let org_id = Uuid::new_v4();
+    let eval_id = Uuid::now_v7();
+    let commit_id = Uuid::now_v7();
+    let project_id = Uuid::now_v7();
+    let org_id = Uuid::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Queued evaluations
@@ -164,10 +164,10 @@ async fn dispatch_queued_eval_enqueues_job() {
 /// The second call sees `contains_job` = true and skips the commit/org lookup.
 #[tokio::test]
 async fn dispatch_queued_eval_skips_already_enqueued() {
-    let eval_id = Uuid::new_v4();
-    let commit_id = Uuid::new_v4();
-    let project_id = Uuid::new_v4();
-    let org_id = Uuid::new_v4();
+    let eval_id = Uuid::now_v7();
+    let commit_id = Uuid::now_v7();
+    let project_id = Uuid::now_v7();
+    let org_id = Uuid::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // First dispatch:
@@ -201,9 +201,9 @@ async fn dispatch_queued_eval_skips_already_enqueued() {
 /// When the commit row is missing, the eval is skipped and no job is enqueued.
 #[tokio::test]
 async fn dispatch_queued_eval_skips_missing_commit() {
-    let eval_id = Uuid::new_v4();
-    let commit_id = Uuid::new_v4();
-    let project_id = Uuid::new_v4();
+    let eval_id = Uuid::now_v7();
+    let commit_id = Uuid::now_v7();
+    let project_id = Uuid::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Queued evaluations
@@ -228,10 +228,10 @@ async fn dispatch_queued_eval_skips_missing_commit() {
 /// When the eval has no project (direct build), org is looked up via DirectBuild.
 #[tokio::test]
 async fn dispatch_queued_eval_via_direct_build_org() {
-    let eval_id = Uuid::new_v4();
-    let commit_id = Uuid::new_v4();
-    let org_id = Uuid::new_v4();
-    let direct_build_id = Uuid::new_v4();
+    let eval_id = Uuid::now_v7();
+    let commit_id = Uuid::now_v7();
+    let org_id = Uuid::now_v7();
+    let direct_build_id = Uuid::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Queued evaluations — project: None (direct build)
@@ -259,12 +259,12 @@ async fn dispatch_queued_eval_via_direct_build_org() {
 /// A single ready Queued build → one job enqueued with the correct drv_path.
 #[tokio::test]
 async fn dispatch_ready_build_enqueues_job() {
-    let eval_id = Uuid::new_v4();
-    let commit_id = Uuid::new_v4();
-    let project_id = Uuid::new_v4();
-    let org_id = Uuid::new_v4();
-    let drv_id = Uuid::new_v4();
-    let build_id = Uuid::new_v4();
+    let eval_id = Uuid::now_v7();
+    let commit_id = Uuid::now_v7();
+    let project_id = Uuid::now_v7();
+    let org_id = Uuid::now_v7();
+    let drv_id = Uuid::now_v7();
+    let build_id = Uuid::now_v7();
     let drv_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello.drv";
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -297,12 +297,12 @@ async fn dispatch_ready_build_enqueues_job() {
 /// Calling dispatch_ready_builds twice for the same build does not enqueue a second job.
 #[tokio::test]
 async fn dispatch_ready_build_skips_already_enqueued() {
-    let eval_id = Uuid::new_v4();
-    let commit_id = Uuid::new_v4();
-    let project_id = Uuid::new_v4();
-    let org_id = Uuid::new_v4();
-    let drv_id = Uuid::new_v4();
-    let build_id = Uuid::new_v4();
+    let eval_id = Uuid::now_v7();
+    let commit_id = Uuid::now_v7();
+    let project_id = Uuid::now_v7();
+    let org_id = Uuid::now_v7();
+    let drv_id = Uuid::now_v7();
+    let build_id = Uuid::now_v7();
     let drv_path = "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-foo.drv";
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)

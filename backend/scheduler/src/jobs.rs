@@ -398,10 +398,10 @@ mod tests {
 
     fn eval_job(peer: Uuid) -> PendingJob {
         PendingJob::Eval(PendingEvalJob {
-            evaluation_id: Uuid::new_v4(),
+            evaluation_id: Uuid::now_v7(),
             project_id: None,
             peer_id: peer,
-            commit_id: Uuid::new_v4(),
+            commit_id: Uuid::now_v7(),
             repository: "https://example.com/repo".into(),
             job: FlakeJob {
                 tasks: vec![FlakeTask::EvaluateDerivations],
@@ -428,12 +428,12 @@ mod tests {
         required_features: Vec<String>,
     ) -> PendingJob {
         PendingJob::Build(PendingBuildJob {
-            build_id: Uuid::new_v4(),
-            evaluation_id: Uuid::new_v4(),
+            build_id: Uuid::now_v7(),
+            evaluation_id: Uuid::now_v7(),
             peer_id: peer,
             job: BuildJob {
                 builds: vec![BuildTask {
-                    build_id: Uuid::new_v4().to_string(),
+                    build_id: Uuid::now_v7().to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                 }],
             },
@@ -475,7 +475,7 @@ mod tests {
     #[test]
     fn test_add_pending_and_candidates() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::new_v4();
+        let peer = Uuid::now_v7();
         tracker.add_pending("j1".into(), eval_job(peer));
         tracker.add_pending("j2".into(), eval_job(peer));
         tracker.add_pending("j3".into(), build_job(peer, vec![]));
@@ -488,8 +488,8 @@ mod tests {
     #[test]
     fn test_candidates_filtered_by_peer() {
         let mut tracker = JobTracker::new();
-        let peer_a = Uuid::new_v4();
-        let peer_b = Uuid::new_v4();
+        let peer_a = Uuid::now_v7();
+        let peer_b = Uuid::now_v7();
         tracker.add_pending("ja".into(), eval_job(peer_a));
         tracker.add_pending("jb".into(), eval_job(peer_b));
 
@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn test_candidates_filtered_by_architecture() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::new_v4();
+        let peer = Uuid::now_v7();
         // x86_64 build
         tracker.add_pending(
             "x86".into(),
@@ -534,7 +534,7 @@ mod tests {
     #[test]
     fn test_take_best_of_kind_skips_wrong_arch() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::new_v4();
+        let peer = Uuid::now_v7();
         tracker.add_pending(
             "arm".into(),
             build_job_arch(peer, vec![], "aarch64-linux", vec![]),
@@ -554,7 +554,7 @@ mod tests {
     #[test]
     fn test_take_best_of_kind_requires_features() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::new_v4();
+        let peer = Uuid::now_v7();
         tracker.add_pending(
             "kvm".into(),
             build_job_arch(peer, vec![], "x86_64-linux", vec!["kvm".into()]),
@@ -585,7 +585,7 @@ mod tests {
     #[test]
     fn test_record_scores_then_request_assigns_best() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::new_v4();
+        let peer = Uuid::now_v7();
         tracker.add_pending(
             "j1".into(),
             build_job(
@@ -617,7 +617,7 @@ mod tests {
     #[test]
     fn test_request_without_scores_still_assigns() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::new_v4();
+        let peer = Uuid::now_v7();
         tracker.add_pending(
             "j1".into(),
             build_job(
@@ -641,7 +641,7 @@ mod tests {
     #[test]
     fn test_release_to_pending_after_rejection() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::new_v4();
+        let peer = Uuid::now_v7();
         tracker.add_pending("j1".into(), eval_job(peer));
 
         // Assign it.
@@ -664,7 +664,7 @@ mod tests {
     #[test]
     fn test_worker_disconnected_requeues() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::new_v4();
+        let peer = Uuid::now_v7();
         tracker.add_pending("j1".into(), eval_job(peer));
         tracker.add_pending("j2".into(), eval_job(peer));
 
@@ -694,7 +694,7 @@ mod tests {
     #[test]
     fn test_take_empty_required() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::new_v4();
+        let peer = Uuid::now_v7();
         // Job with required paths — should NOT be taken.
         tracker.add_pending(
             "j1".into(),
@@ -718,8 +718,8 @@ mod tests {
     #[test]
     fn test_drain_peer_jobs_on_worker_aborts_only_revoked_org() {
         let mut tracker = JobTracker::new();
-        let org_a = Uuid::new_v4();
-        let org_b = Uuid::new_v4();
+        let org_a = Uuid::now_v7();
+        let org_b = Uuid::now_v7();
         tracker.add_pending("ja1".into(), eval_job(org_a));
         tracker.add_pending("ja2".into(), eval_job(org_a));
         tracker.add_pending("jb1".into(), eval_job(org_b));
@@ -762,7 +762,7 @@ mod tests {
     #[test]
     fn test_drain_peer_jobs_on_worker_empty_revoked() {
         let mut tracker = JobTracker::new();
-        let org_a = Uuid::new_v4();
+        let org_a = Uuid::now_v7();
         tracker.add_pending("j1".into(), eval_job(org_a));
         tracker.take_best_of_kind(
             "w1",
@@ -780,7 +780,7 @@ mod tests {
     #[test]
     fn test_contains_job_both_maps() {
         let mut tracker = JobTracker::new();
-        let peer = Uuid::new_v4();
+        let peer = Uuid::now_v7();
         tracker.add_pending("j1".into(), eval_job(peer));
         assert!(tracker.contains_job("j1"));
         assert!(!tracker.contains_job("j2"));

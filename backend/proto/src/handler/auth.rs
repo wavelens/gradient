@@ -496,7 +496,7 @@ mod tests {
 
     fn org_cache_row(org: Uuid, cache: Uuid) -> OrgCacheModel {
         OrgCacheModel {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             organization: org,
             cache,
             mode: CacheSubscriptionMode::ReadWrite,
@@ -509,8 +509,8 @@ mod tests {
 
     #[tokio::test]
     async fn filter_org_peers_passes_through_org_with_cache() {
-        let org = Uuid::new_v4();
-        let cache = Uuid::new_v4();
+        let org = Uuid::now_v7();
+        let cache = Uuid::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![org_row(org)]])
             .append_query_results([vec![org_cache_row(org, cache)]])
@@ -524,7 +524,7 @@ mod tests {
 
     #[tokio::test]
     async fn filter_org_peers_demotes_org_without_cache() {
-        let org = Uuid::new_v4();
+        let org = Uuid::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![org_row(org)]])
             .append_query_results([Vec::<OrgCacheModel>::new()])
@@ -542,7 +542,7 @@ mod tests {
 
     #[tokio::test]
     async fn filter_org_peers_passes_through_non_org_uuids() {
-        let cache_peer = Uuid::new_v4();
+        let cache_peer = Uuid::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<OrgModel>::new()])
             .into_connection();
@@ -555,10 +555,10 @@ mod tests {
 
     #[tokio::test]
     async fn filter_org_peers_mixed() {
-        let org_with = Uuid::new_v4();
-        let org_without = Uuid::new_v4();
-        let cache = Uuid::new_v4();
-        let cache_peer = Uuid::new_v4();
+        let org_with = Uuid::now_v7();
+        let org_without = Uuid::now_v7();
+        let cache = Uuid::now_v7();
+        let cache_peer = Uuid::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![org_row(org_with), org_row(org_without)]])
             .append_query_results([vec![org_cache_row(org_with, cache)]])
@@ -582,8 +582,8 @@ mod tests {
     #[tokio::test]
     async fn validate_then_filter_demotes_org_without_cache() {
         let token = "token-x";
-        let org_with = Uuid::new_v4();
-        let org_without = Uuid::new_v4();
+        let org_with = Uuid::now_v7();
+        let org_without = Uuid::now_v7();
         let registered = vec![
             (org_with.to_string(), sha256_hex(token)),
             (org_without.to_string(), sha256_hex(token)),
@@ -596,7 +596,7 @@ mod tests {
         assert_eq!(authorized.len(), 2);
         assert!(failed.is_empty());
 
-        let cache = Uuid::new_v4();
+        let cache = Uuid::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![org_row(org_with), org_row(org_without)]])
             .append_query_results([vec![org_cache_row(org_with, cache)]])

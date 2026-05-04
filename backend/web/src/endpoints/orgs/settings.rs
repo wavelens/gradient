@@ -169,7 +169,7 @@ pub async fn post_organization_subscribe_cache(
         .unwrap_or(CacheSubscriptionMode::ReadWrite);
 
     AOrganizationCache {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         organization: Set(org.id),
         cache: Set(cache.id),
         mode: Set(mode),
@@ -235,7 +235,7 @@ async fn enqueue_backfill_signatures(state: &ServerState, org_id: Uuid, cache_id
             continue;
         }
         let am = ACachedPathSignature {
-            id: Set(Uuid::new_v4()),
+            id: Set(Uuid::now_v7()),
             cached_path: Set(cp_id),
             cache: Set(cache_id),
             signature: Set(None),

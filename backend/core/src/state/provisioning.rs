@@ -213,7 +213,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated managed user: {}", state_user.username);
             } else {
                 let user = user::ActiveModel {
-                    id: Set(Uuid::new_v4()),
+                    id: Set(Uuid::now_v7()),
                     username: Set(state_user.username.clone()),
                     name: Set(state_user.name.clone()),
                     email: Set(state_user.email.clone()),
@@ -281,7 +281,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated managed organization: {}", state_org.name);
                 org_id
             } else {
-                let org_id = Uuid::new_v4();
+                let org_id = Uuid::now_v7();
                 let org = organization::ActiveModel {
                     id: Set(org_id),
                     name: Set(state_org.name.clone()),
@@ -308,7 +308,7 @@ impl<'a> StateApplicator<'a> {
 
             if existing_membership.is_none() {
                 let membership = organization_user::ActiveModel {
-                    id: Set(Uuid::new_v4()),
+                    id: Set(Uuid::now_v7()),
                     organization: Set(org_id),
                     user: Set(created_by_id),
                     role: Set(BASE_ROLE_ADMIN_ID),
@@ -360,7 +360,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated managed project: {}", state_project.name);
             } else {
                 let proj = project::ActiveModel {
-                    id: Set(Uuid::new_v4()),
+                    id: Set(Uuid::now_v7()),
                     organization: Set(org_id),
                     name: Set(state_project.name.clone()),
                     active: Set(state_project.active),
@@ -444,7 +444,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated managed cache: {}", state_cache.name);
                 existing.id
             } else {
-                let cache_id = Uuid::new_v4();
+                let cache_id = Uuid::now_v7();
                 let cache_model = cache::ActiveModel {
                     id: Set(cache_id),
                     name: Set(state_cache.name.clone()),
@@ -483,7 +483,7 @@ impl<'a> StateApplicator<'a> {
 
                 if existing_association.is_none() {
                     let org_cache_model = organization_cache::ActiveModel {
-                        id: Set(Uuid::new_v4()),
+                        id: Set(Uuid::now_v7()),
                         organization: Set(org_id),
                         cache: Set(cache_id),
                         mode: Set(organization_cache::CacheSubscriptionMode::ReadWrite),
@@ -540,7 +540,7 @@ impl<'a> StateApplicator<'a> {
                         .clone()
                         .unwrap_or_else(|| upstream_cache_name.clone());
                     ACacheUpstream {
-                        id: Set(Uuid::new_v4()),
+                        id: Set(Uuid::now_v7()),
                         cache: Set(cache_id),
                         display_name: Set(name),
                         mode: Set(mode.clone()),
@@ -554,7 +554,7 @@ impl<'a> StateApplicator<'a> {
                     url,
                     public_key,
                 } => ACacheUpstream {
-                    id: Set(Uuid::new_v4()),
+                    id: Set(Uuid::now_v7()),
                     cache: Set(cache_id),
                     display_name: Set(display_name.clone()),
                     mode: Set(CacheSubscriptionMode::ReadOnly),
@@ -609,7 +609,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated managed API key: {}", state_api_key.name);
             } else {
                 let api_key_model = api::ActiveModel {
-                    id: Set(Uuid::new_v4()),
+                    id: Set(Uuid::now_v7()),
                     owned_by: Set(owned_by_id),
                     name: Set(state_api_key.name.clone()),
                     key: Set(key_hash),
@@ -673,7 +673,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated worker registration: {}", state_worker.worker_id);
             } else {
                 let reg = worker_registration::ActiveModel {
-                    id: Set(Uuid::new_v4()),
+                    id: Set(Uuid::now_v7()),
                     peer_id: Set(peer_id),
                     worker_id: Set(state_worker.worker_id.clone()),
                     token_hash: Set(token_hash),
@@ -787,7 +787,7 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!("Updated managed integration: {}", state_int.name);
             } else {
                 let row = integration::ActiveModel {
-                    id: Set(Uuid::new_v4()),
+                    id: Set(Uuid::now_v7()),
                     organization: Set(org_id),
                     name: Set(state_int.name.clone()),
                     display_name: Set(display_name),
@@ -1085,7 +1085,7 @@ mod helper_tests {
 
     #[test]
     fn lookup_id_returns_id_when_present() {
-        let id = Uuid::new_v4();
+        let id = Uuid::now_v7();
         let mut m = HashMap::new();
         m.insert("alice".to_string(), id);
         assert_eq!(lookup_id(&m, "alice", "User").unwrap(), id);

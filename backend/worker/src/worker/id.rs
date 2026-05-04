@@ -46,7 +46,7 @@ pub(super) fn load_or_generate_id(data_dir: &str, id_override: Option<&str>) -> 
         return Ok(id);
     }
 
-    let id = uuid::Uuid::new_v4().to_string();
+    let id = uuid::Uuid::now_v7().to_string();
     fs::write(&id_path, &id).with_context(|| format!("failed to write '{}'", id_path.display()))?;
     info!(path = %id_path.display(), %id, "generated and persisted new worker ID");
     Ok(id)
@@ -79,7 +79,7 @@ mod tests {
     fn load_or_generate_id_reads_existing() {
         let dir = temp_dir();
         let id_path = dir.path().join("worker-id");
-        let known_id = uuid::Uuid::new_v4().to_string();
+        let known_id = uuid::Uuid::now_v7().to_string();
         fs::write(&id_path, &known_id).unwrap();
         let data_dir = dir.path().to_string_lossy().to_string();
         let loaded = load_or_generate_id(&data_dir, None).expect("should read existing id");
@@ -100,9 +100,9 @@ mod tests {
     fn load_or_generate_id_override_takes_priority() {
         let dir = temp_dir();
         let id_path = dir.path().join("worker-id");
-        let file_id = uuid::Uuid::new_v4().to_string();
+        let file_id = uuid::Uuid::now_v7().to_string();
         fs::write(&id_path, &file_id).unwrap();
-        let override_id = uuid::Uuid::new_v4().to_string();
+        let override_id = uuid::Uuid::now_v7().to_string();
         let data_dir = dir.path().to_string_lossy().to_string();
         let result =
             load_or_generate_id(&data_dir, Some(&override_id)).expect("override should work");

@@ -128,7 +128,7 @@ pub async fn put_cache_upstream(
             }
             let name = display_name.unwrap_or_else(|| upstream.display_name.clone());
             ACacheUpstream {
-                id: Set(Uuid::new_v4()),
+                id: Set(Uuid::now_v7()),
                 cache: Set(cache.id),
                 display_name: Set(name),
                 mode: Set(mode.unwrap_or(CacheSubscriptionMode::ReadWrite)),
@@ -142,7 +142,7 @@ pub async fn put_cache_upstream(
             url,
             public_key,
         } => ACacheUpstream {
-            id: Set(Uuid::new_v4()),
+            id: Set(Uuid::now_v7()),
             cache: Set(cache.id),
             display_name: Set(display_name),
             mode: Set(CacheSubscriptionMode::ReadOnly),

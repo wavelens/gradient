@@ -145,7 +145,7 @@ pub async fn post_org_worker(
     let token_hash = password_auth::generate_hash(&token);
 
     let row = AWorkerRegistration {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         peer_id: Set(org.id),
         worker_id: Set(worker_id_str.clone()),
         token_hash: Set(token_hash),

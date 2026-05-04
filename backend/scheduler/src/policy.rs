@@ -290,12 +290,12 @@ mod tests {
         missing_nar_size: Option<u64>,
     ) -> (PendingJob, u32, u64) {
         let job = PendingJob::Build(PendingBuildJob {
-            build_id: Uuid::new_v4(),
-            evaluation_id: Uuid::new_v4(),
-            peer_id: Uuid::new_v4(),
+            build_id: Uuid::now_v7(),
+            evaluation_id: Uuid::now_v7(),
+            peer_id: Uuid::now_v7(),
             job: BuildJob {
                 builds: vec![BuildTask {
-                    build_id: Uuid::new_v4().to_string(),
+                    build_id: Uuid::now_v7().to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                 }],
             },
@@ -427,12 +427,12 @@ mod tests {
 
     fn build_job_with_deps(dep_count: u32) -> PendingJob {
         PendingJob::Build(PendingBuildJob {
-            build_id: Uuid::new_v4(),
-            evaluation_id: Uuid::new_v4(),
-            peer_id: Uuid::new_v4(),
+            build_id: Uuid::now_v7(),
+            evaluation_id: Uuid::now_v7(),
+            peer_id: Uuid::now_v7(),
             job: BuildJob {
                 builds: vec![BuildTask {
-                    build_id: Uuid::new_v4().to_string(),
+                    build_id: Uuid::now_v7().to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                 }],
             },

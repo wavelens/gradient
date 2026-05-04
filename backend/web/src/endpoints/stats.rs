@@ -87,7 +87,7 @@ fn build_record_nar_traffic_stmt(cache_id: Uuid, bucket: NaiveDateTime, bytes: i
            DO UPDATE SET bytes_sent = cache_metric.bytes_sent + EXCLUDED.bytes_sent,
                          nar_count  = cache_metric.nar_count  + EXCLUDED.nar_count"#,
         [
-            sea_orm::Value::Uuid(Some(Box::new(Uuid::new_v4()))),
+            sea_orm::Value::Uuid(Some(Box::new(Uuid::now_v7()))),
             sea_orm::Value::Uuid(Some(Box::new(cache_id))),
             sea_orm::Value::ChronoDateTime(Some(Box::new(bucket))),
             sea_orm::Value::BigInt(Some(bytes)),

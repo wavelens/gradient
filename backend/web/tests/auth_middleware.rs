@@ -28,7 +28,7 @@ use web::create_router;
 /// file is missing, which would tear down the test process before assertions
 /// run.
 fn server() -> TestServer {
-    let jwt_path = std::env::temp_dir().join(format!("gradient-test-jwt-{}", Uuid::new_v4()));
+    let jwt_path = std::env::temp_dir().join(format!("gradient-test-jwt-{}", Uuid::now_v7()));
     std::fs::write(&jwt_path, "test-jwt-secret").expect("write jwt secret file");
 
     let mut cli = test_cli();

@@ -59,7 +59,7 @@ mod tests {
 
     fn dep_edge(derivation: Uuid, dependency: Uuid) -> MDerivationDependency {
         entity::derivation_dependency::Model {
-            id: Uuid::new_v4(),
+            id: Uuid::now_v7(),
             derivation,
             dependency,
         }
@@ -67,7 +67,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_dependents_returns_only_start() {
-        let start = Uuid::new_v4();
+        let start = Uuid::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<MDerivationDependency>::new()])
             .into_connection();
@@ -79,10 +79,10 @@ mod tests {
 
     #[tokio::test]
     async fn walks_multiple_layers_breadth_first() {
-        let a = Uuid::new_v4(); // start
-        let b = Uuid::new_v4(); // depends on a
-        let c = Uuid::new_v4(); // depends on b
-        let d = Uuid::new_v4(); // depends on a (sibling of b)
+        let a = Uuid::now_v7(); // start
+        let b = Uuid::now_v7(); // depends on a
+        let c = Uuid::now_v7(); // depends on b
+        let d = Uuid::now_v7(); // depends on a (sibling of b)
 
         // Layer 1: dependents of {a}        → b, d
         // Layer 2: dependents of {b, d}     → c
@@ -102,8 +102,8 @@ mod tests {
 
     #[tokio::test]
     async fn cycles_terminate() {
-        let a = Uuid::new_v4();
-        let b = Uuid::new_v4();
+        let a = Uuid::now_v7();
+        let b = Uuid::now_v7();
         // Pathological cycle: b depends on a AND a depends on b. The visited
         // set must dedupe so the BFS terminates.
         let db = MockDatabase::new(DatabaseBackend::Postgres)

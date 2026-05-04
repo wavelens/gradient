@@ -239,7 +239,7 @@ pub async fn put(
         })?;
 
     let organization = AOrganization {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         name: Set(body.name.clone()),
         display_name: Set(body.display_name.trim().to_string()),
         description: Set(body.description.trim().to_string()),
@@ -255,7 +255,7 @@ pub async fn put(
     let organization = organization.insert(&state.web_db).await?;
 
     let organization_user = AOrganizationUser {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         organization: Set(organization.id),
         user: Set(user.id),
         role: Set(BASE_ROLE_ADMIN_ID),

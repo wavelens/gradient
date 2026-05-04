@@ -224,7 +224,7 @@ pub async fn update_evaluation_status_with_error(
     debug!(evaluation_id = %evaluation.id, status = ?status, error = %error_message, ?source, "Updating evaluation status with error");
 
     let msg = AEvaluationMessage {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         evaluation: Set(evaluation.id),
         level: Set(MessageLevel::Error),
         message: Set(error_message),
@@ -250,7 +250,7 @@ pub async fn record_evaluation_message(
     source: Option<String>,
 ) {
     let msg = AEvaluationMessage {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         evaluation: Set(evaluation_id),
         level: Set(level),
         message: Set(message),

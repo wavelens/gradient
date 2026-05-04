@@ -342,7 +342,7 @@ async fn create_or_update_user(
     }
 
     let new_user = AUser {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         username: Set(login_name),
         name: Set(display_name),
         email: Set(email),

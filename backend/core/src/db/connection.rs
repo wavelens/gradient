@@ -169,7 +169,7 @@ pub async fn add_features(
             f
         } else {
             let afeature = AFeature {
-                id: Set(Uuid::new_v4()),
+                id: Set(Uuid::now_v7()),
                 name: Set(f),
                 kind: Set(kind.clone()),
             };
@@ -182,7 +182,7 @@ pub async fn add_features(
 
         if let Some(d_id) = derivation_id {
             let aderivation_feature = ADerivationFeature {
-                id: Set(Uuid::new_v4()),
+                id: Set(Uuid::now_v7()),
                 derivation: Set(d_id),
                 feature: Set(feature.id),
             };

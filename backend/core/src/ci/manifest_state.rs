@@ -99,8 +99,8 @@ mod tests {
     #[test]
     fn issue_state_returns_unique_tokens() {
         let store = empty_state_store();
-        let a = issue_state(&store, Uuid::new_v4());
-        let b = issue_state(&store, Uuid::new_v4());
+        let a = issue_state(&store, Uuid::now_v7());
+        let b = issue_state(&store, Uuid::now_v7());
         assert_ne!(a, b);
         assert!(a.len() >= 32);
     }
@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn validate_and_consume_returns_user_then_fails_on_replay() {
         let store = empty_state_store();
-        let user = Uuid::new_v4();
+        let user = Uuid::now_v7();
         let s = issue_state(&store, user);
         assert_eq!(validate_and_consume(&store, &s), Some(user));
         assert_eq!(validate_and_consume(&store, &s), None);
@@ -126,16 +126,16 @@ mod tests {
         let stale = "stale-token".to_string();
         store.lock().unwrap().insert(
             stale.clone(),
-            (Uuid::new_v4(), Instant::now() - Duration::from_secs(11 * 60)),
+            (Uuid::now_v7(), Instant::now() - Duration::from_secs(11 * 60)),
         );
-        let _fresh = issue_state(&store, Uuid::new_v4());
+        let _fresh = issue_state(&store, Uuid::now_v7());
         assert!(!store.lock().unwrap().contains_key(&stale));
     }
 
     #[test]
     fn store_and_take_credentials_one_shot() {
         let store: PendingCredentialsStore = Mutex::new(HashMap::new());
-        let user = Uuid::new_v4();
+        let user = Uuid::now_v7();
         let creds = ManifestResult {
             id: 1,
             slug: "x".into(),
