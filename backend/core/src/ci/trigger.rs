@@ -191,6 +191,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
             log_id: Set(None),
             build_time_ms: Set(None),
             worker: Set(None),
+            via: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         };

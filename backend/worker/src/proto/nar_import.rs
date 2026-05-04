@@ -494,11 +494,40 @@ impl<'a> InputPrefetcher<'a> {
                     "closure walk: examining references"
                 );
             }
-            let refs: HashSet<String> = batch
+            let mut refs: HashSet<String> = batch
                 .iter()
                 .flat_map(|(_, _, meta)| meta.references.clone().unwrap_or_default())
                 .filter(|r| !queried.contains(r))
                 .collect();
+
+            // For every `.drv` we just fetched, parse it to discover its
+            // declared output paths. A .drv's `references` only enumerate
+            // its inputs (input drvs + sources) — never its own outputs —
+            // so without this step the closure walk misses the output
+            // store paths the dependent build will ultimately need (e.g.
+            // `closure-info` produced by `closure-info.drv`).
+            for (path, bytes, meta) in &batch {
+                if !path.ends_with(".drv") {
+                    continue;
+                }
+                let compression = meta
+                    .url
+                    .as_deref()
+                    .map(detect_compression)
+                    .unwrap_or(Compression::Zstd);
+                for out_path in
+                    drv_outputs_from_compressed_nar(bytes, compression, path).await
+                {
+                    if !queried.contains(&out_path) {
+                        tracing::trace!(
+                            drv = %path,
+                            out = %out_path,
+                            "closure walk: discovered drv output"
+                        );
+                        refs.insert(out_path);
+                    }
+                }
+            }
 
             all_results.extend(batch);
 
@@ -811,6 +840,65 @@ fn decompress(compressed: &[u8], kind: Compression) -> Result<Vec<u8>> {
         Compression::Xz => decompress_xz(compressed),
         Compression::Bzip2 => decompress_bzip2(compressed),
     }
+}
+
+/// Extract the single regular-file payload from a NAR. `.drv` files are
+/// stored as exactly that, so this is enough to recover the .drv bytes
+/// without writing them to disk first.
+async fn extract_single_file_from_nar(nar_bytes: &[u8]) -> Result<Vec<u8>> {
+    use futures::StreamExt as _;
+    use harmonia_nar::{NarEvent, parse_nar};
+    use tokio::io::AsyncReadExt as _;
+
+    let cursor = std::io::Cursor::new(nar_bytes.to_vec());
+    let mut stream = std::pin::pin!(parse_nar(cursor));
+    let event = stream
+        .next()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("NAR is empty"))??;
+    match event {
+        NarEvent::File { mut reader, .. } => {
+            let mut buf = Vec::new();
+            reader.read_to_end(&mut buf).await.context("read NAR file body")?;
+            Ok(buf)
+        }
+        _ => Err(anyhow::anyhow!("expected single regular file in NAR")),
+    }
+}
+
+/// Decompress a `.drv`'s NAR, parse it, and return its declared output store
+/// paths. Returns an empty vec on any failure — the caller proceeds with what
+/// it has so a transient parse problem does not stall the closure walk.
+async fn drv_outputs_from_compressed_nar(
+    compressed: &[u8],
+    compression: Compression,
+    drv_path: &str,
+) -> Vec<String> {
+    let nar = match decompress(compressed, compression) {
+        Ok(b) => b,
+        Err(e) => {
+            warn!(drv = %drv_path, error = %e, "decompress failed while harvesting drv outputs");
+            return Vec::new();
+        }
+    };
+    let drv_bytes = match extract_single_file_from_nar(&nar).await {
+        Ok(b) => b,
+        Err(e) => {
+            warn!(drv = %drv_path, error = %e, "could not extract drv file from NAR");
+            return Vec::new();
+        }
+    };
+    let drv = match parse_drv(&drv_bytes) {
+        Ok(d) => d,
+        Err(e) => {
+            warn!(drv = %drv_path, error = %e, "could not parse fetched .drv");
+            return Vec::new();
+        }
+    };
+    drv.outputs
+        .into_iter()
+        .filter_map(|o| (!o.path.is_empty()).then_some(o.path))
+        .collect()
 }
 
 fn decompress_zstd(compressed: &[u8]) -> Result<Vec<u8>> {
