@@ -77,6 +77,7 @@ fn make_build(id: Uuid, eval_id: Uuid, drv_id: Uuid, status: BuildStatus) -> MBu
         build_time_ms: None,
         worker: None,
         via: None,
+        external_cached: false,
         created_at: test_date(),
         updated_at: test_date(),
     }

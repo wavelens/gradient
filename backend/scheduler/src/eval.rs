@@ -214,6 +214,7 @@ impl<'a> EvalResultProcessor<'a> {
             .copied()
             .filter(|id| !truly_substituted.contains(id))
             .collect();
+
         let leader_for_drv = if buildable_drv_ids.is_empty() {
             HashMap::new()
         } else {
@@ -224,16 +225,26 @@ impl<'a> EvalResultProcessor<'a> {
             let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
                 continue;
             };
-            let status = if truly_substituted.contains(&drv_id) {
-                BuildStatus::Substituted
+            // Three-way classification:
+            //  - In our cache (`truly_substituted`)  → Substituted, no work
+            //  - Worker says cached but our cache lacks it → upstream-only;
+            //    Created + external_cached so the worker fetches from
+            //    upstream and pushes to our cache instead of rebuilding
+            //  - Otherwise → plain rebuild
+            let (status, external_cached) = if truly_substituted.contains(&drv_id) {
+                (BuildStatus::Substituted, false)
+            } else if d.substituted {
+                (BuildStatus::Created, true)
             } else {
-                BuildStatus::Created
+                (BuildStatus::Created, false)
             };
+
             let via = if matches!(status, BuildStatus::Substituted) {
                 None
             } else {
                 leader_for_drv.get(&drv_id).copied()
             };
+
             builds.push(ABuild {
                 id: Set(Uuid::now_v7()),
                 evaluation: Set(self.evaluation_id),
@@ -243,6 +254,7 @@ impl<'a> EvalResultProcessor<'a> {
                 build_time_ms: Set(None),
                 worker: Set(None),
                 via: Set(via),
+                external_cached: Set(external_cached),
                 created_at: Set(now),
                 updated_at: Set(now),
             });
@@ -299,6 +311,7 @@ impl<'a> EvalResultProcessor<'a> {
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
+
         let fully_cached_ids: std::collections::HashSet<Uuid> = if cached_path_ids.is_empty() {
             std::collections::HashSet::new()
         } else {
@@ -497,25 +510,38 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uui
 
     // Recursive CTE: seed = direct deps of substituted builds in this eval;
     // recurse through derivation_dependency until the closure is exhausted.
-    // The outer SELECT filters to derivations without a build row yet.
+    // The outer SELECT filters to derivations without a build row yet, and
+    // tags each result with the kind of seed it descends from:
+    //  - 'sub' — reached from a `Substituted` (status=7) build; outputs are
+    //    in our cache, transitive deps are too (Nix substitution invariant)
+    //  - 'ext' — reached from a `Created + external_cached = true` build;
+    //    outputs are in upstream only, transitive deps too. New rows for
+    //    these get inserted with `external_cached = true` so the worker
+    //    fetches them from upstream rather than trying to rebuild.
+    //
+    // When a drv is reachable via both kinds of seed simultaneously, prefer
+    // 'sub' (already retrievable from our cache).
     let find_sql = sea_orm::Statement::from_sql_and_values(
         sea_orm::DbBackend::Postgres,
         r#"
-        WITH RECURSIVE sub_closure(drv_id) AS (
-            SELECT DISTINCT dd.dependency
+        WITH RECURSIVE sub_closure(drv_id, kind) AS (
+            SELECT DISTINCT dd.dependency,
+                CASE WHEN b.status = 7 THEN 'sub' ELSE 'ext' END
             FROM build b
             JOIN derivation_dependency dd ON dd.derivation = b.derivation
-            WHERE b.evaluation = $1 AND b.status = 7
+            WHERE b.evaluation = $1
+              AND (b.status = 7 OR b.external_cached = TRUE)
             UNION
-            SELECT dd2.dependency
+            SELECT dd2.dependency, sc.kind
             FROM derivation_dependency dd2
             JOIN sub_closure sc ON sc.drv_id = dd2.derivation
         )
-        SELECT DISTINCT sc.drv_id
+        SELECT sc.drv_id, MIN(sc.kind) AS kind
         FROM sub_closure sc
         WHERE NOT EXISTS (
             SELECT 1 FROM build WHERE derivation = sc.drv_id AND evaluation = $1
         )
+        GROUP BY sc.drv_id
         "#,
         [evaluation_id.into()],
     );
@@ -533,15 +559,23 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uui
     let builds: Vec<ABuild> = rows
         .iter()
         .filter_map(|row| {
-            row.try_get::<Uuid>("", "drv_id").ok().map(|drv_id| ABuild {
+            let drv_id = row.try_get::<Uuid>("", "drv_id").ok()?;
+            let kind = row.try_get::<String>("", "kind").ok()?;
+            let (status, external_cached) = if kind == "sub" {
+                (BuildStatus::Substituted, false)
+            } else {
+                (BuildStatus::Created, true)
+            };
+            Some(ABuild {
                 id: Set(Uuid::now_v7()),
                 evaluation: Set(evaluation_id),
                 derivation: Set(drv_id),
-                status: Set(BuildStatus::Substituted),
+                status: Set(status),
                 log_id: Set(None),
                 build_time_ms: Set(None),
                 worker: Set(None),
                 via: Set(None),
+                external_cached: Set(external_cached),
                 created_at: Set(now),
                 updated_at: Set(now),
             })
@@ -574,6 +608,7 @@ pub async fn handle_eval_result(
         .one(&state.worker_db)
         .await
         .context("fetch evaluation")?;
+
     let evaluation = match current {
         Some(e) if e.status == EvaluationStatus::Aborted => {
             info!(%evaluation_id, "evaluation aborted; discarding worker result");
@@ -605,8 +640,10 @@ pub async fn handle_eval_result(
 
     proc.insert_build_rows(&derivations, &drv_path_to_id)
         .await?;
+
     proc.add_system_features(&derivations, &drv_path_to_id)
         .await;
+
     proc.record_eval_messages(&warnings, &errors).await;
 
     // Errors are stored as evaluation_message rows and will cause

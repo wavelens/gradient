@@ -14,10 +14,13 @@ use anyhow::Result;
 use sea_orm::EntityTrait;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+use entity::build::BuildStatus;
+use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
 
 use gradient_core::types::proto::{
     BuildOutput, CandidateScore, DiscoveredDerivation, JobCandidate, JobKind,
 };
+
 use gradient_core::types::*;
 
 use crate::Scheduler;
@@ -260,8 +263,7 @@ impl Scheduler {
                 return;
             }
         };
-        use entity::build::BuildStatus;
-        use sea_orm::{ActiveModelTrait, IntoActiveModel, Set};
+
         match EBuild::find_by_id(build_id).one(&self.state.worker_db).await {
             Ok(Some(build)) => {
                 // Record which worker is handling this build. Persisting here

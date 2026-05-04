@@ -79,6 +79,13 @@ pub struct Model {
     /// finishes. Same-organization only — followers always share a `derivation`
     /// row with their leader.
     pub via: Option<Uuid>,
+    /// `true` when the build's outputs are known to be available from an
+    /// upstream cache (cache.nixos.org etc.) but are not yet in the gradient
+    /// cache. The dispatcher hands these jobs to a worker which downloads
+    /// from upstream, recompresses, and pushes to our cache instead of
+    /// running an actual `nix build`. Always `false` for `Substituted`
+    /// rows (those are already in our cache) and for plain rebuild jobs.
+    pub external_cached: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }

@@ -110,6 +110,7 @@ fn make_build_queued(id: Uuid, eval_id: Uuid, drv_id: Uuid) -> MBuild {
         build_time_ms: None,
         worker: None,
         via: None,
+        external_cached: false,
         created_at: test_date(),
         updated_at: test_date(),
     }
