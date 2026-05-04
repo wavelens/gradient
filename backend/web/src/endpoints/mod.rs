@@ -30,6 +30,7 @@ pub fn content_type_for_filename(filename: &str) -> &'static str {
         .extension()
         .and_then(|ext| ext.to_str())
     {
+        Some("html") | Some("htm") => "text/html",
         Some("tar") => "application/x-tar",
         Some("gz") => "application/gzip",
         Some("zst") => "application/zstd",
@@ -125,6 +126,8 @@ mod tests {
 
     #[test]
     fn content_type_for_known_extensions() {
+        assert_eq!(content_type_for_filename("x.html"), "text/html");
+        assert_eq!(content_type_for_filename("x.htm"), "text/html");
         assert_eq!(content_type_for_filename("x.tar"), "application/x-tar");
         assert_eq!(content_type_for_filename("x.gz"), "application/gzip");
         assert_eq!(content_type_for_filename("x.zst"), "application/zstd");

@@ -36,10 +36,12 @@
           <a
             class="download-btn"
             [href]="downloadUrl(artefact)"
-            [title]="'Download ' + artefact.name"
+            [attr.target]="artefact.file_type === 'html' ? '_blank' : null"
+            [attr.rel]="artefact.file_type === 'html' ? 'noopener noreferrer' : null"
+            [title]="(artefact.file_type === 'html' ? 'Open ' : 'Download ') + artefact.name"
           >
-            <span class="material-symbols-outlined">download</span>
-            <span>Download</span>
+            <span class="material-symbols-outlined">{{ artefact.file_type === 'html' ? 'open_in_new' : 'download' }}</span>
+            <span>{{ artefact.file_type === 'html' ? 'Open' : 'Download' }}</span>
           </a>
         </div>
       }

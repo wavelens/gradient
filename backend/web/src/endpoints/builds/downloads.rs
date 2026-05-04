@@ -144,6 +144,12 @@ async fn find_and_serve_file(
             }
         };
 
+        let disposition = if product.file_type == "html" {
+            "inline".to_string()
+        } else {
+            format!("attachment; filename=\"{}\"", filename)
+        };
+
         match extract_path_from_nar_bytes(compressed, &rel).await {
             Ok(Extracted::File { contents, .. }) => {
                 tracing::info!(%build_id, %filename, file_size = contents.len(), "Successfully extracted file for download");
@@ -152,10 +158,7 @@ async fn find_and_serve_file(
                         StatusCode::OK,
                         [
                             (header::CONTENT_TYPE, content_type_for_filename(filename)),
-                            (
-                                header::CONTENT_DISPOSITION,
-                                &format!("attachment; filename=\"{}\"", filename),
-                            ),
+                            (header::CONTENT_DISPOSITION, disposition.as_str()),
                         ],
                         contents,
                     )

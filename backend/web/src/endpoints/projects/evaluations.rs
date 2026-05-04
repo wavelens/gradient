@@ -513,6 +513,12 @@ async fn serve_hydra_artifact(
             }
         };
 
+        let disposition = if product.file_type == "html" {
+            "inline".to_string()
+        } else {
+            format!("attachment; filename=\"{}\"", filename)
+        };
+
         match extract_path_from_nar_bytes(compressed, &rel).await {
             Ok(Extracted::File { contents, .. }) => {
                 return Ok(Some(
@@ -520,10 +526,7 @@ async fn serve_hydra_artifact(
                         StatusCode::OK,
                         [
                             (header::CONTENT_TYPE, content_type_for_filename(filename)),
-                            (
-                                header::CONTENT_DISPOSITION,
-                                &format!("attachment; filename=\"{}\"", filename),
-                            ),
+                            (header::CONTENT_DISPOSITION, disposition.as_str()),
                         ],
                         contents,
                     )
