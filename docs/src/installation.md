@@ -52,8 +52,8 @@ In your `configuration.nix`:
     jwtSecretFile   = "/var/lib/gradient/jwt-secret";   # random alphanumeric RS256 secret
 
     # Convenience options
-    configurePostgres = true;
-    configureNginx    = true;
+    configurePostgres         = true;
+    reverseProxy.nginx.enable = true;
   };
 }
 ```

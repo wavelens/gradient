@@ -48,7 +48,32 @@ in {
   options = {
     services.gradient = {
       enable = lib.mkEnableOption "Gradient";
-      configureNginx = lib.mkEnableOption "Nginx configuration";
+      reverseProxy = {
+        nginx.enable = lib.mkEnableOption "nginx configuration";
+        caddy = {
+          enable = lib.mkEnableOption "caddy configuration";
+          useACMEHost = lib.mkOption {
+            description = ''
+              A host of an existing Let’s Encrypt certificate to use.
+
+              This options is directly passed to `services.caddy.virtualHosts.<name>.useACMEHost`
+              and therefore does not create an ACME certificate.
+            '';
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+          };
+          extraConfig = lib.mkOption {
+            description = ''
+              Additional lines of configuration passed to
+              `services.caddy.virtualHosts.<name>.extraConfig` 
+              after the reverse proxy setup.
+            '';
+            type = lib.types.lines;
+            default = "";
+          };
+        };
+      };
+      configureCaddy = lib.mkEnableOption "Caddy configuration";
       configurePostgres = lib.mkEnableOption "PostgreSQL configuration";
       reportErrors = lib.mkEnableOption "error reporting to Sentry";
       useTls = lib.mkEnableOption "TLS" // { default = true; };
@@ -323,6 +348,10 @@ in {
         assertion = cfg.proto.federate -> cfg.discoverable;
         message = "proto.federate requires discoverable to be enabled";
       }
+      {
+        assertion = !(cfg.reverseProxy.nginx && cfg.reverseProxy.caddy);
+        message = "You can only use one reverse proxy at a time";
+      }
     ];
 
     systemd.services.gradient-server = {
@@ -443,7 +472,7 @@ in {
     };
 
     services = {
-      nginx = lib.mkIf cfg.configureNginx {
+      nginx = lib.mkIf cfg.reverseProxy.nginx.enable {
         enable = true;
         virtualHosts."${cfg.domain}" = {
           enableACME = cfg.useTls;
@@ -457,12 +486,12 @@ in {
             };
 
             "/api/" = {
-              proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
+              proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
               proxyWebsockets = true;
             };
 
             "/proto" = lib.mkIf (cfg.discoverable && cfg.proto.public) {
-              proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
+              proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
               proxyWebsockets = true;
               extraConfig = ''
                 proxy_connect_timeout 90d;
@@ -472,10 +501,35 @@ in {
             };
 
             "/cache/" = {
-              proxyPass = "http://127.0.0.1:${toString config.services.gradient.port}";
+              proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
               proxyWebsockets = true;
             };
           };
+        };
+      };
+
+      caddy = lib.mkIf cfg.reverseProxy.caddy.enable {
+        enable = true;
+        virtualHosts."${if cfg.useTls then "" else "http://"}${cfg.domain}" = {
+          useACMEHost = cfg.reverseProxy.caddy.useACMEHost;
+          extraConfig = ''
+            @backend {
+              path_regexp api ^/(api|proto|cache)(/.*)?$
+            }
+            reverse_proxy @backend http://${cfg.listenAddr}:${toString cfg.port}
+
+            ${
+              if cfg.frontend.enable then
+                ''
+                  root ${cfg.frontend.package}/share/gradient-frontend
+                  file_server
+                ''
+              else
+                ""
+            }
+
+            ${cfg.reverseProxy.caddy.extraConfig}
+          '';
         };
       };
 
