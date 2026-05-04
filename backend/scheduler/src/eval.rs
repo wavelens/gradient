@@ -184,6 +184,14 @@ impl<'a> EvalResultProcessor<'a> {
     }
 
     /// Insert `ABuild` rows for each newly-discovered derivation.
+    ///
+    /// `Substituted` status is decided server-side from the actual cache
+    /// state — a drv is Substituted iff *every* `derivation_output` row for
+    /// it links to a `cached_path` whose `file_hash IS NOT NULL`. The
+    /// worker's `substituted` flag is treated as a hint for its own
+    /// scheduling and is ignored here, so a stale or lying `cached_path`
+    /// row can never make us skip a build whose bytes aren't actually
+    /// retrievable.
     async fn insert_build_rows(
         &self,
         derivations: &[DiscoveredDerivation],
@@ -192,25 +200,31 @@ impl<'a> EvalResultProcessor<'a> {
         let now = gradient_core::types::now();
         let mut builds: Vec<ABuild> = Vec::new();
 
-        let drv_ids: Vec<Uuid> = derivations
+        let all_drv_ids: Vec<Uuid> = derivations
             .iter()
-            .filter(|d| !d.substituted)
             .filter_map(|d| drv_path_to_id.get(&d.drv_path).copied())
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
 
-        let leader_for_drv = if drv_ids.is_empty() {
+        let truly_substituted = self.compute_truly_substituted(&all_drv_ids).await?;
+
+        let buildable_drv_ids: Vec<Uuid> = all_drv_ids
+            .iter()
+            .copied()
+            .filter(|id| !truly_substituted.contains(id))
+            .collect();
+        let leader_for_drv = if buildable_drv_ids.is_empty() {
             HashMap::new()
         } else {
-            find_active_leaders(self.state, &drv_ids).await
+            find_active_leaders(self.state, &buildable_drv_ids).await
         };
 
         for d in derivations {
             let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
                 continue;
             };
-            let status = if d.substituted {
+            let status = if truly_substituted.contains(&drv_id) {
                 BuildStatus::Substituted
             } else {
                 BuildStatus::Created
@@ -255,6 +269,73 @@ impl<'a> EvalResultProcessor<'a> {
         }
 
         Ok(())
+    }
+
+    /// Return the subset of `drv_ids` whose every `derivation_output` row
+    /// links to a `cached_path` with `file_hash IS NOT NULL`. These are the
+    /// drvs the server can confidently mark `Substituted` — anything else
+    /// must be built (or substituted later when the bytes show up).
+    async fn compute_truly_substituted(
+        &self,
+        drv_ids: &[Uuid],
+    ) -> Result<std::collections::HashSet<Uuid>> {
+        if drv_ids.is_empty() {
+            return Ok(std::collections::HashSet::new());
+        }
+
+        let outputs = EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.is_in(drv_ids.to_vec()))
+            .all(&self.state.worker_db)
+            .await
+            .context("compute_truly_substituted: load derivation_output")?;
+
+        if outputs.is_empty() {
+            return Ok(std::collections::HashSet::new());
+        }
+
+        let cached_path_ids: Vec<Uuid> = outputs
+            .iter()
+            .filter_map(|o| o.cached_path)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        let fully_cached_ids: std::collections::HashSet<Uuid> = if cached_path_ids.is_empty() {
+            std::collections::HashSet::new()
+        } else {
+            ECachedPath::find()
+                .filter(CCachedPath::Id.is_in(cached_path_ids))
+                .all(&self.state.worker_db)
+                .await
+                .context("compute_truly_substituted: load cached_path")?
+                .into_iter()
+                .filter(|cp| cp.is_fully_cached())
+                .map(|cp| cp.id)
+                .collect()
+        };
+
+        // Group outputs by drv. A drv is truly substituted iff it has at
+        // least one output AND every output is linked to a fully-cached
+        // cached_path. Drvs without any derivation_output rows yet (eval
+        // racing with another worker) fall through as not-substituted.
+        let mut outputs_by_drv: HashMap<Uuid, Vec<&MDerivationOutput>> = HashMap::new();
+        for o in &outputs {
+            outputs_by_drv.entry(o.derivation).or_default().push(o);
+        }
+
+        let mut substituted = std::collections::HashSet::new();
+        for (drv_id, outs) in outputs_by_drv {
+            let all_present = !outs.is_empty()
+                && outs.iter().all(|o| {
+                    o.is_cached
+                        && o.cached_path
+                            .map(|cp| fully_cached_ids.contains(&cp))
+                            .unwrap_or(false)
+                });
+            if all_present {
+                substituted.insert(drv_id);
+            }
+        }
+        Ok(substituted)
     }
 
     /// Record per-derivation system-feature requirements in the DB.
