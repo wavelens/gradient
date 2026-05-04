@@ -20,7 +20,7 @@ pub async fn get_workers(
 ) -> WebResult<Json<BaseResponse<Vec<WorkerInfo>>>> {
     if !state.config.proto.global_stats_public && !user.superuser {
         return Err(WebError::forbidden(
-            "workers endpoint requires superuser".into(),
+            "workers endpoint requires superuser",
         ));
     }
     let workers = scheduler.workers_info().await;

@@ -106,7 +106,7 @@ pub async fn put(
             "Webhook URL cannot be empty.".to_string(),
         ));
     }
-    validate_webhook_url(&body.url).map_err(WebError::BadRequest)?;
+    validate_webhook_url(&body.url).map_err(WebError::bad_request)?;
     if body.secret.is_empty() {
         return Err(WebError::bad_request(
             "Webhook secret cannot be empty.".to_string(),
@@ -166,7 +166,7 @@ pub async fn patch_webhook(
         active_webhook.name = Set(name);
     }
     if let Some(url) = body.url {
-        validate_webhook_url(&url).map_err(WebError::BadRequest)?;
+        validate_webhook_url(&url).map_err(WebError::bad_request)?;
         active_webhook.url = Set(url);
     }
     if let Some(secret) = body.secret {

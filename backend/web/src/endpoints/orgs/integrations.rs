@@ -190,8 +190,7 @@ pub async fn put_integration(
     if matches!(forge, ForgeType::GitHub) {
         return Err(WebError::bad_request(
             "GitHub integrations are managed through the server-wide GitHub App; \
-             enable the App on the organization instead of creating an integration row."
-                .into(),
+             enable the App on the organization instead of creating an integration row.",
         ));
     }
 
@@ -330,8 +329,7 @@ pub async fn patch_integration(
         if matches!(parsed, ForgeType::GitHub) {
             return Err(WebError::bad_request(
                 "GitHub integrations are managed through the server-wide GitHub App; \
-                 enable the App on the organization instead of switching forge_type to github."
-                    .into(),
+                 enable the App on the organization instead of switching forge_type to github.",
             ));
         }
         active.forge_type = Set(parsed.as_i16());
