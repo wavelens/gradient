@@ -98,7 +98,7 @@ in {
         services = {
           gradient = {
             enable = true;
-            configureNginx = true;
+            reverseProxy.nginx.enable = true;
             configurePostgres = true;
             domain = "gradient.local";
             proto.public = true;

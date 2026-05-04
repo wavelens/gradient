@@ -51,14 +51,14 @@ echo "*:$(cat /run/secrets/gradient-worker-token)" > /run/secrets/gradient-worke
 ```nix
 {
   services.gradient = {
-    enable            = true;
-    frontend.enable   = true;
-    domain            = "gradient.example.com";
-    jwtSecretFile     = "/run/secrets/gradient-jwt";
-    cryptSecretFile   = "/run/secrets/gradient-crypt";
-    configurePostgres = true;
-    configureNginx    = true;
-    reportErrors      = true; # optional: will send crash reports to us
+    enable                    = true;
+    frontend.enable           = true;
+    domain                    = "gradient.example.com";
+    jwtSecretFile             = "/run/secrets/gradient-jwt";
+    cryptSecretFile           = "/run/secrets/gradient-crypt";
+    configurePostgres         = true;
+    reverseProxy.nginx.enable = true;
+    reportErrors              = true; # optional: will send crash reports to us
   };
 
   services.gradient.worker = {

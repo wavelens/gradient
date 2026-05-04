@@ -34,11 +34,35 @@ in {
       };
     };
 
-    configureNginx = lib.mkEnableOption "Nginx reverse proxy for the worker listener";
+    reverseProxy = {
+      nginx.enable = lib.mkEnableOption "Nginx reverse proxy for the worker listener";
+      caddy = {
+        enable = lib.mkEnableOption "Caddy reverse proxy for the worker listener";
+        useACMEHost = lib.mkOption {
+          description = ''
+            A host of an existing Let’s Encrypt certificate to use.
+
+            This options is directly passed to `services.caddy.virtualHosts.<name>.useACMEHost`
+            and therefore does not create an ACME certificate.
+          '';
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+        };
+        extraConfig = lib.mkOption {
+          description = ''
+            Additional lines of configuration passed to
+            `services.caddy.virtualHosts.<name>.extraConfig` 
+            after the reverse proxy setup.
+          '';
+          type = lib.types.lines;
+          default = "";
+        };
+      };
+    };
     useTls = lib.mkEnableOption "TLS" // { default = true; };
     discoverable = lib.mkEnableOption "accept incoming connections on /proto";
     domain = lib.mkOption {
-      description = "Domain under which the worker's nginx vhost is served. Only used when configureNginx is enabled";
+      description = "Domain under which the worker's nginx vhost is served. Only used when a reverseProxy is enabled";
       type = lib.types.str;
       default = "";
       example = "worker.example.com";
@@ -213,10 +237,16 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
-    assertions = [{
-      assertion = cfg.capabilities.federate -> cfg.discoverable;
-      message = "services.gradient.worker: capabilities.federate requires discoverable to be enabled";
-    }];
+    assertions = [
+      {
+        assertion = cfg.capabilities.federate -> cfg.discoverable;
+        message = "services.gradient.worker: capabilities.federate requires discoverable to be enabled";
+      }
+      {
+        assertion = !(cfg.reverseProxy.nginx.enable && cfg.reverseProxy.caddy.enable);
+        message = "You can only use one reverse proxy at a time";
+      }
+    ];
 
     systemd = {
       tmpfiles.settings."10-gradient"."/nix/var/nix/gcroots/gradient".d = {
@@ -314,18 +344,29 @@ in {
       ];
     };
 
-    services.nginx = lib.mkIf cfg.configureNginx {
-      enable = true;
-      virtualHosts."${cfg.domain}" = {
-        enableACME = cfg.useTls;
-        forceSSL = cfg.useTls;
-        locations."/proto" = {
-          proxyPass = "http://${cfg.listenAddr}:${toString cfg.port}";
-          proxyWebsockets = true;
+    services = {
+      nginx = lib.mkIf cfg.reverseProxy.nginx.enable {
+        enable = true;
+        virtualHosts."${cfg.domain}" = {
+          enableACME = cfg.useTls;
+          forceSSL = cfg.useTls;
+          locations."/proto" = {
+            proxyPass = "http://${cfg.listenAddr}:${toString cfg.port}";
+            proxyWebsockets = true;
+            extraConfig = ''
+              proxy_connect_timeout 90d;
+              proxy_send_timeout 90d;
+              proxy_read_timeout 90d;
+            '';
+          };
+        };
+      };
+      caddy = lib.mkIf cfg.reverseProxy.caddy.enable {
+        enable = true;
+        virtualHosts."${if cfg.useTls then "" else "http://"}${cfg.domain}" = {
+          useACMEHost = cfg.reverseProxy.caddy.useACMEHost;
           extraConfig = ''
-            proxy_connect_timeout 90d;
-            proxy_send_timeout 90d;
-            proxy_read_timeout 90d;
+            reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}
           '';
         };
       };

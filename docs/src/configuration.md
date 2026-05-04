@@ -9,14 +9,14 @@ services.gradient = {
   enable            = true;
   frontend.enable   = true;
   configurePostgres = true;
-  configureNginx    = true;
+  reverseProxy.nginx.enable = true;
   domain            = "gradient.example.com";
   jwtSecretFile     = "/run/secrets/gradient-jwt";
   cryptSecretFile   = "/run/secrets/gradient-crypt";
 };
 ```
 
-`configurePostgres` creates a local PostgreSQL database and user. `configureNginx` adds a virtual host that proxies `/api/`, `/proto`, and `/cache/` to the backend and serves the frontend SPA.
+`configurePostgres` creates a local PostgreSQL database and user. `reverseProxy` adds a virtual host that proxies `/api/`, `/proto`, and `/cache/` to the backend and serves the frontend SPA (either with `nginx` or `caddy` as a reverse proxy)
 
 ## Secrets
 
@@ -57,6 +57,40 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.enableRegistration` | `true` | Allow new user self-registration |
 | `settings.deleteState` | `true` | Remove entities no longer in `state` (see below) |
 | `settings.cacheTtlHours` | `336` | TTL in hours for cached NARs not fetched recently (0 = disabled) |
+
+## Reverse Proxies
+
+The Gradient server does not come with a built-in http server for the frontend. 
+Therefore a reverse proxy / webserver is needed for hosting.
+The nixos module provides two preconfigured reverse proxies:
+- `nginx`
+- `caddy`
+
+### Nginx
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `reverseProxy.nginx.enable` | `false` | Whether to enable nginx as the reverse proxy |
+
+### Caddy
+
+!!! note
+    To match the upstream `services.caddy` configuration you have to manage the ACME host certificate yourself.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `reverseProxy.caddy.enable` | `false` | Whether to enable caddy as the reverse proxy |
+| `reverseProxy.caddy.useACMEHost` | `null` | Passed directly to [`services.caddy.virtualHosts.<name>.useACMEHost`](https://search.nixos.org/options?channel=unstable&query=services.caddy.virtualHosts.&show=option:services.caddy.virtualHosts.%3Cname%3E.useACMEHost) |
+| `reversePorxy.caddy.extraConfig` | `""` | Caddy config options written to [`services.caddy.virtualHosts.<name>.extraConfig`](https://search.nixos.org/options?channel=unstable&query=services.caddy.virtualHosts.&show=option:services.caddy.virtualHosts.%3Cname%3E.extraConfig) after the reverse proxy setup |
+
+### Custom Reverse Proxy
+
+If you want to use your own reverse proxy you have to setup redirects as follows:
+- `https://example.com/api` _(with all subpaths)_ -> `http://${ADDR}:${PORT}/api`
+- `https://example.com/proto` -> `http://${ADDR}:${PORT}/proto` _(must support websockets)_
+- `https://example.com/cache` _(with all subpaths)_ -> `http://${ADDR}:${PORT}/cache`
+All other requests should be handled by a static webserver hosting the files at:
+- `${pkgs.gradient-frontend}/share/gradient-frontend`
 
 ## OIDC
 
