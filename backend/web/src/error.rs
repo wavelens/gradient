@@ -4,230 +4,337 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+//! Web-layer error type.
+//!
+//! `WebError` collapses every failure mode the HTTP layer can produce into one
+//! variant per HTTP status, plus a single `Internal` variant for chained
+//! source errors. Each non-internal variant carries a stable [`ErrorCode`]
+//! slug that is emitted in the JSON response body so clients can
+//! programmatically branch on failures without parsing English prose.
+//!
+//! Construct errors through the `bad_request`, `not_found`, … helper
+//! constructors (which set sensible default codes) or pass an explicit
+//! [`ErrorCode`] for finer-grained semantics.
+
 use anyhow::Error as AnyhowError;
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use gradient_core::types::BaseResponse;
 use sea_orm::DbErr;
+use serde::Serialize;
 use std::fmt;
+use thiserror::Error;
 
-#[derive(Debug)]
-pub enum WebError {
-    BadRequest(String),
-    Unauthorized(String),
-    Forbidden(String),
-    NotFound(String),
-    Conflict(String),
-    UnprocessableEntity(String),
-    InternalServerError(String),
-    ServiceUnavailable(String),
-    Database(DbErr),
-    Validation(String),
-    Authentication(String),
-    InputValidation(gradient_core::types::input::InputError),
-    JsonParsing(JsonRejection),
-    Internal(AnyhowError),
+/// Stable, machine-readable error slug returned in the JSON body alongside
+/// the HTTP status. Codes are intentionally `&'static str` so they cost
+/// nothing and can be exhaustively listed in API docs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct ErrorCode(pub &'static str);
+
+impl ErrorCode {
+    // 400 Bad Request
+    pub const BAD_REQUEST: Self = Self("bad_request");
+    pub const VALIDATION: Self = Self("validation");
+    pub const INPUT_VALIDATION: Self = Self("input_validation");
+    pub const JSON_PARSING: Self = Self("json_parsing");
+    pub const INVALID_NAME: Self = Self("invalid_name");
+    pub const INVALID_EMAIL: Self = Self("invalid_email");
+    pub const INVALID_PASSWORD: Self = Self("invalid_password");
+    pub const INVALID_USERNAME: Self = Self("invalid_username");
+    pub const INVALID_OAUTH_CODE: Self = Self("invalid_oauth_code");
+    pub const OAUTH_DISABLED: Self = Self("oauth_disabled");
+    pub const REGISTRATION_DISABLED: Self = Self("registration_disabled");
+
+    // 401 Unauthorized
+    pub const UNAUTHORIZED: Self = Self("unauthorized");
+    pub const AUTHENTICATION: Self = Self("authentication");
+    pub const INVALID_CREDENTIALS: Self = Self("invalid_credentials");
+    pub const OAUTH_REQUIRED: Self = Self("oauth_required");
+
+    // 403 Forbidden
+    pub const FORBIDDEN: Self = Self("forbidden");
+    pub const SUPERUSER_REQUIRED: Self = Self("superuser_required");
+
+    // 404 Not Found
+    pub const NOT_FOUND: Self = Self("not_found");
+
+    // 409 Conflict
+    pub const CONFLICT: Self = Self("conflict");
+    pub const ALREADY_EXISTS: Self = Self("already_exists");
+
+    // 422 Unprocessable Entity
+    pub const UNPROCESSABLE_ENTITY: Self = Self("unprocessable_entity");
+
+    // 500 Internal Server Error
+    pub const INTERNAL: Self = Self("internal");
+    pub const DATABASE: Self = Self("database");
+    pub const DATA_INCONSISTENCY: Self = Self("data_inconsistency");
+    pub const TOKEN_GENERATION_FAILED: Self = Self("token_generation_failed");
+    pub const USER_UPDATE_FAILED: Self = Self("user_update_failed");
+    pub const SSH_KEY_GENERATION_FAILED: Self = Self("ssh_key_generation_failed");
+
+    // 503 Service Unavailable
+    pub const SERVICE_UNAVAILABLE: Self = Self("service_unavailable");
+
+    #[inline]
+    pub const fn as_str(&self) -> &'static str {
+        self.0
+    }
 }
 
-impl fmt::Display for WebError {
+impl fmt::Display for ErrorCode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum WebError {
+    #[error("Bad Request [{0}]: {1}")]
+    BadRequest(ErrorCode, String),
+    #[error("Unauthorized [{0}]: {1}")]
+    Unauthorized(ErrorCode, String),
+    #[error("Forbidden [{0}]: {1}")]
+    Forbidden(ErrorCode, String),
+    #[error("Not Found [{0}]: {1}")]
+    NotFound(ErrorCode, String),
+    #[error("Conflict [{0}]: {1}")]
+    Conflict(ErrorCode, String),
+    #[error("Unprocessable Entity [{0}]: {1}")]
+    UnprocessableEntity(ErrorCode, String),
+    #[error("Service Unavailable [{0}]: {1}")]
+    ServiceUnavailable(ErrorCode, String),
+    #[error(transparent)]
+    Internal(#[from] AnyhowError),
+}
+
+pub type WebResult<T> = Result<T, WebError>;
+
+/// JSON response body emitted for every `WebError`. Adds a stable `code`
+/// alongside the existing `error`/`message` fields so clients can branch
+/// without parsing prose.
+#[derive(Serialize)]
+struct ErrorResponseBody<'a> {
+    error: bool,
+    code: ErrorCode,
+    message: &'a str,
+}
+
+impl WebError {
+    /// HTTP status this error maps to.
+    pub fn status(&self) -> StatusCode {
         match self {
-            WebError::BadRequest(msg) => write!(f, "Bad Request: {}", msg),
-            WebError::Unauthorized(msg) => write!(f, "Unauthorized: {}", msg),
-            WebError::Forbidden(msg) => write!(f, "Forbidden: {}", msg),
-            WebError::NotFound(msg) => write!(f, "Not Found: {}", msg),
-            WebError::Conflict(msg) => write!(f, "Conflict: {}", msg),
-            WebError::UnprocessableEntity(msg) => write!(f, "Unprocessable Entity: {}", msg),
-            WebError::InternalServerError(msg) => write!(f, "Internal Server Error: {}", msg),
-            WebError::ServiceUnavailable(msg) => write!(f, "Service Unavailable: {}", msg),
-            WebError::Database(err) => write!(f, "Database error: {}", err),
-            WebError::Validation(msg) => write!(f, "Validation error: {}", msg),
-            WebError::Authentication(msg) => write!(f, "Authentication error: {}", msg),
-            WebError::InputValidation(err) => write!(f, "Input validation error: {}", err),
-            WebError::JsonParsing(err) => write!(f, "JSON parsing error: {}", err),
-            WebError::Internal(err) => write!(f, "Internal error: {}", err),
+            Self::BadRequest(..) => StatusCode::BAD_REQUEST,
+            Self::Unauthorized(..) => StatusCode::UNAUTHORIZED,
+            Self::Forbidden(..) => StatusCode::FORBIDDEN,
+            Self::NotFound(..) => StatusCode::NOT_FOUND,
+            Self::Conflict(..) => StatusCode::CONFLICT,
+            Self::UnprocessableEntity(..) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::ServiceUnavailable(..) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    /// Stable error slug returned in the JSON body.
+    pub fn code(&self) -> ErrorCode {
+        match self {
+            Self::BadRequest(c, _)
+            | Self::Unauthorized(c, _)
+            | Self::Forbidden(c, _)
+            | Self::NotFound(c, _)
+            | Self::Conflict(c, _)
+            | Self::UnprocessableEntity(c, _)
+            | Self::ServiceUnavailable(c, _) => *c,
+            Self::Internal(_) => ErrorCode::INTERNAL,
         }
     }
 }
 
-impl std::error::Error for WebError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            WebError::Database(err) => Some(err),
-            WebError::InputValidation(err) => Some(err),
-            WebError::JsonParsing(err) => Some(err),
-            WebError::Internal(err) => Some(err.as_ref()),
-            _ => None,
-        }
-    }
-}
+// ── Conversions ─────────────────────────────────────────────────────────
 
-// Manual From implementations to avoid naming conflicts with core crate
 impl From<DbErr> for WebError {
     fn from(err: DbErr) -> Self {
-        WebError::Database(err)
+        Self::Internal(AnyhowError::new(err))
     }
 }
 
 impl From<gradient_core::types::input::InputError> for WebError {
     fn from(err: gradient_core::types::input::InputError) -> Self {
-        WebError::InputValidation(err)
+        Self::BadRequest(ErrorCode::INPUT_VALIDATION, err.to_string())
     }
 }
 
 impl From<JsonRejection> for WebError {
     fn from(err: JsonRejection) -> Self {
-        WebError::JsonParsing(err)
-    }
-}
-
-impl From<AnyhowError> for WebError {
-    fn from(err: AnyhowError) -> Self {
-        WebError::Internal(err)
+        Self::BadRequest(ErrorCode::JSON_PARSING, format!("Invalid JSON: {}", err))
     }
 }
 
 impl IntoResponse for WebError {
     fn into_response(self) -> Response {
-        let (status, error_message) = match self {
-            WebError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
-            WebError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
-            WebError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
-            WebError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
-            WebError::Conflict(msg) => (StatusCode::CONFLICT, msg),
-            WebError::UnprocessableEntity(msg) => (StatusCode::UNPROCESSABLE_ENTITY, msg),
-            WebError::InternalServerError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-            WebError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
-            WebError::Database(err) => {
-                tracing::error!("Database error: {}", err);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Database error".to_string(),
-                )
+        let status = self.status();
+        let code = self.code();
+
+        let message: String = match &self {
+            Self::Internal(err) => {
+                tracing::error!("Internal error: {:#}", err);
+                "Internal server error".to_string()
             }
-            WebError::Validation(msg) => (StatusCode::BAD_REQUEST, msg),
-            WebError::Authentication(msg) => (StatusCode::UNAUTHORIZED, msg),
-            WebError::InputValidation(err) => (StatusCode::BAD_REQUEST, err.to_string()),
-            WebError::JsonParsing(err) => {
-                (StatusCode::BAD_REQUEST, format!("Invalid JSON: {}", err))
-            }
-            WebError::Internal(err) => {
-                tracing::error!("Internal error: {}", err);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Internal server error".to_string(),
-                )
-            }
+            Self::BadRequest(_, m)
+            | Self::Unauthorized(_, m)
+            | Self::Forbidden(_, m)
+            | Self::NotFound(_, m)
+            | Self::Conflict(_, m)
+            | Self::UnprocessableEntity(_, m)
+            | Self::ServiceUnavailable(_, m) => m.clone(),
         };
 
-        let body = Json(BaseResponse {
+        let body = Json(ErrorResponseBody {
             error: true,
-            message: error_message,
+            code,
+            message: &message,
         });
 
         (status, body).into_response()
     }
 }
 
-pub type WebResult<T> = Result<T, WebError>;
+// ── Constructors ────────────────────────────────────────────────────────
 
-// Helper functions for common error scenarios
 impl WebError {
-    // ── Generic Into<String> constructors so callers can drop `.to_string()` ──
-
     pub fn bad_request(msg: impl Into<String>) -> Self {
-        WebError::BadRequest(msg.into())
+        Self::BadRequest(ErrorCode::BAD_REQUEST, msg.into())
+    }
+
+    pub fn bad_request_with(code: ErrorCode, msg: impl Into<String>) -> Self {
+        Self::BadRequest(code, msg.into())
     }
 
     pub fn unauthorized(msg: impl Into<String>) -> Self {
-        WebError::Unauthorized(msg.into())
+        Self::Unauthorized(ErrorCode::UNAUTHORIZED, msg.into())
+    }
+
+    pub fn unauthorized_with(code: ErrorCode, msg: impl Into<String>) -> Self {
+        Self::Unauthorized(code, msg.into())
     }
 
     pub fn forbidden(msg: impl Into<String>) -> Self {
-        WebError::Forbidden(msg.into())
+        Self::Forbidden(ErrorCode::FORBIDDEN, msg.into())
+    }
+
+    pub fn forbidden_with(code: ErrorCode, msg: impl Into<String>) -> Self {
+        Self::Forbidden(code, msg.into())
     }
 
     pub fn conflict(msg: impl Into<String>) -> Self {
-        WebError::Conflict(msg.into())
+        Self::Conflict(ErrorCode::CONFLICT, msg.into())
     }
 
     pub fn unprocessable_entity(msg: impl Into<String>) -> Self {
-        WebError::UnprocessableEntity(msg.into())
+        Self::UnprocessableEntity(ErrorCode::UNPROCESSABLE_ENTITY, msg.into())
     }
 
     pub fn internal(msg: impl Into<String>) -> Self {
-        WebError::InternalServerError(msg.into())
+        Self::Internal(AnyhowError::msg(msg.into()))
     }
 
     pub fn service_unavailable(msg: impl Into<String>) -> Self {
-        WebError::ServiceUnavailable(msg.into())
+        Self::ServiceUnavailable(ErrorCode::SERVICE_UNAVAILABLE, msg.into())
     }
 
-    // ── Domain-specific constructors ────────────────────────────────────────
+    // ── Domain-specific constructors ────────────────────────────────────
 
     pub fn invalid_name(name: &str) -> Self {
-        WebError::BadRequest(format!("Invalid {}", name))
+        Self::BadRequest(ErrorCode::INVALID_NAME, format!("Invalid {}", name))
     }
 
     pub fn already_exists(resource: &str) -> Self {
-        WebError::Conflict(format!("{} already exists", resource))
+        Self::Conflict(ErrorCode::ALREADY_EXISTS, format!("{} already exists", resource))
     }
 
     pub fn not_found(resource: &str) -> Self {
-        WebError::NotFound(format!("{} not found", resource))
+        Self::NotFound(ErrorCode::NOT_FOUND, format!("{} not found", resource))
+    }
+
+    /// Like [`not_found`] but takes a fully-formed message instead of
+    /// appending " not found".
+    pub fn not_found_msg(msg: impl Into<String>) -> Self {
+        Self::NotFound(ErrorCode::NOT_FOUND, msg.into())
     }
 
     /// Internal-server-error for "<resource> data inconsistency" — a
     /// referential-integrity violation discovered at request time
     /// (e.g. a build row with no derivation row).
     pub fn data_inconsistency(resource: &str) -> Self {
-        WebError::InternalServerError(format!("{} data inconsistency", resource))
+        Self::Internal(AnyhowError::msg(format!(
+            "[{}] {} data inconsistency",
+            ErrorCode::DATA_INCONSISTENCY,
+            resource
+        )))
     }
 
     pub fn invalid_credentials() -> Self {
-        WebError::Unauthorized("Invalid credentials".to_string())
+        Self::Unauthorized(ErrorCode::INVALID_CREDENTIALS, "Invalid credentials".to_string())
     }
 
     pub fn oauth_disabled() -> Self {
-        WebError::BadRequest("OAuth login is disabled".to_string())
+        Self::BadRequest(ErrorCode::OAUTH_DISABLED, "OAuth login is disabled".to_string())
     }
 
     pub fn oauth_required() -> Self {
-        WebError::Unauthorized("Please login via OAuth".to_string())
+        Self::Unauthorized(ErrorCode::OAUTH_REQUIRED, "Please login via OAuth".to_string())
     }
 
     pub fn registration_disabled() -> Self {
-        WebError::BadRequest("Registration is disabled".to_string())
+        Self::BadRequest(
+            ErrorCode::REGISTRATION_DISABLED,
+            "Registration is disabled".to_string(),
+        )
     }
 
     pub fn invalid_email() -> Self {
-        WebError::BadRequest("Invalid Email".to_string())
+        Self::BadRequest(ErrorCode::INVALID_EMAIL, "Invalid Email".to_string())
     }
 
     pub fn failed_to_generate_token() -> Self {
-        WebError::InternalServerError("Failed to generate token".to_string())
+        Self::Internal(AnyhowError::msg(format!(
+            "[{}] Failed to generate token",
+            ErrorCode::TOKEN_GENERATION_FAILED
+        )))
     }
 
     pub fn failed_to_update_user() -> Self {
-        WebError::InternalServerError("Failed to update user".to_string())
+        Self::Internal(AnyhowError::msg(format!(
+            "[{}] Failed to update user",
+            ErrorCode::USER_UPDATE_FAILED
+        )))
     }
 
     pub fn invalid_oauth_code() -> Self {
-        WebError::BadRequest("Invalid OAuth Code".to_string())
+        Self::BadRequest(ErrorCode::INVALID_OAUTH_CODE, "Invalid OAuth Code".to_string())
     }
 
     pub fn failed_ssh_key_generation() -> Self {
-        WebError::InternalServerError("Failed to generate SSH key".to_string())
+        Self::Internal(AnyhowError::msg(format!(
+            "[{}] Failed to generate SSH key",
+            ErrorCode::SSH_KEY_GENERATION_FAILED
+        )))
     }
 
     pub fn invalid_password(reason: String) -> Self {
-        WebError::BadRequest(format!("Invalid password: {}", reason))
+        Self::BadRequest(
+            ErrorCode::INVALID_PASSWORD,
+            format!("Invalid password: {}", reason),
+        )
     }
 
     pub fn invalid_username(reason: String) -> Self {
-        WebError::BadRequest(format!("Invalid username: {}", reason))
+        Self::BadRequest(
+            ErrorCode::INVALID_USERNAME,
+            format!("Invalid username: {}", reason),
+        )
     }
 }
 
@@ -237,6 +344,9 @@ pub fn require_superuser(user: &gradient_core::types::MUser) -> Result<(), WebEr
     if user.superuser {
         Ok(())
     } else {
-        Err(WebError::Forbidden("superuser required".into()))
+        Err(WebError::Forbidden(
+            ErrorCode::SUPERUSER_REQUIRED,
+            "superuser required".into(),
+        ))
     }
 }

@@ -169,7 +169,7 @@ pub async fn put(
 
     body.repository
         .parse::<RepositoryUrl>()
-        .map_err(|e| WebError::BadRequest(e.to_string()))?;
+        .map_err(|e| WebError::bad_request(e.to_string()))?;
 
     let organization = load_org(
         &state.0,
@@ -199,7 +199,7 @@ pub async fn put(
         .evaluation_wildcard
         .trim()
         .parse::<Wildcard>()
-        .map_err(|e| WebError::BadRequest(e.to_string()))?
+        .map_err(|e| WebError::bad_request(e.to_string()))?
         .to_string();
 
     let project = AProject {
@@ -357,7 +357,7 @@ impl<'a> ProjectPatcher<'a> {
     fn apply_repository(&mut self, repository: String) -> WebResult<()> {
         repository
             .parse::<RepositoryUrl>()
-            .map_err(|e| WebError::BadRequest(e.to_string()))?;
+            .map_err(|e| WebError::bad_request(e.to_string()))?;
         self.aproject.repository = Set(repository);
         Ok(())
     }
@@ -366,7 +366,7 @@ impl<'a> ProjectPatcher<'a> {
         let evaluation_wildcard = evaluation_wildcard
             .trim()
             .parse::<Wildcard>()
-            .map_err(|e| WebError::BadRequest(e.to_string()))?
+            .map_err(|e| WebError::bad_request(e.to_string()))?
             .to_string();
         self.aproject.evaluation_wildcard = Set(evaluation_wildcard);
         Ok(())
@@ -374,7 +374,7 @@ impl<'a> ProjectPatcher<'a> {
 
     fn apply_keep_evaluations(&mut self, keep: i32) -> WebResult<()> {
         if keep < 1 {
-            return Err(WebError::BadRequest(
+            return Err(WebError::bad_request(
                 "keep_evaluations must be at least 1".to_string(),
             ));
         }
@@ -466,7 +466,7 @@ pub async fn post_project_check_repository(
 
         Ok(Json(res))
     } else {
-        Err(WebError::InternalServerError(
+        Err(WebError::internal(
             "Failed to check repository".to_string(),
         ))
     }
@@ -492,13 +492,13 @@ pub async fn post_project_transfer(
     let is_admin = has_permission(&state, user.id, organization.id, Permission::EditProject).await?;
     let is_owner = project.created_by == user.id;
     if !is_admin && !is_owner {
-        return Err(WebError::Forbidden(
+        return Err(WebError::forbidden(
             "Only the project owner or an organization admin can transfer ownership.".to_string(),
         ));
     }
 
     if project.managed {
-        return Err(WebError::Forbidden(
+        return Err(WebError::forbidden(
             "Cannot transfer ownership of a state-managed project.".to_string(),
         ));
     }
@@ -515,7 +515,7 @@ pub async fn post_project_transfer(
     .await?;
 
     if new_organization.id == organization.id {
-        return Err(WebError::BadRequest(
+        return Err(WebError::bad_request(
             "Project is already in this organization.".to_string(),
         ));
     }

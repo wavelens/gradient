@@ -237,7 +237,7 @@ pub async fn get_oauth_authorize(
         csrf,
     )
     .await
-    .map_err(|e| WebError::Unauthorized(e.to_string()))?;
+    .map_err(|e| WebError::unauthorized(e.to_string()))?;
 
     let token =
         encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
@@ -266,7 +266,7 @@ pub async fn post_oauth_authorize(
     let use_tls = state.config.server.use_tls;
     let req = oidc_login_create(state)
         .await
-        .map_err(|e| WebError::Unauthorized(e.to_string()))?;
+        .map_err(|e| WebError::unauthorized(e.to_string()))?;
 
     let res = BaseResponse {
         error: false,
@@ -292,7 +292,7 @@ pub async fn get_oidc_login(
     let use_tls = state.config.server.use_tls;
     let req = oidc_login_create(state)
         .await
-        .map_err(|e| WebError::Unauthorized(e.to_string()))?;
+        .map_err(|e| WebError::unauthorized(e.to_string()))?;
 
     Response::builder()
         .status(StatusCode::FOUND)
@@ -325,7 +325,7 @@ pub async fn get_oidc_callback(
         csrf,
     )
     .await
-    .map_err(|e| WebError::Unauthorized(e.to_string()))?;
+    .map_err(|e| WebError::unauthorized(e.to_string()))?;
 
     let token =
         encode_jwt(state, user.id, false).map_err(|_| WebError::failed_to_generate_token())?;
@@ -416,7 +416,7 @@ pub async fn get_verify_email(
     Query(query): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if !state.config.email.as_ref().is_some_and(|e| e.require_verification) {
-        return Err(WebError::BadRequest(
+        return Err(WebError::bad_request(
             "Email verification is not enabled".to_string(),
         ));
     }
@@ -434,7 +434,7 @@ pub async fn get_verify_email(
     if let Some(expires) = user.email_verification_token_expires
         && gradient_core::types::now() > expires
     {
-        return Err(WebError::BadRequest(
+        return Err(WebError::bad_request(
             "Verification token has expired".to_string(),
         ));
     }
@@ -458,7 +458,7 @@ pub async fn post_resend_verification(
     Json(body): Json<CheckUsernameRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if !state.config.email.as_ref().is_some_and(|e| e.require_verification) {
-        return Err(WebError::BadRequest(
+        return Err(WebError::bad_request(
             "Email verification is not enabled".to_string(),
         ));
     }
@@ -470,7 +470,7 @@ pub async fn post_resend_verification(
         .or_not_found("User")?;
 
     if user.email_verified {
-        return Err(WebError::BadRequest(
+        return Err(WebError::bad_request(
             "Email is already verified".to_string(),
         ));
     }

@@ -486,7 +486,7 @@ mod tests {
             let err = load_org(&state, Caller::User(&user), "test-org".into(), admin_required())
                 .await
                 .expect_err("view-only must be rejected");
-            assert!(matches!(err, WebError::Forbidden(_)));
+            assert!(matches!(err, WebError::Forbidden(..)));
         });
     }
 
@@ -502,7 +502,7 @@ mod tests {
             let err = load_org(&state, Caller::User(&user), "test-org".into(), admin_required())
                 .await
                 .expect_err("managed must be rejected");
-            assert!(matches!(err, WebError::Forbidden(_)));
+            assert!(matches!(err, WebError::Forbidden(..)));
         });
     }
 
@@ -518,7 +518,7 @@ mod tests {
             let err = load_org(&state, Caller::User(&user), "test-org".into(), admin_required())
                 .await
                 .expect_err("non-member must be rejected");
-            assert!(matches!(err, WebError::NotFound(_)));
+            assert!(matches!(err, WebError::NotFound(..)));
         });
     }
 
@@ -556,7 +556,7 @@ mod tests {
             let err = load_org(&state, Caller::User(&user), "test-org".into(), access)
                 .await
                 .expect_err("view-only must be rejected");
-            assert!(matches!(err, WebError::Forbidden(_)));
+            assert!(matches!(err, WebError::Forbidden(..)));
         });
     }
 
@@ -608,7 +608,7 @@ mod tests {
             )
             .await
             .expect_err("anon must not see private org");
-            assert!(matches!(err, WebError::NotFound(_)));
+            assert!(matches!(err, WebError::NotFound(..)));
         });
     }
 
@@ -661,7 +661,7 @@ mod tests {
             )
             .await
             .expect_err("view-only must be rejected");
-            assert!(matches!(err, WebError::Forbidden(_)));
+            assert!(matches!(err, WebError::Forbidden(..)));
         });
     }
 
@@ -688,7 +688,7 @@ mod tests {
             )
             .await
             .expect_err("managed must be rejected");
-            assert!(matches!(err, WebError::Forbidden(_)));
+            assert!(matches!(err, WebError::Forbidden(..)));
         });
     }
 
@@ -714,7 +714,7 @@ mod tests {
             .await
             .expect_err("missing must be rejected");
             match err {
-                WebError::NotFound(msg) => assert!(msg.contains("Project"), "got {}", msg),
+                WebError::NotFound(_, msg) => assert!(msg.contains("Project"), "got {}", msg),
                 other => panic!("expected NotFound, got {:?}", other),
             }
         });

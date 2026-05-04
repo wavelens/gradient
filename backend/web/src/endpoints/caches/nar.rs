@@ -23,7 +23,7 @@ pub async fn nar(
     Path((cache, path)): Path<(String, String)>,
 ) -> WebResult<Response> {
     let path_hash =
-        get_hash_from_url(path.clone()).map_err(|e| WebError::BadRequest(e.to_string()))?;
+        get_hash_from_url(path.clone()).map_err(|e| WebError::bad_request(e.to_string()))?;
 
     if !(path.ends_with(".nar") || path.contains(".nar.")) {
         return Err(WebError::not_found("Path"));

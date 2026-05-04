@@ -138,7 +138,7 @@ async fn find_and_serve_file(
             }
             Err(e) => {
                 tracing::error!(%build_id, %filename, hash, error = %e, "Failed to fetch NAR");
-                return Err(WebError::InternalServerError(
+                return Err(WebError::internal(
                     "Failed to fetch NAR".to_string(),
                 ));
             }
@@ -189,7 +189,7 @@ async fn find_and_serve_file(
             }
             Err(e) => {
                 tracing::error!(%build_id, %filename, %rel, error = %e, "Failed to extract path from NAR");
-                return Err(WebError::InternalServerError(
+                return Err(WebError::internal(
                     "Failed to extract path from NAR".to_string(),
                 ));
             }

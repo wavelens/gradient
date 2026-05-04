@@ -184,7 +184,7 @@ pub async fn post_project_evaluate(
         .map_err(|e| anyhow::anyhow!(e))?;
 
     if commit_hash.is_empty() {
-        return Err(WebError::InternalServerError(
+        return Err(WebError::internal(
             "Failed to fetch repository state".to_string(),
         ));
     }
@@ -553,7 +553,7 @@ async fn serve_hydra_artifact(
             Err(ExtractError::NotFound) => continue,
             Err(e) => {
                 tracing::error!(output_path = %output_root, %rel, error = %e, "Failed to extract path from NAR");
-                return Err(WebError::InternalServerError(
+                return Err(WebError::internal(
                     "Failed to extract path from NAR".to_string(),
                 ));
             }

@@ -55,7 +55,7 @@ pub async fn github_app_webhook(
              (requires GRADIENT_GITHUB_APP_ID, GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE, \
              and GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE)"
         );
-        return Err(WebError::ServiceUnavailable(
+        return Err(WebError::service_unavailable(
             "github app integration not configured".into(),
         ));
     };
@@ -68,7 +68,7 @@ pub async fn github_app_webhook(
 
     if !verify_github_signature(secret.expose(), sig_header, &body) {
         warn!("GitHub App webhook: invalid signature");
-        return Err(WebError::Unauthorized("invalid webhook signature".into()));
+        return Err(WebError::unauthorized("invalid webhook signature".into()));
     }
 
     let event = headers
@@ -82,7 +82,7 @@ pub async fn github_app_webhook(
     let response = match event.as_str() {
         "push" => {
             let Some(parsed) = ParsedPushEvent::from_github(&body) else {
-                return Err(WebError::BadRequest("malformed webhook payload".into()));
+                return Err(WebError::bad_request("malformed webhook payload".into()));
             };
             let urls = parsed.repository_urls.clone();
             let outcome = parsed.trigger(&state).await;
@@ -118,10 +118,10 @@ pub async fn forge_webhook(
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
     let Some(forge_type) = ForgeType::from_path_segment(&forge) else {
         warn!(forge = %forge, "Unknown forge path segment");
-        return Err(WebError::NotFound("integration not found".into()));
+        return Err(WebError::not_found_msg("integration not found".into()));
     };
     if matches!(forge_type, ForgeType::GitHub) {
-        return Err(WebError::BadRequest("unsupported forge".into()));
+        return Err(WebError::bad_request("unsupported forge".into()));
     }
 
     let org = EOrganization::find()
@@ -130,9 +130,9 @@ pub async fn forge_webhook(
         .await
         .map_err(|e| {
             warn!(error = %e, org = %org_name, "DB error looking up organization for forge webhook");
-            WebError::InternalServerError("internal error".into())
+            WebError::internal("internal error".into())
         })?
-        .ok_or_else(|| WebError::NotFound("integration not found".into()))?;
+        .ok_or_else(|| WebError::not_found_msg("integration not found".into()))?;
 
     let integration = EIntegration::find()
         .filter(CIntegration::Organization.eq(org.id))
@@ -142,27 +142,27 @@ pub async fn forge_webhook(
         .await
         .map_err(|e| {
             warn!(error = %e, "DB error looking up integration for forge webhook");
-            WebError::InternalServerError("internal error".into())
+            WebError::internal("internal error".into())
         })?
         .ok_or_else(|| {
             warn!(org = %org_name, %forge, integration = %integration_name, "Integration not found");
-            WebError::NotFound("integration not found".into())
+            WebError::not_found_msg("integration not found".into())
         })?;
 
     let encrypted_secret = integration.secret.as_ref().ok_or_else(|| {
         warn!(integration_id = %integration.id, "Integration has no secret configured");
-        WebError::NotFound("integration not found".into())
+        WebError::not_found_msg("integration not found".into())
     })?;
 
     let plaintext_secret =
         decrypt_webhook_secret(&state.config.secrets.crypt_secret_file, encrypted_secret).map_err(|e| {
             warn!(error = %e, integration_id = %integration.id, "Failed to decrypt integration secret");
-            WebError::InternalServerError("internal error".into())
+            WebError::internal("internal error".into())
         })?;
 
     if !verify_forge_signature(forge_type, plaintext_secret.expose(), &headers, &body) {
         warn!(org = %org_name, forge = %forge, integration = %integration_name, "Forge webhook: invalid signature");
-        return Err(WebError::Unauthorized("invalid webhook signature".into()));
+        return Err(WebError::unauthorized("invalid webhook signature".into()));
     }
 
     let parsed = match forge_type {
@@ -171,7 +171,7 @@ pub async fn forge_webhook(
         ForgeType::GitHub => unreachable!("checked above"),
     };
     let Some(parsed) = parsed else {
-        return Err(WebError::BadRequest("malformed webhook payload".into()));
+        return Err(WebError::bad_request("malformed webhook payload".into()));
     };
 
     let urls = parsed.repository_urls.clone();

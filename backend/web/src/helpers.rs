@@ -54,7 +54,7 @@ mod tests {
     fn or_not_found_maps_none_to_not_found() {
         let r: WebResult<i32> = Option::<i32>::None.or_not_found("Thing");
         match r.unwrap_err() {
-            WebError::NotFound(msg) => assert_eq!(msg, "Thing not found"),
+            WebError::NotFound(_, msg) => assert_eq!(msg, "Thing not found"),
             other => panic!("expected NotFound, got {other:?}"),
         }
     }
