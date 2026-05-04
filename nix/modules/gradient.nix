@@ -49,9 +49,9 @@ in {
     services.gradient = {
       enable = lib.mkEnableOption "Gradient";
       reverseProxy = {
-        nginx.enable = lib.mkEnableOption "nginx configuration";
+        nginx.enable = lib.mkEnableOption "Nginx configuration" // { default = true; };
         caddy = {
-          enable = lib.mkEnableOption "caddy configuration";
+          enable = lib.mkEnableOption "Caddy configuration";
           useACMEHost = lib.mkOption {
             description = ''
               A host of an existing Let’s Encrypt certificate to use.
@@ -62,6 +62,7 @@ in {
             type = lib.types.nullOr lib.types.str;
             default = null;
           };
+
           extraConfig = lib.mkOption {
             description = ''
               Additional lines of configuration passed to
@@ -73,7 +74,7 @@ in {
           };
         };
       };
-      configureCaddy = lib.mkEnableOption "Caddy configuration";
+
       configurePostgres = lib.mkEnableOption "PostgreSQL configuration";
       reportErrors = lib.mkEnableOption "error reporting to Sentry";
       useTls = lib.mkEnableOption "TLS" // { default = true; };
@@ -138,7 +139,7 @@ in {
       };
 
       frontend = {
-        enable = lib.mkEnableOption "Gradient Frontend";
+        enable = lib.mkEnableOption "Gradient Frontend" // { default = true; };
         url = lib.mkOption {
           description = "Public URL of the Gradient frontend, used in CI status report links";
           type = lib.types.str;
@@ -371,7 +372,7 @@ in {
         message = "proto.federate requires discoverable to be enabled";
       }
       {
-        assertion = !(cfg.reverseProxy.nginx && cfg.reverseProxy.caddy);
+        assertion = !(cfg.reverseProxy.nginx.enable && cfg.reverseProxy.caddy.enable);
         message = "You can only use one reverse proxy at a time";
       }
     ];
