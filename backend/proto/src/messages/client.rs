@@ -102,7 +102,7 @@ pub enum ClientMessage {
     NarPush {
         job_id: String,
         store_path: String,
-        /// zstd-compressed NAR data, 64 KiB chunks.
+        /// zstd-compressed NAR data, ~4 MiB chunks.
         data: Vec<u8>,
         offset: u64,
         is_final: bool,

@@ -242,7 +242,7 @@ fn proto_version_is_nonzero() {
 }
 
 /// Regression for #110: the `/proto` WebSocket cap must:
-/// - exceed the largest legitimate frame (`NarPush` at 64 KiB plus rkyv
+/// - exceed the largest legitimate frame (`NarPush` at 4 MiB plus rkyv
 ///   overhead, plus headroom for `LogChunk`/`CacheQuery` arrays), and
 /// - stay well below tungstenite's 64 MiB default so a malicious peer can't
 ///   ask the server to allocate gigabytes from a single send.

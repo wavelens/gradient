@@ -141,22 +141,38 @@ impl ProtoConnection {
 
         tokio::spawn(async move {
             let mut sink = sink;
-            while let Some(msg) = rx.recv().await {
-                let bytes = match rkyv::to_bytes::<RkyvError>(&msg) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        tracing::warn!("serialisation error: {}", e);
-                        continue;
-                    }
-                };
-                if let Err(e) =
-                    SinkExt::send(&mut sink, Message::Binary(bytes.to_vec().into())).await
-                {
-                    tracing::warn!("WebSocket write error: {}", e);
+            // Drain the channel in batches so consecutive messages (e.g.
+            // 64+ KiB NarPush chunks) coalesce into one TCP write+flush
+            // instead of one syscall per chunk.
+            const WRITE_BATCH: usize = 32;
+            let mut batch: Vec<ClientMessage> = Vec::with_capacity(WRITE_BATCH);
+            'drain: loop {
+                batch.clear();
+                let n = rx.recv_many(&mut batch, WRITE_BATCH).await;
+                if n == 0 {
                     break;
                 }
-                tracing::trace!(?msg, bytes = bytes.len(), "send ClientMessage (split)");
-            }
+                for msg in batch.drain(..) {
+                    let bytes = match rkyv::to_bytes::<RkyvError>(&msg) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            tracing::warn!("serialisation error: {}", e);
+                            continue;
+                        }
+                    };
+                    let len = bytes.len();
+                    if let Err(e) =
+                        SinkExt::feed(&mut sink, Message::Binary(bytes.to_vec().into())).await
+                    {
+                        tracing::warn!("WebSocket write error: {}", e);
+                        break 'drain;
+                    }
+                    tracing::trace!(?msg, bytes = len, "send ClientMessage (split)");
+                }
+                if let Err(e) = SinkExt::flush(&mut sink).await {
+                    tracing::warn!("WebSocket flush error: {}", e);
+                    break;
+                }
         });
 
         (

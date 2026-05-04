@@ -8,7 +8,7 @@
 //!
 //! Two modes depending on server configuration:
 //! - **Direct**: chunked [`ClientMessage::NarPush`] frames over the WebSocket
-//!   (zstd-compressed, 64 KiB chunks).  Initiated by the worker after a build;
+//!   (zstd-compressed, 4 MiB chunks).  Initiated by the worker after a build;
 //!   this mirrors [`crate::executor::compress`] but is triggered by a server
 //!   `PresignedUpload` message that includes no URL (direct mode sentinel).
 //! - **S3**: server sends a [`ServerMessage::PresignedUpload`] with a URL;
@@ -28,8 +28,10 @@ use tracing::{debug, info, warn};
 use crate::connection::ProtoWriter;
 use crate::nix::store::{LocalNixStore, is_connection_corrupt, strip_store_prefix};
 
-/// Chunk size for direct NAR streaming (64 KiB).
-const NAR_CHUNK_SIZE: usize = 64 * 1024;
+/// Chunk size for direct NAR streaming (4 MiB). Sized to amortise per-message
+/// rkyv/WebSocket framing overhead while staying well under
+/// `MAX_PROTO_MESSAGE_SIZE` so envelope fields and rkyv padding fit too.
+const NAR_CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
 /// Normalise a store path so it always carries the `/nix/store/` prefix.
 ///
