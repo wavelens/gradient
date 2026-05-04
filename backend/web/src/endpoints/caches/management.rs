@@ -146,7 +146,7 @@ pub async fn put(
         })?;
 
     let cache = ACache {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         name: Set(body.name.clone()),
         active: Set(true),
         display_name: Set(body.display_name.trim().to_string()),
@@ -163,7 +163,7 @@ pub async fn put(
     let cache = cache.insert(&state.web_db).await?;
 
     ACacheUpstream {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         cache: Set(cache.id),
         display_name: Set("cache.nixos.org".to_string()),
         mode: Set(CacheSubscriptionMode::ReadOnly),

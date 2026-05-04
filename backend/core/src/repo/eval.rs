@@ -61,7 +61,7 @@ impl<'db> EvalRepo<'db> {
         source: Option<String>,
     ) -> Result<()> {
         let msg = AEvaluationMessage {
-            id: Set(Uuid::new_v4()),
+            id: Set(Uuid::now_v7()),
             evaluation: Set(evaluation_id),
             level: Set(level),
             message: Set(message),
@@ -85,7 +85,7 @@ impl<'db> EvalRepo<'db> {
         let rows: Vec<AEvaluationMessage> = messages
             .into_iter()
             .map(|(level, message, source)| AEvaluationMessage {
-                id: Set(Uuid::new_v4()),
+                id: Set(Uuid::now_v7()),
                 evaluation: Set(evaluation_id),
                 level: Set(level),
                 message: Set(message),

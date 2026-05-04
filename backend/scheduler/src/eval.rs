@@ -61,7 +61,7 @@ impl DerivationInsertBatch {
             if drv_path_to_id.contains_key(&d.drv_path) {
                 continue;
             }
-            let id = Uuid::new_v4();
+            let id = Uuid::now_v7();
             drv_path_to_id.insert(d.drv_path.clone(), id);
             new_derivations.push(ADerivation {
                 id: Set(id),
@@ -74,7 +74,7 @@ impl DerivationInsertBatch {
                 let (hash, package) = get_hash_from_path(output.path.clone())
                     .unwrap_or_else(|_| ("unknown".to_owned(), output.name.clone()));
                 new_outputs.push(ADerivationOutput {
-                    id: Set(Uuid::new_v4()),
+                    id: Set(Uuid::now_v7()),
                     derivation: Set(id),
                     name: Set(output.name.clone()),
                     output: Set(output.path.clone()),
@@ -202,7 +202,7 @@ impl<'a> EvalResultProcessor<'a> {
                 BuildStatus::Created
             };
             builds.push(ABuild {
-                id: Set(Uuid::new_v4()),
+                id: Set(Uuid::now_v7()),
                 evaluation: Set(self.evaluation_id),
                 derivation: Set(drv_id),
                 status: Set(status),
@@ -321,7 +321,7 @@ impl<'a> EvalResultProcessor<'a> {
             {
                 entry_points.push((build_id, d.attr.clone()));
                 active_entry_points.push(AEntryPoint {
-                    id: Set(Uuid::new_v4()),
+                    id: Set(Uuid::now_v7()),
                     project: Set(project_id),
                     evaluation: Set(self.evaluation_id),
                     build: Set(build_id),
@@ -433,7 +433,7 @@ async fn expand_substituted_closure(state: &Arc<ServerState>, evaluation_id: Uui
         .iter()
         .filter_map(|row| {
             row.try_get::<Uuid>("", "drv_id").ok().map(|drv_id| ABuild {
-                id: Set(Uuid::new_v4()),
+                id: Set(Uuid::now_v7()),
                 evaluation: Set(evaluation_id),
                 derivation: Set(drv_id),
                 status: Set(BuildStatus::Substituted),
@@ -620,7 +620,7 @@ pub async fn flush_deferred_deps(
         for dep in deps {
             if let Some(&dep_id) = drv_path_to_id.get(dep) {
                 edges.push(ADerivationDependency {
-                    id: Set(Uuid::new_v4()),
+                    id: Set(Uuid::now_v7()),
                     derivation: Set(src_id),
                     dependency: Set(dep_id),
                 });

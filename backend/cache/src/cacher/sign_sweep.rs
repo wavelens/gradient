@@ -224,7 +224,7 @@ async fn try_record_cache_derivation(
     }
 
     let row = ACacheDerivation {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         cache: Set(cache_id),
         derivation: Set(derivation_id),
         cached_at: Set(now),

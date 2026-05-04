@@ -178,7 +178,7 @@ mod tests {
 
     fn cached_path_row() -> entity::cached_path::Model {
         entity::cached_path::Model {
-            id: uuid::Uuid::new_v4(),
+            id: uuid::Uuid::now_v7(),
             store_path: format!("/nix/store/{STORE_HASH}-hello.drv"),
             hash: STORE_HASH.to_string(),
             package: "hello.drv".to_string(),

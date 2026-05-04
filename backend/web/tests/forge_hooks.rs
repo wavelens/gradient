@@ -37,7 +37,7 @@ use web::create_router;
 /// Write `content` to a unique file under the system temp dir and return the path.
 /// The file is intentionally not cleaned up — tests are short-lived.
 fn temp_secret_file(content: &str) -> String {
-    let path = std::env::temp_dir().join(format!("gradient-test-crypt-{}", Uuid::new_v4()));
+    let path = std::env::temp_dir().join(format!("gradient-test-crypt-{}", Uuid::now_v7()));
     std::fs::write(&path, content).expect("write temp secret file");
     path.to_string_lossy().into_owned()
 }

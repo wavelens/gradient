@@ -48,8 +48,8 @@ async fn main() {
         .nth(1)
         .unwrap_or_else(|| "ws://127.0.0.1:3000/proto".to_string());
 
-    let worker_id = Uuid::new_v4().to_string();
-    let job_id = Uuid::new_v4().to_string();
+    let worker_id = Uuid::now_v7().to_string();
+    let job_id = Uuid::now_v7().to_string();
     let store_path = format!("/nix/store/{FAKE_HASH}-{FAKE_NAME}");
 
     eprintln!("[probe] connecting to {url} as fresh worker_id={worker_id}");

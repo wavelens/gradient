@@ -91,7 +91,7 @@ pub async fn post_direct_build(
     // We'll create the DirectBuild record after the evaluation
 
     // Create temporary directory for files
-    let temp_dir = format!("{}/uploads/{}", state.config.storage.base_path, Uuid::new_v4());
+    let temp_dir = format!("{}/uploads/{}", state.config.storage.base_path, Uuid::now_v7());
     fs::create_dir_all(&temp_dir).await.map_err(|e| {
         WebError::internal(format!("Failed to create temp directory: {}", e))
     })?;
@@ -126,7 +126,7 @@ pub async fn post_direct_build(
 
     // Create commit record
     let commit = ACommit {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         message: Set("Direct build submission".to_string()),
         hash: Set(vec![0; 20]), // Dummy hash for direct builds
         author: Set(Some(user.id)),
@@ -140,7 +140,7 @@ pub async fn post_direct_build(
     // Create evaluation record (without project for direct builds)
     let now = gradient_core::types::now();
     let evaluation = AEvaluation {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         project: Set(None), // No project for direct builds
         repository: Set(temp_dir.clone()),
         commit: Set(commit.id),
@@ -159,7 +159,7 @@ pub async fn post_direct_build(
 
     // Create DirectBuild record
     let direct_build = ADirectBuild {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         organization: Set(org.id),
         evaluation: Set(evaluation.id),
         derivation: Set(derivation.clone()),

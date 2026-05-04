@@ -74,7 +74,7 @@ async fn upsert_cache_metric(
         }
         None => {
             let am = ACacheMetric {
-                id: Set(Uuid::new_v4()),
+                id: Set(Uuid::now_v7()),
                 cache: Set(cache_id),
                 bucket_time: Set(bucket),
                 bytes_sent: Set(bytes),
@@ -139,7 +139,7 @@ pub(super) async fn mark_nar_stored(
         }
         None => {
             let am = ACachedPath {
-                id: Set(Uuid::new_v4()),
+                id: Set(Uuid::now_v7()),
                 store_path: Set(store_path.to_owned()),
                 hash: Set(hash.to_owned()),
                 package: Set(package.to_owned()),
@@ -247,7 +247,7 @@ async fn ensure_signature_placeholders(
         }
 
         let am = ACachedPathSignature {
-            id: Set(Uuid::new_v4()),
+            id: Set(Uuid::now_v7()),
             cached_path: Set(cached_path_row.id),
             cache: Set(oc.cache),
             signature: Set(None),

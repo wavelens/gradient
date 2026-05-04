@@ -83,7 +83,7 @@ impl<'a> BuildStateHandler<'a> {
                 // Insert new product rows.
                 for product in &output.products {
                     let am = ABuildProduct {
-                        id: Set(Uuid::new_v4()),
+                        id: Set(Uuid::now_v7()),
                         derivation_output: Set(row_id),
                         file_type: Set(product.file_type.clone()),
                         name: Set(product.name.clone()),

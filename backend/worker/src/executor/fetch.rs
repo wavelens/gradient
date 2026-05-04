@@ -309,7 +309,7 @@ async fn query_path_info(
 }
 
 fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<String> {
-    let temp_dir = std::env::temp_dir().join(format!("gradient-fetch-{}", uuid::Uuid::new_v4()));
+    let temp_dir = std::env::temp_dir().join(format!("gradient-fetch-{}", uuid::Uuid::now_v7()));
 
     let mut callbacks = RemoteCallbacks::new();
     callbacks.certificate_check(|cert, _valid| {

@@ -81,7 +81,7 @@ mod tests {
 
     #[test]
     fn non_empty_set_yields_restricted() {
-        let peer = Uuid::new_v4();
+        let peer = Uuid::now_v7();
         assert!(matches!(
             PeerAuth::from_peers(HashSet::from([peer])),
             PeerAuth::Restricted(_)
@@ -91,20 +91,20 @@ mod tests {
     #[test]
     fn open_contains_any_peer() {
         let auth = PeerAuth::Open;
-        assert!(auth.contains(&Uuid::new_v4()));
+        assert!(auth.contains(&Uuid::now_v7()));
     }
 
     #[test]
     fn restricted_contains_registered_peer() {
-        let peer = Uuid::new_v4();
+        let peer = Uuid::now_v7();
         let auth = PeerAuth::Restricted(HashSet::from([peer]));
         assert!(auth.contains(&peer));
     }
 
     #[test]
     fn restricted_does_not_contain_other_peer() {
-        let peer = Uuid::new_v4();
-        let other = Uuid::new_v4();
+        let peer = Uuid::now_v7();
+        let other = Uuid::now_v7();
         let auth = PeerAuth::Restricted(HashSet::from([peer]));
         assert!(!auth.contains(&other));
     }
@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn restricted_as_filter_is_some() {
-        let peer = Uuid::new_v4();
+        let peer = Uuid::now_v7();
         let auth = PeerAuth::Restricted(HashSet::from([peer]));
         assert!(auth.as_filter().is_some());
     }

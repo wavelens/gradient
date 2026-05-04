@@ -148,7 +148,7 @@ fn evaluation_row() -> entity::evaluation::Model {
         id: evaluation_id(),
         project: Some(project_id()),
         repository: "https://example.com/repo".into(),
-        commit: Uuid::new_v4(),
+        commit: Uuid::now_v7(),
         wildcard: "*".into(),
         status: EvaluationStatus::Completed,
         previous: None,

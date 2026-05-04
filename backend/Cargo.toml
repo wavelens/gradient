@@ -44,7 +44,7 @@ thiserror = { version = "2.0", default-features = false }
 # Time / random / ids
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 rand   = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
-uuid   = { version = "1.23", default-features = false, features = ["std", "v4", "fast-rng", "serde", "macro-diagnostics"] }
+uuid   = { version = "1.23", default-features = false, features = ["std", "v7", "fast-rng", "serde", "macro-diagnostics"] }
 
 # Serialization
 rkyv       = { version = "0.8", default-features = false, features = ["alloc", "bytecheck"] }

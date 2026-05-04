@@ -203,7 +203,7 @@ pub async fn put(
         .to_string();
 
     let project = AProject {
-        id: Set(Uuid::new_v4()),
+        id: Set(Uuid::now_v7()),
         organization: Set(organization.id),
         name: Set(body.name.clone()),
         active: Set(true),

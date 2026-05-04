@@ -367,8 +367,8 @@ mod tests {
     #[test]
     fn test_authorized_peers_for() {
         let mut pool = WorkerPool::new();
-        let peer_a = Uuid::new_v4();
-        let peer_b = Uuid::new_v4();
+        let peer_a = Uuid::now_v7();
+        let peer_b = Uuid::now_v7();
 
         pool.register("w1".into(), caps(), HashSet::from([peer_a, peer_b]));
         let auth = pool.peer_auth_for("w1").unwrap();
@@ -382,8 +382,8 @@ mod tests {
     #[test]
     fn test_update_authorized_peers() {
         let mut pool = WorkerPool::new();
-        let peer_a = Uuid::new_v4();
-        let peer_b = Uuid::new_v4();
+        let peer_a = Uuid::now_v7();
+        let peer_b = Uuid::now_v7();
 
         pool.register("w1".into(), caps(), HashSet::from([peer_a]));
         assert!(matches!(
@@ -468,8 +468,8 @@ mod tests {
     #[test]
     fn test_all_workers_info_exposes_authorized_peers() {
         let mut pool = WorkerPool::new();
-        let org_a = Uuid::new_v4();
-        let org_b = Uuid::new_v4();
+        let org_a = Uuid::now_v7();
+        let org_b = Uuid::now_v7();
 
         // Restricted: worker authorized for org_a only.
         pool.register("w1".into(), caps(), HashSet::from([org_a]));
