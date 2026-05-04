@@ -159,7 +159,14 @@ impl<'a> InputPrefetcher<'a> {
                     }
                 },
                 Err(e) => {
-                    debug!(drv = %input_full, error = %e, "input .drv not present locally; will need it from cache");
+                    debug!(drv = %input_full, error = %e, "input .drv not present locally; queuing for fetch");
+                    // Queue the input .drv itself. Its outputs will be
+                    // discovered after it lands in the local store and the
+                    // closure walk processes its `references` (which include
+                    // any input drvs of its own). Output paths the build
+                    // ultimately needs are reached transitively via the same
+                    // walk.
+                    wanted.insert(input_drv_path.clone());
                 }
             }
         }
@@ -480,6 +487,13 @@ impl<'a> InputPrefetcher<'a> {
 
             // Collect any references from this batch that we haven't yet
             // queried and that aren't already in the local store.
+            for (path, _, meta) in &batch {
+                tracing::trace!(
+                    path = %path,
+                    refs = ?meta.references.as_ref().map(|r| r.len()).unwrap_or(0),
+                    "closure walk: examining references"
+                );
+            }
             let refs: HashSet<String> = batch
                 .iter()
                 .flat_map(|(_, _, meta)| meta.references.clone().unwrap_or_default())
@@ -494,9 +508,11 @@ impl<'a> InputPrefetcher<'a> {
                     Ok(true) => {
                         // Already in the local store — nothing to do; still
                         // record it as queried so we don't revisit.
+                        tracing::trace!(path = %r, "closure walk: ref already in local store");
                         queried.insert(r);
                     }
                     Ok(false) => {
+                        tracing::trace!(path = %r, "closure walk: ref missing locally, queuing");
                         queried.insert(r.clone());
                         next_batch.push(r);
                     }

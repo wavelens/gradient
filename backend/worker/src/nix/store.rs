@@ -59,6 +59,15 @@ impl LocalNixStore {
     }
 
     /// Check whether a store path is present in the local store.
+    ///
+    /// Uses `is_valid_path` rather than `query_path_info`. The former is the
+    /// authoritative "the daemon will accept a dependent that references
+    /// this path" check; the latter only confirms the store DB has metadata
+    /// for the path, which can disagree with on-disk presence after a GC
+    /// race or an interrupted import. A `query_path_info` false-positive
+    /// causes the prefetch closure walk to skip a path the daemon will then
+    /// reject, surfacing as a confusing `store path '...' does not exist`
+    /// error during import of a dependent.
     pub async fn has_path(&self, store_path: &str) -> Result<bool> {
         let hash_name = strip_store_prefix(store_path);
         let sp = StorePath::from_base_path(hash_name)
@@ -70,11 +79,11 @@ impl LocalNixStore {
             .await
             .map_err(|e| anyhow::anyhow!("acquire store for has_path: {e}"))?;
 
-        match guard.client().query_path_info(&sp).await {
-            Ok(info) => Ok(info.is_some()),
+        match guard.client().is_valid_path(&sp).await {
+            Ok(valid) => Ok(valid),
             Err(e) => {
                 let corrupt = is_connection_corrupt(&e);
-                let err = anyhow::anyhow!("query_path_info failed for {store_path}: {e}");
+                let err = anyhow::anyhow!("is_valid_path failed for {store_path}: {e}");
                 if corrupt {
                     guard.mark_broken();
                 }
