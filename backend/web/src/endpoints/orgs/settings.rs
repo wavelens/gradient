@@ -44,7 +44,7 @@ async fn load_subscribable_cache(
         .or_not_found("Cache")?;
 
     if !cache.public && cache.created_by != user_id {
-        return Err(WebError::Forbidden(
+        return Err(WebError::forbidden(
             "You don't have permission to subscribe to this cache. The cache is private and you are not the owner.".to_string(),
         ));
     }

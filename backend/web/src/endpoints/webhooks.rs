@@ -97,18 +97,18 @@ pub async fn put(
     let organization = load_org(&state, Caller::User(&user), organization, webhook_org_access()).await?;
 
     if body.name.is_empty() {
-        return Err(WebError::BadRequest(
+        return Err(WebError::bad_request(
             "Webhook name cannot be empty.".to_string(),
         ));
     }
     if body.url.is_empty() {
-        return Err(WebError::BadRequest(
+        return Err(WebError::bad_request(
             "Webhook URL cannot be empty.".to_string(),
         ));
     }
     validate_webhook_url(&body.url).map_err(WebError::BadRequest)?;
     if body.secret.is_empty() {
-        return Err(WebError::BadRequest(
+        return Err(WebError::bad_request(
             "Webhook secret cannot be empty.".to_string(),
         ));
     }

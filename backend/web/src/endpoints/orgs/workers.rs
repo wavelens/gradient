@@ -118,7 +118,7 @@ pub async fn post_org_worker(
     let worker_uuid = Uuid::parse_str(&body.worker_id)
         .ok()
         .filter(|u| u.get_version() == Some(uuid::Version::Random))
-        .ok_or_else(|| WebError::BadRequest("worker_id must be a valid UUID v4".into()))?;
+        .ok_or_else(|| WebError::bad_request("worker_id must be a valid UUID v4".into()))?;
     let worker_id_str = worker_uuid.to_string();
 
     // Resolve token: use caller-supplied one (after validation) or generate a new one.
@@ -127,9 +127,9 @@ pub async fn post_org_worker(
         // Must be exactly 64 chars of valid standard base64 (openssl rand -base64 48 output).
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(&t)
-            .map_err(|_| WebError::BadRequest("token is not valid base64".into()))?;
+            .map_err(|_| WebError::bad_request("token is not valid base64".into()))?;
         if decoded.len() != 48 {
-            return Err(WebError::BadRequest(
+            return Err(WebError::bad_request(
                 "token must be 48 raw bytes encoded as base64 (openssl rand -base64 48)".into(),
             ));
         }

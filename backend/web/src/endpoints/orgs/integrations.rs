@@ -188,7 +188,7 @@ pub async fn put_integration(
     let kind = parse_kind(&body.kind)?;
     let forge = parse_forge(&body.forge_type)?;
     if matches!(forge, ForgeType::GitHub) {
-        return Err(WebError::BadRequest(
+        return Err(WebError::bad_request(
             "GitHub integrations are managed through the server-wide GitHub App; \
              enable the App on the organization instead of creating an integration row."
                 .into(),
@@ -318,7 +318,7 @@ pub async fn patch_integration(
     if let Some(display_name) = body.display_name {
         let trimmed = display_name.trim().to_string();
         if trimmed.is_empty() {
-            return Err(WebError::BadRequest(
+            return Err(WebError::bad_request(
                 "display_name cannot be empty".to_string(),
             ));
         }
@@ -328,7 +328,7 @@ pub async fn patch_integration(
     if let Some(forge) = body.forge_type {
         let parsed = parse_forge(&forge)?;
         if matches!(parsed, ForgeType::GitHub) {
-            return Err(WebError::BadRequest(
+            return Err(WebError::bad_request(
                 "GitHub integrations are managed through the server-wide GitHub App; \
                  enable the App on the organization instead of switching forge_type to github."
                     .into(),

@@ -122,7 +122,7 @@ pub async fn put_cache_upstream(
         } => {
             let upstream = load_cache_for_user(&state, user.id, cache_name).await?;
             if upstream.id == cache.id {
-                return Err(WebError::BadRequest(
+                return Err(WebError::bad_request(
                     "A cache cannot be its own upstream".to_string(),
                 ));
             }

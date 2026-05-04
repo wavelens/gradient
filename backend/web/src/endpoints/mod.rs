@@ -42,7 +42,7 @@ pub fn content_type_for_filename(filename: &str) -> &'static str {
 }
 
 pub async fn handle_404() -> crate::error::WebError {
-    crate::error::WebError::NotFound("Not Found".to_string())
+    crate::error::WebError::not_found_msg("Not Found".to_string())
 }
 
 pub async fn get_health() -> WebResult<Json<BaseResponse<String>>> {

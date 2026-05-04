@@ -87,7 +87,7 @@ async fn require_cache_auth(
     let maybe_user = try_authenticate_basic(state, headers).await;
     match maybe_user {
         Some(user) if user_can_access_cache(state, cache, &user).await => Ok(()),
-        _ => Err(WebError::Unauthorized(
+        _ => Err(WebError::unauthorized(
             "Authentication required to access this cache".to_string(),
         )),
     }

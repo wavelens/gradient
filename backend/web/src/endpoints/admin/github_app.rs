@@ -43,13 +43,13 @@ fn default_host() -> String {
 
 pub fn validate_host(host: &str) -> Result<(), WebError> {
     if host.is_empty() {
-        return Err(WebError::BadRequest("host must not be empty".into()));
+        return Err(WebError::bad_request("host must not be empty".into()));
     }
     let ok = host
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
     if !ok {
-        return Err(WebError::BadRequest(
+        return Err(WebError::bad_request(
             "host must contain only alphanumerics, '.' and '-'".into(),
         ));
     }
@@ -96,7 +96,7 @@ pub async fn callback(
     let Some(user_id) =
         gradient_core::ci::manifest_state::validate_and_consume(&state.manifest_state, &q.state)
     else {
-        return Err(WebError::BadRequest(
+        return Err(WebError::bad_request(
             "manifest state invalid or expired".into(),
         ));
     };
@@ -120,7 +120,7 @@ pub async fn credentials(
     require_superuser(&user)?;
 
     let creds = gradient_core::ci::manifest_state::take_credentials(&state.pending_credentials, user.id)
-        .ok_or_else(|| WebError::NotFound("Pending credentials".into()))?;
+        .ok_or_else(|| WebError::not_found_msg("Pending credentials".into()))?;
 
     Ok(ok_json(creds))
 }
