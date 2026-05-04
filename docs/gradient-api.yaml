@@ -3699,6 +3699,67 @@ components:
         message:
           description: Response payload — type varies by endpoint
 
+    ErrorResponse:
+      type: object
+      description: |
+        Returned for every non-2xx response. Carries a stable, machine-readable
+        `code` slug alongside the human-readable `message`, so clients can
+        branch programmatically without parsing English prose.
+      required: [error, code, message]
+      properties:
+        error:
+          type: boolean
+          enum: [true]
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+          description: Human-readable error description (English, may change)
+
+    ErrorCode:
+      type: string
+      description: |
+        Stable slug identifying the error category. New codes may be added
+        over time; clients SHOULD treat unknown codes as their underlying
+        HTTP status.
+      enum:
+        # 400 Bad Request
+        - bad_request
+        - validation
+        - input_validation
+        - json_parsing
+        - invalid_name
+        - invalid_email
+        - invalid_password
+        - invalid_username
+        - invalid_oauth_code
+        - oauth_disabled
+        - registration_disabled
+        # 401 Unauthorized
+        - unauthorized
+        - authentication
+        - invalid_credentials
+        - oauth_required
+        # 403 Forbidden
+        - forbidden
+        - superuser_required
+        # 404 Not Found
+        - not_found
+        # 409 Conflict
+        - conflict
+        - already_exists
+        # 422 Unprocessable Entity
+        - unprocessable_entity
+        # 500 Internal Server Error
+        - internal
+        - database
+        - data_inconsistency
+        - token_generation_failed
+        - user_update_failed
+        - ssh_key_generation_failed
+        # 503 Service Unavailable
+        - service_unavailable
+
     StringResponse:
       allOf:
         - $ref: '#/components/schemas/BaseResponse'
