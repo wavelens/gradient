@@ -591,6 +591,19 @@ CachedPath {
 - `Push` + `cached: true` — only `path` + `cached`; worker skips the path.
 - `Push` + `cached: false` — `path`, `cached`, and `url` (presigned S3 PUT on S3-backed stores; `None` on local, worker falls back to `NarPush`). No other metadata. No upstream lookup in Push mode.
 
+**"Cached" requires fully-stored bytes.** A `cached_path` row only counts as `cached: true` when its `file_hash IS NOT NULL` (`is_fully_cached()`). Placeholder rows for in-flight or aborted uploads are excluded from `CacheStatus` so the worker never receives "yes, fetch via `NarRequest`" for a path the server can't actually serve.
+
+#### NAR transfer failure signals
+
+`NarRequest` is a request the server may not be able to satisfy. To prevent workers from waiting on the 10-minute receive timeout the server emits one of:
+
+| Message | When | Worker action |
+|---------|------|---------------|
+| `NarUnavailable { job_id, store_path, reason }` | Sent **before** any `NarPush` chunk when the lookup fails (path not in `nar_storage`, malformed store path, storage backend error). No chunks will follow. | Resolve the waiter for `(job_id, store_path)` with `Err(reason)` immediately. |
+| `NarAbort { job_id, store_path, reason }` | Sent **during** a transfer when the server can no longer continue (WebSocket write failed mid-stream). No further chunks follow for this path on this transfer. | Discard any partial buffer for `(job_id, store_path)` and resolve the waiter with `Err(reason)`. |
+
+Both are routed through the worker's `NarReceiver::fail` and surface as a build error instead of a hung task.
+
 **`Normal` mode during `EvaluateDerivations`:**
 
 ```mermaid
@@ -618,7 +631,7 @@ The flow for getting any store path (fetched flake input, evaluated `.drv`, or b
  1. **Worker produces** the path locally (fetch, eval, or build).
  2. **Worker zstd-compresses** the NAR. The compressed stream is the only form in which a NAR is ever transmitted or stored.
  3. **Worker uploads** the compressed NAR via `NarPush` (local mode) or S3 PUT (cloud mode), then sends a single `NarUploaded` carrying `file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`, and `deriver` (the full `.drv` path, when the daemon knows one). `nar_hash` and `nar_size` are computed locally over the uncompressed NAR; `file_hash` and `file_size` over the compressed stream. `references` is read from the local nix-daemon via harmonia's `DaemonStore::query_path_info` (no subprocess) — for build outputs this is the runtime reference set scanned out of the NAR; for `.drv` and fetched-source paths it's whatever the daemon records.
- 4. **Server records** `cached_path` metadata (including `references` as a space-separated hash-name string in the `cached_path.references` column, and `deriver` in `cached_path.deriver` when the worker supplied one) from `NarUploaded`. No local re-packing, re-compression, or re-hashing ever happens.
+ 4. **Server commits atomically on `NarUploaded`**: in local mode it pops the buffered `NarPush` chunks, validates the buffer length against the reported `file_size`, writes the compressed bytes to `nar_storage`, and **only then** records `cached_path` metadata (including `references` as a space-separated hash-name string in the `cached_path.references` column, and `deriver` in `cached_path.deriver` when the worker supplied one). If the size check fails or `nar_storage.put` errors, the server sends `AbortJob` and the build is marked failed — no `cached_path` row ever claims bytes that aren't actually stored. In S3 mode there are no buffered chunks; the worker uploaded directly to object storage and `NarUploaded` only records metadata. No local re-packing, re-compression, or re-hashing ever happens.
  5. **Signing** is deferred. `mark_nar_stored` inserts one `cached_path_signature` row per org-cache with `signature = NULL`. A background sweep (`cache::cacher::sign_sweep`, ticking every 60 s) finds NULL rows, reads `nar_hash` / `nar_size` / `references` from `cached_path`, computes the narinfo fingerprint, and fills in the signature. New org ↔ cache subscriptions also enqueue NULL rows for every existing `cached_path` the org owns, so the same sweep back-fills signatures without any extra code path.
 
 The server does **not** use `ensure_path` or GC roots. All cached content lives in the NAR store (S3 or local files), not in the server's Nix store.
@@ -778,6 +791,10 @@ enum ServerMessage {
 
     // NAR transfer — direct mode
     NarPush { job_id: Uuid, store_path: String, data: Vec<u8>, offset: u64, is_final: bool },
+
+    // NAR transfer — failure signals (responses to NarRequest)
+    NarUnavailable { job_id: Uuid, store_path: String, reason: String },  // server cannot serve; no chunks will follow
+    NarAbort       { job_id: Uuid, store_path: String, reason: String },  // in-flight transfer aborted; discard partial buffer
 
     // NAR transfer — S3 mode (batched)
     PresignedUpload { job_id: Uuid, store_path: String, url: String, method: String, headers: Vec<(String, String)> },

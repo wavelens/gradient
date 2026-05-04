@@ -48,8 +48,13 @@ async fn build_local_cache_map(
             }
         };
 
+        // Only paths whose NAR upload actually completed count as cached.
+        // `is_fully_cached()` requires `file_hash IS NOT NULL`; rows without
+        // it are placeholders for an in-flight or failed upload and would
+        // cause the worker to issue a `NarRequest` the server can't satisfy.
         let sizes: HashMap<String, (Option<i64>, Option<i64>)> = cached_paths
             .into_iter()
+            .filter(|cp| cp.is_fully_cached())
             .map(|cp| (cp.hash, (cp.file_size, cp.nar_size)))
             .collect();
 

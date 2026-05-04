@@ -169,17 +169,28 @@ pub(super) async fn serve_nar_request(
     job_id: &str,
     store_path: &str,
 ) -> anyhow::Result<()> {
-    let hash = store_path
+    let Some(hash) = store_path
         .strip_prefix("/nix/store/")
         .and_then(|s| s.split('-').next())
-        .ok_or_else(|| anyhow::anyhow!("invalid store path: {store_path}"))?;
+    else {
+        let reason = format!("invalid store path: {store_path}");
+        let _ = send_nar_unavailable(socket, job_id, store_path, reason.clone()).await;
+        return Err(anyhow::anyhow!(reason));
+    };
 
-    let bytes = state
-        .nar_storage
-        .get(hash)
-        .await
-        .map_err(|e| anyhow::anyhow!("nar_storage.get({hash}) failed: {e}"))?
-        .ok_or_else(|| anyhow::anyhow!("NAR not found in cache for {store_path}"))?;
+    let bytes = match state.nar_storage.get(hash).await {
+        Ok(Some(b)) => b,
+        Ok(None) => {
+            let reason = format!("NAR not found in cache for {store_path}");
+            send_nar_unavailable(socket, job_id, store_path, reason.clone()).await;
+            return Err(anyhow::anyhow!(reason));
+        }
+        Err(e) => {
+            let reason = format!("nar_storage.get({hash}) failed: {e}");
+            send_nar_unavailable(socket, job_id, store_path, reason.clone()).await;
+            return Err(anyhow::anyhow!(reason));
+        }
+    };
 
     let total = bytes.len();
     if total == 0 {
@@ -215,9 +226,20 @@ pub(super) async fn serve_nar_request(
         .await
         .is_err()
         {
-            return Err(anyhow::anyhow!(
-                "WebSocket send failed mid-NarPush at offset {offset}"
-            ));
+            let reason = format!("WebSocket send failed mid-NarPush at offset {offset}");
+            // Best-effort abort — the same socket just failed, but try anyway
+            // so the worker has at least a chance to clear its buffer instead
+            // of timing out.
+            let _ = send_server_msg(
+                socket,
+                &ServerMessage::NarAbort {
+                    job_id: job_id.to_owned(),
+                    store_path: store_path.to_owned(),
+                    reason: reason.clone(),
+                },
+            )
+            .await;
+            return Err(anyhow::anyhow!(reason));
         }
         offset += chunk_len;
     }
@@ -228,6 +250,23 @@ pub(super) async fn serve_nar_request(
         "NarRequest served"
     );
     Ok(())
+}
+
+async fn send_nar_unavailable(
+    socket: &mut ProtoSocket,
+    job_id: &str,
+    store_path: &str,
+    reason: String,
+) {
+    let _ = send_server_msg(
+        socket,
+        &ServerMessage::NarUnavailable {
+            job_id: job_id.to_owned(),
+            store_path: store_path.to_owned(),
+            reason,
+        },
+    )
+    .await;
 }
 
 // ── Credential delivery ───────────────────────────────────────────────────────

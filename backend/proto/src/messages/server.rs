@@ -94,10 +94,34 @@ pub enum ServerMessage {
     NarPush {
         job_id: String,
         store_path: String,
-        /// zstd-compressed NAR data, 64 KiB chunks.
+        /// zstd-compressed NAR data, ~4 MiB chunks.
         data: Vec<u8>,
         offset: u64,
         is_final: bool,
+    },
+
+    /// Sent in response to a [`super::client::ClientMessage::NarRequest`] when
+    /// the server cannot serve the requested path at all (e.g. the
+    /// `cached_path` row exists but the NAR bytes are not in `nar_storage`).
+    /// No `NarPush` chunks will follow for this path. The worker must
+    /// resolve any waiter for `(job_id, store_path)` with this `reason`
+    /// instead of waiting for `is_final`.
+    NarUnavailable {
+        job_id: String,
+        store_path: String,
+        reason: String,
+    },
+
+    /// Sent during an in-flight NAR transfer when the server can no longer
+    /// continue (e.g. the WebSocket write failed after some chunks, or the
+    /// underlying storage stream errored). The worker must discard any
+    /// partial buffer for `(job_id, store_path)` and resolve the waiter
+    /// with this `reason`. No further `NarPush` chunks will arrive for
+    /// this path on this transfer.
+    NarAbort {
+        job_id: String,
+        store_path: String,
+        reason: String,
     },
 
     /// Presigned S3 upload URL for a build output.  Worker uploads directly

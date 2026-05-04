@@ -173,6 +173,7 @@ impl ProtoConnection {
                     tracing::warn!("WebSocket flush error: {}", e);
                     break;
                 }
+            }
         });
 
         (

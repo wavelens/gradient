@@ -280,6 +280,19 @@ impl<'a> MessageHandler<'a> {
             } => {
                 self.on_nar_push(job_id, store_path, data, offset, is_final);
             }
+            ServerMessage::NarUnavailable {
+                job_id,
+                store_path,
+                reason,
+            }
+            | ServerMessage::NarAbort {
+                job_id,
+                store_path,
+                reason,
+            } => {
+                warn!(%job_id, %store_path, %reason, "server cannot deliver NAR");
+                self.nar_recv.fail(&job_id, &store_path, reason);
+            }
             ServerMessage::PresignedDownload {
                 job_id,
                 store_path,
@@ -607,6 +620,8 @@ pub(super) fn msg_kind(msg: &ServerMessage) -> &'static str {
         ServerMessage::AbortJob { .. } => "AbortJob",
         ServerMessage::Credential { .. } => "Credential",
         ServerMessage::NarPush { .. } => "NarPush",
+        ServerMessage::NarUnavailable { .. } => "NarUnavailable",
+        ServerMessage::NarAbort { .. } => "NarAbort",
         ServerMessage::PresignedDownload { .. } => "PresignedDownload",
         ServerMessage::PresignedUpload { .. } => "PresignedUpload",
         ServerMessage::RequestAllScores => "RequestAllScores",

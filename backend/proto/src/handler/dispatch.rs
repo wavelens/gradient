@@ -133,8 +133,15 @@ impl<'a> DispatchContext<'a> {
                 deriver,
             } => {
                 self.on_nar_uploaded(
-                    job_id, store_path, file_hash, file_size, nar_size, nar_hash, references,
+                    job_id,
+                    store_path,
+                    file_hash,
+                    file_size,
+                    nar_size,
+                    nar_hash,
+                    references,
                     deriver,
+                    nar_buffers,
                 )
                 .await;
                 true
@@ -470,32 +477,24 @@ impl<'a> DispatchContext<'a> {
                 .or_default()
                 .extend_from_slice(&data);
         }
-        if !is_final {
-            return;
-        }
-        let buf = nar_buffers.remove(&store_path).unwrap_or_default();
-        let compressed_size = buf.len() as i64;
-        let hash_opt = store_path
-            .strip_prefix("/nix/store/")
-            .unwrap_or(&store_path)
-            .split('-')
-            .next()
-            .filter(|h| h.len() == 32 && h.bytes().all(|b| b.is_ascii_alphanumeric()))
-            .map(str::to_owned);
-        match hash_opt {
-            Some(hash) => {
-                if let Err(e) = self.state.nar_storage.put(&hash, buf).await {
-                    error!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "NarPush write failed");
-                } else {
-                    info!(peer_id = %self.peer_id, %job_id, %store_path, compressed_size, "NarPush stored");
-                }
-            }
-            None => {
-                warn!(peer_id = %self.peer_id, %job_id, %store_path, "NarPush: could not parse store path hash")
-            }
-        }
+        // The buffer is held until `on_nar_uploaded` arrives; that handler
+        // commits it to `nar_storage` and records the metadata atomically so
+        // we never end up with a `cached_path` row claiming bytes that
+        // aren't actually stored.
     }
 
+    /// Apply the worker's NAR upload metadata.
+    ///
+    /// For local-mode pushes (preceded by `NarPush` chunks), the buffered
+    /// bytes are popped from `nar_buffers`, validated against the reported
+    /// `file_size`, written to `nar_storage`, and only then is
+    /// `mark_nar_stored` invoked. Any failure aborts the job with
+    /// [`ServerMessage::AbortJob`] so the build is marked failed and the
+    /// scheduler does not advertise the path as cached.
+    ///
+    /// For S3 / presigned uploads (no preceding `NarPush`), there is no
+    /// buffer to commit — the worker has already PUT the bytes directly to
+    /// object storage and we just record the metadata.
     #[allow(clippy::too_many_arguments)] // mirrors the wire-protocol message fields
     async fn on_nar_uploaded(
         &mut self,
@@ -507,8 +506,45 @@ impl<'a> DispatchContext<'a> {
         nar_hash: String,
         references: Vec<String>,
         deriver: Option<String>,
+        nar_buffers: &mut std::collections::HashMap<String, Vec<u8>>,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, ?deriver, "NarUploaded");
+
+        // Local-mode commit: if we buffered NarPush chunks for this path,
+        // validate + write them to nar_storage atomically with the metadata.
+        if let Some(buf) = nar_buffers.remove(&store_path) {
+            if buf.len() as u64 != file_size {
+                let reason = format!(
+                    "NarPush buffer size {} does not match reported file_size {}",
+                    buf.len(),
+                    file_size
+                );
+                error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "NAR upload integrity check failed");
+                self.abort_job(&job_id, reason).await;
+                return;
+            }
+            let Some(hash) = store_path
+                .strip_prefix("/nix/store/")
+                .unwrap_or(&store_path)
+                .split('-')
+                .next()
+                .filter(|h| h.len() == 32 && h.bytes().all(|b| b.is_ascii_alphanumeric()))
+                .map(str::to_owned)
+            else {
+                let reason = format!("NarUploaded for malformed store path {store_path}");
+                error!(peer_id = %self.peer_id, %job_id, %store_path, "{reason}");
+                self.abort_job(&job_id, reason).await;
+                return;
+            };
+            if let Err(e) = self.state.nar_storage.put(&hash, buf).await {
+                let reason = format!("nar_storage write failed: {e}");
+                error!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "NAR storage commit failed");
+                self.abort_job(&job_id, reason).await;
+                return;
+            }
+            info!(peer_id = %self.peer_id, %job_id, %store_path, file_size, "NAR stored");
+        }
+
         let file_size_i64 = file_size as i64;
         let nar_record = NarUploadRecord {
             file_hash: &file_hash,
@@ -534,6 +570,20 @@ impl<'a> DispatchContext<'a> {
         {
             debug!(error = %e, "failed to record cache metric for NarUploaded");
         }
+    }
+
+    /// Send `AbortJob` to the worker. Used when a NAR upload cannot be
+    /// committed safely — the worker stops the job and replies with
+    /// `JobFailed`, which the scheduler turns into a failed build.
+    async fn abort_job(&mut self, job_id: &str, reason: String) {
+        let _ = send_server_msg(
+            self.socket,
+            &ServerMessage::AbortJob {
+                job_id: job_id.to_owned(),
+                reason,
+            },
+        )
+        .await;
     }
 
     // ── Cache queries ─────────────────────────────────────────────────────────

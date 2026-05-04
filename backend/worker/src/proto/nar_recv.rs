@@ -13,6 +13,12 @@
 //! `(job_id, store_path)` and on `is_final` the buffer is delivered to the
 //! waiting task via a `oneshot`.
 //!
+//! When the server can't serve a requested NAR it emits
+//! [`proto::messages::ServerMessage::NarUnavailable`] before any chunk, or
+//! [`proto::messages::ServerMessage::NarAbort`] mid-stream. Both are routed
+//! through [`NarReceiver::fail`] so the waiter resolves with the reason
+//! immediately instead of timing out 600 s later.
+//!
 //! Keyed by `(job_id, store_path)` so multiple concurrent jobs can request the
 //! same path without collision.
 //!
@@ -26,11 +32,10 @@ use anyhow::Result;
 use tokio::sync::oneshot;
 use tracing::{debug, warn};
 
-/// How long to wait for a single requested NAR before giving up. The dispatch
-/// loop processes incoming server messages serially, so a slow scoring pass
-/// could delay the `NarPush` chunks just like it can delay `CacheStatus`.
-/// Pretty generous since dep NARs can be large; bump if you see legitimate
-/// long downloads tripping the timeout.
+/// Hard ceiling on a single NAR transfer. Hit only when the server stops
+/// responding entirely without sending `NarUnavailable`/`NarAbort` (e.g.
+/// connection silently stalled). Normal failures resolve immediately via
+/// [`NarReceiver::fail`].
 const NAR_RECV_TIMEOUT: Duration = Duration::from_secs(600);
 
 type Key = (String, String); // (job_id, store_path)
@@ -39,8 +44,9 @@ type Key = (String, String); // (job_id, store_path)
 struct Inner {
     /// Partial NAR bytes accumulated from `NarPush` chunks.
     buffers: HashMap<Key, Vec<u8>>,
-    /// Outstanding waiters; the dispatch loop sends to these on `is_final`.
-    waiters: HashMap<Key, oneshot::Sender<Vec<u8>>>,
+    /// Outstanding waiters; the dispatch loop sends to these on `is_final`
+    /// (success) or on `NarUnavailable` / `NarAbort` (failure).
+    waiters: HashMap<Key, oneshot::Sender<Result<Vec<u8>, String>>>,
 }
 
 /// Shared state between the dispatch loop and job tasks for routing inbound
@@ -55,9 +61,10 @@ impl NarReceiver {
         Self::default()
     }
 
-    /// Register a waiter for `(job_id, store_path)`. The returned oneshot will
-    /// resolve when a `NarPush` arrives with `is_final: true` for this key.
-    /// Wraps the wait in [`NAR_RECV_TIMEOUT`].
+    /// Register a waiter for `(job_id, store_path)`. The returned oneshot
+    /// resolves with the assembled NAR bytes on `is_final`, or with an error
+    /// if the server signals `NarUnavailable` / `NarAbort`. Wraps the wait
+    /// in [`NAR_RECV_TIMEOUT`] as a last-resort backstop.
     pub async fn wait_for(&self, job_id: &str, store_path: &str) -> Result<Vec<u8>> {
         let key = (job_id.to_owned(), store_path.to_owned());
         let (tx, rx) = oneshot::channel();
@@ -66,7 +73,16 @@ impl NarReceiver {
         self.inner.lock().unwrap().waiters.insert(key.clone(), tx);
 
         match tokio::time::timeout(NAR_RECV_TIMEOUT, rx).await {
-            Ok(Ok(bytes)) => Ok(bytes),
+            Ok(Ok(Ok(bytes))) => Ok(bytes),
+            Ok(Ok(Err(reason))) => {
+                // Server-signalled failure. Buffer was already cleared in
+                // `fail()`.
+                Err(anyhow::anyhow!(
+                    "NAR transfer for {} failed: {}",
+                    store_path,
+                    reason
+                ))
+            }
             Ok(Err(_)) => Err(anyhow::anyhow!(
                 "NarPush waiter dropped for {}/{} — connection closed or superseded?",
                 job_id,
@@ -105,7 +121,7 @@ impl NarReceiver {
             match g.waiters.remove(&key) {
                 Some(tx) => {
                     let bytes_len = buf.len();
-                    if tx.send(buf).is_err() {
+                    if tx.send(Ok(buf)).is_err() {
                         debug!(
                             %job_id,
                             %store_path,
@@ -122,6 +138,34 @@ impl NarReceiver {
                         "received final NarPush with no waiter — discarding"
                     );
                 }
+            }
+        }
+    }
+
+    /// Resolve the waiter for `(job_id, store_path)` with an error and drop
+    /// any partial buffer. Called for both `NarUnavailable` (transfer never
+    /// started) and `NarAbort` (transfer aborted mid-stream).
+    pub fn fail(&self, job_id: &str, store_path: &str, reason: String) {
+        let key = (job_id.to_owned(), store_path.to_owned());
+        let mut g = self.inner.lock().unwrap();
+        g.buffers.remove(&key);
+        match g.waiters.remove(&key) {
+            Some(tx) => {
+                if tx.send(Err(reason)).is_err() {
+                    debug!(
+                        %job_id,
+                        %store_path,
+                        "NAR failure waiter went away before delivery"
+                    );
+                }
+            }
+            None => {
+                warn!(
+                    %job_id,
+                    %store_path,
+                    %reason,
+                    "received NarUnavailable/NarAbort with no waiter — discarding"
+                );
             }
         }
     }
@@ -145,7 +189,6 @@ mod tests {
         let r = NarReceiver::new();
         let r2 = r.clone();
         let task = tokio::spawn(async move { r2.wait_for("job1", "/nix/store/aaa").await });
-        // Yield so the waiter is registered before we push.
         tokio::task::yield_now().await;
         r.accept_chunk("job1", "/nix/store/aaa", b"hello world".to_vec(), true);
         let bytes = task.await.unwrap().unwrap();
@@ -168,9 +211,7 @@ mod tests {
     #[tokio::test]
     async fn final_with_no_waiter_is_discarded() {
         let r = NarReceiver::new();
-        // No waiter registered; final chunk is just dropped, no panic.
         r.accept_chunk("j", "/nix/store/x", b"orphan".to_vec(), true);
-        // And we can still wait for a future transfer of the same path.
         let r2 = r.clone();
         let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/x").await });
         tokio::task::yield_now().await;
@@ -187,5 +228,30 @@ mod tests {
         r.forget_job("doomed");
         let result = task.await.unwrap();
         assert!(result.is_err(), "waiter should have been cancelled");
+    }
+
+    #[tokio::test]
+    async fn fail_resolves_waiter_with_reason() {
+        let r = NarReceiver::new();
+        let r2 = r.clone();
+        let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/x").await });
+        tokio::task::yield_now().await;
+        r.fail("j", "/nix/store/x", "not in nar_storage".into());
+        let err = task.await.unwrap().unwrap_err().to_string();
+        assert!(err.contains("not in nar_storage"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn fail_clears_partial_buffer() {
+        let r = NarReceiver::new();
+        let r2 = r.clone();
+        // Accumulate a partial buffer, then abort, then start a fresh request.
+        r.accept_chunk("j", "/nix/store/x", b"partial".to_vec(), false);
+        r.fail("j", "/nix/store/x", "mid-stream abort".into());
+        // A subsequent transfer must not see the discarded prefix.
+        let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/x").await });
+        tokio::task::yield_now().await;
+        r.accept_chunk("j", "/nix/store/x", b"fresh".to_vec(), true);
+        assert_eq!(task.await.unwrap().unwrap(), b"fresh");
     }
 }
